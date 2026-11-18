@@ -96,9 +96,9 @@ pub use http::{
 pub use model::AnthropicLanguageModel;
 #[cfg(feature = "native-auth")]
 pub use native_auth::{
-    ClaudeCompatibilityAcceptance, ClaudeEnrolledModel, ClaudeNativeAuthError,
-    ClaudeNativeAuthManager, ClaudeOAuthLogin, ClaudeOfflineSelectedSlot,
-    ClaudeSubscriptionIntegrationProfile, ClaudeSubscriptionStatus,
+    CLAUDE_ACCOUNT_UUID_IDENTITY, CLAUDE_DEVICE_ID_IDENTITY, ClaudeCompatibilityAcceptance,
+    ClaudeEnrolledModel, ClaudeNativeAuthError, ClaudeNativeAuthManager, ClaudeOAuthLogin,
+    ClaudeOfflineSelectedSlot, ClaudeSubscriptionIntegrationProfile, ClaudeSubscriptionStatus,
 };
 pub use oauth::{
     CLAUDE_ENROLLMENTS, CLAUDE_OAUTH_ADAPTER_REVISION, CLAUDE_OAUTH_BASELINE_BETAS,

@@ -349,12 +349,19 @@ fn optional_u64(value: Option<&Value>) -> Result<Option<u64>, XaiApiModelError> 
 pub async fn list_xai_api_models(
     source: &XaiPlatformKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
+    transport: &plakous_http::RouteTransport,
 ) -> Result<Vec<XaiListedModel>, XaiApiModelError> {
     let origin =
         Origin::parse(XAI_PLATFORM_API_KEY_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
-    let client = Client::new_http1(plakous_http::Limits::default())
-        .map_err(|_| transport_error())?
-        .with_observer(observer);
+    let client = transport.client(
+        Client::new_http1(plakous_http::Limits::default())
+            .map_err(|_| transport_error())?
+            .with_observer(observer),
+    );
+    source
+        .prepare()
+        .await
+        .map_err(|_| list_error("credential is unavailable"))?;
     let authorization = platform_authorization(source)?;
     let body = get_models(&client, origin, authorization, deadline_instant()?).await?;
     parse_xai_models_page(&body)
@@ -385,11 +392,8 @@ pub fn xai_api_key_fingerprint(source: &XaiPlatformKeySource) -> Result<String, 
 fn platform_authorization(source: &XaiPlatformKeySource) -> Result<HeaderValue, XaiApiModelError> {
     let grant = crate::platform_binding::xai_api_key_generation(source)
         .map_err(|_| list_error("credential is unavailable"))?;
-    let key = source
-        .api_key(&crate::platform_binding::API_KEY_REQUEST, &grant)
-        .map_err(|_| list_error("credential is unavailable"))?;
-    crate::platform_binding::platform_bearer(&key)
-        .map_err(|_| list_error("credential is not a header value"))
+    crate::platform_binding::platform_bearer(source, &grant)
+        .map_err(|_| list_error("credential is unavailable"))
 }
 
 pub(crate) async fn get_models(

@@ -1,5 +1,6 @@
 //! The immutable route authority bound to one catalog receipt.
 
+use super::RefreshForce;
 use super::{
     ACCESS_REFRESH_LEAD_SECONDS, Arc, CatalogReceiptCore, CatalogRenewal, Future,
     GrokCodingProfile, ManagerCore, RuntimeModelAuthorityError, SubscriptionRequestPermit,
@@ -73,7 +74,11 @@ impl NativeRouteAuthority {
                 Some(&self.expected_receipt.public.account),
                 Some(&self.expected_receipt.selection_epoch),
                 Some(&self.expected_receipt.authority_id),
-                force,
+                if force {
+                    RefreshForce::Always
+                } else {
+                    RefreshForce::IfDue
+                },
             )
             .await
             .map_err(|error| match error {

@@ -376,7 +376,6 @@ pub fn wire_facts(
         account: protocol::GatewayAccount::new(facts.slot.as_str())
             .unwrap_or_else(|_| unreachable!("custody slots share the account grammar")),
         instance: instance.clone(),
-        facts_revision: 0,
         observed_at_unix_ms,
         credential: protocol::facts::CredentialFacts {
             status: wire_status(facts.status),

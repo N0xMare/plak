@@ -39,6 +39,18 @@ for one version bump, without native protocol compatibility.
   local custody, exact per-provider upstream pin tables and an in-process
   gateway. Gateway refusals are unsent, a moved fence is prepared again at
   most twice, and a direct exchange refuses any custodied placeholder.
+- Add local custody of the Codex, Claude and SuperGrok logins for a
+  credential gateway (`SubscriptionCustodian`): facts carry the exact session
+  binding digests, fields are read and held under the store's Ready lease
+  until the upstream head, and a refresh after a rejection claims one grant
+  only while the store still holds the rejected generation.
+- Add route custody (`Custody`, `GatewayCustody`, `RouteTransport`): API-key
+  routes, their listings and OpenRouter relay through a gateway when one
+  holds the keys, with custodied key sources that admit the same generation
+  as a local key and fetch the gateway's facts once per attempt
+  (`ApiKeySource::prepare`). The xAI Platform route takes its authorization
+  from `credential_field`. Local custody sends the same bytes as before.
+- Remove the unused `facts_revision` from gateway account facts.
 
 ### plakd
 

@@ -61,11 +61,9 @@ async fn responses_with_key(key: &str) -> TestResult<ConfiguredLanguageModel> {
         revision: ProviderProfileRevisionId::new(OPENAI_RESPONSES_ADAPTER_REVISION)?,
     };
     let selected = authority.selected_configuration(policy)?;
-    Ok(Arc::new(OpenAiPlatformModel::with_exchange_observer(
-        authority, selected, None,
-    )?)
-    .configured()
-    .await?)
+    Ok(Arc::new(OpenAiPlatformModel::new(authority, selected)?)
+        .configured()
+        .await?)
 }
 fn reasoning_segment(id: u128, blocks: Vec<ContentBlock>) -> TestResult<HistorySegment> {
     Ok(HistorySegment::new(

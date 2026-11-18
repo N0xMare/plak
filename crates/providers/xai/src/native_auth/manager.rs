@@ -1,5 +1,6 @@
 //! The app-owned manager for one explicit xAI selected-account slot.
 
+use super::RefreshForce;
 use super::{
     Arc, AsyncMutex, AtomicU64, AuthEndpoints, AuthTransportError, BrowserLoginFlow, Bytes,
     COMPATIBILITY_EXPIRES_UNIX, CallbackBinding, CatalogReceiptCore, Client, CredentialGeneration,
@@ -642,7 +643,9 @@ impl XaiNativeAuthManager {
     ///
     /// Same fail-closed failures as [`Self::refresh_if_needed`].
     pub async fn refresh_now(&self) -> Result<(), XaiNativeAuthError> {
-        self.core.refresh_with_force(None, None, None, true).await
+        self.core
+            .refresh_with_force(None, None, None, RefreshForce::Always)
+            .await
     }
 
     /// Stored access-token expiry (Unix seconds) of the Ready credential.

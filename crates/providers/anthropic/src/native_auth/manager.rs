@@ -1,5 +1,6 @@
 //! The app-owned manager for one explicit Claude selected-account slot.
 
+use super::refresh::RefreshForce;
 use super::{
     AccountBinding, Arc, AsyncMutex, AuthBodyError, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
     CLAUDE_OAUTH_TOKEN_ORIGIN, CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_PATH,
@@ -352,7 +353,7 @@ impl ClaudeNativeAuthManager {
     ///
     /// Ambiguous rotating-token results remain quarantined.
     pub async fn refresh_if_needed(&self) -> Result<(), ClaudeNativeAuthError> {
-        self.refresh_with_force(false).await
+        self.refresh_with_force(RefreshForce::IfDue).await
     }
 
     /// Forces one claimed refresh after the provider answered a Messages
@@ -363,7 +364,7 @@ impl ClaudeNativeAuthManager {
     /// Same fail-closed failures as [`Self::refresh_if_needed`]; a rejected
     /// grant leaves the credential not Ready and is never retried here.
     pub async fn refresh_after_rejection(&self) -> Result<(), ClaudeNativeAuthError> {
-        self.refresh_with_force(true).await
+        self.refresh_with_force(RefreshForce::Always).await
     }
 
     /// Stored access-token expiry (Unix seconds) of the Ready credential.
@@ -380,7 +381,10 @@ impl ClaudeNativeAuthManager {
         Ok(self.core.read_stored(&fence)?.expires_at)
     }
 
-    async fn refresh_with_force(&self, force: bool) -> Result<(), ClaudeNativeAuthError> {
+    pub(super) async fn refresh_with_force(
+        &self,
+        force: RefreshForce,
+    ) -> Result<(), ClaudeNativeAuthError> {
         validate_current_ready_record(&self.core.store)?;
         let flight = self.core.refresh_flight.lock().await;
         let mut hooks = ClaudeRefreshHooks {

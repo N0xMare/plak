@@ -685,28 +685,8 @@ impl ClaudeNativeAuthManager {
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         let now = SubscriptionClock.now();
         let expires_at = pin_expires_at(now)?;
-        let account_binding = digest_binding(
-            b"claude-oauth-provider-account",
-            identity.account_uuid().as_str().as_bytes(),
-        )?;
-        let credential_authority_binding = digest_binding(
-            b"claude-oauth-provider-account-credential",
-            identity.account_uuid().as_str().as_bytes(),
-        )?;
-        let credential_authority_binding = if let Some(scope) = self.credential_source_scope() {
-            Digest::sha256(
-                DigestDomain::ModelBinding,
-                1,
-                &[
-                    credential_authority_binding.bytes(),
-                    b"plak.account-scope.v1",
-                    scope.as_bytes(),
-                ],
-            )
-            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?
-        } else {
-            credential_authority_binding
-        };
+        let (account_binding, credential_authority_binding) =
+            claude_route_bindings(identity.account_uuid(), self.credential_source_scope())?;
         let context_authority_binding = RuntimeModelAuthority::authority_class_for(
             account_binding,
             credential_authority_binding,
@@ -910,6 +890,37 @@ fn reference_client_wire_observation(
         complete_wire_bytes,
     )
     .map_err(|error| rejection(ModelPreparationErrorKind::InvalidConfiguration, error))
+}
+
+/// The account and credential-authority bindings a Claude OAuth route binds
+/// a session to, for `account` under the manager's optional source `scope`.
+pub(crate) fn claude_route_bindings(
+    account: &crate::ClaudeAccountUuid,
+    scope: Option<&str>,
+) -> Result<(Digest, Digest), ClaudeNativeAuthError> {
+    let account_binding = digest_binding(
+        b"claude-oauth-provider-account",
+        account.as_str().as_bytes(),
+    )?;
+    let credential_authority_binding = digest_binding(
+        b"claude-oauth-provider-account-credential",
+        account.as_str().as_bytes(),
+    )?;
+    let credential_authority_binding = if let Some(scope) = scope {
+        Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[
+                credential_authority_binding.bytes(),
+                b"plak.account-scope.v1",
+                scope.as_bytes(),
+            ],
+        )
+        .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?
+    } else {
+        credential_authority_binding
+    };
+    Ok((account_binding, credential_authority_binding))
 }
 
 fn digest_binding(label: &[u8], value: &[u8]) -> Result<Digest, ClaudeNativeAuthError> {
@@ -1121,6 +1132,10 @@ mod auth_binding_tests;
 #[cfg(test)]
 #[path = "oauth_model/credential_wait_tests.rs"]
 mod credential_wait_tests;
+
+#[cfg(test)]
+#[path = "oauth_model/custody_tests.rs"]
+mod custody_tests;
 
 #[cfg(test)]
 #[allow(

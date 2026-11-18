@@ -112,17 +112,25 @@ pub(crate) fn execution_authority(
         .map_err(|_| XaiPlatformBuildError::Authentication)
 }
 
+/// The `Bearer` authorization header of an admitted generation, from the
+/// key's custodian. A locally held key must be at most 16 KiB of visible
+/// ASCII; a custodied field is filled and checked where the key is held.
 pub(crate) fn platform_bearer(
-    key: &ApiKey,
+    source: &XaiPlatformKeySource,
+    grant: &XaiPlatformKeyGeneration,
 ) -> Result<plakous_http::HeaderValue, XaiPlatformBuildError> {
-    use plakous_auth::api_key::ExposeApiKey as _;
-    let text = key.expose_secret();
-    if text.len() > 16_384 || !text.bytes().all(|byte| byte.is_ascii_graphic()) {
+    let field = source.credential_field(
+        &API_KEY_REQUEST,
+        grant,
+        plakous_auth::custody::KeyHeaderForm::Bearer,
+    )?;
+    let bytes = field.into_header_bytes();
+    if let Some(key) = bytes.strip_prefix(b"Bearer ")
+        && (key.len() > 16_384 || !key.iter().all(u8::is_ascii_graphic))
+    {
         return Err(XaiPlatformBuildError::Authentication);
     }
-    let field = plakous_auth::custody::KeyHeaderForm::Bearer.field(key);
-    plakous_http::sensitive_header_value(field.into_header_bytes())
-        .map_err(|_| XaiPlatformBuildError::Authentication)
+    plakous_http::sensitive_header_value(bytes).map_err(|_| XaiPlatformBuildError::Authentication)
 }
 
 /// Builds the grok-4.6 route. Other reviewed ids use

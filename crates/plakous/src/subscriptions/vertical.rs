@@ -85,6 +85,11 @@ pub(super) trait NativeVertical: Sync {
         'a,
         Result<NativeFuture<'static, SubscriptionUsageRead>, NativeSubscriptionError>,
     >;
+    /// The opened login a gateway serves facts, fields and refresh from.
+    fn login_custody<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>;
 }
 pub(super) struct NativeVerticalEntry {
     pub(super) provider: NativeProvider,

@@ -62,6 +62,11 @@ struct PreparedOpenRouter {
 /// re-resolves at every attempt fence and retains no secret, so a one-shot value
 /// would break the refresh it exists for.
 pub trait OpenRouterCredentials: Send + Sync + 'static {
+    /// Who holds this route's credentials; routes relay through a credential
+    /// gateway under gateway custody. Local by default.
+    fn custody(&self) -> plakous::custody::Custody {
+        plakous::custody::Custody::local()
+    }
     /// Prepares one read's source and optional best-effort observation scope.
     ///
     /// # Errors
@@ -176,7 +181,8 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
     // Resolve once for an immediate, safe construction diagnostic. The source
     // itself never retains this secret and re-resolves at every attempt fence.
     spec.credentials.preflight(&spec.account)?;
-    let client = OpenRouterChatClient::connect_with_retention(
+    let client = OpenRouterChatClient::connect_with_retention_in(
+        &spec.credentials.custody(),
         spec.credentials.source(&spec.account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
@@ -843,7 +849,8 @@ pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     let credentials = config.state_roots.openrouter_credentials();
     let account = config.session.account_ref()?;
     credentials.preflight(&account)?;
-    let client = OpenRouterChatClient::connect_with_retention(
+    let client = OpenRouterChatClient::connect_with_retention_in(
+        &credentials.custody(),
         credentials.source(&account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )

@@ -41,6 +41,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 
 use super::*;
+mod custody;
 mod drift;
 use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 
@@ -2269,7 +2270,7 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
         _flight: core.refresh_flight.lock().await,
         request_permit: None,
         started: Instant::now(),
-        force: false,
+        force: RefreshForce::IfDue,
         detail: CredentialRefreshDetail::default(),
     };
     hooks.cancel_guard.claimed(ours);

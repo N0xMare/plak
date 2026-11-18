@@ -9,7 +9,10 @@ pub use plakous_http::relay::{
     custodied_placeholder,
 };
 
+mod client;
 pub mod server;
+
+pub use client::{CustodiedKeySource, GatewayCustody};
 
 /// Each compiled provider's exact upstream pins and credential header names.
 pub mod pins {

@@ -129,6 +129,14 @@ impl Client {
     }
 }
 
+impl crate::RouteTransport {
+    /// Through the credential gateway `relay` serves.
+    #[must_use]
+    pub fn relayed(relay: Arc<RelayClient>) -> Self {
+        Self(Some(relay))
+    }
+}
+
 impl crate::transport::hooks::Relay for RelayClient {
     fn execute<'a>(
         &'a self,

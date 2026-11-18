@@ -19,6 +19,10 @@ mod common_error;
 mod compatibility;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod credential;
+/// Local custody of the subscription logins, for a credential gateway.
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+#[doc(hidden)]
+pub mod custody;
 mod error;
 #[cfg(feature = "grok")]
 mod grok;

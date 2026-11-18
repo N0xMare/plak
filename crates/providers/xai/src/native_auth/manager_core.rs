@@ -1,5 +1,6 @@
 //! The shared manager core: admission, refresh, catalog and resolution.
 
+use super::RefreshForce;
 #[cfg(test)]
 use super::ensure_compatibility;
 use super::{
@@ -346,7 +347,7 @@ impl ManagerCore {
             expected_account,
             expected_selection_epoch,
             expected_authority,
-            false,
+            RefreshForce::IfDue,
         )
         .await
     }
@@ -359,7 +360,7 @@ impl ManagerCore {
         expected_account: Option<&AccountBinding>,
         expected_selection_epoch: Option<&str>,
         expected_authority: Option<&str>,
-        force: bool,
+        force: RefreshForce,
     ) -> Result<(), XaiNativeAuthError> {
         let flight = self.refresh_flight.lock().await;
         let mut hooks = XaiRefreshHooks {

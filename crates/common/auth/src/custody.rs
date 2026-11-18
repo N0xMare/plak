@@ -63,44 +63,89 @@ impl fmt::Debug for CredentialField {
     }
 }
 
+/// What a custodian keeps held while a request carries its fields, such as
+/// a credential store's Ready lease: refresh, replacement and logout of that
+/// record wait until it is dropped.
+pub struct CredentialHold(Box<dyn std::any::Any + Send>);
+
+impl CredentialHold {
+    /// Holds `guard`.
+    #[must_use]
+    pub fn new(guard: impl Send + 'static) -> Self {
+        Self(Box::new(guard))
+    }
+
+    /// The held guard.
+    #[must_use]
+    pub fn into_inner(self) -> Box<dyn std::any::Any + Send> {
+        self.0
+    }
+}
+
+impl fmt::Debug for CredentialHold {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CredentialHold(<held>)")
+    }
+}
+
 /// The credential fields of one request, in the order the custodian's
-/// injection rule names them. Names are lowercase header names.
+/// injection rule names them, and what the custodian holds while they are in
+/// use. Names are lowercase header names.
 #[derive(Debug, Default)]
-pub struct CredentialFields(Vec<(&'static str, CredentialField)>);
+pub struct CredentialFields {
+    fields: Vec<(&'static str, CredentialField)>,
+    hold: Option<CredentialHold>,
+}
 
 impl CredentialFields {
     /// No fields yet.
     #[must_use]
     pub const fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            fields: Vec::new(),
+            hold: None,
+        }
     }
 
     /// Appends one field.
     pub fn push(&mut self, name: &'static str, field: CredentialField) {
-        self.0.push((name, field));
+        self.fields.push((name, field));
+    }
+
+    /// Keeps `hold` with these fields until a caller takes it.
+    #[must_use]
+    pub fn holding(mut self, hold: CredentialHold) -> Self {
+        self.hold = Some(hold);
+        self
+    }
+
+    /// Takes what the custodian holds for these fields, for a caller that
+    /// keeps it until the request's response head.
+    pub fn take_hold(&mut self) -> Option<CredentialHold> {
+        self.hold.take()
     }
 
     /// The field names, in order.
     pub fn names(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.0.iter().map(|(name, _)| *name)
+        self.fields.iter().map(|(name, _)| *name)
     }
 
     /// Takes the field named `name`.
     pub fn take(&mut self, name: &str) -> Option<CredentialField> {
-        let index = self.0.iter().position(|(field, _)| *field == name)?;
-        Some(self.0.remove(index).1)
+        let index = self.fields.iter().position(|(field, _)| *field == name)?;
+        Some(self.fields.remove(index).1)
     }
 
     /// The number of fields.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.fields.len()
     }
 
     /// Whether there are no fields.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.fields.is_empty()
     }
 }
 
@@ -109,7 +154,7 @@ impl IntoIterator for CredentialFields {
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.fields.into_iter()
     }
 }
 
@@ -285,6 +330,25 @@ pub enum CustodyStatus {
     WrittenByNewerBuild,
     /// The provider or a logout ended the grant.
     Revoked,
+}
+
+impl CustodyStatus {
+    /// The custody status of a stored subscription credential's offline
+    /// lifecycle; a lifecycle this build does not know is quarantined.
+    #[must_use]
+    pub const fn from_lifecycle(lifecycle: crate::OfflineCredentialLifecycle) -> Self {
+        use crate::OfflineCredentialLifecycle as Lifecycle;
+        match lifecycle {
+            Lifecycle::SignedOut => Self::SignedOut,
+            Lifecycle::Ready => Self::Ready,
+            Lifecycle::RefreshRequired => Self::RefreshRequired,
+            Lifecycle::Refreshing => Self::Refreshing,
+            Lifecycle::Revoked => Self::Revoked,
+            Lifecycle::LoginRequired => Self::LoginRequired,
+            Lifecycle::WrittenByNewerBuild => Self::WrittenByNewerBuild,
+            Lifecycle::Quarantined => Self::Quarantined,
+        }
+    }
 }
 
 /// Where a custodied API key resolved from.

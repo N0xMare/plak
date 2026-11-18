@@ -19,18 +19,26 @@ pub trait Credentials: Send + Sync + 'static {
         &self,
         _account: &crate::account::AccountRef,
     ) -> CliResult<Arc<plakous::anthropic::AnthropicKeySource>>;
+    /// Who holds this route's credentials; routes relay through a credential
+    /// gateway under gateway custody. Local by default.
+    fn custody(&self) -> plakous::custody::Custody {
+        plakous::custody::Custody::local()
+    }
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/anthropic.rs"]
 mod test_support;
 
-pub(super) fn construct(
-    input: Construction<'_, '_>,
-) -> std::future::Ready<CliResult<ConfiguredLanguageModel>> {
-    std::future::ready(construct_now(input))
+pub(super) async fn construct(input: Construction<'_, '_>) -> CliResult<ConfiguredLanguageModel> {
+    let source = input.credentials.anthropic(&input.spec.account)?;
+    source.prepare().await.map_err(api_error)?;
+    construct_now(input, source)
 }
 
-fn construct_now(input: Construction<'_, '_>) -> CliResult<ConfiguredLanguageModel> {
+fn construct_now(
+    input: Construction<'_, '_>,
+    source: Arc<plakous::anthropic::AnthropicKeySource>,
+) -> CliResult<ConfiguredLanguageModel> {
     let Construction {
         provider,
         credentials,
@@ -47,13 +55,17 @@ fn construct_now(input: Construction<'_, '_>) -> CliResult<ConfiguredLanguageMod
         .ok_or_else(|| CliFailure::new("Anthropic API model facts are unavailable"))?;
     let (configured, retrieval) =
         plakous::anthropic::AnthropicLanguageModel::configured_with_retrieval(
-            credentials.anthropic(&spec.account)?,
+            source,
             &spec.account.source_authority("plak/anthropic"),
             model,
             &row.binding_evidence_for(provider, window),
             behavior,
             maximum,
-            observer.clone(),
+            plakous::anthropic::AnthropicLanguageModel::platform_client(
+                observer.clone(),
+                &Credentials::custody(credentials).transport(),
+            )
+            .map_err(api_error)?,
         )
         .map_err(api_error)?;
     spec.topology_extensions.connect_retrieval(Some(Arc::new(
@@ -127,6 +139,9 @@ pub(super) async fn listing(
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
+    if let Err(error) = source.prepare().await {
+        return bundled_catalog(provider, &error.to_string());
+    }
     let fingerprint = match plakous::anthropic::anthropic_api_key_fingerprint(source.as_ref()) {
         Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
@@ -135,9 +150,13 @@ pub(super) async fn listing(
     lookup
         .run(
             async {
-                plakous::anthropic::list_anthropic_api_models(source.as_ref(), observer)
-                    .await
-                    .map_err(|error| error.to_string())
+                plakous::anthropic::list_anthropic_api_models(
+                    source.as_ref(),
+                    observer,
+                    &Credentials::custody(credentials).transport(),
+                )
+                .await
+                .map_err(|error| error.to_string())
             },
             CachedRows::Anthropic,
             |rows| match rows {

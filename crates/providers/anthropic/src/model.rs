@@ -97,8 +97,26 @@ impl AnthropicLanguageModel {
         )
     }
 
+    /// The Platform route's client: the exact streaming HTTP/1.1 profile,
+    /// pooled, observed by `observer`, taking `transport`.
+    ///
+    /// # Errors
+    /// Returns a configuration error when the client cannot be built.
+    pub fn platform_client(
+        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+        transport: &plakous_http::RouteTransport,
+    ) -> Result<Client, AnthropicError> {
+        Ok(transport.client(
+            Client::new_http1(Limits::for_streaming_inference())
+                .map_err(configuration_error)?
+                .pooled()
+                .with_observer(observer),
+        ))
+    }
+
     /// Builds the exact-origin executor and its hosted-retrieval side-request
-    /// port on the same route, key, model and client.
+    /// port on the same route, key, model and `client`
+    /// ([`Self::platform_client`]).
     pub fn configured_with_retrieval(
         source: Arc<AnthropicKeySource>,
         account: &str,
@@ -106,12 +124,8 @@ impl AnthropicLanguageModel {
         admitted_facts: &[u8],
         behavior: ProviderBehaviorConfiguration,
         maximum_projected_input: NonZeroU64,
-        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+        client: Client,
     ) -> Result<(ConfiguredLanguageModel, crate::AnthropicRetrieval), AnthropicError> {
-        let client = Client::new_http1(Limits::for_streaming_inference())
-            .map_err(configuration_error)?
-            .pooled()
-            .with_observer(observer);
         let (configured, executor) = Self::build(
             source,
             account,

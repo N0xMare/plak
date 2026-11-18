@@ -1,6 +1,7 @@
 //! Plakous-owned xAI OIDC authentication and selected-slot credential authority.
 
 mod catalog;
+mod custody;
 mod dispatch;
 mod error;
 mod evidence;
@@ -40,7 +41,7 @@ use login::{
 pub use login::{XaiBrowserLogin, XaiDeviceLogin, XaiRemoteBrowserLogin};
 #[cfg(test)]
 use refresh::xai_refresh_failure_is_retryable;
-use refresh::{XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks};
+use refresh::{RefreshForce, XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks};
 
 #[cfg(test)]
 use dispatch::supergrok_generation_fingerprint;

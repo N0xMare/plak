@@ -131,6 +131,7 @@ tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 futures-core.workspace = true
 futures-util.workspace = true
 plakous-anthropic = { workspace = true, features = ["test-clock"] }
+plakous-http = { workspace = true, features = ["fault-injection"] }
 plakous-openai = { workspace = true, features = ["test-support", "test-clock"] }
 plakous-test-support = { path = "../../tests/support/plakous-test-support" }
 plakous-xai = { workspace = true, features = ["test-clock"] }

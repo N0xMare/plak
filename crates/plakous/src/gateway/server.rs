@@ -144,7 +144,11 @@ impl LocalCustody {
                     .ok_or(GatewayRefusal::CustodiedHeadersMismatch {})
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Injection::new(values))
+        let injection = Injection::new(values);
+        Ok(match fields.take_hold() {
+            Some(hold) => injection.holding(hold.into_inner()),
+            None => injection,
+        })
     }
 
     /// Current facts for each requested account, in order.

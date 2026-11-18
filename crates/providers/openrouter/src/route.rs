@@ -779,6 +779,12 @@ impl OpenRouterChatRoute {
         Ok(self)
     }
 
+    /// Brings the key source current for one physical attempt
+    /// ([`plakous_auth::api_key::ApiKeySource::prepare`]).
+    pub(crate) async fn prepare_credential(&self) -> Result<(), OpenRouterAuthError> {
+        self.key_source.prepare().await.map_err(Into::into)
+    }
+
     pub(crate) fn current_credential_generation_grant(
         &self,
     ) -> Result<OpenRouterKeyGeneration, OpenRouterAuthError> {

@@ -469,6 +469,12 @@ fn openrouter_preflight<'a>(
         dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
         dialect
             .target
+            .route()
+            .prepare_credential()
+            .await
+            .map_err(|_| ResponsesDispatchRejection::Authentication)?;
+        dialect
+            .target
             .runtime_authority(dialect.target.route().clock.now())
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         let route = dialect.target.route();

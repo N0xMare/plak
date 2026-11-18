@@ -1822,7 +1822,7 @@ fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestR
         b"",
         behavior()?,
         NonZeroU64::new(64_000).ok_or("window")?,
-        None,
+        AnthropicLanguageModel::platform_client(None, &plakous_http::RouteTransport::direct())?,
     )?;
     let body = retrieval
         .request(plakous_messages::MessagesRetrievalQuery::WebSearch {
@@ -1854,7 +1854,7 @@ fn api_side_requests_never_claim_the_claude_beta_rejection() -> TestResult {
         b"",
         behavior()?,
         NonZeroU64::new(64_000).ok_or("window")?,
-        None,
+        AnthropicLanguageModel::platform_client(None, &plakous_http::RouteTransport::direct())?,
     )?;
     // A beta the Claude OAuth route sends; the API route must not claim it.
     let beta = "effort-2025-11-24";

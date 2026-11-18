@@ -709,7 +709,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-runner-dial": "c09c036c17a063b8cab99b89d81a7172d85026b1eddb4c81e852bd79ac4afc79",
     "plakous-py-worker": "1c7107be21d5a7c5aa653e21f3dded3fb74043df734e4d9edfe5a9bf5948a012",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
-    "plakous": "c720914a4f5fbf347473e398558ce666f8496b5d4765905945142e5a2a636640",
+    "plakous": "0dc929754774cac56e3cbf49ef90ee92ac5f9212986e8fa3bf596e893b7f7e88",
     "plakous-agent": "c0493a5d9f2387a4342ab95f9a02d0e87a5020ea2b7fd57423a77202ad2a5a86",
     "plakous-anthropic": "ba64c2d30c1997089e1750a23b63549ebcff8d77aad1db6c7c6bfd559b8c40e5",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",

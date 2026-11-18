@@ -928,6 +928,17 @@ impl NativeVertical for Vertical {
             })
             .and_then(codex_native_tool_mode)
     }
+    fn login_custody<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>
+    {
+        Box::pin(async move {
+            let manager: Arc<dyn super::custody::LoginCustody> =
+                subscriptions.codex_online().await?.manager;
+            Ok(manager)
+        })
+    }
     fn usage_reader<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
@@ -997,3 +1008,5 @@ mod tests {
         );
     }
 }
+
+super::custody::login_custody!(plakous_openai::CodexSubscriptionCredentialManager);

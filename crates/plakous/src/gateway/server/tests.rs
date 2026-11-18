@@ -109,7 +109,10 @@ async fn injection_checks_the_pin_row_names_and_fence_before_lowering_the_key() 
         ))
         .await
         .unwrap();
-    assert_eq!(format!("{injected:?}"), "Injection { values: 1 }");
+    assert_eq!(
+        format!("{injected:?}"),
+        "Injection { values: 1, holding: false }"
+    );
 
     let custody = &custody;
     let refused = |envelope| async move { custody.inject(&envelope).await.unwrap_err() };

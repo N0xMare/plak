@@ -107,6 +107,19 @@ impl OpenAiRoute {
         )
     }
 
+    /// Brings the Platform key source current for one physical attempt
+    /// ([`plakous_auth::api_key::ApiKeySource::prepare`]).
+    pub(crate) async fn prepare_platform_credential(&self) -> Result<(), AuthError> {
+        #[allow(
+            irrefutable_let_patterns,
+            reason = "the subscription variant exists only with native-auth"
+        )]
+        let RouteAuth::Platform { source, .. } = &self.auth else {
+            return Err(AuthError::BindingMismatch);
+        };
+        source.prepare().await.map_err(Into::into)
+    }
+
     pub(crate) fn platform_generation_grant(&self) -> Result<OpenAiKeyGeneration, AuthError> {
         match &self.auth {
             RouteAuth::Platform {

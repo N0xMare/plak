@@ -4,6 +4,7 @@ mod authority;
 mod authorization;
 mod catalog;
 mod catalog_source;
+mod custody;
 mod dispatch;
 mod error;
 mod evidence;

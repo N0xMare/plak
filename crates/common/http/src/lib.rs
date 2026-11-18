@@ -26,6 +26,7 @@ pub mod relay;
 #[cfg(feature = "gateway-server")]
 pub mod relay_server;
 mod request;
+mod route_transport;
 mod sensitive;
 pub mod sse;
 mod transport;
@@ -51,6 +52,7 @@ pub use error::{
 pub use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Version};
 pub use observation::{ExchangeObservation, ExchangeObserver, ExchangeTerminal};
 pub use request::{Headers, Origin, Request};
+pub use route_transport::RouteTransport;
 pub use sensitive::{SensitiveBytes, sensitive_header_value};
 pub use sse::{SseDecoder, SseError, SseLimits, SseMessage};
 #[cfg(feature = "fault-injection")]

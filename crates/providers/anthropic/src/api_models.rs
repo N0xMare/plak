@@ -268,12 +268,19 @@ pub fn anthropic_api_key_fingerprint(
 pub async fn list_anthropic_api_models(
     source: &AnthropicKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
+    transport: &plakous_http::RouteTransport,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
     let origin =
         Origin::parse(ANTHROPIC_PLATFORM_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
-    let client = Client::new_http1(plakous_http::Limits::default())
-        .map_err(transport_error)?
-        .with_observer(observer);
+    let client = transport.client(
+        Client::new_http1(plakous_http::Limits::default())
+            .map_err(transport_error)?
+            .with_observer(observer),
+    );
+    source
+        .prepare()
+        .await
+        .map_err(crate::route::api_key_error)?;
     list_from(source, &client, origin, list_deadline()?).await
 }
 

@@ -83,14 +83,21 @@ impl OpenAiPlatformModel {
         authority: OpenAiPlatformConfigurationAuthority,
         selected: SelectedProviderConfiguration,
     ) -> Result<Self, OpenAiPlatformBuildError> {
-        Self::with_exchange_observer(authority, selected, None)
+        Self::with_exchange_observer(
+            authority,
+            selected,
+            None,
+            &plakous_http::RouteTransport::direct(),
+        )
     }
 
-    /// Constructs official execution with the existing header-free exchange observer.
+    /// Constructs official execution with the existing header-free exchange
+    /// observer, its client taking `transport`.
     pub fn with_exchange_observer(
         authority: OpenAiPlatformConfigurationAuthority,
         selected: SelectedProviderConfiguration,
         observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+        transport: &plakous_http::RouteTransport,
     ) -> Result<Self, OpenAiPlatformBuildError> {
         if authority.is_local_fixture()
             || authority.target().route().origin().as_str() != crate::OPENAI_PLATFORM_ORIGIN
@@ -100,10 +107,12 @@ impl OpenAiPlatformModel {
         if authority.descriptor().context_contract().is_none() {
             return Err(OpenAiPlatformBuildError::Configuration);
         }
-        let client = Client::new(plakous_http::Limits::for_streaming_inference())
-            .map_err(|_| OpenAiPlatformBuildError::SharedBinding)?
-            .pooled()
-            .with_observer(observer);
+        let client = transport.client(
+            Client::new(plakous_http::Limits::for_streaming_inference())
+                .map_err(|_| OpenAiPlatformBuildError::SharedBinding)?
+                .pooled()
+                .with_observer(observer),
+        );
         Self::assemble(authority, selected, client, None)
     }
 
@@ -552,6 +561,14 @@ fn platform_preflight<'a>(
             .target()
             .validate_current_route_evidence()
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
+        if !authority.is_local_fixture() {
+            authority
+                .target()
+                .route()
+                .prepare_platform_credential()
+                .await
+                .map_err(|_| ResponsesDispatchRejection::Authentication)?;
+        }
         stateless_stream_body(
             request.body_bytes(),
             Some(authority.descriptor().requested_model().as_str()),

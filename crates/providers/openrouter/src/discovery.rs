@@ -71,6 +71,7 @@ impl OpenRouterChatRoute {
                 MODELS_PATH.as_bytes(),
             ],
         )?;
+        self.prepare_credential().await?;
         let generation = self.current_credential_generation_grant()?;
         let authorization = authorization_value(self.catalog_credential(&operation, &generation)?)?;
         let deadline = Instant::now()
@@ -118,6 +119,7 @@ impl OpenRouterChatRoute {
                 endpoint_path.as_bytes(),
             ],
         )?;
+        self.prepare_credential().await?;
         let generation = self.current_credential_generation_grant()?;
         let authorization = authorization_value(self.catalog_credential(&operation, &generation)?)?;
         let deadline = Instant::now()

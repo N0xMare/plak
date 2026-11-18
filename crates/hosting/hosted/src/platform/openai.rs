@@ -48,6 +48,11 @@ pub trait Credentials: Send + Sync + 'static {
         &self,
         _account: &crate::account::AccountRef,
     ) -> CliResult<Arc<plakous::openai::OpenAiKeySource>>;
+    /// Who holds this route's credentials; routes relay through a credential
+    /// gateway under gateway custody. Local by default.
+    fn custody(&self) -> plakous::custody::Custody {
+        plakous::custody::Custody::local()
+    }
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/openai.rs"]
@@ -70,9 +75,11 @@ pub(super) async fn construct(
 
     let facts = OpenAiPlatformModelFacts::from_model_id(spec.literal_model)
         .ok_or_else(|| CliFailure::new("OpenAI API model is not enrolled"))?;
+    let source = credentials.openai(&spec.account)?;
+    source.prepare().await.map_err(api_error)?;
     let authority = OpenAiPlatformModelBuilder::new(
         openai_credential_reference(&spec.account)?,
-        credentials.openai(&spec.account)?,
+        source,
         facts,
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::DefaultProject,
@@ -89,8 +96,13 @@ pub(super) async fn construct(
         .selected_configuration(exact_route_retention(&provisional))
         .map_err(api_error)?;
     let model = Arc::new(
-        OpenAiPlatformModel::with_exchange_observer(authority, selected, observer.clone())
-            .map_err(api_error)?,
+        OpenAiPlatformModel::with_exchange_observer(
+            authority,
+            selected,
+            observer.clone(),
+            &Credentials::custody(credentials).transport(),
+        )
+        .map_err(api_error)?,
     );
     spec.topology_extensions.connect_retrieval(Some(Arc::new(
         plakous::openai::OpenAiRetrievalPort::new(
@@ -178,6 +190,9 @@ pub(super) async fn listing(
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
+    if let Err(error) = source.prepare().await {
+        return bundled_catalog(provider, &error.to_string());
+    }
     let reference = match openai_credential_reference(account) {
         Ok(reference) => reference,
         Err(error) => return bundled_catalog(provider, error.message()),
@@ -191,9 +206,14 @@ pub(super) async fn listing(
     lookup
         .run(
             async {
-                plakous::openai::list_openai_api_models(&reference, source.as_ref(), observer)
-                    .await
-                    .map_err(|error| error.to_string())
+                plakous::openai::list_openai_api_models(
+                    &reference,
+                    source.as_ref(),
+                    observer,
+                    &Credentials::custody(credentials).transport(),
+                )
+                .await
+                .map_err(|error| error.to_string())
             },
             CachedRows::OpenAi,
             |rows| match rows {

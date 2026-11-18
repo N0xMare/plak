@@ -742,7 +742,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         let selected = authority
             .selected_configuration(exact_route_retention(&provisional))
             .unwrap();
-        Arc::new(OpenAiPlatformModel::with_exchange_observer(authority, selected, None).unwrap())
+        Arc::new(OpenAiPlatformModel::new(authority, selected).unwrap())
             .configured()
             .await
             .unwrap()

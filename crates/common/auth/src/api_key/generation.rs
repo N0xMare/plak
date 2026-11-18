@@ -79,6 +79,13 @@ impl CredentialGenerationFingerprint {
         Self(hasher.finalize().into())
     }
 
+    /// Parses a fingerprint a custodian reported as 64 lowercase hex digits
+    /// ([`Self::to_hex`]).
+    #[must_use]
+    pub fn from_hex(value: &str) -> Option<Self> {
+        crate::custody::IdentityDigest::from_hex(value).map(|digest| Self(*digest.as_bytes()))
+    }
+
     /// Returns the fingerprint bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {

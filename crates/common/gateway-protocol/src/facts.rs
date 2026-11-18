@@ -208,8 +208,6 @@ pub struct AccountFacts {
     pub account: GatewayAccount,
     /// The gateway instance that observed these facts.
     pub instance: UuidText,
-    /// Monotonic per account within one gateway instance.
-    pub facts_revision: u64,
     /// When the gateway observed them, in Unix milliseconds on its clock.
     pub observed_at_unix_ms: u64,
     /// Credential state.

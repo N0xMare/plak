@@ -243,6 +243,7 @@ impl OpenRouterChatRoute {
                 OPENROUTER_KEY_USAGE_PATH.as_bytes(),
             ],
         )?;
+        self.prepare_credential().await?;
         let generation = self.current_credential_generation_grant()?;
         let key = self.catalog_credential(&operation, &generation)?;
         let deadline = Instant::now()

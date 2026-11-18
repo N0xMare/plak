@@ -430,19 +430,7 @@ impl CodexSubscriptionCredentialManager {
     }
 
     pub(super) fn route_account_digest(&self) -> Digest {
-        let selected = self.selected_account().ok();
-        Digest::sha256(
-            DigestDomain::ModelBinding,
-            1,
-            &[
-                b"plak-native-codex-account",
-                OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
-                selected
-                    .as_ref()
-                    .map_or(b"unselected".as_slice(), |value| value.as_str().as_bytes()),
-            ],
-        )
-        .unwrap_or_else(|error| unreachable!("static digest version is valid: {error}"))
+        codex_account_digest(self.selected_account().ok().as_ref())
     }
 
     pub(super) fn catalog_witness_binding(
@@ -511,6 +499,20 @@ impl CodexSubscriptionCredentialManager {
             responses_lite,
         ))
     }
+}
+
+/// The account fingerprint a Codex route binds for `account`.
+pub(super) fn codex_account_digest(account: Option<&AccountBinding>) -> Digest {
+    Digest::sha256(
+        DigestDomain::ModelBinding,
+        1,
+        &[
+            b"plak-native-codex-account",
+            OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
+            account.map_or(b"unselected".as_slice(), |value| value.as_str().as_bytes()),
+        ],
+    )
+    .unwrap_or_else(|error| unreachable!("static digest version is valid: {error}"))
 }
 
 impl fmt::Debug for CodexSubscriptionCredentialManager {

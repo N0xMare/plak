@@ -57,6 +57,7 @@ use crate::{
 };
 use plakous_exchange::network_failure;
 
+mod custody;
 mod error;
 mod login;
 mod manager;
@@ -64,6 +65,7 @@ mod manager_core;
 mod profile;
 mod refresh;
 
+pub use custody::{CLAUDE_ACCOUNT_UUID_IDENTITY, CLAUDE_DEVICE_ID_IDENTITY};
 pub use error::ClaudeNativeAuthError;
 pub use login::ClaudeOAuthLogin;
 pub use manager::ClaudeNativeAuthManager;

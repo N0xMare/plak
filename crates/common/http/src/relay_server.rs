@@ -74,14 +74,26 @@ pub enum Peer {
 pub type ServiceFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, GatewayRefusal>> + Send + 'a>>;
 
-/// The exact value of each custodied entry, in the envelope's custodied order.
-pub struct Injection(Vec<SensitiveBytes>);
+/// The exact value of each custodied entry, in the envelope's custodied
+/// order, and what the custodian holds while they are in use.
+pub struct Injection {
+    values: Vec<SensitiveBytes>,
+    hold: Option<Box<dyn std::any::Any + Send>>,
+}
 
 impl Injection {
     /// Values for the custodied entries, in order.
     #[must_use]
     pub const fn new(values: Vec<SensitiveBytes>) -> Self {
-        Self(values)
+        Self { values, hold: None }
+    }
+
+    /// Keeps `hold` (a credential store's Ready lease, say) until the upstream
+    /// exchange yields its response head or fails.
+    #[must_use]
+    pub fn holding(mut self, hold: Box<dyn std::any::Any + Send>) -> Self {
+        self.hold = Some(hold);
+        self
     }
 }
 
@@ -89,7 +101,8 @@ impl std::fmt::Debug for Injection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Injection")
-            .field("values", &self.0.len())
+            .field("values", &self.values.len())
+            .field("holding", &self.hold.is_some())
             .finish()
     }
 }
@@ -390,8 +403,8 @@ impl<S: GatewayService> ServerInner<S> {
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
         let method = Method::from_bytes(envelope.method.as_bytes())
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-        let injection = self.service.inject(principal, envelope).await?;
-        let mut values = injection.0.into_iter();
+        let Injection { values, hold } = self.service.inject(principal, envelope).await?;
+        let mut values = values.into_iter();
         let mut headers = HeaderMap::with_capacity(envelope.headers.len());
         for header in &envelope.headers {
             let (name, value) = match header {
@@ -438,6 +451,7 @@ impl<S: GatewayService> ServerInner<S> {
         Ok(Prepared {
             upstream,
             request,
+            hold,
             deadline: envelope_deadline(envelope),
             max_chunk: usize::try_from(envelope.limits.max_chunk_bytes)
                 .unwrap_or(MAX_DATA_BYTES)
@@ -465,6 +479,7 @@ impl<S: GatewayService> ServerInner<S> {
         let Prepared {
             upstream,
             request,
+            hold,
             deadline,
             max_chunk,
             ..
@@ -478,6 +493,7 @@ impl<S: GatewayService> ServerInner<S> {
             }
             result = upstream.execute(request, control) => Some(result),
         };
+        drop(hold);
         record.outcome = match outcome {
             None => RelayOutcome::Abandoned,
             Some(Err(failure)) => {
@@ -582,6 +598,7 @@ async fn stream(
 struct Prepared {
     upstream: Client,
     request: Request,
+    hold: Option<Box<dyn std::any::Any + Send>>,
     deadline: Instant,
     max_chunk: usize,
     audit_target: (String, String),

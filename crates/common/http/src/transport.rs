@@ -542,7 +542,6 @@ impl Client {
 
     /// This client with every exchange taken by `relay` instead of its own
     /// connections, keeping its limits, policy, identity and observer.
-    #[allow(dead_code, reason = "the credential gateway relay client installs it")]
     pub(crate) fn with_relay_hook(&self, relay: Arc<dyn Relay>) -> Self {
         self.with_inner(|inner| inner.relay = Some(relay))
     }

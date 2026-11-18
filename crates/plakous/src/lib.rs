@@ -386,6 +386,20 @@ pub mod runner {
     pub use plakous_runner_protocol as protocol;
 }
 
+/// Who holds route credentials: local custody or a credential gateway
+/// (unsupported for embedders; official hosting threads it to every route).
+#[cfg(any(
+    feature = "anthropic",
+    feature = "openai",
+    feature = "xai",
+    feature = "openrouter",
+    feature = "codex",
+    feature = "grok",
+    feature = "claude"
+))]
+#[doc(hidden)]
+pub mod custody;
+
 /// Unsupported credential gateway seam for official hosting (spec 01 §7.1,
 /// §7.5, §13.1): the custody seam, the wire protocol, the relay client and
 /// remote custodian, and the relay server core over local custody.
@@ -827,7 +841,7 @@ pub mod openrouter {
         pub fn connect(
             key_source: Arc<OpenRouterKeySource>,
         ) -> Result<Self, OpenRouterChatConnectionError> {
-            Self::connect_inner(key_source, None)
+            Self::connect_inner(&crate::custody::Custody::local(), key_source, None)
         }
 
         /// Creates the exact production route with explicit retention restrictions.
@@ -839,10 +853,30 @@ pub mod openrouter {
             key_source: Arc<OpenRouterKeySource>,
             retention: OpenRouterRetentionPolicy,
         ) -> Result<Self, OpenRouterChatConnectionError> {
-            Self::connect_inner(key_source, Some(retention))
+            Self::connect_inner(
+                &crate::custody::Custody::local(),
+                key_source,
+                Some(retention),
+            )
+        }
+
+        /// [`Self::connect_with_retention`] under `custody`: through a
+        /// credential gateway, every exchange relays and the key source's
+        /// fields are custodied.
+        ///
+        /// # Errors
+        ///
+        /// Returns a safe connection error when the route or transport is invalid.
+        pub fn connect_with_retention_in(
+            custody: &crate::custody::Custody,
+            key_source: Arc<OpenRouterKeySource>,
+            retention: OpenRouterRetentionPolicy,
+        ) -> Result<Self, OpenRouterChatConnectionError> {
+            Self::connect_inner(custody, key_source, Some(retention))
         }
 
         fn connect_inner(
+            custody: &crate::custody::Custody,
             key_source: Arc<OpenRouterKeySource>,
             retention: Option<OpenRouterRetentionPolicy>,
         ) -> Result<Self, OpenRouterChatConnectionError> {
@@ -855,8 +889,10 @@ pub mod openrouter {
             // OpenRouter's public gateway is qualified over one explicit
             // HTTP/1.1 transport profile. The request is never replayed as a
             // fallback across protocol versions after possible transmission.
-            let client = Client::new_http1(Limits::for_streaming_inference())
-                .map_err(|_| OpenRouterChatConnectionError::HttpClientConfiguration)?;
+            let client = custody.transport().client(
+                Client::new_http1(Limits::for_streaming_inference())
+                    .map_err(|_| OpenRouterChatConnectionError::HttpClientConfiguration)?,
+            );
             Ok(Self { route, client })
         }
 

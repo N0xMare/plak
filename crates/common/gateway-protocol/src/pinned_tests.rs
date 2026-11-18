@@ -77,7 +77,6 @@ pub(crate) fn facts_sample() -> AccountFacts {
     AccountFacts {
         account: account("claude/work"),
         instance: uuid(INSTANCE),
-        facts_revision: 3,
         observed_at_unix_ms: 1_800_000_000_000,
         credential: CredentialFacts {
             status: CredentialStatus::Ready,
@@ -113,7 +112,6 @@ fn key_facts_sample() -> AccountFacts {
     AccountFacts {
         account: account("openai"),
         instance: uuid(INSTANCE),
-        facts_revision: 1,
         observed_at_unix_ms: 1_800_000_000_000,
         credential: CredentialFacts {
             status: CredentialStatus::Ready,

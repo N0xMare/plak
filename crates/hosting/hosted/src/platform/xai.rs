@@ -19,6 +19,11 @@ pub trait Credentials: Send + Sync + 'static {
         &self,
         _account: &crate::account::AccountRef,
     ) -> CliResult<Arc<plakous::xai::XaiPlatformKeySource>>;
+    /// Who holds this route's credentials; routes relay through a credential
+    /// gateway under gateway custody. Local by default.
+    fn custody(&self) -> plakous::custody::Custody {
+        plakous::custody::Custody::local()
+    }
 }
 #[cfg(any(test, feature = "test-support"))]
 #[path = "test_support/xai.rs"]
@@ -40,6 +45,7 @@ pub(super) async fn construct(
     } = input;
 
     let source = credentials.xai(&spec.account)?;
+    source.prepare().await.map_err(api_error)?;
     let provisional = plakous::xai::xai_platform_selection_for(spec.literal_model, behavior)
         .map_err(api_error)?;
     let selected = plakous::xai::xai_platform_selection_for(
@@ -59,7 +65,11 @@ pub(super) async fn construct(
             maximum,
             selected,
             Arc::clone(&clock),
-            observer,
+            plakous::xai::XaiPlatformModel::platform_client(
+                observer,
+                &Credentials::custody(credentials).transport(),
+            )
+            .map_err(api_error)?,
             &row.binding_evidence_for(provider, window),
         )
         .map_err(api_error)?,
@@ -143,6 +153,9 @@ pub(super) async fn listing(
         Ok(source) => source,
         Err(error) => return bundled_catalog(provider, error.message()),
     };
+    if let Err(error) = source.prepare().await {
+        return bundled_catalog(provider, &error.to_string());
+    }
     let fingerprint = match plakous::xai::xai_api_key_fingerprint(source.as_ref()) {
         Ok(fingerprint) => fingerprint,
         Err(error) => return bundled_catalog(provider, &error.to_string()),
@@ -151,9 +164,13 @@ pub(super) async fn listing(
     lookup
         .run(
             async {
-                plakous::xai::list_xai_api_models(source.as_ref(), observer)
-                    .await
-                    .map_err(|error| error.to_string())
+                plakous::xai::list_xai_api_models(
+                    source.as_ref(),
+                    observer,
+                    &Credentials::custody(credentials).transport(),
+                )
+                .await
+                .map_err(|error| error.to_string())
             },
             CachedRows::Xai,
             |rows| match rows {

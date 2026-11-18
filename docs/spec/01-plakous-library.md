@@ -6192,6 +6192,47 @@ while every check still runs on the logical URL; the gateway's upstream
 client keeps its own transport fault plan, so upstream faults apply to the
 in-process gateway's upstream hop, and the relayed client applies none.
 
+A custodian may keep what it read the fields from held until the request's
+response head (`CredentialFields::holding`, carried by the server's
+`Injection`): a subscription custodian holds the store's exact Ready lease,
+so refresh, replacement and logout of that record wait for the upstream head
+exactly as under direct dispatch. `plakous::gateway::server::SubscriptionCustodian`
+is local custody of one subscription kind's logins (Codex, Claude,
+SuperGrok) under a store, the default account and its named accounts: each
+call opens the login as the library's own operations do, so consent,
+profile windows and newer-build refusals apply unchanged. Its facts' account
+and credential-authority digests are the exact bytes the kind's route binds
+a session to (the Codex authority digest still hashes the slot path, which a
+gateway adopting the store in place keeps), its selection digest names the
+login selection (Codex's route digest; for Claude the login grant, for
+SuperGrok the selection epoch), and Claude's account UUID and client device
+id travel as `claude_account_uuid` and `claude_device_id` wire identity.
+Refresh is the single writer's: `IfDue` refreshes only while the caller's
+fence is current and the custodian's own clock says it is due;
+`AfterRejection` waits for any claimed refresh in flight to settle, then
+claims one grant only while the store still holds the rejected generation of
+the same account and selection (so concurrent rejections of one generation
+yield one grant, and another login is never refreshed); `Operator` forces
+one grant. A failed refresh shows in the reported status. Facts carry
+neither email nor plan: status never showed them, and the allowance read
+reports them.
+
+On the calling side, `plakous::custody::Custody` names who holds route
+credentials: local (the default, byte-identical) or a `GatewayCustody`
+(`GatewayCustody::connect(endpoint, caller_key, credential_headers)`). Each
+route builds its own client as before and passes it through
+`plakous_http::RouteTransport`, which relays every exchange under gateway
+custody. A key the gateway holds is a `CustodiedKeySource`: its generation
+grant carries the fingerprint the gateway reports (the local key's exact
+fingerprint, so a session admits and binds the same generation), its field
+is a custodied placeholder, and it never yields the key. Because
+`ApiKeySource` reads are synchronous, routes await the provided
+`ApiKeySource::prepare` before each physical attempt (and constructions and
+listings before they read a generation): a custodied source fetches the
+gateway's facts there, once per attempt, with no cache across attempts and
+no blocking bridge; a local source does nothing. The gateway checks the
+fence again at injection either way.
+
 ## 8. Tools and effects
 
 ### 8.1 Contracts

@@ -168,12 +168,19 @@ pub async fn list_openai_api_models(
     reference: &CredentialReference,
     source: &OpenAiKeySource,
     observer: Option<std::sync::Arc<dyn plakous_http::ExchangeObserver>>,
+    transport: &plakous_http::RouteTransport,
 ) -> Result<Vec<OpenAiListedModel>, OpenAiError> {
     let origin =
         Origin::parse(OPENAI_PLATFORM_ORIGIN).map_err(|_| list_error("origin is invalid"))?;
-    let client = Client::new_http1(plakous_http::Limits::default())
-        .map_err(|_| transport_error())?
-        .with_observer(observer);
+    let client = transport.client(
+        Client::new_http1(plakous_http::Limits::default())
+            .map_err(|_| transport_error())?
+            .with_observer(observer),
+    );
+    source
+        .prepare()
+        .await
+        .map_err(|_| list_error("credential is unavailable"))?;
     let credential = platform_credential(reference, source)?;
     let body = get_models(&client, origin, credential, deadline_instant()?).await?;
     parse_openai_models_page(&body)

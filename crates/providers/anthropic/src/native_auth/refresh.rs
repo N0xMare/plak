@@ -18,10 +18,22 @@ pub(super) struct ClaudeRefreshHooks<'a> {
     pub(super) observer: Option<&'a dyn CredentialRefreshObserver>,
     pub(super) _flight: futures_util::lock::MutexGuard<'a, ()>,
     pub(super) request_permit: Option<Box<dyn SubscriptionRequestPermit>>,
-    /// Refresh even when the stored expiry is outside the skew (HTTP 401).
-    pub(super) force: bool,
+    /// Whether to refresh even when the stored expiry is outside the skew.
+    pub(super) force: RefreshForce,
     /// Numbers and rejecting check of the received response, for diagnostics.
     pub(super) detail: CredentialRefreshDetail,
+}
+
+/// When a claimed refresh runs although the stored expiry is outside the skew.
+#[derive(Clone, Copy)]
+pub(super) enum RefreshForce {
+    /// Only inside the skew.
+    IfDue,
+    /// Always (the provider rejected the access token with HTTP 401).
+    Always,
+    /// Only while the store still holds this rejected generation; a
+    /// generation another refresher already rotated is refreshed if due.
+    WhileCurrent(plakous_auth::CredentialGeneration),
 }
 
 pub(super) struct ClaudeRefreshPrepared {
@@ -56,7 +68,12 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
             return Err(ClaudeNativeAuthError::NotReady);
         }
         let stored = self.core.read_stored(&fence)?;
-        if self.force
+        let forced = match self.force {
+            RefreshForce::IfDue => false,
+            RefreshForce::Always => true,
+            RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
+        };
+        if forced
             || access_needs_refresh(
                 stored.expires_at,
                 system_unix_seconds()?,

@@ -141,6 +141,16 @@ fn ok_reply(content_type: &str, body: &[u8]) -> Vec<u8> {
 struct Service {
     generation: AtomicU64,
     moves_per_inject: AtomicU64,
+    held: Arc<AtomicUsize>,
+}
+
+/// Counts itself held until dropped, as a store's Ready lease would be.
+struct Hold(Arc<AtomicUsize>);
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Service {
@@ -148,6 +158,7 @@ impl Service {
         Arc::new(Self {
             generation: AtomicU64::new(7),
             moves_per_inject: AtomicU64::new(0),
+            held: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -155,7 +166,6 @@ impl Service {
         AccountFacts {
             account: GatewayAccount::new(ACCOUNT).unwrap(),
             instance: UuidText::new("0b9e5f4c-7d3a-4e21-9f80-1a2b3c4d5e6f").unwrap(),
-            facts_revision: 1,
             observed_at_unix_ms: 1,
             credential: CredentialFacts {
                 status: CredentialStatus::Ready,
@@ -211,7 +221,9 @@ impl GatewayService for Service {
                     facts: Box::new(self.facts()),
                 });
             }
-            Ok(Injection::new(vec![SensitiveBytes::new(SECRET.to_vec())]))
+            self.held.fetch_add(1, Ordering::SeqCst);
+            Ok(Injection::new(vec![SensitiveBytes::new(SECRET.to_vec())])
+                .holding(Box::new(Hold(self.held.clone()))))
         })
     }
 
@@ -632,6 +644,34 @@ async fn a_break_after_the_head_may_have_transmitted_and_leaving_cancels_upstrea
     let failure = body_chunks(response).await.unwrap_err();
     assert_eq!(failure.phase(), Phase::ResponseBody);
     assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+}
+
+#[tokio::test]
+async fn the_custodian_hold_lasts_until_the_upstream_head() {
+    let head = b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: 1\n\n".to_vec();
+    let fixture = upstream(Script::HangAfter(head)).await;
+    let service = Service::new();
+    let holds = service.held.clone();
+    let client = relayed(gateway(service, &fixture, Peer::InProcess));
+    let response = client
+        .execute(
+            request(
+                Origin::parse(&format!("{LOGICAL}/")).unwrap(),
+                "/v1/stream",
+                placeholder(7),
+            ),
+            control(),
+        )
+        .await
+        .unwrap();
+    // The head has arrived while the body is still streaming: the gateway
+    // released the hold at the head, not at the end of the body.
+    assert_eq!(holds.load(Ordering::SeqCst), 0);
+    let mut body = response.into_body();
+    assert_eq!(
+        body.next_chunk().await.unwrap().unwrap().as_ref(),
+        b"data: 1\n\n"
+    );
 }
 
 #[tokio::test]

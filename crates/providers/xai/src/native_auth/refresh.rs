@@ -22,6 +22,18 @@ pub(super) struct XaiRefreshPrepared {
 }
 
 /// Shared-orchestrator hooks for SuperGrok claimed refresh (form body, ES256).
+/// When a claimed refresh runs although the stored expiry is outside the lead.
+#[derive(Clone, Copy)]
+pub(super) enum RefreshForce {
+    /// Only inside the lead.
+    IfDue,
+    /// Always (an operator refresh, or the provider rejected the access token).
+    Always,
+    /// Only while the store still holds this rejected generation; a
+    /// generation another refresher already rotated is refreshed if due.
+    WhileCurrent(CredentialGeneration),
+}
+
 pub(super) struct XaiRefreshHooks<'a> {
     /// Declared first so a dropped refresh restores its claim before the
     /// in-process flight is released.
@@ -33,8 +45,8 @@ pub(super) struct XaiRefreshHooks<'a> {
     pub(super) _flight: futures_util::lock::MutexGuard<'a, ()>,
     pub(super) request_permit: Option<Box<dyn SubscriptionRequestPermit>>,
     pub(super) started: Instant,
-    /// Refresh even when the stored expiry is outside the lead (HTTP 401).
-    pub(super) force: bool,
+    /// Whether to refresh even when the stored expiry is outside the lead.
+    pub(super) force: RefreshForce,
     /// Numbers of the received token response, for failure diagnostics.
     pub(super) detail: CredentialRefreshDetail,
 }
@@ -71,7 +83,12 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 self.expected_authority,
             )?;
         }
-        if !self.force && !self.core.needs_refresh(&fence)? {
+        let forced = match self.force {
+            RefreshForce::IfDue => false,
+            RefreshForce::Always => true,
+            RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
+        };
+        if !forced && !self.core.needs_refresh(&fence)? {
             return Ok(None);
         }
         // Ready still pre-reads under a Ready lease. Unknown/RefreshRequired keep

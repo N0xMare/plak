@@ -3,6 +3,7 @@
     reason = "Exercise exact Codex login, catalog, credential rotation and inference through complete controlled-peer scenarios."
 )]
 mod carry_replay;
+mod custody;
 mod drift;
 
 use std::collections::BTreeSet;

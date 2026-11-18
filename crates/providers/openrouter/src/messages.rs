@@ -422,6 +422,11 @@ impl LanguageModel for OpenRouterMessagesLanguageModel {
     ) -> RuntimeModelAuthorityOperation {
         Box::pin(async move {
             self.target
+                .route
+                .prepare_credential()
+                .await
+                .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
+            self.target
                 .runtime_authority(checked_at)
                 .map_err(|error| match error {
                     OpenRouterMessagesBuildError::StaleEvidence => {

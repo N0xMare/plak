@@ -1576,6 +1576,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
             # only line starts with, so a face shows no fragment.
             "JOB_TAIL_FRAGMENT",
         },
+        # Hidden, unsupported: who holds route credentials (spec 01 sec. 7.5).
+        "custody": {"Custody"},
     },
     "plakous-workspace": _SHARED_PLAKOUS_SYMBOLS,
     "plakous-recursive-subagents": {

@@ -712,6 +712,17 @@ impl NativeVertical for Vertical {
     fn tool_mode(&self, _resolved: &ResolvedNativeModel) -> Option<NativeToolMode> {
         None
     }
+    fn login_custody<'a>(
+        &self,
+        subscriptions: &'a NativeSubscriptions,
+    ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>
+    {
+        Box::pin(async move {
+            let manager: Arc<dyn super::custody::LoginCustody> =
+                subscriptions.claude_online().await?.manager;
+            Ok(manager)
+        })
+    }
     fn usage_reader<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
@@ -756,3 +767,5 @@ mod tests {
         }
     }
 }
+
+super::custody::login_custody!(plakous_anthropic::ClaudeNativeAuthManager);

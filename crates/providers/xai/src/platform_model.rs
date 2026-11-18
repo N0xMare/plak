@@ -107,7 +107,25 @@ impl XaiPlatformModel {
             &[],
         )
     }
-    /// Same as [`Self::with_exchange_observer`], appending admitted catalog facts
+    /// The Platform route's client: the exact streaming profile, pooled,
+    /// observed by `observer`, taking `transport`.
+    ///
+    /// # Errors
+    /// Returns [`XaiPlatformBuildError::Transport`] when it cannot be built.
+    pub fn platform_client(
+        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+        transport: &plakous_http::RouteTransport,
+    ) -> Result<Client, XaiPlatformBuildError> {
+        Ok(transport.client(
+            Client::new(plakous_http::Limits::for_streaming_inference())
+                .map_err(|_| XaiPlatformBuildError::Transport)?
+                .pooled()
+                .with_observer(observer),
+        ))
+    }
+
+    /// Same as [`Self::with_exchange_observer`] over `client`
+    /// ([`Self::platform_client`]), appending admitted catalog facts
     /// to the provider semantic evidence. Empty bytes leave that evidence unchanged.
     pub fn with_admitted_facts(
         authority: XaiPlatformApiKeyAuthority,
@@ -115,13 +133,9 @@ impl XaiPlatformModel {
         maximum_input: NonZeroU64,
         selected: SelectedProviderConfiguration,
         clock: Arc<dyn Clock>,
-        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+        client: Client,
         admitted_facts: &[u8],
     ) -> Result<Self, XaiPlatformBuildError> {
-        let client = Client::new(plakous_http::Limits::for_streaming_inference())
-            .map_err(|_| XaiPlatformBuildError::Transport)?
-            .pooled()
-            .with_observer(observer);
         let origin = Origin::parse(XAI_PLATFORM_API_KEY_ORIGIN)
             .map_err(|_| XaiPlatformBuildError::Transport)?;
         Self::assemble(
@@ -339,26 +353,19 @@ impl XaiPlatformModel {
             .revalidate_runtime_authority(execution.clock.now())
             .await
             .map_err(|_| "xAI API admission is no longer current")?;
-        check_grant(execution).map_err(|_| "xAI API key grant is no longer current")?;
-        let key = execution
+        execution
             .source
-            .api_key(&platform_binding::API_KEY_REQUEST, &execution.grant)
+            .prepare()
+            .await
             .map_err(|_| "xAI API key is unavailable")?;
-        if key.generation_grant(
-            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
-            execution.grant.authority().clone(),
-        ) != execution.grant
-        {
-            return Err("xAI API key does not match the session's grant");
-        }
+        check_grant(execution).map_err(|_| "xAI API key grant is no longer current")?;
+        let authorization =
+            platform_binding::platform_bearer(execution.source.as_ref(), &execution.grant)
+                .map_err(|_| "xAI API key is unavailable")?;
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static(accept));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            AUTHORIZATION,
-            platform_binding::platform_bearer(&key)
-                .map_err(|_| "xAI API key is not a header value")?,
-        );
+        headers.insert(AUTHORIZATION, authorization);
         Request::new(
             execution.origin.clone(),
             Method::POST,
@@ -583,25 +590,21 @@ fn preflight<'a>(
 ) -> ResponsesPreflightFuture<'a, XaiPlatformKeyGeneration> {
     Box::pin(async move {
         dispatch_available(request.cancellation().is_cancelled(), request.deadline())?;
+        execution
+            .source
+            .prepare()
+            .await
+            .map_err(|_| ResponsesDispatchRejection::Authentication)?;
         check_grant(execution).map_err(|_| ResponsesDispatchRejection::Authentication)?;
         stateless_stream_body(request.body_bytes(), Some(execution.model.as_str()))?;
-        let key = execution
-            .source
-            .api_key(&platform_binding::API_KEY_REQUEST, &execution.grant)
-            .map_err(|_| ResponsesDispatchRejection::Authentication)?;
-        if key.generation_grant(
-            plakous_auth::api_key::CredentialProviderTag::XaiPlatform,
-            execution.grant.authority().clone(),
-        ) != execution.grant
-        {
-            return Err(ResponsesDispatchRejection::Authentication);
-        }
+        let authorization =
+            platform_binding::platform_bearer(execution.source.as_ref(), &execution.grant)
+                .map_err(|_| ResponsesDispatchRejection::Authentication)?;
         check_grant(execution).map_err(|_| ResponsesDispatchRejection::Authentication)?;
         seal(Wire {
             origin: execution.origin.clone(),
             path: XAI_PLATFORM_RESPONSES_PATH,
-            authorization: platform_binding::platform_bearer(&key)
-                .map_err(|_| ResponsesDispatchRejection::Authentication)?,
+            authorization,
             extra_headers: Vec::new(),
             body: request.body_bytes().to_vec(),
             limits: execution.client.limits().clone(),

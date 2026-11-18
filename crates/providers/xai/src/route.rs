@@ -169,7 +169,7 @@ pub struct XaiRouteIdentity {
 
 impl XaiRouteIdentity {
     #[cfg(feature = "native-auth")]
-    fn new(
+    pub(crate) fn new(
         kind: XaiRouteKind,
         origin: XaiOrigin,
         access_mode: XaiAccessMode,

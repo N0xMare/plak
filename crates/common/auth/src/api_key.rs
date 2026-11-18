@@ -163,6 +163,21 @@ impl<A> ApiKeyGenerationGrant<A> {
         })
     }
 
+    /// The grant of the generation a custodian reported by `fingerprint`,
+    /// for a key this process never holds.
+    #[must_use]
+    pub const fn from_fingerprint(
+        provider: CredentialProviderTag,
+        authority: A,
+        fingerprint: CredentialGenerationFingerprint,
+    ) -> Self {
+        Self {
+            provider,
+            authority,
+            fingerprint,
+        }
+    }
+
     /// Exact credential provider, never inferred from a key's spelling.
     #[must_use]
     pub const fn provider(&self) -> CredentialProviderTag {
@@ -213,6 +228,10 @@ pub trait ApiKeyRequest {
     }
 }
 
+/// A boxed [`ApiKeySource::prepare`] future.
+pub type ApiKeyFuture<'a> =
+    std::pin::Pin<Box<dyn Future<Output = Result<(), ApiKeyError>> + Send + 'a>>;
+
 /// Application-owned generation and bearer resolution for one typed route.
 pub trait ApiKeySource<R: ApiKeyRequest + ?Sized, A = ()>: Send + Sync {
     /// Stable, non-secret source-owned account/authority identity.
@@ -236,6 +255,17 @@ pub trait ApiKeySource<R: ApiKeyRequest + ?Sized, A = ()>: Send + Sync {
         request: &R,
         expected: &ApiKeyGenerationGrant<A>,
     ) -> Result<ApiKey, ApiKeyError>;
+
+    /// Brings the source's generation and field reads current before one
+    /// physical attempt reads them synchronously. A source that keeps the
+    /// key elsewhere fetches its custodian's facts here, once per attempt;
+    /// a local source holds everything already.
+    ///
+    /// # Errors
+    /// Returns a redaction-safe source error.
+    fn prepare(&self) -> ApiKeyFuture<'_> {
+        Box::pin(std::future::ready(Ok(())))
+    }
 
     /// The credential header value for an admitted request, lowered in
     /// `form`. Local custody lowers [`Self::api_key`]; a custodian that keeps
