@@ -2286,7 +2286,7 @@ impl FaceFixture {
         }
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700))?;
         std::fs::set_permissions(home.join("agents"), std::fs::Permissions::from_mode(0o700))?;
-        let mut fixture = Self {
+        let fixture = Self {
             _gateway: None,
             script: root.path().join("script.json"),
             evidence: root.path().join("evidence.jsonl"),
@@ -2296,8 +2296,10 @@ impl FaceFixture {
             root,
         };
         fixture.write_script(script)?;
-        fixture._gateway = Some(fixture.start_gateway()?);
-        Ok(fixture)
+        Ok(Self {
+            _gateway: Some(fixture.start_gateway()?),
+            ..fixture
+        })
     }
 
     fn write_script(&self, script: &Value) -> TestResult {

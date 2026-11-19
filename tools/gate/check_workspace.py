@@ -1718,6 +1718,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # The synchronous account bridge carries the same stack as its executor.
     ("plakd", "src/gateway/bridge.rs"): {"agent": {"RUNTIME_EXECUTOR_STACK_BYTES"}},
+    # Route admission reads non-secret key facts through gateway custody.
+    ("plakd", "src/gateway/route_custody.rs"): {"gateway": {"custody::CredentialCustodian"}},
     # Unsupported host-only semantic reconstruction seams (spec 01 sec. 5).
     ("plakd", "src/carry/host_move.rs"): {
         'sessions': {
