@@ -568,12 +568,17 @@ and contract-tested in full, not shipped. Other combinations may compile;
 compilation does not establish support. Named variants also get closure
 witnesses in the static checker, without adding reduced compilation to check.
 Product setting bounds and account remedies do not depend on client
-presentation. Store/composition tests compile without terminal adapters.
+presentation. CLI account admission and the web console share credential
+roster reads; the CLI does not compile the console to select an account.
+Store/composition tests compile without terminal adapters.
 Only the `variants` group (full only) builds the two reduced named products,
 plus an admission fixture that omits images, Python and MCP.
 Each distinct resolution builds its
 library and binary and runs clippy with warnings denied, then checks version,
 doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
+The admission fixture checks that an unused Python template does not block
+either CLI entry point with an explicit root account, while an implicit root
+without a Ready account still requires a choice (chapter 02 §4.4.1).
 The group also builds a full test-hooks fixture writer and a reduced
 test-hooks/maintainer reader to exercise real canonical stores, genesis
 import rebind, attached maintainer actions and an image diagnostic during an

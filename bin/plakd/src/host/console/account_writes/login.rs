@@ -5,7 +5,7 @@ use super::{
     HostResponse, MutationRefusal, OperatorAction, PlakousApplication, ReadRefusal, RequestRefusal,
     ValidationCode, failed, host_failure, refused, validation, worker,
 };
-use crate::commands::application::{LoginOutcome, host::HostLoginStartError};
+use crate::commands::application::{LoginOutcome, host::login::HostLoginStartError};
 use crate::presentation::CredentialState;
 use plakd_wire_types::console::{LoginMethod, LoginPhase, SecretInput};
 use plakous::subscriptions::NativeLoginCompletion;

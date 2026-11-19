@@ -5,7 +5,6 @@
 //! native-subscription service; tests replace the port and all three process
 //! streams without touching storage or a network.
 
-#[cfg(feature = "web")]
 pub(crate) mod host;
 
 use std::path::PathBuf;

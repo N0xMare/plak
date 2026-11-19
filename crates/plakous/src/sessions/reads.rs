@@ -76,9 +76,7 @@ impl AgentSessions {
             committed_compaction_facts(&exact.checkpoint),
         ))
     }
-}
 
-impl AgentSessions {
     /// Reads the committed conversation and named state of one exact quiescent SQLite branch
     /// head so it can seed a new session elsewhere, without opening a mutable
     /// runtime, acquiring a lease, or calling a provider or tool.
@@ -88,7 +86,6 @@ impl AgentSessions {
     /// Returns typed lookup, stale-locator, integrity, schema, or storage
     /// failure, and an invalid-input refusal when the head is an unfinished
     /// turn.
-    #[cfg(feature = "sessions-sqlite")]
     pub fn export_history_sqlite(
         path: impl AsRef<Path>,
         locator: SessionLocator,
@@ -157,7 +154,9 @@ impl AgentSessions {
             }
         }
     }
+}
 
+impl AgentSessions {
     /// Whether the head at this locator is an unfinished turn awaiting recovery.
     ///
     /// A caller that has just been refused for a stale locator uses this to say

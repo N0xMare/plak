@@ -4,7 +4,7 @@ use plakous::subscriptions::NativeSubscriptions;
 pub(super) type SubscriptionCustody = ();
 
 pub(super) const fn apply(
-    (): &SubscriptionCustody,
+    _: Option<&SubscriptionCustody>,
     subscriptions: NativeSubscriptions,
 ) -> NativeSubscriptions {
     subscriptions

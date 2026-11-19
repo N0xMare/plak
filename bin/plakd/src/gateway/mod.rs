@@ -15,6 +15,8 @@ mod custody;
 mod dispatch;
 mod flags;
 mod holder;
+#[cfg(feature = "web")]
+pub(crate) mod host_support;
 mod http;
 mod install;
 mod io_file;
@@ -33,10 +35,10 @@ mod subscription_custody;
 
 pub(crate) use address::GatewayAddress;
 pub(crate) use cli_cmd::{doctor_line, execute};
-pub(crate) use holder::{HolderLock, acquire_shared, acquire_shared_creating};
+pub(crate) use holder::acquire_shared;
 pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
-pub(crate) use route::{AccountRoute, provider_key_env_set, select};
+pub(crate) use route::{AccountRoute, select};
 pub(crate) use route_custody::{AdminLink, HolderProofError, HostCustody};
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
@@ -344,21 +346,6 @@ pub(crate) fn validate_client_config(
     if let Some(path) = config.gateway_key_file.as_deref() {
         address::absolute_file(std::path::Path::new(path))
             .map_err(|error| format!("gateway.key_file: {error}"))?;
-    }
-    Ok(())
-}
-
-/// A gateway host refuses provider key variables: the gateway's own
-/// environment is the one that resolves keys.
-pub(crate) fn host_may_open_store(custody: &HostCustody) -> Result<(), String> {
-    if custody.address().is_some() {
-        let set = provider_key_env_set();
-        if !set.is_empty() {
-            return Err(format!(
-                "a host with [gateway] address set refuses provider key environment variables: {}",
-                set.join(", ")
-            ));
-        }
     }
     Ok(())
 }

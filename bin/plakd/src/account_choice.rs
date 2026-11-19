@@ -15,6 +15,8 @@ use crate::home::paths::PlakPaths;
 use crate::product_config::{AgentTemplate, ProductConfig};
 use crate::store::sessions::SessionRecord;
 
+pub(crate) mod readiness;
+
 pub use plakous_hosted::runtime::ReadyAccount;
 
 /// Whether an unfilled kind refuses.
@@ -64,7 +66,7 @@ pub fn ready_catalog(
                     .enable_all()
                     .build()
                     .map_err(|_| "the account readiness read could not start".to_owned())?
-                    .block_on(crate::host::ready_accounts(&state, paths, custody))
+                    .block_on(readiness::ready_accounts(&state, paths, custody))
             })
             .join()
             .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))

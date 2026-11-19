@@ -129,6 +129,18 @@ pub(crate) mod host {
     pub(crate) fn unit_path() -> Option<std::ffi::OsString> {
         std::env::var_os("SYSTEMD_UNIT_PATH")
     }
+
+    pub(crate) fn provider_key_env_set() -> Vec<&'static str> {
+        [
+            "OPENAI_API_KEY",
+            "XAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+        ]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some())
+        .collect()
+    }
 }
 
 /// The user's login shell, when `SHELL` names an absolute path.
@@ -136,11 +148,6 @@ pub(crate) fn login_shell() -> Option<String> {
     std::env::var_os("SHELL")
         .and_then(|value| value.into_string().ok())
         .filter(|shell| shell.starts_with('/'))
-}
-
-/// Whether `name` is set. The value is never read or returned.
-pub(crate) fn variable_is_set(name: &str) -> bool {
-    std::env::var_os(name).is_some()
 }
 
 /// `XDG_RUNTIME_DIR` when the process has one.

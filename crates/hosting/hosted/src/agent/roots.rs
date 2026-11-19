@@ -199,7 +199,7 @@ pub struct ProductStateRoots {
     /// Skill notices new constructions raised, drained by the host loop.
     skill_notices: Arc<Mutex<Vec<String>>>,
     exchange_observer: crate::exchange_observation::Observer,
-    subscription_custody: subscription_custody::SubscriptionCustody,
+    subscription_custody: Option<subscription_custody::SubscriptionCustody>,
     session_records: Arc<dyn crate::session_store::SessionRecordStore>,
     product: PathBuf,
     /// The runtime database the product bound at construction. It is an
@@ -332,7 +332,7 @@ impl ProductStateRoots {
             pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
-            subscription_custody: subscription_custody::SubscriptionCustody::default(),
+            subscription_custody: None,
             session_records,
             product: std::fs::canonicalize(&product).unwrap_or(product),
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
@@ -806,7 +806,7 @@ impl ProductStateRoots {
                 .map_err(|_| CliFailure::new("native subscription storage is unavailable"))?;
         Ok(crate::exchange_observation::observe(
             subscription_custody::apply(
-                &self.subscription_custody,
+                self.subscription_custody.as_ref(),
                 plakous::subscriptions::NativeSubscriptions::new(paths),
             ),
             self.exchange_observer(),
@@ -1101,7 +1101,7 @@ impl ProductStateRoots {
             pending_epoch: None,
             skill_notices: Arc::default(),
             exchange_observer: None,
-            subscription_custody: subscription_custody::SubscriptionCustody::default(),
+            subscription_custody: None,
             session_records: Arc::new(crate::session_store::MemoryStore::new()),
             subscriptions: state_home.join("plak/subscriptions"),
             runtime_database: product.join("runtime.sqlite3"),

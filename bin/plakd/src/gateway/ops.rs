@@ -282,8 +282,10 @@ impl OpsBridge {
         }
         match logout_host_account(&mut self.app, &parsed, mode == LogoutMode::Local) {
             Ok(remain) => changed(account.clone(), remain),
-            Err(HostAccountError::Refused(_)) => refused(AdminRefusal::Unavailable {}),
-            Err(HostAccountError::OutcomeUnknown(_)) => refused(AdminRefusal::OutcomeUnknown {}),
+            Err(HostAccountError::Refused(_cause)) => refused(AdminRefusal::Unavailable {}),
+            Err(HostAccountError::OutcomeUnknown(_cause)) => {
+                refused(AdminRefusal::OutcomeUnknown {})
+            }
         }
     }
 

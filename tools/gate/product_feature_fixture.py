@@ -224,7 +224,9 @@ def check(
                     errors.append(
                         "MCP import carried frozen template tools instead of binding destination genesis"
                     )
-        # An unused Python template must not prevent either session-running face.
+        # An unused Python template needs no account. The selected OpenRouter
+        # root does: without a Ready account or an explicit root selector, the
+        # bare invocation must still refuse to choose.
         (home / "config.toml").write_text('[root]\nagent = "root-agent"\n')
         (home / "agents/root-agent.toml").write_text(
             'account = "openrouter"\nmodel = "openai/gpt-6-astra"\ncomposition = "direct"\n'
@@ -233,12 +235,20 @@ def check(
             'account = "codex"\nmodel = "gpt-6-astra"\ncomposition = "py-ptc"\n'
         )
         environment.pop("PLAK_TEST_MODEL", None)
+        result = run(reduced_binary, ["agent"])
+        if (
+            result.returncode != 1
+            or "account_choice_required: choose an account for openrouter;" not in result.stderr
+        ):
+            errors.append(
+                f"unready OpenRouter root did not require a choice: {result.returncode}: {result.stdout}{result.stderr}"
+            )
         for arguments in (
             ["run", "--account", "openrouter", "--model", "openai/gpt-6-astra", "--", "hello"],
-            ["agent"],
+            ["agent", "--account", "openrouter"],
         ):
             result = run(reduced_binary, arguments)
-            if result.returncode != 3 or "feature `python`" in result.stderr:
+            if result.returncode != 3 or "OpenRouter API key is not set" not in result.stderr:
                 errors.append(
                     f"unused Python template blocked {arguments}: {result.returncode}: {result.stdout}{result.stderr}"
                 )

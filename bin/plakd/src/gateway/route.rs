@@ -56,19 +56,3 @@ pub(crate) fn select(
         Err(error) => Err(error.to_string()),
     }
 }
-
-/// Provider key variables a gateway client must not carry. The gateway's own
-/// environment is the one that resolves keys.
-pub(crate) const PROVIDER_KEY_ENV: [&str; 4] = [
-    "OPENAI_API_KEY",
-    "XAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "OPENROUTER_API_KEY",
-];
-
-pub(crate) fn provider_key_env_set() -> Vec<&'static str> {
-    PROVIDER_KEY_ENV
-        .into_iter()
-        .filter(|name| crate::environment::variable_is_set(name))
-        .collect()
-}

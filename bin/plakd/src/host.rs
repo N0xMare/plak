@@ -13,7 +13,6 @@
 
 mod bridge;
 mod console;
-pub(crate) use console::ready_accounts;
 mod gateway_startup;
 mod idle;
 pub(crate) mod lifecycle;
@@ -325,7 +324,7 @@ async fn refuse_external_gateway(
     services: &Services,
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<()> {
-    crate::gateway::host_may_open_store(custody).map_err(CliFailure::new)?;
+    crate::gateway::host_support::host_may_open_store(custody).map_err(CliFailure::new)?;
     gateway_startup::verify(custody, services.home().state()?)
         .await
         .map_err(CliFailure::new)
@@ -334,12 +333,12 @@ async fn refuse_external_gateway(
 fn hold_host_store(
     services: &Services,
     custody: &crate::gateway::HostCustody,
-) -> CliResult<Option<crate::gateway::HolderLock>> {
+) -> CliResult<Option<crate::gateway::host_support::HolderLock>> {
     if custody.address().is_some() {
         return Ok(None);
     }
     let root = services.home().state()?;
-    crate::gateway::acquire_shared_creating(root)
+    crate::gateway::host_support::acquire_shared_creating(root)
         .map(Some)
         .map_err(CliFailure::new)
 }

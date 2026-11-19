@@ -5,11 +5,10 @@ use plakous::subscriptions::NativeSubscriptions;
 
 use super::ProductStateRoots;
 
-/// `None` is this process's store.
-pub(super) type SubscriptionCustody = Option<plakous::custody::Custody>;
+pub(super) type SubscriptionCustody = plakous::custody::Custody;
 
 pub(super) fn apply(
-    custody: &SubscriptionCustody,
+    custody: Option<&SubscriptionCustody>,
     subscriptions: NativeSubscriptions,
 ) -> NativeSubscriptions {
     match custody {

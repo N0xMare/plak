@@ -1,6 +1,7 @@
 //! Local account observations, without product roots or session admission.
 
 use super::{diagnostic, unavailable, validation};
+use crate::account_choice::readiness;
 use crate::home::{paths::PlakPaths, secrets};
 use plakd_wire_types::console::{
     AccountCustody, AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus,
@@ -8,7 +9,6 @@ use plakd_wire_types::console::{
     ValidationCode, Vertical,
 };
 use plakous_hosted::account::{AccountRef, Vertical as AccountVertical};
-use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
@@ -30,10 +30,8 @@ pub(super) fn reader_at(
     state: &std::path::Path,
     custody: &crate::gateway::HostCustody,
 ) -> Result<Reader, ReadRefusal> {
-    let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state.to_path_buf())
+    let subscriptions = readiness::subscriptions_at(state, custody)
         .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
-    let subscriptions =
-        custody.subscriptions(plakous::subscriptions::NativeSubscriptions::new(paths));
     Ok(Reader {
         subscriptions,
         custody: custody.clone(),
@@ -44,28 +42,28 @@ impl Reader {
         &self,
         account: &AccountRef,
     ) -> Result<plakous::subscriptions::NativeSubscriptions, ReadRefusal> {
-        if let Some(name) = account.name() {
-            let provider = account
-                .vertical()
-                .capability()
-                .native_provider()
-                .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::NotCompiled))?;
-            self.subscriptions
-                .for_named_account(provider, name.as_str())
-                .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
-        } else {
-            Ok(self.subscriptions.clone())
+        if account.name().is_none() {
+            return Ok(self.subscriptions.clone());
         }
+        let provider = account
+            .vertical()
+            .capability()
+            .native_provider()
+            .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::NotCompiled))?;
+        readiness::subscriptions_for(&self.subscriptions, provider, account)
+            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     }
 }
 
-fn gateway_names(link: &crate::gateway::AdminLink) -> Result<Vec<String>, String> {
-    link.accounts()
-}
-
 fn gateway_roster(link: &crate::gateway::AdminLink) -> Roster {
-    match gateway_names(link) {
-        Ok(names) => roster_from_names(names),
+    match link.accounts() {
+        Ok(names) => Roster {
+            accounts: readiness::with_default_accounts(
+                names.iter().filter_map(|name| readiness::parse_exact(name)),
+            ),
+            diagnostics: Vec::new(),
+            truncated: false,
+        },
         Err(_) => Roster {
             accounts: Vec::new(),
             diagnostics: vec![diagnostic(
@@ -110,28 +108,8 @@ fn gateway_key_status(key: Option<plakous::gateway::protocol::facts::KeyFacts>) 
     }
 }
 
-fn roster_from_names(names: Vec<String>) -> Roster {
-    let mut accounts = BTreeSet::new();
-    for vertical in AccountVertical::ALL {
-        accounts.insert(AccountRef::default_for(vertical));
-    }
-    for name in names {
-        if let Ok(account) = exact(&name) {
-            accounts.insert(account);
-        }
-    }
-    Roster {
-        accounts: accounts.into_iter().collect(),
-        diagnostics: Vec::new(),
-        truncated: false,
-    }
-}
-
 pub(super) fn exact(value: &str) -> Result<AccountRef, ReadRefusal> {
-    value
-        .parse::<AccountRef>()
-        .ok()
-        .filter(|account| value.len() <= 64 && account.as_str() == value)
+    readiness::parse_exact(value)
         .ok_or_else(|| validation("account_id", ValidationCode::InvalidAccount))
 }
 
@@ -152,48 +130,20 @@ pub(super) async fn roster(
     if let Some(link) = application.custody.admin() {
         return Ok(gateway_roster(link));
     }
-    let mut accounts = BTreeSet::new();
-    let mut diagnostics = Vec::new();
-    let mut remaining = super::limits::SCAN_ENTRIES;
-    let mut truncated = false;
-    for vertical in AccountVertical::ALL {
-        accounts.insert(AccountRef::default_for(vertical));
-        let names = if let Some(provider) = vertical.capability().native_provider() {
-            if !vertical.capability().compiled {
-                continue;
-            }
-            application
-                .subscriptions
-                .named_accounts_bounded(provider, remaining)
-                .await
-                .ok()
-        } else {
-            secrets::list_shelf_secrets_bounded(
-                paths,
-                crate::home::paths::SecretShelf::Api(vertical),
-                remaining,
-            )
-            .ok()
-        };
-        match names {
-            Some((names, scanned, cut)) => {
-                remaining = remaining.saturating_sub(scanned);
-                truncated |= cut;
-                for name in names {
-                    if let Ok(account) = exact(&format!("{}/{name}", vertical.as_str())) {
-                        accounts.insert(account);
-                    }
-                }
-            }
-            None => diagnostics.push(diagnostic(
+    let (accounts, unavailable, truncated) =
+        readiness::local_roster(&application.subscriptions, paths).await;
+    let diagnostics = unavailable
+        .into_iter()
+        .map(|vertical| {
+            diagnostic(
                 "enumeration_unavailable",
                 Some(vertical.as_str()),
                 "account names could not be read",
-            )),
-        }
-    }
+            )
+        })
+        .collect();
     Ok(Roster {
-        accounts: accounts.into_iter().collect(),
+        accounts,
         diagnostics,
         truncated,
     })
@@ -211,115 +161,6 @@ fn custody(paths: &PlakPaths, host: &crate::gateway::HostCustody) -> AccountCust
             }),
         Err(_) => AccountCustody::in_process(),
     }
-}
-
-/// Every known account with whether its credential can serve a new dispatch
-/// now: the session account-choice fill reads this (spec 02 §4.4.1). The
-/// configured or local service gateway answers its roster and status; no
-/// local key file or subscription store is read under service custody.
-///
-/// # Errors
-/// The roster or the gateway's status could not be read.
-pub(crate) async fn ready_accounts(
-    state: &std::path::Path,
-    paths: &PlakPaths,
-    custody: &crate::gateway::HostCustody,
-) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
-    if let Some(link) = custody.admin() {
-        return gateway_ready_accounts(link);
-    }
-    if let crate::gateway::AccountRoute::Service(address) =
-        crate::gateway::route_for(paths, custody)?
-    {
-        return gateway_ready_accounts(&crate::gateway::AdminLink::local_service(address));
-    }
-    let _holder = crate::gateway::acquire_shared(state)?;
-    let unreadable = |_| "the account roster could not be read".to_owned();
-    let reader = reader_at(state, custody).map_err(unreadable)?;
-    let roster = roster(&reader, paths, None).await.map_err(unreadable)?;
-    let mut rows = Vec::with_capacity(roster.accounts.len());
-    for account in roster.accounts {
-        let vertical = account.vertical();
-        let ready = if !vertical.capability().compiled {
-            false
-        } else if vertical.is_api() {
-            secrets::key_status(paths, account.as_str())
-                .is_ok_and(|key| key.source != secrets::KeySource::Missing)
-        } else if let Some(provider) = vertical.capability().native_provider()
-            && let Ok(subscriptions) = reader.subscriptions_for(&account)
-        {
-            crate::commands::support::offline_subscription_status(&subscriptions, provider)
-                .await
-                .is_ok_and(|status| {
-                    status.compatibility == crate::presentation::CompatibilityState::Current
-                        && status.credential == crate::presentation::CredentialState::Ready
-                })
-        } else {
-            false
-        };
-        rows.push(crate::account_choice::ReadyAccount {
-            account: account.to_string(),
-            ready,
-            label: None,
-        });
-    }
-    Ok(rows)
-}
-
-/// Readiness as the gateway that holds this home's credentials reports it.
-fn gateway_ready_accounts(
-    link: &crate::gateway::AdminLink,
-) -> Result<Vec<crate::account_choice::ReadyAccount>, String> {
-    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
-    use plakous::gateway::protocol::facts::CredentialStatus;
-    let names = gateway_names(link)?;
-    let expected = names
-        .iter()
-        .filter_map(|name| exact(name).ok())
-        .filter(|account| account.vertical().capability().compiled)
-        .map(|account| account.to_string())
-        .collect::<BTreeSet<_>>();
-    let roster = roster_from_names(names);
-    let accounts = roster
-        .accounts
-        .iter()
-        .filter(|account| account.vertical().capability().compiled)
-        .map(|account| plakous::gateway::protocol::GatewayAccount::new(account.as_str()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| error.to_string())?;
-    let mut readiness = std::collections::BTreeMap::new();
-    if !accounts.is_empty() {
-        match link.call(&AdminRequest::Status { accounts })? {
-            AdminResponse::Status { rows } => {
-                for row in rows {
-                    readiness.insert(
-                        row.facts.account.as_str().to_owned(),
-                        row.facts.credential.status == CredentialStatus::Ready,
-                    );
-                }
-            }
-            AdminResponse::Refused { refusal } => {
-                return Err(format!(
-                    "the gateway refused the account status read: {refusal:?}"
-                ));
-            }
-            _ => return Err("the gateway answered the account status read unexpectedly".to_owned()),
-        }
-    }
-    if let Some(missing) = expected.iter().find(|name| !readiness.contains_key(*name)) {
-        return Err(format!(
-            "the gateway returned partial account status: missing {missing}"
-        ));
-    }
-    Ok(roster
-        .accounts
-        .into_iter()
-        .map(|account| crate::account_choice::ReadyAccount {
-            account: account.to_string(),
-            ready: readiness.get(account.as_str()).copied().unwrap_or(false),
-            label: None,
-        })
-        .collect())
 }
 
 pub(super) async fn status(
