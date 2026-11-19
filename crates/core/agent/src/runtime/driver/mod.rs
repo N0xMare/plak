@@ -178,6 +178,7 @@ struct Driver {
     job_host: Option<Arc<dyn plakous_tools::JobHost>>,
     job_owner: plakous_tools::JobOwner,
     job_release_mode: Arc<Mutex<super::JobReleaseMode>>,
+    job_stop: Arc<Mutex<super::JobStopState>>,
     recovery_gated: bool,
     observation_budget: crate::runtime::observation::budget::ObservationBudget,
     accepting: Arc<AtomicBool>,

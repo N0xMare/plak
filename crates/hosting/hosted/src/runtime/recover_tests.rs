@@ -935,6 +935,7 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
+    assert!(!super::turn_drive::quit_trace::steps(&session_id).contains(&"root job stop started"));
     assert!(
         topology.is_closed(),
         "the keep path closed topology admission"
@@ -996,6 +997,11 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
     );
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
+    assert!(
+        super::turn_drive::quit_trace::steps(&session_id)
+            .starts_with(&["root job stop started", "requested"]),
+        "the root stop must have the cancellation grace in which to run"
+    );
     let record = store.load(&session_id).unwrap();
     assert_eq!(keep_notices(&record), 0);
     let locator = record.plakous_locator.expect("released locator");

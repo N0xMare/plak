@@ -181,6 +181,7 @@ impl PreparedAgent {
         }
         let job_sessions = self.job_sessions.clone();
         let has_job_host = self.job_host.is_some();
+        let job_stop = Arc::new(Mutex::new(crate::runtime::JobStopState::Idle));
         let job_release_mode = Arc::new(Mutex::new(if self.daemon_processes {
             crate::runtime::JobReleaseMode::Transfer
         } else {
@@ -215,6 +216,7 @@ impl PreparedAgent {
             job_host: self.job_host,
             job_owner: self.job_owner,
             job_release_mode: Arc::clone(&job_release_mode),
+            job_stop: Arc::clone(&job_stop),
             pending_job_promotions: Vec::new(),
             pending_job_consumptions: Vec::new(),
             noticed_job_terminals: Vec::new(),
@@ -321,7 +323,7 @@ impl PreparedAgent {
                 #[cfg(test)]
                 exit_probe,
                 credential_wait,
-                job_stop: Mutex::new(crate::runtime::JobStopState::Idle),
+                job_stop,
                 executor: self.executor.clone(),
                 job_sessions,
                 has_job_host,

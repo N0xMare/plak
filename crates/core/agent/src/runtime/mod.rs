@@ -278,9 +278,20 @@ enum JobReleaseMode {
     Abandon,
 }
 
+type JobStopCompletion = watch::Receiver<Option<Result<(), AgentError>>>;
+
 enum JobStopState {
     Idle,
-    Stopping(watch::Receiver<Option<Result<(), AgentError>>>),
+    Stopping(JobStopCompletion),
+}
+
+impl JobStopState {
+    fn completion(&self) -> Option<JobStopCompletion> {
+        match self {
+            Self::Idle => None,
+            Self::Stopping(receiver) => Some(receiver.clone()),
+        }
+    }
 }
 
 struct AgentInner {
@@ -290,7 +301,7 @@ struct AgentInner {
     #[cfg(test)]
     exit_probe: Arc<driver::exit_probe::ExitProbe>,
     credential_wait: Arc<Mutex<Option<CredentialWait>>>,
-    job_stop: Mutex<JobStopState>,
+    job_stop: Arc<Mutex<JobStopState>>,
     executor: crate::executor::Executor,
     job_sessions: plakous_tools::JoinedProcessSessions,
     /// Whether a host-owned `JobHost` holds the process service, so a

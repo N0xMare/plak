@@ -133,15 +133,12 @@ async fn settle_and_release_many(
 ) -> Result<(), AgentError> {
     let mut stops = futures_util::stream::FuturesUnordered::new();
     for agent in agents {
-        let receiver = match &*agent
+        let receiver = agent
             .inner
             .job_stop
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-        {
-            super::JobStopState::Idle => None,
-            super::JobStopState::Stopping(receiver) => Some(receiver.clone()),
-        };
+            .completion();
         if let Some(receiver) = receiver {
             stops.push(agent.inner.executor.spawn(wait_for_completion(receiver)));
         }
@@ -734,15 +731,12 @@ impl Agent {
         let completion = wait_for_completion(self.inner.completion.clone()).await;
         let stop = if terminal {
             self.begin_job_stop();
-            let receiver = match &*self
+            let receiver = self
                 .inner
                 .job_stop
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-            {
-                super::JobStopState::Stopping(receiver) => Some(receiver.clone()),
-                super::JobStopState::Idle => None,
-            };
+                .completion();
             if let Some(receiver) = receiver {
                 wait_for_completion(receiver).await
             } else {

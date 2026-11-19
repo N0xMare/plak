@@ -97,19 +97,7 @@ impl Driver {
         );
         let jobs_started = crate::executor::now();
         let jobs_result = if release_mode == super::super::JobReleaseMode::Terminal {
-            let sessions = self.job_sessions.clone();
-            let owner = self.agent_id.to_string();
-            crate::executor::spawn_blocking(move || {
-                plakous_tools::internal::stop_jobs_for_owner(
-                    &sessions,
-                    &owner,
-                    plakous_tools::JobStopReason::SessionExit,
-                    std::time::Duration::from_millis(200),
-                )
-            })
-            .await
-            .map_err(|_| tool_cleanup_error())
-            .and_then(|result| result.map_err(|_| tool_cleanup_error()))
+            self.stop_session_jobs().await
         } else {
             Ok(())
         };
@@ -143,6 +131,30 @@ impl Driver {
             store_result,
             events_result,
         ])
+    }
+
+    async fn stop_session_jobs(&mut self) -> Result<(), AgentError> {
+        let pending = self
+            .job_stop
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completion();
+        if let Some(pending) = pending {
+            return crate::runtime::terminal::wait_for_completion(pending).await;
+        }
+        let sessions = self.job_sessions.clone();
+        let owner = self.agent_id.to_string();
+        crate::executor::spawn_blocking(move || {
+            plakous_tools::internal::stop_jobs_for_owner(
+                &sessions,
+                &owner,
+                plakous_tools::JobStopReason::SessionExit,
+                std::time::Duration::from_millis(200),
+            )
+        })
+        .await
+        .map_err(|_| tool_cleanup_error())
+        .and_then(|result| result.map_err(|_| tool_cleanup_error()))
     }
 
     #[allow(

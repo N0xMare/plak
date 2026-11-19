@@ -311,7 +311,12 @@ fn a_quit_after_an_interrupt_records_exactly_one_cancel_command() {
     );
     assert_eq!(
         crate::runtime::turn_drive::quit_trace::steps(&session_id),
-        ["bounded", "notice committed", "queue paused"],
+        [
+            "root job stop started",
+            "bounded",
+            "notice committed",
+            "queue paused"
+        ],
         "quit must bound the accepted cancel and commit its notice before the queue write"
     );
     assert!(
@@ -368,8 +373,8 @@ fn a_quit_after_a_refused_interrupt_requests_the_cancel() {
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
     assert_eq!(
-        crate::runtime::turn_drive::quit_trace::steps(&session_id).first(),
-        Some(&"requested")
+        &crate::runtime::turn_drive::quit_trace::steps(&session_id)[..2],
+        ["root job stop started", "requested"]
     );
     let record = store.load(&session_id).unwrap();
     let page = executor
