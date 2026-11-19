@@ -35,6 +35,8 @@ pub const DEFAULT_TELEMETRY_MAX_AGE_DAYS: u64 = 90;
 #[cfg(feature = "web")]
 mod account_refresh;
 pub(crate) mod files;
+mod model_failure;
+pub(crate) use model_failure::ModelFailureDiagnostic;
 mod observation;
 #[cfg(all(test, feature = "otel"))]
 mod projection_tests;
@@ -475,10 +477,11 @@ impl From<crate::product_config::TelemetryConfig> for TelemetryRetentionConfig {
 }
 
 /// One item enqueued for the telemetry writer thread.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TelemetryItem {
     Agent(TelemetryObservation),
     Product(ProductObservation),
+    ModelFailure(std::sync::Arc<ModelFailureDiagnostic>),
 }
 
 pub(crate) fn emit_projected_turn_usages(
@@ -978,6 +981,7 @@ fn write_item(
     match item {
         TelemetryItem::Agent(observation) => write_observation(transaction, observation),
         TelemetryItem::Product(observation) => write_product_observation(transaction, observation),
+        TelemetryItem::ModelFailure(diagnostic) => diagnostic.write(transaction),
     }
 }
 

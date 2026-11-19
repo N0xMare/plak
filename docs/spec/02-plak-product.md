@@ -525,7 +525,7 @@ compression, not classification by prose or a change to recovery authority.
 | `runtime.sqlite3` | Plakous | checkpoints, canonical history and the change feed (chapter 01 §5.11) — the only recovery authority, and the source every view below is derived from |
 | `product.sqlite3` | plakd | product intents (sessions, queue and submissions, prompt history, workflow requests, operator notices) and the views the projector derives from the feed (section 2.6); never recovery authority |
 | `subagents.sqlite3` | `plakous-recursive-subagents-store` (schema), plakd (location) | the agent tree: intents keyed to runtime command and call ids, views derived from the tree's sessions' feeds, and external-effect records (seals, adoptions, copies), reopened under the reopen law (chapter 03 section 14) |
-| `telemetry/telemetry-v<schema>.sqlite3` | plakd | numbers and the bounded OAuth refresh diagnostic only (section 7.1), disposable, never recovery authority |
+| `telemetry/telemetry-v<schema>.sqlite3` | plakd | analytics and bounded failure diagnostics (section 7.1), disposable, never recovery authority |
 
 `runtime.sqlite3`, `product.sqlite3`, and `subagents.sqlite3` are a
 **triple**. They are admitted together, and none is opened without the other
@@ -7517,10 +7517,10 @@ turns. Those captures are witnesses, not a target and not a benchmark.
 
 plakd attaches a telemetry sink to every runtime it constructs -- `plakd run`,
 `plakd agent`, and hosted sessions -- and persists two families of typed, content-free
-observations into `telemetry/telemetry-v<schema>.sqlite3`. The one bounded
-provider-prose exception is the credential-filtered OAuth refresh
-`oauth_error_description`; it contains printable ASCII only, never raw bodies
-or token fields. Each schema version
+observations into `telemetry/telemetry-v<schema>.sqlite3`. The bounded
+provider-prose exceptions are the model failure excerpt below and the
+credential-filtered OAuth refresh `oauth_error_description`; the latter
+contains printable ASCII only, never raw bodies or token fields. Each schema version
 has its own file; builds never destructively rebuild another schema. Old and
 legacy files remain untouched and doctor reports them for explicit removal.
 The library's sink and its lifecycle
@@ -7710,6 +7710,23 @@ message or stopped-job text. Host job wakes retain `host_wake` origin on every
 admitting route, including non-interactive run continuations; they never acquire
 human billing attribution after steering.
 
+A terminal model failure that carries a provider status or code emits a
+`plak.model` diagnostic log event and a `product_events` row of kind
+`model_attempt_failed`. Its existing `status` text column holds a JSON object
+with `attempt_id`, `http_status`, `provider_code` (or provider type, when
+available), and `excerpt`. Absent numeric status or code is null. The excerpt
+comes from the operator-facing diagnostic, which can include provider-supplied
+error text and may echo request content. It is not a copy of the raw exchange
+or the underlying error source. The product applies best-effort redaction for
+credentials, email addresses and labelled account identifiers, removes Unicode
+format characters, and keeps at most 300 UTF-8 bytes on one line. Redaction
+cannot guarantee that arbitrary echoed content is absent. An adapter that
+withholds provider prose (such as Anthropic) keeps its safe diagnostic and
+carries the validated type when available. OpenRouter's nested raw upstream body
+is not a diagnostic. The row joins to
+`model_attempts` by attempt id and does not change that table, the SQLite
+schema, or OTLP export. The log is queued independently of the SQLite writer.
+
 **Commands.** `plakd telemetry status` prints the path, schema version, size on
 disk (the main database plus `-wal` and `-shm` if they exist), the configured
 retention, the writer's write-error, drop, and WAL-checkpoint-busy counts, and a
@@ -7771,8 +7788,8 @@ operator may still want.
 
 `PLAK_LOG` installs a content-free boundary-span log at `~/.plak/logs/plak.log`
 -- JSONL command, store open and resume, attach and rebind, provider
-request — carrying ids, counts, lengths, and durations only, never prompt or
-tool content. A build
+request — carrying ids, counts, lengths, and durations, never prompt or
+tool content. The bounded `plak.model` failure event is described above. A build
 with the `otel` feature adds an OTLP exporter for the **finished** observations
 as spans with deterministic ids; started kinds stay in SQLite, and exit does
 not synchronously flush.

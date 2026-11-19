@@ -27,8 +27,8 @@ use plakous_messages::{
     PreparedMessagesHttpOperation, ProviderAcceptance, call_messages_operation,
 };
 use plakous_model::{
-    Clock, IdGenerator, ModelHttpStatus, ModelProviderRequestId, ModelRetryDelay, SystemClock,
-    SystemIdGenerator,
+    Clock, IdGenerator, ModelHttpStatus, ModelProviderCode, ModelProviderRequestId,
+    ModelRetryDelay, SystemClock, SystemIdGenerator,
 };
 use tower_service::Service;
 
@@ -595,6 +595,17 @@ fn anthropic_model_error(
         Some(status) => context.with_http_status(status),
         None => context,
     })
+    .map(|mut context| {
+        if let Some(MessagesAttemptError::Protocol { source, .. }) = error {
+            if let Some(code) = source.provider_code() {
+                context = context.with_provider_code(code.clone());
+            }
+            if let Some(request_id) = source.provider_request_id() {
+                context = context.with_provider_request_id(request_id.clone());
+            }
+        }
+        context
+    })
     .and_then(|context| ModelError::contextual(kind, message, context))
     .unwrap_or_else(|_| ModelError::new(kind, message));
     let model_error = model_error.with_attempt_summary(
@@ -904,6 +915,13 @@ fn annotate_messages_stream_terminal(
     error: MessagesAttemptProtocolError,
     stream: &plakous_messages::MessagesStreamError,
 ) -> MessagesAttemptProtocolError {
+    let error = if stream.kind() == plakous_messages::MessagesStreamErrorKind::ProviderError
+        && let Ok(status) = ModelHttpStatus::new(StatusCode::OK.as_u16())
+    {
+        error.with_http_status(status)
+    } else {
+        error
+    };
     if stream.context_overflow() {
         error.with_context_overflow()
     } else {
@@ -1212,10 +1230,9 @@ pub(crate) fn messages_request(
 
 fn protocol_source(error: &AnthropicError) -> MessagesAttemptProtocolError {
     let source = MessagesAttemptProtocolError::new(format!(
-        "anthropic/{:?} status={:?} request_id={:?}: {}",
+        "anthropic/{:?} status={:?}: {}",
         error.kind(),
         error.status(),
-        error.request_id(),
         error.message()
     ));
     // Carry the provider's own name for the refusal forward. The formatted
@@ -1239,6 +1256,20 @@ fn protocol_source(error: &AnthropicError) -> MessagesAttemptProtocolError {
         .and_then(|status| ModelHttpStatus::new(status).ok())
     {
         Some(status) => source.with_http_status(status),
+        None => source,
+    };
+    let source = match error
+        .code()
+        .and_then(|code| ModelProviderCode::new(code).ok())
+    {
+        Some(code) => source.with_provider_code(code),
+        None => source,
+    };
+    let source = match error
+        .request_id()
+        .and_then(|request_id| ModelProviderRequestId::new(request_id).ok())
+    {
+        Some(request_id) => source.with_provider_request_id(request_id),
         None => source,
     };
     match error

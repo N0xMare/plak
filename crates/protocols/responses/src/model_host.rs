@@ -105,12 +105,15 @@ impl ResponsesAttemptError {
             }
             ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
         };
-        // A terminal credential rejection needs new credentials, contract
-        // drift a new build, and a content refusal a different request.
+        // A definite client-side refusal is permanent for this request even
+        // when the acceptance ledger classified it as pre-acceptance.
         let retryability = if matches!(
             kind,
             ModelErrorKind::Authentication
+                | ModelErrorKind::Authorization
+                | ModelErrorKind::ContextLimit
                 | ModelErrorKind::InvalidConfiguration
+                | ModelErrorKind::InvalidRequest
                 | ModelErrorKind::Policy
         ) && retryability == ModelRetryability::Exhausted
         {
@@ -1302,10 +1305,7 @@ fn contextual_http_error(
         context = context.with_http_status(status);
     }
     if let Some(provider) = provider.as_ref() {
-        if let Some(code) = provider
-            .code()
-            .and_then(|value| ModelProviderCode::new(value).ok())
-        {
+        if let Some(code) = diagnostic_provider_code(provider) {
             context = context.with_provider_code(code);
         }
         if let Some(request_id) = provider
@@ -1339,6 +1339,13 @@ fn operator_provider_detail(provider: &crate::ResponsesProviderError) -> Option<
         .collect::<Vec<_>>()
         .join(" ");
     (!collapsed.is_empty()).then_some(collapsed)
+}
+
+fn diagnostic_provider_code(provider: &crate::ResponsesProviderError) -> Option<ModelProviderCode> {
+    [provider.code(), provider.kind()]
+        .into_iter()
+        .flatten()
+        .find_map(|value| ModelProviderCode::new(value).ok())
 }
 
 fn provider_terminal_error(
@@ -1391,10 +1398,11 @@ fn provider_terminal_error(
     .ok() else {
         return ModelError::new(kind, message);
     };
-    if let Some(code) = provider
-        .and_then(crate::ResponsesProviderError::code)
-        .and_then(|code| ModelProviderCode::new(code).ok())
-    {
+    // The Responses dispatch host accepts only HTTP 200 into its stream.
+    if let Ok(status) = ModelHttpStatus::new(plakous_http::StatusCode::OK.as_u16()) {
+        context = context.with_http_status(status);
+    }
+    if let Some(code) = provider.and_then(diagnostic_provider_code) {
         context = context.with_provider_code(code);
     }
     if let Some(request_id) = provider

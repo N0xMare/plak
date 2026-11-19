@@ -832,6 +832,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/projection.rs"): {"json"},
     # Static WAL-checkpoint contention warning; no SQL, paths, or session data.
     ("plakd", "src/telemetry_store.rs"): {"params", "warn"},
+    # Typed provider status/code and bounded, display-redacted failure excerpt.
+    ("plakd", "src/telemetry_store/model_failure.rs"): {"json", "params", "warn"},
     # Typed SQLite binds only; neither projection admits or dispatches work.
     ("plakd", "src/telemetry_store/recorded_usage.rs"): {"params"},
     ("plakd", "src/host/console/recorded.rs"): {"params"},

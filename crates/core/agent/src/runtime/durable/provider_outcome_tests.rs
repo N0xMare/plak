@@ -104,7 +104,23 @@ pub(super) async fn scripted_turn_with(
     telemetry: Option<Arc<TelemetryEmitter>>,
 ) -> TestResult<(TurnResult, Vec<ProviderOutcome>)> {
     let directory = tempfile::tempdir()?;
-    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let (agent, model) = scripted_agent(create, directory.path(), scenarios, telemetry).await?;
+    let turn = agent.prompt("scripted").await?;
+    let turn_id = turn.id();
+    let result = turn.result().await?;
+    let outcomes = round_outcomes(result.checkpoint(), turn_id)?;
+    assert_eq!(model.remaining_scenarios(), 0);
+    agent.shutdown().await?;
+    Ok((result, outcomes))
+}
+
+async fn scripted_agent(
+    create: &str,
+    directory: &std::path::Path,
+    scenarios: Vec<ModelScenario>,
+    telemetry: Option<Arc<TelemetryEmitter>>,
+) -> TestResult<(Agent, Arc<plakous_test_support::ScriptedModel>)> {
+    let workspace = Arc::new(WorkspacePolicy::host(directory, ".")?);
     let descriptor = durable_test_descriptor("test.route")?;
     let authority = artifact_authority(&descriptor, 1)?;
     let model = Arc::new(
@@ -144,14 +160,88 @@ pub(super) async fn scripted_turn_with(
         RuntimeDurability::Required,
         NonZeroU64::new(30).ok_or("nonzero lease")?,
     )?;
-    let agent = sessions.create(create, builder).await?;
-    let turn = agent.prompt("scripted").await?;
-    let turn_id = turn.id();
-    let result = turn.result().await?;
-    let outcomes = round_outcomes(result.checkpoint(), turn_id)?;
-    assert_eq!(model.remaining_scenarios(), 0);
-    agent.shutdown().await?;
-    Ok((result, outcomes))
+    Ok((sessions.create(create, builder).await?, model))
+}
+
+#[tokio::test]
+async fn driver_model_failure_hook_skips_cancel_and_shutdown() -> TestResult {
+    use crate::runtime::terminal::lock_mutex;
+    use crate::{
+        TelemetryContext, TelemetryObservation, TelemetryObservationKind, TelemetrySink,
+        TelemetrySinkError, TelemetryTerminalStatus,
+    };
+    use TelemetryTerminalStatus::{Cancelled, Failed, Shutdown};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct ModelDiagnostics {
+        finished: Mutex<Vec<(TelemetryContext, TelemetryTerminalStatus)>>,
+        failures: Mutex<Vec<(TelemetryContext, ModelErrorKind)>>,
+    }
+
+    impl TelemetrySink for ModelDiagnostics {
+        fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
+            if let TelemetryObservationKind::ModelFinished { status, .. } = observation.kind() {
+                lock_mutex(&self.finished).push((observation.context(), status));
+            }
+            Ok(())
+        }
+
+        fn observe_model_failure(&self, context: TelemetryContext, error: &ModelError) {
+            lock_mutex(&self.failures).push((context, error.kind()));
+        }
+    }
+
+    for expected in [Failed, Cancelled, Shutdown] {
+        let start = if expected == Failed {
+            ScenarioStart::Error(ModelError::new(
+                ModelErrorKind::Authorization,
+                "request denied",
+            ))
+        } else {
+            ScenarioStart::AwaitCancellation
+        };
+        let directory = tempfile::tempdir()?;
+        let sink = Arc::new(ModelDiagnostics::default());
+        let (agent, model) = scripted_agent(
+            "create:failure-hook",
+            directory.path(),
+            vec![ModelScenario::new(ExpectedRequest::Any, start, Vec::new())],
+            Some(Arc::new(TelemetryEmitter::enabled(sink.clone()))),
+        )
+        .await?;
+        let turn = agent.prompt("trigger model attempt").await?;
+        if expected != Failed {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while model.remaining_scenarios() != 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+        }
+        if expected == Cancelled {
+            let _ = turn.control().cancel().await?;
+        } else if expected == Shutdown {
+            agent.shutdown().await?;
+        }
+        let _ = turn.result().await?;
+        {
+            let finished = lock_mutex(&sink.finished);
+            let &[(context, status)] = finished.as_slice() else {
+                return Err("expected one model finish observation".into());
+            };
+            assert_eq!(status, expected);
+            assert!(context.attempt_id().is_some());
+            let failures = lock_mutex(&sink.failures);
+            if expected == Failed {
+                assert_eq!(*failures, [(context, ModelErrorKind::Authorization)]);
+            } else {
+                assert!(failures.is_empty(), "{expected:?}: {failures:?}");
+            }
+        }
+        agent.shutdown().await?;
+    }
+    Ok(())
 }
 
 /// A content-filtered first round, its output-limit retry, then an answer.

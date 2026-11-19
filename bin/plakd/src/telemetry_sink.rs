@@ -17,8 +17,8 @@ use plakous::agent::{
 
 use crate::home::paths::PlakPaths;
 use crate::telemetry_store::{
-    TelemetryItem, TelemetryRetentionConfig, TelemetryStore, TelemetryStoreOpenError,
-    WAL_CHECKPOINT_EVERY_WRITES, WRITER_BATCH_DRAIN, WalCheckpointOutcome,
+    ModelFailureDiagnostic, TelemetryItem, TelemetryRetentionConfig, TelemetryStore,
+    TelemetryStoreOpenError, WAL_CHECKPOINT_EVERY_WRITES, WRITER_BATCH_DRAIN, WalCheckpointOutcome,
 };
 use plakous_hosted::product_observation::{
     ProductObservation, ResourceSamplePhase, wall_timestamp,
@@ -143,6 +143,10 @@ impl TelemetryWriter {
         {
             extra.disabled.store(true, Ordering::Release);
         }
+        self.enqueue_product(TelemetryItem::Product(observation));
+    }
+
+    fn enqueue_product(&self, item: TelemetryItem) {
         let sender = self
             .sender
             .lock()
@@ -150,10 +154,7 @@ impl TelemetryWriter {
         let Some(sender) = sender.as_ref() else {
             return;
         };
-        if sender
-            .try_send(TelemetryItem::Product(observation))
-            .is_err()
-        {
+        if sender.try_send(item).is_err() {
             let _ = self.dropped.fetch_add(1, Ordering::AcqRel);
         }
     }
@@ -324,10 +325,10 @@ fn flush_batch(store: &mut TelemetryStore, write_errors: &AtomicU64, batch: &[Te
         return;
     }
     let mut expanded = Vec::with_capacity(batch.len().saturating_mul(2));
-    for &item in batch {
-        expanded.push(item);
+    for item in batch {
+        expanded.push(item.clone());
         if let TelemetryItem::Agent(observation) = item
-            && let Some(sample) = resource_sample_for_agent_observation(&observation)
+            && let Some(sample) = resource_sample_for_agent_observation(observation)
         {
             // Sampled on the writer thread after dequeue; typically ~ms after the agent path.
             expanded.push(TelemetryItem::Product(sample));
@@ -501,20 +502,47 @@ fn compose_telemetry_sink(
         None => writer,
         Some(extra) => FanOutSink::new(vec![writer, extra]),
     };
-    Arc::new(RetryLoggingSink {
+    Arc::new(ModelDiagnosticsSink {
         inner: Some(inner),
         writer: Some(product_writer),
     })
 }
 
-struct RetryLog {
-    context: plakous::agent::TelemetryContext,
-    retry: plakous::model::ModelRetry,
+enum ModelLogKind {
+    Retry(
+        plakous::agent::TelemetryContext,
+        Box<plakous::model::ModelRetry>,
+    ),
+    Failure(Arc<ModelFailureDiagnostic>),
+}
+
+struct ModelLog {
+    kind: ModelLogKind,
     dispatcher: tracing::Dispatch,
 }
 
 // File rotation and writes must never run on the single-owner agent driver.
-static RETRY_LOGS: OnceLock<Option<SyncSender<RetryLog>>> = OnceLock::new();
+fn enqueue_model_log(kind: ModelLogKind) {
+    static MODEL_LOGS: OnceLock<Option<SyncSender<ModelLog>>> = OnceLock::new();
+    if let Some(sender) = MODEL_LOGS.get_or_init(|| {
+        let (sender, receiver) = mpsc::sync_channel::<ModelLog>(64);
+        thread::Builder::new()
+            .name("plakd-model-log".into())
+            .spawn(move || {
+                while let Ok(record) = receiver.recv() {
+                    tracing::dispatcher::with_default(&record.dispatcher, || match record.kind {
+                        ModelLogKind::Retry(context, retry) => log_model_retry(context, &retry),
+                        ModelLogKind::Failure(diagnostic) => diagnostic.log(),
+                    });
+                }
+            })
+            .ok()
+            .map(|_| sender)
+    }) {
+        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+        let _ = sender.try_send(ModelLog { kind, dispatcher });
+    }
+}
 
 fn log_model_retry(context: plakous::agent::TelemetryContext, retry: &plakous::model::ModelRetry) {
     let request = retry.request();
@@ -538,12 +566,12 @@ fn log_model_retry(context: plakous::agent::TelemetryContext, retry: &plakous::m
 }
 
 /// Logging is independent of SQLite availability and analytics admission.
-struct RetryLoggingSink {
+struct ModelDiagnosticsSink {
     writer: Option<Arc<TelemetryWriter>>,
     inner: Option<Arc<dyn TelemetrySink>>,
 }
 
-impl TelemetrySink for RetryLoggingSink {
+impl TelemetrySink for ModelDiagnosticsSink {
     fn observe_model_retry(
         &self,
         context: plakous::agent::TelemetryContext,
@@ -565,28 +593,21 @@ impl TelemetrySink for RetryLoggingSink {
         if retry.loss().declined_reason.is_some() {
             return;
         }
-        if let Some(sender) = RETRY_LOGS.get_or_init(|| {
-            let (sender, receiver) = mpsc::sync_channel::<RetryLog>(64);
-            thread::Builder::new()
-                .name("plakd-retry-log".into())
-                .spawn(move || {
-                    while let Ok(record) = receiver.recv() {
-                        tracing::dispatcher::with_default(&record.dispatcher, || {
-                            log_model_retry(record.context, &record.retry);
-                        });
-                    }
-                })
-                .ok()
-                .map(|_| sender)
-        }) {
-            tracing::dispatcher::get_default(|dispatcher| {
-                let _ = sender.try_send(RetryLog {
-                    context,
-                    retry: retry.clone(),
-                    dispatcher: dispatcher.clone(),
-                });
-            });
+        enqueue_model_log(ModelLogKind::Retry(context, Box::new(retry.clone())));
+    }
+
+    fn observe_model_failure(
+        &self,
+        context: plakous::agent::TelemetryContext,
+        error: &plakous::model::ModelError,
+    ) {
+        let Some(diagnostic) = ModelFailureDiagnostic::capture(context, error).map(Arc::new) else {
+            return;
+        };
+        if let Some(writer) = &self.writer {
+            writer.enqueue_product(TelemetryItem::ModelFailure(Arc::clone(&diagnostic)));
         }
+        enqueue_model_log(ModelLogKind::Failure(diagnostic));
     }
 
     #[allow(
@@ -654,7 +675,7 @@ impl plakous_hosted::agent::ProductTelemetry for OpenedProductTelemetry {
         match &self.cache {
             TelemetryCache::Ready(ready) => Some(Arc::clone(&ready.emitter)),
             TelemetryCache::Unavailable(_) => Some(Arc::new(TelemetryEmitter::enabled(Arc::new(
-                RetryLoggingSink {
+                ModelDiagnosticsSink {
                     inner: None,
                     writer: None,
                 },

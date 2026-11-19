@@ -2060,7 +2060,7 @@ async fn refusal_terminal_capture_failure_is_transport_not_status_retry() -> Tes
             assert!(matches!(error, MessagesAttemptError::Protocol { .. }));
             assert_eq!(
                 error.to_string(),
-                "anthropic/Transport status=None request_id=None: response stream interrupted"
+                "anthropic/Transport status=None: response stream interrupted"
             );
             assert_eq!(error.http_status(), None);
             assert_eq!(error.provider_refusal(), None);
@@ -2240,7 +2240,14 @@ async fn provider_rejection_and_ambiguous_disconnect_keep_exact_physical_facts()
     );
     assert!(events.iter().any(|event| {
         event.as_ref().is_err_and(|error| {
-            error.message().contains("RateLimited") && error.message().contains("req_rate_01")
+            error.message().contains("RateLimited")
+                && !error.message().contains("req_rate_01")
+                && error
+                    .provider_request_id()
+                    .is_some_and(|id| id.as_str() == "req_rate_01")
+                && error
+                    .provider_code()
+                    .is_some_and(|code| code.as_str() == "rate_limit_error")
         })
     }));
     timeout(Duration::from_secs(5), peer).await???;

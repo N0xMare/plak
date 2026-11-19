@@ -67,7 +67,7 @@ fn observation() -> TestResult<TelemetryObservation> {
 #[test]
 fn every_runtime_retry_is_enqueued_once_with_its_own_context() -> TestResult {
     let (writer, receiver) = TelemetryWriter::detached(4);
-    let sink = RetryLoggingSink {
+    let sink = ModelDiagnosticsSink {
         inner: None,
         writer: Some(writer),
     };
@@ -101,27 +101,31 @@ fn every_runtime_retry_is_enqueued_once_with_its_own_context() -> TestResult {
     Ok(())
 }
 
+#[derive(Clone)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>, mpsc::Sender<()>);
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for LogBuffer {
+    fn drop(&mut self) {
+        let _ = self.1.send(());
+    }
+}
+
 #[test]
 fn child_retry_is_logged_with_host_route_and_size_even_without_analytics() -> TestResult {
-    #[derive(Clone)]
-    struct Buffer(Arc<Mutex<Vec<u8>>>, mpsc::Sender<()>);
-    impl std::io::Write for Buffer {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    impl Drop for Buffer {
-        fn drop(&mut self) {
-            let _ = self.1.send(());
-        }
-    }
     let bytes = Arc::new(Mutex::new(Vec::new()));
     let (done, finished) = mpsc::channel();
-    let writer = Buffer(Arc::clone(&bytes), done);
+    let writer = LogBuffer(Arc::clone(&bytes), done);
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
         .without_time()
@@ -147,7 +151,7 @@ fn child_retry_is_logged_with_host_route_and_size_even_without_analytics() -> Te
         "/v1/messages?secret=must-not-log",
         4_194_304,
     );
-    let emitter = TelemetryEmitter::enabled(Arc::new(RetryLoggingSink {
+    let emitter = TelemetryEmitter::enabled(Arc::new(ModelDiagnosticsSink {
         inner: None,
         writer: None,
     }));
@@ -169,6 +173,79 @@ fn child_retry_is_logged_with_host_route_and_size_even_without_analytics() -> Te
         "{log}"
     );
     assert!(!log.contains("secret") && !log.contains("must-not-log"));
+    Ok(())
+}
+
+#[test]
+fn a_terminal_provider_failure_logs_and_stores_only_a_bounded_redacted_excerpt() -> TestResult {
+    use plakous::model::{
+        ModelError, ModelErrorContext, ModelErrorKind, ModelErrorPhase, ModelHttpStatus, ModelId,
+        ModelProviderCode, ModelRetryability, ProtocolId, RouteId,
+    };
+
+    let (_guard, paths) = PlakPaths::isolated_test_home();
+    let mut store = TelemetryStore::open(&paths)?;
+    let (writer, receiver) = TelemetryWriter::detached(4);
+    let sink = ModelDiagnosticsSink {
+        inner: None,
+        writer: Some(writer),
+    };
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (done, finished) = mpsc::channel();
+    let writer = LogBuffer(Arc::clone(&bytes), done);
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .without_time()
+        .with_writer(move || writer.clone())
+        .finish();
+    let error = ModelError::contextual(
+        ModelErrorKind::Authorization,
+        format!(
+            "Access de\u{202e}nied, token=FIXTURE_SECRET_NOT_FOR_LOGS for us\u{2066}er@example.invalid, account_id=42\n {}",
+            "界".repeat(150)
+        ),
+        ModelErrorContext::new(
+            ProtocolId::new("example.responses")?,
+            RouteId::new("example.platform")?,
+            ModelId::new("test-model")?,
+            ModelErrorPhase::FirstEvent,
+            ModelRetryability::Permanent,
+        )?
+        .with_http_status(ModelHttpStatus::new(403)?)
+        .with_provider_code(ModelProviderCode::new("permission-denied")?),
+    )?
+    .with_source("unsent-to-logs source marker");
+    let context = observation()?.context();
+    tracing::subscriber::with_default(subscriber, || sink.observe_model_failure(context, &error));
+    store.write_batch(&[receiver.try_recv()?])?;
+    let detail = store
+        .query_text("SELECT status FROM product_events WHERE kind = 'model_attempt_failed'")
+        .ok_or("missing model failure row")?;
+    let detail: serde_json::Value = serde_json::from_str(&detail)?;
+    assert_eq!(detail["http_status"], 403);
+    assert_eq!(detail["provider_code"], "permission-denied");
+    assert_eq!(detail["attempt_id"], Uuid::from_u128(6).to_string());
+    let excerpt = detail["excerpt"].as_str().ok_or("missing excerpt")?;
+    assert!(
+        excerpt.contains("Access denied, token=[redacted]"),
+        "{excerpt}"
+    );
+    assert!(excerpt.contains("for [redacted], account_id=[redacted]"));
+    assert!(!excerpt.contains('\n'), "{excerpt}");
+    assert!((298..=300).contains(&excerpt.len()), "{excerpt}");
+
+    finished.recv_timeout(Duration::from_secs(30))?;
+    let log = String::from_utf8(bytes.lock().unwrap().clone())?;
+    assert!(log.contains("http_status=403"), "{log}");
+    assert!(log.contains("permission-denied"), "{log}");
+    assert!(log.contains(excerpt), "{log}");
+    for output in [log.as_str(), excerpt] {
+        assert!(!output.contains("FIXTURE_SECRET_NOT_FOR_LOGS"), "{output}");
+        assert!(!output.contains("unsent-to-logs"), "{output}");
+        assert!(!output.contains(['\u{202e}', '\u{2066}']), "{output}");
+        assert!(!output.contains("example.invalid"), "{output}");
+        assert!(!output.contains("account_id=42"), "{output}");
+    }
     Ok(())
 }
 

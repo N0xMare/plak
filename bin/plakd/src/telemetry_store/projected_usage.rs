@@ -124,7 +124,7 @@ fn projected_usage_keeps_unknown_identity_empty_and_preserves_live_identity() ->
             turn_id: context.turn_id().unwrap(),
             usage: TurnUsage::new(Usage::new(123, 45, 6, 7, 8), 2, 1, 0)?,
         });
-        store.write_batch(&[usage, usage])?;
+        store.write_batch(&[usage.clone(), usage.clone()])?;
         assert_eq!(store.query_i64("SELECT input_tokens FROM turns"), Some(123));
         assert_eq!(
             store.query_text("SELECT run_id FROM turns"),
@@ -176,7 +176,7 @@ fn projected_usage_upsert_is_identical_and_live_timings_cannot_replace_it() -> T
             0,
         )?,
     });
-    store.write_batch(&[observation])?;
+    store.write_batch(std::slice::from_ref(&observation))?;
     let rows = store.query_i64("SELECT count(*) FROM turns");
     let total = store.query_i64("SELECT sum(input_tokens) FROM turns");
     store.write_batch(&[observation])?;

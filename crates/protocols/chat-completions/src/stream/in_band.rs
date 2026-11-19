@@ -145,9 +145,9 @@ fn bounded_in_band_text(raw: &str, limit: usize) -> String {
                     || unicode_general_category::get_general_category(*ch)
                         == unicode_general_category::GeneralCategory::Format)
         })
-        .take(limit)
         .collect();
-    sanitized.trim().to_owned()
+    let redacted = plakous_model::SafeDiagnostic::new(sanitized);
+    redacted.as_str().trim().chars().take(limit).collect()
 }
 
 fn in_band_error_detail(error: &serde_json::Value) -> String {

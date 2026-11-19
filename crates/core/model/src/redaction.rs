@@ -56,6 +56,33 @@ const ASSIGNMENT: &str = r#"(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|pa
 
 static ASSIGNMENT_RULE: LazyLock<Regex> = LazyLock::new(|| compile(ASSIGNMENT));
 
+static FORMAT_CHARS: LazyLock<Regex> = LazyLock::new(|| compile(r"\p{Cf}"));
+static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+    compile(r"[\p{L}\p{N}._%+!#$&'*=/\x5e\x60{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+")
+});
+static ACCOUNT_ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
+    compile(
+        r#"(?i)(\b(?:account(?:[-_ ]?id)?|(?:user|org(?:anization)?|project)[-_ ]?id|email(?:[-_ ]?address)?)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^"'\[\]]+)(\\["'])|(["'])([^"'\[\]]+)(["'])|([^\s"'\[\],;(){}<>]+))"#,
+    )
+});
+
+/// Extra minimization for provider excerpts in local diagnostics. The shared
+/// transcript redactor stays unchanged so existing views need no rebuild.
+pub(crate) fn provider_excerpt(input: &str) -> String {
+    let line: String = FORMAT_CHARS
+        .replace_all(input, "")
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect();
+    let credential_safe = text(&line);
+    let accounts = ACCOUNT_ASSIGNMENT.replace_all(&credential_safe, assignment_value);
+    EMAIL
+        .replace_all(&accounts, MARKER)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn text(input: &str) -> String {
     let mut output = input.to_owned();
     for (rule, replacement) in RULES.iter() {

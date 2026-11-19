@@ -20,6 +20,16 @@ impl SafeDiagnostic {
         Self(truncate_utf8(&redacted, MAX_SAFE_DIAGNOSTIC_BYTES))
     }
 
+    /// Builds a single-line provider excerpt, with best-effort redaction of
+    /// credentials, email addresses, and labelled account identifiers, and
+    /// with Unicode format characters removed. For diagnostic sinks only;
+    /// this does not change ordinary diagnostic or transcript redaction.
+    #[must_use]
+    pub fn for_provider_excerpt(message: impl AsRef<str>) -> Self {
+        let redacted = crate::redaction::provider_excerpt(message.as_ref());
+        Self(truncate_utf8(&redacted, MAX_SAFE_DIAGNOSTIC_BYTES))
+    }
+
     /// Returns the bounded, sanitized diagnostic.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -108,6 +118,28 @@ mod tests {
             let decoded: SafeDiagnostic = serde_json::from_str(&encoded).unwrap();
             assert_eq!(serde_json::to_string(&decoded).unwrap(), encoded);
         }
+    }
+
+    #[test]
+    fn provider_excerpt_minimizes_email_and_labelled_account_identifiers() {
+        let diagnostic = SafeDiagnostic::for_provider_excerpt(
+            "Order rejected for <user+tag@example.invalid> (account_id=42, user ID: 'u-7').\nKeep the error.",
+        );
+        assert_eq!(
+            diagnostic.as_str(),
+            "Order rejected for <[redacted]> (account_id=[redacted], user ID: '[redacted]'). Keep the error."
+        );
+        assert_eq!(
+            SafeDiagnostic::for_provider_excerpt(diagnostic.as_str()),
+            diagnostic
+        );
+        assert_eq!(
+            SafeDiagnostic::for_provider_excerpt(
+                r#"{"email":"user@example.invalid","organization_id":123}"#
+            )
+            .as_str(),
+            r#"{"email":"[redacted]","organization_id":[redacted]}"#
+        );
     }
 
     #[test]

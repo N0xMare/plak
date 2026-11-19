@@ -16,7 +16,7 @@ use crate::runtime::{OperationId, PromptCommand};
 use crate::{
     AgentError, AgentErrorKind, AgentEventKind, AgentSessionEndpointError, DurableOperationKind,
     DurableOperationState, EventContext, FamilyArtifact, RuntimeComponentKind, StoreAdmission,
-    TelemetryObservationKind,
+    TelemetryContext, TelemetryObservationKind, TelemetryTerminalStatus,
 };
 use futures_util::StreamExt;
 use plakous_model::{
@@ -290,7 +290,7 @@ impl Driver {
             context,
             &TelemetryObservationKind::ModelFinished {
                 elapsed: model_elapsed,
-                status: agent_terminal_status(&result, self.shutdown.is_cancelled()),
+                status: self.observe_model_terminal(context, &result),
                 usage,
                 served_by,
                 output_deltas,
@@ -308,6 +308,20 @@ impl Driver {
             request_context_status,
             wire_output_limit: prepared_wire_output_limit,
         }
+    }
+
+    fn observe_model_terminal(
+        &self,
+        context: TelemetryContext,
+        result: &Result<ModelResponse, AgentError>,
+    ) -> TelemetryTerminalStatus {
+        let status = agent_terminal_status(result, self.shutdown.is_cancelled());
+        if status == TelemetryTerminalStatus::Failed
+            && let Some(error) = result.as_ref().err().and_then(AgentError::model_error)
+        {
+            self.telemetry.observe_model_failure(context, error);
+        }
+        status
     }
 
     /// Credential and placement parking since `before`, which no model

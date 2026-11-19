@@ -46,6 +46,48 @@ fn proved_contract_drift_is_permanent_configuration_drift_not_a_login_or_request
 }
 
 #[test]
+fn provider_refusal_keeps_request_id_in_typed_context_only()
+-> Result<(), Box<dyn std::error::Error>> {
+    let error = crate::classify_provider_error_with_safety(
+        Some(403),
+        br#"{"type":"error","error":{"type":"permission_error","message":"synthetic refusal"}}"#,
+        Some("fixture-request-id"),
+        crate::AnthropicErrorPhase::Connect,
+        crate::RetrySafety::new(false, false, false),
+    );
+    let source = super::protocol_source(&error);
+    assert_eq!(source.http_status().map(ModelHttpStatus::get), Some(403));
+    assert_eq!(
+        source
+            .provider_code()
+            .map(plakous_model::ModelProviderCode::as_str),
+        Some("permission_error")
+    );
+    assert!(!source.message().contains("fixture-request-id"));
+    assert!(!source.message().contains("synthetic refusal"));
+    let descriptor = ResolvedModelDescriptor::new(
+        &plakous_model::StandardIntegrationAuthority::release_owned(),
+        ProtocolId::new("anthropic.messages")?,
+        RouteId::new("anthropic.claude_oauth")?,
+        ModelId::new("claude-sonnet-5")?,
+        None,
+        None,
+        ModelAdapterProfileId::new("anthropic.claude.oauth.test")?,
+        CapabilitySet::new(BTreeMap::new(), BTreeMap::new()),
+    );
+    let attempt = MessagesAttemptError::protocol(source, TerminalFacts::preacceptance_test());
+    let failure = anthropic_model_error(&descriptor, Some(&attempt), &attempt.to_string());
+    assert!(!failure.message().contains("fixture-request-id"));
+    assert_eq!(
+        failure
+            .context()
+            .and_then(plakous_model::ModelErrorContext::provider_request_id),
+        Some("fixture-request-id"),
+    );
+    Ok(())
+}
+
+#[test]
 fn user_cancel_after_accept_is_cancelled_not_outcome_unknown() {
     for (acceptance, message) in [
         (
@@ -54,7 +96,7 @@ fn user_cancel_after_accept_is_cancelled_not_outcome_unknown() {
         ),
         (
             Some(ProviderAcceptance::Accepted),
-            "anthropic/Cancelled status=None request_id=None: cancelled",
+            "anthropic/Cancelled status=None: cancelled",
         ),
         (
             Some(ProviderAcceptance::PossiblyAccepted),

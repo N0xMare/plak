@@ -1407,22 +1407,8 @@ fn openrouter_error_detail(body: &[u8]) -> Option<String> {
         .or_else(|| value.get("message"))
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
-        .filter(|message| !message.is_empty());
-    let raw = value
-        .pointer("/error/metadata/raw")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|raw| !raw.is_empty());
-    let combined = match (message, raw) {
-        (Some(message), Some(raw)) if message.eq_ignore_ascii_case("provider returned error") => {
-            format!("{message}: {raw}")
-        }
-        (Some(message), Some(raw)) => format!("{message}: {raw}"),
-        (Some(message), None) => message.to_owned(),
-        (None, Some(raw)) => raw.to_owned(),
-        (None, None) => return None,
-    };
-    let lower = combined.to_ascii_lowercase();
+        .filter(|message| !message.is_empty())?;
+    let lower = message.to_ascii_lowercase();
     if lower.contains("bearer")
         || lower.contains("api-key")
         || lower.contains("api_key")
@@ -1431,7 +1417,8 @@ fn openrouter_error_detail(body: &[u8]) -> Option<String> {
     {
         return None;
     }
-    Some(combined.chars().take(240).collect())
+    let message = plakous_model::SafeDiagnostic::new(message);
+    Some(message.as_str().chars().take(240).collect())
 }
 
 fn concrete_model_id(value: &str) -> bool {

@@ -229,6 +229,7 @@ fn bridge_loop(receiver: Receiver<TelemetryItem>, mut worker: BridgeWorker) {
         match observation {
             TelemetryItem::Agent(observation) => emit_observation(&mut worker, observation),
             TelemetryItem::Product(observation) => emit_product_observation(&worker, observation),
+            TelemetryItem::ModelFailure(_) => {}
         }
     }
 }

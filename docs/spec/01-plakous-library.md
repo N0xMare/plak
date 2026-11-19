@@ -12123,7 +12123,10 @@ bounded, redaction-safe retry notice and correlation context for application
 logging from every agent, independently of analytics queue admission. This
 logging hook is not a `TelemetryObservation` or a persistence format; it may
 include the credential-filtered diagnostic already presented to the operator.
-Its panics are contained and retire the hook without affecting the turn.
+`observe_model_failure` likewise receives the typed error and attempt
+context when a model operation ends in failure; it does not observe
+intermediate retries, cancellations, or shutdown. Hook panics are contained
+and retire model diagnostics without affecting the turn.
 Request host, route path (no query), and serialized body byte count attached to
 retry notices are ephemeral logging facts, excluded from serialization.
 Their live strings still count against the event window's retained-byte budget.

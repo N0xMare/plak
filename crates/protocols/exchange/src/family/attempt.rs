@@ -17,7 +17,8 @@ use plakous_attempt::{
 };
 use plakous_model::{
     AttemptId, BlockStart, CancellationToken, ContentBlock, Digest, ModelCallContext, ModelEvent,
-    ModelHttpStatus, ModelProviderRequestId, ModelResponse, ModelRetryDelay, ToolExecutionOwner,
+    ModelHttpStatus, ModelProviderCode, ModelProviderRequestId, ModelResponse, ModelRetryDelay,
+    ToolExecutionOwner,
 };
 use tower_service::Service;
 
@@ -89,7 +90,7 @@ pub struct FamilyAttemptProtocolError<W: FamilyWire> {
     wire: PhantomData<W>,
     terminal_facts: Option<Box<TerminalFacts>>,
     message: String,
-    detail: Option<plakous_model::SafeDiagnostic>,
+    diagnostic: Option<Box<FamilyErrorDiagnostic>>,
     http_status: Option<ModelHttpStatus>,
     retry_after: Option<ModelRetryDelay>,
     refusal: Option<ProviderRefusal>,
@@ -97,6 +98,13 @@ pub struct FamilyAttemptProtocolError<W: FamilyWire> {
     usage_limit: bool,
     compatibility_drift: bool,
     exchange_break: ExchangeBreak,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct FamilyErrorDiagnostic {
+    detail: Option<plakous_model::SafeDiagnostic>,
+    provider_code: Option<ModelProviderCode>,
+    provider_request_id: Option<ModelProviderRequestId>,
 }
 
 impl<W: FamilyWire> FamilyAttemptProtocolError<W> {
@@ -118,14 +126,17 @@ impl<W: FamilyWire> FamilyAttemptProtocolError<W> {
     /// Attaches the redacted physical transport tuple without changing human text.
     #[must_use]
     pub fn with_detail(mut self, detail: impl AsRef<str>) -> Self {
-        self.detail = Some(plakous_model::SafeDiagnostic::new(detail));
+        self.diagnostic.get_or_insert_default().detail =
+            Some(plakous_model::SafeDiagnostic::new(detail));
         self
     }
 
     /// Returns the optional redacted physical transport tuple.
     #[must_use]
     pub fn detail(&self) -> Option<&str> {
-        self.detail
+        self.diagnostic
+            .as_ref()?
+            .detail
             .as_ref()
             .map(plakous_model::SafeDiagnostic::as_str)
     }
@@ -137,7 +148,7 @@ impl<W: FamilyWire> FamilyAttemptProtocolError<W> {
             wire: PhantomData,
             terminal_facts: None,
             message: message.into(),
-            detail: None,
+            diagnostic: None,
             http_status: None,
             retry_after: None,
             refusal: None,
@@ -152,6 +163,30 @@ impl<W: FamilyWire> FamilyAttemptProtocolError<W> {
     pub const fn with_http_status(mut self, status: ModelHttpStatus) -> Self {
         self.http_status = Some(status);
         self
+    }
+    /// Attaches a validated provider error code or type.
+    #[must_use]
+    pub fn with_provider_code(mut self, code: ModelProviderCode) -> Self {
+        self.diagnostic.get_or_insert_default().provider_code = Some(code);
+        self
+    }
+    /// Returns the validated provider error code or type, when available.
+    #[must_use]
+    pub fn provider_code(&self) -> Option<&ModelProviderCode> {
+        self.diagnostic.as_ref()?.provider_code.as_ref()
+    }
+
+    /// Attaches a validated request id for correlation without adding it to the message.
+    #[must_use]
+    pub fn with_provider_request_id(mut self, request_id: ModelProviderRequestId) -> Self {
+        self.diagnostic.get_or_insert_default().provider_request_id = Some(request_id);
+        self
+    }
+
+    /// Returns a validated request id for this failure, when available.
+    #[must_use]
+    pub fn provider_request_id(&self) -> Option<&ModelProviderRequestId> {
+        self.diagnostic.as_ref()?.provider_request_id.as_ref()
     }
     /// Attaches bounded provider retry-delay advice.
     #[must_use]

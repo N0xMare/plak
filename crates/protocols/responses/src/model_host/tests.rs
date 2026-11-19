@@ -390,6 +390,22 @@ fn xai_pre_generation_refusal_is_policy_not_authorization() -> Result<(), Box<dy
     let context = error.context().ok_or("refusal context missing")?;
     assert_eq!(context.http_status().map(ModelHttpStatus::get), Some(403));
     assert_eq!(context.provider_code(), Some("permission-denied"));
+    let error = classify(
+        serde_json::json!({"error": {
+            "type": "forbidden",
+            "message": "Subscription access denied for token=FIXTURE_SECRET_NOT_FOR_LOGS",
+        }}),
+        crate::ResponsesProviderErrorPolicy::Grok,
+    )?;
+    let context = error.context().ok_or("forbidden context missing")?;
+    assert_eq!(context.http_status().map(ModelHttpStatus::get), Some(403));
+    assert_eq!(context.provider_code(), Some("forbidden"));
+    assert!(
+        error
+            .message()
+            .contains("Subscription access denied for token=[redacted]")
+    );
+    assert!(!error.message().contains("FIXTURE_SECRET_NOT_FOR_LOGS"));
     for (body, policy) in [
         (
             serde_json::json!({"code": "unauthenticated:bad-credentials", "error": "denied"}),
@@ -441,6 +457,9 @@ fn provider_terminal_content_policy_never_retries() -> Result<(), Box<dyn std::e
                     policy,
                 )?;
                 let error = provider_terminal_error(&descriptor()?, Some(&provider), facts);
+                let context = error.context().ok_or("stream error context missing")?;
+                assert_eq!(context.http_status().map(ModelHttpStatus::get), Some(200));
+                assert_eq!(context.provider_code(), Some(label));
                 assert_eq!(
                     error.kind(),
                     ModelErrorKind::Policy,

@@ -112,6 +112,16 @@ pub trait TelemetrySink: Send + Sync + 'static {
     /// of the bounded analytics queue. Must not block or retain request content.
     /// The default sink does not log retries.
     fn observe_model_retry(&self, _context: TelemetryContext, _retry: &plakous_model::ModelRetry) {}
+
+    /// Observes a terminal model failure for application diagnostics. The
+    /// error's public diagnostic is already redacted. Must not block or retain
+    /// request content. The default sink ignores this observation.
+    fn observe_model_failure(
+        &self,
+        _context: TelemetryContext,
+        _error: &plakous_model::ModelError,
+    ) {
+    }
 }
 
 /// Typed correlation context for a telemetry observation.
@@ -1025,7 +1035,7 @@ impl TelemetryStatus {
 /// Panic-contained optional telemetry emitter suitable for later actor wiring.
 pub struct TelemetryEmitter {
     sink: Mutex<Option<Arc<dyn TelemetrySink>>>,
-    retry_sink: Mutex<Option<Arc<dyn TelemetrySink>>>,
+    diagnostic_sink: Mutex<Option<Arc<dyn TelemetrySink>>>,
     emitted: AtomicU64,
     dropped: AtomicU64,
     panics: AtomicU64,
@@ -1037,7 +1047,7 @@ impl TelemetryEmitter {
     pub const fn disabled() -> Self {
         Self {
             sink: Mutex::new(None),
-            retry_sink: Mutex::new(None),
+            diagnostic_sink: Mutex::new(None),
             emitted: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             panics: AtomicU64::new(0),
@@ -1048,7 +1058,7 @@ impl TelemetryEmitter {
     #[must_use]
     pub fn enabled(sink: Arc<dyn TelemetrySink>) -> Self {
         Self {
-            retry_sink: Mutex::new(Some(Arc::clone(&sink))),
+            diagnostic_sink: Mutex::new(Some(Arc::clone(&sink))),
             sink: Mutex::new(Some(sink)),
             emitted: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
@@ -1085,15 +1095,24 @@ impl TelemetryEmitter {
         context: TelemetryContext,
         retry: &plakous_model::ModelRetry,
     ) {
-        let sink = lock(&self.retry_sink).clone();
+        self.observe_model_diagnostic(|sink| sink.observe_model_retry(context, retry));
+    }
+
+    pub(crate) fn observe_model_failure(
+        &self,
+        context: TelemetryContext,
+        error: &plakous_model::ModelError,
+    ) {
+        self.observe_model_diagnostic(|sink| sink.observe_model_failure(context, error));
+    }
+
+    fn observe_model_diagnostic(&self, observe: impl FnOnce(&dyn TelemetrySink)) {
+        let sink = lock(&self.diagnostic_sink).clone();
         if let Some(sink) = sink
-            && std::panic::catch_unwind(AssertUnwindSafe(|| {
-                sink.observe_model_retry(context, retry);
-            }))
-            .is_err()
+            && std::panic::catch_unwind(AssertUnwindSafe(|| observe(sink.as_ref()))).is_err()
         {
             increment(&self.panics);
-            *lock(&self.retry_sink) = None;
+            *lock(&self.diagnostic_sink) = None;
         }
     }
 

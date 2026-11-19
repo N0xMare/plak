@@ -915,7 +915,7 @@ fn openrouter_error_detail_takes_message_and_drops_secrets() {
             br#"{"error":{"message":"Provider returned error","metadata":{"raw":"Unknown parameter: 'session_id'"}}}"#
         )
         .as_deref(),
-        Some("Provider returned error: Unknown parameter: 'session_id'")
+        Some("Provider returned error")
     );
     assert_eq!(
         openrouter_error_detail(br#"{"error":{"message":"Authorization Bearer sk-test"}}"#),
