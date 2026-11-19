@@ -182,7 +182,7 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ),
     (
         "gateway",
-        "The credential gateway this process calls. An absent address keeps account commands in this process.",
+        "The separate credential gateway. Required for hosts; standalone account commands can use the local service.",
     ),
 ];
 

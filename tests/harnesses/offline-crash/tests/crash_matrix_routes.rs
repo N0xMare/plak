@@ -2253,6 +2253,7 @@ impl FaceFixture {
              to a matching workspace test build with both sidecars",
         )?;
         let root = tempfile::tempdir()?;
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))?;
         let home = root.path().join("home");
         let workspace = root.path().join("workspace");
         std::fs::create_dir_all(home.join("agents"))?;

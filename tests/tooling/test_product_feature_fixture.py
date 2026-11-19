@@ -6,11 +6,13 @@ import importlib.util
 import os
 import stat
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/gate"))
 SPEC = importlib.util.spec_from_file_location(
     "product_feature_fixture", ROOT / "tools/gate/product_feature_fixture.py"
 )
@@ -47,6 +49,17 @@ def _assert_isolated(test: unittest.TestCase, env: dict[str, str]) -> None:
 
 
 class FixtureIsolationTests(unittest.TestCase):
+    def setUp(self):
+        def gateway(binary, home, cwd, environment):
+            _assert_isolated(self, environment)
+            self.assertEqual(home.parent, cwd)
+            self.assertIn(binary, ("writer", "binary"))
+            result = mock.MagicMock()
+            result.__enter__.return_value = ""
+            return result
+
+        self.enterContext(mock.patch.object(FIXTURE, "running_gateway", side_effect=gateway))
+
     def test_route_fixture_accepts_in_a_private_home(self):
         def run(*_args, **kwargs):
             _assert_isolated(self, kwargs["env"])

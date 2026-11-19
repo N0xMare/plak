@@ -264,6 +264,9 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
 
 def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> list[str]:
     """Real reduced binaries refuse before credentials, providers or session writes."""
+    from gateway_fixture import running_gateway
+    from product_feature_fixture import isolated_environment
+
     errors = []
     with tempfile.TemporaryDirectory(prefix="plakd-feature-smoke-") as directory:
         environment = dict(os.environ, PLAK_HOME=directory)
@@ -425,8 +428,9 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
         for feature in ("python", "mcp"):
             if feature in selected or "codex" not in selected:
                 continue
-            home = Path(directory) / feature
-            home.mkdir(mode=0o700)
+            root = Path(directory) / feature
+            root.mkdir(mode=0o700)
+            home, isolated = isolated_environment(root)
             (home / "agents").mkdir(mode=0o700)
             config = '[root]\nagent = "root-agent"\n'
             template = 'account = "codex"\nmodel = "gpt-6-astra"\n'
@@ -435,18 +439,21 @@ def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> l
             else:
                 config += '[mcp_servers.example]\ntransport = "stdio"\ncommand = "/bin/false"\n'
                 template += 'tools = ["mcp:example"]\n'
-            (home / "config.toml").write_text(config)
             (home / "agents/root-agent.toml").write_text(template)
-            completed = subprocess.run(
-                [executable, "agent"],
-                cwd=directory,
-                env=dict(environment, PLAK_HOME=str(home)),
-                input="",
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=30,
-            )
+            with running_gateway(executable, home, root, isolated) as gateway:
+                (home / "config.toml").write_text(config + gateway)
+                # Select the root slot explicitly so this tests the selected
+                # template's capability, not the gateway's empty account roster.
+                completed = subprocess.run(
+                    [executable, "agent", "--account", "codex"],
+                    cwd=root,
+                    env=isolated,
+                    input="",
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                )
             if completed.returncode != 2 or f"feature `{feature}`" not in completed.stderr:
                 errors.append(
                     f"plakd [{profile}] configured {feature}: expected typed exit 2; got {completed.returncode}: {completed.stdout}{completed.stderr}"

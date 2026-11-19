@@ -1490,6 +1490,50 @@ fn openai_api_account_without_a_key_fails_as_auth_and_names_the_fix() {
 }
 
 #[test]
+fn named_api_import_does_not_use_the_gateways_default_key() {
+    use plakous_hosted::binding::{PlatformProvider, TargetSelection};
+    use serde_json::{Value, json};
+    use std::process::Stdio;
+
+    let dir = isolated_home_dir();
+    let home = dir.path();
+    let _gateway = local_gateway(home);
+    let key = "synthetic-default-key";
+    let mut set = local_command(home)
+        .args(["key", "set", "openai"])
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(set.stdin.take().unwrap(), "{key}").unwrap();
+    let set = set.wait_with_output().unwrap();
+    assert!(set.status.success(), "{}", stderr(&set));
+    let mut document: Value =
+        serde_json::from_str(include_str!("../fixtures/session-export-v12.json")).unwrap();
+    document["workspace_root"] = json!(home);
+    document["binding"] = json!({
+        "account": "openai/work",
+        "model": "gpt-6-luna",
+        "effort": "low",
+        "composition": "direct",
+        "target_selection": TargetSelection::Platform { provider: PlatformProvider::OpenAi }
+    });
+    let path = home.join("export.json");
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let out = run_plak(home, &["session", "import", path.to_str().unwrap()]);
+    let failure = stderr(&out);
+    assert_eq!(out.status.code(), Some(3), "{failure}");
+    assert!(
+        failure.contains("openai/work API key is not set"),
+        "{failure}"
+    );
+    assert!(!failure.contains(key));
+    let listed = run_plak(home, &["session", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    assert_eq!(stdout(&listed).trim(), "No sessions in this workspace.");
+}
+
+#[test]
 fn anthropic_api_account_without_a_key_fails_as_auth_and_names_the_fix() {
     api_account_without_a_key_fails_as_auth(
         "anthropic",
