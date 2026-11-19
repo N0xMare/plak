@@ -720,27 +720,30 @@ fn validate_loaded_bindings(
     connection: &Connection,
     session: &SessionRecord,
 ) -> Result<(), String> {
-    let create:Option<(String,String,String,Option<String>)>=connection.query_row("SELECT kind,owner_session_id,binding_digest,terminal_disposition FROM identity_bindings WHERE identity=?1",[&session.create_operation_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|"could not inspect create identity".to_owned())?;
-    if create
-        != Some((
-            "create".to_owned(),
-            session.id.clone(),
-            session.id.clone(),
-            None,
-        ))
-    {
+    validate_create_binding(connection, &session.id, &session.create_operation_id)?;
+    validate_queue_bindings(connection, &session.id, &session.pending_queue)
+}
+
+fn validate_create_binding(
+    connection: &Connection,
+    id: &str,
+    operation: &str,
+) -> Result<(), String> {
+    let create:Option<(String,String,String,Option<String>)>=connection.query_row("SELECT kind,owner_session_id,binding_digest,terminal_disposition FROM identity_bindings WHERE identity=?1",[operation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|"could not inspect create identity".to_owned())?;
+    if create != Some(("create".to_owned(), id.to_owned(), id.to_owned(), None)) {
         return Err("session create identity contradicts global registry".to_owned());
     }
-    for item in &session.pending_queue {
+    Ok(())
+}
+
+fn validate_queue_bindings(
+    connection: &Connection,
+    id: &str,
+    pending_queue: &[QueueItem],
+) -> Result<(), String> {
+    for item in pending_queue {
         let queue:Option<(String,String,String,Option<String>)>=connection.query_row("SELECT kind,owner_session_id,binding_digest,terminal_disposition FROM identity_bindings WHERE identity=?1",[&item.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|"could not inspect queue identity".to_owned())?;
-        if queue
-            != Some((
-                "queue".to_owned(),
-                session.id.clone(),
-                session.id.clone(),
-                None,
-            ))
-        {
+        if queue != Some(("queue".to_owned(), id.to_owned(), id.to_owned(), None)) {
             return Err("active queue identity contradicts global registry".to_owned());
         }
     }

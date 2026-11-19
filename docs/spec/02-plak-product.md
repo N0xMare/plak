@@ -1766,6 +1766,10 @@ Explicit archived-inclusive lists filter before applying row limits. An archived
 session is read-only until explicitly unarchived; inspection must not open its
 runtime, recover, drain its queue or execute a continuation. Rename, unarchive
 and guarded delete remain available. Repeating the archive state is a no-op.
+The attached prompt and delivery guards read archive and identity metadata
+without loading transcript views. Their read retains the raw queue and prompt
+history baseline for subsequent saves. Immutable submission still checks
+archive and revision inside its write transaction.
 A stop addressed to an archived read-only attachment is also a no-op:
 it acknowledges `stopped {runner_pending:false}` without opening a runtime.
 Archive refuses a busy turn, any live child, a running process, a durable
@@ -2435,12 +2439,14 @@ passes do not reload a session record or transcript to discover a clear join;
 only a clear target's creation identity or an unresolved clear request needs
 that join. Call bookkeeping is pruned when its owning turn ends, while the
 settled transcript rows and counters remain.
-The host loop never waits on it for a feed notification while streaming; it
-settles the task after an acknowledged command (an admission or a send-now) and
-before terminal publication: one pass to the tail, then a copy of the task's
-views, which stay with the task. The command's queue join and root-turn count,
-and terminal publication, read that copy rather than a stored load. Before
-release it requests a final pass that stops the task. The after-ack settle,
+The host loop never waits on it for a feed notification while streaming. After
+an acknowledged command (an admission or a send-now), the task passes to the
+tail and returns only the joined local deliveries, root-turn count, wake
+suppression, and exact applied checkpoint and feed watermark. A watermark below
+the acknowledgement is debt, not settlement. The task uses the local intents
+already read at the tail, without decoding extra notices or copying transcript
+views. Terminal publication still takes a copy of the task's views. Before
+release the host requests a final pass that stops the task. The after-ack settle,
 interactive terminal publication's settle and release are bounded at 400 ms;
 quit stages share the one-second quit deadline. Past the bound the host
 proceeds with projection debt, not a snapshot of stale rows. A task that stops

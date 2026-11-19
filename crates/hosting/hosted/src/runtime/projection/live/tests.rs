@@ -503,6 +503,50 @@ fn rebuilt(
         .unwrap()
 }
 
+#[test]
+fn after_ack_uses_one_tail_join_and_refuses_an_unapplied_watermark() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = tool_turns_host(root.path(), 1);
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let id = config.session.id.clone();
+    super::super::tests::run_prompts(config, &["one admitted command"]);
+    let (target, _) = recording_target(root.path(), &store, &id);
+    let views = store.load_views(&id).unwrap().unwrap();
+    let stored = store.load(&id).unwrap();
+    let record_reads = store.record_read_count();
+    let intent_reads = store.intent_read_count();
+    super::super::probe::track(&id);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut live = LiveProjector::spawn(&crate::TaskSet::new());
+        let facts = live.settle_after_ack(target.clone()).await.unwrap();
+        assert_eq!(facts.applied.applied(), views.cursor);
+        assert_eq!(facts.checkpoint, stored.plakous_locator);
+        assert_eq!(facts.commands, stored.queue_commands);
+        assert_eq!(facts.root_turns, 1);
+        assert!(
+            facts
+                .through(
+                    target.followed,
+                    Some(plakous::sessions::feed::FeedSeq::new(
+                        views.cursor.get() + 1
+                    )),
+                )
+                .is_err(),
+            "an unapplied acknowledgement cannot settle admission"
+        );
+        assert_eq!(store.record_read_count(), record_reads);
+        assert_eq!(store.intent_read_count(), intent_reads + 1);
+        let counts = super::super::probe::take(&id);
+        assert_eq!(counts.live, 1);
+        assert_eq!(counts.writes, 0, "an already applied feed adds no writes");
+    });
+}
+
 /// One attachment's live projector keeps its views and the rows it has
 /// shown across turns (spec 02 §2.6): the attachment parses the stored views
 /// once, when the first pass finds the session stored, and every settled

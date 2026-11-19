@@ -2,7 +2,7 @@
 //! session applies the feed to the views after each acknowledged commit and
 //! keeps them, with the settled rows it has shown, for the whole attachment.
 //! The host loop never waits on it while streaming; admission, send-now and
-//! terminal publication settle it (a pass and a copy of its views), and
+//! terminal publication settle it, and
 //! release grants it a bounded final pass. The tree projector runs from the host loop
 //! itself. Projection debt is safe: every write is CAS'd on the cursor and
 //! the next open catches up.
@@ -37,6 +37,7 @@ impl LiveTarget {
     fn same_session(&self, other: &Self) -> bool {
         self.product_id == other.product_id
             && self.followed.session_id() == other.followed.session_id()
+            && self.followed.branch_id() == other.followed.branch_id()
     }
 
     /// One product projector pass to the feed's tail.
@@ -103,15 +104,44 @@ struct Applied {
     error: Option<String>,
 }
 
-/// Where a settling request's views go: taken by the pass that serves it.
-type SettleReply = Arc<std::sync::Mutex<Option<oneshot::Sender<Result<SessionViews, String>>>>>;
+/// A request is answered once even when a feed wake repeats it.
+type Reply<T> = Arc<std::sync::Mutex<Option<oneshot::Sender<Result<T, String>>>>>;
+
+#[derive(Clone)]
+enum Settle {
+    Views(Reply<SessionViews>),
+    AfterAck(Reply<super::AfterAck>),
+}
+
+impl Settle {
+    fn complete(&self, projected: Result<&super::ProjectedViews, &String>, target: &LiveTarget) {
+        match self {
+            Self::Views(to) => reply(to, || {
+                projected
+                    .map(|pass| pass.views.clone())
+                    .map_err(String::clone)
+            }),
+            Self::AfterAck(to) => reply(to, || {
+                super::AfterAck::from_pass(projected.map_err(String::clone)?, target.followed)
+            }),
+        }
+    }
+}
+
+fn reply<T>(to: &Reply<T>, value: impl FnOnce() -> Result<T, String>) {
+    if let Some(to) = to.lock().ok().and_then(|mut to| to.take())
+        && !to.is_closed()
+    {
+        let _ = to.send(value());
+    }
+}
 
 #[derive(Clone)]
 struct Request {
     generation: u64,
     target: LiveTarget,
     finish: bool,
-    settle: Option<SettleReply>,
+    settle: Option<Settle>,
 }
 
 /// The host loop's handle on its session's projector task.
@@ -185,31 +215,50 @@ impl LiveProjector {
     /// [`Self::take_refusal`]. A stopped task is restarted first, and once
     /// more when it stops during the pass.
     pub(crate) async fn settle(&mut self, target: LiveTarget) -> Result<SessionViews, String> {
+        self.settle_with(target, Settle::Views).await
+    }
+
+    pub(super) async fn settle_after_ack(
+        &mut self,
+        target: LiveTarget,
+    ) -> Result<super::AfterAck, String> {
+        self.settle_with(target, Settle::AfterAck).await
+    }
+
+    async fn settle_with<T>(
+        &mut self,
+        target: LiveTarget,
+        settle: fn(Reply<T>) -> Settle,
+    ) -> Result<T, String> {
         if self.stopped() {
             self.restart();
         }
-        if let Some(settled) = self.request_settle(target.clone()).await {
+        if let Some(settled) = self.request_settle(target.clone(), settle).await {
             return settled;
         }
         if self.stopped() {
             self.restart();
-            if let Some(settled) = self.request_settle(target).await {
+            if let Some(settled) = self.request_settle(target, settle).await {
                 return settled;
             }
         }
         Err("the projector task stopped".to_owned())
     }
 
-    /// The pass's views or refusal; `None` when the task stopped before it
+    /// The pass's reply or refusal; `None` when the task stopped before it
     /// replied.
-    async fn request_settle(&mut self, target: LiveTarget) -> Option<Result<SessionViews, String>> {
+    async fn request_settle<T>(
+        &mut self,
+        target: LiveTarget,
+        settle: fn(Reply<T>) -> Settle,
+    ) -> Option<Result<T, String>> {
         self.generation = self.generation.saturating_add(1);
         let (reply, settled) = oneshot::channel();
         let _ = self.requests.send(Some(Request {
             generation: self.generation,
             target,
             finish: false,
-            settle: Some(Arc::new(std::sync::Mutex::new(Some(reply)))),
+            settle: Some(settle(Arc::new(std::sync::Mutex::new(Some(reply))))),
         }));
         self.wake.notify_one();
         // The reply's sender stays in the request the watch channel holds, so
@@ -353,45 +402,39 @@ async fn run(
         };
         #[cfg(test)]
         stop_if_armed(&request.target.product_id);
-        let error = match request.target.views(cached.take()).await {
-            Ok(super::ProjectedViews { views, changed }) => {
-                let current_target = requests
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|latest| latest.target.same_session(&request.target));
-                if current_target {
-                    emit_settled_changes(
-                        &views,
-                        changed,
-                        &mut shown,
-                        &*request.target.emit_settled,
-                    );
-                } else {
-                    shown.initialized = false;
-                    #[cfg(test)]
-                    tests::pause_noncurrent(
-                        &request.target.product_id,
-                        forwarder.as_ref().is_some_and(|task| !task.is_finished()),
-                    )
-                    .await;
-                }
-                cached = Some(views);
+        let mut projected = request.target.views(cached.take()).await;
+        if let Ok(projected) = &mut projected {
+            let current_target = requests
+                .borrow()
+                .as_ref()
+                .is_some_and(|latest| latest.target.same_session(&request.target));
+            if current_target {
+                emit_settled_changes(
+                    &projected.views,
+                    projected.changed.take(),
+                    &mut shown,
+                    &*request.target.emit_settled,
+                );
+            } else {
+                shown.initialized = false;
+                #[cfg(test)]
+                tests::pause_noncurrent(
+                    &request.target.product_id,
+                    forwarder.as_ref().is_some_and(|task| !task.is_finished()),
+                )
+                .await;
+            }
+        }
+        if let Some(settle) = &request.settle {
+            settle.complete(projected.as_ref(), &request.target);
+        }
+        let error = match projected {
+            Ok(projected) => {
+                cached = Some(projected.views);
                 None
             }
             Err(error) => Some(error),
         };
-        if let Some(reply) = request
-            .settle
-            .as_ref()
-            .and_then(|reply| reply.lock().ok()?.take())
-        {
-            let settled = match (&error, &cached) {
-                (Some(error), _) => Err(error.clone()),
-                (None, Some(views)) => Ok(views.clone()),
-                (None, None) => Err("the projector pass kept no views".to_owned()),
-            };
-            let _ = reply.send(settled);
-        }
         report.send_replace(Applied {
             generation: request.generation,
             error,

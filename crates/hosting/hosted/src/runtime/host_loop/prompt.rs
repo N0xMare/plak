@@ -157,9 +157,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             self.role
                 .config
                 .store
-                .load(&self.role.config.session.id)
+                .load_admission_archived(&self.role.config.session.id)
                 .map_err(CliFailure::new)?
-                .archived
         };
         if archived {
             reject_draft(

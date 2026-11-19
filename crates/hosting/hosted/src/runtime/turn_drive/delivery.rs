@@ -135,6 +135,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         self.host.projection_store,
                         &self.host.session.id,
                         followed,
+                        submission.acknowledgement().feed_seq(),
                         self.host
                             .live_projector
                             .as_deref_mut()

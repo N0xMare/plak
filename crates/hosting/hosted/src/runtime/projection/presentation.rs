@@ -65,6 +65,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load(id)
     }
 
+    fn load_admission_archived(&self, id: &str) -> Result<bool, String> {
+        self.inner.load_admission_archived(id)
+    }
+
     fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
         self.inner.load_tree_source(id)
     }

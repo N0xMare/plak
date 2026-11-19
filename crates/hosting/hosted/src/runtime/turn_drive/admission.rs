@@ -59,7 +59,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         job_events,
         runtime_factory,
     } = host;
-    if store.load(&session.id)?.archived {
+    if store.load_admission_archived(&session.id)? {
         return Ok(DrivenTurn::continuing(
             super::TurnHostOutcome::AdmissionRejected {
                 error: "session_archived: unarchive this session before admitting work".into(),
@@ -245,6 +245,9 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 projection_store,
                 &session.id,
                 followed,
+                submission
+                    .as_ref()
+                    .and_then(|submission| submission.acknowledgement().feed_seq()),
                 live_projector
                     .as_deref_mut()
                     .map(|live| (live, &live_target)),

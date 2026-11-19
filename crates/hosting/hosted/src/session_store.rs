@@ -158,6 +158,13 @@ pub trait SessionRecordStore: Send + Sync {
     /// `session not found`, or a message when the row is invalid.
     fn load(&self, id: &str) -> Result<SessionRecord, String>;
 
+    /// Reads the archival guard from the stored session, retaining any
+    /// collection baseline needed by subsequent revision-fenced saves.
+    ///
+    /// # Errors
+    /// A missing session, or invalid admission metadata.
+    fn load_admission_archived(&self, id: &str) -> Result<bool, String>;
+
     /// Reads only the metadata needed to follow a product session's tree lineage.
     ///
     /// # Errors
@@ -986,6 +993,16 @@ mod memory {
                     record.pause_restored_work();
                     record
                 })
+                .ok_or_else(|| "session not found".to_owned())
+        }
+
+        fn load_admission_archived(&self, id: &str) -> Result<bool, String> {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .records
+                .get(id)
+                .map(|record| record.archived)
                 .ok_or_else(|| "session not found".to_owned())
         }
 

@@ -45,6 +45,47 @@ pub(in crate::runtime) struct AfterAck {
     pub(in crate::runtime) commands: crate::sessions::QueueCommands,
     pub(in crate::runtime) root_turns: u64,
     pub(in crate::runtime) wake_suppressed: bool,
+    checkpoint: Option<plakous::sessions::SessionLocator>,
+    applied: FeedCursor,
+}
+
+impl AfterAck {
+    fn from_pass(
+        projected: &ProjectedViews,
+        followed: plakous::sessions::SessionLocator,
+    ) -> Result<Self, String> {
+        let views = &projected.views;
+        let intents = projected
+            .tail_intents
+            .as_ref()
+            .ok_or_else(|| "the after-ack projector pass did not reach the feed tail".to_owned())?;
+        Ok(Self {
+            commands: crate::sessions::QueueCommands::from_join(intents, Some(views)),
+            root_turns: views.state.counters.root_turns,
+            wake_suppressed: views.wake_suppressed(intents),
+            checkpoint: views.state.projected_locator(None),
+            applied: FeedCursor::new(followed.session_id(), views.cursor),
+        })
+    }
+
+    fn through(
+        self,
+        followed: plakous::sessions::SessionLocator,
+        through: Option<FeedSeq>,
+    ) -> Result<Self, String> {
+        if self.applied.session_id() != followed.session_id()
+            || self.checkpoint.is_some_and(|head| {
+                head.session_id() != followed.session_id()
+                    || head.branch_id() != followed.branch_id()
+            })
+            || through.is_some_and(|seq| self.checkpoint.is_none() || self.applied.applied() < seq)
+        {
+            return Err(
+                "the projector has not applied the acknowledged branch and watermark".to_owned(),
+            );
+        }
+        Ok(self)
+    }
 }
 
 /// The projector pass after an acknowledged command. The session's live
@@ -55,6 +96,7 @@ pub(in crate::runtime) async fn queue_after_ack(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
+    through: Option<FeedSeq>,
     live: Option<(&mut live::LiveProjector, &live::LiveTarget)>,
 ) -> Result<AfterAck, String> {
     tokio::time::timeout(
@@ -62,7 +104,8 @@ pub(in crate::runtime) async fn queue_after_ack(
         after_ack_pass(sessions, store, product_id, followed, live),
     )
     .await
-    .unwrap_or_else(|_| Err("the after-ack projector pass exceeded its bound".to_owned()))
+    .unwrap_or_else(|_| Err("the after-ack projector pass exceeded its bound".to_owned()))?
+    .through(followed, through)
 }
 
 /// The pass `queue_after_ack` bounds: the feed to its tail, then the queue
@@ -74,21 +117,17 @@ async fn after_ack_pass(
     followed: plakous::sessions::SessionLocator,
     live: Option<(&mut live::LiveProjector, &live::LiveTarget)>,
 ) -> Result<AfterAck, String> {
-    let views = match live.filter(|(_, target)| {
-        target.product_id == product_id && target.followed.session_id() == followed.session_id()
+    match live.filter(|(_, target)| {
+        target.product_id == product_id
+            && target.followed.session_id() == followed.session_id()
+            && target.followed.branch_id() == followed.branch_id()
     }) {
-        Some((live, target)) => live.settle(target.clone()).await?,
-        None => project_to_tail(sessions, store, product_id, followed).await?,
-    };
-    let intents = blocking(store, product_id, |store, id| {
-        store.load_intents(id).map_err(ReadFailure::from)
-    })
-    .await?;
-    Ok(AfterAck {
-        commands: crate::sessions::QueueCommands::from_join(&intents, Some(&views)),
-        root_turns: views.state.counters.root_turns,
-        wake_suppressed: views.wake_suppressed(&intents),
-    })
+        Some((live, target)) => live.settle_after_ack(target.clone()).await,
+        None => AfterAck::from_pass(
+            &project_to_tail_cached(sessions, store, product_id, followed, None).await?,
+            followed,
+        ),
+    }
 }
 
 /// Step 0 of the reopen (spec 02 §4.2): a lease-free projector pass to the
@@ -246,6 +285,8 @@ pub(super) struct ProjectedViews {
     pub(super) views: SessionViews,
     /// None after a store reload: reconcile all retained settled rows once.
     changed: Option<std::collections::BTreeSet<crate::sessions::projector::RowKey>>,
+    /// Local intents read after the empty tail page, never ancestor deliveries.
+    tail_intents: Option<crate::sessions::projector::ProductIntents>,
 }
 
 async fn project_to_tail_cached(
@@ -313,7 +354,7 @@ async fn project_to_tail_controlled(
                 .to_owned()
                 .into());
         }
-        let (page, intents) = page_with_intents(store, product_id, &inherited, async {
+        let (page, mut intents) = page_with_intents(store, product_id, &inherited, async {
             sessions
                 .feed_page(FeedPageRequest::after(FeedCursor::new(
                     runtime_session,
@@ -424,7 +465,14 @@ async fn project_to_tail_controlled(
                             .insert(request.operation_id.clone(), completion);
                     }
                 }
-                return Ok(ProjectedViews { views, changed });
+                intents
+                    .submissions
+                    .truncate(intents.submissions.len() - inherited.len());
+                return Ok(ProjectedViews {
+                    views,
+                    changed,
+                    tail_intents: Some(intents),
+                });
             }
             FeedPage::Records {
                 records,
@@ -500,7 +548,11 @@ async fn project_to_tail_controlled(
         }
         progress(views.cursor, tail);
     }
-    Ok(ProjectedViews { views, changed })
+    Ok(ProjectedViews {
+        views,
+        changed,
+        tail_intents: None,
+    })
 }
 
 async fn load_views(

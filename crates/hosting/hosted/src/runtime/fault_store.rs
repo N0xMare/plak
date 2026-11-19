@@ -8,6 +8,7 @@ pub(crate) enum StoreCall {
     WriteHostControls,
     WriteRootLoss,
     Load,
+    LoadAdmissionArchived,
     LoadQueueHead,
     Save,
     SaveSubmission,
@@ -149,6 +150,11 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
     fn load(&self, id: &str) -> Result<SessionRecord, String> {
         self.faults.before(StoreCall::Load, None)?;
         self.inner.load(id)
+    }
+
+    fn load_admission_archived(&self, id: &str) -> Result<bool, String> {
+        self.faults.before(StoreCall::LoadAdmissionArchived, None)?;
+        self.inner.load_admission_archived(id)
     }
 
     fn load_queue_head(&self, id: &str) -> Result<crate::session_store::SessionQueueHead, String> {

@@ -246,6 +246,11 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load(id))
     }
 
+    fn load_admission_archived(&self, id: &str) -> Result<bool, String> {
+        crate::store::sessions::canonical_product_session_id(id)?;
+        self.with_store(|store| store.load_admission_archived(id))
+    }
+
     fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
         crate::store::sessions::canonical_product_session_id(id)?;
         self.with_store(|store| store.load_tree_source(id))

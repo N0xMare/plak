@@ -47,6 +47,34 @@ pub(super) fn admit_work(
 }
 
 impl ProductStore {
+    pub(super) fn load_admission_archived(&mut self, id: &str) -> Result<bool, String> {
+        let tx = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| "could not start product store read".to_owned())?;
+        let (archived, operation): (bool, String) = tx
+            .query_row(
+                "SELECT archived,create_operation_id FROM sessions WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| "product session admission metadata is invalid".to_owned())?
+            .ok_or_else(|| "session not found".to_owned())?;
+        super::validate_create_binding(&tx, id, &operation)?;
+        // Do not replace an unfiltered save baseline with the public queue
+        // projection: accepted drafts can still be present in the intent rows.
+        let baseline = plakous_hosted::sessions::StoreBaseline {
+            pending_queue: super::load_queue(&tx, id)?,
+            prompt_history: super::load_prompt_history(&tx, id)?,
+        };
+        super::validate_queue_bindings(&tx, id, &baseline.pending_queue)?;
+        tx.commit()
+            .map_err(|_| "could not finish product store read".to_owned())?;
+        self.baselines.insert(id.to_owned(), baseline);
+        Ok(archived)
+    }
+
     pub(crate) fn lifecycle_metadata(
         &self,
         id: &str,
@@ -185,6 +213,50 @@ mod tests {
     use super::*;
     use crate::home::paths::PlakPaths;
     use crate::store::sessions::SessionRecord;
+
+    #[test]
+    fn admission_reads_identity_and_remembers_raw_collections_without_loading_notices() {
+        use plakous_hosted::sessions::{NoticeScope, QueueItem, StoreBaseline, TranscriptRow};
+
+        let (_home, paths) = PlakPaths::isolated_test_home();
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut record = SessionRecord::new(paths.home().to_owned());
+        record.pending_queue.push(QueueItem::new("queued"));
+        record.record_prompt("remembered prompt".into());
+        record.record_notice(TranscriptRow::info(NoticeScope::Session, "notice"));
+        store.commit(&mut record).unwrap();
+        store
+            .connection
+            .execute(
+                r#"UPDATE operator_notices SET row='{"kind":"invalid_fixture"}' WHERE session_id=?1"#,
+                [&record.id],
+            )
+            .unwrap();
+        store.baselines.clear();
+        assert!(
+            store.load(&record.id).is_err(),
+            "a full load decodes the notice"
+        );
+        assert!(!store.load_admission_archived(&record.id).unwrap());
+        assert_eq!(
+            store.baselines.get(&record.id),
+            Some(&StoreBaseline::of(&record))
+        );
+        store.set_archived(&record.id, true).unwrap();
+        assert!(store.load_admission_archived(&record.id).unwrap());
+        assert!(admit_work(&store.connection, &record.id).is_err());
+        store
+            .connection
+            .execute(
+                "UPDATE identity_bindings SET binding_digest='contradiction' WHERE identity=?1",
+                [&record.pending_queue[0].id],
+            )
+            .unwrap();
+        assert_eq!(
+            store.load_admission_archived(&record.id).unwrap_err(),
+            "active queue identity contradicts global registry"
+        );
+    }
 
     #[test]
     fn lifecycle_metadata_transaction_refuses_pending_work() {
