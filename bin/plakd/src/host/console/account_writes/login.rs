@@ -1,19 +1,15 @@
-//! Each attempt owns its application, pending token and cancellable worker.
+//! Each attempt owns one cancellable gateway login worker.
 
 use super::{
-    AccountError, AccountOps, Arc, Console, HostPrincipal, HostRequest, HostRequestContext,
-    HostResponse, MutationRefusal, OperatorAction, PlakousApplication, ReadRefusal, RequestRefusal,
-    ValidationCode, failed, host_failure, refused, validation, worker,
+    AccountError, Arc, Console, HostPrincipal, HostRequest, HostRequestContext, HostResponse,
+    MutationRefusal, OperatorAction, ReadRefusal, RequestRefusal, ValidationCode, failed, refused,
+    validation, worker,
 };
-use crate::commands::application::{LoginOutcome, host::login::HostLoginStartError};
-use crate::presentation::CredentialState;
-use plakd_wire_types::console::{LoginMethod, LoginPhase, SecretInput};
-use plakous::subscriptions::NativeLoginCompletion;
+use plakd_wire_types::console::{LoginPhase, SecretInput};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
-use zeroize::Zeroizing;
 
 mod gateway;
 #[cfg(test)]
@@ -390,148 +386,9 @@ impl Console {
     }
 
     fn run_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
-        if let Some(link) = self.custody.admin() {
-            return gateway::run(link, work);
-        }
-        self.run_local_login(work)
+        let link = self.custody.admin().ok_or_else(|| failed(false))?;
+        gateway::run(link, work)
     }
-
-    fn run_local_login(&self, work: LoginWork<'_>) -> Result<(), AccountError> {
-        let LoginWork {
-            id,
-            account,
-            notice_revision,
-            replace_newer,
-            cancel,
-            pasted,
-            progress,
-            reply,
-        } = work;
-        let mut reply = Some(reply);
-        let mut app = self.application()?;
-        let account = super::super::accounts::exact(account)?;
-        let start = begin_login(
-            &mut app,
-            &account,
-            notice_revision,
-            replace_newer,
-            &cancel,
-            progress,
-        );
-        let challenge = match start {
-            Ok(challenge) => challenge,
-            Err(reason) => {
-                if let Some(reply) = reply.take() {
-                    let _ = reply.send(Err(reason.clone()));
-                }
-                app.end_login_attempt(&account);
-                return Err(reason);
-            }
-        };
-        let device = challenge.completion == NativeLoginCompletion::DeviceCode;
-        if challenge.completion == NativeLoginCompletion::Automatic {
-            return Err(failed(false));
-        }
-        let timeout = challenge
-            .device_code
-            .as_ref()
-            .map_or(LIFETIME, |code| code.expires_in.min(LIFETIME));
-        let expires = Instant::now() + timeout;
-        let code = challenge
-            .device_code
-            .map(|code| SecretInput::new(code.user_code).map_err(|_| failed(false)))
-            .transpose()?;
-        let mut warning = "Only enter this code on the provider's page you explicitly opened. Never share it. This logs in the serving machine, not your browser's machine.".to_owned();
-        if challenge.replaced_unusable {
-            warning.push_str(" Replacing the stored login this build cannot use (older format or another profile); its remote grant may remain active.");
-        }
-        let response = HostResponse::LoginChallenge {
-            attempt: id.into(),
-            method: if device {
-                LoginMethod::DeviceCode
-            } else {
-                LoginMethod::Paste
-            },
-            authorize_url: SecretInput::new(Zeroizing::new(challenge.authorize_url))
-                .map_err(|_| failed(false))?,
-            user_code: code,
-            expires_in_ms: u64::try_from(timeout.as_millis()).unwrap_or(0),
-            warning,
-        };
-        progress
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .phase = if device {
-            LoginPhase::Exchanging
-        } else {
-            LoginPhase::AwaitingInput
-        };
-        if reply
-            .take()
-            .is_none_or(|reply| reply.send(Ok(response)).is_err())
-        {
-            return Err(failed(false));
-        }
-        let pasted = if device {
-            None
-        } else {
-            let value = wait_for_paste(&app, pasted, cancel.clone(), expires, progress, |input| {
-                challenge
-                    .pending
-                    .1
-                    .validate_remote_input(input)
-                    .map_err(|_| validation("pasted", ValidationCode::InvalidValue).into())
-            })?;
-            if value.is_none() {
-                app.end_login_attempt(&account);
-                return Ok(());
-            }
-            value
-        };
-        finish_attempt(
-            &mut app,
-            challenge.pending,
-            pasted,
-            expires,
-            cancel,
-            progress,
-        )
-    }
-}
-
-fn begin_login(
-    app: &mut PlakousApplication,
-    account: &plakous_hosted::account::AccountRef,
-    notice_revision: &str,
-    replace_newer: bool,
-    cancel: &watch::Receiver<bool>,
-    progress: &Mutex<Progress>,
-) -> Result<
-    crate::commands::application::LoginChallenge<<PlakousApplication as AccountOps>::PendingLogin>,
-    AccountError,
-> {
-    crate::commands::application::host::prepare_host_login(
-        app,
-        account,
-        notice_revision,
-        replace_newer,
-    )
-    .map_err(|_| failed(false))?;
-    if *cancel.borrow() {
-        return Err(failed(false));
-    }
-    app.begin_host_login(account, cancel.clone())
-        .map_err(|error| match error {
-            HostLoginStartError::DeviceUnavailable => ReadRefusal::DeviceLoginUnavailable {}.into(),
-            HostLoginStartError::Cancelled => {
-                progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::Cancelled;
-                failed(false)
-            }
-            HostLoginStartError::Failed => failed(false),
-        })
 }
 
 fn attempt_id(request: &HostRequest) -> &str {
@@ -541,102 +398,6 @@ fn attempt_id(request: &HostRequest) -> &str {
         | HostRequest::AccountLoginComplete { attempt, .. } => attempt,
         _ => unreachable!(),
     }
-}
-
-fn wait_for_paste(
-    app: &PlakousApplication,
-    mut pasted: mpsc::Receiver<Completion>,
-    mut cancel: watch::Receiver<bool>,
-    expires: Instant,
-    progress: &Mutex<Progress>,
-    validate: impl Fn(&str) -> Result<(), AccountError>,
-) -> Result<Option<SecretInput>, AccountError> {
-    let value = app
-        .executor
-        .block_on(async {
-            loop {
-                if *cancel.borrow() {
-                    return None;
-                }
-                let completion = tokio::select! {
-                    biased;
-                    _ = cancel.changed() => None,
-                    value = tokio::time::timeout(
-                        expires.saturating_duration_since(Instant::now()),
-                        pasted.recv(),
-                    ) => value.ok().flatten(),
-                }?;
-                if let Err(reason) = validate(completion.pasted.expose()) {
-                    progress
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .phase = LoginPhase::AwaitingInput;
-                    let _ = completion.reply.send(Err(reason));
-                    continue;
-                }
-                if completion.reply.send(Ok(())).is_err() {
-                    return None;
-                }
-                return Some(completion.pasted);
-            }
-        })
-        .map_err(|_| failed(false))?;
-    if value.is_none() {
-        progress
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .phase = if Instant::now() >= expires {
-            LoginPhase::Expired
-        } else {
-            LoginPhase::Cancelled
-        };
-    }
-    Ok(value)
-}
-
-fn finish_attempt(
-    app: &mut PlakousApplication,
-    pending: <PlakousApplication as AccountOps>::PendingLogin,
-    pasted: Option<SecretInput>,
-    expires: Instant,
-    cancel: watch::Receiver<bool>,
-    progress: &Mutex<Progress>,
-) -> Result<(), AccountError> {
-    let account = pending.0.clone();
-    let result = app
-        .finish_host_login(
-            pending,
-            pasted.as_ref().map(SecretInput::expose),
-            expires.saturating_duration_since(Instant::now()),
-            cancel,
-        )
-        .map_err(host_failure);
-    app.end_login_attempt(&account);
-    match result? {
-        LoginOutcome::Completed(CredentialState::Ready) => {
-            let provenance_warning = !app.record_login_host(&account);
-            let warning = app.same_upstream_account(&account)
-                .map(|sibling| format!("Same upstream account as {sibling}; provider limits are shared, not additional allowance."));
-            let mut progress = progress.lock().unwrap_or_else(PoisonError::into_inner);
-            progress.phase = LoginPhase::Succeeded;
-            progress.provenance_warning = provenance_warning;
-            progress.warning = warning;
-        }
-        LoginOutcome::Cancelled => {
-            progress
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .phase = LoginPhase::Cancelled;
-        }
-        LoginOutcome::TimedOut => {
-            progress
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .phase = LoginPhase::Expired;
-        }
-        LoginOutcome::Completed(_) => return Err(failed(true)),
-    }
-    Ok(())
 }
 
 fn owner_matches(left: &HostRequestContext, right: &HostRequestContext) -> bool {

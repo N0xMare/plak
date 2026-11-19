@@ -2,6 +2,10 @@ use super::*;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+fn render(home: &Path, product: &Path, args: &HostInstall) -> CliResult<String> {
+    super::render(home, product, &home.join(".local/state"), args)
+}
+
 fn args() -> HostInstall {
     HostInstall {
         web: "unix:/home/user/.plak/host/web/web.sock".into(),

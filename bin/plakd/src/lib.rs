@@ -44,6 +44,7 @@ pub mod agent_stdio;
 mod agent_wire;
 #[doc(hidden)]
 pub mod agents_projection;
+mod app_dispatch;
 mod build_features;
 mod build_identity;
 mod capabilities;
@@ -211,14 +212,17 @@ use std::process::ExitCode;
 #[cfg(feature = "otel")]
 use std::sync::Arc;
 
+use crate::app_dispatch::execute_application_command;
 use crate::command::{Command, command_is_read_only, command_needs_product_state, runs_a_cli_turn};
 use crate::commands::agent::run_agent;
 use crate::commands::application::{AccountOps, PlakousApplication};
 use crate::commands::catalog::list_models;
 use crate::commands::doctor::run_doctor;
+use crate::commands::login::print_compatibility_notice;
+#[cfg(test)]
 use crate::commands::login::{
     auth_login, auth_logout, auth_logout_local, auth_refresh, auth_status, key_clear, key_set,
-    key_status, print_compatibility_notice,
+    key_status,
 };
 use crate::commands::session::{
     confirm_session_mutation, load_admitted_product_session, run_attached_action,
@@ -473,6 +477,21 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             .map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(ProcessOutcome::Success);
     }
+    if let Command::Gateway(command) = command {
+        gateway::execute(&services, command, &mut io::stdout().lock()).map_err(CliFailure::new)?;
+        return Ok(ProcessOutcome::Success);
+    }
+    if gateway::is_account_command(&command)
+        && let Some(outcome) = gateway::try_remote_account(
+            &services,
+            &command,
+            &mut io::stdin().lock(),
+            &mut io::stdout().lock(),
+            &mut io::stderr().lock(),
+        )?
+    {
+        return Ok(outcome);
+    }
     let _upgrade_admission = if (command_needs_product_state(&command)
         && !matches!(command, Command::Host(_)))
         || matches!(
@@ -723,10 +742,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             &mut stdout,
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
-        Command::Gateway(command) => {
-            gateway::execute(&services, command, &mut stdout).map_err(CliFailure::new)?;
-            Ok(ProcessOutcome::Success)
-        }
         Command::TreeRelease { tree_id, force } => {
             if !force {
                 return Err(CliFailure::classified(
@@ -774,17 +789,32 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             Ok(ProcessOutcome::Success)
         }
         command => {
-            if let Some(outcome) = gateway::try_remote_account(
-                &services,
-                &command,
-                &mut stdin,
-                &mut stdout,
-                &mut stderr,
-            )? {
-                return Ok(outcome);
-            }
-            let _store = gateway::hold_in_process(&services, &command)?;
             let failure_kind = command.default_failure_kind();
+            if !matches!(
+                command,
+                Command::Run { .. }
+                    | Command::RunOpenRouter { .. }
+                    | Command::RunPlatform { .. }
+                    | Command::ContinueSession { .. }
+                    | Command::Models(_)
+                    | Command::ModelsOpenRouter(_)
+                    | Command::ModelsPlatform(_)
+                    | Command::Usage {
+                        session_id: Some(_),
+                        ..
+                    }
+            ) {
+                return execute_command::<PlakousApplication>(
+                    command,
+                    &services,
+                    None,
+                    &mut stdin,
+                    &mut stdout,
+                    &mut stderr,
+                    &mut commands::login_flow::SystemLoginUi,
+                )
+                .map_err(|failure| failure.or_kind(failure_kind));
+            }
             let read_only = command_is_read_only(&command);
             let mut backend = PlakousApplication::new(
                 services.home().state()?.to_path_buf(),
@@ -972,173 +1002,66 @@ fn show_session_read_only(
 
 #[allow(
     clippy::too_many_lines,
-    reason = "Application command routing preserves one explicit handler for each account, catalog, usage, and one-shot run verb."
-)]
-fn execute_application_command(
-    command: Command,
-    services: &Services,
-    backend: &mut PlakousApplication,
-    stdin: &mut dyn io::BufRead,
-    stdout: &mut dyn io::Write,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    // Every turn-running arm admits `config.toml` first, before the
-    // compatibility prompt, a credential read or any session state.
-    let admit = |stderr: &mut dyn io::Write| {
-        commands::support::admit_product_config(services.paths()?, stderr)
-    };
-    match command {
-        Command::Run {
-            limits,
-            provider,
-            model,
-            effort,
-            composition,
-            prompt,
-            print_session_id,
-            accounts,
-        } => {
-            let config = admit(stderr)?;
-            #[cfg(feature = "test-hooks")]
-            let injected = test_hooks::selected().is_some();
-            #[cfg(not(feature = "test-hooks"))]
-            let injected = false;
-            if !injected {
-                let status = AccountOps::offline_status(backend, &provider)?;
-                if status.credential != CredentialState::RefreshRequired {
-                    commands::support::require_ready(&provider, status.credential)?;
-                }
-            }
-            commands::login::ensure_compatibility(backend, &provider, stdin, stderr)?;
-            backend.run(
-                &config,
-                &provider,
-                &model,
-                effort,
-                composition,
-                prompt,
-                print_session_id,
-                stdout,
-                stderr,
-                limits,
-                &accounts,
-            )
-        }
-        Command::RunOpenRouter {
-            account,
-            limits,
-            model,
-            effort,
-            composition,
-            wire,
-            prompt,
-            print_session_id,
-            accounts,
-        } => backend.run_api(
-            &admit(stderr)?,
-            account,
-            &model,
-            effort,
-            composition,
-            product_config::ProductTargetSelection::OpenRouter {
-                wire,
-                routing: product_config::ProductOpenRouterRoutingSelection::GatewayManaged,
-            },
-            prompt,
-            print_session_id,
-            stdout,
-            stderr,
-            limits,
-            &accounts,
-        ),
-        Command::RunPlatform {
-            account,
-            limits,
-            provider,
-            model,
-            effort,
-            composition,
-            prompt,
-            print_session_id,
-            accounts,
-        } => backend.run_api(
-            &admit(stderr)?,
-            account,
-            &model,
-            Some(effort),
-            composition,
-            product_config::ProductTargetSelection::Platform { provider },
-            prompt,
-            print_session_id,
-            stdout,
-            stderr,
-            limits,
-            &accounts,
-        ),
-        Command::ContinueSession {
-            limits,
-            session_id,
-            prompt,
-            print_session_id,
-        } => backend.continue_session(
-            &admit(stderr)?,
-            // A session a carry moved on runs on its successor (spec 02 §2.6).
-            &carry::work_id(services, &session_id, stderr)?,
-            prompt,
-            print_session_id,
-            stdout,
-            stderr,
-            limits,
-        ),
-        command => execute_command(
-            command,
-            services,
-            backend,
-            stdin,
-            stdout,
-            stderr,
-            &mut commands::login_flow::SystemLoginUi,
-        ),
-    }
-}
-
-#[allow(
-    clippy::too_many_lines,
     reason = "The product dispatcher exhaustively routes the remaining admitted commands without a second interpretation of their arguments."
 )]
-fn execute_command(
+fn execute_command<Backend: AccountOps>(
     command: Command,
     services: &Services,
-    backend: &mut impl AccountOps,
+    backend: Option<&mut Backend>,
     stdin: &mut dyn io::BufRead,
     stdout: &mut dyn io::Write,
     stderr: &mut dyn io::Write,
     login_ui: &mut impl commands::login_flow::LoginUi,
 ) -> CliResult<ProcessOutcome> {
     match command {
+        #[cfg(test)]
         Command::AuthStatus(provider) => {
             review_expiry::write_warnings(stdout, services.now_unix_seconds())
                 .map_err(|_| CliFailure::new("stdout failed"))?;
-            auth_status(backend, &provider, services.paths().ok(), stdout)
+            auth_status(
+                application_backend(backend)?,
+                &provider,
+                services.paths().ok(),
+                stdout,
+            )
         }
-        Command::AuthLogin { provider, mode } => {
-            auth_login(backend, &provider, mode, stdin, stderr, login_ui)
+        #[cfg(test)]
+        Command::AuthLogin { provider, mode } => auth_login(
+            application_backend(backend)?,
+            &provider,
+            mode,
+            stdin,
+            stderr,
+            login_ui,
+        ),
+        #[cfg(test)]
+        Command::AuthRefresh(provider) => {
+            auth_refresh(application_backend(backend)?, &provider, stdin, stderr)
         }
-        Command::AuthRefresh(provider) => auth_refresh(backend, &provider, stdin, stderr),
+        #[cfg(test)]
         Command::AuthLogout {
             provider,
             local_only: true,
-        } => auth_logout_local(backend, &provider, stderr),
+        } => auth_logout_local(application_backend(backend)?, &provider, stderr),
+        #[cfg(test)]
         Command::AuthLogout {
             provider,
             local_only: false,
-        } => auth_logout(backend, &provider, stdin, stderr),
-        Command::Models(provider) => list_models(backend, &provider, stdin, stdout, stderr),
-        Command::ModelsOpenRouter(account) => {
-            commands::catalog::list_openrouter_models(backend, &account, stdout)
-        }
+        } => auth_logout(application_backend(backend)?, &provider, stdin, stderr),
+        Command::Models(provider) => list_models(
+            application_backend(backend)?,
+            &provider,
+            stdin,
+            stdout,
+            stderr,
+        ),
+        Command::ModelsOpenRouter(account) => commands::catalog::list_openrouter_models(
+            application_backend(backend)?,
+            &account,
+            stdout,
+        ),
         Command::ModelsPlatform(provider) => {
-            let catalog = backend.platform_catalog(&provider)?;
+            let catalog = application_backend(backend)?.platform_catalog(&provider)?;
             commands::catalog::list_platform_models(&catalog, &provider, stdout)
         }
         Command::ConfigShow => dispatch::execute_config_show(services, stdout),
@@ -1199,8 +1122,11 @@ fn execute_command(
             .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
+        #[cfg(test)]
         Command::KeySet { account } => key_set(account.as_str(), stdin, stderr),
+        #[cfg(test)]
         Command::KeyClear { account } => key_clear(account.as_str(), stdout),
+        #[cfg(test)]
         Command::KeyStatus { account } => {
             key_status(account.map(|account| account.to_string()), stdout)
         }
@@ -1217,16 +1143,26 @@ fn execute_command(
             commands::mcp::run(services.paths()?, command, stdin, stdout, stderr, login_ui)
         }
         Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
-        Command::StatusAll => dispatch::execute_status_all(services, backend, stdout),
+        #[cfg(test)]
+        Command::StatusAll => {
+            dispatch::execute_status_all(services, application_backend(backend)?, stdout)
+        }
+        #[cfg(test)]
         Command::AccountsList => {
-            for account in backend.accounts()? {
+            for account in application_backend(backend)?.accounts()? {
                 writeln!(stdout, "{account}").map_err(|_| CliFailure::new("stdout failed"))?;
             }
             Ok(ProcessOutcome::Success)
         }
-        Command::AccountsRemove { account, confirmed } => {
-            commands::login::remove_account(backend, &account, confirmed, stdin, stdout, stderr)
-        }
+        #[cfg(test)]
+        Command::AccountsRemove { account, confirmed } => commands::login::remove_account(
+            application_backend(backend)?,
+            &account,
+            confirmed,
+            stdin,
+            stdout,
+            stderr,
+        ),
         Command::SessionList { include_archived } => {
             dispatch::execute_session_list(services, stdout, include_archived)
         }
@@ -1360,7 +1296,24 @@ fn execute_command(
         Command::Usage {
             account,
             session_id,
-        } => dispatch::execute_usage(services, backend, stdout, account, session_id),
+        } => dispatch::execute_usage(
+            services,
+            application_backend(backend)?,
+            stdout,
+            account,
+            session_id,
+        ),
+        #[cfg(not(test))]
+        Command::AuthStatus(_)
+        | Command::AuthLogin { .. }
+        | Command::AuthRefresh(_)
+        | Command::AuthLogout { .. }
+        | Command::KeySet { .. }
+        | Command::KeyClear { .. }
+        | Command::KeyStatus { .. }
+        | Command::StatusAll
+        | Command::AccountsList
+        | Command::AccountsRemove { .. } => Err(CliFailure::new("internal account dispatch error")),
         Command::Run { .. }
         | Command::RunOpenRouter { .. }
         | Command::RunPlatform { .. }
@@ -1400,6 +1353,10 @@ fn execute_command(
         | Command::TelemetryPrune { .. } => Err(CliFailure::new("internal command dispatch error")),
         Command::CompatibilityNotice(_) => Err(CliFailure::new("internal command dispatch error")),
     }
+}
+
+fn application_backend<T>(backend: Option<&mut T>) -> CliResult<&mut T> {
+    backend.ok_or_else(|| CliFailure::new("internal command dispatch error"))
 }
 
 /// Appends the attached account's allowance through the one host-owned Usage

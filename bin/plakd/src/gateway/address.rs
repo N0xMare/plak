@@ -57,7 +57,11 @@ pub(crate) fn parse(text: &str, allow_non_tailnet: bool) -> Result<GatewayAddres
 
 fn unix_path(path: &str) -> Result<PathBuf, AddressError> {
     let path = PathBuf::from(path);
-    if !path.is_absolute() || path.to_str().is_none() {
+    if !path.is_absolute()
+        || path
+            .to_str()
+            .is_none_or(|path| path.chars().any(char::is_control))
+    {
         return Err(AddressError(
             "unix gateway address must be an absolute UTF-8 path",
         ));

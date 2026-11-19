@@ -6,35 +6,18 @@ use std::path::Path;
 use plakous::gateway::protocol::GatewayAccount;
 use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
 use plakous::gateway::protocol::facts::CredentialStatus;
-use plakous::subscriptions::{
-    NativeProvider, NativeSubscriptionError, NativeSubscriptions, SubscriptionPaths,
-};
+#[cfg(test)]
+use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 use plakous_hosted::account::{AccountRef, Vertical};
 
 use super::ReadyAccount;
-use crate::gateway::{AccountRoute, AdminLink, HostCustody};
-use crate::home::{paths::PlakPaths, secrets};
+use crate::gateway::{AdminLink, HostCustody};
+use crate::home::paths::PlakPaths;
+#[cfg(test)]
+use crate::home::secrets;
 
+#[cfg(test)]
 const SCAN_ENTRIES: usize = 512;
-
-pub(crate) fn subscriptions_at(
-    state: &Path,
-    custody: &HostCustody,
-) -> Result<NativeSubscriptions, NativeSubscriptionError> {
-    let paths = SubscriptionPaths::from_xdg_state_home(state)?;
-    Ok(custody.subscriptions(NativeSubscriptions::new(paths)))
-}
-
-pub(crate) fn subscriptions_for(
-    subscriptions: &NativeSubscriptions,
-    provider: NativeProvider,
-    account: &AccountRef,
-) -> Result<NativeSubscriptions, NativeSubscriptionError> {
-    match account.name() {
-        Some(name) => subscriptions.for_named_account(provider, name.as_str()),
-        None => Ok(subscriptions.clone()),
-    }
-}
 
 pub(crate) fn parse_exact(value: &str) -> Option<AccountRef> {
     value
@@ -56,6 +39,7 @@ pub(crate) fn with_default_accounts(
 }
 
 /// Returns the accounts, verticals whose enumeration failed, and truncation.
+#[cfg(test)]
 pub(crate) async fn local_roster(
     subscriptions: &NativeSubscriptions,
     paths: &PlakPaths,
@@ -99,7 +83,7 @@ pub(crate) async fn local_roster(
 
 /// The actual custodian answers roster and readiness, without a local read
 /// when a configured or local service gateway holds the credentials.
-pub(super) async fn ready_accounts(
+pub(super) fn ready_accounts(
     state: &Path,
     paths: &PlakPaths,
     custody: &HostCustody,
@@ -107,12 +91,28 @@ pub(super) async fn ready_accounts(
     if let Some(link) = custody.admin() {
         return gateway_ready_accounts(link);
     }
-    if let AccountRoute::Service(address) = crate::gateway::route_for(paths, custody)? {
-        return gateway_ready_accounts(&AdminLink::local_service(address));
+    #[cfg(test)]
+    return tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "the account readiness read could not start".to_owned())?
+        .block_on(local_ready_accounts(state, paths));
+    #[cfg(not(test))]
+    {
+        let _ = (state, paths);
+        Err(crate::gateway::GatewayUnavailable::MissingAddress.to_string())
     }
-    let _holder = crate::gateway::acquire_shared(state)?;
-    let subscriptions = subscriptions_at(state, custody)
-        .map_err(|_| "the account roster could not be read".to_owned())?;
+}
+
+#[cfg(test)]
+async fn local_ready_accounts(
+    state: &Path,
+    paths: &PlakPaths,
+) -> Result<Vec<ReadyAccount>, String> {
+    let subscriptions = NativeSubscriptions::new(
+        SubscriptionPaths::from_xdg_state_home(state)
+            .map_err(|_| "the account roster could not be read".to_owned())?,
+    );
     let (accounts, _, _) = local_roster(&subscriptions, paths).await;
     let mut rows = Vec::with_capacity(accounts.len());
     for account in accounts {
@@ -123,7 +123,10 @@ pub(super) async fn ready_accounts(
             secrets::key_status(paths, account.as_str())
                 .is_ok_and(|key| key.source != secrets::KeySource::Missing)
         } else if let Some(provider) = vertical.capability().native_provider()
-            && let Ok(selected) = subscriptions_for(&subscriptions, provider, &account)
+            && let Ok(selected) = account.name().map_or_else(
+                || Ok(subscriptions.clone()),
+                |name| subscriptions.for_named_account(provider, name.as_str()),
+            )
         {
             crate::commands::support::offline_subscription_status(&selected, provider)
                 .await

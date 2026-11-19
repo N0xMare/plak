@@ -14,13 +14,3 @@ pub(crate) fn legacy(
         _ => VerticalObservation::NotConnected,
     }
 }
-#[cfg(feature = "web")]
-pub(crate) mod console {
-    use super::{AccountRef, PlakPaths, VerticalObservation, legacy};
-    pub(crate) fn read(
-        paths: &PlakPaths,
-        account: &AccountRef,
-    ) -> std::future::Ready<VerticalObservation> {
-        std::future::ready(legacy(paths, &crate::gateway::HostCustody::Local, account))
-    }
-}

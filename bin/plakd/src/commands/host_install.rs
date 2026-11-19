@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::command::HostInstall;
+use crate::gateway::{GatewayAddress, GatewayUnit, SYSTEMD_UNIT, ServerConfig, default_socket};
 use crate::home::paths::PlakPaths;
 
 mod launchd;
@@ -36,14 +37,17 @@ pub(crate) fn run(
         .ok_or_else(|| CliFailure::new("HOME is unavailable or is not UTF-8"))?;
     let home = Path::new(&home);
     let paths = paths?;
+    let state = crate::home::paths::application_state_home().map_err(CliFailure::new)?;
     let unit = if std::env::consts::OS == "macos" {
-        launchd::render(home, paths.home(), args)?
+        launchd::render(home, paths.home(), &state, args)?
     } else {
-        render(home, paths.home(), args)?
+        render(home, paths.home(), &state, args)?
     };
     if std::env::consts::OS == "linux" {
         validate_config_home(home, crate::environment::xdg_config_home().as_deref())?;
     }
+    let gateway = GatewayUnit::render(home, paths.home(), &state).map_err(CliFailure::new)?;
+    let address = installed_gateway_address(paths)?;
     let executable = home.join(".local/bin/plakd");
     if !is_executable(&executable) {
         eprintln!(
@@ -53,50 +57,115 @@ pub(crate) fn run(
     }
     if args.dry_run {
         output.write_all(unit.as_bytes()).map_err(failed)?;
+        writeln!(output, "\n# {}\n{}", gateway.path.display(), gateway.body).map_err(failed)?;
+        writeln!(
+            output,
+            "# {}\n[gateway]\naddress = {}",
+            paths.config_file().display(),
+            toml_edit::Value::from(address.as_str())
+        )
+        .map_err(failed)?;
+        if std::env::consts::OS == "macos" {
+            output
+                .write_all(
+                    launchd::next_steps(
+                        home,
+                        args,
+                        rustix::process::getuid().as_raw(),
+                        &gateway.path,
+                    )
+                    .as_bytes(),
+                )
+                .map_err(failed)?;
+        }
         return Ok(ProcessOutcome::Success);
     }
+    let path = if std::env::consts::OS == "macos" {
+        home.join("Library/LaunchAgents/com.plakd.host.plist")
+    } else {
+        home.join(".config/systemd/user/plakd-host.service")
+    };
+    matching_unit(&path, &unit).map_err(failed)?;
+    gateway.check().map_err(failed)?;
+    crate::product_config::install_gateway_address(paths, &address).map_err(CliFailure::new)?;
+    let gateway_created = gateway.install().map_err(failed)?;
+    writeln!(
+        output,
+        "{} {}",
+        if gateway_created {
+            "Installed"
+        } else {
+            "Already installed"
+        },
+        gateway.path.display()
+    )
+    .map_err(failed)?;
     #[cfg(target_os = "macos")]
     {
-        launchd::install(home, &unit, args, output)
+        launchd::install(home, &unit, args, output, &gateway.path)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let path = home.join(".config/systemd/user").join(UNIT);
-        let created = install_file(&path, &unit).map_err(failed)?;
-        if created {
-            reload_manager(home)?;
-        }
-        writeln!(
-            output,
-            "{} {}",
-            if created {
-                "Installed"
-            } else {
-                "Already installed"
-            },
-            path.display()
-        )
-        .map_err(failed)?;
-        writeln!(output, "systemctl --user enable --now {UNIT}").map_err(failed)?;
-        writeln!(
-            output,
-            "# To keep the user manager running without a login session:"
-        )
-        .map_err(failed)?;
-        writeln!(output, "loginctl enable-linger \"$USER\"").map_err(failed)?;
-        writeln!(
-            output,
-            "tailscale serve --bg {}",
-            shell_words::quote(&args.web)
-        )
-        .map_err(failed)?;
-        writeln!(output, "journalctl --user -u {UNIT} -f").map_err(failed)?;
-        Ok(ProcessOutcome::Success)
+        install_systemd(home, &path, &unit, args, output, gateway_created)
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_systemd(
+    home: &Path,
+    path: &Path,
+    unit: &str,
+    args: &HostInstall,
+    output: &mut dyn io::Write,
+    gateway_created: bool,
+) -> CliResult<ProcessOutcome> {
+    let created = install_file(path, unit).map_err(failed)?;
+    if created || gateway_created {
+        reload_manager(home)?;
+    }
+    writeln!(
+        output,
+        "{} {}\nsystemctl --user enable --now {UNIT}\n\
+         # To keep the user manager running without a login session:\n\
+         loginctl enable-linger \"$USER\"\ntailscale serve --bg {}\n\
+         journalctl --user -u {UNIT} -f",
+        if created {
+            "Installed"
+        } else {
+            "Already installed"
+        },
+        path.display(),
+        shell_words::quote(&args.web),
+    )
+    .map_err(failed)?;
+    Ok(ProcessOutcome::Success)
 }
 
 fn failed(error: io::Error) -> CliFailure {
     CliFailure::new(format!("host service installation failed: {error}"))
+}
+
+fn installed_gateway_address(paths: &PlakPaths) -> CliResult<String> {
+    let socket = default_socket(paths);
+    let text = path_text(&socket, "gateway socket")?;
+    let limit = if std::env::consts::OS == "macos" {
+        103
+    } else {
+        107
+    };
+    if text.len() > limit {
+        return Err(CliFailure::new(format!(
+            "the gateway socket path exceeds the Unix-socket limit of {limit} bytes"
+        )));
+    }
+    let config = ServerConfig::load(paths).map_err(CliFailure::new)?;
+    ServerConfig::require_host_state_root(&config.state_root).map_err(CliFailure::new)?;
+    if config.socket != socket {
+        return Err(CliFailure::new(
+            "host install requires the default gateway socket; remove socket from gateway.toml and retry",
+        ));
+    }
+    Ok(GatewayAddress::Unix(socket).label())
 }
 
 fn path_text<'a>(path: &'a Path, name: &str) -> CliResult<&'a str> {
@@ -124,9 +193,10 @@ fn quote(value: &str) -> String {
 fn service_arguments(
     home: &Path,
     product_home: &Path,
+    state_home: &Path,
     args: &HostInstall,
     socket_limit: usize,
-) -> CliResult<[String; 9]> {
+) -> CliResult<[String; 10]> {
     let home = path_text(home, "HOME")?;
     if home.contains('=') || home.contains(':') {
         return Err(CliFailure::new(
@@ -134,6 +204,7 @@ fn service_arguments(
         ));
     }
     let product_home = path_text(product_home, "PLAK_HOME")?;
+    let state_home = path_text(state_home, "XDG_STATE_HOME")?;
     let socket = args.web.strip_prefix("unix:").ok_or_else(|| {
         CliFailure::new("plakd host install requires --web unix:<absolute socket>")
     })?;
@@ -148,6 +219,7 @@ fn service_arguments(
         format!("HOME={home}"),
         format!("PLAK_HOME={product_home}"),
         format!("PATH={home}/.local/bin:/usr/local/bin:/usr/bin:/bin"),
+        format!("XDG_STATE_HOME={state_home}"),
         format!("{home}/.local/bin/plakd"),
         "host".into(),
         "--web".into(),
@@ -157,20 +229,25 @@ fn service_arguments(
     ])
 }
 
-fn render(home: &Path, product_home: &Path, args: &HostInstall) -> CliResult<String> {
-    let args = service_arguments(home, product_home, args, 107)?;
-    let environment = args[..3]
+fn render(
+    home: &Path,
+    product_home: &Path,
+    state_home: &Path,
+    args: &HostInstall,
+) -> CliResult<String> {
+    let args = service_arguments(home, product_home, state_home, args, 107)?;
+    let environment = args[..4]
         .iter()
         .map(|s| quote(s).replace('$', "$$"))
         .collect::<Vec<_>>()
         .join(" ");
-    let command = args[3..]
+    let command = args[4..]
         .iter()
         .map(|s| quote(s).replace('$', "$$"))
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "{MARKER}[Unit]\nDescription=Plak host\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
+        "{MARKER}[Unit]\nDescription=Plak host\nRequires={SYSTEMD_UNIT}\nAfter={SYSTEMD_UNIT}\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 
@@ -182,7 +259,7 @@ fn install_file(path: &Path, unit: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
+pub(crate) fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.is_file() && metadata.len() == unit.len() as u64 {
@@ -192,9 +269,30 @@ fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
                     return Ok(true);
                 }
             }
+            let quoted = shell_words::quote(path.to_str().unwrap_or_default());
+            let name = path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default();
+            let stop = if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("plist"))
+            {
+                format!(
+                    "launchctl bootout gui/{} {quoted}",
+                    rustix::process::getuid().as_raw()
+                )
+            } else {
+                format!("systemctl --user disable --now {name}")
+            };
+            let command = if name.contains("gateway") {
+                "gateway"
+            } else {
+                "host"
+            };
             Err(io::Error::other(format!(
-                "refusing to overwrite {}: not the exact generated service file; stop and remove it manually first",
-                path.display()
+                "refusing to overwrite {}: not the exact generated service file; run `{stop}` if loaded, back it up, run `rm -- {quoted}`, then retry `plakd {command} install`",
+                path.display(),
             )))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -202,7 +300,7 @@ fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
     }
 }
 
-fn publish_unit(path: &Path, unit: &str) -> io::Result<()> {
+pub(crate) fn publish_unit(path: &Path, unit: &str) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other("unit has no directory"))?;

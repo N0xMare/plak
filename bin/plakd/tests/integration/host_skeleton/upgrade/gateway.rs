@@ -11,7 +11,7 @@ fn cross_key_preflight_refuses_codex_behind_a_v1_gateway_before_surrender() {
     let mut client = Client::connect(&host);
     assert!(client.rows(1).iter().any(|row| row.session == source));
 
-    // The source has already latched local custody. Its destination probe
+    // The source has already latched its local gateway link. The destination probe
     // reads the new configuration, with no scripted-model bypass.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -19,14 +19,13 @@ fn cross_key_preflight_refuses_codex_behind_a_v1_gateway_before_surrender() {
     let key = fixture.home().join("fixture-caller.key");
     write_private(&key, "fixture-key");
     let config = fixture.home().join("config.toml");
-    let prior = std::fs::read_to_string(&config).unwrap();
-    write_private(
-        &config,
-        &format!(
-            "{prior}\n[gateway]\naddress = \"tcp:{address}\"\nkey_file = {:?}\n",
-            key.to_str().unwrap()
-        ),
-    );
+    let mut edited = std::fs::read_to_string(&config)
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    edited["gateway"]["address"] = toml_edit::value(format!("tcp:{address}"));
+    edited["gateway"]["key_file"] = toml_edit::value(key.to_str().unwrap());
+    write_private(&config, &edited.to_string());
 
     let result = upgrade(&fixture, &binary(&fixture));
     assert!(!result.status.success());

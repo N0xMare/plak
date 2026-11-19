@@ -17,7 +17,6 @@ use super::callers::Callers;
 use super::dispatch::{self, GatewayState};
 use super::flags::Flags;
 use super::http::Request;
-use super::route::{AccountRoute, select};
 use super::server_config::ServerConfig;
 use crate::home::paths::PlakPaths;
 
@@ -624,47 +623,6 @@ fn drain_stops_later_calls() {
 }
 
 #[test]
-fn cli_routing_prefers_the_configured_address_then_the_service_then_the_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-    let lock = dir.path().join("holder.lock");
-    let configured_home = PlakPaths::explicit(dir.path().join("configured"));
-    std::fs::create_dir_all(configured_home.home()).unwrap();
-    std::fs::write(
-        configured_home.config_file(),
-        "[gateway]\naddress = \"tcp:127.0.0.1:9\"\n",
-    )
-    .unwrap();
-    super::io_file::write_private(
-        &configured_home.secrets_dir().join("gateway.key"),
-        b"plakgw1.host.unused",
-    )
-    .unwrap();
-    let configured_custody = super::HostCustody::resolve(&configured_home).unwrap();
-    let configured = select(&configured_custody, &lock).unwrap();
-    assert!(matches!(configured, AccountRoute::Configured(_)));
-    assert!(configured.via_line().unwrap().contains("tcp:127.0.0.1:9"));
-    let local = super::HostCustody::Local;
-    let alone = select(&local, &lock).unwrap();
-    assert!(matches!(alone, AccountRoute::InProcess));
-    assert!(alone.via_line().is_none());
-    assert!(!lock.exists(), "routing must not create the holder file");
-    let exclusive =
-        super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
-            .unwrap();
-    let socket = dir.path().join("gateway.sock");
-    exclusive.advertise(&socket).unwrap();
-    let service = select(&local, &lock).unwrap();
-    assert_eq!(
-        service,
-        AccountRoute::Service(super::address::GatewayAddress::Unix(socket))
-    );
-    assert!(service.via_line().unwrap().starts_with("via gateway unix:"));
-    let still = select(&configured_custody, &lock).unwrap();
-    assert!(matches!(still, AccountRoute::Configured(_)));
-}
-
-#[test]
 fn a_non_tailnet_tcp_address_is_refused_unless_opted_in() {
     assert!(super::address::parse("tcp:192.0.2.10:9", false).is_err());
     assert!(super::address::parse("tcp:192.0.2.10:9", true).is_ok());
@@ -693,32 +651,6 @@ fn gateway_grammar_parses_the_service_verbs() {
     ));
     let drained = crate::cli::parse(["gateway", "drain"].map(std::ffi::OsString::from)).unwrap();
     assert!(matches!(drained, Command::Gateway(GatewayCommand::Drain)));
-}
-
-#[test]
-fn routing_uses_configuration_and_does_not_create_the_holder() {
-    let (_dir, paths) = home();
-    let local = super::HostCustody::resolve(&paths).unwrap();
-    let lock = paths
-        .home()
-        .join("state/plak/subscriptions/.custody-holder.lock");
-    assert!(matches!(
-        select(&local, &lock).unwrap(),
-        AccountRoute::InProcess
-    ));
-    assert!(
-        !lock.exists(),
-        "looking for a gateway must not create the holder"
-    );
-    std::fs::write(
-        paths.config_file(),
-        "[gateway]\naddress = \"unix:/tmp/plak-routing-test.sock\"\n",
-    )
-    .unwrap();
-    let configured = super::HostCustody::resolve(&paths).unwrap();
-    let route = select(&configured, &lock).unwrap();
-    assert!(route.via_line().unwrap().contains("plak-routing-test.sock"));
-    assert!(!lock.exists());
 }
 
 fn mint(state: &Arc<GatewayState>, id: &str, scopes: &str, source: &str) -> String {
@@ -1116,11 +1048,6 @@ fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() 
         .unwrap();
         assert!(forwarded.is_none(), "{args:?} must run in this process");
         assert!(stdout.is_empty(), "{args:?} is not an admin verb");
-        assert!(
-            super::hold_in_process(&services, &command)
-                .unwrap()
-                .is_none()
-        );
         let app = crate::commands::application::PlakousApplication::new(
             state.clone(),
             None,
@@ -1133,25 +1060,5 @@ fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() 
     assert!(
         !state.join("plak/subscriptions").exists(),
         "a gateway process must not create its subscription store"
-    );
-}
-
-/// Without an address, a model command under a service-held store refuses
-/// with the remedy instead of opening the store beside the service.
-#[test]
-fn a_model_command_without_an_address_refuses_a_service_held_store() {
-    let (dir, paths) = home();
-    let state = dir.path().join("host-state");
-    let lock = super::holder::lock_path(&state);
-    let held = super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
-        .unwrap();
-    held.advertise(&dir.path().join("gw.sock")).unwrap();
-    let services = crate::shell::services::Services::for_home_with_state(paths, state);
-    let command = crate::cli::parse(["models", "codex"].map(std::ffi::OsString::from)).unwrap();
-    let refused = super::hold_in_process(&services, &command).err().unwrap();
-    assert!(
-        refused.message().contains("[gateway] address"),
-        "{}",
-        refused.message()
     );
 }

@@ -1,29 +1,28 @@
-//! `plakd gateway` execution. Account verbs that are not gateway verbs stay on
-//! the normal commands and are forwarded when a gateway holds the store.
+//! `plakd gateway` execution.
 
 use crate::command::GatewayCommand;
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
 use std::io::Write;
 
+use super::AdminLink;
 use super::ServerConfig;
 use super::address::GatewayAddress;
-use super::route::AccountRoute;
 
 pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate::CliResult<u64> {
     use plakous::gateway::protocol::facts::{CredentialStatus, FactsReply, FactsRequest};
     use plakous::gateway::protocol::{Endpoint, GatewayAccount};
 
-    let (route, key) = route(services).map_err(crate::CliFailure::new)?;
-    let address = route
-        .remote()
+    let custody = services.custody()?;
+    let link = custody
+        .admin()
         .ok_or_else(|| crate::CliFailure::new("deploy requires an enrolled gateway"))?;
-    verify_holder(services).map_err(crate::CliFailure::new)?;
+    verify_holder(services, link).map_err(crate::CliFailure::new)?;
     let account = GatewayAccount::new(account.to_owned())
         .map_err(|_| crate::CliFailure::new("invalid deploy account"))?;
     let answer = super::client::request::<FactsReply>(
-        address,
-        key.as_deref(),
+        &link.address,
+        link.key(),
         Endpoint::Facts,
         &FactsRequest {
             accounts: vec![account.clone()],
@@ -54,16 +53,14 @@ pub(crate) fn execute(
         GatewayCommand::Init { tcp } => write_init(home, tcp.as_deref(), stdout),
         GatewayCommand::Serve => super::serve(home),
         GatewayCommand::Install { dry_run } => {
-            let executable = std::env::current_exe().map_err(|error| error.to_string())?;
             let state = services
                 .home()
                 .state()
                 .map_err(|failure| failure.message().to_owned())?;
-            let path = super::install(&executable, home.home(), state, dry_run)?;
-            writeln!(stdout, "{}", path.display()).map_err(|error| error.to_string())
+            super::install::install(home, state, dry_run, stdout)
         }
         GatewayCommand::Uninstall => {
-            let note = super::uninstall()?;
+            let note = super::install::uninstall()?;
             writeln!(stdout, "{note}").map_err(|error| error.to_string())
         }
         GatewayCommand::Status { dry_run: true } => dry_status(home, stdout),
@@ -94,13 +91,10 @@ pub(crate) fn execute(
             caller,
             cut,
         } => {
-            let (route, key) = route(services)?;
-            let Some(address) = route.remote() else {
-                return Err("no gateway is configured or running".to_owned());
-            };
+            let link = AdminLink::for_cli(home)?;
             super::set_flag(
-                address,
-                key.as_deref(),
+                &link.address,
+                link.key(),
                 account.as_deref(),
                 caller.as_deref(),
                 cut,
@@ -142,27 +136,20 @@ fn write_init(home: &PlakPaths, tcp: Option<&str>, stdout: &mut dyn Write) -> Re
 }
 
 fn live_status(services: &Services, stdout: &mut dyn Write) -> Result<(), String> {
-    let (route, key) = route(services)?;
-    if let Some(line) = route.via_line() {
-        writeln!(stdout, "{line}").map_err(|error| error.to_string())?;
-    }
     let home = services
         .paths()
         .map_err(|failure| failure.message().to_owned())?;
-    let text = super::status_text(home, &route, key.as_deref())?;
-    writeln!(stdout, "{text}").map_err(|error| error.to_string())
+    let link = AdminLink::for_cli(home)?;
+    let text = super::status_text(home, &link.address, link.key())?;
+    writeln!(stdout, "via gateway {}\n{text}", link.address.label())
+        .map_err(|error| error.to_string())
 }
 
 fn live_check(services: &Services, stdout: &mut dyn Write) -> Result<(), String> {
-    let (route, key) = route(services)?;
-    let Some(address) = route.remote() else {
-        return Err("no gateway is configured or running".to_owned());
-    };
-    if let Some(line) = route.via_line() {
-        writeln!(stdout, "{line}").map_err(|error| error.to_string())?;
-    }
-    verify_holder(services)?;
-    super::check(address, key.as_deref(), stdout)
+    let link = cli_link(services)?;
+    verify_holder(services, &link)?;
+    writeln!(stdout, "via gateway {}", link.address.label()).map_err(|error| error.to_string())?;
+    super::check(&link.address, link.key(), stdout)
 }
 
 fn dry_status(home: &PlakPaths, stdout: &mut dyn Write) -> Result<(), String> {
@@ -179,67 +166,41 @@ fn dry_status(home: &PlakPaths, stdout: &mut dyn Write) -> Result<(), String> {
 }
 
 fn local_service(services: &Services) -> Result<GatewayAddress, String> {
-    match route(services)?.0 {
-        AccountRoute::Configured(address) | AccountRoute::Service(address) => Ok(address),
-        AccountRoute::InProcess => {
-            Err("no local gateway is running; start it with plakd gateway serve".to_owned())
-        }
-    }
-}
-
-/// The route for a gateway verb and the caller key it presents: the
-/// configured gateway's key, or none for a discovered same-user service.
-fn route(services: &Services) -> Result<(AccountRoute, Option<String>), String> {
-    let custody = services
-        .custody()
-        .map_err(|failure| failure.message().to_owned())?;
     let home = services
         .paths()
         .map_err(|failure| failure.message().to_owned())?;
-    let route = super::route_for(home, &custody)?;
-    let key = match route {
-        AccountRoute::Configured(_) => custody
-            .admin()
-            .and_then(super::AdminLink::key)
-            .map(str::to_owned),
-        AccountRoute::Service(_) | AccountRoute::InProcess => None,
-    };
-    Ok((route, key))
+    Ok(AdminLink::local(home)?.address)
+}
+
+fn cli_link(services: &Services) -> Result<AdminLink, String> {
+    let home = services
+        .paths()
+        .map_err(|failure| failure.message().to_owned())?;
+    AdminLink::for_cli(home)
 }
 
 /// A configured unix gateway must hold this home's state store.
-fn verify_holder(services: &Services) -> Result<(), String> {
-    let custody = services
-        .custody()
-        .map_err(|failure| failure.message().to_owned())?;
+fn verify_holder(services: &Services, link: &AdminLink) -> Result<(), String> {
     let state = services
         .home()
         .state()
         .map_err(|failure| failure.message().to_owned())?;
-    custody
-        .verify_holder(state)
-        .map_err(super::HolderProofError::into_message)
+    if !super::verify_holder(&link.address, state)? {
+        return Err(super::GatewayUnavailable::Unreachable(&link.address).to_string());
+    }
+    Ok(())
 }
 
-/// `gateway: in-process`, or the gateway's address and instance. A gateway
+/// The gateway's address and instance. A gateway
 /// that does not answer, or that does not hold this home's store, is an
 /// error the doctor counts as a failure.
 pub(crate) fn doctor_line(services: &Services) -> Result<String, String> {
-    let (route, key) = route(services).map_err(|error| format!("gateway: {error}"))?;
-    match route.remote() {
-        None => Ok("gateway: in-process".to_owned()),
-        Some(address) => {
-            if matches!(route, AccountRoute::Configured(_)) {
-                verify_holder(services).map_err(|error| format!("gateway: {error}"))?;
-            }
-            match super::client::versions(address, key.as_deref()) {
-                Ok(versions) => Ok(format!(
-                    "gateway: {} {}",
-                    address.label(),
-                    versions.instance.as_str()
-                )),
-                Err(error) => Err(format!("gateway: {error}")),
-            }
-        }
-    }
+    let link = cli_link(services)?;
+    verify_holder(services, &link)?;
+    let versions = super::client::versions(&link.address, link.key())?;
+    Ok(format!(
+        "gateway: {} {}",
+        link.address.label(),
+        versions.instance.as_str()
+    ))
 }

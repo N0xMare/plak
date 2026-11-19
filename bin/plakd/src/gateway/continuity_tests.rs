@@ -60,8 +60,7 @@ struct Grants {
     openrouter: plakous::openrouter::OpenRouterKeyGeneration,
 }
 
-async fn grants(paths: &PlakPaths) -> Grants {
-    let custody = super::HostCustody::resolve(paths).unwrap();
+async fn grants(paths: &PlakPaths, custody: super::HostCustody) -> Grants {
     let platform =
         crate::platform_product::ProductPlatformCredentials::shared(paths, custody.clone());
     let openrouter =
@@ -244,7 +243,7 @@ fn a_gateway_host_admits_the_in_process_key_generations_and_opens_no_store() {
         .unwrap();
 
     // The build before the flip: no gateway, keys read in this process.
-    let before = runtime.block_on(grants(&paths));
+    let before = runtime.block_on(grants(&paths, super::HostCustody::Local));
 
     let (socket, served) = serve(&paths, &directory.path().join("gateway-state"));
     std::fs::write(
@@ -254,7 +253,7 @@ fn a_gateway_host_admits_the_in_process_key_generations_and_opens_no_store() {
     .unwrap();
 
     // The same home after the flip: every key stays at the gateway.
-    let after = runtime.block_on(grants(&paths));
+    let after = runtime.block_on(grants(&paths, super::HostCustody::resolve(&paths).unwrap()));
     assert!(
         before == after,
         "a gateway host must admit the generations it admitted in-process"

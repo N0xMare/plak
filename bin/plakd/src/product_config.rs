@@ -67,6 +67,34 @@ pub use templates::{
 
 pub(crate) use templates::{parse_template, render_template};
 
+pub(crate) fn install_gateway_address(
+    paths: &crate::home::paths::PlakPaths,
+    address: &str,
+) -> Result<(), String> {
+    let _lock = publication::ConfigLock::take(paths).map_err(ConfigSaveError::into_message)?;
+    let path = paths.config_file();
+    let (text, missing) = match std::fs::read_to_string(&path) {
+        Ok(text) => (text, false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
+        Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+    };
+    let mut config = toml_file::parse_config(&text)?;
+    if let Some(existing) = config.gateway_address.as_deref() {
+        return if existing == address {
+            Ok(())
+        } else {
+            Err(format!(
+                "host install will not replace gateway.address in {}; remove the existing address to install the local gateway",
+                path.display(),
+            ))
+        };
+    }
+    config.gateway_address = Some(address.to_owned());
+    let edited = toml_file::edit_document(Some(&text), &config)?;
+    atomic::atomic_file(&path, edited.as_bytes(), missing, &mut |_, _| Ok(()))
+        .map_err(ConfigSaveError::into_message)
+}
+
 #[cfg(test)]
 mod tool_sections_tests;
 

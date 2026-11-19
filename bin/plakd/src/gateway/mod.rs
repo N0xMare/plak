@@ -16,15 +16,12 @@ mod custody;
 mod dispatch;
 mod flags;
 mod holder;
-#[cfg(feature = "web")]
-pub(crate) mod host_support;
 mod http;
 mod install;
 mod io_file;
 mod ops;
 mod product;
 mod remote_account;
-mod route;
 mod route_custody;
 mod server_config;
 mod service;
@@ -36,12 +33,10 @@ mod subscription_custody;
 
 pub(crate) use address::GatewayAddress;
 pub(crate) use cli_cmd::{doctor_line, execute};
-pub(crate) use holder::acquire_shared;
-pub(crate) use install::{install, uninstall};
-pub(crate) use remote_account::{hold_in_process, try_remote_account};
-pub(crate) use route::{AccountRoute, select};
-pub(crate) use route_custody::{AdminLink, HolderProofError, HostCustody};
-pub(crate) use server_config::ServerConfig;
+pub(crate) use install::{GatewayUnit, SYSTEMD_UNIT, launchd_start};
+pub(crate) use remote_account::{is_account_command, try_remote_account};
+pub(crate) use route_custody::{AdminLink, GatewayUnavailable, HostCustody, verify_holder};
+pub(crate) use server_config::{ServerConfig, default_socket};
 pub(crate) use service::Gateway;
 
 use std::io::Write;
@@ -50,8 +45,6 @@ use std::net::SocketAddr;
 use plakous::gateway::protocol::GatewayAccount;
 use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse, DisableTarget};
 use plakous::gateway::protocol::scope::{CallerId, ScopeSet, SourceNet};
-
-use holder::lock_path;
 
 /// Runs `plakd gateway serve` until a signal or an admin drain.
 pub(crate) fn serve(home: &crate::home::paths::PlakPaths) -> Result<(), String> {
@@ -104,33 +97,27 @@ fn parse_listen(text: &str) -> Result<SocketAddr, String> {
 
 pub(crate) fn status_text(
     home: &crate::home::paths::PlakPaths,
-    route: &AccountRoute,
+    address: &GatewayAddress,
     key: Option<&str>,
 ) -> Result<String, String> {
-    let mut lines = Vec::new();
-    match route.remote() {
-        Some(address) => {
-            let versions = client::versions(address, key)?;
-            lines.push(format!("instance {}", versions.instance.as_str()));
-            if let Some(count) = audit::published_failures(
-                &server_config::audit_failures_path(home),
-                versions.instance.as_str(),
-            ) {
-                lines.push(format!("audit append failures {count}"));
-            }
-            lines.push(format!(
-                "versions {}",
-                versions
-                    .versions
-                    .iter()
-                    .map(u16::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-            lines.push(address.label());
-        }
-        None => lines.push("no gateway service is running".to_owned()),
+    let versions = client::versions(address, key)?;
+    let mut lines = vec![format!("instance {}", versions.instance.as_str())];
+    if let Some(count) = audit::published_failures(
+        &server_config::audit_failures_path(home),
+        versions.instance.as_str(),
+    ) {
+        lines.push(format!("audit append failures {count}"));
     }
+    lines.push(format!(
+        "versions {}",
+        versions
+            .versions
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    lines.push(address.label());
     let flags = flags::Flags::load(&server_config::flags_path(home)).ok();
     if let Some(flags) = flags {
         lines.push(format!("flags {}", flags.summary()));
@@ -306,22 +293,6 @@ pub(crate) fn check(
         }
         _ => Err("gateway account list returned an unexpected response".to_owned()),
     }
-}
-
-/// The account route for a CLI gateway verb under `custody`. Discovery
-/// reads the state root `gateway.toml` names, else the host state home.
-pub(crate) fn route_for(
-    home: &crate::home::paths::PlakPaths,
-    custody: &HostCustody,
-) -> Result<AccountRoute, String> {
-    if let Some(address) = custody.address() {
-        return Ok(AccountRoute::Configured(address.clone()));
-    }
-    let state = match ServerConfig::load(home) {
-        Ok(config) => config.state_root,
-        Err(_) => crate::home::paths::application_state_home()?,
-    };
-    select(custody, &lock_path(&state))
 }
 
 fn flag_target(account: Option<&str>, caller: Option<&str>) -> Result<DisableTarget, String> {

@@ -125,6 +125,7 @@ impl Services {
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         let state = paths.home().join("test-state");
         Self::for_home_with_state(paths, state)
+            .with_test_custody(crate::gateway::HostCustody::Local)
     }
 
     #[cfg(test)]
@@ -146,18 +147,7 @@ impl Services {
         }
     }
 
-    #[cfg(all(
-        test,
-        feature = "openai",
-        feature = "anthropic",
-        feature = "xai-api",
-        feature = "openrouter",
-        feature = "codex",
-        feature = "grok",
-        feature = "claude",
-        feature = "test-hooks",
-        feature = "web"
-    ))]
+    #[cfg(test)]
     pub(crate) fn with_test_custody(mut self, custody: crate::gateway::HostCustody) -> Self {
         self.custody = Arc::new(OnceLock::from(custody));
         self

@@ -176,19 +176,15 @@ also keep compatibility with their immediately preceding version.
   remedy only when no recovery will run.
 
 - Add `plakd gateway`: a same-user service that holds the credential store,
-  caller keys, a kill switch, an audit log and the admin verbs. A configured
-  `[gateway]` address is home-scoped. In-process account commands take the
-  holder lock shared; the service takes it exclusive. The listener relays
-  API-key accounts and the subscription logins through the shared server
-  core. A host that names a gateway relays API-key and subscription routes
-  through it and does not take the holder lock or open the subscription
-  store. Login, logout, consent and account listing use the gateway admin
-  verbs. OpenRouter
-  allowance is one gateway-side `GET /api/v1/key`; other API-key kinds report
-  `not-observed`. Host sessions, child agents and `plakd run` take the
-  gateway's custody too, and `plakd key status` through a gateway names the
-  key's source. A host with no gateway address keeps direct in-process
-  custody. No persisted format changes.
+  caller keys, a kill switch, an audit log and the admin verbs. All hosts and
+  CLI account commands use a separate gateway; an absent or unreachable
+  gateway reports `gateway_unavailable` instead of opening credentials in
+  process. `host install` installs both user services and sets the default
+  Unix gateway address. The gateway runs through `~/.local/bin/plakd-gateway`,
+  which normal installation does not advance. Drain, flip that link, restart
+  and run `gateway check` before upgrading the host. Existing edited units
+  or gateway definitions pinned to a snapshot must be stopped, backed up and
+  replaced explicitly. No persisted format changes.
 - Resolve credential custody once per process from the home `config.toml`:
   a host resolves it at startup and every route, console read and write,
   carry probe and catalog refresh uses it. `[gateway]` changes need a host

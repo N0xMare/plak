@@ -26,8 +26,7 @@ fn profile_fixture() -> Option<Fixture> {
     }));
     let profiles = fixture.home().join("profiles");
     std::fs::create_dir_all(&profiles).unwrap();
-    write_private(
-        &fixture.home().join("config.toml"),
+    fixture.write_config(
         "[root]\nagent = \"lead\"\n[orchestration]\nsubagents = true\n[compaction]\nenabled = true\n",
     );
     for (name, model, effort) in [

@@ -1369,7 +1369,8 @@ the flag first, then cancels each matching relay in flight; the caller sees an
 `End` `cancelled` frame and the upstream exchange is dropped. A relay that
 registers while a disable lands re-checks the flag, so none escapes a cut.
 
-A host with a unix `[gateway] address` refuses to start unless the exclusive
+Every host requires a separate, reachable credential gateway. A host with a
+Unix `[gateway] address` refuses to start unless the exclusive
 holder of its own state home's store advertises exactly that socket; `gateway
 check` and `plakd doctor` apply the same check, so a host never relays through a
 gateway that holds another store. Startup tolerates a short listener bring-up
@@ -1481,13 +1482,13 @@ effect. Key files are mode `0600` inside the `0700` `secrets/` directory. A key
 is never an argv value; the CLI prompts with masked input. **plakd never loads a
 `.env` file.**
 
-The serving host, not a connected client, resolves host-session credentials.
-Its unit environment is authoritative when unit-managed. An explicitly
-auto-started host receives an empty-then-curated environment, excluding all
-caller API-key variables; missing-key diagnostics name that effective resolver
-and the ignored variable without exposing values. Explicit CLI key writes
-remain in-process and retain their own environment-first refusal law. The
-bridge does not forward key mutations or add a credential-write wire operation.
+Only the gateway process resolves and holds provider credentials. Its own
+environment decides API-key overrides, including refusals to write or clear
+a stored key. The host never reads provider key files or opens the native
+subscription store; an explicitly auto-started host does not inherit caller
+API-key variables. CLI key writes go to the gateway over its admin protocol.
+The bridge does not forward key mutations or add a credential-write wire
+operation. Plakous embedders may still use library-local custody.
 
 Named API keys use only `secrets/api/<vertical>/<name>.secret`, through the
 API SecretShelf, with 0700 directories and single-link regular files owned

@@ -1,4 +1,6 @@
 use super::*;
+use plakd_wire_types::console::LoginMethod;
+use zeroize::Zeroizing;
 
 fn owner() -> HostRequestContext {
     HostRequestContext {
@@ -248,7 +250,6 @@ async fn start_login_allows_two_pending_attempts_and_a_key_write_without_burning
 {
     let root = tempfile::tempdir().expect("home");
     let console = console_at(root.path());
-    let paths = &console.paths;
     let mut attempts = Vec::new();
     for name in ["first", "second"] {
         let account = format!("claude/{name}");
@@ -269,29 +270,6 @@ async fn start_login_allows_two_pending_attempts_and_a_key_write_without_burning
         };
         attempts.push((attempt, stopped));
     }
-    let account = "openai/work";
-    let token = grant(
-        &console,
-        OperatorAction::AccountKeySet {
-            account_id: account.into(),
-        },
-    );
-    let result = Arc::clone(&console)
-        .account_write(
-            owner(),
-            HostRequest::AccountKeySet {
-                account_id: account.into(),
-                secret: SecretInput::new(Zeroizing::new("synthetic-key".into())).expect("fixture"),
-                confirmation: token,
-            },
-        )
-        .await;
-    assert!(matches!(result, Ok(HostResponse::AccountChanged { .. })));
-    assert!(
-        crate::home::secrets::resolve_api_key(paths, account)
-            .expect("read")
-            .is_some()
-    );
     let token = login_grant(&console, "claude/third");
     let (stop, _) = oneshot::channel();
     assert!(matches!(
@@ -336,99 +314,4 @@ async fn start_login_allows_two_pending_attempts_and_a_key_write_without_burning
     for (_, stopped) in attempts {
         stopped.await.expect("worker stopped");
     }
-}
-
-#[tokio::test]
-async fn refused_paste_keeps_pending_authority_and_accepts_a_corrected_input() {
-    let root = tempfile::tempdir().expect("home");
-    let console = console_at(root.path());
-    let token = login_grant(&console, "claude/work");
-    let (done, finished) = oneshot::channel();
-    let response = Arc::clone(&console)
-        .start_login(
-            owner(),
-            "claude/work".into(),
-            "fixture".into(),
-            false,
-            token,
-            move |console, work| {
-                let app = console.application()?;
-                work.progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::AwaitingInput;
-                let _ = work.reply.send(Ok(HostResponse::LoginChallenge {
-                    attempt: work.id.into(),
-                    method: LoginMethod::Paste,
-                    authorize_url: SecretInput::new(Zeroizing::new(
-                        "https://example.invalid/login".into(),
-                    ))
-                    .expect("fixture"),
-                    user_code: None,
-                    expires_in_ms: 60_000,
-                    warning: "fixture".into(),
-                }));
-                let value = wait_for_paste(
-                    &app,
-                    work.pasted,
-                    work.cancel,
-                    Instant::now() + Duration::from_secs(30),
-                    work.progress,
-                    |input| {
-                        if input == "valid-bound-callback" {
-                            Ok(())
-                        } else {
-                            Err(validation("pasted", ValidationCode::InvalidValue).into())
-                        }
-                    },
-                )?;
-                assert_eq!(
-                    value.as_ref().map(SecretInput::expose),
-                    Some("valid-bound-callback")
-                );
-                work.progress
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .phase = LoginPhase::Succeeded;
-                let _ = done.send(());
-                Ok(())
-            },
-        )
-        .await;
-    let Ok(HostResponse::LoginChallenge { attempt, .. }) = response else {
-        panic!("challenge")
-    };
-    let submit = |value: &str| HostRequest::AccountLoginComplete {
-        attempt: attempt.clone(),
-        pasted: SecretInput::new(Zeroizing::new(value.into())).expect("fixture"),
-    };
-    assert!(matches!(
-        Arc::clone(&console)
-            .login_request(owner(), submit("wrong-state"))
-            .await,
-        Ok(HostResponse::Refused {
-            reason: ReadRefusal::ValidationFailed { .. }
-        })
-    ));
-    assert!(matches!(
-        Arc::clone(&console)
-            .login_request(
-                owner(),
-                HostRequest::AccountLoginPoll {
-                    attempt: attempt.clone()
-                }
-            )
-            .await,
-        Ok(HostResponse::LoginProgress {
-            phase: LoginPhase::AwaitingInput,
-            ..
-        })
-    ));
-    assert!(matches!(
-        Arc::clone(&console)
-            .login_request(owner(), submit("valid-bound-callback"))
-            .await,
-        Ok(HostResponse::LoginProgress { .. })
-    ));
-    finished.await.expect("worker finished");
 }

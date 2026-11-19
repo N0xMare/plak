@@ -5,14 +5,18 @@ use std::io;
 use crate::commands;
 use crate::commands::application::AccountOps;
 use crate::commands::session::{load_admitted_product_session, run_attached_action};
+use crate::commands::support::config_set_failure;
+#[cfg(test)]
 use crate::commands::support::{
-    api_key_status_failure_cell, api_provider_label, config_set_failure, profile_acceptance_label,
+    api_key_status_failure_cell, api_provider_label, profile_acceptance_label,
     status_credential_cell, subscription_provider_label,
 };
 use crate::commands::usage::{collect_usage_limits, usage_vertical_for_account};
+#[cfg(test)]
+use crate::presentation::{CompatibilityState, CredentialState, credential_locations_line};
 use crate::presentation::{
-    CompatibilityState, CredentialState, cli_human_output, credential_locations_line,
-    event_table_row, format_unix_seconds, product_account_label, session_preview_line,
+    cli_human_output, event_table_row, format_unix_seconds, product_account_label,
+    session_preview_line,
 };
 use crate::product_subscription_usage;
 use crate::shell::services::Services;
@@ -20,8 +24,10 @@ use crate::surface_protocol;
 use crate::surface_protocol::SurfaceIntent;
 use crate::{
     CliFailure, CliFailureKind, CliResult, ProcessOutcome, carry, cli_output, product_config,
-    product_secrets, product_session_log, review_expiry, store, topology_product,
+    product_session_log, store, topology_product,
 };
+#[cfg(test)]
+use crate::{product_secrets, review_expiry};
 
 pub(super) fn execute_config_show(
     services: &Services,
@@ -124,6 +130,7 @@ pub(super) fn execute_config_set(
     clippy::too_many_lines,
     reason = "The all-account status command collects OAuth and API credential facts before rendering one consistently ordered table."
 )]
+#[cfg(test)]
 pub(super) fn execute_status_all(
     services: &Services,
     backend: &mut impl AccountOps,

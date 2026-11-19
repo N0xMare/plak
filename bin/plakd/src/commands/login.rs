@@ -6,23 +6,34 @@
 
 use std::io::{self, IsTerminal as _};
 
+#[cfg(test)]
 use crate::terminal_application::read_terminal_secret_line;
-use plakous::subscriptions::{NativeLoginMode, NativeSubscriptions};
+#[cfg(test)]
+use plakous::subscriptions::NativeLoginMode;
+use plakous::subscriptions::NativeSubscriptions;
 
-use super::application::{AccountOps, Revocation, StoredCredential};
+use super::application::AccountOps;
+#[cfg(test)]
+use super::application::{Revocation, StoredCredential};
+#[cfg(test)]
 use super::support::{
-    compatibility_status_name, credential_status_name, profile_date, profile_inactive_failure,
-    require_locally_retired, require_ready, require_revoked,
+    compatibility_status_name, credential_status_name, require_locally_retired, require_revoked,
 };
+use super::support::{profile_date, profile_inactive_failure, require_ready};
+#[cfg(test)]
 use crate::home::paths as product_paths;
+#[cfg(test)]
 use crate::home::secrets as product_secrets;
 use crate::oauth_ui as product_oauth_ui;
-use crate::presentation::{
-    CompatibilityState, CredentialState, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES,
-};
-use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
+#[cfg(test)]
+use crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES;
+use crate::presentation::{CompatibilityState, CredentialState};
+#[cfg(test)]
+use plakous_hosted::error::ProcessOutcome;
+use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 
 /// Removes only an already signed-out named slot, or clears one named API key.
+#[cfg(test)]
 pub(crate) fn remove_account(
     backend: &mut impl AccountOps,
     account: &plakous_hosted::account::AccountRef,
@@ -63,6 +74,7 @@ pub(crate) fn remove_account(
 }
 
 /// `plakd status <provider>`: offline credential and compatibility posture.
+#[cfg(test)]
 pub fn auth_status(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -92,6 +104,7 @@ pub fn auth_status(
 }
 
 /// `plakd login <provider>`: exact acceptance, then the provider login flow.
+#[cfg(test)]
 pub(crate) fn auth_login(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -106,6 +119,7 @@ pub(crate) fn auth_login(
     result
 }
 
+#[cfg(test)]
 fn auth_login_prepared(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -161,6 +175,7 @@ fn auth_login_prepared(
 /// Asks before replacing a login a newer build wrote, since that build must
 /// then log in again. Nothing is written unless the answer is yes; without a
 /// terminal it refuses without asking.
+#[cfg(test)]
 pub(crate) fn confirm_newer_build_replacement(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -202,6 +217,7 @@ pub(crate) fn confirm_newer_build_replacement(
 }
 
 /// `plakd refresh <provider>`.
+#[cfg(test)]
 pub fn auth_refresh(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -233,6 +249,7 @@ pub fn auth_refresh(
 
 /// `plakd logout <provider> --local`: retire the local credential without
 /// contacting the provider.
+#[cfg(test)]
 pub fn auth_logout_local(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -254,6 +271,7 @@ pub fn auth_logout_local(
 
 /// `plakd logout <provider>`: revoke a usable credential at the provider;
 /// retire one this build cannot use locally, saying the remote grant may remain.
+#[cfg(test)]
 pub fn auth_logout(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -292,6 +310,7 @@ pub fn auth_logout(
     Ok(ProcessOutcome::Success)
 }
 
+#[cfg(test)]
 fn retire_unusable(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -303,6 +322,7 @@ fn retire_unusable(
     ))
 }
 
+#[cfg(test)]
 fn retire_local(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -316,6 +336,7 @@ fn retire_local(
 }
 
 /// `plakd key set <account>`: cooked-mode hidden read, then a stored key file.
+#[cfg(test)]
 pub fn key_set(
     account: &str,
     stdin: &mut dyn io::BufRead,
@@ -344,6 +365,7 @@ pub fn key_set(
 }
 
 /// `plakd key clear <account>`.
+#[cfg(test)]
 pub fn key_clear(account: &str, stdout: &mut dyn io::Write) -> CliResult<ProcessOutcome> {
     let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
     let removed = product_secrets::clear_api_key(&paths, account)
@@ -362,6 +384,7 @@ pub fn key_clear(account: &str, stdout: &mut dyn io::Write) -> CliResult<Process
 }
 
 /// `plakd key status [account]`: fingerprints only, never key material.
+#[cfg(test)]
 pub fn key_status(
     account: Option<String>,
     stdout: &mut dyn io::Write,
@@ -408,6 +431,7 @@ pub fn key_status(
 /// refusal elsewhere sends the operator, so its own refusal must not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Asker {
+    #[cfg(test)]
     Login,
     Other,
 }
@@ -564,6 +588,7 @@ fn read_notice_answer(
         writeln!(stderr).map_err(|_| CliFailure::new("stderr failed"))?;
     }
     let remedy = match asker {
+        #[cfg(test)]
         Asker::Login => "answer `y` from a terminal, or pipe `y` on stdin".to_owned(),
         Asker::Other => {
             format!(

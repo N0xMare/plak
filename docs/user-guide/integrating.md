@@ -166,7 +166,8 @@ your surrounding job. See the CLI reference for output and continuation rules.
 ## Service setup
 
 [Host service setup](host-service.md) covers Linux systemd user units and
-macOS per-user LaunchAgents. `plakd host install` writes the service file and
+macOS per-user LaunchAgents. `plakd host install` writes both the host and
+credential gateway service files, sets the default Unix gateway address, and
 prints platform-specific start, log and removal commands; it never enables
 or starts the service. On Linux the printed steps also cover optional lingering.
 On macOS follow the printed `launchctl` steps, not the Linux systemd commands.

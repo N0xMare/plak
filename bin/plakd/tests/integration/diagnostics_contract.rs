@@ -167,10 +167,10 @@ fn invalid_plak_log_warns_without_failing_commands() {
     let home = std::fs::canonicalize(home).expect("canonical home");
     let output = plak_command(&home)
         .env("PLAK_LOG", "info=not_a_real_level")
-        .arg("doctor")
+        .arg("version")
         .output()
-        .expect("spawn plakd doctor");
-    assert!(output.status.success(), "doctor must succeed: {output:?}");
+        .expect("spawn plakd version");
+    assert!(output.status.success(), "version must succeed: {output:?}");
     let output = plak_command(&home)
         .env("PLAK_LOG", "info=not_a_real_level")
         .args(["config", "set", "skills.enabled", "true"])

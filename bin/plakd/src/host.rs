@@ -154,9 +154,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
     let stores_pending = crate::store::revisions::host::pending(paths)?;
-    let holder = hold_host_store(services, &custody)?;
     if let Some(replacement) = upgrade::startup_replacement(services)? {
-        drop(holder);
         drop(lock);
         drop(home_lock);
         runtime.shutdown_timeout(Duration::from_secs(1));
@@ -235,7 +233,6 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         stopping.elapsed().as_millis()
     );
     drop(lock);
-    drop(holder);
     runtime.shutdown_timeout(Duration::from_secs(1));
     upgrade::replace(
         ready,
@@ -330,22 +327,15 @@ async fn refuse_external_gateway(
     services: &Services,
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<()> {
-    crate::gateway::host_support::host_may_open_store(custody).map_err(CliFailure::new)?;
+    let set = crate::environment::host::provider_key_env_set();
+    if !set.is_empty() {
+        return Err(CliFailure::new(format!(
+            "a host with [gateway] address set refuses provider key environment variables: {}",
+            set.join(", ")
+        )));
+    }
     gateway_startup::verify(custody, services.home().state()?)
         .await
-        .map_err(CliFailure::new)
-}
-
-fn hold_host_store(
-    services: &Services,
-    custody: &crate::gateway::HostCustody,
-) -> CliResult<Option<crate::gateway::host_support::HolderLock>> {
-    if custody.address().is_some() {
-        return Ok(None);
-    }
-    let root = services.home().state()?;
-    crate::gateway::host_support::acquire_shared_creating(root)
-        .map(Some)
         .map_err(CliFailure::new)
 }
 

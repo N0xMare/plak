@@ -6,13 +6,12 @@ use std::path::{Path, PathBuf};
 
 use plakous::subscriptions::NativeProvider;
 
-use crate::commands::application::{AccountOps as _, PlakousApplication};
 use crate::presentation::{cli_human_output, title_case_token};
 use crate::shell::services::Services;
 use crate::{
-    CliFailure, CliFailureKind, CliResult, ProcessOutcome, cli_output, home, openrouter_product,
-    platform_catalog, presentation, product_config, product_doctor, roster_input, sidecars, store,
-    telemetry_sink, telemetry_store,
+    CliFailure, CliFailureKind, CliResult, ProcessOutcome, cli_output, home, platform_catalog,
+    presentation, product_config, product_doctor, roster_input, sidecars, store, telemetry_sink,
+    telemetry_store,
 };
 
 #[allow(
@@ -92,33 +91,7 @@ pub(crate) fn run_doctor(
     // rows come from the gateway's admin status, and a custody that does not
     // resolve fails those rows instead of reading local state.
     let custody = services.custody();
-    let local_keys = matches!(custody, Ok(crate::gateway::HostCustody::Local));
-    let openrouter_probe = if local_keys {
-        openrouter_product::probe_openrouter_catalog_allowlist(
-            paths,
-            selected.default_account(),
-            selected.default_model(),
-        )
-    } else {
-        openrouter_product::OpenRouterCatalogProbe::Gateway
-    };
-    let openrouter_catalog = match openrouter_probe {
-        openrouter_product::OpenRouterCatalogProbe::Gateway => {
-            product_doctor::OpenRouterCatalogStatus::Gateway
-        }
-        openrouter_product::OpenRouterCatalogProbe::NotConfigured => {
-            product_doctor::OpenRouterCatalogStatus::NotConfigured
-        }
-        openrouter_product::OpenRouterCatalogProbe::KeyPresentNoModel => {
-            product_doctor::OpenRouterCatalogStatus::KeyPresentNoModel
-        }
-        openrouter_product::OpenRouterCatalogProbe::Ok => {
-            product_doctor::OpenRouterCatalogStatus::Ok
-        }
-        openrouter_product::OpenRouterCatalogProbe::Failed(detail) => {
-            product_doctor::OpenRouterCatalogStatus::Failed(detail)
-        }
-    };
+    let openrouter_catalog = product_doctor::OpenRouterCatalogStatus::Gateway;
     // `config OK` means the effective config and all template files parsed. Say before launch
     // whether the template new sessions bind is actually attachable. Both
     // inputs are local — the persisted catalog and the offline credential
@@ -168,32 +141,13 @@ pub(crate) fn run_doctor(
         },
     };
     let spawn_templates = doctor_spawn_templates(paths, custody.as_ref(), &selected);
-    let state_home = services.home().state()?.to_path_buf();
-    // The same offline classification `plakd status` and model runs read,
-    // or the gateway's status of the same account.
-    let mut accounts = match &custody {
-        Ok(crate::gateway::HostCustody::Local) => Some(PlakousApplication::for_accounts(
-            state_home.clone(),
-            crate::gateway::HostCustody::Local,
-        )),
-        _ => None,
-    };
-    let mut credential = |provider| {
+    let accounts = crate::gateway::AdminLink::for_cli(paths);
+    let credential = |provider| {
         let name = crate::commands::support::cli_provider_name(provider);
-        match (&custody, accounts.as_mut()) {
-            (Err(failure), _) => Err(failure.message().to_owned()),
-            (Ok(custody), None) => custody
-                .admin()
-                .ok_or_else(|| "credential custody is unavailable".to_owned())
-                .and_then(|link| link.credential_status(name)),
-            (Ok(_), Some(Ok(accounts))) => name
-                .parse()
-                .map_err(
-                    |error: plakous_hosted::capabilities::AccountAdmissionError| error.to_string(),
-                )
-                .and_then(|account| accounts.offline_status_row(&account)),
-            (Ok(_), Some(Err(failure))) => Err(failure.message().to_owned()),
-        }
+        accounts
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|link| link.credential_status(name))
     };
     let path = env::var_os("PATH");
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
@@ -237,45 +191,16 @@ pub(crate) fn run_doctor(
             &crate::commands::runner::STRICT_SSH_OPTIONS,
             path.as_deref(),
         ),
-        oauth: if local_keys {
-            product_doctor::OauthCredentialProbes {
-                codex: product_doctor::probe_oauth_credential(
-                    "codex",
-                    credential(NativeProvider::Codex),
-                    &state_home.join("plak/subscriptions/codex/credential.json"),
-                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "codex")
-                        .map_err(|error| error.to_string()),
-                ),
-                xai: product_doctor::probe_oauth_credential(
-                    "xai",
-                    credential(NativeProvider::Xai),
-                    &state_home.join("plak/subscriptions/xai/credential.json"),
-                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "xai")
-                        .map_err(|error| error.to_string()),
-                ),
-                claude: product_doctor::probe_oauth_credential(
-                    "claude",
-                    credential(NativeProvider::Claude),
-                    &state_home.join("plak/subscriptions/claude/credential.json"),
-                    telemetry_store::TelemetryStore::latest_credential_refresh(paths, "claude")
-                        .map_err(|error| error.to_string()),
-                ),
-            }
-        } else {
-            product_doctor::OauthCredentialProbes {
-                codex: product_doctor::probe_gateway_credential(
-                    "codex",
-                    credential(NativeProvider::Codex),
-                ),
-                xai: product_doctor::probe_gateway_credential(
-                    "xai",
-                    credential(NativeProvider::Xai),
-                ),
-                claude: product_doctor::probe_gateway_credential(
-                    "claude",
-                    credential(NativeProvider::Claude),
-                ),
-            }
+        oauth: product_doctor::OauthCredentialProbes {
+            codex: product_doctor::probe_gateway_credential(
+                "codex",
+                credential(NativeProvider::Codex),
+            ),
+            xai: product_doctor::probe_gateway_credential("xai", credential(NativeProvider::Xai)),
+            claude: product_doctor::probe_gateway_credential(
+                "claude",
+                credential(NativeProvider::Claude),
+            ),
         },
     });
 

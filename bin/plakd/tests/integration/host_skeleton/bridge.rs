@@ -447,82 +447,21 @@ fn a_losing_starter_settles_before_its_parent_returns() {
 }
 
 #[test]
-fn auto_started_key_resolution_ignores_caller_only_keys_and_names_its_resolver() {
-    for caller_only in [false, true] {
-        let Some(fixture) = fixture() else { return };
-        std::fs::write(fixture.home().join("agents/lead.toml"),
-            "account = \"openai\"\nmodel = \"gpt-6-luna\"\neffort = \"none\"\ncomposition = \"direct\"\n").unwrap();
-        let _started = StartedHome(fixture.home());
-        let environment = if caller_only {
-            vec![("OPENAI_API_KEY", "fixture-caller-only-key")]
-        } else {
-            Vec::new()
-        };
-        let mut bridge = Bridge::configured(&fixture, true, &environment);
-        bridge.hello(WIRE_VERSION);
-        assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
-        let outcome = bridge.request(1, new_session(&fixture.workspace()));
-        let outcome = if let Outcome::Ok(Answer::Created { node, .. }) = outcome {
-            bridge.request(2, Op::Attach { node })
-        } else {
-            outcome
-        };
-        let text = if matches!(outcome, Outcome::Ok(Answer::Attached { .. })) {
-            loop {
-                if let HostFrame::Event {
-                    observation:
-                        plakous_host_protocol::SessionObservation::Status {
-                            detail:
-                                Some(plakous_host_protocol::status::HostStatusDetail::Failure {
-                                    failure,
-                                }),
-                            ..
-                        },
-                    ..
-                } = bridge.next()
-                {
-                    break failure.diagnostic.as_str().to_owned();
-                }
-            }
-        } else {
-            format!("{outcome:?}")
-        };
-        assert!(text.contains("OPENAI_API_KEY"), "{text}");
-        assert!(
-            text.contains("effective key resolver") && text.contains("auto-started host"),
-            "{text}"
-        );
-        assert!(!text.contains("fixture-caller-only-key"));
-        assert_eq!(crash::dispatches(&fixture), 0);
-        bridge.finish();
-    }
-}
-
-#[test]
-fn a_target_only_key_is_resolved_in_the_existing_hosts_environment() {
+fn a_foreground_host_refuses_provider_key_variables() {
     let Some(fixture) = fixture() else { return };
-    std::fs::write(fixture.home().join("agents/lead.toml"),
-        "account = \"openai\"\nmodel = \"gpt-6-luna\"\neffort = \"none\"\ncomposition = \"direct\"\n").unwrap();
-    let mut host = start_env(
-        &fixture,
-        &[],
-        &[("OPENAI_API_KEY", "fixture-target-only-key".into())],
+    let refused = fixture
+        .command()
+        .arg("host")
+        .env("OPENAI_API_KEY", "synthetic-host-only-placeholder")
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let error = String::from_utf8(refused.stderr).unwrap();
+    assert!(
+        error.contains("refuses provider key environment variables: OPENAI_API_KEY"),
+        "{error}"
     );
-    let mut bridge = Bridge::start(&fixture);
-    bridge.hello(WIRE_VERSION);
-    assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
-    let Outcome::Ok(Answer::Created { node, .. }) =
-        bridge.request(1, new_session(&fixture.workspace()))
-    else {
-        panic!("the target resolver did not admit its configured account")
-    };
-    assert!(matches!(
-        bridge.request(2, Op::Attach { node }),
-        Outcome::Ok(Answer::Attached { .. })
-    ));
-    assert_eq!(crash::dispatches(&fixture), 0);
-    bridge.finish();
-    stop(&mut host);
+    assert!(!error.contains("synthetic-host-only-placeholder"));
 }
 
 #[test]

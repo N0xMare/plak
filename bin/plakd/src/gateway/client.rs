@@ -9,7 +9,7 @@ use plakous::gateway::protocol::call;
 use plakous::gateway::protocol::refusal::RefusalBody;
 use plakous::gateway::protocol::{Endpoint, KEY_HEADER, SUPPORTED_VERSIONS};
 
-use super::address::GatewayAddress;
+use super::{GatewayAddress, GatewayUnavailable};
 
 pub(crate) struct Call {
     pub status: u16,
@@ -24,18 +24,30 @@ pub(crate) fn exchange(
     path: &str,
     body: &[u8],
 ) -> Result<Call, String> {
+    exchange_with_timeout(address, key, method, path, body, Duration::from_secs(30))
+}
+
+fn exchange_with_timeout(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    method: &str,
+    path: &str,
+    body: &[u8],
+    timeout: Duration,
+) -> Result<Call, String> {
     match address {
         GatewayAddress::Unix(socket) => {
-            let stream = UnixStream::connect(socket).map_err(|error| error.to_string())?;
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+            let stream = UnixStream::connect(socket)
+                .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
+            let _ = stream.set_read_timeout(Some(timeout));
+            let _ = stream.set_write_timeout(Some(timeout));
             write_and_read(stream, key, method, path, body)
         }
         GatewayAddress::Tcp(addr) => {
-            let stream = TcpStream::connect_timeout(addr, Duration::from_secs(10))
-                .map_err(|error| error.to_string())?;
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+            let stream = TcpStream::connect_timeout(addr, timeout.min(Duration::from_secs(10)))
+                .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
+            let _ = stream.set_read_timeout(Some(timeout));
+            let _ = stream.set_write_timeout(Some(timeout));
             write_and_read(stream, key, method, path, body)
         }
     }
@@ -67,13 +79,23 @@ pub(crate) fn versions(
     address: &GatewayAddress,
     key: Option<&str>,
 ) -> Result<plakous::gateway::protocol::VersionsReply, String> {
-    let call = exchange(
+    versions_with_timeout(address, key, Duration::from_secs(10))
+}
+
+pub(super) fn versions_with_timeout(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    timeout: Duration,
+) -> Result<plakous::gateway::protocol::VersionsReply, String> {
+    let call = exchange_with_timeout(
         address,
         key,
         "GET",
         plakous::gateway::protocol::VERSIONS_PATH,
         &[],
-    )?;
+        timeout,
+    )
+    .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
     decode_call(call)
 }
 

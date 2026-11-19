@@ -8,13 +8,12 @@ fn home(directory: &tempfile::TempDir) -> PlakPaths {
 }
 
 #[test]
-fn an_unset_address_stays_local() {
+fn an_unset_address_refuses_with_the_install_remedy() {
     let directory = tempfile::tempdir().unwrap();
     let paths = home(&directory);
-    let custody = HostCustody::resolve(&paths).unwrap();
-    assert!(custody.gateway().is_none());
-    assert!(custody.admin().is_none());
-    assert_eq!(custody.label(), "in-process");
+    let error = HostCustody::resolve(&paths).unwrap_err();
+    assert!(error.starts_with("gateway_unavailable: "));
+    assert!(error.contains("plakd gateway install"));
 }
 
 #[test]
@@ -165,13 +164,8 @@ fn a_unix_gateway_must_advertise_this_homes_store_at_the_configured_socket() {
     let host_state = directory.path().join("host-state");
     let other_state = directory.path().join("other-state");
     // Nothing holds the host's store.
-    let HolderProofError::Waiting(refused) = custody.verify_holder(&host_state).unwrap_err() else {
-        panic!("a missing holder must be retryable");
-    };
-    assert!(
-        refused.contains("no plakd gateway serve holds"),
-        "{refused}"
-    );
+    let address = custody.address().unwrap();
+    assert!(!verify_holder(address, &host_state).unwrap());
     assert!(!host_state.join("plak/subscriptions").exists());
     // A gateway holds another state root at the configured socket.
     let other = super::super::holder::lock_path(&other_state);
@@ -181,7 +175,7 @@ fn a_unix_gateway_must_advertise_this_homes_store_at_the_configured_socket() {
     )
     .unwrap();
     held.advertise(&configured).unwrap();
-    assert!(custody.verify_holder(&host_state).is_err());
+    assert!(!verify_holder(address, &host_state).unwrap());
     // A gateway holds the host's store but serves another socket.
     let mine = super::super::holder::lock_path(&host_state);
     let elsewhere = super::super::holder::HolderLock::try_acquire(
@@ -189,19 +183,13 @@ fn a_unix_gateway_must_advertise_this_homes_store_at_the_configured_socket() {
         super::super::holder::HolderMode::Exclusive,
     )
     .unwrap();
-    assert!(matches!(
-        custody.verify_holder(&host_state),
-        Err(HolderProofError::Waiting(_))
-    ));
+    assert!(!verify_holder(address, &host_state).unwrap());
     elsewhere
         .advertise(&directory.path().join("elsewhere.sock"))
         .unwrap();
-    let HolderProofError::Refused(refused) = custody.verify_holder(&host_state).unwrap_err() else {
-        panic!("a mismatched holder must not be retryable");
-    };
+    let refused = verify_holder(address, &host_state).unwrap_err();
     assert!(refused.contains("not the configured"), "{refused}");
     elsewhere.advertise(&configured).unwrap();
-    custody.verify_holder(&host_state).unwrap();
-    assert!(HostCustody::Local.verify_holder(&host_state).is_ok());
+    assert!(verify_holder(address, &host_state).unwrap());
     drop(held);
 }

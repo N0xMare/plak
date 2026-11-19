@@ -11,7 +11,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 pub(super) const WAIT: Duration = Duration::from_secs(45);
 
@@ -134,6 +134,7 @@ pub(super) struct Fixture {
     preserve: AtomicBool,
     session_lease_seconds: Option<u64>,
     ledger_retirement_high_water: AtomicUsize,
+    gateway: OnceLock<super::gateway_process::GatewayProcess>,
 }
 
 static FIXTURE_ORDINAL: AtomicU32 = AtomicU32::new(0);
@@ -153,11 +154,13 @@ impl Fixture {
             preserve: AtomicBool::new(false),
             session_lease_seconds: None,
             ledger_retirement_high_water: AtomicUsize::new(0),
+            gateway: OnceLock::new(),
         };
         std::fs::create_dir_all(fixture.home().join("agents")).expect("home");
+        std::fs::set_permissions(&fixture.root, std::fs::Permissions::from_mode(0o700))
+            .expect("gateway socket directory mode");
         std::fs::create_dir_all(fixture.workspace()).expect("workspace");
-        write_private(
-            &fixture.home().join("config.toml"),
+        fixture.write_config(
             "[root]\nagent = \"lead\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = true\n",
         );
         write_private(
@@ -185,6 +188,15 @@ impl Fixture {
         );
         std::fs::remove_dir_all(fixture.home()).expect("empty fork home");
         copy_directory(&self.home(), &fixture.home());
+        let config = fixture.home().join("config.toml");
+        if let Ok(text) = std::fs::read_to_string(&config) {
+            let before = self.gateway_socket();
+            let after = fixture.gateway_socket();
+            write_private(
+                &config,
+                &text.replace(before.to_str().unwrap(), after.to_str().unwrap()),
+            );
+        }
         ChildRunner::at(self).fork_into(&fixture);
         fixture
     }
@@ -196,6 +208,16 @@ impl Fixture {
             serde_json::to_vec_pretty(script).expect("script json"),
         )
         .expect("script file");
+    }
+
+    pub(super) fn write_config(&self, text: &str) {
+        write_private(
+            &self.home().join("config.toml"),
+            &format!(
+                "{text}\n[gateway]\naddress = {:?}",
+                format!("unix:{}", self.gateway_socket().display())
+            ),
+        );
     }
 
     pub(super) fn home(&self) -> PathBuf {
@@ -230,12 +252,50 @@ impl Fixture {
 
     /// A `plakd` command bound to this fixture's home, workspace and script.
     pub(super) fn command(&self) -> Command {
+        let command = self.base_command();
+        self.gateway.get_or_init(|| {
+            let socket = self.gateway_socket();
+            write_private(
+                &self.home().join("gateway.toml"),
+                &format!("socket = {:?}\n", socket.to_str().unwrap()),
+            );
+            let mut gateway = self.base_command();
+            gateway.env("PLAK_TEST_FAULTS", "fault=connect");
+            super::gateway_process::GatewayProcess::start(
+                &mut gateway,
+                &socket,
+                &self.root.join("gateway.log"),
+            )
+        });
+        let config = self.home().join("config.toml");
+        if let Ok(mut text) = std::fs::read_to_string(&config)
+            && let Ok(doc) = text.parse::<toml_edit::DocumentMut>()
+            && doc.get("gateway").is_none()
+        {
+            use std::fmt::Write as _;
+            writeln!(
+                text,
+                "\n[gateway]\naddress = {:?}",
+                format!("unix:{}", self.gateway_socket().display())
+            )
+            .unwrap();
+            write_private(&config, &text);
+        }
+        command
+    }
+
+    fn gateway_socket(&self) -> PathBuf {
+        self.root.join("g.sock")
+    }
+
+    fn base_command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_plakd"));
         command
             .current_dir(self.workspace())
             .env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", self.root.join("fake-home"))
+            .env("XDG_STATE_HOME", self.root.join("fake-home/.local/state"))
             .env("TMPDIR", self.root.join("tmp"))
             .env("PLAK_HOME", self.home())
             .env("PLAK_TEST_RUNNER_DETACHED", "1")
@@ -290,6 +350,7 @@ pub(super) fn write_private(path: &Path, body: &str) {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        drop(self.gateway.take());
         if self.home().join("host/runner").exists() {
             for entry in std::fs::read_dir(&self.root)
                 .into_iter()

@@ -71,6 +71,27 @@ fn launchd_install_dry_run_creates_no_files_or_manager_calls() -> TestResult {
     let output = fixture.command().arg("--dry-run").output()?;
     success(&output);
     assert!(output.stdout.starts_with(b"<?xml version="));
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    assert!(rendered.contains("<string>com.plakd.gateway</string>"));
+    assert!(rendered.contains(&format!(
+        "{}/.local/bin/plakd-gateway</string>",
+        fixture.root.path().display()
+    )));
+    assert!(rendered.contains(&format!(
+        "{}/.local/bin/plakd</string>",
+        fixture.root.path().display()
+    )));
+    assert!(rendered.contains(&format!(
+        "[gateway]\naddress = \"unix:{}/product/gateway/gateway.sock\"",
+        fixture.root.path().display()
+    )));
+    let starts = rendered
+        .lines()
+        .filter(|line| line.starts_with("launchctl bootstrap"))
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 2);
+    assert!(starts[0].ends_with("com.plakd.gateway.plist"));
+    assert!(starts[1].ends_with("com.plakd.host.plist"));
     assert!(!fixture.root.path().join("Library").exists());
     assert!(!fixture.root.path().join("product").exists());
     assert!(!fixture.root.path().join("manager-called").exists());
@@ -96,7 +117,7 @@ fn launchd_install_is_atomic_idempotent_and_never_loads_or_starts() -> TestResul
         assert!(instructions.contains(command), "{instructions}");
     }
     assert!(!fixture.root.path().join("manager-called").exists());
-    assert!(!fixture.root.path().join("product").exists());
+    assert!(fixture.root.path().join("product/config.toml").is_file());
     let plist = std::fs::read_to_string(fixture.plist())?;
     assert!(plist.contains(&format!(
         "{}/.local/bin/plakd",

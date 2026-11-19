@@ -3,8 +3,10 @@
 This setup uses a Linux systemd **user** service or a macOS per-user
 LaunchAgent, never a system-wide service. Use the default installed
 release product, which includes host/web serving, together with
-its matching sidecars. The service always runs the stable `~/.local/bin/plakd`
-link, so keep that installation current. Install the web UI build separately;
+its matching sidecars. The host runs the stable `~/.local/bin/plakd` link.
+The required separate [credential gateway](gateway.md) runs through
+`~/.local/bin/plakd-gateway`, which normal binary installation does not move.
+Install the web UI build separately;
 its directory must contain `index.html` and `csp.json` as described in
 [the web endpoint spec](../spec/02-plak-product.md#45-the-web-endpoint).
 The installer warns, but does not refuse, if that stable link is missing or
@@ -35,17 +37,23 @@ plakd host install --web "unix:$HOME/.plak/host/web/web.sock" \
   --ui "$HOME/.plak/web-ui"
 ```
 
-Dry run only prints the service file and creates nothing. An identical
-re-install keeps the service file unchanged; any other existing file, including
-an edited generated file or a symlink, is refused. To change its paths, stop the service and remove
-the old file first, as shown below.
+Dry run prints both service definitions and the default Unix
+`[gateway] address`, and creates nothing. Installation writes that address
+in the product home's `config.toml` without replacing a conflicting address.
+An identical re-install keeps both definitions unchanged. Edited or symlinked
+units are refused. For an existing install, follow the
+[one-time migration](gateway.md#migrate-an-existing-service-once).
 
 ### Linux
 
 Installation writes
-`~/.config/systemd/user/plakd-host.service` atomically with mode 0644 and calls
+`~/.config/systemd/user/plakd-host.service` and, if absent,
+`~/.config/systemd/user/plak-gateway.service` atomically with mode 0644, then calls
 `systemctl --user daemon-reload`. It does **not** enable, start or restart
 anything.
+
+The host unit requires and orders after the gateway unit. Starting the host
+starts the gateway first, and the host verifies the gateway is ready.
 
 Follow the printed commands:
 
@@ -81,14 +89,16 @@ and only HOME and the user-manager runtime-directory and bus variables.
 
 ### macOS
 
-Installation writes `~/Library/LaunchAgents/com.plakd.host.plist` atomically with
-mode 0644 and prepares the private directory `~/Library/Logs/Plak` (mode 0700)
+Installation writes `~/Library/LaunchAgents/com.plakd.host.plist` and, if
+absent, `com.plakd.gateway.plist` atomically with mode 0644. It prepares the
+private directory `~/Library/Logs/Plak` (mode 0700)
 and its two private log files (mode 0600). Existing logs must be your private
 regular files, not symlinks or hard links; unsafe files are refused unchanged.
 It never calls `launchctl`, loads the agent or starts the host. Follow the
 printed commands, which contain your actual user ID and chosen paths:
 
 ```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plakd.gateway.plist"
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plakd.host.plist"
 # If it is not already running:
 launchctl kickstart "gui/$(id -u)/com.plakd.host"
@@ -101,7 +111,9 @@ tail -F "$HOME/Library/Logs/Plak/host.stdout.log" \
 `KeepAlive` restarts it only after unsuccessful exit. A clean host handoff does
 not trigger a restart. The job allows 90 seconds to stop and does not kill its
 remaining process group on exit. It uses a private umask and runs from HOME.
-This is a GUI-login agent, not a daemon that runs before login.
+These are GUI-login agents, not daemons that run before login. launchd does
+not order them; bootstrap the gateway first. At GUI login or manual startup,
+the host waits for the gateway and refuses if it is not reachable.
 
 The agent uses the same stable binary link and explicit host arguments as the
 Linux unit. A fixed shell wrapper forwards only the manager's SHELL, USER and
@@ -123,9 +135,8 @@ For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
    daemon jobs.
 3. Upgrade each paired runner to the matching snapshot and advance its
    dedicated executable link.
-4. If using a [gateway](gateway.md), drain it, point its service at the new
-   immutable snapshot, reload the service definition, start it and run
-   `plakd gateway check`.
+4. Drain and [upgrade the gateway](gateway.md#upgrade-with-the-host) by
+   flipping its dedicated link, restarting it, and running `plakd gateway check`.
 5. From the destination snapshot, run
    `plakd host upgrade --expect-binary <id>` to carry settled sessions.
 6. Re-pin clients to host wire protocol 12. A protocol-11 client receives a

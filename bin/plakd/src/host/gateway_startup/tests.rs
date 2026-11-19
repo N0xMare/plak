@@ -19,13 +19,7 @@ async fn startup_waits_for_the_holder_and_a_connectable_unix_listener() {
     let directory = tempfile::tempdir().unwrap();
     let configured = directory.path().join("gw.sock");
     let advertised = Cell::new(false);
-    let proof = wait_for_listener(&configured, || {
-        if advertised.get() {
-            Ok(())
-        } else {
-            Err(HolderProofError::Waiting("not advertised".to_owned()))
-        }
-    });
+    let proof = wait_for_listener(&configured, || Ok(advertised.get()));
     tokio::pin!(proof);
     still_waiting(proof.as_mut()).await;
 

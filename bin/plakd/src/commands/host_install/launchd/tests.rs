@@ -2,6 +2,10 @@ use super::*;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+fn render(home: &Path, product: &Path, args: &HostInstall) -> CliResult<String> {
+    super::render(home, product, &home.join(".local/state"), args)
+}
+
 fn args() -> HostInstall {
     HostInstall {
         web: "unix:/tmp/plakd-web.sock".into(),
@@ -128,7 +132,8 @@ fn host_install_launchd_reuses_atomic_no_replace_publication() -> TestResult {
 #[test]
 fn host_install_launchd_next_steps_are_explicit_and_shell_quoted() -> TestResult {
     let home = Path::new("/tmp/a '$HOME");
-    let instructions = next_steps(home, &args(), 501);
+    let gateway = home.join("Library/LaunchAgents/com.plakd.gateway.plist");
+    let instructions = next_steps(home, &args(), 501, &gateway);
     let commands = instructions
         .lines()
         .filter(|line| !line.starts_with('#'))
@@ -140,15 +145,24 @@ fn host_install_launchd_next_steps_are_explicit_and_shell_quoted() -> TestResult
             "launchctl",
             "bootstrap",
             "gui/501",
-            "/tmp/a '$HOME/Library/LaunchAgents/com.plakd.host.plist"
+            "/tmp/a '$HOME/Library/LaunchAgents/com.plakd.gateway.plist"
         ]
     );
     assert_eq!(
         commands[1],
+        [
+            "launchctl",
+            "bootstrap",
+            "gui/501",
+            "/tmp/a '$HOME/Library/LaunchAgents/com.plakd.host.plist"
+        ]
+    );
+    assert_eq!(
+        commands[2],
         ["launchctl", "kickstart", "gui/501/com.plakd.host"]
     );
     assert_eq!(
-        commands[3],
+        commands[4],
         [
             "tail",
             "-F",
@@ -156,9 +170,9 @@ fn host_install_launchd_next_steps_are_explicit_and_shell_quoted() -> TestResult
             "/tmp/a '$HOME/Library/Logs/Plak/host.stderr.log"
         ]
     );
-    assert_eq!(commands[4][..3], ["launchctl", "bootout", "gui/501"]);
+    assert_eq!(commands[5][..3], ["launchctl", "bootout", "gui/501"]);
     assert_eq!(
-        commands[5],
+        commands[6],
         [
             "rm",
             "--",
@@ -180,7 +194,13 @@ fn host_install_launchd_command_clears_environment_and_preserves_arguments() -> 
         "#!/bin/sh\nprintf 'argument:%s\\n' \"$@\"\n/usr/bin/env\n",
     )?;
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))?;
-    let arguments = service_arguments(&home, Path::new("/tmp/product"), &args(), 103)?;
+    let arguments = service_arguments(
+        &home,
+        Path::new("/tmp/product"),
+        Path::new("/tmp/state"),
+        &args(),
+        103,
+    )?;
     let output = std::process::Command::new("/bin/sh")
         .args(["-c", SHELL_COMMAND, "plakd-host"])
         .args(&arguments)

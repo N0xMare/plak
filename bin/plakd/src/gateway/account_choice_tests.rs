@@ -157,20 +157,7 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
         "a spawn never reads the host's key file"
     );
 
-    // Without a configured route, discover the exclusive local service.
-    // Its key (not the local key) still supplies the readiness facts.
-    std::fs::remove_file(host.config_file()).unwrap();
-    std::fs::write(
-        super::ServerConfig::path(&host),
-        format!(
-            "state_root = \"{}\"\n",
-            directory.path().join("gateway-state").display()
-        ),
-    )
-    .unwrap();
-    let local_service = account_choice::ready_catalog(&host, &super::HostCustody::Local);
     drain(&socket, served);
-    assert_eq!(local_service.unwrap(), catalog);
 }
 
 #[cfg(feature = "codex")]

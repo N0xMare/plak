@@ -11,7 +11,7 @@ use plakous::gateway::protocol::admin::{AdminRefusal, AdminRequest, AdminRespons
 use plakous::gateway::protocol::facts::CredentialStatus;
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
 
-use super::{AccountError, env_override, failed, validation};
+use super::{AccountError, failed, validation};
 use crate::gateway::AdminLink;
 
 pub(super) fn execute(
@@ -23,7 +23,6 @@ pub(super) fn execute(
     let mut remote_grant_may_remain = None;
     match request {
         HostRequest::AccountKeySet { secret, .. } => {
-            env_override(selected)?;
             changed(
                 link,
                 AdminRequest::KeySet {
@@ -33,7 +32,6 @@ pub(super) fn execute(
             )?;
         }
         HostRequest::AccountKeyClear { .. } => {
-            env_override(selected)?;
             changed(link, AdminRequest::KeyClear { account })?;
         }
         HostRequest::AccountRemove { .. } => {

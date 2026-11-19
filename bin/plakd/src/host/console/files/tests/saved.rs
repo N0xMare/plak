@@ -157,7 +157,8 @@ async fn saved_local_unrestricted_roots_still_protect_both_homes_in_both_directi
     let state = root.path().join("xdg");
     let paths = crate::home::paths::PlakPaths::explicit(home.clone());
     let services =
-        crate::shell::services::Services::for_home_with_state(paths.clone(), state.clone());
+        crate::shell::services::Services::for_home_with_state(paths.clone(), state.clone())
+            .with_test_custody(crate::gateway::HostCustody::Local);
     ready_local(&services);
     let sessions = crate::host::sessions::ProductSessions::new(
         &services,

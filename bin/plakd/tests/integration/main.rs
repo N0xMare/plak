@@ -13,6 +13,8 @@ mod diagnostics_contract;
     feature = "grok"
 ))]
 mod gateway_admin;
+#[path = "support/gateway_process.rs"]
+mod gateway_process;
 #[cfg(all(
     feature = "test-hooks",
     feature = "codex",
@@ -21,6 +23,7 @@ mod gateway_admin;
 ))]
 #[path = "support/gateway_seed.rs"]
 mod gateway_seed;
+mod gateway_service;
 #[cfg(all(target_os = "linux", feature = "web"))]
 mod host_install;
 #[cfg(all(target_os = "macos", feature = "web"))]

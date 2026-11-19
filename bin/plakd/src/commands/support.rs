@@ -721,6 +721,7 @@ fn unsafe_storage_status_cell(detail: &str, account: &str) -> String {
 }
 
 /// API-key failure cell. Same backtick-free column style as the OAuth cells.
+#[cfg(test)]
 pub(crate) fn api_key_status_failure_cell(detail: &str) -> String {
     format!("Unreadable · {}", detail.replace('`', ""))
 }

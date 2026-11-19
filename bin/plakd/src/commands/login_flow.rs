@@ -2,15 +2,23 @@
 
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 
+#[cfg(test)]
 use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode};
 
+#[cfg(test)]
 use super::application::{AccountOps, LoginChallenge, LoginOutcome, LoginResponse};
+#[cfg(test)]
 use super::login::read_remote_authorization_interactive;
+#[cfg(test)]
+use crate::CliFailure;
+use crate::CliResult;
 use crate::oauth_ui;
+#[cfg(test)]
 use crate::presentation::{CredentialState, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES};
-use crate::{CliFailure, CliResult};
 
 /// Machine effects belong to terminal presentation, separate from account authority.
 pub(crate) trait LoginUi {
@@ -70,6 +78,7 @@ impl LoginUi for SystemLoginUi {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn perform_login(
     accounts: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
@@ -179,9 +188,11 @@ pub(crate) fn perform_login(
 
 /// Grace past the device-code lifetime so the provider's own expiry, not the
 /// local wait, normally ends an unapproved login.
+#[cfg(test)]
 const DEVICE_WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Shows the device code and waits for approval elsewhere; stdin is never read.
+#[cfg(test)]
 fn finish_device_login<A: AccountOps>(
     accounts: &mut A,
     challenge: LoginChallenge<A::PendingLogin>,

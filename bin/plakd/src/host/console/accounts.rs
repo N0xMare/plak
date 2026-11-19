@@ -2,12 +2,15 @@
 
 use super::{diagnostic, unavailable, validation};
 use crate::account_choice::readiness;
-use crate::home::{paths::PlakPaths, secrets};
+use crate::home::paths::PlakPaths;
+#[cfg(test)]
+use crate::home::secrets;
 use plakd_wire_types::console::{
     AccountCustody, AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus,
     NativeStatus, ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope, UnavailableCode,
     ValidationCode, Vertical,
 };
+use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 use plakous_hosted::account::{AccountRef, Vertical as AccountVertical};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -30,10 +33,10 @@ pub(super) fn reader_at(
     state: &std::path::Path,
     custody: &crate::gateway::HostCustody,
 ) -> Result<Reader, ReadRefusal> {
-    let subscriptions = readiness::subscriptions_at(state, custody)
+    let paths = SubscriptionPaths::from_xdg_state_home(state)
         .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
     Ok(Reader {
-        subscriptions,
+        subscriptions: custody.subscriptions(NativeSubscriptions::new(paths)),
         custody: custody.clone(),
     })
 }
@@ -42,15 +45,16 @@ impl Reader {
         &self,
         account: &AccountRef,
     ) -> Result<plakous::subscriptions::NativeSubscriptions, ReadRefusal> {
-        if account.name().is_none() {
+        let Some(name) = account.name() else {
             return Ok(self.subscriptions.clone());
-        }
+        };
         let provider = account
             .vertical()
             .capability()
             .native_provider()
             .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::NotCompiled))?;
-        readiness::subscriptions_for(&self.subscriptions, provider, account)
+        self.subscriptions
+            .for_named_account(provider, name.as_str())
             .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     }
 }
@@ -127,9 +131,25 @@ pub(super) async fn roster(
             truncated: false,
         });
     }
-    if let Some(link) = application.custody.admin() {
-        return Ok(gateway_roster(link));
+    if application.custody.admin().is_some() {
+        let custody = application.custody.clone();
+        return tokio::task::spawn_blocking(move || custody.admin().map(gateway_roster))
+            .await
+            .ok()
+            .flatten()
+            .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::Storage));
     }
+    #[cfg(not(test))]
+    {
+        let _ = paths;
+        Err(unavailable(ReadScope::Accounts, UnavailableCode::Storage))
+    }
+    #[cfg(test)]
+    local_roster(application, paths).await
+}
+
+#[cfg(test)]
+async fn local_roster(application: &Reader, paths: &PlakPaths) -> Result<Roster, ReadRefusal> {
     let (accounts, unavailable, truncated) =
         readiness::local_roster(&application.subscriptions, paths).await;
     let diagnostics = unavailable
@@ -149,18 +169,40 @@ pub(super) async fn roster(
     })
 }
 
-/// Where this home's credentials are held: the configured gateway or the
-/// local gateway service that holds the store, else in process.
-fn custody(paths: &PlakPaths, host: &crate::gateway::HostCustody) -> AccountCustody {
-    match crate::gateway::route_for(paths, host) {
-        Ok(route) => route
-            .remote()
-            .map_or_else(AccountCustody::in_process, |address| AccountCustody {
-                mode: plakd_wire_types::console::CustodyMode::Service,
-                gateway: Some(address.label()),
-            }),
-        Err(_) => AccountCustody::in_process(),
+fn custody(host: &crate::gateway::HostCustody) -> AccountCustody {
+    host.address()
+        .map_or_else(AccountCustody::in_process, |address| AccountCustody {
+            mode: plakd_wire_types::console::CustodyMode::Service,
+            gateway: Some(address.label()),
+        })
+}
+
+fn key_status(
+    application: &Reader,
+    paths: &PlakPaths,
+    account: &AccountRef,
+) -> Result<KeyStatus, ()> {
+    if let Some(link) = application.custody.admin() {
+        return gateway_key(link, account).map(gateway_key_status);
     }
+    #[cfg(not(test))]
+    {
+        let _ = paths;
+        Err(())
+    }
+    #[cfg(test)]
+    secrets::key_status(paths, account.as_str())
+        .map(|key| KeyStatus {
+            source: match key.source {
+                secrets::KeySource::Env => KeySource::Environment,
+                secrets::KeySource::File => KeySource::File,
+                secrets::KeySource::Missing => KeySource::Missing,
+            },
+            fingerprint: key.fingerprint,
+            environment_override: key.env_var.is_some(),
+            shadowed_file_fingerprint: key.shadowed_file_fingerprint,
+        })
+        .map_err(|_| ())
 }
 
 pub(super) async fn status(
@@ -183,14 +225,11 @@ pub(super) async fn status(
         last_refresh: None,
         remedies: Vec::new(),
         diagnostics: Vec::new(),
-        custody: custody(paths, &application.custody),
+        custody: custody(&application.custody),
     };
-    if vertical.is_api()
-        && let Some(link) = application.custody.admin()
-    {
-        match gateway_key(link, account) {
+    if vertical.is_api() {
+        match key_status(application, paths, account) {
             Ok(key) => {
-                let key = gateway_key_status(key);
                 if key.source == KeySource::Missing {
                     row.remedies.push(remedy(ReadAction::SetKey, account));
                 }
@@ -200,29 +239,6 @@ pub(super) async fn status(
                 "key_status_unavailable",
                 Some(account.as_str()),
                 "the gateway did not answer key status",
-            )),
-        }
-    } else if vertical.is_api() {
-        match secrets::key_status(paths, account.as_str()) {
-            Ok(key) => {
-                if key.source == secrets::KeySource::Missing {
-                    row.remedies.push(remedy(ReadAction::SetKey, account));
-                }
-                row.key = Some(KeyStatus {
-                    source: match key.source {
-                        secrets::KeySource::Env => KeySource::Environment,
-                        secrets::KeySource::File => KeySource::File,
-                        secrets::KeySource::Missing => KeySource::Missing,
-                    },
-                    fingerprint: key.fingerprint,
-                    environment_override: key.env_var.is_some(),
-                    shadowed_file_fingerprint: key.shadowed_file_fingerprint,
-                });
-            }
-            Err(_) => row.diagnostics.push(diagnostic(
-                "key_status_unavailable",
-                Some(account.as_str()),
-                "key status could not be read",
             )),
         }
     } else if let Some(provider) = vertical.capability().native_provider()
@@ -399,14 +415,10 @@ pub(super) async fn exists(
             .account_exists(provider)
             .await
             .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
-    } else if let Some(link) = application.custody.admin() {
-        gateway_key(link, account)
-            .map(|key| gateway_key_status(key).source != KeySource::Missing)
-            .map_err(|()| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     } else {
-        secrets::key_status(paths, account.as_str())
-            .map(|key| key.source != secrets::KeySource::Missing)
-            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
+        key_status(application, paths, account)
+            .map(|key| key.source != KeySource::Missing)
+            .map_err(|()| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     }
 }
 

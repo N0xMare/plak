@@ -182,7 +182,7 @@ impl openrouter::KeyUsageObserver for Capture {
     }
 }
 
-#[cfg(any(feature = "web", test))]
+#[cfg(test)]
 pub(crate) mod console;
 fn project(probe: OpenRouterKeyUsageProbe) -> VerticalObservation {
     match probe {

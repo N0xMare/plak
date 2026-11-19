@@ -794,38 +794,25 @@ fall-through to the file, because a broken environment must not quietly resolve
 to a different credential. And while the variable is set, `key set` and
 `key clear` refuse and say so, because writing the file would have no effect.
 
-When `[gateway] address` is set, or a local `plakd gateway serve` holds the
-credential holder lock, account commands go to that gateway instead of opening
-the store. The gateway process is then the one whose environment resolves API
-keys. A same-UID Unix peer is the local administrator and sends no caller key.
-The holder lock is `$XDG_STATE_HOME/plak/subscriptions/.custody-holder.lock`:
-the service takes it exclusive and records its socket; in-process holders take
-it shared. The two modes do not overlap. An in-process account command, and
-`plakd host` with no `[gateway] address`, take that shared lock for as long as
-they hold the store. A host that finds the service already holding it refuses
-to start and names `[gateway] address`. The gateway listener relays the
-API-key accounts (`openai`, `xai-api`, `anthropic`, `openrouter`) and the
-subscription logins (`codex`, `claude`, `grok`) through the shared server
-core. A host whose `[gateway] address` is set does not take the holder lock
-and does not resolve API keys or open the subscription store. Its API-key
-routes and its Codex, Claude and SuperGrok routes, for host sessions, child
-agents and `plakd run` alike, use that gateway's custody. Login, logout,
-consent and account listing stay on the gateway's admin verbs. If provider API-key
-variables are set in that host's environment, the host refuses to start and
-names them. OpenRouter allowance is the gateway's Allowance verb: one
-`GET /api/v1/key` answered in the gateway process. The other API-key kinds
-report `not-observed`. The key never appears in the admin JSON.
+Only the separate `plakd gateway serve` process opens provider credential
+stores or resolves provider API-key variables. It takes the exclusive
+`$XDG_STATE_HOME/plak/subscriptions/.custody-holder.lock` and advertises its
+Unix socket once listening. Hosts require a home-scoped `[gateway] address`;
+they do not take the lock, open the store or resolve API keys. The same gateway
+custody applies to API-key and subscription traffic, including child agents
+and standalone CLI runs. A host with provider API-key variables set refuses
+and names them. A same-UID Unix peer without a caller key is the local
+administrator. The CLI sends login, logout, consent, account listing and key
+verbs to the configured gateway or, without host configuration, to the local
+service's Unix socket. An unavailable gateway produces a one-line
+`gateway_unavailable` remedy, not local credential access.
 
-This precedence belongs to the process resolving the key, not a connected
-client. With no gateway, explicit CLI `key set` and `key clear` stay in this
-process and inspect its environment. With a gateway, the command reads the
-secret here and the gateway's environment decides the override. Host sessions
-use the serving host's environment;
-unit-managed hosts use their unit environment. An explicitly auto-started host
-does not inherit caller API-key variables (see §4.6). Missing-key diagnostics
-name the effective resolver and the relevant variable, never its value.
-Target-host key mutation and caller-versus-target write notices are not
-provided by the stdio bridge; no new wire operation is implied.
+The CLI reads `key set` input locally but sends it to the gateway. The
+gateway's environment, not the CLI or host environment, decides overrides
+for `key set` and `key clear`. The bridge does not forward key mutations.
+OpenRouter allowance is one `GET /api/v1/key` answered in the gateway
+process. Other API-key kinds report `not-observed`. Admin JSON never contains
+the stored provider key.
 
 Direct API sessions select `openai`, `anthropic`, or `xai-api`. The last name
 resolves the existing `xai` key slot and `XAI_API_KEY`; bare `xai` is
@@ -2797,10 +2784,10 @@ version. There is no top-level prompt positional or terminal resume command.
 | `run [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
-| `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports whether account calls stay in-process or name a gateway |
+| `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports the gateway or its refusal |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
-| `gateway install [--dry-run]`, `gateway uninstall` | user service definition only; does not start or stop the service |
+| `gateway install [--dry-run]`, `gateway uninstall` | user service definition; install also seeds an absent dedicated command link; does not start or stop the service |
 | `gateway status [--dry-run]` | versions, instance and flags; `--dry-run` prints paths, does not take the lock, and refuses a `state_root` that is not the host state home byte for byte |
 | `gateway caller add <id> --source <net>... [--admin <account>]... [--key-out <file>]`, `gateway caller list`, `gateway caller rm <id>`, `gateway caller rotate <id>` | local-admin caller registry; the key is shown once |
 | `gateway disable [--account <ref>] [--caller <id>] [--cut]`, `gateway enable [--account <ref>] [--caller <id>]` | kill switch; disable may be remote, enable is local-admin |
@@ -5327,7 +5314,7 @@ cards name, before the root's route, wire and probe resolve:
 An invalid explicit choice is `account_choice_invalid {kind, account,
 reason}`. A subscription is Ready when its credential is Ready under current
 compatibility; an API account is Ready when it has a key. Readiness comes from
-the gateway when a configured or local service gateway holds the credentials.
+the gateway.
 It asks for implicit default slots even when the gateway does not list them;
 a default slot with no status row is not Ready. A refused listing or status
 read, or a missing status row for a listed account, fails admission. A
@@ -5418,8 +5405,7 @@ empty catalog). In the product DTOs (`ApplyProfile.accounts`,
 neutral envelope (`NewSession.accounts`, `KindAccounts`, `UsageLimitNotice`,
 `account_choice_required` and `account_choice_invalid`) it is a string with
 the same spellings. `AccountStatus.custody {mode, gateway?}` is `service` with
-the gateway's address when a configured gateway or the local gateway service
-holds the credentials, and is omitted for in-process custody.
+the configured gateway's address.
 
 ### 4.5 The web endpoint
 
@@ -6302,7 +6288,7 @@ keeps its separate readiness path.
   its work stands, under the unit's `TimeoutStopSec`; a session not
   released by then is left to the crash law (`owner_lost`). It prints
   `plakd host: serving on <socket> (host <host id>, instance <instance>);
-  gateway: <in-process or the configured address>; tools get <source>` once
+  gateway: <configured address>; tools get <source>` once
   it accepts.
 
 `SIGUSR1` reloads UI assets only (§4.5). It deliberately differs from
@@ -6321,13 +6307,17 @@ running until they end or reach their caps; the daemon exits after its idle
 period. Embedded mode keeps direct process calls and exit = stop.
 
 **Service installation.** `plakd host install --web unix:<absolute socket>
---ui <absolute dir> [--dry-run]` installs a systemd **user** unit on Linux at
+--ui <absolute dir> [--dry-run]` installs the gateway service (§4.7) if absent,
+sets the default Unix `[gateway] address` in the product home's `config.toml`,
+and installs a systemd **user** host unit on Linux at
 `$HOME/.config/systemd/user/plakd-host.service`, or a per-user macOS LaunchAgent
 at `$HOME/Library/LaunchAgents/com.plakd.host.plist`, mode 0644. Both arguments
 are required, absolute UTF-8 paths without control characters; there are no
 socket or UI defaults. Install never accepts or emits `--dev-login` or a
 TCP listener. Other platforms refuse as not yet supported. It runs before
-product-store setup. HOME containing `=` or `:` is refused: neither executable
+product-store setup. It refuses a conflicting gateway address or a custom
+listener socket rather than replacing the operator's configuration.
+HOME containing `=` or `:` is refused: neither executable
 assignment parsing nor PATH components may be ambiguous. On Linux, a set
 XDG_CONFIG_HOME must resolve to `$HOME/.config`, or install refuses before
 writing, because the user manager
@@ -6336,8 +6326,10 @@ stable binary is warned about, without preventing installation or dry run.
 
 On Linux, the generated unit executes the installed stable `$HOME/.local/bin/plakd`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
+It declares `Requires=plak-gateway.service` and `After=plak-gateway.service`;
+starting the host pulls in the gateway before the host's readiness check.
 WorkingDirectory remains unset: systemd user services use `$HOME` by default.
-`/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, a curated
+`/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, XDG_STATE_HOME, a curated
 PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
 directory and user-bus address, and the manager's SHELL, USER, LOGNAME and
 INVOCATION_ID reach the host. SHELL lets the host capture the login shell's
@@ -6350,7 +6342,8 @@ SIGTERM hands off; ExecReload sends SIGUSR1 for UI-only reload.
 SSH_AUTH_SOCK and locale variables are not inherited: the service starts in
 the C locale. Remote runners need IdentityAgent or IdentityFile in ssh config.
 
-Install publishes the complete service file atomically without replacement.
+Install checks both service definitions before changing either one and
+publishes each complete service file atomically without replacement.
 On Linux it then runs only `systemctl --user daemon-reload` (bounded at five
 seconds). It resolves the first executable systemctl on the installer's PATH to an absolute
 path, then invokes it with HOME, fixed PATH `/usr/bin:/bin` and only the
@@ -6359,7 +6352,8 @@ It never enables or starts the service or runs Tailscale. A generated marker
 and exact content identify an identical re-install, which is a no-op;
 symlinks, edited generated units and unrelated files are refused unchanged.
 A failed reload leaves the complete unit installed and reports the retry
-remedy. `--dry-run` prints the unit and creates no files or manager calls.
+remedy. `--dry-run` prints both units and the gateway configuration and
+creates no files or manager calls.
 After installation it prints `systemctl --user enable --now plakd-host.service`,
 the `loginctl enable-linger "$USER"` note for running without a login session,
 `tailscale serve --bg unix:<socket>` (shell-quoted), and the journalctl command.
@@ -6372,7 +6366,7 @@ unsuccessful exit restarts it. A clean planned handoff does not restart the
 source. `ExitTimeOut=90`, `AbandonProcessGroup=true` and `Umask=63` (0077) keep
 planned-stop and private-file semantics. WorkingDirectory is HOME explicitly.
 A fixed `/bin/sh -c` wrapper execs `/usr/bin/env -i`, forwarding only the
-manager's SHELL, USER and LOGNAME, followed by the same fixed HOME, PLAK_HOME,
+manager's SHELL, USER and LOGNAME, followed by the same fixed HOME, PLAK_HOME, XDG_STATE_HOME,
 curated PATH, stable binary link and explicit host arguments as Linux. User
 paths are separate literal ProgramArguments, never shell source, and XML
 metacharacters are escaped. Paths that cannot be represented as XML are
@@ -6387,9 +6381,13 @@ single-link, user-owned private regular files. StandardOutPath is
 `host.stdout.log` there and StandardErrorPath is `host.stderr.log`.
 Edited or foreign service files and symlinks are refused before log-directory creation; publication cannot replace
 a file that races it. Identical generated plists remain unchanged. Install
-never invokes launchctl, loads the agent or starts a host. `--dry-run` prints
-only the plist and creates no log directory or service file. The installer
-prints `launchctl bootstrap gui/<uid> <plist>`,
+never invokes launchctl, loads an agent or starts a process. LaunchAgents
+have no equivalent to systemd's required ordering: the instructions
+bootstrap the gateway first, and the host itself waits for gateway readiness
+at login or manual start. `--dry-run` prints both plists, the configuration
+and that order, and creates no files. The installer prints
+`launchctl bootstrap gui/<uid> <gateway-plist>` before
+`launchctl bootstrap gui/<uid> <host-plist>`,
 `launchctl kickstart gui/<uid>/com.plakd.host`, the chosen Tailscale Serve
 command, both log paths with `tail -F`, and removal instructions:
 `launchctl bootout gui/<uid> <plist>` then `rm -- <plist>`. Paths are shell-quoted
@@ -6404,7 +6402,7 @@ Example generated Linux service section for the paths shown in the golden:
 
 ```ini
 [Service]
-ExecStart=/usr/bin/env -i "HOME=/home/user" "PLAK_HOME=/home/user/.plak" "PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin" "SHELL=${SHELL}" "USER=${USER}" "LOGNAME=${LOGNAME}" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" "/home/user/.local/bin/plakd" "host" "--web" "unix:/home/user/.plak/host/web/web.sock" "--ui" "/home/user/.plak/web-ui"
+ExecStart=/usr/bin/env -i "HOME=/home/user" "PLAK_HOME=/home/user/.plak" "PATH=/home/user/.local/bin:/usr/local/bin:/usr/bin:/bin" "XDG_STATE_HOME=/home/user/.local/state" "SHELL=${SHELL}" "USER=${USER}" "LOGNAME=${LOGNAME}" "XDG_RUNTIME_DIR=%t" "DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus" "INVOCATION_ID=${INVOCATION_ID}" "/home/user/.local/bin/plakd" "host" "--web" "unix:/home/user/.plak/host/web/web.sock" "--ui" "/home/user/.plak/web-ui"
 ExecReload=/bin/kill -USR1 $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
@@ -6598,44 +6596,51 @@ buffered dispatcher cannot stream a relay, so a relay it decodes is refused
 with `not-observed`. Subscription Allowance runs the held slot's provider usage
 workflow and returns its projected usage view or an explicit unavailable reason.
 
-`gateway install` writes a Linux user unit or macOS LaunchAgent and does not
-start it. The unit runs the executable that wrote it, with `UMask=0077`,
-`PLAK_HOME` and `XDG_STATE_HOME` set to the home and state home the installing
-process resolved, the optional
-`EnvironmentFile=-%h/.config/plak/gateway.env`, `Restart=on-failure`,
-`RestartSec=2` and `TimeoutStopSec=45`, longer than the drain.
+Every plakd host uses a separate gateway process, even on one machine.
+`plakd host install` installs the local gateway service if absent, as well as
+the host service and the default Unix `[gateway] address` (§4.6).
+`plakd gateway install` installs just the gateway service, for gateway-only
+machines. Neither command starts a service. The gateway definition executes
+`$HOME/.local/bin/plakd-gateway gateway serve`, not the host's stable link or
+a snapshot path. The installer seeds a missing gateway link to the invoking
+executable's resolved path; it never changes an existing link. Normal binary
+installation changes only the host link. Linux uses `plak-gateway.service`,
+the optional `EnvironmentFile=-%h/.config/plak/gateway.env` for provider keys,
+`Restart=on-failure`, `RestartSec=2` and `TimeoutStopSec=45`. macOS uses
+`com.plakd.gateway`, `RunAtLoad`, unsuccessful-exit restart and a 45 second
+exit timeout. Both use a private umask and the resolved product and XDG state
+homes. Exact generated definitions are left in place; a pinned old definition,
+hand edit or symlink is refused with commands to stop and remove it before
+retrying.
 
-A process resolves its credential custody once, from the home's own
-`config.toml` (never a project overlay), when it first needs it; `plakd host`
-resolves it at startup, before it takes the holder lock, and every route,
-subscription, console read and write, carry probe, catalog refresh and admin
-link of that host uses that one value. `[gateway]` changes take effect at the
-next host start. A `config.toml` that does not read or parse, an address that
-does not parse, or an unsafe key file is an error: a host refuses to start and
-a command fails; nothing falls back to in-process custody.
+To upgrade, drain the gateway and wait for exit, atomically replace only its
+dedicated link with a link to the tested destination snapshot, restart the
+gateway, and run `plakd gateway check` before upgrading the host. Do not edit
+or reload the service definition for a link flip. This preserves the host link,
+credential store and account authority. Existing installations with an old
+host unit and a gateway unit pinned to a snapshot need one explicit
+stop, backup and reinstall; see the user guide.
 
-A host with `[gateway] address` set does not take the credential holder lock,
-does not resolve API keys or read `secrets/`, and does not open or create the
-subscription store. With a unix address it refuses to start unless the
-exclusive holder of its own state home's store advertises exactly that socket.
-At startup it waits up to three seconds for the holder proof and a successful
-Unix connection, retrying a missing advertisement or a missing or refusing
-socket. A different advertised path still refuses immediately.
-Its API-key routes and its subscription routes use the gateway's custody, and
-an existing session reopens with its recorded binding, because the binding
-names the provider account and key generation, never where the credential is
-held. Login, logout, consent, key status and account listing use the gateway's
-admin verbs; `plakd key status` through a gateway prints each key's
-fingerprint as the in-process command does. Without an account selection,
+The host reads its own `config.toml` once at startup; project overlays cannot
+select the gateway. Every route, subscription, console operation, carry probe
+and catalog refresh uses that link. Restart the host to change it. An absent
+address, an unreadable config, an invalid address or an unsafe key file
+refuses startup. A Unix gateway must be the exclusive holder of the host's own
+state store and advertise exactly the configured socket. The host waits up to
+three seconds for the holder and listener to appear, and refuses a mismatched
+advertisement immediately. Unix and TCP startups require a reachable gateway
+with a supported protocol. A missing address or unreachable service reports
+`gateway_unavailable` and names installation or startup as the remedy; there is
+no provider-credential fallback.
+
+`plakd run`, `continue` and `models` run in the CLI process with the gateway
+for provider traffic. Existing bindings name the provider account and key
+generation, not the credential location. Without an account selection,
 `plakd status`, `plakd key status` and `plakd usage` list accounts first,
 then query one row per account. A failed row shows its own error without
-hiding other rows; a failed list still fails the command. The host console
-shows an empty roster with a diagnostic when the gateway cannot list
-accounts instead of refusing the whole read. That display does not authorize
-session account choices (§4.4.1). `plakd run`, `continue` and
-`models` run in the CLI process, whose routes relay through the gateway the
-same way. Unset, the host keeps direct in-process credential access and takes
-the holder lock shared.
+hiding other rows; a failed list fails the command. The host console shows an
+empty roster with a diagnostic when the gateway cannot list accounts; that
+display does not authorize session account choices (§4.4.1).
 
 Under gateway custody, startup refresh and `plakd models <native-account>`
 obtain the catalog under the gateway's account and consent checks (relaying

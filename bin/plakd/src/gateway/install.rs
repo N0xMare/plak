@@ -1,136 +1,221 @@
-//! `plakd gateway install` writes a user service definition and does not start it.
-//! The unit runs whatever executable is installing it, with `PLAK_HOME` and
-//! `XDG_STATE_HOME` set to the home and state home the installing process
-//! resolved, so the service resolves the same bytes the operator's host does;
-//! the cutover runbook pins the executable to an immutable snapshot before the
-//! service is enabled.
+//! The credential gateway's user service and independently pinned command link.
 
 use std::fs;
-use std::io::Write as _;
+use std::io;
+use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::path::{Path, PathBuf};
 
-pub(crate) fn install(
-    executable: &Path,
-    home: &Path,
+use crate::commands::host_install::{matching_unit, publish_unit};
+use crate::home::paths::PlakPaths;
+
+pub(crate) const SYSTEMD_UNIT: &str = "plak-gateway.service";
+pub(crate) const LAUNCHD_LABEL: &str = "com.plakd.gateway";
+const LAUNCHD_PLIST: &str = "com.plakd.gateway.plist";
+
+pub(crate) struct GatewayUnit {
+    pub(crate) path: PathBuf,
+    pub(crate) body: String,
+    link: PathBuf,
+}
+
+impl GatewayUnit {
+    pub(crate) fn render(
+        user_home: &Path,
+        product_home: &Path,
+        state_home: &Path,
+    ) -> Result<Self, String> {
+        let runtime = crate::environment::xdg_runtime_dir().filter(|path| path.is_absolute());
+        Self::for_platform(
+            user_home,
+            product_home,
+            state_home,
+            runtime.as_deref(),
+            cfg!(target_os = "macos"),
+        )
+    }
+
+    fn for_platform(
+        user_home: &Path,
+        product_home: &Path,
+        state_home: &Path,
+        runtime: Option<&Path>,
+        mac: bool,
+    ) -> Result<Self, String> {
+        let link = user_home.join(".local/bin/plakd-gateway");
+        let executable = text(&link)?;
+        let homes = [
+            ("HOME", text(user_home)?),
+            ("PLAK_HOME", text(product_home)?),
+            ("XDG_STATE_HOME", text(state_home)?),
+            (
+                "XDG_RUNTIME_DIR",
+                runtime.map(text).transpose()?.unwrap_or_default(),
+            ),
+        ];
+        let body = if mac {
+            launchd_plist(executable, &homes)
+        } else {
+            systemd_unit(executable, &homes)
+        };
+        Ok(Self {
+            path: if mac {
+                launchd_path(user_home)
+            } else {
+                systemd_path(user_home)
+            },
+            body,
+            link,
+        })
+    }
+
+    pub(crate) fn check(&self) -> io::Result<()> {
+        matching_unit(&self.path, &self.body).map(|_| ())
+    }
+
+    pub(crate) fn install(&self) -> io::Result<bool> {
+        let present = matching_unit(&self.path, &self.body)?;
+        ensure_link(&self.link, || std::env::current_exe()?.canonicalize())?;
+        if !present {
+            publish_unit(&self.path, &self.body)?;
+        }
+        Ok(!present)
+    }
+}
+
+fn ensure_link(link: &Path, executable: impl FnOnce() -> io::Result<PathBuf>) -> io::Result<()> {
+    match fs::symlink_metadata(link) {
+        Ok(metadata)
+            if metadata.is_symlink()
+                && fs::metadata(link).is_ok_and(|target| {
+                    target.is_file() && target.permissions().mode() & 0o111 != 0
+                }) =>
+        {
+            Ok(())
+        }
+        Ok(_) => Err(io::Error::other(format!(
+            "refusing to replace {}; point it at an installed, executable plakd snapshot, then retry",
+            link.display(),
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let target = executable()?;
+            let parent = link
+                .parent()
+                .ok_or_else(|| io::Error::other("gateway link has no parent"))?;
+            fs::create_dir_all(parent)?;
+            symlink(target, link)?;
+            fs::File::open(parent)?.sync_all()?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn install(
+    home: &PlakPaths,
     state_home: &Path,
     dry_run: bool,
-) -> Result<PathBuf, String> {
-    let executable = executable
-        .to_str()
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| "the gateway executable path is not UTF-8".to_owned())?;
-    let text = |path: &Path, name: &str| {
-        path.to_str()
-            .map(str::to_owned)
-            .ok_or_else(|| format!("the {name} path is not UTF-8"))
+    out: &mut dyn io::Write,
+) -> Result<(), String> {
+    let user_home = user_home()?;
+    let unit = GatewayUnit::render(&user_home, home.home(), state_home)?;
+    let result = if dry_run {
+        writeln!(out, "# {}\n{}", unit.path.display(), unit.body)
+    } else {
+        let created = unit.install().map_err(|error| error.to_string())?;
+        writeln!(
+            out,
+            "{} {}",
+            if created {
+                "Installed"
+            } else {
+                "Already installed"
+            },
+            unit.path.display()
+        )
     };
-    let homes = [
-        ("PLAK_HOME", text(home, "home")?),
-        ("XDG_STATE_HOME", text(state_home, "state home")?),
-    ];
-    if cfg!(target_os = "linux") {
-        install_systemd(executable, &homes, dry_run)
-    } else if cfg!(target_os = "macos") {
-        install_launchd(executable, dry_run)
+    result.map_err(|error| error.to_string())?;
+    if cfg!(target_os = "macos") {
+        write!(
+            out,
+            "{}",
+            launchd_start(&unit.path, rustix::process::getuid().as_raw())
+        )
     } else {
-        Err("plakd gateway install supports Linux user units and macOS LaunchAgents".to_owned())
+        writeln!(
+            out,
+            "systemctl --user daemon-reload\nsystemctl --user enable --now {SYSTEMD_UNIT}"
+        )
     }
+    .map_err(|error| error.to_string())
 }
 
-pub(crate) fn uninstall() -> Result<String, String> {
-    if cfg!(target_os = "linux") {
-        remove_definition(&systemd_path()?, "no unit at")
-    } else if cfg!(target_os = "macos") {
-        remove_definition(&launchd_path()?, "no LaunchAgent at")
+pub(super) fn uninstall() -> Result<String, String> {
+    let home = user_home()?;
+    let path = if cfg!(target_os = "macos") {
+        launchd_path(&home)
     } else {
-        Err("plakd gateway uninstall supports Linux user units and macOS LaunchAgents".to_owned())
+        systemd_path(&home)
+    };
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(format!("removed {}", path.display())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Ok(format!("no unit at {}", path.display()))
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 
-fn remove_definition(path: &Path, absent: &str) -> Result<String, String> {
-    if path.is_file() {
-        fs::remove_file(path).map_err(|error| error.to_string())?;
-        Ok(format!("removed {}", path.display()))
-    } else {
-        Ok(format!("{absent} {}", path.display()))
-    }
+fn user_home() -> Result<PathBuf, String> {
+    crate::environment::inherited_home()
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME is unavailable".to_owned())
 }
 
-fn install_systemd(
-    executable: &str,
-    homes: &[(&str, String)],
-    dry_run: bool,
-) -> Result<PathBuf, String> {
-    let path = systemd_path()?;
-    let unit = systemd_unit(executable, homes);
-    if dry_run {
-        print_dry(&path, &unit)?;
-        return Ok(path);
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    write_new(&path, &unit)?;
-    Ok(path)
+fn systemd_path(home: &Path) -> PathBuf {
+    crate::environment::xdg_config_home()
+        .unwrap_or_else(|| home.join(".config"))
+        .join("systemd/user")
+        .join(SYSTEMD_UNIT)
 }
 
-fn install_launchd(executable: &str, dry_run: bool) -> Result<PathBuf, String> {
-    let path = launchd_path()?;
-    let plist = launchd_plist(executable);
-    if dry_run {
-        print_dry(&path, &plist)?;
-        return Ok(path);
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    write_new(&path, &plist)?;
-    Ok(path)
+fn launchd_path(home: &Path) -> PathBuf {
+    home.join("Library/LaunchAgents").join(LAUNCHD_PLIST)
 }
 
-fn systemd_path() -> Result<PathBuf, String> {
-    let home =
-        crate::environment::inherited_home().ok_or_else(|| "HOME is unavailable".to_owned())?;
-    let config = crate::environment::xdg_config_home()
-        .unwrap_or_else(|| PathBuf::from(home).join(".config"));
-    Ok(config.join("systemd/user/plak-gateway.service"))
+pub(crate) fn launchd_start(path: &Path, uid: u32) -> String {
+    let path = shell_words::quote(path.to_str().unwrap_or_default());
+    format!("launchctl bootstrap gui/{uid} {path}\n")
 }
 
-fn launchd_path() -> Result<PathBuf, String> {
-    let home =
-        crate::environment::inherited_home().ok_or_else(|| "HOME is unavailable".to_owned())?;
-    Ok(PathBuf::from(home).join("Library/LaunchAgents/com.plakd.gateway.plist"))
+fn text(path: &Path) -> Result<&str, String> {
+    path.to_str()
+        .filter(|value| {
+            path.is_absolute()
+                && !value.chars().any(char::is_control)
+                && !value.contains(['\u{fffe}', '\u{ffff}'])
+        })
+        .ok_or_else(|| {
+            "gateway service paths must be absolute UTF-8 paths without control characters"
+                .to_owned()
+        })
 }
 
-/// The user unit. Files it creates are owner-only; API-key variables come
-/// from the optional `gateway.env` beside the home config; a stop allows the
-/// 30 s drain plus the runtime's own shutdown before systemd kills it.
-pub(crate) fn systemd_unit(executable: &str, homes: &[(&str, String)]) -> String {
+fn systemd_unit(executable: &str, homes: &[(&str, &str)]) -> String {
     let environment: String = homes
         .iter()
         .map(|(name, value)| format!("Environment=\"{name}={}\"\n", systemd_quoted(value)))
         .collect();
     format!(
-        "\
-[Unit]
-Description=plakd credential gateway
-[Service]
-Type=simple
-ExecStart={} gateway serve
-UMask=0077
-{environment}EnvironmentFile=-%h/.config/plak/gateway.env
-Restart=on-failure
-RestartSec=2
-TimeoutStopSec=45
-[Install]
-WantedBy=default.target
-",
-        executable.replace('%', "%%")
+        "# Generated by plakd gateway install. Do not edit.\n\
+         [Unit]\nDescription=plakd credential gateway\n\
+         [Service]\nType=simple\nExecStart=:\"{}\" gateway serve\nUMask=0077\n\
+         {environment}EnvironmentFile=-%h/.config/plak/gateway.env\n\
+         Restart=on-failure\nRestartSec=2\nTimeoutStopSec=45\n\
+         [Install]\nWantedBy=default.target\n",
+        systemd_quoted(executable)
     )
 }
 
-/// A value inside a double-quoted systemd assignment: specifiers and quoting
-/// characters are escaped.
 fn systemd_quoted(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -138,78 +223,49 @@ fn systemd_quoted(value: &str) -> String {
         .replace('%', "%%")
 }
 
-fn launchd_plist(executable: &str) -> String {
+fn launchd_plist(executable: &str, homes: &[(&str, &str)]) -> String {
+    let environment: String = homes
+        .iter()
+        .map(|(name, value)| format!("    <key>{name}</key><string>{}</string>\n", xml(value)))
+        .collect();
+    let executable = xml(executable);
     format!(
-        "\
-<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-<plist version=\"1.0\">
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generated by plakd gateway install. Do not edit. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.plakd.gateway</string>
+  <string>{LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
     <string>{executable}</string>
     <string>gateway</string>
     <string>serve</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+{environment}  </dict>
   <key>RunAtLoad</key>
-  <false/>
+  <true/>
   <key>KeepAlive</key>
   <dict>
     <key>SuccessfulExit</key>
     <false/>
   </dict>
+  <key>ExitTimeOut</key>
+  <integer>45</integer>
+  <key>Umask</key>
+  <integer>63</integer>
 </dict>
 </plist>
-"
+"#
     )
 }
 
-fn write_new(path: &Path, body: &str) -> Result<(), String> {
-    if path.exists() {
-        return Err(format!(
-            "{} already exists; it was not replaced",
-            path.display()
-        ));
-    }
-    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
-    file.write_all(body.as_bytes())
-        .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-fn print_dry(path: &Path, body: &str) -> Result<(), String> {
-    let mut out = std::io::stdout();
-    writeln!(out, "# {}", path.display()).map_err(|error| error.to_string())?;
-    writeln!(out, "{body}").map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_unit_carries_the_installing_homes_and_the_service_bounds() {
-        let unit = super::systemd_unit(
-            "/home/user/.local/lib/plak/maintainer/abc/plakd",
-            &[
-                ("PLAK_HOME", "/home/user/.plak".to_owned()),
-                ("XDG_STATE_HOME", "/home/user/state 100%".to_owned()),
-            ],
-        );
-        for line in [
-            "ExecStart=/home/user/.local/lib/plak/maintainer/abc/plakd gateway serve",
-            "UMask=0077",
-            "Environment=\"PLAK_HOME=/home/user/.plak\"",
-            "Environment=\"XDG_STATE_HOME=/home/user/state 100%%\"",
-            "EnvironmentFile=-%h/.config/plak/gateway.env",
-            "Restart=on-failure",
-            "RestartSec=2",
-            "TimeoutStopSec=45",
-        ] {
-            assert!(unit.lines().any(|row| row == line), "{line}\n{unit}");
-        }
-        let bare = super::systemd_unit("/usr/bin/plakd", &[]);
-        assert!(!bare.contains("Environment=\""));
-    }
+fn xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

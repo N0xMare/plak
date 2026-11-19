@@ -110,10 +110,17 @@ fn publication_command(root: &std::path::Path, args: &[&str]) -> Command {
     command
 }
 
+use super::gateway_process::GatewayProcess;
+
+fn publication_gateway(root: &std::path::Path) -> (GatewayProcess, tempfile::TempDir) {
+    GatewayProcess::configured(&mut publication_command(root, &[]), &root.join("home"))
+}
+
 #[test]
 fn named_api_key_commands_ignore_environment_and_the_default_key_file() {
     use std::process::Stdio;
     let root = tempfile::tempdir().unwrap();
+    let _gateway = publication_gateway(root.path());
     let mut child = publication_command(root.path(), &["key", "set", "openai/work"])
         .env("OPENAI_API_KEY", "synthetic-environment-key")
         .stdin(Stdio::piped())
@@ -180,9 +187,6 @@ fn named_api_key_commands_ignore_environment_and_the_default_key_file() {
 #[test]
 fn publication_read_only_commands_leave_missing_home_untouched() {
     for args in [
-        vec!["status"],
-        vec!["doctor"],
-        vec!["key", "status"],
         vec!["config", "show"],
         vec!["session", "check-binding", "--all"],
         vec!["wire", "schema"],
@@ -234,6 +238,7 @@ fn doctor_capacity_override_is_independent_of_the_model_and_test_volume() {
         ("refused", "ERROR", 5),
     ] {
         let root = tempfile::tempdir().unwrap();
+        let _gateway = publication_gateway(root.path());
         let out = publication_command(root.path(), &["doctor"])
             .env_remove("PLAK_TEST_MODEL")
             .env("PLAK_TEST_STORAGE_CAPACITY", capacity)
@@ -413,16 +418,18 @@ fn publication_config_edit_without_editor_or_terminal_is_usage() {
 #[test]
 fn publication_single_account_status_names_repair() {
     let root = tempfile::tempdir().unwrap();
+    let _gateway = publication_gateway(root.path());
     let out = publication_command(root.path(), &["status", "codex"])
         .output()
         .unwrap();
     assert!(out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("run plakd login codex"));
+    assert!(stdout(&out).contains("codex: credential=signed-out"));
 }
 
 #[test]
 fn publication_run_checks_signed_out_before_compatibility() {
     let root = tempfile::tempdir().unwrap();
+    let _gateway = publication_gateway(root.path());
     let out = publication_command(
         root.path(),
         &["run", "--account", "codex", "--model", "test", "--", "task"],
@@ -494,17 +501,28 @@ fn make_private_home(home: &std::path::Path) {
     }
 }
 
-fn run_plak(home: &std::path::Path, args: &[&str]) -> std::process::Output {
+fn local_command(home: &std::path::Path) -> Command {
     make_private_home(home);
-    Command::new(plak_bin())
+    let mut command = Command::new(plak_bin());
+    command
         .env("PLAK_TEST_STORAGE_CAPACITY", "available")
         .env("PLAK_HOME", home)
         .env("HOME", home) // some paths fall back to HOME
+        .env("XDG_STATE_HOME", home.join(".local/state"))
         .current_dir(home)
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
-        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("OPENROUTER_API_KEY");
+    command
+}
+
+fn local_gateway(home: &std::path::Path) -> (GatewayProcess, tempfile::TempDir) {
+    GatewayProcess::configured(&mut local_command(home), home)
+}
+
+fn run_plak(home: &std::path::Path, args: &[&str]) -> std::process::Output {
+    local_command(home)
         .args(args)
         .output()
         .expect("spawn plakd")
@@ -876,6 +894,7 @@ fn bare_product_commands_print_their_help_and_exit_zero() {
 fn api_effort_none_is_reconstructed_before_the_missing_key_refusal() {
     let dir = isolated_home_dir();
     let home = dir.path();
+    let _gateway = local_gateway(home);
     for (account, model, key_line) in [
         ("openai", "gpt-6-luna", "OpenAI API key is not set"),
         ("xai-api", "grok-4.3", "xAI API key is not set"),
@@ -946,6 +965,7 @@ fn run_plak_without_provider(home: &std::path::Path, args: &[&str]) -> std::proc
     Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .env("XDG_STATE_HOME", home.join(".local/state"))
         .current_dir(home)
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
@@ -1078,6 +1098,7 @@ fn doctor_and_session_list_and_key_status() {
     let dir = isolated_home_dir();
     let home = dir.path();
     let _ = run_plak(home, &["config", "init"]);
+    let _gateway = local_gateway(home);
 
     let out = run_plak(home, &["doctor"]);
     assert!(out.status.success(), "{}", stderr(&out));
@@ -1112,6 +1133,7 @@ fn doctor_accepts_current_config_without_a_hypothetical_downgrade_warning() {
         "[host]\nresume_after_loss = \"continue\"\n[runners]\n[web]\n",
     )
     .unwrap();
+    let _gateway = local_gateway(home.path());
     let out = run_plak(home.path(), &["doctor"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
@@ -1120,38 +1142,26 @@ fn doctor_accepts_current_config_without_a_hypothetical_downgrade_warning() {
 }
 
 #[test]
-fn key_clear_fails_closed_when_process_env_still_wins() {
+fn key_clear_fails_closed_when_gateway_env_still_wins() {
     let dir = isolated_home_dir();
     let home = dir.path();
-    make_private_home(home);
-    let out = Command::new(plak_bin())
-        .env("PLAK_HOME", home)
-        .env("HOME", home)
-        .current_dir(home)
-        .env(
-            "OPENROUTER_API_KEY",
-            concat!("sk-or-v1-", "env-shadow-test-key"),
-        )
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("XAI_API_KEY")
-        .env_remove("ANTHROPIC_API_KEY")
+    let _gateway = GatewayProcess::configured(
+        local_command(home).env("OPENROUTER_API_KEY", "synthetic-gateway-env-key"),
+        home,
+    );
+    let out = local_command(home)
         .args(["key", "status", "openrouter"])
         .output()
         .expect("spawn plakd");
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("openrouter\tenv\t"), "{text}");
-    assert!(text.contains("OPENROUTER_API_KEY"), "{text}");
-    assert!(text.contains("does not load .env"), "{text}");
+    assert!(
+        text.contains("openrouter: credential=ready source=environment"),
+        "{text}"
+    );
+    assert!(!text.contains("synthetic-gateway-env-key"), "{text}");
 
-    let clear = Command::new(plak_bin())
-        .env("PLAK_HOME", home)
-        .env("HOME", home)
-        .current_dir(home)
-        .env(
-            "OPENROUTER_API_KEY",
-            concat!("sk-or-v1-", "env-shadow-test-key"),
-        )
+    let clear = local_command(home)
         .args(["key", "clear", "openrouter"])
         .output()
         .expect("spawn plakd");
@@ -1161,8 +1171,7 @@ fn key_clear_fails_closed_when_process_env_still_wins() {
     );
     let err = stderr(&clear);
     assert!(err.contains("OPENROUTER_API_KEY"), "{err}");
-    assert!(err.contains("unset"), "{err}");
-    assert!(err.contains("never loads .env"), "{err}");
+    assert!(err.contains("gateway environment variable"), "{err}");
 }
 
 #[test]
@@ -1197,18 +1206,8 @@ fn session_mutations_require_confirmation_and_context_never_guesses() {
     }
 
     let usage = run_plak(home, &["usage"]);
-    assert!(usage.status.success(), "{}", stderr(&usage));
-    let usage_text = stdout(&usage);
-    assert!(usage_text.contains("Limits"), "{usage_text}");
-    // All four verticals are always listed, with no data by reason.
-    for vertical in ["Codex", "SuperGrok", "Claude", "OpenRouter"] {
-        assert!(usage_text.contains(vertical), "{vertical}: {usage_text}");
-    }
-    assert!(usage_text.contains("not connected"), "{usage_text}");
-    // An unknown cost is `not available`, never `$0`.
-    assert!(usage_text.contains("Cost:"), "{usage_text}");
-    assert!(usage_text.contains("not available"), "{usage_text}");
-    assert!(!usage_text.contains("$0"), "{usage_text}");
+    assert!(!usage.status.success());
+    assert!(stderr(&usage).contains("gateway_unavailable:"));
     assert!(
         usage_text.contains("Turn tokens and context capacity"),
         "{usage_text}"
@@ -1393,6 +1392,7 @@ fn another_builds_state_is_named_once_left_untouched_and_its_sessions_refused() 
 fn run_without_login_has_exact_auth_exit() {
     let dir = isolated_home_dir();
     let home = dir.path();
+    let _gateway = local_gateway(home);
     let out = run_plak(
         home,
         &[
@@ -1417,6 +1417,7 @@ fn run_without_login_has_exact_auth_exit() {
 fn agent_without_login_has_exact_auth_exit() {
     let dir = isolated_home_dir();
     let home = dir.path();
+    let _gateway = local_gateway(home);
     let out = run_plak(
         home,
         &[
@@ -1449,6 +1450,7 @@ fn api_account_without_a_key_fails_as_auth(
     env: &str,
 ) {
     let dir = isolated_home_dir();
+    let _gateway = local_gateway(dir.path());
     let effort: &[&str] = if account == "openrouter" {
         &[]
     } else {
@@ -1574,6 +1576,12 @@ fn a_non_private_home_is_refused_with_its_fix_and_never_repaired() {
         let out = plakd(args);
         if args == ["doctor"] {
             assert!(stdout(&out).contains("chmod 700"), "{}", stdout(&out));
+        } else if args == ["status"] {
+            assert!(
+                stderr(&out).contains("gateway_unavailable:"),
+                "{}",
+                stderr(&out)
+            );
         } else {
             assert_eq!(out.status.code(), Some(0), "{args:?}: {}", stderr(&out));
         }
@@ -1728,6 +1736,7 @@ fn doctor_reports_unowned_home_worktrees_as_informational() {
     let unowned = dir.path().join("worktrees/unowned");
     std::fs::create_dir_all(&unowned).unwrap();
     std::fs::write(unowned.join("work"), b"keep").unwrap();
+    let _gateway = local_gateway(dir.path());
     let doctor = run_plak(dir.path(), &["doctor"]);
     assert_eq!(doctor.status.code(), Some(0), "{}", stderr(&doctor));
     let text = stdout(&doctor);

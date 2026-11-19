@@ -7,13 +7,10 @@ mod tests;
 pub(super) use login::Logins;
 
 use super::{Console, HostPrincipal, HostRequestContext, operator, refused, validation};
-use crate::commands::application::{AccountOps, PlakousApplication};
-use crate::presentation::CompatibilityState;
 use plakd_wire_types::console::{
     HostRequest, HostResponse, OperatorAction, ReadRefusal, ValidationCode,
 };
 use plakous_host_protocol::wire::RequestRefusal;
-use plakous_hosted::account::AccountRef;
 use std::sync::Arc;
 
 pub(super) fn action(request: &HostRequest) -> Option<OperatorAction> {
@@ -174,68 +171,13 @@ impl Console {
         Ok(result)
     }
 
-    fn application(&self) -> Result<PlakousApplication, AccountError> {
-        PlakousApplication::new(self.state.clone(), None, None, self.custody.clone())
-            .map(|app| app.with_account_home(Some(self.paths.clone())))
-            .map_err(|_| failed(false))
-    }
-
     fn execute_account(&self, request: HostRequest) -> Result<HostResponse, AccountError> {
         let selected = action(&request)
             .and_then(|action| operator::account(&action).map(str::to_owned))
             .ok_or_else(|| failed(false))?;
-        let account = super::accounts::exact(&selected)?;
-        if let Some(link) = self.custody.admin() {
-            return remote::execute(link, &selected, request);
-        }
-        let mut remote_grant_may_remain = None;
-        match request {
-            HostRequest::AccountKeySet { secret, .. } => {
-                env_override(&selected)?;
-                if secret.expose().len() > crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES
-                    || secret.expose().trim().is_empty()
-                    || secret.expose().trim().chars().any(char::is_control)
-                {
-                    return Err(validation("secret", ValidationCode::InvalidValue).into());
-                }
-                crate::home::secrets::set_api_key(&self.paths, &selected, secret.into_zeroizing())
-                    .map_err(key_failure)?;
-            }
-            HostRequest::AccountKeyClear { .. } => {
-                env_override(&selected)?;
-                crate::home::secrets::clear_api_key(&self.paths, &selected).map_err(key_failure)?;
-            }
-            HostRequest::AccountRemove { .. } => {
-                if account.vertical().is_api() {
-                    env_override(&selected)?;
-                }
-                self.application()?
-                    .remove_account(&account)
-                    .map_err(|error| account_failure(&error, true))?;
-            }
-            HostRequest::AccountRefresh { .. } => {
-                let mut app = self.application()?;
-                require_current(&mut app, &account)?;
-                let (state, _) = app
-                    .refresh_now(&account)
-                    .map_err(|error| account_failure(&error, true))?;
-                if state != crate::presentation::CredentialState::Ready {
-                    return Err(failed(true));
-                }
-            }
-            HostRequest::AccountLogout { local_only, .. } => {
-                let mut app = self.application()?;
-                remote_grant_may_remain = crate::commands::application::host::logout_host_account(
-                    &mut app, &account, local_only,
-                )
-                .map_err(host_failure)?;
-            }
-            _ => return Err(validation("request", ValidationCode::InvalidAction).into()),
-        }
-        Ok(HostResponse::AccountChanged {
-            account_id: selected,
-            remote_grant_may_remain,
-        })
+        super::accounts::exact(&selected)?;
+        let link = self.custody.admin().ok_or_else(|| failed(false))?;
+        remote::execute(link, &selected, request)
     }
 }
 
@@ -252,77 +194,10 @@ fn worker<T: Send + 'static>(
     Ok(receiver)
 }
 
-fn env_override(account: &str) -> Result<(), AccountError> {
-    if let Some(variable) = crate::home::secrets::overriding_env_var(account) {
-        return Err(ReadRefusal::EnvironmentOverride {
-            proven_no_effect: true,
-            variable: variable.into(),
-            remedies: vec![plakd_wire_types::console::ReadRemedy {
-                action: plakd_wire_types::console::ReadAction::RestartHostWithoutOverride,
-                account_id: Some(account.into()),
-            }],
-        }
-        .into());
-    }
-    Ok(())
-}
-
-fn require_current(app: &mut impl AccountOps, account: &AccountRef) -> Result<(), AccountError> {
-    let status = app.offline_status(account).map_err(|_| failed(false))?;
-    if status.compatibility != CompatibilityState::Current {
-        return Err(validation("notice_revision", ValidationCode::InvalidValue).into());
-    }
-    Ok(())
-}
-
 fn failed(outcome_unknown: bool) -> AccountError {
     if outcome_unknown {
         AccountError::Unknown
     } else {
         AccountError::Refused(ReadRefusal::AccountOperationFailed {})
-    }
-}
-
-fn key_failure(error: crate::home::secrets::ApiKeyWriteError) -> AccountError {
-    failed(matches!(
-        error,
-        crate::home::secrets::ApiKeyWriteError::OutcomeUnknown(_)
-    ))
-}
-
-fn host_failure(error: crate::commands::application::host::HostAccountError) -> AccountError {
-    use crate::commands::application::host::HostAccountError;
-    match error {
-        HostAccountError::Refused(error) => account_failure(&error, false),
-        HostAccountError::OutcomeUnknown(_error) => failed(true),
-    }
-}
-
-fn account_failure(
-    error: &plakous_hosted::error::CliFailure,
-    outcome_unknown: bool,
-) -> AccountError {
-    use plakous_hosted::capabilities::AccountAdmissionError as E;
-    use std::error::Error as _;
-    match error.source().and_then(|source| source.downcast_ref::<E>()) {
-        Some(E::AccountBusy { .. }) => ReadRefusal::Busy {
-            scope: plakd_wire_types::console::ReadScope::Accounts,
-            retry_after_ms: 1_000,
-        }
-        .into(),
-        Some(E::AccountSignedIn { .. }) => {
-            validation("account_id", ValidationCode::AccountSignedIn).into()
-        }
-        Some(E::AccountUnavailable { .. }) => {
-            validation("account_id", ValidationCode::UnknownAccount).into()
-        }
-        Some(E::DefaultAccountNotRemovable { .. }) => {
-            validation("account_id", ValidationCode::InvalidAction).into()
-        }
-        Some(E::UnknownAccount { .. } | E::AccountTargetMismatch { .. }) => {
-            validation("account_id", ValidationCode::InvalidAccount).into()
-        }
-        Some(E::CapabilityUnavailable(_)) => failed(false),
-        _ => failed(outcome_unknown),
     }
 }

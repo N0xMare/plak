@@ -18,7 +18,7 @@ use crate::product_config::ProductConfig;
 /// This process's credential custody.
 #[derive(Clone)]
 pub(crate) enum HostCustody {
-    /// No `[gateway] address`: this process opens the store and key files.
+    /// Reserved for the gateway service's account worker and local unit fixtures.
     Local,
     /// Every route and account verb goes to this gateway.
     Gateway(Arc<GatewayLink>),
@@ -37,8 +37,23 @@ pub(crate) struct AdminLink {
 }
 
 impl AdminLink {
-    pub(crate) fn local_service(address: GatewayAddress) -> Self {
+    pub(super) fn local_service(address: GatewayAddress) -> Self {
         Self { address, key: None }
+    }
+
+    /// Gateway-only machines need no host config to administer their own service.
+    pub(crate) fn for_cli(home: &PlakPaths) -> Result<Self, String> {
+        let config = ProductConfig::load_home_file(home)?;
+        match config.gateway_address {
+            Some(_) => configured_link(home, &config),
+            None => Self::local(home),
+        }
+    }
+
+    pub(super) fn local(home: &PlakPaths) -> Result<Self, String> {
+        let config = super::ServerConfig::load(home)?;
+        super::ServerConfig::require_host_state_root(&config.state_root)?;
+        Ok(Self::local_service(GatewayAddress::Unix(config.socket)))
     }
 
     pub(crate) fn accounts(&self) -> Result<Vec<String>, String> {
@@ -159,31 +174,18 @@ impl HostCustody {
     /// load, an address that does not parse and a key file that is unsafe
     /// are errors.
     pub(crate) fn resolve(home: &PlakPaths) -> Result<Self, String> {
-        let config = ProductConfig::load_home_file(home)?;
-        let Some(text) = config
-            .gateway_address
-            .as_deref()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-        else {
-            return Ok(Self::Local);
-        };
-        let address = super::address::parse(text, config.gateway_allow_non_tailnet)
-            .map_err(|error| format!("gateway.address: {error}"))?;
-        let key = caller_key(home, &address, config.gateway_key_file.as_deref())?;
-        let endpoint = match &address {
+        let admin = configured_link(home, &ProductConfig::load_home_file(home)?)?;
+        let endpoint = match &admin.address {
             GatewayAddress::Unix(path) => GatewayEndpoint::Unix(path.clone()),
             GatewayAddress::Tcp(addr) => GatewayEndpoint::Tcp(*addr),
         };
-        let relay_key = key
+        let relay_key = admin
+            .key
             .as_ref()
             .map(|text| SensitiveBytes::new(text.clone().into_bytes()));
         let custody = GatewayCustody::connect(endpoint, relay_key, credential_headers)
             .map_err(|error| format!("credential gateway: {error}"))?;
-        Ok(Self::Gateway(Arc::new(GatewayLink {
-            admin: AdminLink { address, key },
-            custody,
-        })))
+        Ok(Self::Gateway(Arc::new(GatewayLink { admin, custody })))
     }
 
     /// The gateway's relay custody, when one is configured.
@@ -206,10 +208,10 @@ impl HostCustody {
         self.admin().map(|link| &link.address)
     }
 
-    /// `gateway: in-process` or the configured address.
+    /// The configured gateway or the gateway service's own store.
     pub(crate) fn label(&self) -> String {
         self.address()
-            .map_or_else(|| "in-process".to_owned(), GatewayAddress::label)
+            .map_or_else(|| "gateway service".to_owned(), GatewayAddress::label)
     }
 
     /// Route custody for every route constructor and credentials provider.
@@ -242,65 +244,65 @@ impl HostCustody {
             None => roots,
         }
     }
-
-    /// A unix gateway must be the exclusive holder of `state_home`'s store
-    /// and advertise exactly the configured socket; otherwise the host would
-    /// relay through a gateway that serves some other store. A tcp gateway
-    /// is another machine's and is not checked here.
-    pub(crate) fn verify_holder(&self, state_home: &Path) -> Result<(), HolderProofError> {
-        let Some(GatewayAddress::Unix(socket)) = self.address() else {
-            return Ok(());
-        };
-        prove_holder(&super::holder::lock_path(state_home), socket)
-    }
 }
 
-#[derive(Debug)]
-pub(crate) enum HolderProofError {
-    Waiting(String),
-    Refused(String),
+fn configured_link(home: &PlakPaths, config: &ProductConfig) -> Result<AdminLink, String> {
+    let text = config
+        .gateway_address
+        .as_deref()
+        .ok_or_else(|| GatewayUnavailable::MissingAddress.to_string())?;
+    let address = super::address::parse(text, config.gateway_allow_non_tailnet)
+        .map_err(|error| format!("gateway.address: {error}"))?;
+    let key = caller_key(home, &address, config.gateway_key_file.as_deref())?;
+    Ok(AdminLink { address, key })
 }
 
-impl HolderProofError {
-    pub(crate) fn into_message(self) -> String {
-        match self {
-            Self::Waiting(message) | Self::Refused(message) => message,
-        }
-    }
+pub(crate) enum GatewayUnavailable<'a> {
+    MissingAddress,
+    Unreachable(&'a GatewayAddress),
 }
 
-impl std::fmt::Display for HolderProofError {
+impl std::fmt::Display for GatewayUnavailable<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("gateway_unavailable: ")?;
         match self {
-            Self::Waiting(message) | Self::Refused(message) => formatter.write_str(message),
+            Self::MissingAddress => formatter.write_str(
+                "set [gateway] address and start the service; run `plakd gateway install` for a local gateway",
+            ),
+            Self::Unreachable(address @ GatewayAddress::Unix(_)) => write!(
+                formatter,
+                "cannot reach {}; start the gateway service (install it with `plakd gateway install` if absent)",
+                address.label(),
+            ),
+            Self::Unreachable(address @ GatewayAddress::Tcp(_)) => write!(
+                formatter,
+                "cannot reach {}; start the gateway service on that machine",
+                address.label(),
+            ),
         }
     }
 }
 
-fn prove_holder(lock: &Path, socket: &Path) -> Result<(), HolderProofError> {
-    match super::holder::advertised_socket(lock) {
-        Ok(Some(found)) if found == socket => Ok(()),
-        Ok(Some(found)) => Err(HolderProofError::Refused(format!(
+/// False means a Unix listener is not yet advertised; a different socket is a refusal.
+pub(crate) fn verify_holder(address: &GatewayAddress, state_home: &Path) -> Result<bool, String> {
+    let GatewayAddress::Unix(socket) = address else {
+        return Ok(true);
+    };
+    let lock = super::holder::lock_path(state_home);
+    match super::holder::advertised_socket(&lock) {
+        Ok(Some(found)) if &found == socket => Ok(true),
+        Ok(Some(found)) => Err(format!(
             "the gateway holding {} serves {}, not the configured {}; point [gateway] address at that socket or set gateway.toml socket and state_root for this home",
             lock.display(),
             found.display(),
-            socket.display()
-        ))),
-        Ok(None) => Err(HolderProofError::Waiting(format!(
-            "no plakd gateway serve holds {}; start the gateway for this state home (gateway.toml state_root) before this host",
+            socket.display(),
+        )),
+        Ok(None) => Ok(false),
+        Err(error) if super::holder::is_busy(&error) => Ok(false),
+        Err(error) => Err(format!(
+            "cannot read the credential holder at {}: {error}",
             lock.display()
-        ))),
-        Err(error) => {
-            let message = format!(
-                "cannot read the credential holder at {}: {error}",
-                lock.display()
-            );
-            if super::holder::is_busy(&error) || error.kind() == std::io::ErrorKind::NotFound {
-                Err(HolderProofError::Waiting(message))
-            } else {
-                Err(HolderProofError::Refused(message))
-            }
-        }
+        )),
     }
 }
 

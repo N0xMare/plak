@@ -430,7 +430,7 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
 }
 
 #[test]
-fn accounts_usage_hang_keeps_recorded_totals_and_returns_account_deadline() {
+fn accounts_usage_keeps_recorded_totals_without_reading_the_gateways_key() {
     let fixture = Fixture::new(&json!({
         "version": 1, "steps": [{"output": {"text": ANSWER}}]
     }));
@@ -479,18 +479,11 @@ fn accounts_usage_hang_keeps_recorded_totals_and_returns_account_deadline() {
     )
     .unwrap();
     write_private(&config, &text);
-    // The final catch-all also keeps a mistargeted request entirely offline.
     let (mut web, ready) = launch_on_with_env(
         &fixture,
         &socket_dir(&fixture).join("plak.sock"),
         &[],
-        &[
-            ("OPENROUTER_API_KEY", "offline-placeholder"),
-            (
-                "PLAK_TEST_FAULTS",
-                "host=openrouter.ai,path=/api/v1/key,nth=1,fault=hang,seconds=30;fault=connect",
-            ),
-        ],
+        &[],
         "default-src 'self'; script-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
     );
     assert!(ready, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
@@ -522,7 +515,7 @@ fn accounts_usage_hang_keeps_recorded_totals_and_returns_account_deadline() {
     let row = &usage["rows"][0];
     assert_eq!(row["account_id"], "openrouter", "{answer}");
     assert_eq!(
-        row["allowance"]["unavailable"]["code"], "deadline",
+        row["allowance"]["unavailable"]["code"], "gateway",
         "{answer}"
     );
     assert_eq!(row["recorded"]["calls"], "2", "{answer}");

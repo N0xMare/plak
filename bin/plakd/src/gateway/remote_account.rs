@@ -1,10 +1,6 @@
 //! Account commands when a gateway holds the store.
 //!
-//! A configured address, or a service that already advertised its socket, is
-//! the target. The command prints `via gateway <label>` and sends the admin
-//! verb. With neither, the command stays in this process and this module does
-//! not create the holder file. Model commands always run in this process:
-//! under a configured gateway their routes relay through it.
+//! The command prints `via gateway <label>` and sends the admin verb.
 
 use std::io::{self, Write};
 use std::thread;
@@ -19,34 +15,17 @@ use plakous::subscriptions::{NativeLoginMode, NativeSubscriptions};
 use plakous_hosted::account::AccountRef;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
+use super::AdminLink;
 use super::address::GatewayAddress;
 use super::client;
-use super::route::AccountRoute;
 use crate::command::Command;
+use crate::commands::login::read_remote_authorization_interactive;
+use crate::commands::login_flow::{LoginUi as _, SystemLoginUi};
 use crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES;
 use crate::shell::services::Services;
 use crate::terminal_application::read_terminal_secret_line;
 
-/// Shared holder for an account command that stays in this process.
-/// `Ok(None)` means the command does not open the store: it is not a
-/// credential command, or a configured gateway holds the store.
-pub(crate) fn hold_in_process(
-    services: &Services,
-    command: &Command,
-) -> CliResult<Option<super::holder::HolderLock>> {
-    if !credential_command(command) || services.custody()?.address().is_some() {
-        return Ok(None);
-    }
-    let root = services.home().state()?;
-    let held = if crate::command::command_is_read_only(command) {
-        super::holder::acquire_shared(root)
-    } else {
-        super::holder::acquire_shared_creating(root)
-    };
-    held.map(Some).map_err(CliFailure::new)
-}
-
-/// Forwards an account command to a configured or discovered gateway.
+/// Forwards an account command to the separate gateway.
 /// `Ok(None)` means the command runs in this process: it is not an account
 /// command, or it dispatches model traffic (`run`, `continue`, `models`),
 /// whose routes take this process's gateway custody themselves.
@@ -57,26 +36,19 @@ pub(crate) fn try_remote_account(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> CliResult<Option<ProcessOutcome>> {
-    if !admin_command(command) {
+    if !is_account_command(command) {
         return Ok(None);
     }
-    let custody = services.custody()?;
-    let home = services.paths()?;
-    let route = super::route_for(home, &custody).map_err(CliFailure::new)?;
-    let Some(address) = route.remote().cloned() else {
-        return Ok(None);
-    };
-    if let Some(line) = route.via_line() {
-        writeln!(stdout, "{line}").map_err(|_| CliFailure::new("stdout failed"))?;
-    }
-    let key = match route {
-        AccountRoute::Configured(_) => custody.admin().and_then(super::AdminLink::key),
-        AccountRoute::Service(_) | AccountRoute::InProcess => None,
-    };
-    dispatch(&address, key, command, stdin, stdout, stderr).map(Some)
+    let link = AdminLink::for_cli(services.paths()?).map_err(CliFailure::new)?;
+    let address = &link.address;
+    let key = link.key();
+    client::versions(address, key).map_err(CliFailure::new)?;
+    writeln!(stdout, "via gateway {}", address.label())
+        .map_err(|_| CliFailure::new("stdout failed"))?;
+    dispatch(address, key, command, stdin, stdout, stderr).map(Some)
 }
 
-fn credential_command(command: &Command) -> bool {
+pub(crate) fn is_account_command(command: &Command) -> bool {
     matches!(
         command,
         Command::AuthStatus(_)
@@ -93,31 +65,6 @@ fn credential_command(command: &Command) -> bool {
                 session_id: None,
                 ..
             }
-            | Command::Models(_)
-            | Command::ModelsOpenRouter(_)
-            | Command::ModelsPlatform(_)
-            | Command::Run { .. }
-            | Command::RunOpenRouter { .. }
-            | Command::RunPlatform { .. }
-            | Command::ContinueSession { .. }
-    )
-}
-
-/// The credential commands that are admin verbs at a gateway.
-fn admin_command(command: &Command) -> bool {
-    credential_command(command) && !model_command(command)
-}
-
-fn model_command(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Models(_)
-            | Command::ModelsOpenRouter(_)
-            | Command::ModelsPlatform(_)
-            | Command::Run { .. }
-            | Command::RunOpenRouter { .. }
-            | Command::RunPlatform { .. }
-            | Command::ContinueSession { .. }
     )
 }
 
@@ -488,7 +435,7 @@ fn login(
             replace_newer = true;
             continue;
         }
-        return finish_login(address, key, response, stdin, stderr);
+        return finish_login(address, key, response, mode, stdin, stderr);
     }
 }
 
@@ -496,6 +443,7 @@ fn finish_login(
     address: &GatewayAddress,
     key: Option<&str>,
     response: AdminResponse,
+    mode: NativeLoginMode,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
@@ -513,8 +461,17 @@ fn finish_login(
     if let Some(warning) = warning {
         writeln!(stderr, "{}", warning.as_str()).map_err(|_| CliFailure::new("stderr failed"))?;
     }
-    writeln!(stderr, "open {}", authorize_url.expose())
-        .map_err(|_| CliFailure::new("stderr failed"))?;
+    let mut ui = SystemLoginUi;
+    ui.present_url(
+        stderr,
+        authorize_url.expose(),
+        "gateway",
+        method == LoginMethod::Paste,
+    )
+    .map_err(|_| CliFailure::new("stderr failed"))?;
+    if mode == NativeLoginMode::Browser && !ui.ssh_session_detected() {
+        let _ = ui.open_browser(authorize_url.expose());
+    }
     if let Some(code) = user_code.as_ref() {
         writeln!(stderr, "code {}", code.expose()).map_err(|_| CliFailure::new("stderr failed"))?;
     }
@@ -524,8 +481,13 @@ fn finish_login(
         stderr
             .flush()
             .map_err(|_| CliFailure::new("stderr failed"))?;
-        let pasted = read_terminal_secret_line(stdin, stderr, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES)
-            .map_err(|_| CliFailure::new("could not read the provider response"))?;
+        let pasted = read_remote_authorization_interactive(
+            stdin,
+            stderr,
+            authorize_url.expose(),
+            MAX_REMOTE_AUTHORIZATION_INPUT_BYTES,
+            &mut ui,
+        )?;
         let pasted = SecretText::new(zeroize::Zeroizing::new(pasted.as_str().to_owned()))
             .map_err(|error| CliFailure::new(error.to_string()))?;
         return finish_progress(ask(
@@ -534,24 +496,30 @@ fn finish_login(
             AdminRequest::LoginComplete { attempt, pasted },
         )?);
     }
-    for _ in 0..900 {
-        thread::sleep(Duration::from_millis(1100));
-        let progress = ask(
-            address,
-            key,
-            AdminRequest::LoginPoll {
-                attempt: attempt.clone(),
-            },
-        )?;
-        if terminal_phase(&progress) {
-            return finish_progress(progress);
+    let waiting = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    ui.wait_reminder("gateway".to_owned(), waiting.clone());
+    let result = (|| {
+        for _ in 0..900 {
+            thread::sleep(Duration::from_millis(1100));
+            let progress = ask(
+                address,
+                key,
+                AdminRequest::LoginPoll {
+                    attempt: attempt.clone(),
+                },
+            )?;
+            if terminal_phase(&progress) {
+                return finish_progress(progress);
+            }
         }
-    }
-    let _ = ask(address, key, AdminRequest::LoginCancel { attempt });
-    Err(CliFailure::classified(
-        CliFailureKind::Auth,
-        "the login attempt expired",
-    ))
+        let _ = ask(address, key, AdminRequest::LoginCancel { attempt });
+        Err(CliFailure::classified(
+            CliFailureKind::Auth,
+            "the login attempt expired",
+        ))
+    })();
+    waiting.store(false, std::sync::atomic::Ordering::Release);
+    result
 }
 
 fn finish_progress(response: AdminResponse) -> CliResult<ProcessOutcome> {

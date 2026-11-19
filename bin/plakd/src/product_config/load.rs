@@ -231,7 +231,7 @@ pub struct ProductConfig {
     pub web_config_write: bool,
     pub web_files_read: bool,
     pub web_terminal: bool,
-    /// `[gateway] address`, home-scoped. Unset stays in this process.
+    /// `[gateway] address`, home-scoped. Required at host startup.
     pub gateway_address: Option<String>,
     /// `[gateway] key_file`, home-scoped.
     pub gateway_key_file: Option<String>,

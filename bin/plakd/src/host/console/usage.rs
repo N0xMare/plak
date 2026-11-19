@@ -122,30 +122,11 @@ impl Console {
         }
         if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
             // The gateway holds the key; this host never reads it.
-            if self.custody.admin().is_some() {
-                return missing(
-                    account,
-                    "gateway",
-                    "the gateway holds this key; run plakd usage for its allowance",
-                );
-            }
-            return match tokio::time::timeout(
-                timeout,
-                crate::openrouter_product::usage::console::read(
-                    &self.paths,
-                    account,
-                    self.provider.clone().acquire_owned(),
-                ),
-            )
-            .await
-            {
-                Ok(observation) => project(account, observation),
-                Err(_) => missing(
-                    account,
-                    "deadline",
-                    "provider allowance read took too long; retry",
-                ),
-            };
+            return missing(
+                account,
+                "gateway",
+                "the gateway holds this key; run plakd usage for its allowance",
+            );
         }
         let Some(provider) = account.vertical().capability().native_provider() else {
             return missing(

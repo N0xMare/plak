@@ -62,16 +62,17 @@ command instead. The detached host uses the public home as cwd,
 has no implicit startup workspace, and writes a private bounded
 `host/auto-start.log`. It exits after five minutes without connections or kept
 work; ordinary foreground and unit hosts persist. Auto-start uses a curated
-OS/tool environment, not the caller's API-key variables. Configure stored keys
-with `plakd key set`, or set variables in the environment of an explicitly
-started host/unit. Missing-key diagnostics name the resolving process.
-`key set`/`key clear` themselves still run locally and obey their own process's
-environment-first precedence; the bridge does not perform target-host writes.
+OS/tool environment, not the caller's API-key variables. The host starts only
+with a reachable credential gateway. Configure stored keys with `plakd key set`
+or set variables in the gateway service's environment. The gateway decides
+API-key overrides for `key set` and `key clear`; the bridge does not perform
+target-host writes.
 
 Bare `plakd` prints help and exits 0 without starting a host or session.
 
 `plakd host install --web unix:<absolute-socket> --ui <absolute-directory>
-[--dry-run]` writes a Linux systemd user unit or a macOS per-user LaunchAgent.
+[--dry-run]` writes the host and gateway user units or LaunchAgents, and sets
+the default Unix gateway address.
 Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
@@ -1042,8 +1043,8 @@ plakd gateway check
 
 A same-UID peer on the Unix socket is the local administrator and presents no
 key. TCP requires a caller key. The service relays API-key accounts and the
-subscription logins. A host with `[gateway] address` set relays API-key
-and subscription routes through it. See [credential gateway](gateway.md).
+subscription logins. Every host requires a `[gateway] address` and relays
+API-key and subscription routes through it. See [credential gateway](gateway.md).
 
 ## Maintainer commands
 

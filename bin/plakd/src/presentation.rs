@@ -16,6 +16,7 @@ use crate::commands::support::native_subscription_failure;
 use crate::home::paths::{self, PlakPaths};
 use crate::home::secrets;
 use crate::product_config::ProductCompositionSelection;
+#[cfg(test)]
 use crate::shell::services::Services;
 use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliResult};
@@ -847,6 +848,7 @@ pub(crate) fn event_table_row(value: &serde_json::Value) -> [String; 4] {
 /// OAuth subscription records are XDG state, not product home, so emptying
 /// `PLAK_HOME` leaves every OAuth account Ready. API keys are the opposite:
 /// they are files under the product home. One line says both.
+#[cfg(test)]
 pub(crate) fn credential_locations_line(services: &Services) -> String {
     let oauth = paths::application_state_home().map_or_else(
         |_| "$XDG_STATE_HOME".to_owned(),
@@ -860,6 +862,7 @@ pub(crate) fn credential_locations_line(services: &Services) -> String {
 }
 
 /// The sentence alone, so a test pins it without a product home.
+#[cfg(test)]
 pub(crate) fn credential_locations_text(oauth: &str, keys: &str) -> String {
     format!(
         "OAuth credentials live in {oauth}, outside the product home, so emptying it does not log you out. API keys live in {keys}."

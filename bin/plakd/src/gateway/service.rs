@@ -31,8 +31,7 @@ pub(crate) struct Gateway {
 }
 
 impl Gateway {
-    /// Opens the service files and takes the exclusive holder. Fails while any
-    /// in-process holder exists.
+    /// Opens the service files and takes the exclusive holder.
     pub(crate) fn open_with(
         home: &PlakPaths,
         config: ServerConfig,
@@ -42,7 +41,7 @@ impl Gateway {
         let lock_path = holder::lock_path(&config.state_root);
         let lock = HolderLock::try_acquire(&lock_path, HolderMode::Exclusive).map_err(|error| {
             if holder::is_busy(&error) {
-                "an in-process credential holder exists; stop it before plakd gateway serve"
+                "the credential store already has a gateway; stop it before plakd gateway serve"
                     .to_owned()
             } else {
                 error.to_string()
@@ -93,6 +92,7 @@ impl Gateway {
     /// account worker joins.
     pub(crate) fn serve_foreground(self) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;

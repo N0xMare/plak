@@ -76,13 +76,7 @@ pub(crate) fn ready_catalog_at(
     };
     std::thread::scope(|scope| {
         scope
-            .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|_| "the account readiness read could not start".to_owned())?
-                    .block_on(readiness::ready_accounts(state, paths, custody))
-            })
+            .spawn(|| readiness::ready_accounts(state, paths, custody))
             .join()
             .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))
     })
