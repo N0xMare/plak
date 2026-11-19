@@ -65,7 +65,7 @@ fn translate_history_items<'a>(
     replay_diagnostics: &mut Vec<String>,
 ) -> Result<TranslatedHistory, MessagesRequestError> {
     let mut messages: Vec<MessageParam> = Vec::new();
-    let mut historical_projection_diagnostics = HistoricalProjections::default();
+    let mut projections = HistoricalProjections::default();
     let mut items = items.enumerate().peekable();
     let mut pending = Vec::<PendingTool>::new();
     let mut container = None;
@@ -88,7 +88,7 @@ fn translate_history_items<'a>(
                         server_lineage: &mut server_lineage,
                         diagnostics: replay_diagnostics,
                     },
-                    &mut historical_projection_diagnostics,
+                    &mut projections,
                 )?;
                 if extending {
                     // A cancelled batch records each tool call as its own
@@ -152,11 +152,7 @@ fn translate_history_items<'a>(
     if !pending.is_empty() {
         return Err(invalid("history ends before required tool results"));
     }
-    Ok((
-        messages,
-        container,
-        historical_projection_diagnostics.diagnostics,
-    ))
+    Ok((messages, container, projections.diagnostics))
 }
 
 fn translate_tool_messages<'a>(
@@ -447,7 +443,7 @@ fn translate_assistant_with_history(
     ownership: &ToolOwnership,
     projection: AssistantProjection,
     replay: AssistantReplayState<'_>,
-    historical_projection_diagnostics: &mut HistoricalProjections,
+    projections: &mut HistoricalProjections,
 ) -> Result<(Vec<MessageBlock>, Vec<PendingTool>), MessagesRequestError> {
     let AssistantProjection {
         programmatic,
@@ -476,7 +472,7 @@ fn translate_assistant_with_history(
                     policy,
                     completed_turn,
                     include_native_thinking,
-                    historical_projection_diagnostics,
+                    projections,
                 )? {
                     continue;
                 }
@@ -588,12 +584,8 @@ fn project_completed_thinking(
         if !include_native_thinking {
             return Ok(false);
         }
-        if completed_turn && !projections.unsigned_recorded {
-            projections.record(
-                unsigned_historical_projection_identity(policy)?,
-                "Completed historical thinking without replay was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
-            );
-            projections.unsigned_recorded = true;
+        if completed_turn {
+            projections.record_unsigned(policy)?;
         }
         return Ok(completed_turn);
     };
@@ -912,6 +904,21 @@ struct HistoricalProjections {
 }
 
 impl HistoricalProjections {
+    fn record_unsigned(
+        &mut self,
+        policy: &MessagesRequestPolicy,
+    ) -> Result<(), MessagesRequestError> {
+        // One instance serves one policy for the entire lowering pass.
+        if !self.unsigned_recorded {
+            self.record(
+                unsigned_historical_projection_identity(policy)?,
+                "Completed historical thinking without replay was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
+            );
+            self.unsigned_recorded = true;
+        }
+        Ok(())
+    }
+
     fn record(&mut self, identity: Digest, message: &str) {
         if self
             .diagnostics

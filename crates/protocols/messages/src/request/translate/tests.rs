@@ -1138,6 +1138,82 @@ fn unsigned_completed_history_has_one_stable_projection_and_unchanged_wire() -> 
 }
 
 #[test]
+fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestResult {
+    let fixture = |history| {
+        lowering_fixture_with_tool_choice_and_history(
+            ToolChoice::Auto,
+            history,
+            plakous_model::GenerationLimits::default(),
+            ReasoningPolicy::Enabled {
+                effort: Some(ReasoningEffort::Low),
+                requirement: CapabilityRequirement::Required,
+            },
+        )
+    };
+    let plain = (1..=4)
+        .map(|id| {
+            batch_item(
+                id,
+                Actor::Assistant,
+                vec![ContentBlock::Text(TestTextBlock::new("answer", None)?)],
+            )
+        })
+        .collect::<TestResult<Vec<_>>>()?;
+    let (plain_plan, target) = fixture(plain.clone())?;
+    let target = target.with_strict_thinking_replay(true);
+    let plain_wire = lower_request(&plain_plan, &target, ToolOwnership::default())?;
+    let mut source = target.clone();
+    source.effective_provider_configuration = effective_id(b"prior-effort")?;
+    let signature = bind_replay_payload(
+        &source,
+        source.requested_model.clone(),
+        SIGNATURE_REPLAY_KIND,
+        raw("\"synthetic-signature\"")?,
+    )?;
+    let unsigned = unsigned_historical_projection_identity(&target)?;
+    let signed = historical_projection_identity(&signature, &target)?;
+    assert_ne!(unsigned, signed);
+
+    for signed_first in [false, true] {
+        let history = plain
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let replay = ((index % 2 == 0) == signed_first).then(|| signature.clone());
+                let mut blocks = vec![ContentBlock::Reasoning(plakous_model::ReasoningBlock::new(
+                    ReasoningVisibility::Visible,
+                    Some("synthetic thinking".into()),
+                    replay,
+                )?)];
+                blocks.extend_from_slice(item.blocks());
+                batch_item(index as u128 + 1, Actor::Assistant, blocks)
+            })
+            .collect::<TestResult<Vec<_>>>()?;
+        let (plan, _) = fixture(history)?;
+        let proof = plan
+            .request()
+            .input()
+            .semantic_prefix_identity(plain.len())?;
+        let policy = target.clone().with_completed_history_prefix(Some(proof));
+        let wire = lower_request(&plan, &policy, ToolOwnership::default())?;
+        let expected = if signed_first {
+            [Some(signed), Some(unsigned)]
+        } else {
+            [Some(unsigned), Some(signed)]
+        };
+        assert!(
+            wire.historical_projection_diagnostics()
+                .iter()
+                .map(ModelDiagnostic::history_projection_identity)
+                .eq(expected)
+        );
+        assert!(wire.replay_diagnostics().is_empty());
+        assert_eq!(wire.body(), plain_wire.body());
+    }
+    Ok(())
+}
+
+#[test]
 fn disabled_thinking_omits_unsigned_and_signed_historical_projection_diagnostics() -> TestResult {
     let source = policy()?.with_strict_thinking_replay(true);
     let mut target = source.clone();
