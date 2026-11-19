@@ -14,7 +14,9 @@ use plakous::gateway::protocol::facts::{
 use plakous::gateway::protocol::refusal::GatewayRefusal;
 use plakous::gateway::protocol::{BoundedText, UuidText};
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
-use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode, NativeSubscriptionError};
+use plakous::subscriptions::{
+    NativeAuthStatus, NativeLoginCompletion, NativeLoginMode, NativeSubscriptionError,
+};
 use plakous_hosted::account::AccountRef;
 use tokio::sync::oneshot;
 
@@ -35,12 +37,7 @@ struct LiveLogin {
 }
 
 struct DeviceLogin {
-    result: oneshot::Receiver<
-        Result<
-            plakous::subscriptions::NativeAuthStatus,
-            plakous::subscriptions::NativeSubscriptionError,
-        >,
-    >,
+    result: oneshot::Receiver<Result<NativeAuthStatus, NativeSubscriptionError>>,
     task: tokio::task::AbortHandle,
 }
 
@@ -580,7 +577,7 @@ mod tests {
         let bridge = bridge(&directory);
         for account in ["claude", "claude/work", "codex", "grok/work"] {
             let failure = bridge.app.account_failure(
-                plakous::subscriptions::NativeSubscriptionError::AccountReplacementRefused,
+                NativeSubscriptionError::AccountReplacementRefused,
                 &account.parse().unwrap(),
             );
             assert!(
@@ -590,10 +587,38 @@ mod tests {
             );
         }
         let other = bridge.app.account_failure(
-            plakous::subscriptions::NativeSubscriptionError::Authentication,
+            NativeSubscriptionError::Authentication,
             &"claude".parse().unwrap(),
         );
         assert!(!replacement_refused(other.message()));
+    }
+
+    #[test]
+    fn cancelling_a_settled_device_login_returns_its_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = bridge(&directory);
+        let (send, result) = oneshot::channel();
+        let task = bridge
+            .app
+            .executor
+            .block_on(async { tokio::spawn(std::future::pending::<()>()).abort_handle() })
+            .unwrap();
+        let attempt = bridge
+            .attempts
+            .begin(
+                GatewayAccount::new("codex".to_owned()).unwrap(),
+                LiveLogin {
+                    method: LoginMethod::DeviceCode,
+                    pending: None,
+                    device: Some(DeviceLogin { result, task }),
+                },
+            )
+            .unwrap();
+        send.send(Ok(NativeAuthStatus::Ready)).unwrap();
+        assert_eq!(
+            bridge.login_cancel(&attempt),
+            progress(attempt, LoginPhase::Succeeded)
+        );
     }
 
     /// An empty slot has no account to keep: a remote login into it is not

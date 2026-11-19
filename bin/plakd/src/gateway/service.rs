@@ -124,16 +124,23 @@ impl Gateway {
         let deadline = Instant::now() + RUNTIME_SHUTDOWN;
         accounts.close();
         runtime.shutdown_timeout(deadline.saturating_duration_since(Instant::now()));
-        if !accounts.join_until(deadline) {
-            // Keep the exclusive holder advertised until process exit even
-            // if the detached account worker eventually finishes.
-            std::mem::forget(lock);
-            return Err(
-                "gateway account worker did not stop before the shutdown deadline".to_owned(),
-            );
-        }
+        finish_accounts(accounts, lock, deadline)?;
         result
     }
+}
+
+fn finish_accounts(
+    accounts: AccountThread,
+    lock: Arc<HolderLock>,
+    deadline: Instant,
+) -> Result<(), String> {
+    if accounts.join_until(deadline) {
+        return Ok(());
+    }
+    // Keep the exclusive holder advertised until process exit even
+    // if the detached account worker eventually finishes.
+    std::mem::forget(lock);
+    Err("gateway account worker did not stop before the shutdown deadline".to_owned())
 }
 
 /// How long in-flight relays and refresh claims may take to settle once the
@@ -256,5 +263,84 @@ impl std::fmt::Display for super::callers::CallerError {
             Self::Unknown => formatter.write_str("caller unknown"),
             Self::Io(message) | Self::Malformed(message) => formatter.write_str(message),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use plakous::gateway::protocol::GatewayAccount;
+    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
+    use plakous::gateway::protocol::facts::{AccountFacts, RefreshRequest};
+    use plakous::gateway::protocol::refusal::GatewayRefusal;
+
+    use super::*;
+
+    struct HeldCall {
+        started: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl AccountBridge for HeldCall {
+        fn call(&mut self, _local_admin: bool, _request: AdminRequest) -> AdminResponse {
+            self.started.send(()).unwrap();
+            self.release.recv().unwrap();
+            AdminResponse::Accounts {
+                accounts: Vec::new(),
+            }
+        }
+
+        fn facts(
+            &mut self,
+            _accounts: &[GatewayAccount],
+        ) -> Result<Vec<AccountFacts>, GatewayRefusal> {
+            Err(GatewayRefusal::Internal {})
+        }
+
+        fn refresh(&mut self, _request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal> {
+            Err(GatewayRefusal::Internal {})
+        }
+    }
+
+    #[test]
+    fn join_timeout_keeps_holder_even_after_worker_finishes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("private/holder");
+        let lock = Arc::new(HolderLock::try_acquire(&path, HolderMode::Exclusive).unwrap());
+        let retained = Arc::downgrade(&lock);
+        let (started, entered) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let (mut worker, accounts) = AccountWorker::start(
+            Box::new(HeldCall {
+                started,
+                release: released,
+            }),
+            Arc::clone(&lock),
+        )
+        .unwrap();
+        let call = std::thread::spawn(move || worker.call(true, AdminRequest::List {}));
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        accounts.close();
+        assert!(finish_accounts(accounts, lock, Instant::now()).is_err());
+        let check_exclusive = || match HolderLock::try_acquire(&path, HolderMode::Shared) {
+            Ok(_) => panic!("the exclusive holder was released"),
+            Err(error) => assert!(holder::is_busy(&error), "{error}"),
+        };
+        check_exclusive();
+        release.send(()).unwrap();
+        assert!(matches!(
+            call.join().unwrap(),
+            AdminResponse::Accounts { .. }
+        ));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while retained.strong_count() > 1 {
+            assert!(
+                Instant::now() < deadline,
+                "worker did not drop its holder reference"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        check_exclusive();
     }
 }

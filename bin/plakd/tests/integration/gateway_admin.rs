@@ -9,7 +9,7 @@
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -632,7 +632,6 @@ fn gateway_cli_rosters_print_successful_and_refused_rows() {
     let key = gateway.add_caller("relay:claude,relay:openai");
     let home = gateway.root.path().join("home");
     let key_file = home.join("caller.key");
-    use std::os::unix::fs::OpenOptionsExt as _;
     fs::OpenOptions::new()
         .create_new(true)
         .write(true)

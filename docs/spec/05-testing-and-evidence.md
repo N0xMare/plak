@@ -4395,6 +4395,9 @@ Ready Claude record without changing the record. Concurrent admin calls
 and Drain are exercised with a held provider request; the holder lock
 remains exclusive until that request and the service settle. A separate
 worker test checks that a panicking call is refused and Status still works.
+The shutdown timeout test confirms that the holder remains exclusive even
+after the detached worker returns. CLI and console tests cover per-account
+row errors and the diagnostic on a failed account list.
 
 Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
 peer. Those bytes, with the dial authority normalized, are pinned equal to a

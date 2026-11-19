@@ -624,3 +624,30 @@ impl super::Console {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn gateway_list_failure_preserves_the_console_read_with_a_diagnostic() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().to_path_buf());
+        std::fs::write(
+            paths.home().join("config.toml"),
+            format!(
+                "[gateway]\naddress = \"unix:{}\"\n",
+                root.path().join("missing.sock").display()
+            ),
+        )
+        .unwrap();
+        let custody = crate::gateway::HostCustody::resolve(&paths).unwrap();
+        let reader = reader_at(&root.path().join("state"), &custody).unwrap();
+        let result = roster(&reader, &paths, None).await.unwrap();
+        assert!(result.accounts.is_empty());
+        assert!(!result.truncated);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "enumeration_unavailable");
+        assert!(!root.path().join("state").exists());
+    }
+}
