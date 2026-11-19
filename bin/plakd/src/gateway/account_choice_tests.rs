@@ -11,7 +11,7 @@ use plakous_hosted::runtime::{
     UsageReads,
 };
 
-use super::continuity_tests::{drain, serve};
+use super::test_service::GatewayFixture;
 use crate::account_choice::{self, FillMode, ReadyAccount};
 use crate::home::paths::PlakPaths;
 use crate::surface_protocol::SurfaceIntent;
@@ -84,7 +84,7 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
         zeroize::Zeroizing::new("synthetic-openai-key".to_owned()),
     )
     .unwrap();
-    let (socket, served) = serve(&gateway_home, &directory.path().join("gateway-state"));
+    let gateway = GatewayFixture::start(&gateway_home, &directory.path().join("gateway-state"));
 
     // The host's home names the gateway and holds only an `anthropic` key,
     // which a host that read its own key files would report Ready.
@@ -98,7 +98,7 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
     .unwrap();
     std::fs::write(
         host.config_file(),
-        format!("[gateway]\naddress = \"unix:{}\"\n", socket.display()),
+        format!("[gateway]\naddress = \"{}\"\n", gateway.address().label()),
     )
     .unwrap();
     let custody = super::HostCustody::resolve(&host).unwrap();
@@ -156,8 +156,6 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
         None,
         "a spawn never reads the host's key file"
     );
-
-    drain(&socket, served);
 }
 
 #[cfg(feature = "codex")]
@@ -196,12 +194,12 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
             .await
             .unwrap()
     });
-    let (socket, served) = serve(&gateway_home, &state);
+    let gateway = GatewayFixture::start(&gateway_home, &state);
     let host = PlakPaths::explicit(directory.path().join("host-home"));
     std::fs::create_dir_all(host.home()).unwrap();
     std::fs::write(
         host.config_file(),
-        format!("[gateway]\naddress = \"unix:{}\"\n", socket.display()),
+        format!("[gateway]\naddress = \"{}\"\n", gateway.address().label()),
     )
     .unwrap();
     let custody = super::HostCustody::resolve(&host).unwrap();
@@ -212,7 +210,6 @@ fn the_gateway_reports_the_default_and_named_subscription_slots() {
             .collect(),
     });
     let catalog = account_choice::ready_catalog(&host, &custody);
-    drain(&socket, served);
     let AdminResponse::Status { rows } = status.unwrap() else {
         panic!("the gateway did not answer the subscription status request");
     };

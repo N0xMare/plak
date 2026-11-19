@@ -183,11 +183,17 @@ also keep compatibility with their immediately preceding version.
   Unix gateway address. The gateway runs through `~/.local/bin/plakd-gateway`,
   which normal installation does not advance. Drain, flip that link, start
   the gateway and run `gateway check` without stopping the host. For pinned
-  installs, move paired runners first, then back up and replace the drained
-  gateway's old unit and drop-ins, moving key environment settings to
-  `gateway.env`. Install the gateway from the destination snapshot, check
-  the link and service, then carry the host before replacing its old unit
-  and drop-ins. No persisted format changes.
+  installs, move paired runners first, then drain and disable the old
+  gateway. Back up and remove its unit and drop-ins and move provider-key
+  environment settings to `~/.config/plak/gateway.env`. Run `gateway install`
+  from the destination snapshot, reload and start the gateway, run
+  `gateway check`, and confirm the pin with `readlink ~/.local/bin/plakd-gateway`.
+  Carry the host with `host upgrade` before removing its old unit and drop-ins.
+  Then advance the host link, rerun `host install` with the original flags,
+  reload where needed, and enable and start it. Local macOS commands also
+  need a gateway installed and bootstrapped. See the
+  [one-time migration](docs/user-guide/gateway.md#migrate-an-existing-service-once).
+  No persisted format changes.
 - Resolve credential custody once per process from the home `config.toml`:
   a host resolves it at startup and every route, console read and write,
   carry probe and catalog refresh uses it. `[gateway]` changes need a host

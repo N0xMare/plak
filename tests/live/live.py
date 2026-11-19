@@ -2506,9 +2506,15 @@ class Env:
     def gateway_env(self, env: dict[str, str]) -> dict[str, str]:
         """A separate process owns upstream faults; the caller owns relay faults."""
         env = dict(env, PLAK_TEST_GATEWAY="external")
-        plan = env.pop("PLAK_TEST_FAULTS", "").split(";")
-        relay = [rule for rule in plan if "hop=gateway" in rule.split(",")]
-        upstream = ";".join(rule for rule in plan if rule and rule not in relay)
+        relay, provider = [], []
+        for rule in env.pop("PLAK_TEST_FAULTS", "").split(";"):
+            fields = rule.split(",")
+            if "hop=gateway" in fields:
+                relay.append(rule)
+            elif rule:
+                # The gateway's upstream parser takes provider rules, without hop selectors.
+                provider.append(",".join(field for field in fields if field != "hop=upstream"))
+        upstream = ";".join(provider)
         if not self.owns_gateway and upstream:
             raise ScenarioFailure(HARNESS, "upstream faults require a driver-owned gateway")
         if relay:
@@ -2518,7 +2524,9 @@ class Env:
         home = Path(env["PLAK_HOME"])
         socket = home / "gateway.sock"
         selection = (home, upstream)
-        if self._gateway is not None and self._gateway_selection == selection:
+        # Upstream nth counters belong to the gateway process. Start a fresh
+        # one for each faulted caller, just as the old per-caller counters did.
+        if self._gateway is not None and self._gateway_selection == selection and not upstream:
             configure_caller(home, socket)
             return env
         self.close_gateway()

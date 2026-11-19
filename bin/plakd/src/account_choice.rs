@@ -38,8 +38,8 @@ pub struct FilledChoices {
     pub choices: BTreeMap<String, String>,
 }
 
-/// Every known account with its readiness, as the gateway `custody` names
-/// or this home's stores report it. The read blocks its caller on a thread
+/// Every account and its readiness as reported by the gateway.
+/// The read blocks its caller on a thread
 /// of its own; the host loop never calls it directly, it awaits the read off
 /// the loop (`SurfaceHandler::accounts_read`, `RosterSource::fill_spawn_account`).
 ///

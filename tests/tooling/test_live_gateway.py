@@ -76,7 +76,7 @@ class LiveGatewayPlan(unittest.TestCase):
         env = live.Env(Path("/fixture/plakd"), home, home)
         source = {
             "PLAK_HOME": str(home),
-            "PLAK_TEST_FAULTS": "host=example.test,fault=503;hop=gateway,fault=connect",
+            "PLAK_TEST_FAULTS": "host=example.test,fault=503;hop=upstream,fault=stall;hop=gateway,fault=connect",
             "PLAK_TEST_EXCHANGE_CAPTURE_DIR": "/fixture/capture",
         }
         with patch.object(live, "running_gateway") as start:
@@ -84,8 +84,12 @@ class LiveGatewayPlan(unittest.TestCase):
             caller = env.gateway_env(source)
             self.assertEqual(caller["PLAK_TEST_FAULTS"], "hop=gateway,fault=connect")
             self.assertEqual(caller["PLAK_TEST_GATEWAY"], "external")
-            self.assertEqual(start.call_args.kwargs["faults"], "host=example.test,fault=503")
+            self.assertEqual(
+                start.call_args.kwargs["faults"], "host=example.test,fault=503;fault=stall"
+            )
             self.assertNotIn("PLAK_TEST_EXCHANGE_CAPTURE_DIR", start.call_args.args[3])
+            env.gateway_env(source)
+            self.assertEqual(start.call_count, 2)
 
     def test_plan_names_routes_topologies_and_the_estimate_line(self):
         completed = subprocess.run(
