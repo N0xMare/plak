@@ -293,7 +293,7 @@ mod tests {
     impl AccountBridge for HeldCall {
         fn call(&mut self, _local_admin: bool, _request: AdminRequest) -> AdminResponse {
             self.started.send(()).unwrap();
-            self.release.recv().unwrap();
+            self.release.recv_timeout(Duration::from_secs(10)).unwrap();
             AdminResponse::Accounts {
                 accounts: Vec::new(),
             }
@@ -309,6 +309,97 @@ mod tests {
         fn refresh(&mut self, _request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal> {
             Err(GatewayRefusal::Internal {})
         }
+    }
+
+    #[tokio::test]
+    async fn product_gateway_flushes_an_accepted_call_across_drain() {
+        use std::io::Read as _;
+
+        use plakous::gateway::protocol::{Endpoint, PROTOCOL_VERSION, call};
+        use plakous::gateway::{GatewayEndpoint, RelayClient};
+        use tokio::io::AsyncWriteExt as _;
+
+        let (_temp, home) = PlakPaths::isolated_test_home();
+        let state = super::super::tests::state_for(&home);
+        let (started, entered) = tokio::sync::oneshot::channel();
+        let (started_sync, entered_sync) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        *state.bridge.lock().unwrap() = Box::new(HeldCall {
+            started: started_sync,
+            release: released,
+        });
+        let transfer = tokio::task::spawn_blocking(move || {
+            entered_sync.recv_timeout(Duration::from_secs(5)).unwrap();
+            started.send(()).unwrap();
+        });
+        let server = RelayServer::new(
+            Arc::new(ProductGateway::new(&home, Arc::clone(&state))),
+            plakous::gateway::server::http1_upstream().unwrap(),
+            state.instance.clone(),
+        );
+        let lock = HolderLock::try_acquire(
+            &holder::lock_path(&state.config.state_root),
+            HolderMode::Exclusive,
+        )
+        .unwrap();
+        let socket = state.config.socket.clone();
+        let running = Arc::clone(&state);
+        let service = tokio::spawn(async move {
+            run(Arc::clone(&running), server, &lock, async {
+                running.shutdown.notified().await;
+                Ok(())
+            })
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while state.listeners.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut peer = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let list = call::encode(&AdminRequest::List {}).unwrap();
+        let head = format!(
+            "POST {} HTTP/1.1\r\nhost: gateway\r\ncontent-length: {}\r\n\r\n",
+            Endpoint::Admin.path(PROTOCOL_VERSION),
+            list.len(),
+        );
+        peer.write_all(head.as_bytes()).await.unwrap();
+        peer.write_all(&list).await.unwrap();
+        // Keep a nonblocking OS socket: after run returns the full reply and
+        // EOF must already be readable, not depend on another reactor poll.
+        let mut peer = peer.into_std().unwrap();
+        let relay = RelayClient::new(GatewayEndpoint::Unix(socket), None).unwrap();
+        let control = RelayClient::call_control();
+        entered.await.unwrap();
+        transfer.await.unwrap();
+        let acknowledgement = relay
+            .call(
+                Endpoint::Admin,
+                call::encode(&AdminRequest::Drain {}).unwrap(),
+                &control,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            call::decode::<AdminResponse>(&acknowledgement).unwrap(),
+            AdminResponse::Draining {}
+        );
+        assert!(!service.is_finished());
+        release.send(()).unwrap();
+        service.await.unwrap().unwrap();
+        let mut reply = String::new();
+        peer.read_to_string(&mut reply).unwrap();
+        let expected = call::encode(&AdminResponse::Accounts {
+            accounts: Vec::new(),
+        })
+        .unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        assert!(
+            reply.contains(std::str::from_utf8(&expected).unwrap()),
+            "{reply}"
+        );
     }
 
     #[test]
