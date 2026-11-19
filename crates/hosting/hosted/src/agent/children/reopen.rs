@@ -503,6 +503,8 @@ pub(in crate::agent) enum ChildReopenErrorKind {
     /// The session was written by, or reconstructs differently under,
     /// another plak build.
     Incompatible,
+    /// The recorded session or branch does not exist in this store.
+    SessionMissing,
     /// The tree, the binding, or the session could not be reopened for any
     /// other reason.
     SessionUnavailable,
@@ -514,7 +516,10 @@ impl ChildReopenErrorKind {
     /// produced a session. Storage and a held lease do not: both are
     /// transient, and the create stays retryable work.
     pub(in crate::agent) const fn settles_never_created(&self) -> bool {
-        matches!(self, Self::SessionUnavailable | Self::Incompatible)
+        matches!(
+            self,
+            Self::SessionMissing | Self::SessionUnavailable | Self::Incompatible
+        )
     }
 
     pub(super) fn of(error: &AgentSessionsError) -> Self {
@@ -527,6 +532,7 @@ impl ChildReopenErrorKind {
             | AgentSessionsErrorKind::StorageUnavailable
             | AgentSessionsErrorKind::StoragePressure => Self::StorageUnavailable,
             AgentSessionsErrorKind::IncompatibleBuild => Self::Incompatible,
+            AgentSessionsErrorKind::NotFound => Self::SessionMissing,
             _ => Self::SessionUnavailable,
         }
     }

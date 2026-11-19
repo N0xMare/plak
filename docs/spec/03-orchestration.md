@@ -4671,9 +4671,15 @@ scan leaves the node to the waiter.
 
 Each host-loop-requested run that settled or refused anything reports once to
 the user as a system note naming the children it recovered (interrupted, attempt
-kept) and each refused child with its `recovery_*` code. A refusal note names
-the operator's retry and explains that `/recover` only selects unresolved
-child sessions, not an already-settled child's pending publication. A child
+kept) and each refused child with its refusal code and applicable action:
+retry session recovery, or close the node (after inspecting the copy if a
+workspace effect is ambiguous). A bound session or branch absent from the
+store is a terminal refusal for an open child; `close_agent` can end it.
+If the node is already closed and its fold is intact, that same absence is
+silent, including across host restarts. The tree retains the historical
+attempt without claiming to have recovered it or inventing an outcome.
+Other reopen failures and deleted folds still report their recovery blockers.
+A child
 whose session settled but
 whose seal or adopt is still ambiguous is listed as refused
 (`recovery_vcs_ambiguous`), never as recovered. A VCS-ambiguous child stays

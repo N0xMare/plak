@@ -34,7 +34,7 @@ use plakous::sessions::{
 };
 
 use crate::agent_tree::{RecoverAgentOutput, RecoveryNeed, RecoveryResolution, TopologyError};
-use crate::agent_tree_protocol::{AttemptId, AttemptStatus, TopologyErrorCode};
+use crate::agent_tree_protocol::{AttemptId, AttemptStatus, NodeStatus, TopologyErrorCode};
 use crate::topology_runtime::ProductTopologyRuntime;
 
 use super::children::{
@@ -56,17 +56,21 @@ pub(super) struct ChildReopened {
 /// A port's refusal, and whether any retry could get past it.
 pub(super) struct PortRefusal {
     pub(super) error: TopologyError,
-    /// An incompatible session, or a head that needs effect evidence the host
-    /// does not hold: retrying recovers nothing, so `close_agent` may end the
-    /// node instead.
-    pub(super) terminal: bool,
+    disposition: RefusalDisposition,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefusalDisposition {
+    Retry,
+    Close,
+    MissingSession,
 }
 
 impl From<TopologyError> for PortRefusal {
     fn from(error: TopologyError) -> Self {
         Self {
             error,
-            terminal: false,
+            disposition: RefusalDisposition::Retry,
         }
     }
 }
@@ -142,11 +146,15 @@ impl ChildSessionPort for ParentSessionPort {
                     };
                     Err(PortRefusal {
                         error: refusal(code, &format!("{reason} ({:?})", report.phase())),
-                        terminal: true,
+                        disposition: RefusalDisposition::Close,
                     })
                 }
                 Err(error) => Err(PortRefusal {
-                    terminal: matches!(error.kind, ChildReopenErrorKind::Incompatible),
+                    disposition: match error.kind {
+                        ChildReopenErrorKind::Incompatible => RefusalDisposition::Close,
+                        ChildReopenErrorKind::SessionMissing => RefusalDisposition::MissingSession,
+                        _ => RefusalDisposition::Retry,
+                    },
                     error: reopen_refusal(error),
                 }),
             }
@@ -306,19 +314,17 @@ pub(super) async fn replay_create_with(
 pub(crate) struct ChildRecoveryReport {
     /// Children this run settled: each is interrupted, its attempt kept.
     pub(crate) recovered: Vec<String>,
-    /// Children still waiting, with the typed refusal that kept them waiting.
-    /// A child whose session settled but whose seal or adopt is still
-    /// ambiguous is here (`recovery_vcs_ambiguous`), not in `recovered`.
+    /// Children whose session recovery can be retried.
     pub(crate) refused: Vec<(String, TopologyError)>,
+    /// Children needing closure rather than a session retry. This includes a
+    /// child with a settled session but an ambiguous workspace effect.
+    close: Vec<(String, TopologyError)>,
 }
 
 impl ChildRecoveryReport {
     /// The one operator line for this run, or `None` when it did nothing.
     #[must_use]
     pub(crate) fn note(&self) -> Option<String> {
-        if self.recovered.is_empty() && self.refused.is_empty() {
-            return None;
-        }
         let mut parts = Vec::new();
         if !self.recovered.is_empty() {
             parts.push(format!(
@@ -328,18 +334,21 @@ impl ChildRecoveryReport {
                 self.recovered.join(", ")
             ));
         }
-        if !self.refused.is_empty() {
-            parts.push(format!(
-                "{} child agent(s) still need recovery ({}); retry recovery for each obligation; root recovery only selects unresolved child sessions, not an already-settled child's pending tree publication; close a node only when its reported remedy is closure",
-                self.refused.len(),
-                self.refused
-                    .iter()
-                    .map(|(id, error)| format!("{id}: {}", code_name(error.code)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        Some(format!("plakd: {}", parts.join("; ")))
+        parts.extend(
+            self.refused
+                .iter()
+                .map(|(id, error)| format!("{id}: {} — retry recovery", code_name(error.code))),
+        );
+        parts.extend(self.close.iter().map(|(id, error)| {
+            let action = match error.code {
+                TopologyErrorCode::RecoveryVcsAmbiguous | TopologyErrorCode::MintUnavailable => {
+                    "inspect the copy, then close_agent"
+                }
+                _ => "close_agent",
+            };
+            format!("{id}: {} — {action}", code_name(error.code))
+        }));
+        (!parts.is_empty()).then(|| format!("plakd: {}", parts.join("; ")))
     }
 }
 
@@ -375,9 +384,9 @@ pub(super) fn reopen_refusal(error: ChildReopenError) -> TopologyError {
     let code = match error.kind {
         ChildReopenErrorKind::LeaseHeld { .. } => TopologyErrorCode::RecoveryLeaseHeld,
         ChildReopenErrorKind::StorageUnavailable => TopologyErrorCode::RecoveryStorageUnavailable,
-        ChildReopenErrorKind::Incompatible | ChildReopenErrorKind::SessionUnavailable => {
-            TopologyErrorCode::RecoverySessionUnavailable
-        }
+        ChildReopenErrorKind::Incompatible
+        | ChildReopenErrorKind::SessionMissing
+        | ChildReopenErrorKind::SessionUnavailable => TopologyErrorCode::RecoverySessionUnavailable,
     };
     let mut result = refusal(code, &error.message);
     result.advice = error.advice;
@@ -791,7 +800,7 @@ async fn recover_claimed_child(
         .await;
     }
     let refused = async |refusal: PortRefusal| {
-        if refusal.terminal {
+        if refusal.disposition != RefusalDisposition::Retry {
             let code = code_name(refusal.error.code);
             let (id, attempt, message) = (
                 agent_id.to_owned(),
@@ -844,6 +853,22 @@ async fn recover_claimed_child(
     };
     let reopened = match port.reopen(agent_id, &path, &locator).await {
         Ok(reopened) => reopened,
+        Err(refusal)
+            if refusal.disposition == RefusalDisposition::MissingSession
+                && !rebuilding
+                && runtime
+                    .read(|tree| {
+                        tree.node(agent_id)
+                            .is_ok_and(|node| node.status == NodeStatus::Closed)
+                    })
+                    .unwrap_or(false) =>
+        {
+            // Closure is already durable. Keep the historical attempt as-is:
+            // no session is available to settle it or prove an outcome.
+            return runtime
+                .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), false))
+                .map_err(|error| session_refusal(&error.message))?;
+        }
         Err(refusal) => return Err(refused(refusal).await),
     };
     let retained = runtime
@@ -1078,18 +1103,30 @@ pub(super) async fn recover_unresolved_children(
             }
         };
         let outcome = recover_claimed_child(runtime, port, &agent_id, None).await;
-        drop(claim);
         match outcome {
             Ok(output) if output.recovered => match output.workspace_recovery {
-                Some(reason) => report.refused.push((
+                Some(reason) => report.close.push((
                     agent_id,
                     TopologyError::new(TopologyErrorCode::RecoveryVcsAmbiguous, reason),
                 )),
                 None => report.recovered.push(agent_id),
             },
             Ok(_) => {}
-            Err(error) => report.refused.push((agent_id, error)),
+            Err(error) => {
+                let close = matches!(
+                    error.code,
+                    TopologyErrorCode::RecoveryVcsAmbiguous | TopologyErrorCode::MintUnavailable
+                ) || runtime
+                    .read(|tree| tree.terminal_recovery_refusal(&agent_id).is_some())
+                    .unwrap_or(false);
+                if close {
+                    report.close.push((agent_id, error));
+                } else {
+                    report.refused.push((agent_id, error));
+                }
+            }
         }
+        drop(claim);
     }
     report
 }
@@ -1180,7 +1217,7 @@ pub(crate) fn refuse_operator_child_recover(
     expected_revision: u64,
     state: crate::agent_tree_protocol::TreeAdmissionState,
     is_root: bool,
-    status: crate::agent_tree_protocol::NodeStatus,
+    status: NodeStatus,
     attempt_id: Option<&str>,
     expected_attempt_id: &str,
 ) -> Option<&'static str> {
@@ -1327,6 +1364,7 @@ pub(crate) fn start_tree_recovery(
                 tree_id,
                 recovered = ?report.recovered,
                 refused = ?report.refused,
+                close = ?report.close,
                 "child recovery finished"
             );
         }

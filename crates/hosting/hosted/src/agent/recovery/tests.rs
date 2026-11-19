@@ -2240,10 +2240,10 @@ async fn recovery_pass_keeps_a_genuinely_interrupted_adopt_ambiguous() {
     let id = interrupted_adopt(&fixture).await;
     let report = recover_tree(&fixture.tree_id).await.unwrap();
     assert_eq!(report.recovered, [] as [String; 0]);
-    assert_eq!(report.refused.len(), 1);
-    assert_eq!(report.refused[0].0, id);
+    assert_eq!(report.close.len(), 1);
+    assert_eq!(report.close[0].0, id);
     assert_eq!(
-        report.refused[0].1.code,
+        report.close[0].1.code,
         TopologyErrorCode::RecoveryVcsAmbiguous
     );
     assert_eq!(fixture.status(&id), NodeStatus::RecoveryRequired);
@@ -2911,7 +2911,11 @@ impl ChildSessionPort for RefusingPort {
         Box::pin(async move {
             Err(PortRefusal {
                 error: error.unwrap_or_else(|| session_refusal("the port was asked to reopen")),
-                terminal,
+                disposition: if terminal {
+                    RefusalDisposition::Close
+                } else {
+                    RefusalDisposition::Retry
+                },
             })
         })
     }
@@ -2953,6 +2957,110 @@ async fn a_refusal_records_nothing_on_the_node() {
     assert_eq!(fixture.snapshot(&id), before);
 }
 
+async fn missing_session_child(fixture: &Fixture) -> String {
+    let id = fixture.spawn();
+    let locator = SessionLocator::new(
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+        uuid::Uuid::new_v4().try_into().unwrap(),
+    );
+    fixture
+        .runtime
+        .mutate_then_emit_borrowed_for_test(false, |tree| {
+            tree.bind_session_locator(&id, locator.to_string())
+                .map_err(|error| error.message)?;
+            tree.record_turn_failure(
+                &id,
+                crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                "lost turn".into(),
+            )
+            .map_err(|error| error.message)
+        })
+        .await
+        .unwrap();
+    assert_eq!(fixture.attempt_status(&id), AttemptStatus::RecoveryRequired);
+    id
+}
+
+#[tokio::test]
+async fn a_closed_child_with_a_missing_session_is_quiet_across_reopen() {
+    use plakous_recursive_subagents_store::SqliteTreeStore;
+
+    let fixture = Fixture::new("closed-missing-session");
+    let id = missing_session_child(&fixture).await;
+    let database = fixture.root.path().join("tree.sqlite3");
+    let store = Arc::new(SqliteTreeStore::open(&database).unwrap());
+    fixture
+        .runtime
+        .read(|tree| {
+            let mut tree = tree.clone();
+            tree.acknowledge_revision(Revision::published(0));
+            let _ = store.save_in_custody(&tree).unwrap();
+        })
+        .unwrap();
+    crate::topology_runtime::force_release(&fixture.tree_id).await;
+    // A historical closed node can retain unresolved attempt rows.
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE agent_nodes SET status='closed' WHERE agent_id=?1",
+            [&id],
+        )
+        .unwrap();
+
+    for _ in 0..2 {
+        let persisted = store.load(&fixture.tree_id).unwrap().unwrap();
+        let runtime = crate::topology_runtime::insert_root_with(
+            fixture.tree_id.clone(),
+            ProductAgentTree::reopen(persisted),
+            store.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        runtime.remember_rejoin_spec(Arc::new(fixture.parent.clone()));
+        let report = recover_tree(&fixture.tree_id).await.unwrap();
+        assert!(report.note().is_none(), "{report:?}");
+        let busy = RefusingPort::default();
+        *busy.reopen_error.lock().unwrap() = Some(refusal(
+            TopologyErrorCode::RecoveryStorageUnavailable,
+            "session store is busy",
+        ));
+        let report = recover_unresolved_children(&runtime, &busy).await;
+        assert_eq!(
+            report.note().unwrap(),
+            format!("plakd: {id}: recovery_storage_unavailable — retry recovery")
+        );
+        runtime
+            .read(|tree| {
+                assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Closed);
+                assert_eq!(
+                    tree.attempt(&id).unwrap().status,
+                    AttemptStatus::RecoveryRequired
+                );
+            })
+            .unwrap();
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    }
+}
+
+#[tokio::test]
+async fn an_open_child_with_a_missing_session_reports_closure() {
+    let fixture = Fixture::new("open-missing-session");
+    let id = missing_session_child(&fixture).await;
+    let report = recover_tree(&fixture.tree_id).await.unwrap();
+    assert_eq!(
+        report.note().unwrap(),
+        format!("plakd: {id}: recovery_session_unavailable — close_agent")
+    );
+    assert!(report.refused.is_empty(), "{report:?}");
+    let (closed, receipt) = fixture
+        .invoke("close_agent", json!({ "agent_id": id }))
+        .await;
+    assert!(closed, "{receipt}");
+    assert_eq!(fixture.status(&id), NodeStatus::Closed);
+}
+
 /// Every typed reopen refusal maps to its one recovery code.
 #[test]
 fn reopen_refusals_map_to_exact_codes() {
@@ -2975,6 +3083,10 @@ fn reopen_refusals_map_to_exact_codes() {
         ),
         (
             ChildReopenErrorKind::Incompatible,
+            TopologyErrorCode::RecoverySessionUnavailable,
+        ),
+        (
+            ChildReopenErrorKind::SessionMissing,
             TopologyErrorCode::RecoverySessionUnavailable,
         ),
         (
