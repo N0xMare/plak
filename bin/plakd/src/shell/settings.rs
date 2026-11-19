@@ -439,28 +439,38 @@ fn apply_profile(
             let paths = paths.clone();
             let events = events.answering();
             move |outcome| {
-                let outcome = match outcome {
-                    ProfileForkOutcome::Forked => ProfileOutcome::Forked,
-                    ProfileForkOutcome::Switched => ProfileOutcome::Switched,
-                    ProfileForkOutcome::Bound => ProfileOutcome::Bound,
-                    ProfileForkOutcome::AlreadyActive => ProfileOutcome::AlreadyActive,
-                    ProfileForkOutcome::Refused(reason) => {
-                        refuse_profile_failure(&prepared.id, &reason, &events);
-                        return;
-                    }
-                };
-                commit_profile(
-                    &paths,
-                    prepared.id,
-                    &prepared.config,
-                    outcome,
-                    bootstrap_default,
-                    &events,
-                );
+                finish_applied_profile(&paths, prepared, outcome, bootstrap_default, &events)
             }
         }),
     };
     Some(fork)
+}
+
+fn finish_applied_profile(
+    paths: &PlakPaths,
+    prepared: crate::profiles::Prepared,
+    outcome: ProfileForkOutcome,
+    bootstrap_default: bool,
+    events: &Sender<PlakExtension>,
+) {
+    let outcome = match outcome {
+        ProfileForkOutcome::Forked => ProfileOutcome::Forked,
+        ProfileForkOutcome::Switched => ProfileOutcome::Switched,
+        ProfileForkOutcome::Bound => ProfileOutcome::Bound,
+        ProfileForkOutcome::AlreadyActive => ProfileOutcome::AlreadyActive,
+        ProfileForkOutcome::Refused(reason) => {
+            refuse_profile_failure(&prepared.id, &reason, events);
+            return;
+        }
+    };
+    commit_profile(
+        paths,
+        prepared.id,
+        &prepared.config,
+        outcome,
+        bootstrap_default,
+        events,
+    );
 }
 
 fn admit_profile_route(
