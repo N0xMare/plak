@@ -175,6 +175,11 @@ impl LocalCustody {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let injection = Injection::new(values);
+        let injection = if pin.pool_inference {
+            injection.reuse_upstream()
+        } else {
+            injection
+        };
         Ok(match fields.take_hold() {
             Some(hold) => injection.holding(hold.into_inner()),
             None => injection,
@@ -316,7 +321,8 @@ impl LocalCustody {
 
 /// The HTTP/1.1 client a product gateway uses for its upstream hop.
 ///
-/// The client has streaming-inference limits and no fault plan. Each relay
+/// The client has streaming-inference limits. The relay server owns its
+/// upstream connection pool and only uses it for eligible requests. Each relay
 /// narrows them to the caller's own, so a bound here only ever shortens a
 /// caller's: the default 30-second head and idle bounds would cut every
 /// model stream that a caller allows to stay silent longer. A product

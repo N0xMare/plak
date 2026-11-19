@@ -19,6 +19,7 @@ const fn api(method: &'static str, path: &'static str, query: PinQuery) -> Upstr
         path: PinPath::Exact(path),
         query,
         credential_headers: OPENAI_API_CREDENTIAL_HEADERS,
+        pool_inference: false,
     }
 }
 
@@ -29,12 +30,13 @@ const fn codex(method: &'static str, path: &'static str, query: PinQuery) -> Ups
         path: PinPath::Exact(path),
         query,
         credential_headers: CODEX_CREDENTIAL_HEADERS,
+        pool_inference: false,
     }
 }
 
 /// Platform API-key rows: Responses, the model list and images.
 pub const OPENAI_API_UPSTREAM_PINS: &[UpstreamPin] = &[
-    api("POST", OPENAI_PLATFORM_RESPONSES_PATH, PinQuery::None),
+    api("POST", OPENAI_PLATFORM_RESPONSES_PATH, PinQuery::None).pooled(),
     api("GET", crate::api_models::OPENAI_MODELS_PATH, PinQuery::None),
     api(
         "POST",
@@ -51,7 +53,7 @@ pub const OPENAI_API_UPSTREAM_PINS: &[UpstreamPin] = &[
 /// Codex subscription rows: Responses, the versioned catalog, usage, search
 /// and images. Login, token, revoke, JWKS and userinfo are never relayed.
 pub const CODEX_UPSTREAM_PINS: &[UpstreamPin] = &[
-    codex("POST", OPENAI_CODEX_RESPONSES_PATH, PinQuery::None),
+    codex("POST", OPENAI_CODEX_RESPONSES_PATH, PinQuery::None).pooled(),
     codex(
         "GET",
         OPENAI_CODEX_MODELS_PATH,

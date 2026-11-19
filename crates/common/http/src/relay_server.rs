@@ -33,6 +33,7 @@ use plakous_gateway_protocol::{
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
+use crate::transport::pool::{Pool, PoolScope, PoolUse};
 use crate::{
     CancellationToken, Client, ErrorKind, ExchangeControl, Failure, Origin, Phase, Request,
     SensitiveBytes, TransmissionFact, sensitive_header_value,
@@ -48,6 +49,7 @@ use stream::Chunker;
 
 /// The largest upstream request body a relay request may carry by default.
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
+const MAX_UPSTREAM_IDLE_KEYS: usize = 64;
 
 /// A fresh random gateway process instance id; `None` only when the system
 /// random source fails.
@@ -80,6 +82,7 @@ pub struct Injection {
     values: Vec<SensitiveBytes>,
     hold: Option<Box<dyn std::any::Any + Send>>,
     cut: Option<CancellationToken>,
+    reuse_upstream: bool,
 }
 
 impl Injection {
@@ -90,7 +93,17 @@ impl Injection {
             values,
             hold: None,
             cut: None,
+            reuse_upstream: false,
         }
+    }
+
+    /// Allows this relay to reuse an upstream TLS connection within the
+    /// validated credential fence. Only set this for inference with
+    /// request-scoped credentials, after validating the pin and exact fence.
+    #[must_use]
+    pub const fn reuse_upstream(mut self) -> Self {
+        self.reuse_upstream = true;
+        self
     }
 
     /// Keeps `hold` (a credential store's Ready lease, say) until the upstream
@@ -118,6 +131,7 @@ impl std::fmt::Debug for Injection {
             .field("values", &self.values.len())
             .field("holding", &self.hold.is_some())
             .field("cut", &self.cut.is_some())
+            .field("reuse_upstream", &self.reuse_upstream)
             .finish()
     }
 }
@@ -218,6 +232,7 @@ impl<S> Clone for RelayServer<S> {
 struct ServerInner<S> {
     service: Arc<S>,
     upstream: Client,
+    upstream_pool: Arc<Pool>,
     instance: UuidText,
     max_request_body_bytes: usize,
     draining: CancellationToken,
@@ -241,6 +256,7 @@ impl<S: GatewayService> RelayServer<S> {
             inner: Arc::new(ServerInner {
                 service,
                 upstream,
+                upstream_pool: Arc::new(Pool::new(Some(MAX_UPSTREAM_IDLE_KEYS))),
                 instance,
                 max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
                 draining: CancellationToken::new(),
@@ -260,6 +276,7 @@ impl<S: GatewayService> RelayServer<S> {
         let mut next = ServerInner {
             service: Arc::clone(&inner.service),
             upstream: inner.upstream.clone(),
+            upstream_pool: Arc::clone(&inner.upstream_pool),
             instance: inner.instance.clone(),
             max_request_body_bytes: inner.max_request_body_bytes,
             draining: inner.draining.clone(),
@@ -447,8 +464,12 @@ impl<S: GatewayService> ServerInner<S> {
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
         let method = Method::from_bytes(envelope.method.as_bytes())
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-        let Injection { values, hold, cut } =
-            self.service.inject(principal, version, envelope).await?;
+        let Injection {
+            values,
+            hold,
+            cut,
+            reuse_upstream,
+        } = self.service.inject(principal, version, envelope).await?;
         let mut values = values.into_iter();
         let mut headers = HeaderMap::with_capacity(envelope.headers.len());
         for header in &envelope.headers {
@@ -472,6 +493,15 @@ impl<S: GatewayService> ServerInner<S> {
             return Err(GatewayRefusal::Internal {});
         }
         let origin = self.dial_origin(origin_text)?;
+        let pool_scope = (reuse_upstream && !origin.is_loopback_http()).then(|| {
+            Arc::new(PoolScope {
+                logical_origin: origin_text.to_owned(),
+                version,
+                account: envelope.account.as_str().to_owned(),
+                account_binding: envelope.expected.account_binding.as_str().to_owned(),
+                generation: envelope.expected.generation,
+            })
+        });
         let limits = upstream_limits(self.upstream.limits(), envelope);
         let upstream = self
             .upstream
@@ -496,6 +526,7 @@ impl<S: GatewayService> ServerInner<S> {
         Ok(Prepared {
             upstream,
             request,
+            pool_scope,
             hold,
             cut,
             deadline: envelope_deadline(envelope),
@@ -525,6 +556,7 @@ impl<S: GatewayService> ServerInner<S> {
         let Prepared {
             upstream,
             request,
+            pool_scope,
             hold,
             cut,
             deadline,
@@ -533,7 +565,12 @@ impl<S: GatewayService> ServerInner<S> {
         } = prepared;
         let cancellation = CancellationToken::new();
         let control = ExchangeControl::streaming(deadline, cancellation.clone());
+        let pool = pool_scope.map(|scope| PoolUse {
+            pool: &self.upstream_pool,
+            scope: Some(scope),
+        });
         let outcome = tokio::select! {
+            biased;
             () = sender.closed() => {
                 cancellation.cancel();
                 None
@@ -543,7 +580,7 @@ impl<S: GatewayService> ServerInner<S> {
                 let _ = send(&sender, &Frame::End(RelayEnd::Cancelled {})).await;
                 Some(None)
             }
-            result = upstream.execute(request, control) => Some(Some(result)),
+            result = upstream.execute_with_pool(request, control, pool) => Some(Some(result)),
         };
         drop(hold);
         record.outcome = match outcome {
@@ -633,6 +670,7 @@ async fn stream(
     let mut seq = 0;
     loop {
         let next = tokio::select! {
+            biased;
             () = sender.closed() => {
                 cancellation.cancel();
                 return RelayOutcome::Abandoned;
@@ -686,6 +724,7 @@ async fn stream(
 struct Prepared {
     upstream: Client,
     request: Request,
+    pool_scope: Option<Arc<PoolScope>>,
     hold: Option<Box<dyn std::any::Any + Send>>,
     cut: Option<CancellationToken>,
     deadline: Instant,

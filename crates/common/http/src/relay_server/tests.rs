@@ -2,7 +2,7 @@
 //! with a loopback fixture upstream behind the test-only dial override.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -12,7 +12,7 @@ use plakous_gateway_protocol::facts::{
 };
 use plakous_gateway_protocol::refusal::GatewayRefusal;
 use plakous_gateway_protocol::{Endpoint, GatewayAccount, HexDigest, UuidText};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
@@ -26,6 +26,7 @@ use crate::{
 };
 
 const LOGICAL: &str = "https://api.example.test";
+const SECOND_ORIGIN: &str = "https://other.example.test";
 const ACCOUNT: &str = "example/work";
 const SECRET: &[u8] = b"Bearer synthetic-secret";
 
@@ -104,7 +105,7 @@ fn complete_message(bytes: &[u8]) -> bool {
     bytes.len() >= end + 4 + length
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+async fn read_request(socket: &mut (impl AsyncRead + Unpin)) -> Vec<u8> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {
@@ -146,6 +147,7 @@ struct Service {
     audited: Mutex<Vec<super::RelayOutcome>>,
     cut: Mutex<Option<crate::CancellationToken>>,
     facts_gate: Option<Arc<FactsGate>>,
+    permit: AtomicBool,
 }
 
 #[derive(Default)]
@@ -172,6 +174,7 @@ impl Service {
             audited: Mutex::new(Vec::new()),
             cut: Mutex::new(None),
             facts_gate: None,
+            permit: AtomicBool::new(true),
         })
     }
 
@@ -216,9 +219,16 @@ impl GatewayService for Service {
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection> {
         Box::pin(async move {
-            if envelope.method != "POST" || !envelope.url.starts_with(&format!("{LOGICAL}/v1/")) {
-                return Err(GatewayRefusal::UpstreamNotPinned {});
+            if !self.permit.load(Ordering::SeqCst) {
+                return Err(GatewayRefusal::ScopeDenied {});
             }
+            let path = [LOGICAL, SECOND_ORIGIN]
+                .into_iter()
+                .find_map(|origin| envelope.url.strip_prefix(origin))
+                .filter(|path| path.starts_with("/v1/"));
+            let Some(path) = path.filter(|_| envelope.method == "POST") else {
+                return Err(GatewayRefusal::UpstreamNotPinned {});
+            };
             if envelope.custodied_names().collect::<Vec<_>>() != ["authorization"] {
                 return Err(GatewayRefusal::CustodiedHeadersMismatch {});
             }
@@ -238,6 +248,11 @@ impl GatewayService for Service {
             self.held.fetch_add(1, Ordering::SeqCst);
             let injection = Injection::new(vec![SensitiveBytes::new(SECRET.to_vec())])
                 .holding(Box::new(Hold(self.held.clone())));
+            let injection = if path == "/v1/one-shot" {
+                injection
+            } else {
+                injection.reuse_upstream()
+            };
             Ok(match self.cut.lock().unwrap().clone() {
                 Some(cut) => injection.cut_by(cut),
                 None => injection,
@@ -288,6 +303,10 @@ fn gateway_with(
 ) -> GatewayEndpoint {
     let server = RelayServer::new(service, client, super::new_instance().unwrap())
         .with_dial_override(LOGICAL, upstream.origin.clone());
+    endpoint(server, peer)
+}
+
+fn endpoint(server: RelayServer<Service>, peer: Peer) -> GatewayEndpoint {
     GatewayEndpoint::InMemory(InMemoryGateway::new(move |io| {
         let server = server.clone();
         tokio::spawn(async move {
@@ -295,6 +314,8 @@ fn gateway_with(
         });
     }))
 }
+
+mod pooling;
 
 fn relayed(endpoint: GatewayEndpoint) -> Client {
     Client::new_http1(Limits::default())

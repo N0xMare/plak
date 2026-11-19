@@ -12,7 +12,7 @@ use bytes::Bytes;
 use http::{HeaderMap, Uri, Version};
 use hyper::body::Incoming;
 use hyper::client::conn::{http1, http2};
-use pool::{ConnectionSettings, IdleConnection, Pool, PoolKey};
+use pool::{ConnectionSettings, IdleConnection, Pool, PoolKey, PoolScope, PoolUse};
 use rustls::ClientConfig;
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
@@ -44,7 +44,7 @@ use response::{request_error_kind, response_from_wire, response_wait_deadline, w
 mod address_tests;
 #[cfg(feature = "fault-injection")]
 pub(crate) mod fault;
-mod pool;
+pub(crate) mod pool;
 #[cfg(feature = "fault-injection")]
 mod test_dial;
 #[cfg(feature = "fault-injection")]
@@ -52,6 +52,8 @@ pub(crate) mod test_hop;
 #[cfg(not(feature = "fault-injection"))]
 #[path = "transport/test_hop_off.rs"]
 pub(crate) mod test_hop;
+#[cfg(test)]
+pub(crate) mod test_tls;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
 const TRANSPORT_BEHAVIOR_REVISION: u32 = 5;
@@ -531,7 +533,7 @@ impl Client {
                     )
                 }),
                 tls_config: Arc::clone(&inner.tls_config),
-                pool: Some(Arc::new(Pool::default())),
+                pool: Some(Arc::new(Pool::new(None))),
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
@@ -644,10 +646,24 @@ impl Client {
         request: Request,
         control: ExchangeControl,
     ) -> Result<Response, Failure> {
+        let pool = self
+            .inner
+            .pool
+            .as_ref()
+            .map(|pool| PoolUse { pool, scope: None });
+        self.execute_with_pool(request, control, pool).await
+    }
+
+    pub(crate) async fn execute_with_pool(
+        &self,
+        request: Request,
+        control: ExchangeControl,
+        pool: Option<PoolUse<'_>>,
+    ) -> Result<Response, Failure> {
         let mut observation = Observation::start(self.observer.as_ref(), request.body())?;
         // Observation failure cleanup must not duplicate the large physical
         // exchange future inside every caller's async stack.
-        match Box::pin(self.execute_inner(request, control)).await {
+        match Box::pin(self.execute_inner(request, control, pool)).await {
             Ok(mut response) => {
                 if !observation.head(response.status.as_u16(), response.connection) {
                     let _ = response.body.close().await;

@@ -6418,7 +6418,18 @@ LoginCancel returns a device login's terminal result if it is already
 available instead of reporting cancellation.
 API-key accounts and the
 subscription logins are custodied in the gateway process and relayed only to
-those providers' pin rows. Other admin verbs stay on the account bridge. The
+those providers' pin rows. The gateway keeps its own bounded upstream
+HTTP/1.1 TLS pool for marked inference rows. Every relay still passes the
+caller, permit, credential and pin checks. Only a socket from a fully sent
+request and a fully drained, clean response may serve another request, and
+only for the same origin, transport settings, protocol version and exact
+credential fence. A socket idle for five seconds is not reused. The pool is
+in-memory and ends with the gateway process. There is still one upstream
+exchange per relay: only the transport's existing pre-write stale-socket
+replacement applies, never a resend after any request byte was accepted.
+Non-inference relay rows remain one-shot.
+
+Other admin verbs stay on the account bridge. The
 buffered dispatcher cannot stream a relay, so a relay it decodes is refused
 `internal` and nothing is dialed. OpenRouter allowance is one
 `GET /api/v1/key` from this process; other API-key kinds answer Allowance

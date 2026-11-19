@@ -6205,6 +6205,8 @@ and no keepalive frames. Hop-by-hop response fields are not relayed. The
 upstream exchange's head, idle and body bounds are the gateway client's,
 narrowed by the caller's; `plakous::gateway::server::http1_upstream` carries
 streaming-inference bounds, so a caller's own bounds always govern.
+After authorization and injection, explicitly marked inference pin rows may
+use the gateway's upstream pool (§13.1); other relays open a fresh connection.
 Dropping the relay connection or its response cancels the upstream
 exchange. `plakous::gateway::server::LocalCustody` supplies injection from
 each kind's local custodian and its provider's exact upstream pin table:
@@ -13590,6 +13592,15 @@ dropping an idle connection aborts its driver. The model clients of every route
 (Claude, Codex and Grok subscription inference, the Anthropic, OpenAI Platform
 and xAI API clients, and OpenRouter's configured model clients) are pooled;
 OAuth, token refresh, catalog, discovery and key-usage clients stay one-shot.
+A gateway relay server has a separate pool for its upstream HTTP/1.1 TLS
+connections on marked inference rows. Only a request validated against the
+same exact logical origin, protocol version, custody slot, account binding
+and credential generation can reuse that connection. The per-key cap and
+idle bound below also apply to the gateway. At most 64 keys can hold idle
+sockets per gateway; when a new key would exceed that bound, the gateway
+evicts the key whose most recently parked socket has been idle longest.
+Neither a pool hit nor stale-checkout replacement changes relay authority,
+the relay protocol, or the caller-side route transport identity.
 A pool key is the origin's host, port and scheme (HTTPS or loopback HTTP), the
 shared Rustls configuration, the transport policy, the address policy, and the
 limits fixed into a connection at negotiation (response header bounds and the

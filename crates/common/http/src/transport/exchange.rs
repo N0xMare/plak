@@ -13,9 +13,9 @@ use crate::{
 };
 
 use super::{
-    Client, ConnectionSettings, Exchanged, Live, Pool, PoolKey, ProgressSlot, RequestBody,
-    RequestParts, Response, Reuse, Sender, TaskGuard, WireStream, establish, request_error_kind,
-    resolve, response_from_wire, wait_response, wait_task,
+    Client, ConnectionSettings, Exchanged, Live, Pool, PoolKey, PoolScope, PoolUse, ProgressSlot,
+    RequestBody, RequestParts, Response, Reuse, Sender, TaskGuard, WireStream, establish,
+    request_error_kind, resolve, response_from_wire, wait_response, wait_task,
 };
 
 impl Client {
@@ -23,6 +23,7 @@ impl Client {
         &self,
         request: Request,
         control: ExchangeControl,
+        pool: Option<PoolUse<'_>>,
     ) -> Result<Response, Failure> {
         self.admit(&request)?;
         if control.cancellation().is_cancelled() {
@@ -80,7 +81,7 @@ impl Client {
             not(feature = "fault-injection"),
             allow(unused_mut, reason = "set only by faults")
         )]
-        let mut response = self.dispatch(&parts, &control).await?;
+        let mut response = self.dispatch(&parts, &control, pool).await?;
         #[cfg(feature = "fault-injection")]
         {
             response.body.fault = stream_fault;
@@ -110,12 +111,9 @@ impl Client {
         &self,
         parts: &RequestParts,
         control: &ExchangeControl,
+        pool: Option<PoolUse<'_>>,
     ) -> Result<Response, Failure> {
-        let pool = self
-            .inner
-            .pool
-            .as_ref()
-            .map(|pool| (pool, self.pool_key(&parts.origin)));
+        let pool = pool.map(|PoolUse { pool, scope }| (pool, self.pool_key(&parts.origin, scope)));
         let mut connection_use = ConnectionUse::Fresh;
         let mut idle_age = None;
         if let Some((pool, key)) = &pool
@@ -166,8 +164,9 @@ impl Client {
             })
     }
 
-    fn pool_key(&self, origin: &Origin) -> PoolKey {
+    fn pool_key(&self, origin: &Origin, scope: Option<Arc<PoolScope>>) -> PoolKey {
         PoolKey {
+            scope,
             host: origin.host().to_owned(),
             port: origin.port(),
             plain_loopback: origin.is_loopback_http(),

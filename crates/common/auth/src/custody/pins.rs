@@ -51,9 +51,19 @@ pub struct UpstreamPin {
     pub query: PinQuery,
     /// The custodied header names this request carries.
     pub credential_headers: &'static [&'static str],
+    /// This inference row uses request-scoped credentials and can reuse an
+    /// upstream connection within one validated credential fence.
+    pub pool_inference: bool,
 }
 
 impl UpstreamPin {
+    /// Marks an inference pin as eligible for upstream connection reuse.
+    #[must_use]
+    pub const fn pooled(mut self) -> Self {
+        self.pool_inference = true;
+        self
+    }
+
     /// Whether a request with this method, origin and path-and-query matches.
     #[must_use]
     pub fn matches(&self, method: &str, origin: &str, path_and_query: &str) -> bool {
@@ -156,6 +166,7 @@ mod tests {
             path: PinPath::Exact("/v1/messages"),
             query: PinQuery::Exact("beta=true"),
             credential_headers: &["authorization"],
+            pool_inference: true,
         },
         UpstreamPin {
             origin: "https://api.example.test/",
@@ -168,6 +179,7 @@ mod tests {
             ]),
             query: PinQuery::Keys(&["limit", "after_id"]),
             credential_headers: &["authorization"],
+            pool_inference: false,
         },
     ];
 

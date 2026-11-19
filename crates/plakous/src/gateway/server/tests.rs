@@ -109,8 +109,20 @@ async fn injection_checks_the_pin_row_names_and_fence_before_lowering_the_key() 
         .unwrap();
     assert_eq!(
         format!("{injected:?}"),
-        "Injection { values: 1, holding: false, cut: false }"
+        "Injection { values: 1, holding: false, cut: false, reuse_upstream: true }"
     );
+    let mut catalog = envelope(
+        "openai/work",
+        "https://api.openai.com/v1/models",
+        expected.clone(),
+        &["authorization"],
+    );
+    catalog.method = "GET".into();
+    let injected = custody
+        .inject(plakous_gateway_protocol::PROTOCOL_VERSION, &catalog)
+        .await
+        .unwrap();
+    assert!(format!("{injected:?}").contains("reuse_upstream: false"));
 
     let custody = &custody;
     let refused = |envelope| async move {

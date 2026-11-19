@@ -20,12 +20,13 @@ const fn api(method: &'static str, path: &'static str) -> UpstreamPin {
         path: PinPath::Exact(path),
         query: PinQuery::None,
         credential_headers: XAI_API_CREDENTIAL_HEADERS,
+        pool_inference: false,
     }
 }
 
 /// Platform API-key rows: Responses, the model list and images.
 pub const XAI_API_UPSTREAM_PINS: &[UpstreamPin] = &[
-    api("POST", XAI_PLATFORM_RESPONSES_PATH),
+    api("POST", XAI_PLATFORM_RESPONSES_PATH).pooled(),
     api("GET", crate::api_models::XAI_MODELS_PATH),
     api("POST", crate::images::XAI_IMAGE_GENERATIONS_PATH),
     api("POST", crate::images::XAI_IMAGE_EDITS_PATH),
@@ -41,6 +42,7 @@ pub const SUPERGROK_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(SUPERGROK_RESPONSES_PATH),
         query: PinQuery::None,
         credential_headers: &["authorization"],
+        pool_inference: true,
     },
     UpstreamPin {
         origin: SUPERGROK_RESPONSES_ORIGIN,
@@ -48,6 +50,7 @@ pub const SUPERGROK_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(SUPERGROK_MODELS_PATH),
         query: PinQuery::None,
         credential_headers: SUPERGROK_CREDENTIAL_HEADERS,
+        pool_inference: false,
     },
     UpstreamPin {
         origin: SUPERGROK_RESPONSES_ORIGIN,
@@ -55,6 +58,7 @@ pub const SUPERGROK_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact("/v1/billing"),
         query: PinQuery::Exact("format=credits"),
         credential_headers: SUPERGROK_CREDENTIAL_HEADERS,
+        pool_inference: false,
     },
 ];
 

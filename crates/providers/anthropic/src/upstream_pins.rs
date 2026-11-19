@@ -18,6 +18,7 @@ pub const ANTHROPIC_API_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(ANTHROPIC_MESSAGES_PATH),
         query: PinQuery::None,
         credential_headers: ANTHROPIC_API_CREDENTIAL_HEADERS,
+        pool_inference: true,
     },
     UpstreamPin {
         origin: ANTHROPIC_PLATFORM_ORIGIN,
@@ -25,6 +26,7 @@ pub const ANTHROPIC_API_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(crate::api_models::ANTHROPIC_MODELS_PATH),
         query: PinQuery::Keys(&["limit", "after_id"]),
         credential_headers: ANTHROPIC_API_CREDENTIAL_HEADERS,
+        pool_inference: false,
     },
 ];
 
@@ -37,6 +39,7 @@ pub const CLAUDE_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(ANTHROPIC_MESSAGES_PATH),
         query: PinQuery::Exact("beta=true"),
         credential_headers: CLAUDE_CREDENTIAL_HEADERS,
+        pool_inference: true,
     },
     UpstreamPin {
         origin: CLAUDE_OAUTH_MESSAGES_ORIGIN,
@@ -44,6 +47,7 @@ pub const CLAUDE_UPSTREAM_PINS: &[UpstreamPin] = &[
         path: PinPath::Exact(crate::subscription_usage::CLAUDE_SUBSCRIPTION_USAGE_PATH),
         query: PinQuery::None,
         credential_headers: CLAUDE_CREDENTIAL_HEADERS,
+        pool_inference: false,
     },
 ];
 

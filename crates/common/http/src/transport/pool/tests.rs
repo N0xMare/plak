@@ -12,17 +12,15 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use rcgen::{CertifiedKey, generate_simple_self_signed};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use rustls::{ClientConfig, RootCertStore, ServerConfig};
+use rustls::ClientConfig;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 
 use super::{IDLE_BOUND, MAX_IDLE_PER_KEY, Pool};
+use crate::transport::test_tls::{Endpoint, endpoint_with_versions};
 use crate::{
     Bytes, CancellationToken, Client, ConnectionUse, ErrorKind, ExchangeControl, Failure,
     HeaderMap, Limits, Method, Origin, Phase, Request, TlsCause, TransmissionFact, WireProtocol,
@@ -33,46 +31,8 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 const H1: &[u8] = b"http/1.1";
 const H2: &[u8] = b"h2";
 
-struct Endpoint {
-    listener: TcpListener,
-    acceptor: TlsAcceptor,
-    client: ClientConfig,
-    origin: Origin,
-}
-
 async fn endpoint(alpn: &[u8]) -> TestResult<Endpoint> {
     endpoint_with_versions(alpn, rustls::DEFAULT_VERSIONS).await
-}
-
-async fn endpoint_with_versions(
-    alpn: &[u8],
-    versions: &[&'static rustls::SupportedProtocolVersion],
-) -> TestResult<Endpoint> {
-    let CertifiedKey { cert, signing_key } =
-        generate_simple_self_signed(vec!["127.0.0.1".to_owned()])?;
-    let certificate = cert.der().clone();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
-    let mut server = ServerConfig::builder_with_provider(Arc::clone(&provider))
-        .with_protocol_versions(versions)?
-        .with_no_client_auth()
-        .with_single_cert(vec![certificate.clone()], key)?;
-    server.alpn_protocols = vec![alpn.to_vec()];
-    server.send_tls13_tickets = 0;
-    let mut roots = RootCertStore::empty();
-    roots.add(CertificateDer::from(certificate.to_vec()))?;
-    let client = ClientConfig::builder_with_provider(provider)
-        .with_protocol_versions(versions)?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
-    let origin = Origin::parse(&format!("https://{}", listener.local_addr()?))?;
-    Ok(Endpoint {
-        listener,
-        acceptor: TlsAcceptor::from(Arc::new(server)),
-        client,
-        origin,
-    })
 }
 
 /// A keep-alive peer that counts the connections it accepted and closed.
@@ -560,6 +520,7 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         });
         pool(&client)?.checkin(
             super::PoolKey {
+                scope: None,
                 host: address.ip().to_string(),
                 port: address.port(),
                 plain_loopback: false,

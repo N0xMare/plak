@@ -24,17 +24,31 @@ pub(super) const IDLE_BOUND: Duration = Duration::from_secs(5);
 /// route; a second covers a brief overlap such as a title request.
 pub(super) const MAX_IDLE_PER_KEY: usize = 2;
 
+pub(crate) struct PoolUse<'a> {
+    pub(crate) pool: &'a Arc<Pool>,
+    pub(crate) scope: Option<Arc<PoolScope>>,
+}
+
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub(crate) struct PoolScope {
+    pub(crate) logical_origin: String,
+    pub(crate) version: u16,
+    pub(crate) account: String,
+    pub(crate) account_binding: String,
+    pub(crate) generation: u64,
+}
+
 /// Everything that decides whether one connection may carry another request.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct PoolKey {
+    pub(super) scope: Option<Arc<PoolScope>>,
     pub(super) host: String,
     pub(super) port: u16,
     /// A plain loopback connection never carries an HTTPS origin's request.
     pub(super) plain_loopback: bool,
     pub(super) address_policy: Option<AddressPolicy>,
-    /// Address of the clients' shared Rustls configuration. Every client that
-    /// shares a pool holds that same `Arc`, so the address cannot be reused
-    /// by another configuration while the pool exists.
+    /// Address of the shared Rustls configuration. Its owner (the pooled
+    /// client or relay server) holds the same `Arc` for the pool's lifetime.
     pub(super) tls_config: usize,
     pub(super) policy: TransportPolicy,
     pub(super) settings: ConnectionSettings,
@@ -75,8 +89,9 @@ impl IdleConnection {
 }
 
 #[derive(Default)]
-pub(super) struct Pool {
+pub(crate) struct Pool {
     idle: Mutex<HashMap<PoolKey, Vec<IdleConnection>>>,
+    max_keys: Option<usize>,
     /// Hands out idle connections without checking them, so a test can
     /// reproduce the race with a server closing one after checkout.
     #[cfg(test)]
@@ -84,6 +99,13 @@ pub(super) struct Pool {
 }
 
 impl Pool {
+    pub(crate) fn new(max_keys: Option<usize>) -> Self {
+        Self {
+            max_keys,
+            ..Self::default()
+        }
+    }
+
     /// Takes the most recently used idle connection that is still open and
     /// inside the idle bound, and drops every other expired or closed one.
     pub(super) fn checkout(&self, key: &PoolKey) -> Option<(IdleConnection, Duration)> {
@@ -129,9 +151,23 @@ impl Pool {
     pub(super) fn checkin(&self, key: PoolKey, connection: IdleConnection) {
         let evicted = {
             let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
+            let overflow = if self.max_keys.is_some_and(|limit| idle.len() >= limit)
+                && !idle.contains_key(&key)
+            {
+                let oldest = idle
+                    .iter()
+                    .min_by_key(|(_, entries)| entries.last().map(|entry| entry.since))
+                    .map(|(key, _)| key.clone());
+                oldest.and_then(|key| idle.remove(&key))
+            } else {
+                None
+            };
             let entries = idle.entry(key).or_default();
             entries.push(connection);
-            (entries.len() > MAX_IDLE_PER_KEY).then(|| entries.remove(0))
+            (
+                (entries.len() > MAX_IDLE_PER_KEY).then(|| entries.remove(0)),
+                overflow,
+            )
         };
         drop(evicted);
     }
@@ -167,7 +203,7 @@ impl Pool {
 
     /// Ages every idle connection as if it had sat idle for `by` longer.
     #[cfg(test)]
-    pub(super) fn age(&self, by: Duration) {
+    pub(crate) fn age(&self, by: Duration) {
         for entries in self
             .idle
             .lock()

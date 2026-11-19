@@ -14,6 +14,7 @@ const fn row(method: &'static str, path: PinPath) -> UpstreamPin {
         path,
         query: PinQuery::None,
         credential_headers: OPENROUTER_CREDENTIAL_HEADERS,
+        pool_inference: false,
     }
 }
 
@@ -23,15 +24,18 @@ pub const OPENROUTER_UPSTREAM_PINS: &[UpstreamPin] = &[
     row(
         "POST",
         PinPath::Exact(crate::chat::OPENROUTER_CHAT_COMPLETIONS_PATH),
-    ),
+    )
+    .pooled(),
     row(
         "POST",
         PinPath::Exact(crate::messages::OPENROUTER_MESSAGES_PATH),
-    ),
+    )
+    .pooled(),
     row(
         "POST",
         PinPath::Exact(crate::dialect::OPENROUTER_RESPONSES_PATH),
-    ),
+    )
+    .pooled(),
     row("GET", PinPath::Exact(crate::discovery::MODELS_PATH)),
     row(
         "GET",

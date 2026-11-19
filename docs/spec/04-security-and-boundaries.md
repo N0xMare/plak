@@ -1881,8 +1881,20 @@ an off-table origin, path, method or query, a reserved or hop-by-hop header,
 a plain entry reusing a custodied name and a malformed header are refused
 before any upstream byte. Token, device, JWKS, userinfo, discovery and
 profile endpoints are never relayable. The gateway follows no redirect (a
-3xx is relayed unchanged) and never retries. A custodied placeholder that
-reaches a direct exchange is refused unsent, so a route can never send one
+3xx is relayed unchanged) and never retries an upstream request. An idle
+socket may be reused only for a marked inference row, after the same caller,
+scope, disable, pin and credential checks as on a fresh connection. The pool
+adds the exact logical origin, gateway protocol version, custody slot, account
+binding and credential generation to the transport's connection key. Inference
+credentials remain per-request headers, not TLS client credentials or a
+connection login. The upstream peer may associate prior traffic with a live
+connection, so a different authority or credential generation never uses
+that socket. Only a fully sent request and cleanly drained response can return
+a socket. A stale checkout may be replaced once only on a protocol error before
+the socket accepts any byte of the request (chapter 01 §13.1).
+
+A custodied placeholder that reaches a direct exchange is refused unsent,
+so a route can never send one
 to a provider, and the placeholder carries only the account reference and
 non-secret fence digests. The repository-only dial override that maps a
 pinned origin to a loopback fixture is absent from product builds.
