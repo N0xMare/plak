@@ -31,7 +31,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
         .canonicalize()
         .unwrap();
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
-    let session = super::upgrade::seed(&fixture, 1);
+    let session = upgrade::seed(&fixture, 1);
     stop(&mut start(&fixture));
     assert_eq!(versions(&paths), BASE);
 
