@@ -14,6 +14,7 @@ use plakous_gateway_protocol::refusal::GatewayRefusal;
 use plakous_gateway_protocol::{Endpoint, GatewayAccount, HexDigest, UuidText};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
 use super::{GatewayService, Injection, Peer, RelayServer, ServiceFuture};
 use crate::relay::{
@@ -144,6 +145,13 @@ struct Service {
     held: Arc<AtomicUsize>,
     audited: Mutex<Vec<super::RelayOutcome>>,
     cut: Mutex<Option<crate::CancellationToken>>,
+    facts_gate: Option<Arc<FactsGate>>,
+}
+
+#[derive(Default)]
+struct FactsGate {
+    entered: Notify,
+    release: Notify,
 }
 
 /// Counts itself held until dropped, as a store's Ready lease would be.
@@ -163,6 +171,7 @@ impl Service {
             held: Arc::new(AtomicUsize::new(0)),
             audited: Mutex::new(Vec::new()),
             cut: Mutex::new(None),
+            facts_gate: None,
         })
     }
 
@@ -245,7 +254,13 @@ impl GatewayService for Service {
     ) -> ServiceFuture<'a, Vec<u8>> {
         Box::pin(async move {
             match endpoint {
-                Endpoint::Facts => Ok(body.to_vec()),
+                Endpoint::Facts => {
+                    if let Some(gate) = &self.facts_gate {
+                        gate.entered.notify_one();
+                        gate.release.notified().await;
+                    }
+                    Ok(body.to_vec())
+                }
                 _ => Err(GatewayRefusal::ScopeDenied {}),
             }
         })
@@ -878,6 +893,38 @@ async fn calls_and_versions_are_path_versioned() {
         "{reply}"
     );
     assert!(reply.contains("\"supported\":[1,2]"), "{reply}");
+}
+
+#[tokio::test]
+async fn draining_flushes_an_accepted_reply_and_closes_the_connection() {
+    let gate = Arc::new(FactsGate::default());
+    let mut service = Service::new();
+    Arc::get_mut(&mut service).unwrap().facts_gate = Some(Arc::clone(&gate));
+    let server = RelayServer::new(
+        service,
+        Client::new_http1(Limits::default()).unwrap(),
+        super::new_instance().unwrap(),
+    );
+    let (mut caller, socket) = tokio::io::duplex(1024);
+    let serving = server.clone();
+    let task = tokio::spawn(async move { serving.serve(socket, Peer::InProcess).await });
+    caller
+        .write_all(b"POST /v2/facts HTTP/1.1\r\nhost: g\r\ncontent-length: 2\r\n\r\n{}")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), gate.entered.notified())
+        .await
+        .unwrap();
+    server.drain();
+    gate.release.notify_one();
+    let mut reply = String::new();
+    tokio::time::timeout(Duration::from_secs(1), caller.read_to_string(&mut reply))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    assert!(reply.contains("\r\n{}\r\n"), "{reply}");
+    task.await.unwrap().unwrap();
 }
 
 #[tokio::test]
