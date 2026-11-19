@@ -6530,7 +6530,8 @@ serialized coordinator proves idle with no pending receipt, apply or status
 fences the withdrawn target request and restores the recorded runner links
 before closing the intent. Target-local, per-operation cancellation
 fences under the login's installation root prevent a delayed request from
-undoing withdrawal. There is no service rollback after surrender, unit
+undoing withdrawal. The host requester inherits its target wrapper's fence
+until it exits. There is no service rollback after surrender, unit
 rewrite, timed restart or CAS journal. Do not race another deploy or manual
 handoff against an open intent. A Ready replacement must be the exact new
 image under a new instance with unchanged non-transitioning dependencies.

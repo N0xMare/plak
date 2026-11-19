@@ -765,8 +765,16 @@ pub(super) fn command(binary: &OsStr, node: &Node, product_home: &Path) -> std::
 }
 
 pub(super) fn capture(cmd: std::process::Command, seconds: u64) -> CliResult<Vec<u8>> {
+    capture_input(cmd, seconds, None)
+}
+
+pub(super) fn capture_input(
+    cmd: std::process::Command,
+    seconds: u64,
+    input: Option<fs::File>,
+) -> CliResult<Vec<u8>> {
     let reply =
-        operator_process::capture(cmd, None, Duration::from_secs(seconds), shipping::LIMIT)?;
+        operator_process::capture(cmd, input, Duration::from_secs(seconds), shipping::LIMIT)?;
     check(
         reply.status.success(),
         "target command failed; inspect the documented command on the target",

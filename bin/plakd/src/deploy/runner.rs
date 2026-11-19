@@ -176,9 +176,12 @@ mod tests {
         assert_eq!(fs::read_link(&runner.link).unwrap(), new.join("plakd"));
         fence.cancel().unwrap();
         switch(&runner, &candidate, &source, true).unwrap();
+        let inherited = fence.requester_input().unwrap();
         drop(fence);
 
         assert_eq!(fs::read_link(&runner.link).unwrap(), source.path);
+        assert!(Fence::lock(&runner.node, "runner-desk", ticket).is_err());
+        drop(inherited);
         assert!(
             Fence::lock(&runner.node, "runner-desk", ticket)
                 .unwrap()

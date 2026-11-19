@@ -49,6 +49,12 @@ impl Fence {
         )
     }
 
+    pub(super) fn requester_input(&self) -> CliResult<File> {
+        // The requester does not read stdin. Keep the same locked file
+        // description in the child even if its target wrapper dies.
+        self.file.try_clone().map_err(io)
+    }
+
     pub(super) fn cancel(&mut self) -> CliResult<()> {
         self.file.write_all(b"withdrawn\n").map_err(io)?;
         self.file.sync_all().map_err(io)?;

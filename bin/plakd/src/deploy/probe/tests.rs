@@ -257,13 +257,14 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
     };
     let mut unexpected = serving.clone();
     unexpected.instance = "100-0000000000000002".into();
-    let error = target::upgrade(target, &candidate, &unexpected, 10).unwrap_err();
+    let null = || fs::File::open("/dev/null").unwrap();
+    let error = target::upgrade(target, &candidate, &unexpected, 10, null()).unwrap_err();
     assert!(error.message().contains("serving facts changed"));
     let absent = Candidate {
         snapshot: "f".repeat(64),
         sha256: candidate.sha256.clone(),
     };
-    let error = target::upgrade(target, &absent, &serving, 10).unwrap_err();
+    let error = target::upgrade(target, &absent, &serving, 10, null()).unwrap_err();
     assert!(error.message().contains("candidate snapshot is missing"));
     assert!(!target.host.product_home.join("surrendered").exists());
     let wrong_instance = HostOp::HostLink {

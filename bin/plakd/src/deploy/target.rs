@@ -159,7 +159,13 @@ pub(super) fn execute_host(
         } => {
             let fence = super::fence::Fence::lock(&target.host.node, "upgrade", ticket)?;
             fence.active()?;
-            upgrade(target, &candidate, &previous, drain)?;
+            upgrade(
+                target,
+                &candidate,
+                &previous,
+                drain,
+                fence.requester_input()?,
+            )?;
             data(&())
         }
         HostOp::WithdrawUpgrade {
@@ -242,6 +248,7 @@ pub(super) fn upgrade(
     candidate: &Candidate,
     previous: &Observed,
     drain: u32,
+    requester_input: File,
 ) -> CliResult<()> {
     check(drain <= 120, "invalid drain bound")?;
     check(
@@ -254,17 +261,23 @@ pub(super) fn upgrade(
         .sha256
         .get(..12)
         .ok_or_else(|| fail("invalid expected binary"))?;
-    target.product(
-        &binary,
-        [
-            "host",
-            "upgrade",
-            "--expect-binary",
-            expected,
-            "--drain",
-            &format!("{drain}s"),
-        ],
+    let mut command = probe::command(
+        binary.as_os_str(),
+        &target.host.node,
+        &target.host.product_home,
+    );
+    command.args([
+        "host",
+        "upgrade",
+        "--expect-binary",
+        expected,
+        "--drain",
+        &format!("{drain}s"),
+    ]);
+    probe::capture_input(
+        command,
         timing::UPGRADE + u64::from(drain),
+        Some(requester_input),
     )?;
     Ok(())
 }
