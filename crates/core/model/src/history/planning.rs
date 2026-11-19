@@ -1394,13 +1394,8 @@ fn context_selected_intent_group(
             &end.to_be_bytes(),
         ],
     )?;
-    for segment in source
-        .history()
-        .segments()
-        .iter()
-        .skip(start_usize)
-        .take(end_usize.saturating_sub(start_usize))
-    {
+    let segments = source.history().segments();
+    for segment in (start_usize..end_usize).map_while(|index| segments.get(index)) {
         identity = Digest::sha256(
             DigestDomain::ContextPlan,
             1,
