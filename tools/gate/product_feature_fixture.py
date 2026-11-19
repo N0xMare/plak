@@ -14,6 +14,8 @@ import tempfile
 import threading
 import time
 
+from gateway_fixture import running_gateway
+
 # Subscription acceptance lives under XDG_STATE_HOME (or $HOME/.local/state),
 # not PLAK_HOME. Every fixture process gets private roots and, when it starts
 # a codex turn, accepts the notice itself.
@@ -70,7 +72,10 @@ def check(
     full_binary: str, reduced_binary: str, server_binary: str, maintainer: bool = False
 ) -> list[str]:
     errors = []
-    with tempfile.TemporaryDirectory(prefix="plakd-feature-store-") as directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="plakd-feature-store-") as directory,
+        ExitStack() as stack,
+    ):
         root = Path(directory)
         script = root / "script.json"
         script.write_text(
@@ -79,6 +84,7 @@ def check(
         home, environment = isolated_environment(
             root, PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script)
         )
+        gateway = stack.enter_context(running_gateway(full_binary, home, root, environment))
         (home / "agents").mkdir(mode=0o700)
 
         def run(binary, arguments, input=""):
@@ -105,7 +111,7 @@ def check(
                     + '\n'
                 )
                 template += 'tools = ["mcp:fixture"]\n'
-            (home / "config.toml").write_text(config)
+            (home / "config.toml").write_text(config + gateway)
             (home / "agents/root-agent.toml").write_text(template)
             created = run(
                 full_binary,
@@ -150,7 +156,7 @@ def check(
             ):
                 errors.append("MCP fixture did not freeze the selected server tools")
             # Current config must not provide the refusal: the persisted binding must.
-            (home / "config.toml").write_text("")
+            (home / "config.toml").write_text(gateway)
             (home / "agents/root-agent.toml").unlink()
             exported = root / f"{feature}.json"
             cases = [
@@ -197,7 +203,7 @@ def check(
                         )
             if feature == "mcp" and maintainer:
                 # Export carries history and composition, not the local tool freeze.
-                # Import binds at genesis under the destination config (empty here).
+                # Import binds at genesis under the destination config (gateway only here).
                 database = next(home.rglob("product.sqlite3"))
                 with closing(sqlite3.connect(f"file:{database}?mode=ro", uri=True)) as connection:
                     source_before = connection.execute(
@@ -227,7 +233,7 @@ def check(
         # An unused Python template needs no account. The selected OpenRouter
         # root does: without a Ready account or an explicit root selector, the
         # bare invocation must still refuse to choose.
-        (home / "config.toml").write_text('[root]\nagent = "root-agent"\n')
+        (home / "config.toml").write_text('[root]\nagent = "root-agent"\n' + gateway)
         (home / "agents/root-agent.toml").write_text(
             'account = "openrouter"\nmodel = "openai/gpt-6-astra"\ncomposition = "direct"\n'
         )
@@ -258,7 +264,10 @@ def check(
 def check_route(full_binary: str, reduced_binary: str) -> list[str]:
     """Read a genuine canonical native session; refuse attach without touching it."""
     errors = []
-    with tempfile.TemporaryDirectory(prefix="plakd-feature-route-") as directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="plakd-feature-route-") as directory,
+        ExitStack() as stack,
+    ):
         root = Path(directory)
         script = root / "script.json"
         script.write_text(
@@ -267,6 +276,7 @@ def check_route(full_binary: str, reduced_binary: str) -> list[str]:
         home, environment = isolated_environment(
             root, PLAK_TEST_MODEL="offline-loopback-v1", PLAK_TEST_SCRIPT=str(script)
         )
+        stack.enter_context(running_gateway(full_binary, home, root, environment))
 
         def run(binary, arguments, input=""):
             return subprocess.run(
@@ -339,19 +349,23 @@ def check_route(full_binary: str, reduced_binary: str) -> list[str]:
 
 def image_diagnostic(binary: str) -> list[str]:
     """Refuse an image during a real held turn, then finish that same turn and keep serving."""
-    with tempfile.TemporaryDirectory(prefix="plakd-feature-jsonl-") as directory:
+    with (
+        tempfile.TemporaryDirectory(prefix="plakd-feature-jsonl-") as directory,
+        ExitStack() as stack,
+    ):
         root = Path(directory)
         script = root / "script.json"
         script.write_text(
             json.dumps({"version": 1, "steps": [{"output": {"text": "same turn finished"}}]})
         )
         release = root / "release"
-        _home, environment = isolated_environment(
+        home, environment = isolated_environment(
             root,
             PLAK_TEST_MODEL="offline-loopback-v1",
             PLAK_TEST_SCRIPT=str(script),
             PLAK_TEST_PROVIDER_RELEASE=str(release),
         )
+        stack.enter_context(running_gateway(binary, home, root, environment))
         process = subprocess.Popen(
             [
                 binary,

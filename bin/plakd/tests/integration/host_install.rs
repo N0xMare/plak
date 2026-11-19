@@ -120,6 +120,8 @@ fn host_argv(
     fixture: &mut Fixture,
     managed: bool,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    use std::io::Write as _;
+
     // Match the systemd default cwd and default product home, not a workspace.
     fixture.product = fixture.home.join(".plak");
     std::os::unix::fs::symlink(
@@ -138,7 +140,6 @@ fn host_argv(
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))?;
     std::fs::create_dir_all(&fixture.product)?;
     std::fs::set_permissions(&fixture.product, std::fs::Permissions::from_mode(0o700))?;
-    use std::io::Write as _;
     std::fs::OpenOptions::new()
         .append(true)
         .open(fixture.product.join("config.toml"))?

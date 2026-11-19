@@ -8,12 +8,16 @@ import queue
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/gate"))
+from gateway_fixture import running_gateway  # noqa: E402
+
 EXAMPLE = ROOT / "tests/tooling/fixtures/host_client.py"
 spec = importlib.util.spec_from_file_location("host_client", EXAMPLE)
 host_client = importlib.util.module_from_spec(spec)
@@ -35,9 +39,6 @@ class ReferenceClientTests(unittest.TestCase):
         agents = home / "agents"
         agents.mkdir(parents=True, mode=0o700)
         home.chmod(0o700)
-        (home / "config.toml").write_text(
-            '[root]\nagent="lead"\n[orchestration]\nsubagents=false\n'
-        )
         (agents / "lead.toml").write_text(
             'account="codex"\nmodel="offline-loopback-v1"\neffort="medium"\ncomposition="direct"\n'
         )
@@ -50,6 +51,7 @@ class ReferenceClientTests(unittest.TestCase):
         self.env = {
             "PATH": os.environ["PATH"],
             "HOME": str(self.root / "fake-home"),
+            "XDG_STATE_HOME": str(self.root / "state"),
             "PLAK_HOME": str(home),
             "TMPDIR": str(scratch),
             "GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"],
@@ -61,6 +63,10 @@ class ReferenceClientTests(unittest.TestCase):
         }
         for name in ("PLAK_PY_HOST", "PLAK_JS_HOST"):
             self.env[name] = os.environ[name]
+        gateway = self.enterContext(running_gateway(self.binary, home, self.workspace, self.env))
+        (home / "config.toml").write_text(
+            '[root]\nagent="lead"\n[orchestration]\nsubagents=false\n' + gateway
+        )
         self.host = subprocess.Popen(
             [self.binary, "host"],
             cwd=self.workspace,

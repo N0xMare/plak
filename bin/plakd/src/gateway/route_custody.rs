@@ -196,6 +196,45 @@ impl HostCustody {
         }
     }
 
+    /// Diagnose a missing key before provider construction. The route still
+    /// checks the account and generation at each dispatch.
+    pub(crate) async fn require_api_key(&self, account: &str) -> crate::CliResult<()> {
+        use plakous::gateway::custody::{
+            CredentialCustodian as _, CustodyError, CustodySlot, KeySource,
+        };
+        use plakous_hosted::error::{CliFailure, CliFailureKind};
+
+        let Self::Gateway(link) = self else {
+            return Ok(());
+        };
+        let slot = CustodySlot::new(account)
+            .map_err(|error| CliFailure::classified(CliFailureKind::Usage, error.to_string()))?;
+        let facts = link
+            .custody
+            .custodian()
+            .facts(&slot)
+            .await
+            .map_err(|error| {
+                let message = match error {
+                    CustodyError::Unavailable => {
+                        GatewayUnavailable::Unreachable(&link.admin.address).to_string()
+                    }
+                    error => format!("gateway credential facts for {account}: {error}"),
+                };
+                CliFailure::classified(CliFailureKind::Auth, message)
+            })?;
+        if facts
+            .key
+            .is_some_and(|key| key.source == KeySource::Missing)
+        {
+            return Err(CliFailure::classified(
+                CliFailureKind::Auth,
+                crate::home::secrets::missing_api_key_message(account),
+            ));
+        }
+        Ok(())
+    }
+
     /// The admin link, when a gateway is configured.
     pub(crate) fn admin(&self) -> Option<&AdminLink> {
         match self {

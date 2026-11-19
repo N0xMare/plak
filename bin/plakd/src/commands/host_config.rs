@@ -7,7 +7,8 @@ use std::sync::Arc;
 use plakous::agent::ReasoningEffort;
 
 use super::support::{
-    native_processing_tier, persist_miss_native_tool_mode, product_subscription_request_limits,
+    application_execution_failure, native_processing_tier, persist_miss_native_tool_mode,
+    product_subscription_request_limits,
 };
 use crate::home::paths as product_paths;
 use crate::presentation::HostLaunchNativeModelFact;
@@ -23,10 +24,6 @@ pub(super) fn binding_presentation(
     account: &plakous_hosted::account::AccountRef,
 ) -> crate::CliResult<crate::presentation::HostCatalogBundle> {
     if account.is_named() {
-        // A gateway holds the key; it refuses a missing one at dispatch.
-        if account.vertical().is_api() && custody.admin().is_none() {
-            crate::home::secrets::require_api_key(paths, account.as_str())?;
-        }
         return Ok(crate::presentation::HostCatalogBundle {
             providers: Vec::new(),
             sections: plakous_host_protocol::views::ReadyCatalog::default(),
@@ -213,6 +210,9 @@ pub(crate) fn build_host_config(
                 }
                 plakous_hosted::binding::AttachRoute::NativeOauth { .. } => unreachable!(),
             };
+            executor
+                .block_on(custody.require_api_key(account))
+                .map_err(application_execution_failure)??;
             return Ok(product_host::HostConfig {
                 product_home: paths.home().to_path_buf(),
                 home: paths.session_home(),

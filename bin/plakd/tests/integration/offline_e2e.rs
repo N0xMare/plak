@@ -6705,7 +6705,7 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     let path = fixture.root.join("home-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
     let mut child = fixture
-        .command()
+        .base_command()
         .env("HOME", &fixture.root)
         .env("PLAK_HOME", &home)
         .current_dir(&fixture.root)

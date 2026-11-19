@@ -2221,7 +2221,17 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 const FACE_RECOVERY_NOTE: &str = "recovered an interrupted turn";
 const FACE_WAIT: Duration = Duration::from_secs(45);
 
+struct FaceGateway(Child);
+
+impl Drop for FaceGateway {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 struct FaceFixture {
+    _gateway: Option<FaceGateway>,
     root: TempDir,
     home: PathBuf,
     workspace: PathBuf,
@@ -2248,9 +2258,20 @@ impl FaceFixture {
         std::fs::create_dir_all(home.join("agents"))?;
         std::fs::create_dir_all(&workspace)?;
         std::fs::create_dir_all(root.path().join("tmp"))?;
+        let socket = root.path().join("g.sock");
         std::fs::write(
             home.join("config.toml"),
-            "[root]\nagent = \"lead\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = true\n",
+            format!(
+                "[root]\nagent = \"lead\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = true\n\n[gateway]\naddress = {:?}\n",
+                format!("unix:{}", socket.display())
+            ),
+        )?;
+        std::fs::write(
+            home.join("gateway.toml"),
+            format!(
+                "socket = {:?}\n",
+                socket.to_str().ok_or("gateway socket path")?
+            ),
         )?;
         std::fs::write(
             home.join("agents").join("lead.toml"),
@@ -2258,13 +2279,15 @@ impl FaceFixture {
         )?;
         for path in [
             home.join("config.toml"),
+            home.join("gateway.toml"),
             home.join("agents").join("lead.toml"),
         ] {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         }
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700))?;
         std::fs::set_permissions(home.join("agents"), std::fs::Permissions::from_mode(0o700))?;
-        let fixture = Self {
+        let mut fixture = Self {
+            _gateway: None,
             script: root.path().join("script.json"),
             evidence: root.path().join("evidence.jsonl"),
             home,
@@ -2273,6 +2296,7 @@ impl FaceFixture {
             root,
         };
         fixture.write_script(script)?;
+        fixture._gateway = Some(fixture.start_gateway()?);
         Ok(fixture)
     }
 
@@ -2288,12 +2312,46 @@ impl FaceFixture {
             .env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", self.root.path().join("fake-home"))
+            .env("XDG_STATE_HOME", self.root.path().join("state"))
             .env("TMPDIR", self.root.path().join("tmp"))
             .env("PLAK_HOME", &self.home)
             .env("PLAK_TEST_MODEL", "offline-loopback-v1")
             .env("PLAK_TEST_SCRIPT", &self.script)
             .env("PLAK_TEST_EVIDENCE", &self.evidence);
         command
+    }
+
+    fn start_gateway(&self) -> TestResult<FaceGateway> {
+        let log = self.root.path().join("gateway.log");
+        let mut child = FaceGateway(
+            self.command()
+                .args(["gateway", "serve"])
+                .env("PLAK_TEST_FAULTS", "fault=connect")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(File::create(&log)?)
+                .spawn()?,
+        );
+        let deadline = Instant::now() + CHILD_DEADLINE;
+        loop {
+            if self
+                .command()
+                .args(["gateway", "check"])
+                .output()?
+                .status
+                .success()
+            {
+                return Ok(child);
+            }
+            if child.0.try_wait()?.is_some() || Instant::now() >= deadline {
+                return Err(format!(
+                    "fixture gateway did not become ready: {}",
+                    std::fs::read_to_string(log)?
+                )
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Blocks until the offline model has entered a provider operation.

@@ -1208,7 +1208,7 @@ fn session_mutations_require_confirmation_and_context_never_guesses() {
     let usage = run_plak(home, &["usage"]);
     assert!(!usage.status.success());
     assert!(stderr(&usage).contains("gateway_unavailable:"));
-    assert!(stdout(&usage).is_empty());
+    assert_eq!(stdout(&usage), "");
 }
 
 #[test]

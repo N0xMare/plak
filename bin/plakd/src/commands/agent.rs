@@ -387,12 +387,7 @@ pub(crate) fn run_agent_after_admission(
             "plakd agent requires --model or a configured [root] agent template model",
         )
     })?;
-    // A missing API key is an authentication failure (exit 3) the client can
-    // act on, not a host that fails to attach after the stream opened.
     let custody = services.custody()?;
-    if custody.gateway().is_none() && crate::home::secrets::is_api_key_account(&account) {
-        crate::home::secrets::require_api_key(paths, &account)?;
-    }
     let selected: plakous_hosted::account::AccountRef = account.parse()?;
     let is_openrouter = selected.vertical() == plakous_hosted::account::Vertical::OpenRouter;
     let (resolved_effort, resolved_explicit) = if is_openrouter {

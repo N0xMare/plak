@@ -288,7 +288,7 @@ impl Fixture {
         self.root.join("g.sock")
     }
 
-    fn base_command(&self) -> Command {
+    pub(super) fn base_command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_plakd"));
         command
             .current_dir(self.workspace())

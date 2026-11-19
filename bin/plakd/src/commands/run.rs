@@ -608,11 +608,27 @@ impl PlakousApplication {
             continuation: None,
             event_renderer: None,
         };
+        if print_session_id {
+            write_session_id(stdout, &config.session.id)?;
+        }
+        if let Some(account) = config.session.account.as_deref()
+            && crate::home::secrets::is_api_key_account(account)
+        {
+            let Some(ready) = run_preparation(
+                &self.executor,
+                limits,
+                self.custody.require_api_key(account),
+            )?
+            else {
+                return run_timeout(stderr);
+            };
+            ready?;
+        }
         run_config(
             &self.executor,
             config,
             prompt,
-            print_session_id,
+            false,
             child_agents,
             TerminalMode::of_stdout(),
             stdout,
@@ -626,6 +642,12 @@ fn run_expired(limits: product_host::RunBounds) -> bool {
     limits
         .deadline
         .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+}
+
+fn write_session_id(stdout: &mut dyn io::Write, session_id: &str) -> CliResult<()> {
+    writeln!(stdout, "session_id={session_id}")
+        .and_then(|()| stdout.flush())
+        .map_err(|_| CliFailure::new("stdout failed"))
 }
 
 fn run_timeout(stderr: &mut dyn io::Write) -> CliResult<ProcessOutcome> {
@@ -675,11 +697,7 @@ pub(crate) fn run_config(
             .with_session_id(&config.session.id),
     );
     if print_session_id {
-        writeln!(stdout, "session_id={}", config.session.id)
-            .map_err(|_| CliFailure::new("stdout failed"))?;
-        stdout
-            .flush()
-            .map_err(|_| CliFailure::new("stdout failed"))?;
+        write_session_id(stdout, &config.session.id)?;
     }
     let signal_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_signals = signal_count.clone();
