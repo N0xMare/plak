@@ -65,38 +65,13 @@ case "$(uname -s) $(uname -m)" in
 esac
 triple="$CARGO_BUILD_TARGET"
 
-# Keep the build host's home, checkout and target paths out of the shipped
-# binaries: Rust panic locations name dependency and workspace sources, and C
-# assertions in vendored engines name build-script output. The most specific
-# prefix (the target directory) comes last, where rustc and the C compiler
-# give the last match precedence. Cargo ignores RUSTFLAGS once
-# CARGO_ENCODED_RUSTFLAGS is set, so caller flags go there.
-if [[ -n "${RUSTFLAGS:-}" ]]; then
-  echo "package-release: pass extra rustc flags in CARGO_ENCODED_RUSTFLAGS, not RUSTFLAGS" >&2
-  exit 2
-fi
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 [[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
-mkdir -p "$target_dir"
-target_dir="$(cd "$target_dir" && pwd -P)"
-# A fresh runner may not have created the Cargo home yet; Cargo creates it at
-# this path on first use, so the remap must name it before the build.
-cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-mkdir -p "$cargo_home"
-cargo_home="$(cd "$cargo_home" && pwd -P)"
-maps=("$cargo_home=/cargo" "$repo_root=/plakd" "$target_dir=/target")
-c_flags_var="CFLAGS_${triple//-/_}"
-cxx_flags_var="CXXFLAGS_${triple//-/_}"
-for map in "${maps[@]}"; do
-  CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS:+$CARGO_ENCODED_RUSTFLAGS$'\x1f'}--remap-path-prefix=$map"
-  printf -v "$c_flags_var" '%s' "${!c_flags_var:+${!c_flags_var} }-ffile-prefix-map=$map"
-  printf -v "$cxx_flags_var" '%s' "${!cxx_flags_var:+${!cxx_flags_var} }-ffile-prefix-map=$map"
-done
-export CARGO_ENCODED_RUSTFLAGS "${c_flags_var?}" "${cxx_flags_var?}"
 
 artifacts="$(bash tools/build/build-plakd.sh --artifacts)"
 release_out="${out:-$target_dir/release-dist}"
 mkdir -p "$release_out"
+cp "$artifacts/manifest.json" "$release_out/plakd-$release-$triple-manifest.json"
 "$artifacts/plakd" wire schema >"$release_out/plakd-$release-$triple-wire-schema.json"
 python3 tools/release/release_tarball.py --version "$release" --triple "$triple" \
   --artifacts "$artifacts" --out "$release_out" \

@@ -11,14 +11,14 @@
 # Install modes write an immutable snapshot and point PATH at it:
 #   --install             plain release, under the release snapshot root
 #   --install-maintainer  maintainer profile, under the maintainer snapshot root
-#   --artifacts           plain release build and linkage check; prints the directory
+#   --artifacts           verified stripped release files and manifest; prints the directory
 # The modes are exclusive. Additive flags, not with install, artifacts or profiling:
 #   --features LIST  replace the parent feature set (workers stay unfeatured)
 #   --plakd-only      parent only; no workers and no linkage check
 #   --offline        pass Cargo --offline (any mode)
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$repo_root"
 profile=debug
 snapshot_flavor=
@@ -117,16 +117,61 @@ if [[ "$profile" == release ]]; then
   # Linkage proof needs raw symbols; strip only the staged shipping copies.
   export CARGO_PROFILE_RELEASE_STRIP=debuginfo
 fi
-# A clean checkout states the source revision it builds, half of the
-# version triple runners bind on; anything else builds as `unknown`, which
-# pairs with no remote runner.
-if [[ -z "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+[[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
+clean_revision() {
+  local revision status
+  revision="$(git rev-parse HEAD)" || return 2
+  status="$(git status --porcelain --untracked-files=all --ignore-submodules=none)" || return 2
+  if [[ -n "$status" ]]; then
+    echo "build-plakd: the working tree is not clean; commit or remove changes before building shipping artifacts" >&2
+    return 2
+  fi
+  printf '%s\n' "$revision"
+}
+shipping=
+if [[ "$mode" == --install || "$mode" == --artifacts ]]; then
+  shipping=1
+  if [[ "${RUSTFLAGS+x}" ]]; then
+    echo "build-plakd: pass extra rustc flags in CARGO_ENCODED_RUSTFLAGS, not RUSTFLAGS" >&2
+    exit 2
+  fi
+  PLAK_SOURCE_REVISION="$(clean_revision)"
+  export PLAK_SOURCE_REVISION
+  # An explicit target applies Rust flags to shipping code, not host build
+  # scripts and proc macros. Keep Cargo's native target when not overridden.
+  rustc_facts="$(rustc -vV)"
+  triple="${CARGO_BUILD_TARGET:-$(sed -n 's/^host: //p' <<<"$rustc_facts")}"
+  export CARGO_BUILD_TARGET="${triple:?could not determine Rust target}"
+  cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  mkdir -p "$cargo_home" "$target_dir"
+  cargo_home="$(cd "$cargo_home" && pwd -P)"
+  target_dir="$(cd "$target_dir" && pwd -P)"
+  export CARGO_HOME="$cargo_home" CARGO_TARGET_DIR="$target_dir"
+  c_flags_var="CFLAGS_${triple//-/_}"
+  cxx_flags_var="CXXFLAGS_${triple//-/_}"
+  for path in "$cargo_home" "$repo_root" "$target_dir"; do
+    case "$path" in *"="*|*$'\n'*)
+      echo "build-plakd: paths containing '=' or a newline cannot be remapped" >&2
+      exit 2 ;;
+    esac
+  done
+  # Order by length so overlapping prefixes get the most specific match last.
+  # Bash's %q and cc's shlex keep a prefix containing spaces one C argument.
+  maps="$(python3 -c 'import sys; print(*sorted(sys.argv[1:], key=lambda mapping: len(mapping.split("=")[0])), sep="\n")' \
+    "$cargo_home=/cargo" "$repo_root=/plakd" "$target_dir=/target")"
+  while IFS= read -r map; do
+    CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS:+$CARGO_ENCODED_RUSTFLAGS$'\x1f'}--remap-path-prefix=$map"
+    printf -v escaped '%q' "-ffile-prefix-map=$map"
+    printf -v "$c_flags_var" '%s' "${!c_flags_var:+${!c_flags_var} }$escaped"
+    printf -v "$cxx_flags_var" '%s' "${!cxx_flags_var:+${!cxx_flags_var} }$escaped"
+  done <<<"$maps"
+  export CARGO_ENCODED_RUSTFLAGS CC_SHELL_ESCAPED_FLAGS=1 "${c_flags_var?}" "${cxx_flags_var?}"
+elif [[ -z "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
   PLAK_SOURCE_REVISION="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
   export PLAK_SOURCE_REVISION
 fi
 cargo build --locked ${offline[@]+"${offline[@]}"} -p plakd ${plak_features[@]+"${plak_features[@]}"} ${profile_flag[@]+"${profile_flag[@]}"}
-target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
-[[ "$target_dir" == /* ]] || target_dir="$repo_root/$target_dir"
 output_dir="$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}${profile}"
 bin="$output_dir/plakd"
 js_host="$output_dir/plakous-js-host"
@@ -165,6 +210,7 @@ fi
 if [[ "$profile" == release ]]; then
   output_dir="$output_dir/stripped"
   mkdir -p "$output_dir"
+  rm -f "$output_dir/manifest.json"
   for artifact in "$bin" "$js_host" "$py_host"; do
     cp "$artifact" "$output_dir/$(basename "$artifact")"
     strip "$output_dir/$(basename "$artifact")"
@@ -173,182 +219,17 @@ if [[ "$profile" == release ]]; then
   js_host="$output_dir/plakous-js-host"
   py_host="$output_dir/plakous-py-host"
 fi
+if [[ -n "$shipping" ]]; then
+  revision="$(clean_revision)"
+  if [[ "$revision" != "$PLAK_SOURCE_REVISION" ]]; then
+    echo "build-plakd: HEAD changed during the shipping build" >&2
+    exit 2
+  fi
+  python3 tools/build/artifact_manifest.py emit "$output_dir" "$triple" "$revision" "$cargo_home" "$target_dir"
+fi
 if [[ -n "$artifacts_only" ]]; then
   printf '%s\n' "$output_dir"
   exit 0
 fi
 
-install_link() {
-  local dest="$1"
-  local src="$2"
-  local dest_dir
-  if [[ -e "$dest" || -L "$dest" ]]; then
-    if [[ ! -L "$dest" ]] || ! python3 - "$dest" "$HOME/.local/lib/plak/maintainer" "$HOME/.local/lib/plak/release" "$HOME/.local/lib/plak/sidecars" "$target_dir" <<'PY'
-import os
-import sys
-
-target = os.path.realpath(sys.argv[1])
-roots = [os.path.realpath(root) for root in sys.argv[2:]]
-raise SystemExit(0 if any(os.path.commonpath([target, root]) == root for root in roots) else 1)
-PY
-    then
-      echo "build-plakd: refusing to replace non-Plak destination $dest; move it aside explicitly" >&2
-      return 2
-    fi
-  fi
-  dest_dir="$(dirname "$dest")"
-  mkdir -p "$dest_dir"
-  ln -sfn "$src" "$dest"
-  echo "build-plakd: installed $dest -> $src" >&2
-}
-
-# BEGIN SNAPSHOT INSTALL
-# Install an immutable snapshot keyed by the SHA-256 of all three executables,
-# so a rebuild that changes only a sidecar is a new snapshot too. Rebuilding
-# never rewrites a file a running session executes; new launches (and /reload)
-# pick up the new snapshot.
-sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | cut -d' ' -f1
-  else
-    shasum -a 256 "$1" | cut -d' ' -f1
-  fi
-}
-snapshot_root="${HOME}/.local/lib/plak/${snapshot_flavor}"
-snapshot_id="$(printf 'plakd %s\nplakous-js-host %s\nplakous-py-host %s\n' \
-  "$(sha256_of "$bin")" "$(sha256_of "$js_host")" "$(sha256_of "$py_host")" | sha256_of -)"
-require_artifact_directory() {
-  local facts mode
-  [[ -d "$1" && ! -L "$1" ]] || { echo "build-plakd: sidecar cache directory refused: $1" >&2; return 1; }
-  facts="$(stat -f '%u %Lp' "$1" 2>/dev/null)" || facts="$(stat -c '%u %a' "$1")"
-  mode="${facts##* }"
-  if [[ "${facts%% *}" != "$(id -u)" ]] || (( (8#$mode & 0022) != 0 )); then
-    echo "build-plakd: unsafe sidecar cache directory refused: $1" >&2
-    return 1
-  fi
-}
-# Create missing ancestors individually: mkdir -p's intermediate directories
-# inherit the umask. Resolve links before validating the physical owned chain,
-# preserving linked homes without trusting writable installation ancestors.
-ensure_install_directory() {
-  local directory="$1" physical parent facts mode owner
-  if [[ ! -d "$directory" ]]; then
-    parent="$(dirname "$directory")"
-    ensure_install_directory "$parent" || return 1
-    mkdir -m 0755 "$directory" 2>/dev/null || [[ -d "$directory" ]] || return 1
-  fi
-  physical="$(cd "$directory" && pwd -P)" || return 1
-  while [[ "$physical" != / ]]; do
-    # BSD %Lp omits the sticky bit that %Mp carries.
-    facts="$(stat -f '%u %Mp%Lp' "$physical" 2>/dev/null)" || facts="$(stat -c '%u %a' "$physical")"
-    owner="${facts%% *}"
-    mode="${facts##* }"
-    # Root-owned sticky temporary roots are trusted system anchors, not
-    # installation directories. Other foreign ownership fails closed.
-    if [[ "$owner" == 0 ]] && (( (8#$mode & 01000) != 0 )); then
-      :
-    elif [[ "$owner" == "$(id -u)" ]]; then
-      require_artifact_directory "$physical" || return 1
-    elif [[ "$owner" != 0 ]] || (( (8#$mode & 0022) != 0 && (8#$mode & 01000) == 0 )); then
-      echo "build-plakd: unsafe installation ancestor refused: $physical" >&2
-      return 1
-    fi
-    physical="$(dirname "$physical")"
-  done
-}
-ensure_install_directory "$snapshot_root"
-snapshot_root="$(cd "$snapshot_root" && pwd -P)"
-require_artifact_directory "$snapshot_root"
-artifact_root="$(dirname "$snapshot_root")/sidecars"
-[[ ! -L "$artifact_root" ]] || { echo 'build-plakd: symlinked sidecar cache refused' >&2; exit 1; }
-mkdir -p -m 0755 "$artifact_root"
-require_artifact_directory "$artifact_root"
-artifact_root="$(cd "$artifact_root" && pwd -P)"
-# The canonical worker path is runtime authority. A parent-only rebuild must
-# not relocate unchanged workers, and historical workers are never auto-pruned.
-install_sidecar() {
-  local source="$1" name="$2" digest destination staging facts
-  digest="$(sha256_of "$source")"
-  destination="$artifact_root/$name/$digest"
-  if [[ -L "$artifact_root/$name" || -L "$destination" ]]; then
-    echo "build-plakd: symlinked sidecar artifact directory refused: $destination" >&2
-    return 1
-  fi
-  mkdir -p -m 0755 "$artifact_root/$name"
-  require_artifact_directory "$artifact_root/$name" || return 1
-  if [[ ! -d "$destination" ]]; then
-    staging="$(mktemp -d "$artifact_root/.staging.XXXXXX")"
-    cp "$source" "$staging/$name"
-    chmod 0555 "$staging/$name"
-    mv "$staging" "$destination" 2>/dev/null || true
-    rm -rf "${destination:?}/$(basename "$staging")" "$staging"
-  fi
-  require_artifact_directory "$destination" || return 1
-  if [[ ! -f "$destination/$name" || -L "$destination/$name" \
-    || "$(sha256_of "$destination/$name")" != "$digest" ]]; then
-    echo "build-plakd: sidecar artifact integrity refused: $destination/$name" >&2
-    return 1
-  fi
-  facts="$(stat -f '%u %Lp' "$destination/$name" 2>/dev/null)" \
-    || facts="$(stat -c '%u %a' "$destination/$name")"
-  if [[ "$facts" != "$(id -u) 555" ]]; then
-    echo "build-plakd: sidecar artifact permissions refused: $destination/$name" >&2
-    return 1
-  fi
-  printf '%s\n' "$destination/$name"
-}
-installed_js="$(install_sidecar "$js_host" plakous-js-host)"
-installed_py="$(install_sidecar "$py_host" plakous-py-host)"
-snapshot="$snapshot_root/$snapshot_id"
-if [[ ! -d "$snapshot" ]]; then
-  staging="$(mktemp -d "$snapshot_root/.staging.XXXXXX")"
-  cp "$bin" "$staging/"
-  chmod 0555 "$staging/plakd"
-  ln -s "$installed_js" "$staging/plakous-js-host"
-  ln -s "$installed_py" "$staging/plakous-py-host"
-  "$staging/plakd" version --write-binary-manifest "$staging" 2>/dev/null \
-    || rm -f "$staging/binary-id"
-  # The state key finds the snapshot that can export this build's sessions.
-  "$staging/plakd" version --state-key >"$staging/state-key" 2>/dev/null \
-    || rm -f "$staging/state-key"
-  "$staging/plakd" version --export-version >"$staging/export-version" 2>/dev/null \
-    || rm -f "$staging/export-version"
-  # A concurrent build of the same bytes may have won the rename; then mv nests
-  # the staging copy inside it, and that duplicate is removed.
-  mv "$staging" "$snapshot" 2>/dev/null || true
-  rm -rf "${snapshot:?}/$(basename "$staging")" "$staging"
-  [[ -x "$snapshot/plakd" ]] || { echo "build-plakd: could not install $snapshot" >&2; exit 1; }
-fi
-# Retain snapshots and historical producers until explicit cleanup. A stale
-# pruning listing could otherwise delete a snapshot another installer reused.
-bin="$snapshot/plakd"
-js_host="$installed_js"
-py_host="$installed_py"
-# END SNAPSHOT INSTALL
-
-
-remove_obsolete_worker_link() {
-  obsolete_worker="$HOME/.local/bin/monty"
-  [ -L "$obsolete_worker" ] || return 0
-  obsolete_target="$(readlink "$obsolete_worker")"
-  case "$obsolete_target" in
-    "$HOME/.local/lib/plak/sidecars/"*|"$HOME/.local/lib/plak/maintainer/"*|"$HOME/.local/lib/plak/release/"*)
-      rm "$obsolete_worker" ;;
-  esac
-}
-remove_obsolete_worker_link
-install_link "${HOME}/.local/bin/plakd" "$bin"
-install_link "${HOME}/.local/bin/plakous-js-host" "$js_host"
-install_link "${HOME}/.local/bin/plakous-py-host" "$py_host"
-cargo_plak="${CARGO_HOME:-$HOME/.cargo}/bin/plakd"
-if [[ -e "$cargo_plak" || -L "$cargo_plak" ]]; then
-  install_link "$cargo_plak" "$bin"
-fi
-cargo_js="${CARGO_HOME:-$HOME/.cargo}/bin/plakous-js-host"
-if [[ -e "$cargo_js" || -L "$cargo_js" ]]; then
-  install_link "$cargo_js" "$js_host"
-fi
-cargo_py="${CARGO_HOME:-$HOME/.cargo}/bin/plakous-py-host"
-if [[ -e "$cargo_py" || -L "$cargo_py" ]]; then
-  install_link "$cargo_py" "$py_host"
-fi
+exec sh "$repo_root/install.sh" --source-build "$output_dir" "$snapshot_flavor" "$target_dir"

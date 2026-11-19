@@ -278,6 +278,7 @@ pub(crate) enum Command {
     },
     /// Hidden `plakd version --state-key`.
     StateKey,
+    BuildInfo,
     WriteBinaryManifest {
         directory: PathBuf,
     },
@@ -516,6 +517,7 @@ impl Command {
             Self::Help | Self::CommandHelp { .. } => "help",
             Self::Version
             | Self::StateKey
+            | Self::BuildInfo
             | Self::ReloadProbe
             | Self::HostUpgradeProbe { .. }
             | Self::HostUpgradeCapacity { .. }

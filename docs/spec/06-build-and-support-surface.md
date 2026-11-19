@@ -910,6 +910,22 @@ cargo build --release --locked -p plakd
 cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker
 ```
 
+The bare Cargo commands above build the same package selections but are not
+the shipping recipe. `build-plakd.sh --install` (plain release) and
+`--artifacts` first require a clean Git checkout, including untracked,
+nonignored files, and set `PLAK_SOURCE_REVISION` only from `git rev-parse HEAD`;
+an exported value is ignored. They recheck the clean revision before
+manifest emission. They map the physical Cargo home, checkout and target
+directory to `/cargo`, `/plakd` and `/target`, respectively, with the most
+specific overlapping prefix last. Rust uses `--remap-path-prefix` in
+`CARGO_ENCODED_RUSTFLAGS`; native C/C++ uses `-ffile-prefix-map` in the
+target-scoped `CFLAGS_<triple>` and `CXXFLAGS_<triple>`. Extra Rust flags
+belong in the encoded variable; ambient `RUSTFLAGS` is refused. After stripping,
+the recipe checks all three files for physical build paths. This applies only
+to shipping builds, not ordinary builds or maintainer installation.
+`--artifacts` works from a clean linked worktree; source installation still
+refuses linked worktrees before building or relinking.
+
 The workspace default member is only `plakd`. The parent and evaluator workers
 MUST be built in separate Cargo invocations: Cargo's stable resolver unifies
 `monty-proto/worker` features when the Python worker is selected alongside the
@@ -1681,13 +1697,8 @@ names. `--tag` accepts `v<version>` or a release candidate `v<version>-rc.<n>`
 while its executables still report `<version>`, so the final tag can name the
 same qualified commit. The build is
 `tools/build/build-plakd.sh --artifacts`: the `just install release` Cargo invocations
-and artifact linkage check, without installing. It maps the Cargo home, the
-checkout and the target directory to `/cargo`, `/plakd` and `/target` with
-`--remap-path-prefix` in `CARGO_ENCODED_RUSTFLAGS` and `-ffile-prefix-map` in
-the target's `CFLAGS_<triple>`/`CXXFLAGS_<triple>`, so neither Rust panic
-locations nor vendored C assertions carry build-host paths; caller rustc flags
-go in that variable too, and `RUSTFLAGS` is refused because Cargo would ignore
-it. `tools/release/release_tarball.py` then writes
+and artifact linkage check, without installing. The shipping recipe in §6.1
+owns path remapping for both modes. `tools/release/release_tarball.py` writes
 `plakd-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
 tarball and wire schema in the output directory (default `<target dir>/release-dist`).
 The packaging script also runs the built target's supported `plakd wire schema`
@@ -1703,6 +1714,32 @@ holding the license, copying and NOTICE files those packages ship. Entries are
 sorted, owned by 0:0 and stamped with the release commit's time, so the archive
 bytes depend only on the packed files. The Linux executables must be
 static: an ELF program interpreter fails packaging.
+
+The stripped artifact directory holds a closed schema-1 `manifest.json`;
+release packaging copies it to `plakd-<version>-<triple>-manifest.json` for
+local use without changing the remote release/install assets. It is compact
+UTF-8 JSON with sorted keys, one final newline, no timestamps, local paths
+or environment values. The fields are `schema`, `revision`, `platform`,
+`flavor` (plain `release`), `product_version`, `lock_sha256` (the full
+`Cargo.lock` hash), `toolchain`, `files`, `snapshot_id` and `build_info`.
+`toolchain` records Rust release, commit hash, host triple and LLVM version
+from `rustc -vV`, and Cargo release and commit hash from `cargo -V`.
+`files` has exactly `plakd`, `plakous-js-host` and `plakous-py-host`,
+each with `length` in bytes, full lowercase `sha256` and 12-hex `display_id`.
+`snapshot_id` remains the §6.1 hash of the three lines in that order.
+
+`build_info` is the closed canonical object printed by the private, hidden
+`plakd version --build-info` probe, which conflicts with the other hidden
+version flags and neither opens a store nor contacts a service. It reports
+`flavor`, `revision`, `product_version`, `state_key`, `export` read/write
+versions, `host_upgrade` coordinator/receipt versions, `runner` protocol
+and retention served/spoken versions, `gateway` served/spoken versions,
+and the exact `wire` number and schema pin (chapter 02 §4.4).
+Missing or inconsistent facts fail manifest emission. To compare the full
+digests of two native builds from separately checked out copies of the same
+clean revision, run `bash tools/build/compare-shipping-builds.sh NEW_EVIDENCE_DIRECTORY`
+with locked dependencies already cached. The comparison is report-only,
+not a gate or a guarantee across toolchains or SDKs.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
 `v*` tag runs `package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
@@ -1754,6 +1791,29 @@ therefore share one snapshot, and `plakd doctor`, carry discovery and host upgra
 behave identically. `~/.cargo/bin` is not touched; the installer notes a `plakd`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
+
+For local artifacts, run the repository installer with Python 3.11+:
+
+```sh
+sh install.sh --from ARTIFACT_DIRECTORY --no-link
+sh install.sh --from RELEASE_TARBALL --manifest MANIFEST_JSON --no-link
+sh install.sh link SNAPSHOT_ID
+```
+
+A directory supplies `manifest.json` by default. Supply a trusted manifest
+with the archive; local verification does not authenticate its provenance.
+The installer checks the closed manifest and platform, verifies all three
+file lengths and full hashes in private scratch space before writing
+installation paths, and publishes the release snapshot and canonical sidecars.
+It generates `binary-id`, `state-key` and `export-version` on the target,
+never copying builder markers. Identical snapshots are reused. `--no-link`
+prints the staged snapshot path and does not touch links in `~/.local/bin`
+or `${CARGO_HOME:-~/.cargo}/bin`. Without it the local install links after
+publication. The explicit `link` step takes an already staged release snapshot
+ID and validates the snapshot before linking; it creates the three commands
+under `~/.local/bin`, replaces only links already pointing into plakd's
+snapshot or sidecar roots, and updates existing owned Cargo links without
+creating new Cargo entries. Neither local step starts or changes a service.
 
 Publication retries only Cargo HTTP 429 failures: at most five attempts per
 crate, honoring a numeric or HTTP-date Retry-After, or Cargo's crates.io body

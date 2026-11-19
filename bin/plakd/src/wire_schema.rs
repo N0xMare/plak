@@ -15,6 +15,10 @@ use crate::surface_protocol::PlakExtension;
 /// definitions under `$defs`.
 #[must_use]
 pub(crate) fn document() -> serde_json::Value {
+    schema(crate::build_identity::known_binary_id())
+}
+
+fn schema(binary_id: Option<String>) -> serde_json::Value {
     let mut generator = SchemaSettings::draft2020_12().into_generator();
     let client = generator.subschema_for::<ClientFrame<PlakExtension>>();
     let host = generator.subschema_for::<HostFrame<PlakExtension>>();
@@ -22,11 +26,21 @@ pub(crate) fn document() -> serde_json::Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "plakd wire v2",
         "wire_version": WIRE_VERSION,
-        "binary_id": crate::build_identity::known_binary_id(),
+        "binary_id": binary_id,
         "client_frame": client,
         "host_frame": host,
         "$defs": generator.take_definitions(true),
     })
+}
+
+pub(crate) fn pin() -> Result<String, serde_json::Error> {
+    let mut document = schema(None);
+    if let Some(fields) = document.as_object_mut() {
+        fields.remove("binary_id");
+    }
+    document.sort_all_objects();
+    let bytes = serde_json::to_vec(&document)?;
+    Ok(plakous::model::sha256_hex(&[&bytes]))
 }
 
 /// Prints [`document`] as one pretty JSON document.

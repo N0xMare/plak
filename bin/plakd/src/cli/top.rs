@@ -464,6 +464,9 @@ impl TopCommand {
                 command: "wire".into(),
             }),
             Self::Version {
+                build_info: true, ..
+            } => Ok(Command::BuildInfo),
+            Self::Version {
                 host_upgrade_finish_source: Some(receipt),
                 ..
             } => Ok(Command::HostUpgradeFinishSource { receipt }),

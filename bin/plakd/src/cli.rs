@@ -472,6 +472,8 @@ enum TopCommand {
         action: Option<TelemetryAction>,
     },
     Version {
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_reopen", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service", "host_upgrade_finish_source"])]
+        build_info: bool,
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service"])]
         host_upgrade_finish_source: Option<uuid::Uuid>,
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_capacity"])]

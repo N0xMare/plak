@@ -25,6 +25,8 @@ import tempfile
 import threading
 import unittest
 
+from tests.tooling.shipping_fixture import REVISION, copy_emitter, executable, snapshot_block
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/release"))
 import release_tarball  # noqa: E402
@@ -517,13 +519,11 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(sorted(str(path) for path in self.lib.rglob("*")), before)
 
     def test_same_bytes_share_the_build_plak_snapshot(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
         artifacts = self.base / "built"
         write_executables(artifacts)
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=release; '
-            + block
+            + snapshot_block()
             + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"'
         )
         built = subprocess.run(
@@ -630,6 +630,7 @@ class PackageReleaseTests(unittest.TestCase):
         ):
             (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / path, self.repo / path)
+        copy_emitter(self.repo, VERSION)
         # The real check prints a report; stdout must stay the output directory.
         (self.repo / "tools/build/check-artifact-linkage.py").write_text(
             "print('artifact linkage checked')\n"
@@ -668,17 +669,19 @@ class PackageReleaseTests(unittest.TestCase):
             'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; -m) echo "${FAKE_ARCH:-x86_64}" ;; esac',
         )
         self.stub("rustup", "echo x86_64-unknown-linux-musl")
+        self.stub(
+            "rustc",
+            "printf '%s\\n' 'host: x86_64-unknown-linux-gnu' 'release: 1.100.0' "
+            f"'commit-hash: {'b' * 40}' 'LLVM version: 23.1.5'",
+        )
         self.stub("musl-gcc", "true")
         self.stub("strip", "true")  # Cargo writes shell-script executables in this fixture.
         self.stub(
             "git",
             'case "$1" in status) printf "%s" "${FAKE_DIRTY:-}" ;; '
-            'tag) echo "${FAKE_TAG:-}" ;; log) echo 1700000000 ;; esac',
+            f'tag) echo "${{FAKE_TAG:-}}" ;; log) echo 1700000000 ;; rev-parse) echo {REVISION} ;; esac',
         )
-        schema_script = (
-            '#!/bin/sh\n[ "$*" = "wire schema" ] || exit 2\n'
-            + "echo '{\"wire_version\":9,\"binary_id\":\"release-fixture\"}'\n"
-        )
+        schema_script = executable(VERSION)
         writer = "".join(
             f"printf %s {shlex.quote(schema_script if name == 'plakd' else '#!/bin/sh' + chr(10))} >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
             for name in EXECUTABLES
@@ -689,6 +692,7 @@ class PackageReleaseTests(unittest.TestCase):
 printf 'cargo %s target=%s flags=%s cflags=%s\\n' "$*" "$CARGO_BUILD_TARGET" \
 "$(printf '%s' "${{CARGO_ENCODED_RUSTFLAGS:-}}" | tr '\\037' ' ')" "${{!cflags:-}}" >>{self.log}
 case "$1" in
+  -V) echo 'cargo 1.100.0 (aaaaaaaaa 2026-11-09)' ;;
   metadata)
     case "$*" in *--no-deps*) echo '{{"packages":[{{"name":"plakd","version":"{VERSION}"}}]}}' ;;
       *) cat {self.metadata} ;; esac ;;
@@ -752,6 +756,8 @@ esac""",
                 tarball = dist / f"plakd-{VERSION}-{triple}.tar.gz"
                 self.assertEqual(result.stdout.strip(), str(tarball))
                 schema = dist / f"plakd-{VERSION}-{triple}-wire-schema.json"
+                artifact_manifest = dist / f"plakd-{VERSION}-{triple}-manifest.json"
+                self.assertEqual(json.loads(artifact_manifest.read_bytes())["platform"], triple)
                 self.assertEqual(json.loads(schema.read_text())["binary_id"], "release-fixture")
                 self.assertIn(
                     f"{hashlib.sha256(schema.read_bytes()).hexdigest()}  {schema.name}",
@@ -771,6 +777,7 @@ esac""",
                 ]
                 self.assertEqual(len(builds), 2)
                 maps = (f"{self.base}=/cargo", f"{self.repo}=/plakd", f"{self.base}/target=/target")
+                maps = sorted(maps, key=lambda mapping: len(mapping.split("=")[0]))
                 rust = " ".join(f"--remap-path-prefix={m}" for m in maps)
                 c = " ".join(f"-ffile-prefix-map={m}" for m in maps)
                 for line in builds:

@@ -455,8 +455,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         return Ok(ProcessOutcome::Success);
     }
 
-    if matches!(command, Command::WireSchema) {
-        return wire_schema::print(&mut io::stdout().lock());
+    match command {
+        Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
+        Command::BuildInfo => return build_identity::print_build_info(&mut io::stdout().lock()),
+        _ => {}
     }
 
     if let Command::Runner(commands::runner::RunnerCommand::Connect {
@@ -737,7 +739,8 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             writeln!(stdout, "{}", carry::VERSION).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        Command::WriteBinaryManifest { .. }
+        Command::BuildInfo
+        | Command::WriteBinaryManifest { .. }
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. } => {
             Err(CliFailure::new("internal command dispatch error"))
@@ -1426,6 +1429,7 @@ fn execute_command(
         | Command::HostConnect { .. }
         | Command::HostUpgrade { .. }
         | Command::WireSchema
+        | Command::BuildInfo
         | Command::SessionCheckBinding { .. }
         | Command::Help
         | Command::CommandHelp { .. }

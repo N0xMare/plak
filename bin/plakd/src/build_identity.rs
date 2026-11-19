@@ -6,7 +6,9 @@ use std::sync::OnceLock;
 
 use sha2::{Digest as _, Sha256};
 
+mod info;
 mod interactive;
+pub(crate) use info::print as print_build_info;
 pub(crate) use interactive::installed_executable;
 mod snapshot;
 pub(crate) use interactive::newer_build_installed;

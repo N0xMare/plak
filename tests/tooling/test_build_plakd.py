@@ -2,11 +2,14 @@ import hashlib
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+from tests.tooling.shipping_fixture import LINUX, REVISION, copy_emitter, executable, snapshot_block
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -39,7 +42,7 @@ def snapshot_env(home: str) -> dict[str, str]:
 
 class BuildPlakTests(unittest.TestCase):
     def test_installers_remove_only_owned_obsolete_worker_links(self) -> None:
-        for installer in ("install.sh", "tools/build/build-plakd.sh"):
+        for installer in ("install.sh",):
             source = (ROOT / installer).read_text()
             function = (
                 "remove_obsolete_worker_link() {"
@@ -81,9 +84,10 @@ class BuildPlakTests(unittest.TestCase):
                 self.assertEqual(worker.read_text(), "independent installation")
 
     def test_install_link_refuses_foreign_destinations(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
+        source = (ROOT / "install.sh").read_text()
         function = (
-            "install_link() {" + source.split("install_link() {", 1)[1].split("\n}", 1)[0] + "\n}"
+            "check_link() ("
+            + source.split("check_link() (", 1)[1].split('bindir="$HOME/.local/bin"', 1)[0]
         )
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
@@ -130,9 +134,8 @@ class BuildPlakTests(unittest.TestCase):
                         [
                             "bash",
                             "-c",
-                            "set -euo pipefail; target_dir=$1; "
-                            + function
-                            + '; install_link "$2" "$3"',
+                            'set -eu; mode=maintainer; lib="$HOME/.local/lib/plak"; source_link_target=$1; '
+                            'die() { echo "$*" >&2; exit 1; }; ' + function + '\nlink "$2" "$3"',
                             "link",
                             str(target),
                             str(dest),
@@ -286,8 +289,7 @@ class BuildPlakTests(unittest.TestCase):
                 )
 
     def test_snapshot_install_is_content_addressed_immutable_and_retained(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -457,8 +459,7 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(current.read_text(), "corrupt current")
 
     def test_sidecar_cache_refuses_symlinked_directories_and_changed_permissions(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; umask 002; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -524,8 +525,7 @@ class BuildPlakTests(unittest.TestCase):
                 self.assertIn("refused", refused.stderr)
 
     def test_installer_refuses_unsafe_physical_ancestors_without_repair(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; umask 002; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -574,8 +574,7 @@ class BuildPlakTests(unittest.TestCase):
                     self.assertFalse((home / ".local/lib/plak/sidecars").exists())
 
     def test_concurrent_install_keeps_one_immutable_canonical_worker(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -626,8 +625,7 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(list(cache.rglob("state-key")), [])
 
     def test_install_preserves_legacy_producer_and_canonical_workers(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -669,19 +667,6 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(sum((entry / "plakd").is_file() for entry in root.iterdir()), 11)
 
     def test_snapshot_paths_are_physical_under_a_linked_home(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        link_function = (
-            "install_link() {"
-            + source.split("install_link() {", 1)[1].split("# BEGIN SNAPSHOT INSTALL", 1)[0]
-        )
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
-        script = (
-            'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
-            + link_function
-            + block
-            + '\ninstall_link "${HOME}/.local/bin/plakd" "$bin"'
-            + '\nprintf "%s\\n" "$bin"'
-        )
         with tempfile.TemporaryDirectory() as directory:
             base = pathlib.Path(directory).resolve()
             physical = base / "physical-home"
@@ -697,13 +682,12 @@ class BuildPlakTests(unittest.TestCase):
             env = snapshot_env(str(linked))
             result = subprocess.run(
                 [
-                    "bash",
-                    "-c",
-                    script,
-                    "snapshot",
-                    str(out / "plakd"),
-                    str(out / "plakous-js-host"),
-                    str(out / "plakous-py-host"),
+                    "sh",
+                    str(ROOT / "install.sh"),
+                    "--source-build",
+                    str(out),
+                    "maintainer",
+                    str(out),
                 ],
                 capture_output=True,
                 text=True,
@@ -711,14 +695,13 @@ class BuildPlakTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            installed = pathlib.Path(result.stdout.strip())
+            installed = (linked / ".local/bin/plakd").readlink()
             self.assertEqual(installed, installed.resolve())
             self.assertTrue(installed.is_relative_to(physical))
             self.assertEqual((linked / ".local/bin/plakd").resolve(), installed)
 
     def test_snapshot_install_accepts_a_binary_without_the_manifest_probe(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -754,8 +737,7 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(list(snapshot.parent.glob(".staging.*")), [])
 
     def test_snapshot_records_its_state_key_and_preserves_all_keys(self) -> None:
-        source = (ROOT / "tools/build/build-plakd.sh").read_text()
-        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        block = snapshot_block()
         script = (
             'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=maintainer; '
             + block
@@ -825,6 +807,8 @@ class BuildPlakTests(unittest.TestCase):
             repo = base / "repo"
             (repo / "tools/build").mkdir(parents=True)
             shutil.copy(ROOT / "tools/build/build-plakd.sh", repo / "tools/build/build-plakd.sh")
+            shutil.copy(ROOT / "install.sh", repo / "install.sh")
+            copy_emitter(repo)
             log = base / "calls.log"
             (repo / "tools/build/check-artifact-linkage.py").write_text(
                 f"import sys\nopen({str(log)!r}, 'a').write('linkage ' + sys.argv[1] + '\\n')\n"
@@ -834,12 +818,24 @@ class BuildPlakTests(unittest.TestCase):
             (fake / "python3").symlink_to(sys.executable)
             # Only a primary checkout can relink installed binaries.
             (repo / ".git").mkdir()
-            (fake / "git").write_text(f"#!/bin/sh\necho {repo / '.git'}\n")
+            (fake / "git").write_text(
+                f'#!/bin/sh\ncase "$1" in rev-parse) echo {REVISION} ;; status) printf "%s" "${{FAKE_DIRTY:-}}" ;; esac\n'
+            )
             (fake / "git").chmod(0o755)
+            for name, body in (
+                (
+                    "rustc",
+                    f"printf '%s\\n' 'host: {LINUX}' 'release: 1.100.0' 'commit-hash: {'b' * 40}' 'LLVM version: 23.1.5'",
+                ),
+                ("uname", 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac'),
+            ):
+                (fake / name).write_text(f"#!/bin/sh\n{body}\n")
+                (fake / name).chmod(0o755)
             # Fake cargo: record the invocation and write the named executables
             # whose bytes depend on the build arguments.
             (fake / "cargo").write_text(f"""#!/usr/bin/env bash
 set -euo pipefail
+if [[ "$1" == -V ]]; then echo 'cargo 1.100.0 (aaaaaaaaa 2026-11-09)'; exit; fi
 printf 'cargo %s\\n' "$*" >>{log}
 profile=debug; packages=(); args=("$@")
 for ((i = 0; i < ${{#args[@]}}; i++)); do
@@ -848,7 +844,7 @@ for ((i = 0; i < ${{#args[@]}}; i++)); do
     -p) packages+=("${{args[i+1]}}") ;;
   esac
 done
-out="$CARGO_TARGET_DIR/$profile"
+out="$CARGO_TARGET_DIR/${{CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}}$profile"
 mkdir -p "$out"
 for package in "${{packages[@]}}"; do
   case "$package" in
@@ -857,7 +853,7 @@ for package in "${{packages[@]}}"; do
     plakous-py-worker) names=(plakous-py-host) ;;
   esac
   for name in "${{names[@]}}"; do
-    printf '#!/bin/sh\\n# %s\\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\\n' "$*" >"$out/$name"
+    printf '%s\\n# %s\\n' {shlex.quote(executable())} "$*" >"$out/$name"
     chmod 0755 "$out/$name"
   done
 done
@@ -868,7 +864,9 @@ done
             )
             (fake / "strip").chmod(0o755)
             home = base / "home"
-            env = {k: v for k, v in os.environ.items() if k != "CARGO_BUILD_TARGET"}
+            env = {
+                k: v for k, v in os.environ.items() if k not in ("CARGO_BUILD_TARGET", "RUSTFLAGS")
+            }
             env.update(
                 HOME=str(home),
                 CARGO_TARGET_DIR=str(base / "target"),
@@ -877,33 +875,44 @@ done
             )
             lib = home / ".local/lib/plak"
 
-            def run(*args: str) -> subprocess.CompletedProcess[str]:
+            def run(*args: str, **overrides: str) -> subprocess.CompletedProcess[str]:
                 log.write_text("")
                 return subprocess.run(
                     ["bash", str(repo / "tools/build/build-plakd.sh"), *args],
                     cwd=base,
-                    env=env,
+                    env={**env, **overrides},
                     capture_output=True,
                     text=True,
                     check=False,
                 )
 
-            result = run("--install")
+            for mode in ("--install", "--artifacts"):
+                for overrides, message in (
+                    ({"FAKE_DIRTY": "?? untracked"}, "not clean"),
+                    ({"RUSTFLAGS": ""}, "not RUSTFLAGS"),
+                ):
+                    result = run(mode, **overrides)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertEqual(log.read_text(), "")
+                    self.assertFalse(lib.exists())
+            result = run("--install", PLAK_SOURCE_REVISION="spoofed")
             self.assertEqual(result.returncode, 0, result.stderr)
+            raw = base / "target" / LINUX / "release"
             self.assertEqual(
                 log.read_text().splitlines(),
                 [
                     "cargo build --locked -p plakd --profile release",
                     "cargo build --locked -p plakous-js-runtime -p plakous-py-worker --profile release",
-                    f"linkage {base / 'target/release'}",
-                    f"strip {base / 'target/release/stripped/plakd'}",
-                    f"strip {base / 'target/release/stripped/plakous-js-host'}",
-                    f"strip {base / 'target/release/stripped/plakous-py-host'}",
+                    f"linkage {raw}",
+                    f"strip {raw / 'stripped/plakd'}",
+                    f"strip {raw / 'stripped/plakous-js-host'}",
+                    f"strip {raw / 'stripped/plakous-py-host'}",
                 ],
             )
             for name in ("plakd", "plakous-js-host", "plakous-py-host"):
-                self.assertNotIn("# stripped", (base / "target/release" / name).read_text())
-                self.assertIn("# stripped", (base / "target/release/stripped" / name).read_text())
+                self.assertNotIn("# stripped", (raw / name).read_text())
+                self.assertIn("# stripped", (raw / "stripped" / name).read_text())
             installed = (home / ".local/bin/plakd").resolve()
             self.assertEqual(installed.parent.parent, lib / "release")
             self.assertEqual(len(installed.parent.name), 64)
@@ -918,9 +927,13 @@ done
 
             result = run("--artifacts")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), str(base / "target/release/stripped"))
+            self.assertEqual(result.stdout.strip(), str(raw / "stripped"))
             self.assertNotIn("--features", log.read_text())
             self.assertEqual((home / ".local/bin/plakd").resolve(), installed)
+            for name in ("plakd", "plakous-js-host", "plakous-py-host"):
+                data = (raw / "stripped" / name).read_bytes()
+                for path in (repo, base / "cargo-home"):
+                    self.assertNotIn(os.fsencode(path), data, name)
 
             checker = repo / "tools/build/check-artifact-linkage.py"
             checker_source = checker.read_text()
@@ -1019,7 +1032,7 @@ done
         self.assertNotIn("PLAK_BUNDLED_PYTHON_HOST", source)
         self.assertNotIn("PLAK_BUNDLED_JAVASCRIPT_HOST", source)
         self.assertIn("--features plakd/maintainer", source)
-        self.assertIn(".local/bin/plakd", source)
+        self.assertIn('exec sh "$repo_root/install.sh"', source)
         self.assertIn("plakous-js-host", source)
         self.assertNotIn("npm", source)
         self.assertNotIn("@openai/codex", source)

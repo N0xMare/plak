@@ -9,6 +9,10 @@ also keep compatibility with their immediately preceding version.
 
 ## Unreleased
 
+- Build plain release artifacts from a clean Git revision with build paths
+  remapped. The artifacts include a verified manifest; `install.sh` can stage
+  a local bundle without moving command links.
+
 ### Persisted formats
 
 - State key `r28.e39.p39.t11` (runtime format epoch 39, product schema 39).

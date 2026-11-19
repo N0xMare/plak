@@ -15,6 +15,9 @@ source_doc="https://github.com/$repo/blob/main/docs/user-guide/getting-started.m
 
 die() { echo "plakd install: $*" >&2; exit 1; }
 say() { echo "plakd install: $*" >&2; }
+usage() {
+  die "usage: sh install.sh [install [--from DIR|TARBALL [--manifest FILE] [--no-link]] | link SNAPSHOT_ID | uninstall [--dry-run]]"
+}
 
 # "<uid> <mode>", with the sticky bit when $2 is "sticky". GNU `stat -f`
 # reports the file system instead; that output is discarded.
@@ -25,7 +28,7 @@ owner_mode() {
 }
 # Same rules as tools/build/build-plakd.sh: physical installation ancestors
 # are user/root-owned and not writable by others, except root-owned sticky roots.
-safe_dir() {
+safe_dir() (
   [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
   dir="$(cd "$1" && pwd -P)"
   while :; do
@@ -37,7 +40,7 @@ safe_dir() {
     [ "$dir" != / ] || break
     dir="$(dirname "$dir")"
   done
-}
+)
 
 uninstall_link() {
   link=$1
@@ -58,6 +61,12 @@ uninstall_link() {
   say "retained unrelated link: $link"
 }
 
+mode=remote
+snapshot_flavor=release
+source_link_target=
+no_link=
+local_source=
+manifest=
 case "${1:-}" in
   uninstall)
     shift
@@ -93,10 +102,41 @@ case "${1:-}" in
     if [ "$dry_run" = 1 ]; then say "dry run; nothing removed; product home and credentials retained"
     else say "uninstalled; product home and credentials retained"; fi
     exit 0 ;;
-  ''|install) [ "$#" -le 1 ] || die "usage: sh install.sh [install|uninstall]" ;;
-  *) die "usage: sh install.sh [install|uninstall]" ;;
+  link)
+    [ "$#" -eq 2 ] || usage
+    mode=link
+    snapshot_id=$2
+    case "$snapshot_id" in *[!0-9a-f]*|'') die "invalid snapshot id" ;; esac
+    [ "${#snapshot_id}" -eq 64 ] || die "invalid snapshot id" ;;
+  --source-build)
+    # Internal build-plakd.sh entry; its linked-worktree guard precedes this.
+    [ "$#" -eq 4 ] || usage
+    source_link_target="$(cd "$4" && pwd -P)"
+    case "$3" in
+      release) mode=local; local_source=$2 ;;
+      maintainer) mode=maintainer; snapshot_flavor=maintainer; artifacts=$2 ;;
+      *) usage ;;
+    esac ;;
+  ''|install|--from|--no-link|--manifest)
+    if [ "${1:-}" = install ]; then shift; fi
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --from) [ "$#" -ge 2 ] && [ -z "$local_source" ] || usage; local_source=$2; shift ;;
+        --manifest) [ "$#" -ge 2 ] && [ -z "$manifest" ] || usage; manifest=$2; shift ;;
+        --no-link) [ -z "$no_link" ] || usage; no_link=1 ;;
+        *) usage ;;
+      esac
+      shift
+    done
+    if [ -n "$local_source" ]; then mode=local
+    else [ -z "$manifest$no_link" ] || usage; fi ;;
+  *) usage ;;
 esac
 
+if [ "$mode" = local ] || [ "$mode" = link ]; then
+  case "${HOME:-}" in /*) [ "$HOME" != / ] || die "HOME must not be /" ;; *) die "HOME must be absolute" ;; esac
+fi
+if [ "$mode" = remote ] || [ "$mode" = local ]; then
 case "$(uname -s) $(uname -m)" in
   "Darwin arm64") triple=aarch64-apple-darwin ;;
   # An x86_64 shell under Rosetta still runs on Apple Silicon.
@@ -107,19 +147,24 @@ case "$(uname -s) $(uname -m)" in
   "Linux x86_64") triple=x86_64-unknown-linux-musl ;;
   *) die "no release for $(uname -s) $(uname -m); build from source: $source_doc" ;;
 esac
+fi
+[ -n "${HOME:-}" ] || die "HOME is not set"
+if [ "$mode" = remote ]; then
 command -v curl >/dev/null || die "curl is required"
 command -v tar >/dev/null || die "tar is required"
-[ -n "${HOME:-}" ] || die "HOME is not set"
+fi
 fetch() {
   if [ -n "${PLAK_RELEASE_BASE:-}" ]; then curl -fsSL "$@"
   else curl -fsSL --proto =https --tlsv1.2 "$@"; fi
 }
 
 sha256_of() {
-  if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1
-  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+  if command -v sha256sum >/dev/null 2>&1; then checksum="$(sha256sum "$1")" || return 1
+  else checksum="$(shasum -a 256 "$1")" || return 1; fi
+  printf '%s\n' "${checksum%% *}"
 }
 
+if [ "$mode" = remote ]; then
 if [ -n "${PLAK_VERSION:-}" ]; then
   version="${PLAK_VERSION#v}"
 else
@@ -156,66 +201,202 @@ tar -xzf "$work/$stem.tar.gz" -C "$work"
 for name in plakd plakous-js-host plakous-py-host; do
   [ -f "$work/$stem/$name" ] && [ ! -L "$work/$stem/$name" ] || die "$stem.tar.gz lacks $name"
 done
-
-make_dir() { mkdir -p "$1" && safe_dir "$1"; }
-
-make_dir "$HOME/.local/lib/plak/release"
-lib="$(cd "$HOME/.local/lib/plak" && pwd -P)"
-snapshot_root="$lib/release"
-make_dir "$lib/sidecars"
-
-# Workers live at sidecars/<name>/<sha256>/<name>, mode 0555, shared with
-# source installs; an existing artifact must match its digest.
-install_sidecar() {
-  digest="$(sha256_of "$work/$stem/$1")"
-  dest="$lib/sidecars/$1/$digest"
-  make_dir "$lib/sidecars/$1"
-  if [ ! -d "$dest" ]; then
-    staging="$(mktemp -d "$lib/sidecars/.staging.XXXXXX")"
-    cp "$work/$stem/$1" "$staging/$1" && chmod 0555 "$staging/$1"
-    mv "$staging" "$dest" 2>/dev/null || true
-    rm -rf "${dest:?}/$(basename "$staging")" "$staging"
+artifacts="$work/$stem"
+elif [ "$mode" = local ]; then
+  if [ -d "$local_source" ]; then
+    manifest="${manifest:-$local_source/manifest.json}"
+  else
+    [ -n "$manifest" ] || die "a local tarball requires --manifest FILE"
   fi
-  safe_dir "$dest"
-  [ -f "$dest/$1" ] && [ ! -L "$dest/$1" ] && [ "$(sha256_of "$dest/$1")" = "$digest" ] \
-    && [ "$(owner_mode "$dest/$1")" = "$(id -u) 555" ] || die "sidecar artifact refused: $dest/$1"
-}
-install_sidecar plakous-js-host
-installed_js="$dest/plakous-js-host"
-install_sidecar plakous-py-host
-installed_py="$dest/plakous-py-host"
+  command -v python3 >/dev/null || die "Python 3.11+ is required for local artifacts"
+  installer_dir="$(cd "$(dirname "$0")" && pwd -P)"
+  work="$(mktemp -d "${TMPDIR:-/tmp}/plakd-install.XXXXXX")"
+  trap 'rm -rf "$work"' EXIT
+  trap 'exit 1' HUP INT TERM
+  expected_snapshot="$(python3 "$installer_dir/tools/build/artifact_manifest.py" stage \
+    "$local_source" "$manifest" "$work" "$triple")"
+  artifacts="$work"
+  strict_markers=1
+fi
 
-snapshot_id="$(printf 'plakd %s\nplakous-js-host %s\nplakous-py-host %s\n' "$(sha256_of "$work/$stem/plakd")" \
-  "$(sha256_of "$work/$stem/plakous-js-host")" "$(sha256_of "$work/$stem/plakous-py-host")" \
-  | { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; } | cut -d' ' -f1)"
-snapshot="$snapshot_root/$snapshot_id"
-if [ ! -d "$snapshot" ]; then
+if [ "$mode" != link ]; then
+  bin="$artifacts/plakd"
+  js_host="$artifacts/plakous-js-host"
+  py_host="$artifacts/plakous-py-host"
+fi
+
+# BEGIN SNAPSHOT INSTALL
+snapshot_digest() (
+  parent_digest="$(sha256_of "$1")" || exit 1
+  js_digest="$(sha256_of "$2")" || exit 1
+  py_digest="$(sha256_of "$3")" || exit 1
+  printf 'plakd %s\nplakous-js-host %s\nplakous-py-host %s\n' \
+    "$parent_digest" "$js_digest" "$py_digest" | sha256_of -
+)
+require_owned_directory() {
+  [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
+  safe_dir "$1" || exit 1
+  [ "$(id -u)" = "$(owner_mode "$1" | cut -d' ' -f1)" ] || die "foreign directory refused: $1"
+}
+# Create missing ancestors individually, independent of the caller's umask.
+# Linked homes resolve to the physical installation, checked by safe_dir.
+ensure_install_directory() (
+  if [ ! -d "$1" ]; then
+    ensure_install_directory "$(dirname "$1")"
+    mkdir -m 0755 "$1" 2>/dev/null || [ -d "$1" ] || exit 1
+  fi
+  safe_dir "$(cd "$1" && pwd -P)"
+)
+check_sidecar() (
+  require_owned_directory "$(dirname "$(dirname "$1")")" || exit 1
+  require_owned_directory "$(dirname "$1")" || exit 1
+  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(sha256_of "$1")" = "$2" ] \
+    || die "sidecar artifact integrity refused: $1"
+  [ "$(owner_mode "$1")" = "$(id -u) 555" ] || die "sidecar artifact permissions refused: $1"
+)
+install_sidecar() (
+  source=$1 name=$2
+  digest="$(sha256_of "$source")" || exit 1
+  dest="$artifact_root/$name/$digest"
+  mkdir -p -m 0755 "$artifact_root/$name" || exit 1
+  require_owned_directory "$artifact_root/$name" || exit 1
+  [ ! -L "$dest" ] || die "symlinked sidecar artifact directory refused: $dest"
+  if [ ! -d "$dest" ]; then
+    staging="$(mktemp -d "$artifact_root/.staging.XXXXXX")" || exit 1
+    trap 'rm -rf "$staging"' EXIT
+    cp "$source" "$staging/$name" && chmod 0555 "$staging/$name" || exit 1
+    mv "$staging" "$dest" 2>/dev/null || true
+    rm -rf "${dest:?}/$(basename "$staging")"
+  fi
+  check_sidecar "$dest/$name" "$digest" || exit 1
+  printf '%s\n' "$dest/$name"
+)
+write_markers() (
+  "$1/plakd" version --write-binary-manifest "$1" 2>/dev/null || rm -f "$1/binary-id"
+  "$1/plakd" version --state-key >"$1/state-key" 2>/dev/null || rm -f "$1/state-key"
+  "$1/plakd" version --export-version >"$1/export-version" 2>/dev/null || rm -f "$1/export-version"
+  if [ -n "${strict_markers:-}" ]; then check_markers "$1"; fi
+)
+check_markers() (
+  for marker in binary-id state-key export-version; do
+    [ -f "$1/$marker" ] && [ ! -L "$1/$marker" ] && [ -s "$1/$marker" ] \
+      || die "missing or invalid target marker: $1/$marker"
+  done
+)
+publish_snapshot() (
   staging="$(mktemp -d "$snapshot_root/.staging.XXXXXX")"
-  cp "$work/$stem/plakd" "$staging/plakd" && chmod 0555 "$staging/plakd"
+  trap 'rm -rf "$staging"' EXIT
+  cp "$bin" "$staging/plakd"
+  chmod 0555 "$staging/plakd"
   ln -s "$installed_js" "$staging/plakous-js-host"
   ln -s "$installed_py" "$staging/plakous-py-host"
-  "$staging/plakd" version --write-binary-manifest "$staging" 2>/dev/null \
-    || rm -f "$staging/binary-id"
-  "$staging/plakd" version --state-key >"$staging/state-key" 2>/dev/null || rm -f "$staging/state-key"
-  "$staging/plakd" version --export-version >"$staging/export-version" 2>/dev/null \
-    || rm -f "$staging/export-version"
+  write_markers "$staging"
+  # A concurrent writer of identical bytes can win the directory rename.
   mv "$staging" "$snapshot" 2>/dev/null || true
-  rm -rf "${snapshot:?}/$(basename "$staging")" "$staging"
+  rm -rf "${snapshot:?}/$(basename "$staging")"
+)
+check_snapshot() (
+  require_owned_directory "$snapshot"
+  [ -f "$snapshot/plakd" ] && [ ! -L "$snapshot/plakd" ] \
+    && [ "$(owner_mode "$snapshot/plakd")" = "$(id -u) 555" ] || die "plakd artifact refused: $snapshot"
+  if [ -n "${strict_markers:-}" ]; then
+    for name in plakous-js-host plakous-py-host; do
+      worker="$(readlink "$snapshot/$name")" || die "sidecar link refused: $name"
+      digest="$(basename "$(dirname "$worker")")"
+      case "$digest" in *[!0-9a-f]*|'') die "sidecar digest refused: $name" ;; esac
+      [ "${#digest}" -eq 64 ] && [ "$worker" = "$artifact_root/$name/$digest/$name" ] \
+        || die "sidecar link refused: $name"
+      check_sidecar "$worker" "$digest"
+    done
+    check_markers "$snapshot"
+  fi
+  [ "$(snapshot_digest "$snapshot/plakd" "$snapshot/plakous-js-host" "$snapshot/plakous-py-host")" = "$snapshot_id" ] \
+    || die "snapshot integrity refused: $snapshot"
+)
+snapshot_root="$HOME/.local/lib/plak/$snapshot_flavor"
+if [ "${mode:-}" != link ]; then
+  snapshot_id="$(snapshot_digest "$bin" "$js_host" "$py_host")"
+  [ "$snapshot_id" = "${expected_snapshot:-$snapshot_id}" ] || die "snapshot id differs after verification"
+  ensure_install_directory "$snapshot_root"
 fi
-[ -x "$snapshot/plakd" ] || die "could not install $snapshot"
+require_owned_directory "$snapshot_root"
+snapshot_root="$(cd "$snapshot_root" && pwd -P)"
+lib="$(dirname "$snapshot_root")"
+artifact_root="$lib/sidecars"
+if [ "${mode:-}" != link ]; then mkdir -p -m 0755 "$artifact_root"; fi
+require_owned_directory "$artifact_root"
+snapshot="$snapshot_root/$snapshot_id"
+if [ "${mode:-}" = link ]; then
+  strict_markers=1
+else
+  installed_js="$(install_sidecar "$js_host" plakous-js-host)"
+  installed_py="$(install_sidecar "$py_host" plakous-py-host)"
+  [ ! -L "$snapshot" ] || die "symlinked snapshot refused: $snapshot"
+  if [ ! -d "$snapshot" ]; then publish_snapshot; fi
+fi
+check_snapshot
+bin="$snapshot/plakd"
+js_host="$(readlink "$snapshot/plakous-js-host")"
+py_host="$(readlink "$snapshot/plakous-py-host")"
+# END SNAPSHOT INSTALL
+
+if [ -n "$no_link" ]; then
+  printf '%s\n' "$snapshot"
+  exit 0
+fi
 
 # Replace only links that already point into the Plak installation roots.
-link() {
+check_link() (
   if [ -e "$1" ] || [ -L "$1" ]; then
     current="$(readlink "$1" 2>/dev/null)" || die "refusing to replace non-Plak $1; move it aside"
+    if [ "$mode" != remote ]; then
+      current="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")"
+    fi
     case "$current" in
       "$lib/maintainer/"*|"$lib/release/"*|"$lib/sidecars/"*) ;;
-      *) die "refusing to replace non-Plak $1; move it aside" ;;
+      *)
+        [ -n "$source_link_target" ] || die "refusing to replace non-Plak $1; move it aside"
+        case "$current" in
+          "$source_link_target/"*) ;;
+          *) die "refusing to replace non-Plak $1; move it aside" ;;
+        esac ;;
     esac
   fi
-  ln -sfn "$2" "$1"
+)
+link() {
+  check_link "$1"
+  if [ "$mode" = local ] || [ "$mode" = link ]; then
+    python3 - "$1" "$2" <<'PY'
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+dest = Path(sys.argv[1])
+with tempfile.TemporaryDirectory(dir=dest.parent) as directory:
+    pending = Path(directory) / dest.name
+    pending.symlink_to(sys.argv[2])
+    os.replace(pending, dest)
+PY
+  else
+    ln -sfn "$2" "$1"
+  fi
 }
-make_dir "$HOME/.local/bin"
+bindir="$HOME/.local/bin"
+cargo_bindir="${CARGO_HOME:-$HOME/.cargo}/bin"
+ensure_install_directory "$bindir"
+safe_dir "$bindir"
+if [ "$mode" != remote ]; then
+  # Refuse foreign destinations before moving the first link. Cargo links
+  # are updated only if already present; no new Cargo commands are installed.
+  for name in plakd plakous-js-host plakous-py-host; do
+    check_link "$bindir/$name"
+    if [ -e "$cargo_bindir/$name" ] || [ -L "$cargo_bindir/$name" ]; then
+      safe_dir "$cargo_bindir"
+      check_link "$cargo_bindir/$name"
+    fi
+  done
+fi
 remove_obsolete_worker_link() {
   obsolete_worker="$HOME/.local/bin/monty"
   [ -L "$obsolete_worker" ] || return 0
@@ -225,10 +406,23 @@ remove_obsolete_worker_link() {
       rm "$obsolete_worker" ;;
   esac
 }
-remove_obsolete_worker_link
-link "$HOME/.local/bin/plakd" "$snapshot/plakd"
-link "$HOME/.local/bin/plakous-js-host" "$installed_js"
-link "$HOME/.local/bin/plakous-py-host" "$installed_py"
+if [ "$mode" = remote ] || [ -n "$source_link_target" ]; then remove_obsolete_worker_link; fi
+link "$bindir/plakd" "$bin"
+link "$bindir/plakous-js-host" "$js_host"
+link "$bindir/plakous-py-host" "$py_host"
+if [ "$mode" != remote ]; then
+  for name in plakd plakous-js-host plakous-py-host; do
+    if [ -e "$cargo_bindir/$name" ] || [ -L "$cargo_bindir/$name" ]; then
+      case "$name" in
+        plakd) link "$cargo_bindir/$name" "$bin" ;;
+        plakous-js-host) link "$cargo_bindir/$name" "$js_host" ;;
+        plakous-py-host) link "$cargo_bindir/$name" "$py_host" ;;
+      esac
+    fi
+  done
+  say "installed snapshot $snapshot"
+  exit 0
+fi
 say "installed plakd $version: $HOME/.local/bin/plakd -> $snapshot/plakd"
 case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*) ;;
