@@ -6461,8 +6461,11 @@ Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in ref
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
 On macOS the loaded LaunchAgent path, arguments and exposed service settings
-must agree with the plist on disk, and the service PID must prove its executable vnode. The host
-plist must match the product renderer. Unloaded, edited or stale services
+must agree with the plist on disk, and the service PID must prove its
+executable vnode. Deploy compares launchd's effective GUI-domain exit timeout
+(the plist value capped at 60 seconds) and verifies `KeepAlive.SuccessfulExit`
+in the reported semaphores. The host plist must match the product renderer.
+Unloaded, edited or stale services
 need manual enrollment; deploy does not bootstrap or kickstart them.
 
 Plan compares the service process image, upgrade coordinator instance, state

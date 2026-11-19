@@ -91,28 +91,25 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
     let mut lines = service_lines(output, service)?;
     let mut props = BTreeMap::new();
     let mut arguments = None;
-    let mut keep_alive = None;
+    let mut semaphores = None;
     while let Some(line) = lines.next() {
         let Some(line) = top_level(line) else {
             continue;
         };
-        if matches!(
-            line,
-            "arguments = {" | "keepalive conditions = {" | "keepalive criteria = {"
-        ) {
+        if matches!(line, "arguments = {" | "semaphores = {") {
             let values = lines
                 .by_ref()
                 .take_while(|line| *line != "\t}")
                 .map(|line| {
                     line.strip_prefix("\t\t")
-                        .ok_or_else(|| fail("invalid LaunchAgent arguments"))
+                        .ok_or_else(|| fail("invalid LaunchAgent block"))
                 })
                 .collect::<CliResult<Vec<_>>>()?;
             check(
                 if line == "arguments = {" {
                     arguments.replace(values).is_none()
                 } else {
-                    keep_alive.replace(values).is_none()
+                    semaphores.replace(values).is_none()
                 },
                 "duplicate LaunchAgent block",
             )?;
@@ -130,9 +127,6 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
                     | "exit timeout"
                     | "umask"
                     | "properties"
-                    | "run at load"
-                    | "abandon process group"
-                    | "keepalive"
             )
         {
             check(
@@ -151,7 +145,7 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
             }),
         "expected the running LaunchAgent and its on-disk arguments; check launchctl print without restarting",
     )?;
-    check_loaded(&props, keep_alive.as_deref().unwrap_or_default(), config)?;
+    check_loaded(&props, semaphores.as_deref().unwrap_or_default(), config)?;
     let expected_program = config
         .program
         .as_deref()
@@ -176,7 +170,11 @@ fn top_level(line: &str) -> Option<&str> {
         .filter(|line| !line.starts_with('\t'))
 }
 
-fn check_loaded(props: &BTreeMap<&str, &str>, criteria: &[&str], config: &Plist) -> CliResult<()> {
+fn check_loaded(
+    props: &BTreeMap<&str, &str>,
+    semaphores: &[&str],
+    config: &Plist,
+) -> CliResult<()> {
     let same_if_exposed = |name, expected: Option<&str>| {
         props
             .get(name)
@@ -188,23 +186,11 @@ fn check_loaded(props: &BTreeMap<&str, &str>, criteria: &[&str], config: &Plist)
             .get("properties")
             .is_some_and(|properties| properties.split(" | ").any(|value| value == flag))
     };
-    let boolean = |value| match value {
-        "true" | "1" | "yes" => Some(true),
-        "false" | "0" | "no" => Some(false),
-        _ => None,
-    };
-    let same_bool = |label, expected: Option<bool>| {
-        props
-            .get(label)
-            .zip(expected)
-            .is_none_or(|(loaded, value)| boolean(loaded) == Some(value))
-    };
+    // launchd caps the effective exit timeout in a GUI domain.
     let exit_timeout = props
         .get("exit timeout")
         .zip(config.exit_time_out)
-        .is_none_or(|(loaded, expected)| {
-            loaded.trim_end_matches(" seconds").parse::<u64>() == Ok(expected)
-        });
+        .is_none_or(|(loaded, expected)| loaded.parse::<u64>() == Ok(expected.min(60)));
     let umask = props
         .get("umask")
         .zip(config.umask)
@@ -212,17 +198,19 @@ fn check_loaded(props: &BTreeMap<&str, &str>, criteria: &[&str], config: &Plist)
             u64::from_str_radix(loaded.trim_start_matches("0o"), 8) == Ok(expected)
         });
     let keepalive = config.keep_alive.as_ref().is_none_or(|expected| {
+        let mut successful_exit = semaphores
+            .iter()
+            .filter_map(|line| line.strip_prefix("successful exit => "));
         if let Some(always) = expected.as_bool() {
-            same_bool("keepalive", Some(always))
-                && (!props.contains_key("properties") || flags("keepalive") == always)
+            flags("keepalive") == always && successful_exit.next().is_none()
         } else {
-            let successful_exit = expected["SuccessfulExit"].as_bool();
-            criteria
-                .iter()
-                .filter_map(|line| line.strip_prefix("successful exit = "))
-                .all(|loaded| successful_exit.is_some_and(|want| boolean(loaded) == Some(want)))
-                && (!flags("keepalive") || !criteria.is_empty())
-                && (!props.contains_key("keepalive") || same_bool("keepalive", Some(false)))
+            expected.get("SuccessfulExit").is_none_or(|condition| {
+                !flags("keepalive")
+                    && condition.as_bool().is_some_and(|want| {
+                        successful_exit.next() == Some(if want { "1" } else { "0" })
+                            && successful_exit.next().is_none()
+                    })
+            })
         }
     });
     check(
@@ -232,14 +220,12 @@ fn check_loaded(props: &BTreeMap<&str, &str>, criteria: &[&str], config: &Plist)
             && exit_timeout
             && umask
             && keepalive
-            && same_bool("run at load", config.run_at_load)
-            && same_bool("abandon process group", config.abandon_process_group)
             && config
                 .run_at_load
-                .is_none_or(|want| !props.contains_key("properties") || flags("runatload") == want)
-            && config.abandon_process_group.is_none_or(|want| {
-                !props.contains_key("properties") || flags("abandon process group") == want
-            }),
+                .is_none_or(|want| flags("runatload") == want)
+            && config
+                .abandon_process_group
+                .is_none_or(|want| flags("abandon process group") == want),
         "loaded LaunchAgent settings differ from the plist; inspect launchctl print without restarting",
     )
 }
@@ -299,52 +285,56 @@ mod tests {
 
     #[test]
     fn deploy_launchagent_proves_loaded_arguments_and_executable_vnode() {
-        let service = "gui/500/com.example";
-        let plist =
-            Path::new("/Volumes/example/example-user/Library/LaunchAgents/com.example.plist");
-        let loaded = format!(
-            concat!(
-                "{0} = {{\n\tactive count = 1\n\tpath = {1}\n\ttype = LaunchAgent\n\tstate = running\n",
-                "\tprogram = /bin/sh\n\targuments = {{\n\t\t/bin/sh\n\t\t-c\n\t\texec /example/link host\n\t}}\n",
-                "\tworking directory = /example\n\tstdout path = /example/out\n\tstderr path = /example/err\n",
-                "\tinherited environment = {{\n\t\tpid => ignored\n\t}}\n",
-                "\tdefault environment = {{\n\t\tPATH => /usr/bin:/bin\n\t}}\n",
-                "\tendpoints = {{\n\t\tapplication.example = {{\n\t\t\tstate = waiting\n\t\t}}\n\t}}\n",
-                "\texit timeout = 90 seconds\n\tumask = 077\n\tpid = 42\n",
-                "\tkeepalive conditions = {{\n\t\tsuccessful exit = false\n\t}}\n",
-                "\tabandon process group = true\n\tproperties = runatload | abandon process group | inferred program\n}}\n"
-            ),
-            service,
-            plist.display()
-        );
-        let config = serde_json::from_value(serde_json::json!({
-            "ProgramArguments": ["/bin/sh","-c","exec /example/link host"], "WorkingDirectory": "/example",
-            "StandardOutPath": "/example/out", "StandardErrorPath": "/example/err",
+        let service = "gui/500/com.example.probe";
+        let plist = Path::new("/D/com.example.probe.plist");
+        let loaded = include_str!("launchd/macos27.print");
+        let mut config = serde_json::from_value(serde_json::json!({
+            "ProgramArguments": ["/bin/sh","-c","exec /bin/sleep 600"], "WorkingDirectory": "/D",
+            "StandardOutPath": "/D/out", "StandardErrorPath": "/D/err",
             "ExitTimeOut": 90, "Umask": 63, "RunAtLoad": true, "AbandonProcessGroup": true,
             "KeepAlive": {"SuccessfulExit": false}
-        })).unwrap();
-        let agent = parse(&loaded, service, plist, &config).unwrap();
+        }))
+        .unwrap();
+        let agent = parse(loaded, service, plist, &config).unwrap();
         assert_eq!(agent.pid, "42");
         assert_eq!(agent.program, Path::new("/bin/sh"));
         for (before, after) in [
-            ("exec /example/link host", "exec /example/other host"),
+            ("exec /bin/sleep 600", "exec /bin/sleep 599"),
             ("state = running", "state = waiting"),
-            ("working directory = /example", "working directory = /other"),
-            ("stdout path = /example/out", "stdout path = /example/other"),
-            ("90 seconds", "5 seconds"),
-            ("umask = 077", "umask = 022"),
-            ("successful exit = false", "successful exit = true"),
+            ("working directory = /D", "working directory = /other"),
+            ("stdout path = /D/out", "stdout path = /D/other"),
+            ("exit timeout = 60", "exit timeout = 61"),
+            ("exit timeout = 60", "exit timeout = 59"),
+            ("umask = 77", "umask = 22"),
+            ("successful exit => 0", "successful exit => 1"),
+            ("\tsemaphores = {\n\t\tsuccessful exit => 0\n\t}\n", ""),
             (
-                "abandon process group = true",
-                "abandon process group = false",
+                "successful exit => 0",
+                "successful exit => 0\n\t\tsuccessful exit => 0",
             ),
+            ("abandon process group | ", ""),
             ("runatload | ", ""),
+            (
+                "properties = runatload",
+                "properties = keepalive | runatload",
+            ),
         ] {
             assert!(
                 parse(&loaded.replace(before, after), service, plist, &config).is_err(),
                 "{before}"
             );
         }
+        config.exit_time_out = Some(59);
+        assert!(parse(loaded, service, plist, &config).is_err());
+        assert!(
+            parse(
+                &loaded.replace("exit timeout = 60", "exit timeout = 59"),
+                service,
+                plist,
+                &config
+            )
+            .is_ok()
+        );
         let images =
             "p42\nftxt\nD0xa\ni100\nn/example/snapshot/plakd\nftxt\nD0xf\ni200\nn/usr/lib/dyld\n";
         assert_eq!(
