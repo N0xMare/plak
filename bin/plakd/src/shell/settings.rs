@@ -439,7 +439,7 @@ fn apply_profile(
             let paths = paths.clone();
             let events = events.answering();
             move |outcome| {
-                finish_applied_profile(&paths, prepared, outcome, bootstrap_default, &events)
+                finish_applied_profile(&paths, prepared, outcome, bootstrap_default, &events);
             }
         }),
     };
