@@ -39,7 +39,7 @@ struct Upstream {
     origin: Origin,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
     accepted: Arc<AtomicUsize>,
-    closed: Arc<tokio::sync::Notify>,
+    closed: Arc<Notify>,
 }
 
 #[derive(Clone)]
@@ -55,7 +55,7 @@ async fn upstream(script: Script) -> Upstream {
     let port = listener.local_addr().unwrap().port();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let accepted = Arc::new(AtomicUsize::new(0));
-    let closed = Arc::new(tokio::sync::Notify::new());
+    let closed = Arc::new(Notify::new());
     let (recorded, counter, notify) = (requests.clone(), accepted.clone(), closed.clone());
     tokio::spawn(async move {
         loop {
