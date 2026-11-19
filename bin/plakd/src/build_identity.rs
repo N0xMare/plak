@@ -438,9 +438,16 @@ fn installed_snapshot_directory(executable: &Path) -> Option<&Path> {
 
 /// Install-time only: hash and stat the same open image before snapshot rename.
 pub(crate) fn write_binary_manifest(directory: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    let mut file =
+    let file =
         open_running_image().ok_or_else(|| std::io::Error::other("running image unavailable"))?;
+    write_image_manifest(directory, file)
+}
+
+pub(crate) fn write_image_manifest(
+    directory: &Path,
+    mut file: std::fs::File,
+) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
     let id = hash_image(&mut file)
         .ok_or_else(|| std::io::Error::other("could not hash running image"))?;
     let contents = format!("{id} {}\n", image_fields(&file.metadata()?));

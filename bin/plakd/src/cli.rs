@@ -286,12 +286,19 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 enum TopCommand {
     #[command(hide = true)]
+    Snapshot {
+        #[command(subcommand)]
+        action: crate::snapshot_install::Action,
+    },
+    #[command(hide = true)]
     Deploy {
         #[command(subcommand)]
         action: crate::deploy::Action,
     },
     #[command(hide = true)]
     DeployCanary(crate::deploy::canary::Options),
+    #[command(hide = true)]
+    DeployTarget,
     #[command(hide = true)]
     DeployCredentialGeneration {
         account: String,

@@ -25,7 +25,7 @@ import tempfile
 import threading
 import unittest
 
-from tests.tooling.shipping_fixture import REVISION, copy_emitter, executable, snapshot_block
+from tests.tooling.shipping_fixture import REVISION, copy_emitter, executable
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/release"))
@@ -42,10 +42,13 @@ def sha(data: bytes) -> str:
 
 
 def executable_bytes(name: str, tag: str = "one") -> bytes:
-    # The snapshot install runs `plakd version --state-key`.
     return (
         f"#!/bin/sh\n# {name} {tag}\n"
-        'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) if [ -n "$REJECT_BINARY_MANIFEST" ]; then echo partial >"$3/binary-id"; exit 2; fi; echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n'
+        'test "$1 $2 $3" = "snapshot install --release-download" || exit 2\n'
+        'test "$4" = "--from" && test -f "$5" || exit 2\n'
+        'test "$6" = "--manifest" && test -f "$7" || exit 2\n'
+        'printf "%s\\n" "$@" >"$FAKE_INSTALL_LOG"\n'
+        'printf "%s\\n" "$HOME/delegated-snapshot"\n'
     ).encode()
 
 
@@ -54,6 +57,7 @@ def write_executables(directory: pathlib.Path, tag: str = "one") -> None:
     for name in EXECUTABLES:
         (directory / name).write_bytes(executable_bytes(name, tag))
         (directory / name).chmod(0o755)
+    (directory / "manifest.json").write_text('{"fixture":true}\n')
 
 
 def fake_metadata(base: pathlib.Path) -> dict:
@@ -200,6 +204,7 @@ class ReleaseTarballTests(unittest.TestCase):
                         f"{stem}/plakous-py-host",
                         f"{stem}/plakd",
                         f"{stem}/plakous-js-host",
+                        f"{stem}/manifest.json",
                         f"{stem}/licenses",
                         f"{stem}/licenses/deep-1.0.0",
                         f"{stem}/licenses/deep-1.0.0/COPYING",
@@ -452,6 +457,7 @@ class InstallScriptTests(unittest.TestCase):
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         self.gh_log = self.base / "gh.log"
+        self.install_log = self.base / "installer.log"
         self.stub(
             "uname",
             'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; -m) echo "${FAKE_ARCH:-x86_64}" ;; esac',
@@ -467,6 +473,7 @@ class InstallScriptTests(unittest.TestCase):
             HOME=str(self.home),
             PLAK_RELEASE_BASE=self.server.url,
             TMPDIR=str(self.base),
+            FAKE_INSTALL_LOG=str(self.install_log),
             PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
         )
         self.lib = self.home / ".local/lib/plak"
@@ -486,65 +493,6 @@ class InstallScriptTests(unittest.TestCase):
             check=False,
         )
 
-    def expected_snapshot(self, tag: str = "one") -> pathlib.Path:
-        digests = {name: sha(executable_bytes(name, tag)) for name in EXECUTABLES}
-        manifest = "".join(f"{name} {digests[name]}\n" for name in EXECUTABLES)
-        return self.lib / "release" / sha(manifest.encode())
-
-    def test_install_accepts_a_release_without_the_binary_manifest_probe(self) -> None:
-        result = self.install(REJECT_BINARY_MANIFEST="1")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        snapshot = self.expected_snapshot()
-        self.assertTrue((snapshot / "plakd").is_file())
-        self.assertFalse((snapshot / "binary-id").exists())
-        self.assertEqual(list(snapshot.parent.glob(".staging.*")), [])
-
-    def test_latest_install_writes_the_source_install_layout(self) -> None:
-        result = self.install()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("attestation not checked", result.stderr)
-        snapshot = self.expected_snapshot()
-        self.assertEqual(os.readlink(self.home / ".local/bin/plakd"), str(snapshot / "plakd"))
-        self.assertEqual((snapshot / "plakd").stat().st_mode & 0o777, 0o555)
-        self.assertEqual((snapshot / "state-key").read_text(), "r1.e1.p1.t1\n")
-        self.assertEqual((snapshot / "export-version").read_text(), "7\n")
-        self.assertEqual((snapshot / "binary-id").read_text(), "fixture\n")
-        self.assertEqual((snapshot / "binary-id").stat().st_mode & 0o777, 0o444)
-        for name in ("plakous-js-host", "plakous-py-host"):
-            worker = self.lib / "sidecars" / name / sha(executable_bytes(name)) / name
-            self.assertEqual(os.readlink(snapshot / name), str(worker))
-            self.assertEqual(os.readlink(self.home / ".local/bin" / name), str(worker))
-            self.assertEqual(worker.stat().st_mode & 0o777, 0o555)
-        for directory in (self.lib, self.lib / "release", self.lib / "sidecars"):
-            self.assertEqual(directory.stat().st_mode & 0o777, 0o755)
-        # A reinstall of the same release changes nothing.
-        before = sorted(str(path) for path in self.lib.rglob("*"))
-        result = self.install(PLAK_VERSION=f"v{VERSION}")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(sorted(str(path) for path in self.lib.rglob("*")), before)
-
-    def test_same_bytes_share_the_build_plak_snapshot(self) -> None:
-        artifacts = self.base / "built"
-        write_executables(artifacts)
-        script = (
-            'set -euo pipefail; bin="$1"; js_host="$2"; py_host="$3"; snapshot_flavor=release; '
-            + snapshot_block()
-            + '\nprintf "%s\\n" "$bin" "$js_host" "$py_host"'
-        )
-        built = subprocess.run(
-            ["bash", "-c", script, "snapshot", *(str(artifacts / name) for name in EXECUTABLES)],
-            env=self.env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(built.returncode, 0, built.stderr)
-        result = self.install(PLAK_VERSION=VERSION)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        installed = [os.readlink(self.home / ".local/bin" / name) for name in EXECUTABLES]
-        self.assertEqual(installed, built.stdout.split())
-        self.assertEqual(list((self.lib / "release").iterdir()), [self.expected_snapshot()])
-
     def test_checksum_mismatch_and_missing_entry_install_nothing(self) -> None:
         sums = self.release / "SHA256SUMS"
         good = sums.read_text()
@@ -557,12 +505,26 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("no entry", result.stderr)
         self.assertFalse((self.home / ".local").exists())
+        self.assertFalse(self.install_log.exists())
+
+    def test_latest_install_delegates_to_the_checked_artifact(self) -> None:
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("attestation not checked", result.stderr)
+        verb, mode, release, source_flag, archive, manifest_flag, manifest = (
+            self.install_log.read_text().splitlines()
+        )
+        self.assertEqual((verb, mode, release), ("snapshot", "install", "--release-download"))
+        self.assertEqual((source_flag, manifest_flag), ("--from", "--manifest"))
+        self.assertTrue(archive.endswith(f"plakd-{VERSION}-{LINUX}.tar.gz"))
+        self.assertTrue(manifest.endswith("/manifest.json"))
 
     def test_signed_in_gh_verifies_the_attestation(self) -> None:
         result = self.install(FAKE_GH="1", FAKE_GH_VERIFY="1")
         self.assertEqual(result.returncode, 1)
         self.assertIn("attestation verification failed", result.stderr)
         self.assertFalse((self.home / ".local").exists())
+        self.assertFalse(self.install_log.exists())
         self.gh_log.write_text("")
         result = self.install(FAKE_GH="1")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -592,31 +554,7 @@ class InstallScriptTests(unittest.TestCase):
         self.stub("sysctl", "echo 1")  # an x86_64 shell under Rosetta
         result = self.install(FAKE_OS="Darwin", FAKE_ARCH="x86_64")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            os.readlink(self.home / ".local/bin/plakd"),
-            str(self.expected_snapshot("mac") / "plakd"),
-        )
-
-    def test_foreign_links_and_unsafe_directories_are_refused(self) -> None:
-        bin_dir = self.home / ".local/bin"
-        bin_dir.mkdir(parents=True)
-        (bin_dir / "plakd").write_text("foreign")
-        result = self.install()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("refusing to replace non-Plak", result.stderr)
-        (bin_dir / "plakd").unlink()
-        self.stub("foreign", "exit 0")
-        foreign = self.stubs / "foreign"
-        (bin_dir / "plakd").symlink_to(foreign)
-        result = self.install()
-        self.assertIn("refusing to replace non-Plak", result.stderr)
-        self.assertEqual(os.readlink(bin_dir / "plakd"), str(foreign))
-        (bin_dir / "plakd").unlink()
-        self.lib.chmod(0o777)
-        result = self.install()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("writable installation ancestor refused", result.stderr)
-        self.assertFalse((bin_dir / "plakd").exists())
+        self.assertIn(f"plakd-{VERSION}-{DARWIN}.tar.gz", self.install_log.read_text())
 
 
 class PackageReleaseTests(unittest.TestCase):
@@ -769,6 +707,10 @@ esac""",
                     (dist / "SHA256SUMS").read_text(),
                 )
                 with tarfile.open(tarball) as archive:
+                    self.assertEqual(
+                        archive.extractfile(f"plakd-{VERSION}-{triple}/manifest.json").read(),
+                        artifact_manifest.read_bytes(),
+                    )
                     third_party = (
                         archive.extractfile(f"plakd-{VERSION}-{triple}/THIRD-PARTY").read().decode()
                     )

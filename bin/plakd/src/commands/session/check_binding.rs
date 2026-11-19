@@ -107,14 +107,14 @@ pub(crate) fn run(
     summary: bool,
     output: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let report = inspect(paths)?;
-    if !summary {
-        return write_report(report, output);
-    }
     #[derive(Serialize)]
     struct Summary {
         compatible: bool,
         count: usize,
+    }
+    let report = inspect(paths)?;
+    if !summary {
+        return write_report(report, output);
     }
     serde_json::to_writer(
         &mut *output,

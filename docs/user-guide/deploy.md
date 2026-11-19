@@ -3,10 +3,10 @@
 The hidden `plakd deploy` command is for a generated Linux systemd user host
 with an unchanged local gateway, a home-local runner, and any exact-match
 clients enrolled on Linux x86_64. It does not update the gateway, migrate
-custody, move state across keys, or render service units. Run it from an
-independent machine with Git, OpenSSH, and Python 3.11+; the remote login
-needs Python 3.11+, a working user service manager, and an enrolled SSH host
-key. Name a resolvable SSH host and login; deploy uses an empty SSH config,
+custody, move state across keys, or write service units. Run it from an
+independent machine with Git and OpenSSH; the remote login needs a working
+user service manager and an enrolled SSH host key. No Python interpreter is
+needed. Name a resolvable SSH host and login; deploy uses an empty SSH config,
 not per-user aliases or shared master sockets. Never run apply inside the
 host or runner being replaced.
 
@@ -47,7 +47,9 @@ plakd deploy status --inventory "$inventory" --stage staging
 ```
 
 Review the JSON plan before applying. Apply runs the old image's health and
-paid canaries before any target mutation, then installs, switches and verifies.
+paid canaries before staging, then installs, switches and verifies. The
+candidate's generated unit must match the on-disk bytes before it can request
+handoff; use the manual same-key procedure if the template differs.
 A green staging transition writes the JSON receipt at the configured path.
 An unchanged, verified re-apply is a no-op and never refreshes that receipt.
 For production use the exact staging manifest digests, route coverage and an
@@ -58,6 +60,7 @@ On failure use the command in the JSON `retry` field. For
 `needs_reconcile`, inspect the actual service and upgrade outcome before
 continuing. If the replacement is already Ready, the same apply can finish
 the remaining links and verification without surrender again. If only the
-incumbent or no owner answers, resolve that situation with the manual
-same-key procedure first. Do not discard the evidence log just to retry an
+incumbent answers and proves it is idle with no pending receipt, status or
+apply can record a withdrawal without issuing another upgrade. If the outcome
+is still uncertain, follow the manual same-key procedure. Do not discard the evidence log just to retry an
 uncertain surrender. There is no automatic rollback.

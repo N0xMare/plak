@@ -43,6 +43,10 @@ use crate::{product_agent, product_config, product_host, product_paths};
 /// The exact model id this hook answers to.
 pub(crate) const SELECTOR: &str = "offline-loopback-v1";
 
+pub(crate) fn snapshot_fixture() -> bool {
+    std::env::var("PLAK_TEST_SNAPSHOT_FIXTURE").as_deref() == Ok("1")
+}
+
 pub(crate) fn gateway_review_clock(
     subscriptions: plakous::subscriptions::NativeSubscriptions,
     provider: NativeProvider,

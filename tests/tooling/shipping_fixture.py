@@ -60,16 +60,3 @@ def copy_emitter(repo, version="0.0.2"):
 
 def manifest(directory):
     return manifests.make_manifest(directory, LINUX, REVISION, "0.0.2", "3" * 64, TOOLCHAIN, info())
-
-
-def snapshot_block():
-    source = (ROOT / "install.sh").read_text()
-    return (
-        source.split("die() {", 1)[0]
-        + "die() {"
-        + source.split("die() {", 1)[1].split("uninstall_link() {", 1)[0]
-        + "sha256_of() {"
-        + source.split("sha256_of() {", 1)[1].split("\n}\n", 1)[0]
-        + "\n}\n"
-        + source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
-    )

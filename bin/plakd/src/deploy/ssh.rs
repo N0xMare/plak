@@ -1,0 +1,181 @@
+use std::fs::File;
+use std::io::{Seek as _, Write as _};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::de::DeserializeOwned;
+
+use crate::CliResult;
+use crate::operator_process;
+use crate::shipping_artifact::{self as shipping, FileFacts, check, fail, io};
+
+use super::inventory::{Node, Stage};
+use super::protocol::{Call, Reply, Request};
+
+const RUN: &str = "sh -c 'IFS= read -r binary && exec \"$binary\" deploy-target'";
+// This loader has only one effect: a private bootstrap file. It verifies the
+// operator-pinned digest before executing the temporary image with stdin intact.
+const BOOT: &str = r#"sh -c '
+set -eu
+umask 077
+IFS= read -r size
+IFS= read -r digest
+work=$(mktemp -d /tmp/plakd-deploy.XXXXXXXX)
+trap "rm -rf -- \"$work\"" 0
+trap "exit 1" HUP INT TERM
+head -c "$size" >"$work/plakd"
+printf "%s  %s\n" "$digest" "$work/plakd" | sha256sum -c --status
+chmod 0500 "$work/plakd"
+"$work/plakd" deploy-target
+'"#;
+
+pub(super) enum Image<'a> {
+    Installed(&'a Path),
+    Transfer(&'a Path, &'a FileFacts),
+}
+
+pub(super) struct Blob<'a> {
+    pub(super) path: &'a Path,
+    pub(super) facts: &'a FileFacts,
+}
+
+pub(super) struct Ssh {
+    operator_machine: Option<String>,
+    stage: Stage,
+}
+
+impl Ssh {
+    pub(super) fn new(stage: Stage) -> CliResult<Self> {
+        let operator_machine = if std::env::consts::OS == "linux" {
+            Some(machine_id()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            operator_machine,
+            stage,
+        })
+    }
+
+    pub(super) fn call<T: DeserializeOwned>(
+        &self,
+        node: &Node,
+        image: Image<'_>,
+        call: Call,
+        files: &[Blob<'_>],
+        timeout: u64,
+    ) -> CliResult<T> {
+        let mut input = tempfile::tempfile().map_err(io)?;
+        let command = match image {
+            Image::Installed(path) => {
+                writeln!(input, "{}", path.display()).map_err(io)?;
+                RUN
+            }
+            Image::Transfer(path, expected) => {
+                writeln!(input, "{}\n{}", expected.length, expected.sha256).map_err(io)?;
+                shipping::copy(path, &mut input, expected)?;
+                BOOT
+            }
+        };
+        let request = Request {
+            operator_machine: self.operator_machine.clone(),
+            stage: self.stage,
+            call,
+        };
+        let request = shipping::canonical(&request)?;
+        check(
+            request.len() as u64 <= shipping::LIMIT,
+            "SSH request exceeds its bound",
+        )?;
+        input.write_all(&request).map_err(io)?;
+        for file in files {
+            shipping::copy(file.path, &mut input, file.facts)?;
+        }
+        let output = run(node, command, input, timeout)?;
+        match serde_json::from_slice(&output)
+            .map_err(|_| fail("SSH target did not return a typed verdict"))?
+        {
+            Reply::Ok(value) => serde_json::from_value(value)
+                .map_err(|_| fail("SSH target returned unexpected facts")),
+            Reply::Error(reason) => Err(fail(&reason)),
+        }
+    }
+
+    pub(super) fn script(node: &Node, script: &str, lines: &[&str]) -> CliResult<Vec<u8>> {
+        let mut file = tempfile::tempfile().map_err(io)?;
+        for line in lines {
+            check(!line.chars().any(char::is_control), "invalid SSH argument")?;
+            writeln!(file, "{line}").map_err(io)?;
+        }
+        run(node, script, file, 45)
+    }
+}
+
+fn run(node: &Node, script: &str, mut input: File, timeout: u64) -> CliResult<Vec<u8>> {
+    input.rewind().map_err(io)?;
+    let mut command = operator_process::command("ssh".as_ref());
+    command.args([
+        "-T",
+        "-F",
+        "/dev/null",
+        "-oBatchMode=yes",
+        "-oControlMaster=no",
+        "-oControlPath=none",
+        "-oStrictHostKeyChecking=yes",
+        "-oConnectTimeout=10",
+        "-oServerAliveInterval=5",
+        "-oServerAliveCountMax=2",
+        "-oForwardAgent=no",
+        "-oClearAllForwardings=yes",
+        "-l",
+        &node.login,
+        "--",
+        &node.ssh,
+        script,
+    ]);
+    let output = operator_process::capture(
+        command,
+        Some(input),
+        Duration::from_secs(timeout),
+        shipping::LIMIT,
+    )
+    .map_err(|_| fail("SSH exchange was unavailable or exceeded its bound"))?;
+    if !output.status.success() {
+        return Err(fail(&format!(
+            "SSH returned no bounded verdict ({})",
+            stderr_class(&output.stderr)
+        )));
+    }
+    Ok(output.stdout)
+}
+
+fn stderr_class(bytes: &[u8]) -> &'static str {
+    let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
+    [
+        ("host key verification failed", "host_key"),
+        ("remote host identification has changed", "host_key"),
+        ("permission denied", "authentication"),
+        ("could not resolve hostname", "name_resolution"),
+        ("connection refused", "connection_refused"),
+        ("timed out", "timeout"),
+        ("broken pipe", "transport_lost"),
+        ("closed by remote host", "transport_lost"),
+    ]
+    .into_iter()
+    .find_map(|(needle, kind)| text.contains(needle).then_some(kind))
+    .unwrap_or("remote_command_or_transport")
+}
+
+pub(super) fn machine_id() -> CliResult<String> {
+    let id =
+        std::fs::read("/etc/machine-id").map_err(|_| fail("cannot establish machine identity"))?;
+    let id = std::str::from_utf8(&id)
+        .map_err(|_| fail("invalid machine identity"))?
+        .trim();
+    check(shipping::hex(id, 32), "invalid machine identity")?;
+    Ok(shipping::digest(id.as_bytes()))
+}
+
+pub(super) fn stable(node: &Node) -> PathBuf {
+    node.home.join(".local/bin/plakd")
+}

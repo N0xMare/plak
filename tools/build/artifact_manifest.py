@@ -1,4 +1,4 @@
-"""Emit a closed manifest for shipping builds; stage only its verified blobs."""
+"""Emit a closed manifest for shipping builds."""
 
 import argparse
 import hashlib
@@ -6,10 +6,7 @@ import json
 import mmap
 import os
 import re
-import shutil
-import stat
 import subprocess
-import tarfile
 import tempfile
 import tomllib
 from pathlib import Path
@@ -223,65 +220,6 @@ def emit(directory, platform, revision, cargo_home, target):
             path.unlink(missing_ok=True)
 
 
-def copy_directory(source, destination, files):
-    for name in NAMES:
-        # Don't follow symlinks or block on special input files.
-        fd = os.open(source / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(fd, "rb") as blob:
-            meta = os.fstat(blob.fileno())
-            require(stat.S_ISREG(meta.st_mode), f"{name} is not a regular file")
-            require(meta.st_size == files[name]["length"], f"length mismatch for {name}")
-            with (destination / name).open("xb") as output:
-                shutil.copyfileobj(blob, output)
-
-
-def copy_tarball(source, destination, files):
-    seen = set()
-    prefix = None
-    with tarfile.open(source, "r|*") as archive:
-        for member in archive:
-            parts = member.name.removeprefix("./").split("/")
-            if len(parts) > 2 or parts[-1] not in NAMES:
-                continue  # License and marker files are never materialized.
-            name = parts[-1]
-            if prefix is None:
-                prefix = parts[:-1]
-            require(
-                parts[:-1] == prefix and name not in seen, f"ambiguous tarball entry for {name}"
-            )
-            require(
-                member.isfile() and not member.issparse(), f"{name} is not a regular tarball entry"
-            )
-            require(member.size == files[name]["length"], f"length mismatch for {name}")
-            with archive.extractfile(member) as blob, (destination / name).open("xb") as output:
-                shutil.copyfileobj(blob, output)
-            seen.add(name)
-    require(seen == set(NAMES), "tarball is missing shipping executables")
-
-
-def stage(source, manifest, destination, platform, source_build=False):
-    data = read_canonical(manifest.read_bytes())
-    validate_manifest(data)
-    allowed = {platform}
-    if source_build and platform == "x86_64-unknown-linux-musl":
-        allowed.add("x86_64-unknown-linux-gnu")
-    require(data["platform"] in allowed, "artifact platform does not match this machine")
-    files = data["files"]
-    copy = copy_directory if source.is_dir() else copy_tarball
-    copy(source, destination, files)
-    for name in NAMES:
-        path = destination / name
-        copied = file_facts(path)
-        require(copied["length"] == files[name]["length"], f"length mismatch for {name}")
-        require(copied["sha256"] == files[name]["sha256"], f"digest mismatch for {name}")
-        path.chmod(0o500)
-    require(
-        build_info(destination / "plakd") == data["build_info"],
-        "artifact and manifest build info differ",
-    )
-    print(data["snapshot_id"])
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
@@ -291,21 +229,14 @@ def main():
     emitter.add_argument("revision")
     emitter.add_argument("cargo_home", type=Path)
     emitter.add_argument("target", type=Path)
-    importer = commands.add_parser("stage")
-    importer.add_argument("source", type=Path)
-    importer.add_argument("manifest", type=Path)
-    importer.add_argument("destination", type=Path)
-    importer.add_argument("platform")
-    importer.add_argument("--source-build", action="store_true")
     args = vars(parser.parse_args())
-    action = args.pop("action")
+    args.pop("action")
     try:
-        (emit if action == "emit" else stage)(**args)
+        emit(**args)
     except (
         ValueError,
         KeyError,
         OSError,
-        tarfile.TarError,
         subprocess.CalledProcessError,
     ) as error:
         parser.exit(1, f"artifact manifest: {error}\n")

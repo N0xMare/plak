@@ -2,7 +2,7 @@
 """Pack built release executables into `plakd-<version>-<triple>.tar.gz`.
 
 The tarball holds one top-level directory `plakd-<version>-<triple>/` with the
-three executables (`plakd`, `plakous-js-host`, `plakous-py-host`), the repository
+three executables (`plakd`, `plakous-js-host`, `plakous-py-host`), the shipping manifest, the repository
 `LICENSE`, `THIRD-PARTY` (every package outside this repository that the three
 executables reach through normal dependency edges for the target), and
 `licenses/<name>-<version>/` with the license and NOTICE files those packages
@@ -258,6 +258,10 @@ def pack(
     files: dict[str, tuple[bytes, int]] = {}
     for name in EXECUTABLES:
         files[name] = ((artifacts / name).read_bytes(), 0o755)
+    manifest = artifacts / "manifest.json"
+    if not manifest.is_file():
+        raise ReleaseError(f"missing shipping manifest {manifest}")
+    files["manifest.json"] = (manifest.read_bytes(), 0o644)
     files["LICENSE"] = ((ROOT / "LICENSE").read_bytes(), 0o644)
     files["THIRD-PARTY"] = (third_party_text(triple, packages).encode(), 0o644)
     for package in packages:

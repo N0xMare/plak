@@ -1197,7 +1197,7 @@ homes; unsafe entries are refused, never silently repaired. Root-owned system
 ancestors must be non-writable or sticky temporary roots; other owners are refused.
 Concurrent identical installs retain one
 artifact. The installer canonicalizes
-the existing snapshot root with `pwd -P` before composing snapshot paths, so
+the existing home before composing snapshot paths, so
 linked home ancestors preserve canonical executable paths. A
 rebuild that changes only a sidecar is a new snapshot (staged then renamed into
 place; a concurrent build of the same bytes keeps one copy). The
@@ -1212,19 +1212,18 @@ operator workflow (chapter 02 section 4.6). A running `plakd` finds its sidecars
 snapshot file it executes, not beside the `PATH` symlink. Each snapshot also
 holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
 executable's final chmod and before renaming the staging directory, the
-installer runs `plakd version --write-binary-manifest <staging>` to hash and
-stat the same open executable. Directory rename preserves those identity
+native snapshot installer hashes and stats the same open staged executable.
+Directory rename preserves those identity
 fields; a matching manifest avoids hashing on startup (chapter 02 §1). This
 manifest is trusted like the private installation directory, not as a signature.
-It is generated at installation, not shipped in the release tarball. If the
-probe fails (including a release without that flag), the manifest is absent
-and installation continues; that binary hashes its executable as before. A
+It is generated at installation, not shipped in the release tarball. An older
+snapshot without it still hashes its executable as before. A
 development or test build, which has no manifest, records its hash in the
 product home's `binary-ids` identity cache keyed by the same fields plus the
 inode-change time, so later processes of the same build skip the hash; only
 commands that use product state write it (chapter 02 §1).
-Each snapshot also holds a `state-key` manifest, the output of the snapshot's
-own hidden `plakd version --state-key` (absent if that fails), which is how a later build
+Each new snapshot also holds `state-key` and `export-version` markers emitted
+by the installing binary. The state key is how a later build
 finds the build that can export an old key's sessions (chapter 02 §2.5.1).
 The matching snapshot, rather than the new build, creates the bounded restart
 checkpoint and readable archive; the new build never carries an unbounded set
@@ -1251,10 +1250,14 @@ Keep all three executables together when installing manually. Missing workers
 fail closed and `plakd doctor` names the missing configuration. Official V8
 and `@openai/codex` are not fetched and are not evaluators.
 
-The maintainer installer and reload-rehearsal staging require Python 3.11+ and
-`tools/build/check-artifact-linkage.py` over the produced artifacts before use.
-It matches QuickJS entry points and length-prefixed micro-monty runtime crate names
-in raw ELF or Mach-O symbols, so Apple's `nm` needs no demangling support.
+The source-build recipes and reload-rehearsal build staging require Python
+3.11+ and `tools/build/check-artifact-linkage.py` over the produced artifacts
+before use. The source recipe delegates publishing to its built binary's
+hidden native `snapshot install`; the recipe still owns its worktree,
+clean-tree and flags checks.
+The linkage check matches QuickJS entry points and length-prefixed micro-monty
+runtime crate names in raw ELF or Mach-O symbols, so Apple's `nm` needs no
+demangling support.
 Both worker positive controls and distinct artifact digests are mandatory;
 missing artifacts, a missing symbol lister or an unreadable listing fail closed.
 For release-profile helper builds, Cargo outputs retain raw symbols solely for
@@ -1682,7 +1685,7 @@ and writes `plakd-<version>-<triple>-wire-schema.json`. This standalone asset
 names that binary and its exact wire version; target-qualified names avoid
 conflating different binary identities. No wire negotiation is introduced. The
 tarball holds one directory `plakd-<version>-<triple>/` with `plakd`,
-`plakous-js-host`, `plakous-py-host`, the repository `LICENSE`, `THIRD-PARTY` (each
+`plakous-js-host`, `plakous-py-host`, `manifest.json`, the repository `LICENSE`, `THIRD-PARTY` (each
 package outside this repository, vendored ones included, that the three
 executables reach through normal dependency edges for the target, with its
 `cargo metadata` license and repository) and `licenses/<name>-<version>/`
@@ -1692,8 +1695,8 @@ bytes depend only on the packed files. The Linux executables must be
 static: an ELF program interpreter fails packaging.
 
 The stripped artifact directory holds a closed schema-1 `manifest.json`;
-release packaging copies it to `plakd-<version>-<triple>-manifest.json` for
-local use without changing the remote release/install assets. It is compact
+release packaging includes it in the archive and copies it to
+`plakd-<version>-<triple>-manifest.json` for local use. It is compact
 UTF-8 JSON with sorted keys, one final newline, no timestamps, local paths
 or environment values. The fields are `schema`, `revision`, `platform`,
 `flavor` (plain `release`), `product_version`, `lock_sha256` (the full
@@ -1777,7 +1780,7 @@ behave identically. `~/.cargo/bin` is not touched; the installer notes a `plakd`
 earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
 macOS.
 
-For local artifacts, run the repository installer with Python 3.11+:
+For local artifacts, run the repository installer:
 
 ```sh
 sh install.sh --from ARTIFACT_DIRECTORY --no-link
@@ -1787,7 +1790,11 @@ sh install.sh link SNAPSHOT_ID
 
 A directory supplies `manifest.json` by default. Supply a trusted manifest
 with the archive; local verification does not authenticate its provenance.
-The installer checks the closed manifest and platform, verifies all three
+Both shell entry points delegate the layout to the authenticated artifact's
+hidden `plakd snapshot install --from` and `plakd snapshot link`; the release
+path keeps the shell download, checksum, and attestation checks. No Python
+interpreter is needed on the installing machine. The native installer checks
+the closed manifest and platform, verifies all three
 file lengths and full hashes in private scratch space before writing
 installation paths, and publishes the release snapshot and canonical sidecars.
 It generates `binary-id`, `state-key` and `export-version` on the target,
@@ -1802,10 +1809,11 @@ creating new Cargo entries. Neither local step starts or changes a service.
 
 The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
 product surface and does not change either publishing or installation policy.
-It requires Python 3.11+ on the operator and target and a read-capable source
-checkout of the origin. It accepts a full revision on the advertised
+It requires Git, OpenSSH and a read-capable source checkout of the origin
+on the operator, and native target operations from the artifact binary on
+the target. It accepts a full revision on the advertised
 `origin/main` first-parent history, never accepts a branch name or builds
-bits itself, and takes the installer and verifier from that revision. Supply
+bits itself, and stages through the artifact's native snapshot installer. Supply
 the S1 artifact directory and its full pinned manifest digest out of band.
 Rehash the manifest and exact files at ingest, during transfer and on the
 target; the installer checks target build-info and publishes without linking.

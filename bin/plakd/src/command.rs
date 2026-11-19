@@ -166,8 +166,10 @@ const NATIVE_RUN_INPUT_UPPER_BOUND_TOTAL: u64 = 1024 * 1024;
     )
 )]
 pub(crate) enum Command {
+    Snapshot(crate::snapshot_install::Action),
     Deploy(crate::deploy::Action),
     DeployCanary(crate::deploy::canary::Options),
+    DeployTarget,
     DeployCredentialGeneration(String),
     Help,
     CommandHelp {
@@ -521,9 +523,11 @@ impl Command {
     pub(crate) const fn diagnostic_verb(&self) -> &'static str {
         match self {
             Self::Help | Self::CommandHelp { .. } => "help",
-            Self::Deploy(_) | Self::DeployCanary(_) | Self::DeployCredentialGeneration(_) => {
-                "deploy"
-            }
+            Self::Snapshot(_) => "snapshot",
+            Self::Deploy(_)
+            | Self::DeployCanary(_)
+            | Self::DeployCredentialGeneration(_)
+            | Self::DeployTarget => "deploy",
             Self::Version
             | Self::StateKey
             | Self::BuildInfo

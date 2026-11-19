@@ -79,6 +79,9 @@ It also refuses a dirty tree, including untracked, nonignored files, and any
 setting of `RUSTFLAGS`, even an empty one. Commit or remove those changes and
 unset `RUSTFLAGS` before building.
 Rebuilding never rewrites an executable a running session uses.
+Both this source recipe and `install.sh` use the same snapshot installer
+inside `plakd`. An authenticated shipping artifact does not need Python on the
+installing machine. The source recipe still uses Python for build-time checks.
 
 Without `just`, build the same executables with Cargo:
 

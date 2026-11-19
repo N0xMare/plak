@@ -729,14 +729,7 @@ fn handle(
             key: crate::home::state::state_key(),
             instance: identity.instance.to_string(),
             binary: crate::build_identity::binary_id().to_owned(),
-            // The accept loop joins the prior coordinator worker before this
-            // greeting. A Ready transfer remains owned until replacement.
-            deploy_idle: receipt::all(services.paths()?).ok().map(|receipts| {
-                !has_ready(pending)
-                    && !receipts
-                        .iter()
-                        .any(|receipt| matches!(receipt.phase, Phase::Prepared | Phase::Committed))
-            }),
+            deploy_idle: deploy_idle(services, pending)?,
         },
     )?;
     let request: Request = read(&stream)?;
@@ -821,6 +814,17 @@ fn handle(
             )
         }
     }
+}
+
+// The accept loop joins the prior worker before greeting. A Ready transfer
+// remains owned until replacement, even after that worker exits.
+fn deploy_idle(services: &Services, pending: &Pending) -> CliResult<Option<bool>> {
+    Ok(receipt::all(services.paths()?).ok().map(|receipts| {
+        !has_ready(pending)
+            && !receipts
+                .iter()
+                .any(|receipt| matches!(receipt.phase, Phase::Prepared | Phase::Committed))
+    }))
 }
 
 fn publish_ready(pending: &Pending, ready: Ready, host: &SessionHost<PlakExtension>) {

@@ -6424,7 +6424,11 @@ runner, gateway, systemd unit or credential configuration. It enrolls one
 Linux x86_64 systemd-user host executing the generated stable-link unit,
 an unchanged local gateway, a home-local runner with unchanged protocol,
 and optionally exact-wire clients. Plan and status are JSON, observational,
-and never dispatch a model request. A pinned ExecStart drop-in refuses:
+and never dispatch a model request. OpenSSH uses a minimal configuration,
+strict host keys, batch mode and no shared connections or agent forwarding.
+Fixed remote loaders read request data on stdin; native target operations
+use closed JSON requests and replies and verified payload lengths and hashes.
+Neither deployment endpoint needs Python. A pinned ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
 
@@ -6457,7 +6461,8 @@ adapter is for qualifying Grok and Claude OAuth routes. Compare the gateway's
 OAuth generation before and after each canary and across BASELINE and
 verification; an increase is normal and a decrease refuses.
 
-Stage the immutable host snapshot with the chapter 06 installer and stage
+The staged destination binary runs the handoff operations. Stage the
+immutable host snapshot without linking with the chapter 06 installer and stage
 client blobs before switching anything. Verify the candidate's rendered
 unit against the unit bytes on disk before recording surrender intent;
 template drift requires the manual procedure. Recheck the candidate's
@@ -6478,8 +6483,10 @@ new image is Ready under a new instance with unchanged dependencies. An old
 or unknown owner does not authorize another surrender. When the exact
 predecessor's serialized coordinator proves idle with no pending receipt,
 status or apply records `withdrawn` without surrendering in that invocation.
-Evidence and receipts record the machine-id digest and product home; a
-production history marker fences staging. The green schema-2 staging JSON
+Evidence and receipts record the machine-id digest and product home. The
+staging receipt must identify a different machine; a production history
+marker in the target login's installation root also fences staging.
+The green schema-2 staging JSON
 report is a receipt for production apply, not a store or custody authority.
 
 ### 4.7 `plakd gateway`

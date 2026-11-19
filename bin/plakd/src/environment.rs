@@ -41,6 +41,10 @@ pub(crate) fn inherited_home() -> Option<String> {
     std::env::var_os("HOME").and_then(|value| value.into_string().ok())
 }
 
+pub(crate) fn cargo_home() -> Option<std::ffi::OsString> {
+    std::env::var_os("CARGO_HOME")
+}
+
 /// Runner-local account name, used only if passwd lookup is unavailable.
 pub(crate) fn inherited_user() -> Option<String> {
     std::env::var_os("USER").and_then(|value| value.into_string().ok())

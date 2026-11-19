@@ -2,13 +2,22 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests.tooling.shipping_fixture import ROOT, executable, manifest, manifests
+from tests.tooling.shipping_fixture import (
+    LINUX,
+    REVISION,
+    ROOT,
+    TOOLCHAIN,
+    executable,
+    manifest,
+    manifests,
+)
 
 
 class ShippingArtifacts(unittest.TestCase):
@@ -30,7 +39,12 @@ class ShippingArtifacts(unittest.TestCase):
     def install(self, *args):
         return subprocess.run(
             ["sh", ROOT / "install.sh", *args],
-            env={**os.environ, "HOME": str(self.home), "CARGO_HOME": str(self.home / ".cargo")},
+            env={
+                **os.environ,
+                "HOME": str(self.home),
+                "CARGO_HOME": str(self.home / ".cargo"),
+                "PLAK_TEST_SNAPSHOT_FIXTURE": "1",
+            },
             check=False,
             capture_output=True,
             text=True,
@@ -85,7 +99,7 @@ class ShippingArtifacts(unittest.TestCase):
             path.write_bytes(before)
 
     def test_mismatched_length_or_digest_writes_nothing_to_home(self):
-        self.set_platform()
+        self.native_artifact()
         path = self.artifacts / "plakous-py-host"
         for bad, message in (
             (b"x", "length mismatch"),
@@ -109,7 +123,7 @@ class ShippingArtifacts(unittest.TestCase):
         for name in ("binary-id", "state-key", "export-version"):
             (self.artifacts / name).write_text("poison from builder\n")
         # Use the host target for the same fixtures on both platforms.
-        self.set_platform()
+        self.native_artifact()
         first = self.install("--no-link", "--from", self.artifacts)
         self.assertEqual(first.returncode, 0, first.stderr)
         snapshot = Path(first.stdout.strip())
@@ -118,9 +132,21 @@ class ShippingArtifacts(unittest.TestCase):
             name: ((snapshot / name).stat().st_ino, (snapshot / name).read_text().strip())
             for name in ("binary-id", "state-key", "export-version")
         }
+        identity = observed["binary-id"][1].split()
+        binary = (snapshot / "plakd").stat()
         self.assertEqual(
-            {key: facts[1] for key, facts in observed.items()},
-            {"binary-id": "fixture", "state-key": "r1.e1.p1.t1", "export-version": "7"},
+            identity,
+            [
+                self.data["files"]["plakd"]["display_id"],
+                str(binary.st_dev),
+                str(binary.st_ino),
+                str(binary.st_size),
+                str(binary.st_mtime_ns),
+            ],
+        )
+        self.assertEqual(observed["state-key"][1], self.data["build_info"]["state_key"])
+        self.assertEqual(
+            observed["export-version"][1], str(self.data["build_info"]["export"]["write"])
         )
         second = self.install("--from", self.artifacts, "--no-link")
         self.assertEqual(second.stdout, first.stdout, second.stderr)
@@ -145,13 +171,23 @@ class ShippingArtifacts(unittest.TestCase):
             self.assertEqual((directory / "plakd").readlink(), snapshot / "plakd")
             self.assertEqual((directory / "unrelated").readlink(), self.root / "foreign")
 
-    def set_platform(self):
-        if os.uname().sysname == "Darwin":
-            self.data["platform"] = "aarch64-apple-darwin"
-            self.manifest.write_bytes(manifests.canonical(self.data))
+    def native_artifact(self):
+        binary = os.environ.get("PLAK_TOOLING_BINARY")
+        if not binary:
+            self.skipTest("requires the real tooling binary from just steps tooling")
+        info = json.loads(subprocess.check_output([binary, "version", "--build-info"]))
+        self.assertTrue(info["test_hooks"])
+        info.update(flavor="release", revision=REVISION, test_hooks=False)
+        shutil.copyfile(binary, self.artifacts / "plakd")
+        (self.artifacts / "plakd").chmod(0o700)
+        platform = "aarch64-apple-darwin" if os.uname().sysname == "Darwin" else LINUX
+        self.data = manifests.make_manifest(
+            self.artifacts, platform, REVISION, info["product_version"], "3" * 64, TOOLCHAIN, info
+        )
+        self.manifest.write_bytes(manifests.canonical(self.data))
 
     def test_tarball_with_external_manifest_publishes_only_verified_files(self):
-        self.set_platform()
+        self.native_artifact()
         archive = self.root / "bundle.tar.gz"
         marker = self.artifacts / "binary-id"
         marker.write_text("not transferred")
@@ -161,8 +197,51 @@ class ShippingArtifacts(unittest.TestCase):
         result = self.install("--from", archive, "--manifest", self.manifest, "--no-link")
         self.assertEqual(result.returncode, 0, result.stderr)
         installed = Path(result.stdout.strip())
-        self.assertEqual((installed / "binary-id").read_text(), "fixture\n")
+        self.assertEqual(
+            (installed / "binary-id").read_text().split()[0],
+            self.data["files"]["plakd"]["display_id"],
+        )
         self.assertFalse((self.root / "outside-the-install").exists())
+
+    def test_snapshot_shares_workers_preserves_old_images_and_refuses_unsafe_layout(self):
+        self.native_artifact()
+        first = self.install("--from", self.artifacts, "--no-link")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        initial = Path(first.stdout.strip())
+        js = (initial / "plakous-js-host").resolve()
+        py = (initial / "plakous-py-host").resolve()
+        self.assertEqual(js.stat().st_mode & 0o777, 0o555)
+        self.assertEqual(py.stat().st_mode & 0o777, 0o555)
+        js.chmod(0o755)
+        refused = self.install("--from", self.artifacts, "--no-link")
+        self.assertIn("unexpected snapshot executable owner or mode", refused.stderr)
+        js.chmod(0o555)
+        lib = initial.parent.parent
+        lib.chmod(0o777)
+        refused = self.install("--from", self.artifacts, "--no-link")
+        self.assertIn("writable installation ancestor refused", refused.stderr)
+        self.assertEqual(lib.stat().st_mode & 0o777, 0o777)
+        lib.chmod(0o755)
+        (self.artifacts / "plakous-py-host").write_bytes(b"replacement worker")
+        previous = self.data
+        self.data = manifests.make_manifest(
+            self.artifacts,
+            previous["platform"],
+            REVISION,
+            previous["product_version"],
+            "3" * 64,
+            TOOLCHAIN,
+            previous["build_info"],
+        )
+        self.manifest.write_bytes(manifests.canonical(self.data))
+        new = self.install("--from", self.artifacts, "--no-link")
+        self.assertEqual(new.returncode, 0, new.stderr)
+        new = Path(new.stdout.strip())
+        self.assertNotEqual(new, initial)
+        self.assertEqual((new / "plakous-js-host").resolve(), js)
+        self.assertEqual((initial / "plakous-py-host").resolve(), py)
+        self.assertNotEqual((new / "plakous-py-host").resolve(), py)
+        self.assertTrue((initial / "plakd").exists())
 
 
 class BuildInfoProbe(unittest.TestCase):

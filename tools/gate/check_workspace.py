@@ -398,6 +398,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         # a PATH runner.toml leaves unset (spec 04 §2.9).
         ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "HOME"),)),
+        ("var_os", (("string", "CARGO_HOME"),)),
         ("var_os", (("string", "USER"),)),
         # The installer contacts only the selected user manager, never copies
         # the shell's environment into the installed host unit.
@@ -440,6 +441,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plakd", "src/test_hooks.rs"): [
+        ("var", (("string", "PLAK_TEST_SNAPSHOT_FIXTURE"),)),
         ("var", (("string", "PLAK_TEST_GATEWAY_REVIEW_CLOCK"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_HANDOFF_BUDGET"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_READY_ORDER"),)),
@@ -545,7 +547,6 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
     ("plakd", "src/cli/render.rs"): ("include_str",) * 29,
-    ("plakd", "src/deploy.rs"): ("include_str",) * 2,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plakd", "src/build_identity.rs"): ("option_env",),
@@ -571,9 +572,9 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plakd", "src/commands/host_install.rs"): [
         ("std::process::Command", (("identifier", "manager"),)),
     ],
-    # The private deploy CLI runs only its bundled Python driver.
-    ("plakd", "src/deploy.rs"): [
-        ("std::process::Command", (("string", "python3"),)),
+    # The private install and deploy commands share a bounded process runner.
+    ("plakd", "src/operator_process.rs"): [
+        ("Command", (("identifier", "program"),)),
     ],
     # Explicit opt-in host starter and its log/reaping supervisor, all stages
     # exec this build only; the launch clears and curates its environment.
@@ -662,6 +663,8 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
+    ("plakd", "src/operator_process.rs"): {"Command", "ExitStatus", "Stdio"},
+    ("plakd", "src/snapshot_install/archive.rs"): {"Stdio"},
     ("plakd", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
     ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
@@ -746,7 +749,6 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/lib.rs"): {"eprint", "info", "join"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plakd", "src/cli/render.rs"): {"include_str"},
-    ("plakd", "src/deploy.rs"): {"include_str"},
     ("plakd", "src/profiles.rs"): {"include_str"},
     ("plakd", "src/capabilities/codex.rs"): {"include_str"},
     ("plakd", "src/capabilities/claude.rs"): {"include_str"},

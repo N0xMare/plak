@@ -239,4 +239,4 @@ if [[ -n "$artifacts_only" ]]; then
   exit 0
 fi
 
-exec sh "$repo_root/install.sh" --source-build "$output_dir" "$snapshot_flavor" "$target_dir"
+exec "$bin" snapshot install --from "$output_dir" --source-build "$target_dir" --flavor "$snapshot_flavor"

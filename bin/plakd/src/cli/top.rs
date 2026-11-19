@@ -70,7 +70,9 @@ impl TopCommand {
     pub(super) fn into_command(self) -> Result<Command, String> {
         match self {
             Self::Deploy { action } => Ok(Command::Deploy(action)),
+            Self::Snapshot { action } => Ok(Command::Snapshot(action)),
             Self::DeployCanary(options) => Ok(Command::DeployCanary(options)),
+            Self::DeployTarget => Ok(Command::DeployTarget),
             Self::DeployCredentialGeneration { account } => {
                 Ok(Command::DeployCredentialGeneration(account))
             }

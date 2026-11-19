@@ -523,9 +523,9 @@ run_group() {
       # fixtures are excluded in the root tool config, not here.
       if [[ "$static_scope" != platform ]]; then
         echo "== ruff =="
-        ruff check tools tests/tooling tests/live eval bin/plakd/src/deploy bin/plakd/tests/deploy_*.py \
+        ruff check tools tests/tooling tests/live eval \
           || failed_steps="${failed_steps:+$failed_steps }ruff"
-        ruff format --check tools tests/tooling tests/live eval bin/plakd/src/deploy bin/plakd/tests/deploy_*.py \
+        ruff format --check tools tests/tooling tests/live eval \
           || failed_steps="${failed_steps:+$failed_steps }ruff-format"
       fi
       structure_log='' structure_status=''
