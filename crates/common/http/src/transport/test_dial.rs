@@ -71,22 +71,25 @@ impl Client {
 /// changing the endpoints the provider workflows validate.
 pub(super) fn gateway_oauth_fixture(
     origin: &Origin,
+    method: &http::Method,
     path: &str,
 ) -> Result<Option<Origin>, Failure> {
-    if !matches!(
-        (origin.host(), path),
-        (
-            "auth.openai.com",
-            "/api/accounts/deviceauth/usercode" | "/api/accounts/deviceauth/token"
-        ) | ("platform.claude.com", "/v1/oauth/token")
-    ) {
+    if *method != http::Method::POST
+        || !matches!(
+            (origin.host(), path),
+            (
+                "auth.openai.com",
+                "/api/accounts/deviceauth/usercode" | "/api/accounts/deviceauth/token"
+            ) | ("platform.claude.com", "/v1/oauth/token")
+        )
+    {
         return Ok(None);
     }
-    let Some(port) = std::env::var_os("PLAK_TEST_GATEWAY_OAUTH_PORT") else {
+    let Some(port) = super::fault::read_env("PLAK_TEST_GATEWAY_OAUTH_PORT") else {
         return Ok(None);
     };
-    port.to_str()
-        .and_then(|value| value.parse().ok())
+    port.parse()
+        .ok()
         .and_then(|port| Origin::loopback_http(IpAddr::V4(Ipv4Addr::LOCALHOST), port).ok())
         .map(Some)
         .ok_or_else(|| {

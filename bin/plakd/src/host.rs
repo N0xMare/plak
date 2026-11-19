@@ -14,6 +14,7 @@
 mod bridge;
 mod console;
 pub(crate) use console::ready_accounts;
+mod gateway_startup;
 mod idle;
 pub(crate) mod lifecycle;
 mod lock;
@@ -325,8 +326,7 @@ async fn refuse_external_gateway(
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<()> {
     crate::gateway::host_may_open_store(custody).map_err(CliFailure::new)?;
-    custody
-        .verify_startup(services.home().state()?)
+    gateway_startup::verify(custody, services.home().state()?)
         .await
         .map_err(CliFailure::new)
 }

@@ -762,6 +762,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/signals.rs"): {"select"},
     # Gateway serve waits on SIGTERM, Ctrl-C and the admin drain together.
     ("plakd", "src/gateway/service.rs"): {"pin", "select"},
+    # The bridge's panic redaction is scoped to the current worker call.
+    ("plakd", "src/gateway/bridge.rs"): {"thread_local"},
     # Install selects the user-service definition for this operating system.
     ("plakd", "src/gateway/install.rs"): {"cfg"},
     ("plakous-hosted", "src/runtime/turn_drive/mod.rs"): {"pin", "select", "debug_assert"},
@@ -1704,6 +1706,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # The synchronous account bridge carries the same stack as its executor.
+    ("plakd", "src/gateway/bridge.rs"): {"agent": {"RUNTIME_EXECUTOR_STACK_BYTES"}},
     # Unsupported host-only semantic reconstruction seams (spec 01 sec. 5).
     ("plakd", "src/carry/host_move.rs"): {
         'sessions': {

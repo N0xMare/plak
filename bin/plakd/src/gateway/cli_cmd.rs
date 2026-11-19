@@ -184,7 +184,9 @@ fn verify_holder(services: &Services) -> Result<(), String> {
         .home()
         .state()
         .map_err(|failure| failure.message().to_owned())?;
-    custody.verify_holder(state)
+    custody
+        .verify_holder(state)
+        .map_err(super::HolderProofError::into_message)
 }
 
 /// `gateway: in-process`, or the gateway's address and instance. A gateway

@@ -165,7 +165,9 @@ fn a_unix_gateway_must_advertise_this_homes_store_at_the_configured_socket() {
     let host_state = directory.path().join("host-state");
     let other_state = directory.path().join("other-state");
     // Nothing holds the host's store.
-    let refused = custody.verify_holder(&host_state).err().unwrap();
+    let HolderProofError::Waiting(refused) = custody.verify_holder(&host_state).unwrap_err() else {
+        panic!("a missing holder must be retryable");
+    };
     assert!(
         refused.contains("no plakd gateway serve holds"),
         "{refused}"
@@ -187,57 +189,19 @@ fn a_unix_gateway_must_advertise_this_homes_store_at_the_configured_socket() {
         super::super::holder::HolderMode::Exclusive,
     )
     .unwrap();
+    assert!(matches!(
+        custody.verify_holder(&host_state),
+        Err(HolderProofError::Waiting(_))
+    ));
     elsewhere
         .advertise(&directory.path().join("elsewhere.sock"))
         .unwrap();
-    let refused = custody.verify_holder(&host_state).err().unwrap();
+    let HolderProofError::Refused(refused) = custody.verify_holder(&host_state).unwrap_err() else {
+        panic!("a mismatched holder must not be retryable");
+    };
     assert!(refused.contains("not the configured"), "{refused}");
     elsewhere.advertise(&configured).unwrap();
     custody.verify_holder(&host_state).unwrap();
     assert!(HostCustody::Local.verify_holder(&host_state).is_ok());
     drop(held);
-}
-
-#[tokio::test]
-async fn startup_waits_for_the_holder_and_a_connectable_unix_listener() {
-    use std::future::Future;
-    use std::pin::Pin;
-
-    use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, bind, listen, socket};
-
-    use super::super::holder::{HolderLock, HolderMode};
-
-    async fn still_waiting(mut proof: Pin<&mut impl Future<Output = Result<(), String>>>) {
-        tokio::select! {
-            biased;
-            result = &mut proof => panic!("startup decided too early: {result:?}"),
-            () = tokio::time::sleep(STARTUP_RETRY * 2) => {}
-        }
-    }
-
-    let directory = tempfile::tempdir().unwrap();
-    let paths = home(&directory);
-    let configured = directory.path().join("gw.sock");
-    std::fs::write(
-        paths.config_file(),
-        format!("[gateway]\naddress = \"unix:{}\"\n", configured.display()),
-    )
-    .unwrap();
-    let custody = HostCustody::resolve(&paths).unwrap();
-    let state = directory.path().join("state");
-    let lock = super::super::holder::lock_path(&state);
-    let proof = custody.verify_startup(&state);
-    tokio::pin!(proof);
-    still_waiting(proof.as_mut()).await;
-
-    let holder = HolderLock::try_acquire(&lock, HolderMode::Exclusive).unwrap();
-    still_waiting(proof.as_mut()).await;
-    // A gateway from an earlier build may advertise before it listens.
-    holder.advertise(&configured).unwrap();
-    still_waiting(proof.as_mut()).await; // ENOENT
-    let fd = socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
-    bind(&fd, &SocketAddrUnix::new(&configured).unwrap()).unwrap();
-    still_waiting(proof.as_mut()).await; // ECONNREFUSED: bound, not listening
-    listen(&fd, 16).unwrap();
-    proof.await.unwrap();
 }

@@ -37,7 +37,7 @@ pub(crate) use holder::{HolderLock, acquire_shared, acquire_shared_creating};
 pub(crate) use install::{install, uninstall};
 pub(crate) use remote_account::{hold_in_process, try_remote_account};
 pub(crate) use route::{AccountRoute, provider_key_env_set, select};
-pub(crate) use route_custody::{AdminLink, HostCustody};
+pub(crate) use route_custody::{AdminLink, HolderProofError, HostCustody};
 pub(crate) use server_config::ServerConfig;
 pub(crate) use service::Gateway;
 

@@ -365,7 +365,7 @@ pub fn provider_from_env() -> Option<FaultPlan> {
     .clone()
 }
 
-fn read_env(name: &str) -> Option<String> {
+pub(super) fn read_env(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
