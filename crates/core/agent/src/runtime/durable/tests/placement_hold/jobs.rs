@@ -31,17 +31,28 @@ impl plakous_tools::JobHost for ObservedJobHost {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runner_release_without_a_job_host_stops_jobs() -> TestResult {
-    release(false).await
+    release(Release::Stop).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runner_release_with_a_job_host_transfers_jobs() -> TestResult {
-    release(true).await
+    release(Release::Transfer).await
 }
 
-async fn release(retained: bool) -> TestResult {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn joined_shutdown_reuses_a_started_job_stop() -> TestResult {
+    release(Release::AlreadyStopping).await
+}
+
+enum Release {
+    Stop,
+    Transfer,
+    AlreadyStopping,
+}
+
+async fn release(release: Release) -> TestResult {
     let directory = tempfile::tempdir()?;
-    let (services, _runner) = placed(directory.path())?;
+    let (services, runner) = placed(directory.path())?;
     let descriptor = durable_test_descriptor("test.route")?;
     let model = Arc::new(
         ArtifactModel::new(
@@ -61,6 +72,7 @@ async fn release(retained: bool) -> TestResult {
     )?
     .with_runner_services(services);
     let host = Arc::new(ObservedJobHost::default());
+    let retained = matches!(release, Release::Transfer);
     if retained {
         builder = builder.job_host(host.clone());
     }
@@ -85,7 +97,18 @@ async fn release(retained: bool) -> TestResult {
         assert_eq!(observations.len(), 1, "promotion waited for the job watch");
         assert_eq!(observations[0].session_id, before[0].session_id);
     }
+    let already_stopping = matches!(release, Release::AlreadyStopping);
+    if already_stopping {
+        agent.begin_job_stop();
+    }
     agent.shutdown().await?;
+    if already_stopping {
+        assert_eq!(
+            runner.job_stops.load(Ordering::SeqCst),
+            1,
+            "joined shutdown must use the stop already sent by begin_job_stop"
+        );
+    }
     port.refresh_jobs()?;
     let after = port.jobs();
     assert_eq!(after.len(), 1);

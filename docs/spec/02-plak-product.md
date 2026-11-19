@@ -2140,12 +2140,12 @@ A reopened steer uses
 active; it can never become a new root or attach to that different turn.
 
 Quit and release write no stop-handoff marker or locator-only publication.
-On confirmed interactive quit during a turn, a root without a job keeper
-starts its promoted-job stop alongside turn cancellation. Both joined and
-escalated release use that stop's result before recording the job terminals
-and releasing the lease. A keeper or a planned handoff does not start this
-early stop. The one-second quit deadline and process-group verification are
-unchanged.
+When the host handles `Quit` or an action-channel disconnect during a root
+turn, it starts the root's promoted-job stop before settling cancellation if
+no planned handoff is armed, the host is not attached as a one-shot, and
+`Agent::retains_background_jobs()` returns false. Joined and escalated
+release use that stop's result before recording job terminals and releasing
+the lease.
 After the final projector pass, the host releases the runtime lease. A pass
 that exceeds the interactive bound leaves projection debt for the next open;
 that open derives the head from the feed and lets the runtime close it.

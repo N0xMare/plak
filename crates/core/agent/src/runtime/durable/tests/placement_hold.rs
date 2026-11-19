@@ -5,8 +5,8 @@
 use super::*;
 use plakous_tools::internal::runner::{
     RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerServices,
-    RunnerVerbFamily, ServeFailure, job_capacity, line_sessions, runner_descriptor, serve,
-    serve_probe, serve_sessions,
+    RunnerVerb, RunnerVerbFamily, ServeFailure, job_capacity, line_sessions, runner_descriptor,
+    serve, serve_probe, serve_sessions,
 };
 use std::time::Duration;
 
@@ -21,12 +21,19 @@ struct InProcessRunner {
     sessions: plakous_tools::JoinedProcessSessions,
     /// Process executions the runner was sent.
     effects: AtomicUsize,
+    job_stops: AtomicUsize,
 }
 
 impl RunnerLink for InProcessRunner {
     fn call(&self, call: RunnerCall) -> RunnerCallFuture {
-        if call.verb() == plakous_tools::internal::runner::RunnerVerb::ExecuteLiteralProcess {
-            self.effects.fetch_add(1, Ordering::SeqCst);
+        match call.verb() {
+            RunnerVerb::ExecuteLiteralProcess => {
+                self.effects.fetch_add(1, Ordering::SeqCst);
+            }
+            RunnerVerb::JobsStop => {
+                self.job_stops.fetch_add(1, Ordering::SeqCst);
+            }
+            _ => {}
         }
         let control = plakous_tools::OperationContext::new(call.cancellation().clone());
         let served = match call.verb().family() {
@@ -176,6 +183,7 @@ fn placed(root: &std::path::Path) -> TestResult<(RunnerServices, Arc<InProcessRu
         environment,
         sessions,
         effects: AtomicUsize::new(0),
+        job_stops: AtomicUsize::new(0),
     });
     let link: Arc<dyn RunnerLink> = runner.clone();
     let backend = RunnerBackend::new(descriptor, link)?;

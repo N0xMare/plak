@@ -143,6 +143,19 @@ fn a_handed_off_root_turn_continues_once_by_itself() {
     }
 }
 
+#[test]
+fn a_planned_handoff_does_not_start_root_job_stop_before_cancellation() {
+    let root = tempfile::tempdir().unwrap();
+    let lost =
+        release_a_running_root_turn(root.path(), Release::Handoff, Cancel::Prompt, |config| {
+            config
+        });
+    assert!(lost.release_error.is_none());
+    let steps = super::turn_drive::quit_trace::steps(&lost.id);
+    assert!(steps.contains(&"requested"), "{steps:?}");
+    assert!(!steps.contains(&"root job stop started"), "{steps:?}");
+}
+
 struct RefuseRootLoss;
 impl StoreFaults for RefuseRootLoss {
     fn before(
