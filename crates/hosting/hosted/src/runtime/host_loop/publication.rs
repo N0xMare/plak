@@ -173,6 +173,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 recovery,
                 error,
             }) => {
+                // A prior successful turn's advisory refresh must not replace
+                // the terminal recovery decision for this turn.
+                self.role.pending_context_refresh = None;
                 let exact_source = self.opened.locator().checkpoint_id() == source_checkpoint;
                 if !exact_source {
                     let _ = self.role.events.notice(TranscriptRow::error(NoticeScope::Compaction,

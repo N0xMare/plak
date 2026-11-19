@@ -418,6 +418,22 @@ fn completed_terminal_projector_publishes_once_and_tracks_head() {
         )
         .unwrap()
         .unwrap();
+    let ack_seq = submission.acknowledgement().feed_seq().unwrap();
+    let after_ack = host
+        .block(async |host| {
+            let target = host.live_target();
+            crate::runtime::projection::queue_after_ack(
+                &target.sessions,
+                &store,
+                &id,
+                target.followed,
+                Some(ack_seq),
+                host.role.live.as_mut().map(|live| (live, &target)),
+            )
+            .await
+        })
+        .unwrap();
+    assert!(after_ack.commands.is_consumed(&item));
     let handle = submission.into_result().unwrap();
     let result = host
         .role

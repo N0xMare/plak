@@ -238,6 +238,48 @@ fn a_paused_queued_item_keeps_the_session() {
 }
 
 #[test]
+fn an_unsettled_queue_command_keeps_the_session() {
+    use crate::sessions::projector::{ProductIntents, Submission, SubmissionKind};
+    use crate::sessions::{QueueCommands, QueueItem};
+
+    with_actor(
+        |_| {},
+        |host, attachments| {
+            let item = QueueItem::new("submitted prompt");
+            let intents = ProductIntents {
+                submissions: vec![Submission {
+                    command_id: "plak.queue.submitted".into(),
+                    kind: SubmissionKind::RootStart,
+                    queue_item_id: item.id,
+                    queue_item_revision: item.revision,
+                    target_turn_id: None,
+                    canonical_command: item.text,
+                    submitted_at_ms: item.submitted_at_ms,
+                }],
+                ..ProductIntents::default()
+            };
+            host.role.config.session.queue_commands = QueueCommands::from_join(&intents, None);
+            held_then_released(host, attachments, |host| {
+                host.role.config.session.queue_commands = QueueCommands::default();
+            });
+        },
+    );
+}
+
+#[test]
+fn queue_projection_debt_keeps_the_session() {
+    with_actor(
+        |_| {},
+        |host, attachments| {
+            host.role.config.session.queue_projection_debt = true;
+            held_then_released(host, attachments, |host| {
+                host.role.config.session.queue_projection_debt = false;
+            });
+        },
+    );
+}
+
+#[test]
 fn a_pending_continuation_keeps_the_session() {
     with_actor(
         |_| {},

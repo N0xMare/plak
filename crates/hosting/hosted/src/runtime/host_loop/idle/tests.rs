@@ -4,11 +4,140 @@
 )]
 
 use super::*;
+use crate::host_service::HostService;
+use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::fresh_injected_attached_host;
 use crate::session_log;
-use crate::surface_protocol::HostEvent;
+use crate::surface_protocol::{ContentEvent, HostEvent, UserActionSender};
+use plakous_host_protocol::ContextCapacityRecovery;
 use std::sync::Arc;
+
+fn activity_service(actions: &UserActionSender<TestExtension>) -> HostService<TestExtension> {
+    HostService::new(
+        actions.clone(),
+        plakous_host_protocol::wire::NodeAddress {
+            tree_id: "fixture".into(),
+            agent_id: "fixture".into(),
+        },
+        64,
+    )
+}
+
+#[test]
+fn prior_terminal_refresh_does_not_clear_a_queued_turns_capacity_recovery() {
+    use serde_json::json;
+
+    for recovery in [
+        ContextCapacityRecovery::ResendShorter,
+        ContextCapacityRecovery::Compactable,
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let mut steps = vec![json!({"output": {"text": "first answer"}})];
+        if recovery == ContextCapacityRecovery::Compactable {
+            // Commit the second prompt with a tool round before rejecting its
+            // next request, so the remedy is compact rather than resend.
+            steps.push(json!({
+                "output": {"tool": {"name": "loopback_effect", "arguments": {}}},
+                "finish": "tool_calls"
+            }));
+        }
+        steps.push(json!({"fault": {"at": "pre_stream", "kind": "context_overflow"}}));
+        let (mut config, _) = scripted_host_with(root.path(), script(&json!(steps)));
+        config.compaction_enabled = false;
+        let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let service = activity_service(&actions);
+        let mut host = RootActor::open_blocking(
+            config,
+            &action_rx,
+            crate::runtime::Sender::over(event_tx),
+            None,
+        )
+        .unwrap();
+        actions.send(UserAction::Prompt("first".into())).unwrap();
+        let HostStep::Prompt {
+            text,
+            queued_delivery,
+            user_echoed,
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
+        else {
+            panic!("first prompt");
+        };
+        crate::sessions::queue::enqueue(
+            &mut host.role.config.session.pending_queue,
+            "queued follow-up",
+        )
+        .unwrap();
+        host.role
+            .config
+            .store
+            .save(&mut host.role.config.session)
+            .unwrap();
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
+        assert_eq!(
+            host.role.pending_context_refresh,
+            Some(host.opened.locator())
+        );
+        assert!(!host.role.config.session.queue_projection_debt);
+        assert!(
+            session_log::read_tail_for_kind(
+                &host.role.config.home,
+                &host.role.config.session.id,
+                1,
+                Some("projector.deferred"),
+            )
+            .unwrap()
+            .is_empty(),
+            "a normal admission must settle its acknowledged feed before running"
+        );
+        events.try_iter().for_each(|event| service.observe(event));
+
+        let HostStep::Prompt {
+            text,
+            queued_delivery,
+            user_echoed,
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
+        else {
+            panic!("auto-drained follow-up");
+        };
+        assert!(queued_delivery.is_some());
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
+        let terminal: Vec<_> = events.try_iter().collect();
+        assert!(
+            terminal.contains(&HostEvent::ContextCapacityRecovery(Some(recovery))),
+            "queued turn did not publish {recovery:?}: {terminal:?}"
+        );
+        for event in terminal {
+            service.observe(event);
+        }
+        assert!(service.kept_activity().awaiting_operator);
+
+        assert!(matches!(
+            host.block(async |host| host.next_prompt(None).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        for event in events.try_iter() {
+            assert_ne!(event, HostEvent::ContextCapacityRecovery(None));
+            service.observe(event);
+        }
+        assert!(service.kept_activity().awaiting_operator);
+        host.block(async |host| host.release().await).unwrap();
+    }
+}
 
 #[test]
 fn immediate_send_replaces_terminal_context_refresh_then_idle_converges() {
@@ -25,6 +154,7 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let service = activity_service(&actions);
     let mut host = RootActor::open_blocking(
         config,
         &action_rx,
@@ -33,6 +163,14 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
     )
     .unwrap();
     for _ in events.try_iter() {}
+    let _ = host
+        .role
+        .events
+        .send(ContentEvent::ContextCapacityRecovery(Some(
+            ContextCapacityRecovery::ResendShorter,
+        )));
+    events.try_iter().for_each(|event| service.observe(event));
+    assert!(service.kept_activity().awaiting_operator);
 
     for (index, prompt) in ["first prompt", "immediate follow-up"]
         .into_iter()
@@ -64,11 +202,10 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
         else {
             panic!("the pending prompt should be taken before the idle context query");
         };
-        assert!(
-            !events
-                .try_iter()
-                .any(|event| matches!(event, HostEvent::Usage(_)))
-        );
+        assert!(!events.try_iter().any(|event| matches!(
+            event,
+            HostEvent::Usage(_) | HostEvent::ContextCapacityRecovery(None)
+        )));
         host.block(async |host| {
             host.run_prompt(text, queued_delivery, user_echoed, None)
                 .await
@@ -78,11 +215,16 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
             host.role.pending_context_refresh,
             Some(host.opened.locator())
         );
+        let turn_events: Vec<_> = events.try_iter().collect();
         assert!(
-            events
-                .try_iter()
+            turn_events
+                .iter()
                 .any(|event| matches!(event, HostEvent::Usage(_)))
         );
+        for event in turn_events {
+            service.observe(event);
+        }
+        assert!(service.kept_activity().awaiting_operator);
     }
 
     if with_traffic {
@@ -108,6 +250,10 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
             .any(|event| matches!(event, HostEvent::ContextCapacityRecovery(None))),
         "a fitting settled head clears any previous capacity recovery presentation"
     );
+    for event in &idle_events {
+        service.observe(event.clone());
+    }
+    assert!(!service.kept_activity().awaiting_operator);
     let measured = idle_events
         .into_iter()
         .find_map(|event| match event {

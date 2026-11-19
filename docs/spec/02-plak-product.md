@@ -7918,8 +7918,12 @@ observation until the next prompt's exact pending-input preflight publishes a
 new one, or until an idle host step leaves no prompt, stop, or release work
 waiting. Read traffic does not defer the refresh. The idle refresh measures
 the latest settled context on the attached branch; it does not measure each
-intermediate head in a burst of prompts. One-shot completion still publishes
-its settled context before returning.
+intermediate head in a burst of prompts. A completed turn's clear of earlier
+capacity-recovery guidance is deferred to that idle refresh, not the next
+completed terminal. A newer terminal capacity stop publishes its recovery
+decision immediately and cancels any earlier idle refresh, so that decision
+remains visible. One-shot completion still publishes its settled context
+before returning.
 
 A Messages cache-miss diagnosis is not one of these counters. It stays in
 telemetry (chapter 01 §7.2) and is not printed here.
