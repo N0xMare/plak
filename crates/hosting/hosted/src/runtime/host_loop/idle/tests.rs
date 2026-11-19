@@ -101,8 +101,15 @@ fn terminal_context_refresh_converges(with_traffic: bool) {
             "a second read must still be pending when the meter converges"
         );
     }
-    let measured = events
-        .try_iter()
+    let idle_events: Vec<_> = events.try_iter().collect();
+    assert!(
+        idle_events
+            .iter()
+            .any(|event| matches!(event, HostEvent::ContextCapacityRecovery(None))),
+        "a fitting settled head clears any previous capacity recovery presentation"
+    );
+    let measured = idle_events
+        .into_iter()
         .find_map(|event| match event {
             HostEvent::Usage(usage) => Some(usage),
             _ => None,
