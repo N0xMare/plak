@@ -976,7 +976,8 @@ fn a_globally_disabled_service_still_drains_and_exits() {
         super::service::Gateway::open_with(&paths, config, Box::new(MemoryBridge::new(instance)))
             .unwrap();
     let served = std::thread::spawn(move || gateway.serve_foreground());
-    while !socket.exists() {
+    // The path appears at bind, before the listener accepts.
+    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let address = super::GatewayAddress::Unix(socket);

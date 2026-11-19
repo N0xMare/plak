@@ -80,9 +80,11 @@ impl GatewayFixture {
                 .stdout(Stdio::null()),
         );
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !socket.exists() {
+        // The socket file appears at bind, before the listener accepts; wait
+        // until a connection succeeds rather than for the path alone.
+        while std::os::unix::net::UnixStream::connect(&socket).is_err() {
             assert_eq!(process.try_wait().unwrap(), None, "gateway exited");
-            assert!(Instant::now() < deadline, "gateway socket did not appear");
+            assert!(Instant::now() < deadline, "gateway socket did not accept");
             std::thread::sleep(Duration::from_millis(10));
         }
         Self {
