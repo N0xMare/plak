@@ -10,6 +10,8 @@ use plakous_auth::custody::{
     ExpectedFence, IdentityDigest, RefreshRequest,
 };
 
+use crate::subscriptions::CatalogPublicationSkipped;
+
 use super::{
     CODEX_CREDENTIAL_HEADERS, CODEX_UPSTREAM_PINS, GROK_MODEL, GatewayCustody, InProcessGateway,
     LocalCustody, MODEL, NativeProvider, NativeSubscriptionError, NativeSubscriptions,
@@ -25,6 +27,8 @@ enum FactChange {
     Consent(Consent),
     #[cfg(feature = "grok")]
     Status(CustodyStatus),
+    #[cfg(feature = "grok")]
+    InitiallyQuarantined,
 }
 
 struct CatalogCustodian {
@@ -36,7 +40,8 @@ impl CredentialCustodian for CatalogCustodian {
     fn facts<'a>(&'a self, slot: &'a CustodySlot) -> CustodyFuture<'a, AccountFacts> {
         Box::pin(async move {
             let mut facts = self.local.facts(slot).await?;
-            match *self.change.lock().unwrap_or_else(PoisonError::into_inner) {
+            let mut change = self.change.lock().unwrap_or_else(PoisonError::into_inner);
+            match *change {
                 Some(FactChange::Binding) => {
                     facts.account_binding = Some(IdentityDigest::derive(b"fixture", &[b"account"]));
                 }
@@ -54,6 +59,13 @@ impl CredentialCustodian for CatalogCustodian {
                 }
                 #[cfg(feature = "grok")]
                 Some(FactChange::Status(status)) => facts.status = status,
+                #[cfg(feature = "grok")]
+                Some(FactChange::InitiallyQuarantined) => {
+                    facts.status = CustodyStatus::Quarantined;
+                    // The same login has recovered by the next credential
+                    // read. The real custodian supplies the Ready lease.
+                    *change = None;
+                }
                 None => {}
             }
             Ok(facts)
@@ -188,7 +200,7 @@ async fn gateway_catalog_cache_rejects_foreign_bindings_bad_consent_and_bad_file
 async fn publish_after_fact_change(
     provider: NativeProvider,
     movement: FactChange,
-    published: bool,
+    skipped: Option<CatalogPublicationSkipped>,
 ) -> TestResult {
     let root = tempfile::tempdir()?;
     let change = Arc::new(Mutex::new(None));
@@ -212,13 +224,14 @@ async fn publish_after_fact_change(
             .any(|model| model.exact_id() == expected)
     );
     assert_eq!(upstream.take().len(), 1);
+    assert_eq!(live.publication_skipped(), skipped);
     assert_eq!(
         root.path()
             .join("host/cache/subscription-catalogs")
             .exists(),
-        published
+        skipped.is_none()
     );
-    if published {
+    if skipped.is_none() {
         assert_eq!(
             host.model_catalog_persisted(provider).await?.models(),
             live.models()
@@ -231,9 +244,21 @@ async fn publish_after_fact_change(
 async fn gateway_catalog_publication_tolerates_refresh_but_skips_account_or_login_change()
 -> TestResult {
     let provider = NativeProvider::Codex;
-    publish_after_fact_change(provider, FactChange::Generation, true).await?;
-    publish_after_fact_change(provider, FactChange::Binding, false).await?;
-    publish_after_fact_change(provider, FactChange::Selection, false).await
+    publish_after_fact_change(provider, FactChange::Generation, None).await?;
+    for change in [FactChange::Binding, FactChange::Selection] {
+        publish_after_fact_change(
+            provider,
+            change,
+            Some(CatalogPublicationSkipped::SelectionChanged),
+        )
+        .await?;
+    }
+    publish_after_fact_change(
+        provider,
+        FactChange::Consent(Consent::Required),
+        Some(CatalogPublicationSkipped::AccountNotReady),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -243,7 +268,52 @@ async fn gateway_grok_listing_remains_available_without_publishing_when_quaranti
     publish_after_fact_change(
         NativeProvider::Xai,
         FactChange::Status(CustodyStatus::Quarantined),
-        false,
+        Some(CatalogPublicationSkipped::AccountNotReady),
     )
     .await
+}
+
+#[tokio::test]
+#[cfg(feature = "grok")]
+async fn gateway_grok_listing_allows_initially_quarantined_login_to_recover() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let upstream = upstream().await?;
+    let provider = NativeProvider::Xai;
+    let host = host(
+        root.path(),
+        provider,
+        &upstream,
+        Arc::new(Mutex::new(Some(FactChange::InitiallyQuarantined))),
+    )?;
+    let live = host.model_catalog(provider).await?;
+    assert!(
+        live.models()
+            .iter()
+            .any(|model| model.exact_id() == GROK_MODEL)
+    );
+    assert_eq!(live.publication_skipped(), None);
+    assert_eq!(
+        host.model_catalog_persisted(provider).await?.models(),
+        live.models()
+    );
+    assert_eq!(upstream.take().len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn gateway_catalog_snapshot_write_failure_keeps_the_live_models() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let upstream = upstream().await?;
+    let provider = NativeProvider::Codex;
+    let host = host(root.path(), provider, &upstream, Arc::new(Mutex::new(None)))?;
+    std::fs::create_dir(root.path().join("host"))?;
+    std::fs::write(root.path().join("host/cache"), b"not a directory")?;
+    let live = host.model_catalog(provider).await?;
+    assert!(live.models().iter().any(|model| model.exact_id() == MODEL));
+    assert_eq!(
+        live.publication_skipped(),
+        Some(CatalogPublicationSkipped::SnapshotWriteFailed)
+    );
+    assert_eq!(upstream.take().len(), 1);
+    Ok(())
 }

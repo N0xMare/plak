@@ -2,6 +2,31 @@ use super::*;
 use plakous::runner::{ConfiguredRunner, PlacementFailure, WorkspaceCatalog};
 use std::sync::Arc;
 
+#[cfg(feature = "openai")]
+#[test]
+fn picker_without_state_home_keeps_api_models_and_omits_native_models() {
+    let (_root, paths) = PlakPaths::isolated_test_home();
+    paths.ensure_layout().unwrap();
+    crate::home::secrets::set_api_key(
+        &paths,
+        "openai",
+        zeroize::Zeroizing::new("fixture-key".to_owned()),
+    )
+    .unwrap();
+    let choices = choices(&paths, &crate::gateway::HostCustody::Local, None);
+    assert!(choices.models.accounts.iter().any(|section| {
+        section.account == "openai" && section.ready && !section.entries.is_empty()
+    }));
+    assert!(choices.models.accounts.iter().all(|section| {
+        section
+            .account
+            .parse::<plakous_hosted::account::AccountRef>()
+            .unwrap()
+            .vertical()
+            .is_api()
+    }));
+}
+
 #[test]
 fn inadmissible_local_recents_are_omitted_without_losing_admitted_choices() {
     let (root, paths) = PlakPaths::isolated_test_home();
@@ -142,7 +167,12 @@ fn cached_picker_rows_finish_once_profiles_stay_ungated_and_workspace_checks_sta
     feature = "codex",
     feature = "grok",
     feature = "claude",
-    feature = "test-hooks"
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter",
+    feature = "test-hooks",
+    feature = "web"
 ))]
 #[test]
 fn native_picker_uses_cached_models_inside_the_host_runtime() {
@@ -176,12 +206,12 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
         };
         crate::gateway::gateway_seed::seed(&credential_state, claude, None, notice.expires_at());
         let local = NativeSubscriptions::new(
-            SubscriptionPaths::from_xdg_state_home(credential_state).unwrap(),
+            SubscriptionPaths::from_xdg_state_home(&credential_state).unwrap(),
         )
         .with_clock(clock.clone());
         // Claude enumerates enrolled models behind the authenticated catalog
         // gate without an upstream request, even with workspace test clocks.
-        let (custody, subscriptions) = if via_gateway {
+        let (custody, subscriptions, stop_gateway) = if via_gateway {
             let service = LocalCustody::new(new_instance().unwrap()).with_kind(
                 "claude",
                 Arc::new(SubscriptionCustodian::new(local, claude)),
@@ -198,9 +228,11 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
             .with_clock(clock.clone())
             .with_custody(&gateway.custody())
             .with_gateway_catalog_cache(paths.home());
-            (HostCustody::in_process_for_test(gateway, &paths), host)
+            let (custody, stop) =
+                HostCustody::in_process_for_test(gateway, &paths, &credential_state);
+            (custody, host, Some(stop))
         } else {
-            (HostCustody::Local, local)
+            (HostCustody::Local, local, None)
         };
         let live = runtime
             .block_on(subscriptions.model_catalog(claude))
@@ -212,6 +244,9 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
         );
         let services = Services::for_home_with_state(paths, host_state).with_test_custody(custody);
         assert_native_picker(&runtime, &services, &workspace, via_gateway);
+        if let Some(stop) = stop_gateway {
+            stop();
+        }
     }
 }
 
@@ -219,7 +254,12 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
     feature = "codex",
     feature = "grok",
     feature = "claude",
-    feature = "test-hooks"
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter",
+    feature = "test-hooks",
+    feature = "web"
 ))]
 fn assert_native_picker(
     runtime: &tokio::runtime::Runtime,
@@ -247,6 +287,13 @@ fn assert_native_picker(
     let Some(wire::WorkspaceOptions::Valid { models, .. }) = options.workspace else {
         panic!("workspace picker missing (via_gateway={via_gateway})");
     };
+    assert!(options.accounts.iter().any(|kind| {
+        kind.kind == "claude"
+            && kind
+                .rows
+                .iter()
+                .any(|row| row.account == "claude" && row.ready)
+    }));
     for catalog in [options.models, models] {
         assert!(
             catalog

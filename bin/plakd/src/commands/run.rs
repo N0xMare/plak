@@ -4,7 +4,7 @@ use super::application::{PlakousApplication, catalog_summaries};
 use super::session::load_admitted_product_session;
 use super::support::{
     application_execution_failure, native_processing_tier, product_subscription_request_limits,
-    require_ready, run_composition,
+    require_ready, run_composition, warn_catalog_snapshot,
 };
 use crate::cli_output::{TerminalMode, safe_terminal_block};
 use crate::product_config;
@@ -151,6 +151,7 @@ impl PlakousApplication {
             return run_timeout(stderr);
         };
         let catalog = catalog.map_err(|error| self.account_failure(error, selection))?;
+        warn_catalog_snapshot(stderr, catalog.publication_skipped());
         let catalog_models = catalog_summaries(provider, &catalog)?;
         let catalog_entry = catalog_models
             .iter()
@@ -429,6 +430,7 @@ impl PlakousApplication {
             return run_timeout(stderr);
         };
         let catalog = catalog.map_err(|error| self.account_failure(error, &selection))?;
+        warn_catalog_snapshot(stderr, catalog.publication_skipped());
         let catalog_models = catalog_summaries(provider, &catalog)?;
         let catalog_entry = catalog_models
             .iter()

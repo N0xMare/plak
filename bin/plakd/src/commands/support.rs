@@ -12,8 +12,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use plakous::subscriptions::{
-    CompatibilityStatus as FacadeCompatibilityStatus, NativeAuthStatus as FacadeAuthStatus,
-    NativeModelVisibility, NativeProvider, NativeSubscriptionError, NativeToolMode,
+    CatalogPublicationSkipped, CompatibilityStatus as FacadeCompatibilityStatus,
+    NativeAuthStatus as FacadeAuthStatus, NativeModelVisibility, NativeProvider,
+    NativeSubscriptionError, NativeToolMode,
 };
 
 use crate::home::paths as product_paths;
@@ -593,9 +594,6 @@ pub fn native_subscription_failure(
         E::GatewayCustody => auth(format!(
             "the {name} login is held by the credential gateway; login, logout, consent and account changes go through its admin verbs"
         )),
-        E::CatalogSnapshotWrite => CliFailure::new(
-            "could not write the Plak home's cache/subscription-catalogs directory; check its permissions and retry",
-        ),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)
@@ -724,6 +722,31 @@ pub(crate) fn api_key_status_failure_cell(detail: &str) -> String {
 
 pub fn application_execution_failure<T>(_: T) -> CliFailure {
     CliFailure::new("application execution failed")
+}
+
+pub(crate) fn warn_catalog_snapshot(
+    stderr: &mut dyn io::Write,
+    skipped: Option<CatalogPublicationSkipped>,
+) {
+    let detail = match skipped {
+        None => return,
+        Some(CatalogPublicationSkipped::FactsUnavailable) => {
+            "the gateway could not confirm the account after model discovery"
+        }
+        Some(CatalogPublicationSkipped::SelectionChanged) => {
+            "the gateway account or login selection changed during model discovery"
+        }
+        Some(CatalogPublicationSkipped::AccountNotReady) => {
+            "the gateway account was not ready with current consent after model discovery"
+        }
+        Some(CatalogPublicationSkipped::SnapshotWriteFailed) => {
+            "could not write the subscription catalog snapshot; check its directory permissions"
+        }
+        Some(CatalogPublicationSkipped::Deadline) => {
+            "could not confirm the subscription catalog snapshot update before the deadline"
+        }
+    };
+    let _ = writeln!(stderr, "warning: {detail}; live models remain available");
 }
 
 pub fn require_ready(

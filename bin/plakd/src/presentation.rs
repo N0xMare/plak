@@ -226,18 +226,22 @@ pub(crate) fn catalog_bundle(
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
-    catalog_bundle_at(paths, custody, &state_home)
+    catalog_bundle_at(paths, custody, Some(&state_home))
 }
 
 pub(crate) fn catalog_bundle_at(
     paths: &PlakPaths,
     custody: &crate::gateway::HostCustody,
-    state_home: &std::path::Path,
+    state_home: Option<&std::path::Path>,
 ) -> CliResult<HostCatalogBundle> {
-    let mut backend = NativePresentationBackend::new(paths, state_home.to_path_buf(), custody)?;
+    let mut backend = state_home
+        .map(|state| NativePresentationBackend::new(paths, state.to_path_buf(), custody))
+        .transpose()?;
     Ok(catalog_bundle_with_backend(
         paths,
-        &mut backend,
+        backend
+            .as_mut()
+            .map(|backend| backend as &mut dyn PresentationBackend),
         ProductCompositionSelection::FollowCatalog,
         custody.admin(),
     ))
@@ -395,7 +399,7 @@ pub fn catalog_bundle_with_backend_and_composition(
     backend: &mut impl PresentationBackend,
     composition: ProductCompositionSelection,
 ) -> HostCatalogBundle {
-    catalog_bundle_with_backend(paths, backend, composition, None)
+    catalog_bundle_with_backend(paths, Some(backend), composition, None)
 }
 
 #[allow(
@@ -404,7 +408,7 @@ pub fn catalog_bundle_with_backend_and_composition(
 )]
 fn catalog_bundle_with_backend(
     paths: &PlakPaths,
-    backend: &mut impl PresentationBackend,
+    mut backend: Option<&mut dyn PresentationBackend>,
     composition: ProductCompositionSelection,
     gateway: Option<&crate::gateway::AdminLink>,
 ) -> HostCatalogBundle {
@@ -425,6 +429,9 @@ fn catalog_bundle_with_backend(
     let mut sections = Vec::new();
     let mut native_models = Vec::new();
     for (account, label, short, provider) in oauth {
+        let Some(backend) = backend.as_deref_mut() else {
+            break;
+        };
         let status = backend.offline_status(provider);
         // Spec 02 §5.5 states: a stored-but-unusable credential reads `expired`,
         // an absent one reads `not logged in`, and a store that cannot be read

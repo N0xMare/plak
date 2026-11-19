@@ -7,6 +7,7 @@
 //! import and carry fill [`FillMode::BestEffort`] and never refuse.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use plakous_host_protocol::wire::{AccountChoice, AccountOption, KindAccounts, RequestRefusal};
 use plakous_hosted::account::{AccountRef, Vertical};
@@ -48,6 +49,14 @@ pub fn ready_catalog(
     paths: &PlakPaths,
     custody: &crate::gateway::HostCustody,
 ) -> Result<Vec<ReadyAccount>, String> {
+    ready_catalog_at(paths, custody, None)
+}
+
+pub(crate) fn ready_catalog_at(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    state: Option<&Path>,
+) -> Result<Vec<ReadyAccount>, String> {
     if let Some(accounts) = crate::test_hooks::ready_accounts() {
         return Ok(accounts
             .into_iter()
@@ -58,7 +67,13 @@ pub fn ready_catalog(
             })
             .collect());
     }
-    let state = crate::home::paths::application_state_home()?;
+    let resolved_state;
+    let state = if let Some(state) = state {
+        state
+    } else {
+        resolved_state = crate::home::paths::application_state_home()?;
+        &resolved_state
+    };
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
@@ -66,7 +81,7 @@ pub fn ready_catalog(
                     .enable_all()
                     .build()
                     .map_err(|_| "the account readiness read could not start".to_owned())?
-                    .block_on(readiness::ready_accounts(&state, paths, custody))
+                    .block_on(readiness::ready_accounts(state, paths, custody))
             })
             .join()
             .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))

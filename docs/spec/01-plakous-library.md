@@ -6350,7 +6350,10 @@ binding; it never opens the gateway's subscription store for them (chapter 02
 §4.7). A cached read requires Ready and current consent. A successful live
 listing can return models without publishing if those checks do not hold
 after discovery or the account binding or login selection moved. A routine
-credential generation change does not invalidate publication.
+credential generation change does not invalidate publication. The facade
+returns a typed publication-skipped reason if it cannot confirm the update,
+including a snapshot write failure; it does not print a warning or turn
+successful discovery into an error.
 
 ## 8. Tools and effects
 

@@ -765,21 +765,18 @@ pub(super) fn write_gateway_catalog_snapshot(
     path: &Path,
     catalog: &NativeModelCatalog,
 ) -> Result<(), NativeSubscriptionError> {
-    let write = || {
-        let directory = path
-            .parent()
-            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
-        let parent = directory
-            .parent()
-            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
-        let name = directory
-            .file_name()
-            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
-        open_or_create_private_child(&ensure_state_root(parent)?, name)?;
-        let bytes = catalog::encode_catalog_snapshot(catalog.provider(), catalog.models())?;
-        write_private_atomic(path, &bytes)
-    };
-    write().map_err(|_| NativeSubscriptionError::CatalogSnapshotWrite)
+    let directory = path
+        .parent()
+        .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+    let parent = directory
+        .parent()
+        .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+    let name = directory
+        .file_name()
+        .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+    open_or_create_private_child(&ensure_state_root(parent)?, name)?;
+    let bytes = catalog::encode_catalog_snapshot(catalog.provider(), catalog.models())?;
+    write_private_atomic(path, &bytes)
 }
 
 #[cfg(all(unix, test))]

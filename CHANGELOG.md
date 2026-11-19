@@ -127,8 +127,8 @@ also keep compatibility with their immediately preceding version.
 - Restore subscription model picking and Codex root prompts under gateway
   custody. Host startup and `plakd models` populate a host-owned catalog
   without opening the gateway's subscription store. Standalone agent admission
-  also skips the local API-key preflight under gateway custody. No gateway or
-  state-key upgrade is required.
+  also skips the local API-key preflight under gateway custody. If the host
+  cannot update its snapshot, `plakd models` warns and still lists live models.
 
 - Fork, profile rebind, Switch now and `/new` no longer refuse an idle root
   with "source does not match the exact durable product binding" after a

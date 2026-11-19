@@ -78,7 +78,12 @@ fn spawn(
                 continue;
             }
             // Stale snapshots must not suppress a background refresh.
-            let _ = executor.block_on(subscriptions.model_catalog(provider));
+            if let Ok(Ok(catalog)) = executor.block_on(subscriptions.model_catalog(provider)) {
+                crate::commands::support::warn_catalog_snapshot(
+                    &mut std::io::stderr().lock(),
+                    catalog.publication_skipped(),
+                );
+            }
         }
         if let Some(session_id) = session_id.as_deref()
             && let Ok(log) = SessionLog::open(&paths.session_home(), session_id)

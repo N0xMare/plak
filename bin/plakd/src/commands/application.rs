@@ -13,8 +13,8 @@ use std::sync::Arc;
 use plakous::application::ApplicationExecutor;
 use plakous::model::SubscriptionUsageRead;
 use plakous::subscriptions::{
-    NativeLoginCompletion, NativeLoginMode, NativeModelCatalog, NativeProvider,
-    NativeSubscriptions, SubscriptionPaths,
+    CatalogPublicationSkipped, NativeLoginCompletion, NativeLoginMode, NativeModelCatalog,
+    NativeProvider, NativeSubscriptions, SubscriptionPaths,
 };
 
 use super::support::{
@@ -29,6 +29,14 @@ use plakous_hosted::account::{AccountRef, Vertical};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 use plakous_hosted::subscription_usage as product_usage;
+
+/// Authenticated rows and a best-effort cache publication result.
+pub struct LiveModelList {
+    /// The live rows to display.
+    pub models: Vec<CliModelSummary>,
+    /// A reason to warn without withholding the live rows.
+    pub publication_skipped: Option<CatalogPublicationSkipped>,
+}
 
 pub(crate) fn native_provider(account: &AccountRef) -> CliResult<NativeProvider> {
     account
@@ -328,7 +336,7 @@ pub trait AccountOps {
     /// Retires a newer build's login state after the operator confirmed it.
     fn replace_newer_build(&mut self, provider: &AccountRef) -> CliResult<CredentialState>;
 
-    fn models(&mut self, provider: &AccountRef) -> CliResult<Vec<CliModelSummary>>;
+    fn models(&mut self, provider: &AccountRef) -> CliResult<LiveModelList>;
 
     fn openrouter_models(&mut self, account: &AccountRef) -> CliResult<Vec<String>>;
     /// One direct API route's catalog: live list, cache or bundled table.
@@ -1032,7 +1040,7 @@ impl AccountOps for PlakousApplication {
             .map_err(application_execution_failure)?
     }
 
-    fn models(&mut self, account: &AccountRef) -> CliResult<Vec<CliModelSummary>> {
+    fn models(&mut self, account: &AccountRef) -> CliResult<LiveModelList> {
         let provider = native_provider(account)?;
         let mut subscriptions = self.subscriptions_for(account)?;
         if let Some(paths) = &self.product {
@@ -1043,10 +1051,10 @@ impl AccountOps for PlakousApplication {
             .block_on(subscriptions.model_catalog(provider))
             .map_err(application_execution_failure)?
             .map_err(|error| self.account_failure(error, account))?;
-        if catalog.provider() != provider {
-            return Err(CliFailure::new("native model catalog provider mismatch"));
-        }
-        catalog_summaries(provider, &catalog)
+        Ok(LiveModelList {
+            models: catalog_summaries(provider, &catalog)?,
+            publication_skipped: catalog.publication_skipped(),
+        })
     }
 }
 
@@ -1077,7 +1085,7 @@ impl PresentationBackend for PlakousApplication {
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-        AccountOps::models(self, &super::support::cli_provider_name(provider).parse()?)
+        Ok(AccountOps::models(self, &super::support::cli_provider_name(provider).parse()?)?.models)
     }
 }
 

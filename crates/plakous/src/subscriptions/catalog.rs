@@ -167,7 +167,11 @@ fn native_catalog_from_persisted(
     if models.is_empty() {
         return Err(NativeSubscriptionError::ModelUnavailable);
     }
-    Ok(NativeModelCatalog { provider, models })
+    Ok(NativeModelCatalog {
+        provider,
+        models,
+        publication_skipped: None,
+    })
 }
 
 pub(super) fn decode_persisted_catalog(

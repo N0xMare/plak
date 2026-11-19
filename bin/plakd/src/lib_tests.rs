@@ -1188,13 +1188,16 @@ impl AccountOps for FakeBackend {
     fn models(
         &mut self,
         account: &plakous_hosted::account::AccountRef,
-    ) -> CliResult<Vec<CliModelSummary>> {
+    ) -> CliResult<commands::application::LiveModelList> {
         let provider = commands::application::native_provider(account)?;
         self.calls.push(Call::Models(provider));
         if let Some(failure) = self.models_failure.clone() {
             return Err(failure);
         }
-        Ok(self.model_summaries.clone())
+        Ok(commands::application::LiveModelList {
+            models: self.model_summaries.clone(),
+            publication_skipped: None,
+        })
     }
 }
 
@@ -1204,7 +1207,7 @@ impl PresentationBackend for FakeBackend {
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-        AccountOps::models(self, &cli_provider_name(provider).parse()?)
+        Ok(AccountOps::models(self, &cli_provider_name(provider).parse()?)?.models)
     }
 }
 

@@ -1379,6 +1379,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "SessionHistoryVisibility",
     },
     "subscriptions": {
+        "CatalogPublicationSkipped",
         "CompatibilityNotice",
         "CompatibilityStatus",
         "FacadeAuthStatus",

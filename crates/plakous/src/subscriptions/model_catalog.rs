@@ -1,14 +1,13 @@
 //! Gated model catalog reads and their persisted snapshots.
 
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use plakous_auth::custody::AccountFacts;
 
 use super::{
-    Arc, CompatibilityStatus, Future, InMemorySubscriptionRequestGate, MODEL_CATALOG_DEADLINE,
-    NativeAuthStatus, NativeModelCatalog, NativeModelSummary, NativeProvider,
-    NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
+    Arc, CatalogPublicationSkipped, CompatibilityStatus, Future, InMemorySubscriptionRequestGate,
+    MODEL_CATALOG_DEADLINE, NativeAuthStatus, NativeModelCatalog, NativeModelSummary,
+    NativeProvider, NativeSubscriptionError, NativeSubscriptionStatus, NativeSubscriptions,
     SubscriptionLimitSnapshot, SubscriptionRequestClass, SubscriptionRequestGate,
     SubscriptionRequestLimits, SystemSubscriptionGateClock, dispatch_credential_admitted,
     run_blocking,
@@ -141,6 +140,8 @@ impl NativeSubscriptions {
     /// entries contain exact IDs, conservative portable capability bits, and
     /// exact provider-authored catalog defaults. A reported default is
     /// observational metadata, never a Plakous selection or request default.
+    /// An unsuccessful snapshot update does not invalidate a live catalog;
+    /// see [`NativeModelCatalog::publication_skipped`].
     ///
     /// # Errors
     ///
@@ -152,66 +153,63 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
         let gate = model_catalog_gate()?;
-        tokio::time::timeout(
-            MODEL_CATALOG_DEADLINE,
-            self.model_catalog_inner(provider, gate.clone()),
-        )
-        .await
-        .map_err(|_| catalog_operation_deadline(gate.as_ref()))?
+        let deadline = tokio::time::Instant::now() + MODEL_CATALOG_DEADLINE;
+        if let Some(gateway) = &self.gateway {
+            let (mut catalog, before) = tokio::time::timeout_at(deadline, async {
+                let before = self.gateway_facts(gateway, provider).await?;
+                let status = Self::gateway_status_of(provider, &before)?;
+                let catalog = self
+                    .discover_catalog(provider, status, gate.clone())
+                    .await?;
+                Ok::<_, NativeSubscriptionError>((catalog, before))
+            })
+            .await
+            .map_err(|_| catalog_operation_deadline(gate.as_ref()))??;
+            if let Some(directory) = &gateway.catalog_cache {
+                let publication = tokio::time::timeout_at(deadline, async {
+                    let after = self
+                        .gateway_facts(gateway, provider)
+                        .await
+                        .map_err(|_| CatalogPublicationSkipped::FactsUnavailable)?;
+                    publish_gateway_snapshot(directory, &catalog, &before, &after).await
+                })
+                .await
+                .unwrap_or(Err(CatalogPublicationSkipped::Deadline));
+                catalog.publication_skipped = publication.err();
+            }
+            return Ok(catalog);
+        }
+
+        tokio::time::timeout_at(deadline, self.local_catalog(provider, gate.clone()))
+            .await
+            .map_err(|_| catalog_operation_deadline(gate.as_ref()))?
     }
 
-    async fn model_catalog_inner(
+    async fn local_catalog(
         &self,
         provider: NativeProvider,
         gate: Arc<InMemorySubscriptionRequestGate>,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
-        if let Some(gateway) = &self.gateway {
-            let before = self.gateway_facts(gateway, provider).await?;
-            let status = Self::gateway_status_of(provider, &before)?;
-            let models =
-                run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
-                    super::vertical::require_vertical(provider)?
-                        .catalog(self, gate)
-                        .await
-                })
-                .await?;
-            if models.is_empty() {
-                return Err(NativeSubscriptionError::ModelUnavailable);
-            }
-            let catalog = NativeModelCatalog { provider, models };
-            if let Some(directory) = &gateway.catalog_cache {
-                let Ok(after) = self.gateway_facts(gateway, provider).await else {
-                    let _ = writeln!(
-                        std::io::stderr().lock(),
-                        "warning: the gateway could not confirm the login after model discovery; host catalog snapshot not updated"
-                    );
-                    return Ok(catalog);
-                };
-                if before.account_binding != after.account_binding
-                    || before.selection_epoch_digest != after.selection_epoch_digest
-                {
-                    let _ = writeln!(
-                        std::io::stderr().lock(),
-                        "warning: the gateway login changed during model discovery; host catalog snapshot not updated"
-                    );
-                    return Ok(catalog);
-                }
-                // Live listings can succeed with posture that is not
-                // admissible for cached reads (for example, Grok quarantine).
-                if require_ready(Self::gateway_status_of(provider, &after)?).is_ok()
-                    && let Ok(path) = gateway_snapshot_path(directory, &after)
-                {
-                    return run_blocking(move || {
-                        super::state::write_gateway_catalog_snapshot(&path, &catalog)?;
-                        Ok(catalog)
-                    })
-                    .await?;
-                }
-            }
-            return Ok(catalog);
-        }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.status_unlocked(provider).await?;
+        let mut catalog = self.discover_catalog(provider, status, gate).await?;
+        lock.verify()?;
+        if self
+            .state
+            .persist_catalog_snapshot(provider, catalog.models())
+            .is_err()
+        {
+            catalog.publication_skipped = Some(CatalogPublicationSkipped::SnapshotWriteFailed);
+        }
+        Ok(catalog)
+    }
+
+    async fn discover_catalog(
+        &self,
+        provider: NativeProvider,
+        status: NativeSubscriptionStatus,
+        gate: Arc<InMemorySubscriptionRequestGate>,
+    ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
         let models =
             run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
                 super::vertical::require_vertical(provider)?
@@ -222,12 +220,11 @@ impl NativeSubscriptions {
         if models.is_empty() {
             return Err(NativeSubscriptionError::ModelUnavailable);
         }
-        lock.verify()?;
-        let catalog = NativeModelCatalog { provider, models };
-        let _ = self
-            .state
-            .persist_catalog_snapshot(provider, catalog.models());
-        Ok(catalog)
+        Ok(NativeModelCatalog {
+            provider,
+            models,
+            publication_skipped: None,
+        })
     }
 
     /// Hydrates the last persisted authenticated catalog without upstream discovery.
@@ -266,6 +263,29 @@ impl NativeSubscriptions {
         lock.verify()?;
         Ok(catalog)
     }
+}
+
+async fn publish_gateway_snapshot(
+    directory: &Path,
+    catalog: &NativeModelCatalog,
+    before: &AccountFacts,
+    after: &AccountFacts,
+) -> Result<(), CatalogPublicationSkipped> {
+    if before.account_binding != after.account_binding
+        || before.selection_epoch_digest != after.selection_epoch_digest
+    {
+        return Err(CatalogPublicationSkipped::SelectionChanged);
+    }
+    let status = NativeSubscriptions::gateway_status_of(catalog.provider(), after)
+        .map_err(|_| CatalogPublicationSkipped::FactsUnavailable)?;
+    require_ready(status).map_err(|_| CatalogPublicationSkipped::AccountNotReady)?;
+    let path = gateway_snapshot_path(directory, after)
+        .map_err(|_| CatalogPublicationSkipped::FactsUnavailable)?;
+    let catalog = catalog.clone();
+    run_blocking(move || super::state::write_gateway_catalog_snapshot(&path, &catalog))
+        .await
+        .flatten()
+        .map_err(|_| CatalogPublicationSkipped::SnapshotWriteFailed)
 }
 
 fn require_ready(status: NativeSubscriptionStatus) -> Result<(), NativeSubscriptionError> {

@@ -12,6 +12,10 @@ use plakous_hosted::host_service::wire::HostPrincipal;
 use super::*;
 
 #[cfg(all(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "xai-api",
+    feature = "openrouter",
     feature = "codex",
     feature = "grok",
     feature = "claude",

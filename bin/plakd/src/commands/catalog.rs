@@ -4,7 +4,9 @@ use std::io;
 
 use super::application::AccountOps;
 use super::login::ensure_catalog_compatibility;
-use super::support::{native_tool_mode_label, native_visibility_label, require_ready};
+use super::support::{
+    native_tool_mode_label, native_visibility_label, require_ready, warn_catalog_snapshot,
+};
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 /// Lists the authenticated catalog rows exactly as the provider admits them.
@@ -18,7 +20,9 @@ pub fn list_models(
     ensure_catalog_compatibility(backend, provider, stdin, stderr)?;
     let refreshed = backend.refresh(provider)?;
     require_ready(provider, refreshed)?;
-    let models = backend.models(provider)?;
+    let catalog = backend.models(provider)?;
+    warn_catalog_snapshot(stderr, catalog.publication_skipped);
+    let models = catalog.models;
     if models.is_empty() {
         return Err(CliFailure::new(
             "authenticated native model catalog is empty",

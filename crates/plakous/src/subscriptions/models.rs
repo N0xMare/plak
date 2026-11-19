@@ -160,6 +160,22 @@ impl NativeModelSummary {
 pub struct NativeModelCatalog {
     pub(super) provider: NativeProvider,
     pub(super) models: Vec<NativeModelSummary>,
+    pub(super) publication_skipped: Option<CatalogPublicationSkipped>,
+}
+
+/// Why a successful live catalog could not confirm a configured snapshot update.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CatalogPublicationSkipped {
+    /// Current account facts could not be confirmed after discovery.
+    FactsUnavailable,
+    /// The account binding or login selection changed during discovery.
+    SelectionChanged,
+    /// The account is not Ready with current compatibility consent.
+    AccountNotReady,
+    /// The snapshot could not be written.
+    SnapshotWriteFailed,
+    /// Snapshot publication was not confirmed by the deadline.
+    Deadline,
 }
 
 /// How to select one account-admitted model during gated catalog resolution.
@@ -330,5 +346,11 @@ impl NativeModelCatalog {
     #[must_use]
     pub fn models(&self) -> &[NativeModelSummary] {
         &self.models
+    }
+
+    /// Returns a skip reason if the live listing did not confirm publication.
+    #[must_use]
+    pub const fn publication_skipped(&self) -> Option<CatalogPublicationSkipped> {
+        self.publication_skipped
     }
 }

@@ -6477,6 +6477,9 @@ from the gateway's XDG subscription tree and its locks. Attach presentation,
 session options and console model pages use this cache, without a provider
 fetch on a cache read or a fallback to the subscription store. API-key
 picker status comes from the gateway's status verb, not from local keys.
+The product warns if a live listing could not publish its snapshot and still
+returns the listing. A session-options read with no resolved subscription
+state home omits native model sections instead of refusing the picker.
 
 ## 5. External client boundary
 

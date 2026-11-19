@@ -48,10 +48,10 @@ impl AdminLink {
                 .into_iter()
                 .map(|account| account.as_str().to_owned())
                 .collect()),
-            AdminResponse::Refused { refusal } => {
-                Err(format!("the gateway refused account listing: {refusal:?}"))
-            }
-            _ => Err("the gateway returned an unexpected account-list response".to_owned()),
+            AdminResponse::Refused { refusal } => Err(format!(
+                "the gateway refused the account roster: {refusal:?}"
+            )),
+            _ => Err("the gateway answered the account roster read unexpectedly".to_owned()),
         }
     }
 
@@ -130,20 +130,29 @@ impl std::fmt::Debug for HostCustody {
 impl HostCustody {
     #[cfg(all(
         test,
+        feature = "openai",
+        feature = "anthropic",
+        feature = "xai-api",
+        feature = "openrouter",
         feature = "codex",
         feature = "grok",
         feature = "claude",
         feature = "test-hooks",
         feature = "web"
     ))]
-    pub(crate) fn in_process_for_test(custody: GatewayCustody, home: &PlakPaths) -> Self {
-        Self::Gateway(Arc::new(GatewayLink {
-            admin: AdminLink {
-                address: GatewayAddress::Unix(home.home().join("unused-admin.sock")),
-                key: None,
-            },
+    pub(crate) fn in_process_for_test(
+        custody: GatewayCustody,
+        home: &PlakPaths,
+        gateway_state: &Path,
+    ) -> (Self, impl FnOnce() + use<>) {
+        let (socket, served) = super::continuity_tests::serve(home, gateway_state);
+        let link = Self::Gateway(Arc::new(GatewayLink {
+            admin: AdminLink::local_service(GatewayAddress::Unix(socket.clone())),
             custody,
-        }))
+        }));
+        (link, move || {
+            super::continuity_tests::drain(&socket, served);
+        })
     }
 
     /// Reads `[gateway]` from `home`'s `config.toml`. A config that does not

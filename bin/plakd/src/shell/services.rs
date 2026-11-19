@@ -141,6 +141,10 @@ impl Services {
 
     #[cfg(all(
         test,
+        feature = "openai",
+        feature = "anthropic",
+        feature = "xai-api",
+        feature = "openrouter",
         feature = "codex",
         feature = "grok",
         feature = "claude",

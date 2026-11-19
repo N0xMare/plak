@@ -82,8 +82,8 @@ pub use login_types::{
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 use models::require_exact_native_tool_mode;
 pub use models::{
-    NativeModelCatalog, NativeModelSelector, NativeModelSelectorError, NativeModelSummary,
-    NativeModelVisibility, NativeServiceTierSummary, NativeToolMode,
+    CatalogPublicationSkipped, NativeModelCatalog, NativeModelSelector, NativeModelSelectorError,
+    NativeModelSummary, NativeModelVisibility, NativeServiceTierSummary, NativeToolMode,
     NativeToolModeRequirementError,
 };
 pub use paths::SubscriptionPaths;

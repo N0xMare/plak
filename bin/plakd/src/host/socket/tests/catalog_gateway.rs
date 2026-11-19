@@ -94,6 +94,7 @@ impl Wire {
             workspace: workspace.to_str().unwrap().to_owned(),
             template: Some("fixture-codex".into()),
             request_id: uuid::Uuid::new_v4().to_string(),
+            accounts: Vec::new(),
         }) {
             Outcome::Ok(Answer::Created { node, .. }) => node,
             other => panic!("new Codex root: {other:?}"),
@@ -210,7 +211,7 @@ fn start_gateway(
     gateway_state: &Path,
     catalogs: Arc<AtomicUsize>,
     inference: tokio::sync::mpsc::UnboundedSender<String>,
-) -> HostCustody {
+) -> (HostCustody, impl FnOnce()) {
     for (_, provider, _) in MODELS {
         let notice = NativeSubscriptions::notice(provider).unwrap();
         crate::gateway::gateway_seed::seed(gateway_state, provider, None, notice.expires_at());
@@ -265,7 +266,7 @@ fn start_gateway(
             },
         )
         .unwrap();
-    HostCustody::in_process_for_test(custody, paths)
+    HostCustody::in_process_for_test(custody, paths, gateway_state)
 }
 
 fn recorded_root(services: &Services, workspace: &Path, account: &str, model: &str) -> NodeAddress {
@@ -415,7 +416,7 @@ fn gateway_host_wire_uses_host_catalogs_and_dispatches_subscription_prompts() {
         .unwrap();
     let catalogs = Arc::new(AtomicUsize::new(0));
     let (inference, mut dispatched) = tokio::sync::mpsc::unbounded_channel();
-    let custody = start_gateway(
+    let (custody, drain_gateway) = start_gateway(
         &runtime,
         &paths,
         &gateway_state,
@@ -447,6 +448,7 @@ fn gateway_host_wire_uses_host_catalogs_and_dispatches_subscription_prompts() {
         assert!(
             app.models(&account.parse().unwrap())
                 .unwrap()
+                .models
                 .iter()
                 .any(|model| model.exact_id == exact && model.unavailable_reason.is_none())
         );
@@ -485,4 +487,5 @@ fn gateway_host_wire_uses_host_catalogs_and_dispatches_subscription_prompts() {
     }
     assert_cache_boundary(&paths, &gateway_state, &host_state);
     stopping.store(true, Ordering::Release);
+    drain_gateway();
 }

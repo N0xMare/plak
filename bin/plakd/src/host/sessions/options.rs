@@ -24,7 +24,7 @@ struct Choices {
 fn choices(
     paths: &PlakPaths,
     custody: &crate::gateway::HostCustody,
-    state_home: &std::path::Path,
+    state_home: Option<&std::path::Path>,
 ) -> Choices {
     // Socket and web requests run inside the host runtime. The synchronous
     // catalog facade owns an application executor and cannot nest there.
@@ -175,11 +175,7 @@ impl ProductSessions {
             .services
             .custody()
             .map_err(|error| unavailable(error.message()))?;
-        let state_home = self
-            .services
-            .home()
-            .state()
-            .map_err(|error| unavailable(error.message()))?;
+        let state_home = self.services.home().state().ok();
         let shared = choices(&home, &custody, state_home);
         let workspace = workspace
             .map(|probe| {
@@ -215,9 +211,11 @@ impl ProductSessions {
             .transpose()?;
         // Every known account per kind, named ones included, with the
         // readiness the creation fill reads.
-        let accounts = crate::account_choice::kind_accounts(
-            &crate::account_choice::ready_catalog(&home, &custody).map_err(unavailable)?,
-        );
+        let accounts = state_home
+            .map(|state| crate::account_choice::ready_catalog_at(&home, &custody, Some(state)))
+            .transpose()
+            .map_err(unavailable)?
+            .map_or_else(Vec::new, |rows| crate::account_choice::kind_accounts(&rows));
         Ok(wire::SessionOptions {
             runners,
             models: shared.models,

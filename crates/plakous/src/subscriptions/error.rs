@@ -80,8 +80,6 @@ pub enum NativeSubscriptionError {
     DeviceCodeExpired,
     /// The exact requested model was not admitted by fresh account-scoped evidence.
     ModelUnavailable,
-    /// A live catalog could not be saved in the host's non-credential cache.
-    CatalogSnapshotWrite,
     /// The explicit provider configuration was not admitted by exact resolved facts.
     ProviderConfigurationRejected,
     /// One explicit behavior dimension did not match the selected provider policy.
@@ -219,7 +217,6 @@ impl NativeSubscriptionError {
             }
             Self::DeviceCodeExpired => "device code expired before it was approved",
             Self::ModelUnavailable => "requested native subscription model is unavailable",
-            Self::CatalogSnapshotWrite => "could not write the host's subscription catalog cache",
             Self::ProviderConfigurationRejected => {
                 "explicit native provider configuration was rejected"
             }
