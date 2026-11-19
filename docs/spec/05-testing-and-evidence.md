@@ -215,7 +215,10 @@ matching stale row after retirement/reap. The exact-key environment assertion
 remains strict and also requires cleanup
 proof; job-control commands run from a short sourced script, disabling Bash
 history expansion before any job-id expansion rather than relying on shell-specific
-interactive parsing. Tests read the exact curated environment from `env`,
+interactive parsing. The runner wire fixture waits for a proved `Exited` event
+even if the first event reports unknown termination; the detached-shell
+fixture waits for the last runner pin to clear before checking idle exit.
+Tests read the exact curated environment from `env`,
 validate passwd/fallback shell selection, bound output before cursor advancement,
 collect more than 65 closed receipts without replay, collect more than 64 refused
 opens while admitting a fresh id and preserving old refusal/digest outcomes, and fence more than 129
@@ -2157,9 +2160,12 @@ Short real-clock checks in this lane cover executor shutdown and application
 result/observation ordering, worker stdin/cancel and SIGTERM escalation, callback
 writer and private-store lock deadlines, unfinished-upload closure and
 detached-writer cleanup. Two cleanup-contention tests assert a two-second
-mutex-admission bound. The 64/128-process capacity probes and pre-spawn refusal
-cleanup are serial because parallel process pressure must not masquerade as a
-cleanup regression. A 240-second runner allowance is a hang watchdog, not a
+mutex-admission bound; the mixed-lock probe starts with one already-exited,
+unretired child so the short budget measures admission, not process-group cleanup.
+The 64/128-process capacity probes and pre-spawn refusal test are serial. The
+64-child running-limit cases hold the children on stdin and join them after
+individual completion, rather than making concurrent termination part of the
+limit assertion. A 240-second runner allowance is a hang watchdog, not a
 replacement for any local assertion. Individual predicates identify these
 tests; an `application::` substring would also match unrelated prefixed modules.
 
@@ -2226,7 +2232,10 @@ on failure.
 
 Paused-Tokio elapsed checks stay parallel, including the quiet-poll repeat-hold
 tests, protocol-terminal close, transition-stage and subscription-refresh
-timeouts, and child completion/start-failure waits. Host-worker join and usage
+timeouts, and child completion/start-failure waits. The terminal UTF-8
+observation test waits for real process completion before pausing Tokio time,
+so its return bound measures observation rather than process startup.
+Host-worker join and usage
 refresh drop use channel-held workers: teardown must complete before the held
 work is released, with a thirty-second scheduling watchdog. Empty-output poll,
 empty first-terminal await and steered Grok await run in parallel with a
@@ -2283,7 +2292,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Cleanup mutex admission | `terminate_contention_is_bounded_and_preserves_correlated_owner`, `join_all_handles_free_children_and_retains_contended_child_for_retry` — the two users of the two-second `assert_bounded` helper |
 | Executor/application ordering | `executor_drop_does_not_wait_out_spawn_blocking`, `result_before_terminal_event_returns_without_drain_or_hang`, `event_before_result_is_presented_without_becoming_terminal_authority`, `observation_error_before_result_is_non_authoritative_and_does_not_hang`, `ready_result_ignores_late_observation_error_without_hanging` |
 | Worker stdin and SIGTERM escalation | `nonreading_stdin_cannot_block_start_or_cancel`, `a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound` |
-| Process observation and job-await budgets | `process_await_wait_does_not_reserve_a_blocking_worker`, `terminal_hint_drains_more_than_one_record_batch_without_waiting`, `terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin`, `contended_observation_does_not_block_the_async_worker` |
+| Process observation and job-await budgets | `process_await_wait_does_not_reserve_a_blocking_worker`, `terminal_hint_drains_more_than_one_record_batch_without_waiting`, `contended_observation_does_not_block_the_async_worker` |
 | Process capacity probes | `running_children_still_count_against_the_session_limit`, `sixty_fifth_running_start_is_refused_before_spawn`, `host_capacity_refuses_the_129th_start_across_services_before_spawn`, `a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure` |
 | Product CAS startup/reopen | `isolated_jsonl_startups_and_reopens_preserve_product_revision`, `isolated_idle_jsonl_quits_and_reopens_preserve_product_revision` |
 | Crash-sweep view rebuild | `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` — runs every registered sweep shape's lifecycle in sequence in one test (38 to 58 seconds alone); under parallel gate load it outran the parallel lane's 120-second allowance |

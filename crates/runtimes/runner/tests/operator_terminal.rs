@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, reason = "isolated runner terminal fixtures")]
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use plakous_runner::{ClientWindows, RunnerClient, RunnerIdentity, RunnerOptions, RunnerService};
@@ -15,6 +15,8 @@ use plakous_runner_protocol::{Bind, VersionTriple};
 use plakous_tools::{
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId,
 };
+
+const CLEANUP_WATCHDOG: Duration = Duration::from_secs(30);
 
 fn id(s: &str) -> OperatorId {
     OperatorId::try_from(s.to_owned()).unwrap()
@@ -148,11 +150,22 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
             },
         )
         .await;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while runner.operator_terminals().unwrap().has_live_terminals() {
-            assert!(Instant::now() < deadline, "cleanup not proven");
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        let deadline = tokio::time::Instant::now() + CLEANUP_WATCHDOG;
+        // The first exit event may report unknown termination. Keep the
+        // stream until the runner publishes proof, not just an input close.
+        loop {
+            let event = tokio::time::timeout_at(deadline, stream.next())
+                .await
+                .expect("runner did not publish terminal cleanup proof")
+                .unwrap();
+            if let TerminalEvent::Exit { status, .. } = event {
+                if status == TerminalStatus::Exited {
+                    break;
+                }
+                assert_eq!(status, TerminalStatus::TerminationUnknown);
+            }
         }
+        assert!(!runner.operator_terminals().unwrap().has_live_terminals());
         drop(stream);
         client.disconnect();
         tokio::time::timeout(Duration::from_secs(5), serving)
@@ -220,13 +233,12 @@ async fn operator_pty_detached_terminal_alone_prevents_daemon_idle_exit() {
         "no connection or agent job exists; the terminal alone must block idle exit"
     );
     operator.close_all();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while operator.has_live_terminals() {
-        assert!(
-            Instant::now() < deadline,
-            "detached shell cleanup not proven"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    tokio::time::timeout(CLEANUP_WATCHDOG, async {
+        while operator.has_live_terminals() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("detached shell cleanup not proven");
     assert!(runner.is_idle());
 }

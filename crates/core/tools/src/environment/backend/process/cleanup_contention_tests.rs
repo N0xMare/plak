@@ -296,35 +296,35 @@ fn a_sequential_program_never_exhausts_the_session_limit() -> Result<(), TestErr
 /// The limit still bounds children that are actually running.
 #[test]
 fn running_children_still_count_against_the_session_limit() -> Result<(), TestError> {
-    let (_workspace, sessions) = sessions(118)?;
-    for _ in 0..MAX_JOINED_PROCESS_SESSIONS {
-        sleeping_child(&sessions)?;
-    }
-    let shell = ["/bin/sh", "/usr/bin/sh"]
-        .into_iter()
-        .find(|candidate| Path::new(candidate).is_file())
-        .ok_or("test shell is unavailable")?;
+    let (_workspace, sessions) = sessions_with_cleanup(
+        118,
+        ExecutionEnvironmentLimits::default().cleanup_duration(),
+    )?;
+    let request = JoinedProcessStartRequest::new(
+        JoinedProcessCommand::literal("/bin/sh", ["-c", "read -r line"].map(str::to_owned))?,
+        ".",
+        [],
+        true,
+        JoinedProcessTerminalMode::Pipes,
+    )?;
+    let context = || OperationContext::new(CancellationToken::new());
+    let children = (0..MAX_JOINED_PROCESS_SESSIONS)
+        .map(|_| sessions.start(request.clone(), context()))
+        .collect::<Result<Vec<_>, _>>()?;
     let refused = sessions
-        .start(
-            JoinedProcessStartRequest::new(
-                JoinedProcessCommand::literal(
-                    shell,
-                    [String::from("-c"), String::from("sleep 30")],
-                )?,
-                ".",
-                [],
-                false,
-                JoinedProcessTerminalMode::Pipes,
-            )?,
-            OperationContext::new(CancellationToken::new()),
-        )
+        .start(request, context())
         .err()
         .ok_or("the session limit admitted one child too many")?;
     assert_eq!(refused.kind(), ExecutionBackendErrorKind::ResourceLimit);
     // The refusal happened before any spawn, which is what lets the model
     // see it as an ordinary tool failure.
     assert!(refused.kind().proven_no_effect());
-    join_all_with_bounded_retries(&sessions)?;
+    for id in children {
+        sessions.write_stdin(id, b"finish\n", JoinedProcessInputDisposition::Close)?;
+        await_terminal(&sessions, id);
+        sessions.join(id)?;
+    }
+    assert!(sessions.is_drained());
     Ok(())
 }
 
@@ -480,7 +480,10 @@ fn terminate_contention_is_bounded_and_preserves_correlated_owner() -> Result<()
 #[test]
 fn join_all_handles_free_children_and_retains_contended_child_for_retry() -> Result<(), TestError> {
     let (_workspace, sessions) = sessions(92)?;
-    let free = sleeping_child(&sessions)?;
+    // Leave a completed, unretired child: only the other child's operation
+    // lock should be competing for the short admission budget.
+    let free = exiting_child(&sessions, 0)?;
+    await_terminal(&sessions, free);
     let contended = sleeping_child(&sessions)?;
     let session = sessions.session(contended)?;
     let operation = session.enter()?;

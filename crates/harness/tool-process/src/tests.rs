@@ -1268,8 +1268,10 @@ fn process_utf8_decoder_retains_invalid_terminal_tails_until_replacement_fits() 
 #[tokio::test]
 async fn terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin()
 -> Result<(), Box<dyn Error>> {
+    use crate::session::ObservationWait;
     use plakous_tools::{
         ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
+        JoinedProcessCommand,
     };
 
     let workspace = tempfile::tempdir()?;
@@ -1279,29 +1281,40 @@ async fn terminal_utf8_larger_than_observation_bound_returns_without_deadline_sp
         ".",
         ExecutionEnvironmentConfig::default(),
     )?;
-    let tools = ProcessSessionTools::posix_sh()?;
+    let sessions = environment.joined_process_sessions()?;
     let control = OperationContext::new(plakous_model::CancellationToken::new());
-    let started = std::time::Instant::now();
+    let request = JoinedProcessStartRequest::new(
+        JoinedProcessCommand::literal(
+            "/bin/sh",
+            ["-c", "printf '\\342\\202\\254'"].map(str::to_owned),
+        )?,
+        ".",
+        [],
+        false,
+        JoinedProcessTerminalMode::Pipes,
+    )?;
+    let id = plakous_tools::internal::start_process_with_output_limit(
+        &sessions,
+        request,
+        control.clone(),
+        1,
+    )?;
+    wait_for_joined_process(&sessions, id).await?;
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
     // A one-byte page cannot hold a three-byte character: the exited
     // process is joined at once and the page counts the bytes it could not
     // show instead of waiting out the yield.
-    let first = tools
-        .start_canonical(
-            &environment,
-            CanonicalProcessStartRequest {
-                command: String::from("printf '\\342\\202\\254'"),
-                workdir: PathBuf::from("."),
-                login: false,
-                tty: false,
-                keep_stdin_open: false,
-
-                _model_description: None,
-                yield_time_ms: 5_000,
-                max_output_bytes: 1,
-            },
-            control,
-        )
-        .await?;
+    let first = ProcessSessionTools::observe_summarized(
+        &environment,
+        u64::from(JoinedProcessSessions::job_number(id)),
+        5_000,
+        1,
+        JoinedProcessOutputCursor::new(0),
+        ObservationWait::PromotionHint,
+        &control,
+    )
+    .await?;
     assert!(started.elapsed() < std::time::Duration::from_secs(1));
     assert!(first.joined);
     assert_eq!(
@@ -2606,24 +2619,19 @@ async fn a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure()
         ExecutionEnvironmentConfig::default(),
     )?);
     let sessions = environment.joined_process_sessions()?;
-    let shell = ["/bin/sh", "/usr/bin/sh"]
-        .into_iter()
-        .find(|candidate| Path::new(candidate).is_file())
-        .ok_or("test shell is unavailable")?;
+    let request = JoinedProcessStartRequest::new(
+        JoinedProcessCommand::literal("/bin/sh", ["-c", "read -r line"].map(str::to_owned))?,
+        ".",
+        [],
+        true,
+        JoinedProcessTerminalMode::Pipes,
+    )?;
+    let mut children = Vec::new();
     for _ in 0..MAX_JOINED_PROCESS_SESSIONS {
-        sessions.start(
-            JoinedProcessStartRequest::new(
-                JoinedProcessCommand::literal(
-                    shell,
-                    [String::from("-c"), String::from("sleep 30")],
-                )?,
-                ".",
-                [],
-                false,
-                JoinedProcessTerminalMode::Pipes,
-            )?,
+        children.push(sessions.start(
+            request.clone(),
             OperationContext::new(plakous_model::CancellationToken::new()),
-        )?;
+        )?);
     }
 
     let registry = process_session_registry()?;
@@ -2652,33 +2660,35 @@ async fn a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure()
             .starts_with("running process limit (64) was reached:")
     );
     assert!(text.text().contains("p64"));
-    join_until_drained(&sessions)?;
+    for id in children {
+        sessions.write_stdin(id, b"finish\n", JoinedProcessInputDisposition::Close)?;
+        wait_for_joined_process(&sessions, id).await?;
+        sessions.join(id)?;
+    }
+    assert!(sessions.is_drained());
     Ok(())
 }
 
 #[cfg(unix)]
-fn join_until_drained(sessions: &JoinedProcessSessions) -> Result<(), Box<dyn Error>> {
-    use std::time::Instant;
-
-    // Joins run concurrently under one cleanup window. A busy operation stays
-    // active for a retry. Bound the drain by a few whole windows, not one
-    // window per admitted session. Same bound as the tools-crate helper.
-    let window = plakous_tools::ExecutionEnvironmentLimits::default().cleanup_duration();
-    let deadline = Instant::now() + window.saturating_mul(3);
-    loop {
-        match sessions.join_all() {
-            Ok(()) => return Ok(()),
-            Err(error)
-                if error.kind() == plakous_tools::ExecutionBackendErrorKind::CleanupUnresolved =>
-            {
-                if Instant::now() >= deadline {
-                    break;
+async fn wait_for_joined_process(
+    sessions: &JoinedProcessSessions,
+    id: JoinedProcessSessionId,
+) -> Result<(), Box<dyn Error>> {
+    let mut changes = plakous_tools::internal::process_session_changes(sessions, id)?;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(FINISHED_PROCESS_YIELD_MS),
+        async {
+            loop {
+                changes.borrow_and_update();
+                if sessions.joined_terminal_status(id).is_some() {
+                    return Ok::<_, tokio::sync::watch::error::RecvError>(());
                 }
+                changes.changed().await?;
             }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Err("process cleanup did not converge across bounded retries".into())
+        },
+    )
+    .await??;
+    Ok(())
 }
 
 /// A sequential program runs as many commands as it likes through the real
@@ -2802,7 +2812,7 @@ async fn process_session_missing_cwd_is_correctable_before_pipes_or_pty_spawn()
                 "login": false,
                 "tty": tty,
                 "keep_stdin_open": false,
-                "yield_time_ms": 1000,
+                "yield_time_ms": FINISHED_PROCESS_YIELD_MS,
                 "max_output_bytes": 4096,
             })
             .to_string()
