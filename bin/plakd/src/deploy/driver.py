@@ -124,6 +124,11 @@ def inventory(filename, stage):
         if name != stage and configured == {}:
             continue
         validate_stage(configured, name)
+    if data["staging"] and data["production"]:
+        need(
+            data["staging"]["host"]["node"]["ssh"] != data["production"]["host"]["node"]["ssh"],
+            "staging and production must use distinct enrolled SSH host aliases",
+        )
     need(
         configuration["evidence"] != data["staging"].get("receipt"),
         "evidence and receipt paths must differ",
@@ -257,7 +262,7 @@ class Artifacts:
             match(manifest["file"]["sha256"], DIGEST, "client file digest")
             integer(manifest["file"]["length"], 1, 2**31, "client length")
             verify_file(client["blob"], manifest["file"])
-            self.clients[client["id"]] = manifest
+            self.clients[client["id"]] = (raw, manifest["file"])
             self.pins["clients"][client["id"]] = client["manifest_sha256"]
 
     def installer(self):
@@ -267,9 +272,24 @@ class Artifacts:
 class SSH:
     def __init__(self, script):
         self.command = "python3 -I -c " + shlex.quote(script)
+        self.operator_machine = None
+        if sys.platform == "linux":
+            with Path("/etc/machine-id").open("rb") as stream:
+                machine = stream.read(65).strip()
+            need(
+                re.fullmatch(rb"[0-9a-f]{32}", machine),
+                "cannot establish operator machine identity",
+            )
+            self.operator_machine = sha(machine)
 
     def call(self, node, operation, arguments, files=(), timeout=45):
-        header = {"op": operation, "node": node, "args": arguments, "files": []}
+        header = {
+            "op": operation,
+            "node": node,
+            "args": arguments,
+            "files": [],
+            "operator_machine": self.operator_machine,
+        }
         with tempfile.TemporaryFile() as upload:
             for name, filename, facts in files:
                 header["files"].append({"name": name, **facts})
@@ -416,13 +436,14 @@ class Deploy:
         )
 
     def client_call(self, client, operation, arguments=None, **options):
-        manifest = self.artifacts.clients[client["id"]]
+        manifest, _ = self.artifacts.clients[client["id"]]
         return self.ssh.call(
             client["node"],
             operation,
             {
                 "link": client["link"],
-                "manifest": manifest,
+                "manifest": manifest.decode(),
+                "manifest_sha256": client["manifest_sha256"],
                 "source_sha256": client["source_sha256"],
                 **(arguments or {}),
             },
@@ -622,7 +643,7 @@ class Deploy:
             else:
                 for client in self.config["clients"]:
                     if client["id"] in clients:
-                        file = self.artifacts.clients[client["id"]]["file"]
+                        _, file = self.artifacts.clients[client["id"]]
                         self.client_call(
                             client,
                             "client_stage",

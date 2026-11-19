@@ -60,7 +60,7 @@ def fake_git(args):
 
 def target(args):
     assert "-oStrictHostKeyChecking=yes" in args and "-oForwardAgent=no" in args
-    assert args[-2] in ("example-host", "example-client")
+    assert args[-2] in ("example-host", "example-client", "example-production")
     assert args[-1].startswith("python3 -I -c ")
     raw = sys.stdin.buffer
     request = json.loads(raw.readline())
@@ -74,6 +74,8 @@ def target(args):
     fleet = json.loads(path.read_bytes())
     operation = request["op"]
     payload = request["args"]
+    if operation.startswith("client_"):
+        assert sha(payload["manifest"].encode()) == payload["manifest_sha256"]
     reply = {}
     if operation == "observe":
         if fleet.get("refusal"):
@@ -378,6 +380,7 @@ def fleet_case(fleet):
     production = fleet.inventory.read_text().split("[staging]\n", 1)[1]
     production = ("[production]\n" + production).replace("[staging.", "[production.")
     production = production.replace(str(fleet.evidence), str(fleet.root / "production.jsonl"))
+    production = production.replace('ssh = "example-host"', 'ssh = "example-production"')
     inventory = fleet.inventory.read_text().replace("[production]\n", "")
     fleet.inventory.write_text(inventory + "\n" + production)
     fleet.reset()

@@ -594,10 +594,15 @@ def check_directory(path, create):
 
 
 class Client:
-    def __init__(self, home, link, manifest, source_sha256):
+    def __init__(self, home, link, manifest, manifest_sha256, source_sha256):
         self.home = home
         self.link = Path(link)
         self.env = environment(home, home / ".plak")
+        require(
+            hashlib.sha256(manifest.encode()).hexdigest() == manifest_sha256,
+            "transferred client manifest digest differs",
+        )
+        manifest = json.loads(manifest)
         self.file = manifest["file"]
         self.wire = manifest["wire"]
         self.source = source_sha256
@@ -711,6 +716,13 @@ def receive_files(raw, entries, root):
 def execute(header, raw):
     home = validate_identity(header["node"])
     operation = header["op"]
+    if not operation.startswith("client_") and header["operator_machine"] is not None:
+        local = contents("/etc/machine-id").strip()
+        require(re.fullmatch(rb"[0-9a-f]{32}", local), "cannot establish target machine identity")
+        require(
+            hashlib.sha256(local).hexdigest() != header["operator_machine"],
+            "run deploy from an operator machine independent of the target host",
+        )
     args = header["args"]
     with contextlib.ExitStack() as stack:
         if header["files"]:
@@ -724,7 +736,13 @@ def execute(header, raw):
             require(not raw.read(1), "unexpected SSH request body")
             files = {}
         if operation.startswith("client_"):
-            client = Client(home, args.pop("link"), args.pop("manifest"), args.pop("source_sha256"))
+            client = Client(
+                home,
+                args.pop("link"),
+                args.pop("manifest"),
+                args.pop("manifest_sha256"),
+                args.pop("source_sha256"),
+            )
             if operation == "client_observe":
                 return client.observe()
             if operation == "client_stage":

@@ -28,11 +28,13 @@ const OUTPUT_TOKENS: NonZeroU32 = NonZeroU32::new(16).expect("nonzero canary lim
 pub(crate) fn capabilities(stdout: &mut dyn Write) -> CliResult<ProcessOutcome> {
     writeln!(stdout, "plakd-deploy-canary-v1")
         .and_then(|()| {
-            if cfg!(feature = "claude") {
-                writeln!(stdout, "claude")?;
-            }
-            if cfg!(feature = "grok") {
-                writeln!(stdout, "grok")?;
+            for (name, provider) in [
+                ("claude", NativeProvider::Claude),
+                ("grok", NativeProvider::Xai),
+            ] {
+                if plakous_hosted::capabilities::require_native(provider).is_ok() {
+                    writeln!(stdout, "{name}")?;
+                }
             }
             Ok(())
         })
