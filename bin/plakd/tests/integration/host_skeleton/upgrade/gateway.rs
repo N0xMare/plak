@@ -39,7 +39,7 @@ fn cross_key_preflight_refuses_codex_behind_a_v1_gateway_before_surrender() {
     assert_eq!(answering.join().unwrap(), "GET /versions HTTP/1.1\r\n");
     assert_eq!(client.request(2, Op::Ping), Outcome::Ok(Answer::Pong));
     assert!(client.rows(3).iter().any(|row| row.session == source));
-    assert_eq!(receipts(&fixture).last().unwrap()["phase"], "aborted");
+    assert!(!fixture.home().join("host/upgrades").exists());
     assert!(
         !fixture
             .home()
