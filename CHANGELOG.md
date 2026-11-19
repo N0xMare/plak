@@ -31,6 +31,7 @@ also keep compatibility with their immediately preceding version.
   `ToolError`; the SDK no longer type-checks before running. Earlier tool
   effects are not rolled back by a later error. Old Monty sessions cannot
   reopen exactly; carry them with a compatible export and import.
+  Python failures show bounded tracebacks with deterministic `<cell N>` frames.
 
 - Bind Codex and SuperGrok credential authority to the profile id, slot id
   and, for SuperGrok, the account scope. The store path is not an input, so

@@ -13,8 +13,9 @@ use std::{
 };
 
 use plakous_cell::{
-    CELL_PROTOCOL_REVISION, EngineConfig, HostFrame, LossClass, MAX_FRAME_BYTES, MONTY_WORKER,
-    WorkerFrame, encode_frame, read_frame_blocking,
+    BindingInput, CELL_PROTOCOL_REVISION, CellClient, CellEvent, CellOutcome, CellPrelude,
+    EngineConfig, HostFrame, LossClass, MAX_FRAME_BYTES, MONTY_WORKER, MontyBinding,
+    MontyBootstrap, NestedDeliveryOutcome, WorkerFrame, encode_frame, read_frame_blocking,
 };
 
 /// Writes `frames`, closes stdin, and returns every frame the worker wrote
@@ -103,19 +104,128 @@ fn the_worker_refuses_other_limits_and_a_repeated_configure() {
     }
 }
 
-#[tokio::test]
-async fn records_and_bytes_reach_the_interpreter_as_typed_values() {
-    use plakous_cell::{
-        BindingInput, CellClient, CellEvent, CellOutcome, CellPrelude, CellValue, MontyBinding,
-        MontyBootstrap, NestedDeliveryOutcome,
+#[test]
+fn exception_reports_keep_cell_ordinals_and_the_tail_of_mutual_recursion() {
+    let start = |cell, source: &str| HostFrame::StartCell {
+        cell,
+        source: source.into(),
+        prelude: CellPrelude::Monty { bootstrap: None },
+        window: None,
     };
-    let client = CellClient::spawn(
+    let (frames, success) = exchange(&[
+        configure(EngineConfig::MONTY),
+        start(
+            81,
+            "def left():\n    right()\ndef right():\n    left()\nleft()",
+        ),
+        HostFrame::Reset,
+        start(
+            24,
+            "try:\n    raise KeyError('missing')\nexcept KeyError as cause:\n    error = ValueError('replacement')\n    error.add_note('the note survives')\n    raise error from cause",
+        ),
+        start(19, "'x' * 40000"),
+    ]);
+    assert!(success, "{frames:?}");
+    let reports: Vec<_> = frames
+        .iter()
+        .filter_map(|frame| match frame {
+            WorkerFrame::CellDone {
+                cell,
+                outcome:
+                    CellOutcome::Failed {
+                        message,
+                        generation_lost: false,
+                        ..
+                    },
+            } => Some((*cell, message.as_str())),
+            _ => None,
+        })
+        .collect();
+    let [(81, recursion), (24, chained)] = reports.as_slice() else {
+        panic!("expected two reports")
+    };
+    assert!(recursion.starts_with("Traceback (most recent call last):"));
+    assert!(recursion.contains("File \"<cell 1>\", line 5"));
+    assert!(recursion.contains("in left") && recursion.contains("in right"));
+    assert!(recursion.contains("bytes omitted") && recursion.len() <= 32 * 1024);
+    assert!(
+        recursion
+            .lines()
+            .last()
+            .is_some_and(|line| line.starts_with("RecursionError:"))
+    );
+    assert!(chained.contains("File \"<cell 2>\", line 2"));
+    assert!(chained.contains("KeyError: 'missing'"));
+    assert!(chained.contains("The above exception was the direct cause"));
+    assert!(chained.ends_with("ValueError: replacement\nthe note survives\n"));
+    assert!(frames.iter().any(|frame| matches!(frame,
+        WorkerFrame::CellDone { cell: 19, outcome: CellOutcome::Completed { value: Some(text), .. } }
+            if text.len() == 40_000
+    )));
+}
+
+async fn client() -> CellClient {
+    CellClient::spawn(
         std::path::Path::new(env!("CARGO_BIN_EXE_plakous-py-host")),
         MONTY_WORKER,
         EngineConfig::MONTY,
     )
     .await
-    .expect("worker");
+    .expect("worker")
+}
+
+async fn tool_failure_report() -> String {
+    let client = client().await;
+    client.start_cell(72, "x = 1\nawait fetch(value=x)", CellPrelude::Monty { bootstrap: Some(MontyBootstrap {
+        source: "async def fetch(*args, **kwargs):\n    return await _fetch(*args, **kwargs)\n".into(),
+        bindings: vec![MontyBinding { function: "_fetch".into(), tool: "fetch".into(), input: BindingInput::Dictionary }],
+    }) }, None).expect("start");
+    let CellEvent::NestedCall { call, .. } = client.read_event().await.expect("call") else {
+        panic!("nested call")
+    };
+    assert_eq!(
+        client
+            .deliver(72, call, Err("fixture tool denied".into()))
+            .await,
+        NestedDeliveryOutcome::Accepted
+    );
+    let message = loop {
+        if let CellEvent::Done { outcome, .. } = client.read_event().await.expect("event") {
+            let CellOutcome::Failed { message, .. } = outcome else {
+                panic!("expected tool failure")
+            };
+            break message;
+        }
+    };
+    client.terminate().await.expect("joined");
+    message
+}
+
+#[tokio::test]
+async fn tool_failure_points_to_the_cell_and_keeps_the_class_and_message() {
+    let message = tool_failure_report().await;
+    assert!(message.contains("File \"<cell 1>\", line 2"), "{message}");
+    assert!(
+        message.contains("ToolError: fixture tool denied"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "micro-monty 0.0.2 cannot hide separately compiled host bootstrap frames"]
+async fn tool_failure_does_not_show_bootstrap_frames() {
+    let message = tool_failure_report().await;
+    assert!(
+        !message.contains("prelude") && !message.contains("bootstrap"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn records_and_bytes_reach_the_interpreter_as_typed_values() {
+    use plakous_cell::CellValue;
+
+    let client = client().await;
     client
         .start_cell(
             1,

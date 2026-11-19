@@ -10342,8 +10342,17 @@ one ordered stream sent by the engine's output callback. The single-frame V1 pro
 each nested result at 1 MiB so their worst-case JSON encoding fits one frame,
 with an aggregate nested-result quota of 16 MiB.
 
-An uncaught Python exception is a definite cell failure with a bounded
-traceback. An engine panic is a worker loss. A lost generation is
+An uncaught Python exception is a definite cell failure. The model sees
+micro-monty's CPython 3.14-shaped traceback, including chained exceptions,
+notes, repeated-line folding and suggestions. The worker gives each evaluation
+a path-free `<cell N>` name, numbered from one in its interpreter generation.
+Resetting the SDK globals does not restart the warm worker's counter. The
+report has a separate 32 KiB budget with a head-and-tail cut; successful
+expression completions retain the 1 MiB result budget. The worker does not
+rewrite the exception or any suggestion. With micro-monty 0.0.2 a nested tool
+failure includes the cell's await line and the generated wrapper frame; the
+engine has no public setting to hide separately compiled bootstrap frames.
+An engine panic is a worker loss. A lost generation is
 stopped, joined and reset under its typed reset reason before the next cell,
 which starts a fresh generation and never re-evaluates source. Every other
 protocol violation leaves the cell's outcome unknown and remains a host loss.

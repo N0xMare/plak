@@ -1243,7 +1243,11 @@ batch is admitted, exercises typed errors and a retry, and verifies
 structured values and unparsed text. Additional real worker cases exercise
 typed record/byte results, ordered and capped print output, persistent versus
 fresh globals, SDK named state, catchable memory errors, the compute watchdog,
-and termination with joined process cleanup.
+and termination with joined process cleanup. Real-worker exception cases
+check deterministic cell ordinals, chained causes and notes, the size and
+tail of a mutual-recursion report, and the source line, class and message of
+a rejected tool. The no-bootstrap-frame assertion is explicitly ignored
+until the engine can hide generated wrapper frames.
 The durability profile's `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
 kills both real workers at test-only boundaries before result handoff and
 after their acceptance receipts but before terminal publication. The first leaves

@@ -9,7 +9,7 @@ use std::{
 
 use micro_monty::{
     Engine, HostArgs, HostError, HostErrorKind, HostException, HostModule, HostSignature,
-    HostValue, Limits, Progress, Resume, Session,
+    HostValue, Limits, Progress, Resume, Session, TextCut, head_tail,
 };
 use plakous_cell::{
     CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
@@ -24,8 +24,8 @@ use crate::{codec, test_hooks::boundary};
 const MAX_PRINT_BYTES: usize = 1_048_576 - 64;
 const PRINT_NOTICE: &str = "\n[Python output truncated at 1 MiB]\n";
 const RESULT_NOTICE: &str = "\n[Python result truncated at 1 MiB]";
+const EXCEPTION_REPORT_BYTES: usize = 32 * 1024;
 const MAX_OUTSTANDING_NESTED: usize = 16;
-const SCRIPT_NAME: &str = "plak-py-ptc.py";
 const PATH_SCAN: &str = "Path.scan";
 
 struct Lost {
@@ -100,6 +100,7 @@ fn read(stdin: &mut impl io::Read) -> Result<Option<HostFrame>, Lost> {
 
 struct Worker {
     session: Session,
+    ordinal: u64,
     bindings: Option<HashMap<u32, MontyBinding>>,
     running: Option<Running>,
     output: Arc<Mutex<Output>>,
@@ -199,6 +200,7 @@ impl Worker {
             lenient: true,
         });
         session.set_text_limit((MAX_PRINT_BYTES - RESULT_NOTICE.len()) as u64);
+        session.set_text_cut(TextCut::HeadTail);
         session.set_int_bits_text(true);
         session.set_wall_clock(Some(Box::new(|| {
             SystemTime::now()
@@ -215,6 +217,7 @@ impl Worker {
         }));
         Ok(Self {
             session,
+            ordinal: 0,
             bindings: None,
             running: None,
             output: sink,
@@ -285,9 +288,14 @@ impl Worker {
             cell: Some(cell),
             ..Output::default()
         };
-        let code = match self.session.compile(source, SCRIPT_NAME) {
+        self.ordinal = self
+            .ordinal
+            .checked_add(1)
+            .ok_or_else(|| Lost::engine("Python cell ordinal exhausted"))?;
+        let filename = format!("<cell {}>", self.ordinal);
+        let code = match self.session.compile(source, &filename) {
             Ok(code) => code,
-            Err(error) => return self.fail(error.to_string(), false),
+            Err(error) => return self.fail(bounded_report(error.to_string()), false),
         };
         let step = self.session.start(&code);
         self.drive(step)
@@ -344,7 +352,10 @@ impl Worker {
                 );
                 Ok(())
             }
-            Progress::Error(error) => Err(format!("Python tool bootstrap failed: {error}")),
+            Progress::Error(error) => Err(format!(
+                "Python tool bootstrap failed: {}",
+                bounded_report(error.traceback)
+            )),
             _ => Err("Python tool bootstrap unexpectedly suspended".into()),
         }
     }
@@ -394,7 +405,7 @@ impl Worker {
                         stored: HashMap::new(),
                     });
                 }
-                Progress::Error(error) => return self.fail(error.to_string(), false),
+                Progress::Error(error) => return self.fail(bounded_report(error.traceback), false),
                 _ => return Err(Lost::engine("unexpected interpreter pause")),
             };
         }
@@ -545,5 +556,15 @@ impl Worker {
             cell: running.cell,
             outcome,
         })
+    }
+}
+
+fn bounded_report(report: String) -> String {
+    // The engine's text limit also limits successful completions. Keep that
+    // budget intact but cap its traceback separately, preserving both ends.
+    if report.len() <= EXCEPTION_REPORT_BYTES {
+        report
+    } else {
+        head_tail(&report, EXCEPTION_REPORT_BYTES as u64).0
     }
 }
