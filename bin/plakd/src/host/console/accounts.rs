@@ -644,7 +644,7 @@ mod tests {
         let custody = crate::gateway::HostCustody::resolve(&paths).unwrap();
         let reader = reader_at(&root.path().join("state"), &custody).unwrap();
         let result = roster(&reader, &paths, None).await.unwrap();
-        assert!(result.accounts.is_empty());
+        assert_eq!(result.accounts, [] as [AccountRef; 0]);
         assert!(!result.truncated);
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "enumeration_unavailable");

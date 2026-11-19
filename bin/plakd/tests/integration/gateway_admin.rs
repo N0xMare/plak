@@ -6,6 +6,7 @@
     reason = "offline integration test"
 )]
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -55,7 +56,7 @@ impl GatewayFixture {
         let socket = base.join("g.sock");
         let mut server = format!("socket = {:?}\n", socket.to_str().unwrap());
         if let Some(tcp) = tcp {
-            server.push_str(&format!("listen_tcp = \"{tcp}\"\n"));
+            writeln!(server, "listen_tcp = \"{tcp}\"").unwrap();
         }
         fs::write(home.join("gateway.toml"), server).unwrap();
         fs::write(
@@ -332,30 +333,7 @@ fn gateway_reads_allowance_and_allows_login_after_refresh_quarantines_a_grant() 
         "{stdout}"
     );
 
-    // The fixture responds to the forced refresh, and the single writer
-    // quarantines this rejected grant. Do not rely on any real OAuth endpoint.
-    let (pending, _) = start_login(&gateway);
-    assert!(matches!(
-        gateway.try_admin(&AdminRequest::Refresh {
-            account: claude.clone()
-        }),
-        Err(RelayCallError::Refused(GatewayRefusal::Internal {}))
-    ));
-    assert_eq!(gateway.credential("claude"), CredentialStatus::Quarantined);
-    assert_eq!(
-        gateway.admin(&login_request("claude", NativeProvider::Claude)),
-        AdminResponse::Refused {
-            refusal: AdminRefusal::AttemptLimit {}
-        },
-    );
-    assert_eq!(gateway.credential("claude"), CredentialStatus::Quarantined);
-    assert!(matches!(
-        gateway.admin(&AdminRequest::LoginCancel { attempt: pending }),
-        AdminResponse::Progress {
-            phase: LoginPhase::Cancelled,
-            ..
-        }
-    ));
+    quarantine_with_pending_login(&gateway);
     let (attempt, _) = start_login(&gateway);
     assert_eq!(gateway.credential("claude"), CredentialStatus::Revoked);
     let poll = gateway.admin(&AdminRequest::LoginPoll {
@@ -421,6 +399,32 @@ fn gateway_reads_allowance_and_allows_login_after_refresh_quarantines_a_grant() 
     );
     assert_eq!(gateway.credential("claude"), CredentialStatus::Revoked);
     gateway.finish();
+}
+
+fn quarantine_with_pending_login(gateway: &GatewayFixture) {
+    let (attempt, _) = start_login(gateway);
+    // The forced refresh is fault-scripted; its rejected grant is quarantined.
+    assert!(matches!(
+        gateway.try_admin(&AdminRequest::Refresh {
+            account: account("claude")
+        }),
+        Err(RelayCallError::Refused(GatewayRefusal::Internal {}))
+    ));
+    assert_eq!(gateway.credential("claude"), CredentialStatus::Quarantined);
+    assert_eq!(
+        gateway.admin(&login_request("claude", NativeProvider::Claude)),
+        AdminResponse::Refused {
+            refusal: AdminRefusal::AttemptLimit {}
+        },
+    );
+    assert_eq!(gateway.credential("claude"), CredentialStatus::Quarantined);
+    assert!(matches!(
+        gateway.admin(&AdminRequest::LoginCancel { attempt }),
+        AdminResponse::Progress {
+            phase: LoginPhase::Cancelled,
+            ..
+        }
+    ));
 }
 
 fn start_login(gateway: &GatewayFixture) -> (UuidText, SecretText) {
@@ -537,7 +541,7 @@ fn gateway_device_login_polls_and_rejects_concurrent_duplicate_start() {
     else {
         panic!("device challenge not returned: {challenge:?}");
     };
-    assert!(code.expose() == "ABCD-1234");
+    assert_eq!(code, paste("ABCD-1234".to_owned()));
     let peer = oauth_request(&oauth, CODEX_DEVICE_TOKEN_PATH);
     let poll = AdminRequest::LoginPoll {
         attempt: attempt.clone(),

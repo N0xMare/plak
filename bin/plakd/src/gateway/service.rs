@@ -142,8 +142,8 @@ fn finish_accounts(
     Err("gateway account worker did not stop before the shutdown deadline".to_owned())
 }
 
-/// How long in-flight relays and refresh claims may take to settle once the
-/// service stops accepting.
+/// How long in-flight relays, refresh claims and admin calls may take to
+/// settle once the service stops accepting.
 const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
 
 /// How long the runtime's remaining tasks get after the drain deadline.
