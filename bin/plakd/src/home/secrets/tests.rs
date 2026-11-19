@@ -5,16 +5,10 @@ use std::ffi::OsStr;
 use tempfile::tempdir;
 
 #[test]
-fn missing_key_remedies_target_the_process_that_resolves_them() {
-    use crate::environment::KeyResolver;
-    let auto = missing_api_key_message_for("openai", KeyResolver::AutoHost);
-    assert!(auto.contains("run `plakd key set openai`"));
-    assert!(auto.contains("caller variable OPENAI_API_KEY is ignored"));
-    assert!(!auto.contains("or set OPENAI_API_KEY"));
-    let host = missing_api_key_message_for("openai", KeyResolver::Host);
-    assert!(host.contains("set OPENAI_API_KEY in the host's or unit's environment"));
-    let cli = missing_api_key_message_for("openai", KeyResolver::Cli);
-    assert!(cli.contains("or set OPENAI_API_KEY; effective key resolver: this CLI process"));
+fn missing_key_remedy_names_the_gateway_environment() {
+    let remedy = missing_api_key_message("openai");
+    assert!(remedy.contains("plakd key set openai"));
+    assert!(remedy.contains("set OPENAI_API_KEY in the gateway service's environment"));
 }
 
 #[test]

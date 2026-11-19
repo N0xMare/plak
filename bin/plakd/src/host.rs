@@ -135,7 +135,6 @@ pub(crate) fn run_host_command(
         crate::command::HostStart::Supervisor => return starter::supervise(services.paths()?),
         crate::command::HostStart::Foreground | crate::command::HostStart::Detached => {}
     }
-    crate::environment::host::serving_keys(command.start == crate::command::HostStart::Detached);
     serve_host(services, command)
 }
 

@@ -1,25 +1,8 @@
 //! Process-local product handoff markers, never session authority.
 
-static HOST_KEY_RESOLVER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
 #[allow(dead_code, reason = "only hosted transports render the restart remedy")]
 pub(crate) const HOST_RESTART_REMEDY: &str =
     "run the installed build's `plakd host upgrade --expect-binary <id>` with its binary id";
-
-#[derive(Clone, Copy)]
-pub(crate) enum KeyResolver {
-    Cli,
-    Host,
-    AutoHost,
-}
-
-pub(crate) fn key_resolver() -> KeyResolver {
-    match HOST_KEY_RESOLVER.load(std::sync::atomic::Ordering::Acquire) {
-        1 => KeyResolver::Host,
-        2 => KeyResolver::AutoHost,
-        _ => KeyResolver::Cli,
-    }
-}
 
 #[allow(dead_code, reason = "only the web host starts a separate runner")]
 pub(crate) fn service_managed() -> bool {
@@ -71,15 +54,6 @@ pub(crate) fn xdg_config_home() -> Option<std::path::PathBuf> {
 
 #[cfg(feature = "web")]
 pub(crate) mod host {
-    use super::HOST_KEY_RESOLVER;
-
-    pub(crate) fn serving_keys(auto_started: bool) {
-        HOST_KEY_RESOLVER.store(
-            if auto_started { 2 } else { 1 },
-            std::sync::atomic::Ordering::Release,
-        );
-    }
-
     /// Deliberate OS/tool inputs, never the caller's API credentials or arbitrary
     /// product/reload overrides. The fixture seam is empty in shipped builds.
     pub(crate) fn start_environment() -> Vec<(&'static str, std::ffi::OsString)> {
