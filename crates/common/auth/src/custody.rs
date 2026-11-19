@@ -531,8 +531,8 @@ pub enum CustodyError {
         /// Current facts.
         facts: Box<AccountFacts>,
     },
-    /// The credential's generation moved since the request was prepared.
-    #[error("credential generation moved")]
+    /// The credential's generation or selection differs from the request's fence.
+    #[error("credential fence moved")]
     FenceMoved {
         /// Current facts.
         facts: Box<AccountFacts>,

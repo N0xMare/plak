@@ -84,16 +84,10 @@ impl GatewayCustodian {
     ) -> Result<T, CustodyError> {
         let control = RelayClient::call_control();
         if self.current_authority_kinds.contains(&slot.kind()) {
-            let version = self
-                .relay
-                .version(&control)
+            self.relay
+                .require_version(protocol::PROTOCOL_VERSION, &control)
                 .await
                 .map_err(|error| call_error(&error, slot))?;
-            if version < protocol::PROTOCOL_VERSION {
-                return Err(CustodyError::VersionMismatch {
-                    supported: vec![version],
-                });
-            }
         }
         let body = protocol::call::encode(request).map_err(|_| CustodyError::Internal)?;
         let reply = self

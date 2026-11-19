@@ -6363,6 +6363,11 @@ authority (chapter 01 §7.5). The host negotiates the highest common version,
 and Codex and SuperGrok cannot use a v1-only gateway for new-build admission
 or revalidation. Upgrade the gateway before carrying the host across state
 keys: the existing host keeps its v1 authority and the successor binds with v2.
+A cross-key preflight that needs either subscription refuses before surrender
+when the destination sees only v1. The host keeps its custody and negotiated
+version for its lifetime. If the host was carried first, upgrade the gateway,
+then restart the host so it negotiates v2. The refusal is `gateway protocol too
+old; upgrade the gateway`.
 
 `<home>/gateway.toml` keys (absent file: every default):
 

@@ -244,12 +244,18 @@ impl CredentialCustodian for SubscriptionCustodian {
                     rejected,
                     selection_epoch_digest,
                 } => {
-                    let facts = self
+                    let result = self
                         .login(&subscriptions)
                         .await?
                         .refresh_after_rejection(slot, &rejected, selection_epoch_digest)
-                        .await?;
-                    self.with_profile(facts).await
+                        .await;
+                    match result {
+                        Ok(facts) => self.with_profile(facts).await,
+                        Err(CustodyError::FenceMoved { facts }) => Err(CustodyError::FenceMoved {
+                            facts: Box::new(self.with_profile(*facts).await?),
+                        }),
+                        Err(error) => Err(error),
+                    }
                 }
                 RefreshRequest::Operator => {
                     subscriptions
@@ -364,6 +370,9 @@ mod gateway {
             CustodyError::Unavailable => NativeSubscriptionError::Transport(None),
             CustodyError::Busy { .. } => NativeSubscriptionError::AccountBusy,
             CustodyError::AccountChanged => NativeSubscriptionError::AuthenticationAccountChanged,
+            CustodyError::VersionMismatch { .. } => {
+                NativeSubscriptionError::GatewayProtocolMismatch
+            }
             CustodyError::NotReady { .. }
             | CustodyError::FenceMoved { .. }
             | CustodyError::UnknownAccount

@@ -18,6 +18,75 @@ use crate::subscriptions::{NativeProvider, NativeSubscriptionError, Subscription
 
 const SUPERGROK: &str = "https://cli-chat-proxy.grok.com";
 
+#[tokio::test]
+async fn a_path_bound_supergrok_binding_revalidates_through_gateway_v1() -> TestResult {
+    use plakous_auth::custody::gateway::GatewayCustodian;
+    use plakous_http::relay::RelayClient;
+    use plakous_model::{Digest, DigestDomain, sha256_hex};
+
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    seed_grok(&paths, "fixture-grok-subject")?;
+    let upstream = upstream().await?;
+    let provider = NativeProvider::Xai;
+    let subscriptions = at_review(&paths, provider)?;
+    let path = subscriptions.state.provider_record(provider);
+    let legacy_authority = format!(
+        "plak-native-xai-route:{}",
+        sha256_hex(&[
+            path.as_os_str().as_encoded_bytes(),
+            b"\0xai-route-credential-authority-v2\0",
+            b"primary",
+        ]),
+    );
+    let recorded = Digest::sha256(
+        DigestDomain::ModelBinding,
+        1,
+        &[
+            b"plakous-xai-credential-authority-binding-v1",
+            b"xai.grok_subscription",
+            SUPERGROK.as_bytes(),
+            legacy_authority.as_bytes(),
+        ],
+    )?;
+
+    let current = SubscriptionCustodian::new(subscriptions.clone(), provider);
+    let legacy = current.for_gateway_v1();
+    let custody = LocalCustody::new(new_instance().ok_or("gateway instance")?).with_kind_versions(
+        "grok",
+        Arc::new(current),
+        Some(Arc::new(legacy)),
+        SUPERGROK_UPSTREAM_PINS,
+    );
+    let server = InProcessGateway::server(custody, upstream.client.clone())
+        .with_dial_override(SUPERGROK, upstream.origin.clone());
+    let relay = Arc::new(RelayClient::new(
+        super::previous_gateway_endpoint(server)?,
+        None,
+    )?);
+    assert_eq!(relay.version(&RelayClient::call_control()).await?, 1);
+    let legacy = Arc::new(GatewayCustodian::new(Arc::clone(&relay), |_| {
+        Some(SUPERGROK_CREDENTIAL_HEADERS)
+    }));
+    let host = subscriptions.with_custody(&crate::custody::Custody::gateway(
+        plakous_http::RouteTransport::relayed(relay),
+        legacy,
+    ));
+    let reopened = host
+        .resolve_turn_scoped_provider_for_attach(grok_selection(GROK_MODEL)?, limits()?)
+        .await?;
+    assert_eq!(
+        reopened.initial_authority().credential_authority_binding(),
+        recorded
+    );
+    let fresh = reopened
+        .model()
+        .revalidate_runtime_authority(reopened.initial_authority().observed_at())
+        .await?;
+    assert_eq!(fresh.credential_authority_binding(), recorded);
+    Ok(())
+}
+
 /// Custody through an in-process gateway that serves the SuperGrok logins
 /// of `paths` and dials the production origin at `upstream`.
 fn gateway_custody(

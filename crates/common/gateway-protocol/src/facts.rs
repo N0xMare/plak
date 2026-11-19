@@ -65,8 +65,8 @@ pub struct IdentityFacts {
     /// Domain-separated digest of the provider account identity: the session
     /// account binding.
     pub account_binding: HexDigest,
-    /// Digest of the credential authority (kind, slot and profile), never a
-    /// path or an address.
+    /// Digest of the credential authority under the requested version; v1
+    /// may hash the slot path. The path or address itself is never sent.
     pub credential_authority: HexDigest,
     /// Provider-reported email, for presentation only.
     pub email: Option<BoundedText<320>>,

@@ -124,7 +124,8 @@ For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
 3. Upgrade each paired runner to the matching snapshot and advance its
    dedicated executable link.
 4. If using a [gateway](gateway.md), drain it, point its service at the new
-   immutable snapshot, start it and run `plakd gateway check`.
+   immutable snapshot, reload the service definition, start it and run
+   `plakd gateway check`.
 5. From the destination snapshot, run
    `plakd host upgrade --expect-binary <id>` to carry settled sessions.
 6. Re-pin clients to host wire protocol 12. A protocol-11 client receives a
@@ -132,6 +133,8 @@ For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
 
 Once the carry commits, recovery is fix-forward only; do not restart the old
 host as a rollback.
+If the host was carried first, upgrade the gateway, then restart the host.
+Codex and SuperGrok refuse while the running host is still using protocol 1.
 
 Install a tested matching snapshot. For a host already supporting the upgrade
 coordinator, invoke the destination build with its binary ID (shown by

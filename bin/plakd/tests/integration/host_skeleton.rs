@@ -56,12 +56,18 @@ fn spawn_env(
     extra: &[&str],
     env: &[(&str, String)],
 ) -> (Child, mpsc::Receiver<String>) {
-    let mut child = Child::spawn(
+    spawn_host(
         fixture
             .command()
             .arg("host")
             .args(extra)
-            .envs(env.iter().map(|(name, value)| (*name, value.as_str())))
+            .envs(env.iter().map(|(name, value)| (*name, value.as_str()))),
+    )
+}
+
+fn spawn_host(command: &mut std::process::Command) -> (Child, mpsc::Receiver<String>) {
+    let mut child = Child::spawn(
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped()),

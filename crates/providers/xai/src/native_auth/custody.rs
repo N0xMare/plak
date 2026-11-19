@@ -242,10 +242,15 @@ impl XaiNativeAuthManager {
         };
         if facts.status != CustodyStatus::Ready
             || facts.account_binding != Some(rejected.account_binding)
-            || selection_epoch_digest
-                .is_some_and(|selection| facts.selection_epoch_digest != Some(selection))
         {
             return Ok(facts);
+        }
+        if selection_epoch_digest
+            .is_some_and(|selection| facts.selection_epoch_digest != Some(selection))
+        {
+            return Err(CustodyError::FenceMoved {
+                facts: Box::new(facts),
+            });
         }
         let authority = self.core.authority_id().map_err(store_error)?;
         if let Err(XaiNativeAuthError::Store(_)) = self

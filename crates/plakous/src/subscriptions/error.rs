@@ -132,6 +132,8 @@ pub enum NativeSubscriptionError {
     /// consent, account listing) runs at the gateway, never on its store
     /// from here.
     GatewayCustody,
+    /// The credential gateway does not speak the protocol required by this route.
+    GatewayProtocolMismatch,
     /// Internal application execution or coordination failed.
     Internal,
 }
@@ -171,6 +173,7 @@ impl fmt::Display for NativeSubscriptionError {
 impl NativeSubscriptionError {
     fn label(&self) -> &'static str {
         match self {
+            Self::GatewayProtocolMismatch => "gateway protocol too old; upgrade the gateway",
             Self::NotCompiled(_) => "native subscription route is not included in this build",
             Self::UnsafeStorage => "native subscription storage is unsafe",
             Self::CredentialProfileChanged => {

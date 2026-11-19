@@ -161,15 +161,24 @@ pub(crate) fn reopen_credential_gate(
     custody: &crate::gateway::HostCustody,
     account: Option<&str>,
 ) -> Option<ReopenProbe> {
+    use plakous::subscriptions::{NativeSubscriptionError, NativeSubscriptions};
+
     let account = account?;
     let provider = plakous_hosted::capabilities::for_account(account)?.native_provider()?;
     let state_home = crate::home::paths::application_state_home().ok()?;
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(state_home).ok()?;
-    let subscriptions =
-        custody.subscriptions(plakous::subscriptions::NativeSubscriptions::new(paths));
+    let mut subscriptions = custody.subscriptions(NativeSubscriptions::new(paths));
+    if let Some((_, name)) = account.split_once('/') {
+        subscriptions = subscriptions.for_named_account(provider, name).ok()?;
+    }
     let executor = plakous::application::ApplicationExecutor::new().ok()?;
     let status = match executor.block_on(subscriptions.status(provider)) {
         Ok(Ok(status)) => Some(status.credential()),
+        Ok(Err(error @ NativeSubscriptionError::GatewayProtocolMismatch)) => {
+            return Some(ReopenProbe::Refused {
+                reason: error.to_string(),
+            });
+        }
         _ => None,
     };
     let expiring = || {

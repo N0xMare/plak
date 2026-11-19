@@ -486,6 +486,13 @@ async fn a_path_bound_codex_binding_revalidates_through_gateway_v1() -> TestResu
 fn previous_gateway_endpoint(
     server: crate::gateway::server::RelayServer<InProcessGateway>,
 ) -> TestResult<crate::gateway::GatewayEndpoint> {
+    advertised_gateway_endpoint(server, vec![1])
+}
+
+fn advertised_gateway_endpoint(
+    server: crate::gateway::server::RelayServer<InProcessGateway>,
+    versions: Vec<u16>,
+) -> TestResult<crate::gateway::GatewayEndpoint> {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use plakous_gateway_protocol::{VersionsReply, call};
@@ -495,7 +502,7 @@ fn previous_gateway_endpoint(
     use crate::gateway::{GatewayEndpoint, InMemoryGateway};
 
     let body = call::encode(&VersionsReply {
-        versions: vec![1],
+        versions,
         instance: server.instance().clone(),
     })?;
     let mut reply = format!(
@@ -530,6 +537,8 @@ fn previous_gateway_endpoint(
         },
     )))
 }
+
+mod versions;
 
 #[tokio::test]
 async fn a_gateway_host_never_creates_the_subscription_store() -> TestResult {

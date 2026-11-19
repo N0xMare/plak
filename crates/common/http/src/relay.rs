@@ -12,7 +12,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -24,6 +24,7 @@ use plakous_gateway_protocol::refusal::{GatewayRefusal, RefusalBody};
 use plakous_gateway_protocol::{
     Endpoint, GatewayAccount, HexDigest, SUPPORTED_VERSIONS, VersionsReply, call, envelope,
 };
+use tokio::sync::OnceCell;
 
 use crate::{
     Client, ConfigError, ErrorKind, ExchangeControl, Failure, Headers, LimitKind, Limits, Origin,
@@ -224,7 +225,12 @@ pub enum RelayCallError {
 pub struct RelayClient {
     hop: Client,
     key: Option<HeaderValue>,
-    version: Mutex<Option<u16>>,
+    version: OnceCell<NegotiatedVersion>,
+}
+
+struct NegotiatedVersion {
+    selected: u16,
+    served: Vec<u16>,
 }
 
 impl std::fmt::Debug for RelayClient {
@@ -259,7 +265,7 @@ impl RelayClient {
         Ok(Self {
             hop: hop.with_dialer(Arc::new(Dial(endpoint))).pooled(),
             key,
-            version: Mutex::new(None),
+            version: OnceCell::new(),
         })
     }
 
@@ -268,9 +274,40 @@ impl RelayClient {
     /// # Errors
     /// Returns the `GET /versions` failure or [`RelayCallError::VersionMismatch`].
     pub async fn version(&self, control: &ExchangeControl) -> Result<u16, RelayCallError> {
-        if let Some(version) = *self.version.lock().unwrap_or_else(PoisonError::into_inner) {
-            return Ok(version);
+        Ok(self.negotiated_version(control).await?.selected)
+    }
+
+    /// Requires a version new enough for the operation's binding inputs.
+    ///
+    /// # Errors
+    /// Returns discovery failure or a mismatch naming all advertised versions.
+    pub async fn require_version(
+        &self,
+        minimum: u16,
+        control: &ExchangeControl,
+    ) -> Result<(), RelayCallError> {
+        let version = self.negotiated_version(control).await?;
+        if version.selected < minimum {
+            return Err(RelayCallError::VersionMismatch {
+                supported: version.served.clone(),
+            });
         }
+        Ok(())
+    }
+
+    async fn negotiated_version(
+        &self,
+        control: &ExchangeControl,
+    ) -> Result<&NegotiatedVersion, RelayCallError> {
+        self.version
+            .get_or_try_init(|| self.discover_version(control))
+            .await
+    }
+
+    async fn discover_version(
+        &self,
+        control: &ExchangeControl,
+    ) -> Result<NegotiatedVersion, RelayCallError> {
         let reply: VersionsReply = call::decode(
             &self
                 .send(
@@ -283,12 +320,17 @@ impl RelayClient {
                 .await?,
         )
         .map_err(|_| RelayCallError::InvalidReply)?;
-        let version = plakous_gateway_protocol::negotiate(SUPPORTED_VERSIONS, &reply.versions)
-            .ok_or(RelayCallError::VersionMismatch {
+        let Some(selected) =
+            plakous_gateway_protocol::negotiate(SUPPORTED_VERSIONS, &reply.versions)
+        else {
+            return Err(RelayCallError::VersionMismatch {
                 supported: reply.versions,
-            })?;
-        *self.version.lock().unwrap_or_else(PoisonError::into_inner) = Some(version);
-        Ok(version)
+            });
+        };
+        Ok(NegotiatedVersion {
+            selected,
+            served: reply.versions,
+        })
     }
 
     /// One JSON call (`facts`, `refresh` or `admin`) at the negotiated version.

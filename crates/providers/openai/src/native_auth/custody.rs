@@ -198,6 +198,14 @@ impl CodexSubscriptionCredentialManager {
         if facts.account_binding != Some(rejected.account_binding) {
             return Ok(facts);
         }
+        if facts
+            .selection_epoch_digest
+            .is_some_and(|current| current != selection)
+        {
+            return Err(CustodyError::FenceMoved {
+                facts: Box::new(facts),
+            });
+        }
         let selection =
             Digest::from_sha256_bytes(DigestDomain::ModelBinding, 2, *selection.as_bytes())
                 .map_err(|_| CustodyError::Internal)?;

@@ -6158,8 +6158,11 @@ profile, slot and source scope for SuperGrok. SuperGrok's
 `grok_authority_id`, both providers' credential-authority bindings and their
 selection digests follow the version, including in refresh replies and
 `fence_moved` facts. A refresh after rejection interprets the request's
-selection digest under the same version; both views use the same store and
-refresh lock. No other facts or relay encodings change. Current Codex and
+selection digest under the same version. A supplied Codex or SuperGrok
+digest that disagrees with the settled login of the same account returns
+`fence_moved` with that version's facts and does not claim a refresh, including
+when the supplied digest belongs to the other protocol version. Both views
+use the same store and refresh lock. No other facts or relay encodings change. Current Codex and
 SuperGrok host routes require v2 authority; they never bind to v1 facts.
 Admin calls cover listing, status, key set and clear, logout,
 forced refresh, removal, login start, complete, poll and cancel, allowance
