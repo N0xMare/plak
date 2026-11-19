@@ -44,7 +44,8 @@ Login and key entry use the operator CLI or the host's confirmed Accounts
 operations. Usage reads do not renew expired credentials. Run
 `plakd refresh <account>` when a subscription token needs refresh, then
 `plakd usage --account <account>`. Catalogs, readiness and credential writes
-remain host-owned; clients do not resolve credentials locally.
+remain service-owned; only the separate [credential gateway](gateway.md)
+resolves and stores provider credentials.
 
 For a profile default, materialize its agent
 templates under the host home's `agents/` directory, then edit `[root] agent`
@@ -64,13 +65,12 @@ working_set = ["claude-default-worker", "claude-default-reviewer", "claude-defau
 Template file creation is separate; setting these pointers does not extract
 the built-in profile. See [writing a template](configuration.md#write-a-template).
 
-API-key environment variables override stored key files. In particular,
+API-key variables in the gateway's environment override stored key files. In particular,
 `OPENROUTER_API_KEY` wins over the OpenRouter key file even if the variable's
 key is invalid. Usage names that variable or the file's `sha256:` fingerprint,
 never a key prefix or suffix. To return to a stored key, run
-`unset OPENROUTER_API_KEY` and start plakd again. Remove the stale export from
-your shell startup configuration too. Restart the resolving process with the
-new environment; an unset in another shell does not change a running host.
+remove `OPENROUTER_API_KEY` from the gateway's environment and restart the
+gateway. An unset in another shell does not change a running service.
 
 Claude OAuth is a first-class account route. Sonnet 5 and Sonnet 5.5 have
 live CLI and JSONL evidence; Opus 5.5 also has a high-context profile-fork check. None of this is release qualification; the
@@ -98,31 +98,17 @@ sessions also have `view_image`, one workspace image and nothing else. The separ
 
 ## OAuth
 
-`plakd login <account>` opens a browser on this machine.
-
-- **Codex** waits for its loopback callback by itself. Do not paste the
-  localhost URL back into the terminal. It reminds you at 30 seconds and times
-  out at 120; press `c` to re-copy the URL while it waits.
-- **Grok** opens a browser and asks you to paste the code from the page.
-- **Claude** uses an HTTPS redirect with no loopback; paste the authorization
-  code shown on the callback page.
-
-`--remote` is for a browser that is not on this host.
+`plakd login <account>` presents the challenge from the gateway and can open a
+browser on the CLI machine. Use `--remote` for a headless CLI.
 
 - **Codex** uses a device code. plakd prints a verification URL and a one-time
   code; open the URL in a browser on any device, sign in, and enter the code.
   plakd completes by itself once you approve; nothing is pasted back. The code
-  expires after 15 minutes and Ctrl-C cancels; neither leaves anything stored.
-  Continue only if you started the login in plakd; if someone gave you a code,
-  cancel. If the provider says device-code login is not available for your
-  account, run `plakd login codex` on a machine with a browser, or forward the
-  callback port with `ssh -L 1455:localhost:1455 <host>` and run
-  `plakd login codex` on the host.
+  expires after 15 minutes. Continue only if you started the login in plakd;
+  if someone gave you a code, do not use it. The gateway does not run a
+  CLI-local callback.
 - **Grok** and **Claude** print the authorize URL and take the pasted code or
   callback URL; `c` then Enter re-copies.
-
-An SSH session refuses a local login outright and prints
-`plakd login <account> --remote` rather than switching mode silently.
 
 `plakd logout <account>` revokes a usable credential at the provider and retires
 it; a credential this build cannot use is retired locally, and the output says
@@ -142,14 +128,13 @@ and `/var`; use a direct path such as one beneath `$HOME` for `XDG_STATE_HOME`.
 `~/.plak/secrets/<account>.key` at mode `0600`. `plakd key clear` removes it.
 `plakd key status` reports presence without printing anything secret.
 
-Environment variables win over files — `OPENAI_API_KEY`, `XAI_API_KEY`,
+Gateway environment variables win over files — `OPENAI_API_KEY`, `XAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` -- and plakd never loads a `.env` file.
 While one of those is set, `plakd key set` and `plakd key clear` refuse to touch
 the file store rather than pretending to work:
 
 ```
-OPENROUTER_API_KEY is set in the process environment and still wins over the
-file store; unset OPENROUTER_API_KEY (plakd never loads .env); no file change
+the gateway environment variable OPENROUTER_API_KEY overrides the stored key
 ```
 
 Codex OAuth enrolls `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,

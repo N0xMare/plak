@@ -59,17 +59,15 @@ Never remove the old snapshot until the destination has acknowledged success.
 atomically; invalid replacements keep the old build. SIGHUP and SIGTERM mean
 planned handoff, not UI reload. A control-only host needs no --web.
 
-Service installation supports Linux systemd user units and macOS per-user
-LaunchAgents. Both paths are explicit and absolute; --dev-login is never
-accepted by install.
+The host requires a reachable credential gateway. Service installation supports
+Linux systemd user units and macOS per-user LaunchAgents. Both web paths are
+explicit and absolute; --dev-login is never accepted by install.
 
-On Linux, install writes ~/.config/systemd/user/plakd-host.service and reloads
-the user manager. On macOS, it writes
-~/Library/LaunchAgents/com.plakd.host.plist and prepares private stdout/stderr
-logs in ~/Library/Logs/Plak; it never invokes launchctl or loads the agent.
-Install never enables or starts a service. An identical service file stays
-unchanged; any other existing file or symlink is refused. --dry-run prints the
-service file without changes. The printed commands show how to start it,
-follow its logs and remove it.
+Install writes the host and gateway definitions and sets the default Unix
+gateway address. Linux reloads the user manager; the host unit requires the
+gateway. macOS prepares private host logs and prints the gateway-first bootstrap
+order without invoking launchctl. Install never enables or starts a service.
+Edited or symlinked definitions are refused. --dry-run prints both definitions
+and the configuration without changes.
 
 See docs/user-guide/host-service.md for setup, upgrades, logs and removal.

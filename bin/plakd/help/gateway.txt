@@ -21,3 +21,6 @@ USAGE:
   administrator and needs no caller key. TCP listeners require a key and bind
   only to loopback or tailnet addresses unless allow_non_tailnet is set.
   Caller keys are shown once and stored hashed. Audit lines are metadata only.
+  `install` writes the user service for a gateway-only machine. It seeds
+  ~/.local/bin/plakd-gateway if absent and never starts the service. Upgrade
+  by draining, switching that link, restarting and running `gateway check`.

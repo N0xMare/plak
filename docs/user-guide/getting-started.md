@@ -174,6 +174,13 @@ home-deletion flag. For a crates.io installation, use
 
 ## Connect an account
 
+First start a separate [credential gateway](gateway.md). For a web host,
+`plakd host install` installs both services and writes the gateway configuration.
+For a foreground host or CLI-only setup, run `plakd gateway install` and follow
+its start instructions. Copy the socket from `plakd gateway status --dry-run`
+into the product home's `config.toml` as `[gateway] address = "unix:<socket>"`
+(on separate TOML lines). Run `plakd gateway check` before connecting an account.
+
 plakd supports three subscription accounts and four separately billed API accounts. See [providers and accounts](providers-and-accounts.md) for their exact names and enrolled models.
 
 ```sh
@@ -183,47 +190,31 @@ plakd login claude    # Claude subscription
 plakd key set openrouter
 ```
 
-`plakd login` opens a browser on **this** machine. Codex waits for its loopback
-callback by itself — do not paste the localhost URL back at it. Grok and Claude
-show you a code on the callback page and ask you to paste it in.
-
-Over SSH or on a headless box use `plakd login <account> --remote`. Codex prints
-a device-login URL and code, then waits for authorization; Grok and Claude use
-paste-back. See [remote login](providers-and-accounts.md#oauth).
-An SSH session refuses a local login and tells
-you to add `--remote` rather than switching mode silently.
+The gateway runs the provider login. Codex supplies a device-login URL and
+code, then waits for authorization; Grok and Claude ask you to paste back the
+provider response. Add `--remote` to avoid opening a local browser.
+See [OAuth login](providers-and-accounts.md#oauth).
 
 `plakd key set` prompts for the key and writes it to `~/.plak/secrets/` with
-mode `0600`. Environment variables (`OPENAI_API_KEY`, `XAI_API_KEY`,
+mode `0600` in the gateway's home. Its environment variables (`OPENAI_API_KEY`, `XAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`) override the files, and plakd never
 loads a `.env` file.
 
 Host clients can also implement the confirmed Accounts operations for login
-and masked key entry. Credential resolution remains on the host.
+and masked key entry. Only the gateway resolves provider credentials.
 
 ## Check the setup
 
-`plakd status` reads local credential state only -- no provider request, no
-secrets printed. An account that cannot be read is a Setup needed row with the
-repair, and the rest of the table still prints:
+`plakd status` asks the gateway for credential state -- no provider request and
+no secrets printed. An unreadable account is reported without hiding other rows:
 
 ```
 $ plakd status
-Ready
-
-PROVIDER            KIND     PROFILE   CREDENTIAL
-Claude Subscription OAuth    Accepted  Ready
-Codex Subscription  OAuth    Accepted  Ready
-Grok Subscription   OAuth    Accepted  Ready
-OpenRouter API      API key  —         Key file
-
-Setup needed
-
-PROVIDER            KIND     PROFILE   CREDENTIAL
-Anthropic API       API key  —         Missing
-OpenAI API          API key  —         Missing
-xAI API             API key  —         Missing
-Local credential state only; no provider request was made.
+via gateway unix:/run/user/1000/plak/gateway.sock
+claude: credential=ready
+codex: credential=ready
+grok: credential=ready
+openai: credential=signed-out source=missing
 ```
 
 `plakd doctor` checks everything else -- plakd home, databases, sidecar, config
@@ -273,7 +264,7 @@ default, the catalog row decides.
 
 ## Connect your client
 
-Start `plakd host`, then connect your own client through
+With the gateway running, start `plakd host`, then connect your own client through
 `plakd host connect --stdio`. A missing host does not start automatically;
 local startup requires the bridge's explicit `--auto-start` option. There is
 no public terminal application, `resume` picker or bare interactive launch.
