@@ -621,6 +621,10 @@ impl ContextAdmission {
         &self.status
     }
 
+    pub(crate) fn into_status(self) -> ContextStatus {
+        self.status
+    }
+
     /// Returns the caller-selected minimum evidence class bound into this receipt.
     #[must_use]
     pub const fn requirement(&self) -> ContextAdmissionRequirement {

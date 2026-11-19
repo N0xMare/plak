@@ -588,8 +588,8 @@ fn decoded_prepared_record_refuses_measurement_instead_of_dropping_its_items() {
         .context_status(&plan, record.projection(), timestamp(2))
         .expect("live status");
     assert_eq!(live.identity(), record.context_status_identity());
-    let decoded = descriptor
-        .context_status(&plan, restored.projection(), timestamp(2))
+    let decoded = restored
+        .context_status(&descriptor, &plan, timestamp(2))
         .expect("decoded status");
     assert_eq!(
         decoded.kind(),
@@ -609,6 +609,68 @@ fn decoded_prepared_record_refuses_measurement_instead_of_dropping_its_items() {
     let byte = &mut tampered["projection"]["token_projection"]["wire_input_identity"]["bytes"][0];
     *byte = serde_json::json!((byte.as_u64().expect("digest byte") + 1) % 256);
     assert!(serde_json::from_value::<PreparedCallRecord>(tampered).is_err());
+}
+
+#[test]
+fn prepared_round_projects_the_sealed_fit_once_and_still_checks_first_dispatch() {
+    use crate::descriptor::FIT_EVALUATIONS;
+
+    FIT_EVALUATIONS.set(0);
+    let (descriptor, plan, record) = anchored_item_record();
+    assert_eq!(FIT_EVALUATIONS.get(), 1);
+    let sealed = record
+        .context_status(&descriptor, &plan, timestamp(2))
+        .expect("prepared status");
+    assert_eq!(sealed.identity(), record.context_status_identity());
+    assert_eq!(
+        FIT_EVALUATIONS.get(),
+        1,
+        "presentation must not evaluate fit"
+    );
+
+    let fresh = RuntimeModelAuthority::new(
+        &descriptor,
+        authority(b"account"),
+        credential_authority(),
+        2,
+        timestamp(3),
+        None,
+    )
+    .expect("fresh authority");
+    record
+        .revalidate_first_dispatch(&descriptor, &plan, &fresh, timestamp(3))
+        .expect("first dispatch must still verify exact current fit");
+    assert_eq!(FIT_EVALUATIONS.get(), 2);
+
+    let after_expiry = record
+        .context_status(&descriptor, &plan, timestamp(100))
+        .expect("expired status");
+    assert_eq!(
+        after_expiry.kind(),
+        &ContextStatusKind::Unavailable(ContextUnavailable::EvidenceExpired {
+            evidence: "capacity",
+        })
+    );
+    assert!(
+        record
+            .revalidate_first_dispatch(&descriptor, &plan, &fresh, timestamp(100))
+            .is_err()
+    );
+    assert_eq!(FIT_EVALUATIONS.get(), 4);
+
+    let other_plan = descriptor
+        .validate_request(request(Some(120_000)), ValidationMode::Strict)
+        .expect("different plan");
+    let foreign = record
+        .context_status(&descriptor, &other_plan, timestamp(2))
+        .expect("drift status");
+    assert_eq!(
+        foreign.kind(),
+        &ContextStatusKind::Unavailable(ContextUnavailable::ScopeDrift {
+            field: "prepared projection",
+        })
+    );
+    assert_eq!(FIT_EVALUATIONS.get(), 5);
 }
 
 #[test]

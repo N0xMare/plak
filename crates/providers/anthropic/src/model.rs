@@ -16,18 +16,17 @@ use crate::{
 use plakous_http::{Client, Limits, Origin};
 use plakous_model::{
     Capability, CapacityCertificate, CapacityRule, Clock, ConfiguredLanguageModel, ContextContract,
-    ContextEvidenceSource, ContextInputParts, CountCertificateKind, CountObservation,
-    CredentialSelectionId, Digest, DigestDomain, EvidenceFreshness, FactSource, LanguageModel,
-    MeasurementCertificate, ModelAdapterProfileId, ModelCacheAffinity, ModelCallContext,
-    ModelError, ModelErrorKind, ModelFamilyId, ModelId, ModelPreparationContext,
-    ModelPreparationError, ModelPreparationErrorKind, OutputBoundDisposition, PreparedCacheUse,
-    PreparedCallRecord, PreparedModelCall, PreparedModelProjection, PreparedOutputLimit,
-    PreparedTokenProjection, ProtocolId, ProviderAuthorityClassId, ProviderBehaviorConfiguration,
-    ProviderProfileRevisionId, ProviderRouteSelection, ProviderSemanticEvidence,
-    ReasoningEffortDisposition, ResolvedModelDescriptor, ResolvedProviderAuthorityBinding,
-    RuntimeModelAuthority, RuntimeModelAuthorityError, RuntimeModelAuthorityOperation,
-    SelectedProviderConfiguration, Support, SystemClock, SystemIdGenerator, Timestamp,
-    ValidatedRequestPlan,
+    ContextEvidenceSource, CountCertificateKind, CountObservation, CredentialSelectionId, Digest,
+    DigestDomain, EvidenceFreshness, FactSource, LanguageModel, MeasurementCertificate,
+    ModelAdapterProfileId, ModelCacheAffinity, ModelCallContext, ModelError, ModelErrorKind,
+    ModelFamilyId, ModelId, ModelPreparationContext, ModelPreparationError,
+    ModelPreparationErrorKind, OutputBoundDisposition, PreparedCacheUse, PreparedCallRecord,
+    PreparedModelCall, PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection,
+    ProtocolId, ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
+    ProviderRouteSelection, ProviderSemanticEvidence, ReasoningEffortDisposition,
+    ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, RuntimeModelAuthority,
+    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SelectedProviderConfiguration,
+    Support, SystemClock, SystemIdGenerator, Timestamp, ValidatedRequestPlan,
 };
 use std::{fmt, num::NonZeroU64, sync::Arc};
 
@@ -506,8 +505,7 @@ impl LanguageModel for AnthropicLanguageModel {
         let token_projection =
             PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))
                 .map_err(|error| rejection(ModelPreparationErrorKind::InvalidConfiguration, error))?
-                .with_input_parts(ContextInputParts::measure_wire(prepared.body()))
-                .with_wire_input(prepared.body(), Some(CLAUDE_IMAGE_MAX_TOKENS), &context)?;
+                .with_wire_analysis(prepared.body(), Some(CLAUDE_IMAGE_MAX_TOKENS), &context)?;
         let output_limit = PreparedOutputLimit::enforced_wire_maximum(
             max_tokens,
             "max_tokens",

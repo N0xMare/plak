@@ -429,8 +429,9 @@ impl Driver {
             .projection()
             .output_limit()
             .map(plakous_model::PreparedOutputLimit::tokens);
-        let sent_status = descriptor
-            .context_status(&plan, prepared.record().projection(), prepared_at)
+        let sent_status = prepared
+            .record()
+            .context_status(&descriptor, &plan, prepared_at)
             .map(|status| {
                 status.with_input_parts(
                     prepared

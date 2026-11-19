@@ -153,6 +153,7 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// actor.
     interrupt_state: std::rc::Rc<RefCell<InterruptWatchState<P>>>,
     pending_start: Option<SessionQueueItem>,
+    pending_context_refresh: Option<plakous::sessions::SessionLocator>,
     /// The idle prompt's one capacity sample, shared by echo and admission.
     pending_storage_admission: Option<crate::session_store::StorageAdmission>,
     /// The queue item of the idle prompt whose row the host echoed before

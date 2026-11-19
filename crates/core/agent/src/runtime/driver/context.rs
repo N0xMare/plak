@@ -106,8 +106,8 @@ impl Driver {
             }
         };
         let record = prepared.record();
-        let status = descriptor
-            .context_status(&plan, record.projection(), prepared_at)
+        let status = record
+            .context_status(&descriptor, &plan, prepared_at)
             .map_err(|_| AgentSessionEndpointError::Unavailable)?;
         if status.identity() != record.context_status_identity() {
             return Err(AgentSessionEndpointError::Unavailable);
@@ -184,8 +184,8 @@ impl Driver {
             }
         };
         let record = prepared.record();
-        let status = descriptor
-            .context_status(&plan, record.projection(), prepared_at)
+        let status = record
+            .context_status(&descriptor, &plan, prepared_at)
             .map_err(|_| AgentSessionEndpointError::Unavailable)?;
         if status.identity() != record.context_status_identity() {
             return Err(AgentSessionEndpointError::Unavailable);

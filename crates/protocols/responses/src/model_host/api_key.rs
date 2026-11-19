@@ -456,10 +456,7 @@ fn seal_prepared_record(
     let body = attempt.body();
     let token_projection = PreparedTokenProjection::new(wire_digest, wire_size, count_observation)
         .map_err(ModelPreparationError::from)?
-        .with_input_parts(plakous_model::ContextInputParts::measure_wire(
-            body.as_ref(),
-        ))
-        .with_wire_input(
+        .with_wire_analysis(
             body.as_ref(),
             Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
             context,

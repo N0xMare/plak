@@ -357,12 +357,11 @@ impl WireProjection {
                 )
             })?;
         let token_projection = PreparedTokenProjection::new(wire_digest, wire_size, observation)?
-            .with_input_parts(plakous_model::ContextInputParts::measure_wire(body))
-            .with_wire_input(
-                body,
-                Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
-                context,
-            )?;
+            .with_wire_analysis(
+            body,
+            Some(plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS),
+            context,
+        )?;
         let output_limit = PreparedOutputLimit::enforced_wire_maximum(
             output_bound,
             "max_tokens",

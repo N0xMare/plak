@@ -20,6 +20,28 @@ pub(super) enum TerminalErrorPresentation {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    pub(super) async fn refresh_terminal_context(&self) {
+        if let Err(error) = report_context(
+            &self.opened,
+            &self.role.events,
+            "after turn publication",
+            self.role
+                .config
+                .target
+                .native_provider()
+                .is_some_and(native_compact_facet),
+            self.role.config.session.context_counters(),
+        )
+        .await
+        {
+            emit_unavailable_context(&self.role.events);
+            let _ = self.role.events.notice(
+                TranscriptRow::error(NoticeScope::Turn, error.message().to_owned())
+                    .with_optional_remedy(error.remedy()),
+            );
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "Terminal publication joins cached outcome, durable feed catch-up, pending notices, and compaction under one publication fence."
@@ -117,24 +139,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                             SessionEvent::new("turn.completed")
                                 .u64("elapsed_ms", elapsed_ms_since(turn_started)),
                         );
-                        if let Err(error) = report_context(
-                            &self.opened,
-                            &self.role.events,
-                            "after turn publication",
-                            self.role
-                                .config
-                                .target
-                                .native_provider()
-                                .is_some_and(native_compact_facet),
-                            self.role.config.session.context_counters(),
-                        )
-                        .await
+                        if self.role.config.attached_one_shot
+                            || matches!(error_presentation, TerminalErrorPresentation::Return)
                         {
-                            emit_unavailable_context(&self.role.events);
-                            let _ = self.role.events.notice(
-                                TranscriptRow::error(NoticeScope::Turn, error.message().to_owned())
-                                    .with_optional_remedy(error.remedy()),
-                            );
+                            self.refresh_terminal_context().await;
+                        } else {
+                            self.role.pending_context_refresh = Some(self.opened.locator());
                         }
                     }
                     Ok(false) => unreachable!("completion update always changes the candidate"),

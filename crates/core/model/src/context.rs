@@ -171,18 +171,16 @@ impl ContextInputParts {
         }
         let image_transport_bytes = before.saturating_sub(json_bytes(&value));
         let object = value.as_object()?;
-        let total_bytes = u64::try_from(body.len()).ok()?;
-        let mut system_bytes = 0_u64;
-        let mut message_bytes = 0_u64;
-        let mut reasoning_bytes = 0_u64;
+        let mut parts = Self::empty(body.len());
+        parts.image_transport_bytes = image_transport_bytes;
         // Responses `instructions` and Messages `system` are the whole system
         // prompt in one field.
         for key in ["instructions", "system"] {
             if let Some(field) = object.get(key) {
-                system_bytes = system_bytes.saturating_add(json_bytes(field));
+                parts.system_bytes = parts.system_bytes.saturating_add(json_bytes(field));
             }
         }
-        let (tool_definition_bytes, tool_definition_count) = match object.get("tools") {
+        (parts.tool_definition_bytes, parts.tool_definition_count) = match object.get("tools") {
             Some(serde_json::Value::Array(tools)) => (
                 json_bytes(object.get("tools")?),
                 u32::try_from(tools.len()).unwrap_or(u32::MAX),
@@ -194,38 +192,45 @@ impl ContextInputParts {
         for key in ["input", "messages"] {
             let Some(serde_json::Value::Array(items)) = object.get(key) else {
                 if let Some(other) = object.get(key) {
-                    message_bytes = message_bytes.saturating_add(json_bytes(other));
+                    parts.message_bytes = parts.message_bytes.saturating_add(json_bytes(other));
                 }
                 continue;
             };
             for item in items {
-                let bytes = json_bytes(item);
-                let kind = item.get("type").and_then(serde_json::Value::as_str);
-                let role = item.get("role").and_then(serde_json::Value::as_str);
-                if matches!(kind, Some("reasoning" | "compaction")) {
-                    reasoning_bytes = reasoning_bytes.saturating_add(bytes);
-                } else if matches!(role, Some("system" | "developer")) {
-                    system_bytes = system_bytes.saturating_add(bytes);
-                } else {
-                    // Thinking blocks and chat reasoning fields ride inside a
-                    // message; they are moved from the message share to the
-                    // reasoning share so neither is counted twice.
-                    let inner = embedded_reasoning_bytes(item);
-                    reasoning_bytes = reasoning_bytes.saturating_add(inner);
-                    message_bytes = message_bytes.saturating_add(bytes.saturating_sub(inner));
-                }
+                parts.add_conversation_item(item, json_bytes(item));
             }
         }
-        Some(Self {
-            total_bytes,
-            image_transport_bytes,
+        Some(parts)
+    }
+
+    fn empty(body_len: usize) -> Self {
+        Self {
+            total_bytes: u64::try_from(body_len).unwrap_or(u64::MAX),
+            image_transport_bytes: 0,
             image_tokens: 0,
-            system_bytes,
-            tool_definition_bytes,
-            tool_definition_count,
-            message_bytes,
-            reasoning_bytes,
-        })
+            system_bytes: 0,
+            tool_definition_bytes: 0,
+            tool_definition_count: 0,
+            message_bytes: 0,
+            reasoning_bytes: 0,
+        }
+    }
+
+    fn add_conversation_item(&mut self, item: &serde_json::Value, bytes: u64) {
+        let kind = item.get("type").and_then(serde_json::Value::as_str);
+        let role = item.get("role").and_then(serde_json::Value::as_str);
+        if matches!(kind, Some("reasoning" | "compaction")) {
+            self.reasoning_bytes = self.reasoning_bytes.saturating_add(bytes);
+        } else if matches!(role, Some("system" | "developer")) {
+            self.system_bytes = self.system_bytes.saturating_add(bytes);
+        } else {
+            // Embedded reasoning is charged to its own share, not twice.
+            let inner = embedded_reasoning_bytes(item);
+            self.reasoning_bytes = self.reasoning_bytes.saturating_add(inner);
+            self.message_bytes = self
+                .message_bytes
+                .saturating_add(bytes.saturating_sub(inner));
+        }
     }
 
     /// Returns the exact serialized body length.
@@ -334,6 +339,30 @@ impl ContextWireInput {
         body: &[u8],
         image_maximum: Option<u64>,
     ) -> Result<Self, ContextContractError> {
+        Self::analyze_wire(body, image_maximum, None)
+    }
+
+    pub(crate) fn measure_wire_and_parts(
+        body: &[u8],
+        image_maximum: Option<u64>,
+    ) -> Result<(Self, ContextInputParts), ContextContractError> {
+        let mut parts = WirePartMeasurement {
+            parts: ContextInputParts::empty(body.len()),
+            conversation_before: 0,
+            conversation_after: 0,
+        };
+        let input = Self::analyze_wire(body, image_maximum, Some(&mut parts))?;
+        parts.parts.image_transport_bytes = parts
+            .conversation_before
+            .saturating_sub(parts.conversation_after);
+        Ok((input, parts.parts))
+    }
+
+    fn analyze_wire(
+        body: &[u8],
+        image_maximum: Option<u64>,
+        mut parts: Option<&mut WirePartMeasurement>,
+    ) -> Result<Self, ContextContractError> {
         let object: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
             serde_json::from_slice(body).map_err(|error| ContextContractError::Serialization {
                 reason: error.to_string(),
@@ -344,7 +373,8 @@ impl ContextWireInput {
             let Some(field) = object.get(key) else {
                 continue;
             };
-            let values: Vec<&serde_json::value::RawValue> = if field.get().starts_with('[') {
+            let array = field.get().starts_with('[');
+            let values: Vec<&serde_json::value::RawValue> = if array {
                 serde_json::from_str(field.get()).map_err(|error| {
                     ContextContractError::Serialization {
                         reason: error.to_string(),
@@ -353,58 +383,38 @@ impl ContextWireInput {
             } else {
                 vec![field]
             };
+            let conversation = matches!(key, "input" | "messages");
+            let count = values.len();
+            let mut field_bytes = if array {
+                2_u64.saturating_add(u64::try_from(count.saturating_sub(1)).unwrap_or(u64::MAX))
+            } else {
+                0
+            };
             for raw in values {
-                let value: serde_json::Value =
-                    serde_json::from_str(raw.get()).map_err(|error| {
-                        ContextContractError::Serialization {
-                            reason: error.to_string(),
-                        }
-                    })?;
-                let wire = raw.get().as_bytes();
-                let normalized =
-                    serde_json::to_vec(&WireDigestItem { raw, root: true }).map_err(|error| {
-                        ContextContractError::Serialization {
-                            reason: error.to_string(),
-                        }
-                    })?;
-                let digest = crate::hex_lower(
-                    Digest::sha256(
-                        DigestDomain::TokenMeasurement,
-                        5,
-                        &[key.as_bytes(), &normalized],
-                    )?
-                    .bytes(),
-                );
-                let mut bounded = value.clone();
-                let image_tokens = if matches!(key, "input" | "messages") {
-                    remove_image_payloads(&mut bounded, image_maximum)?
-                } else {
-                    0
-                };
-                let bytes = u64::try_from(wire.len())
-                    .unwrap_or(u64::MAX)
-                    .saturating_sub(json_bytes(&value))
-                    .saturating_add(json_bytes(&bounded));
-                let index = if matches!(key, "input" | "messages") {
-                    let index = conversation_count;
+                let index = conversation.then_some(conversation_count);
+                if conversation {
                     conversation_count += 1;
-                    Some(index)
-                } else {
-                    None
-                };
-                let response_output = index.is_some()
-                    && (value.get("role").and_then(serde_json::Value::as_str) == Some("assistant")
-                        || matches!(
-                            value.get("type").and_then(serde_json::Value::as_str),
-                            Some("function_call" | "custom_tool_call" | "reasoning")
-                        ));
-                items.push(ContextWireItem {
-                    digest,
-                    bytes,
-                    image_tokens,
-                    response_output,
-                    conversation_index: index,
-                });
+                }
+                let (item, compact_bytes) =
+                    measure_wire_item(key, raw, index, image_maximum, parts.as_deref_mut(), array)?;
+                field_bytes = field_bytes.saturating_add(compact_bytes);
+                items.push(item);
+            }
+            if let Some(parts) = parts.as_deref_mut() {
+                match key {
+                    "instructions" | "system" => {
+                        parts.parts.system_bytes =
+                            parts.parts.system_bytes.saturating_add(field_bytes);
+                    }
+                    "tools" => {
+                        parts.parts.tool_definition_bytes = field_bytes;
+                        if array {
+                            parts.parts.tool_definition_count =
+                                u32::try_from(count).unwrap_or(u32::MAX);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
         // Output schemas and other token-affecting envelope fields are items
@@ -479,6 +489,80 @@ impl ContextWireInput {
                 .saturating_add(16)
         })
     }
+}
+
+struct WirePartMeasurement {
+    parts: ContextInputParts,
+    conversation_before: u64,
+    conversation_after: u64,
+}
+
+fn measure_wire_item(
+    key: &str,
+    raw: &serde_json::value::RawValue,
+    conversation_index: Option<usize>,
+    image_maximum: Option<u64>,
+    parts: Option<&mut WirePartMeasurement>,
+    array: bool,
+) -> Result<(ContextWireItem, u64), ContextContractError> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(raw.get()).map_err(|error| ContextContractError::Serialization {
+            reason: error.to_string(),
+        })?;
+    let normalized = serde_json::to_vec(&WireDigestItem { raw, root: true }).map_err(|error| {
+        ContextContractError::Serialization {
+            reason: error.to_string(),
+        }
+    })?;
+    let digest = crate::hex_lower(
+        Digest::sha256(
+            DigestDomain::TokenMeasurement,
+            5,
+            &[key.as_bytes(), &normalized],
+        )?
+        .bytes(),
+    );
+    let response_output = conversation_index.is_some()
+        && (value.get("role").and_then(serde_json::Value::as_str) == Some("assistant")
+            || matches!(
+                value.get("type").and_then(serde_json::Value::as_str),
+                Some("function_call" | "custom_tool_call" | "reasoning")
+            ));
+    let before = json_bytes(&value);
+    let image_tokens = if conversation_index.is_some() {
+        remove_image_payloads(&mut value, image_maximum)?
+    } else {
+        0
+    };
+    let after = if image_tokens == 0 {
+        before
+    } else {
+        json_bytes(&value)
+    };
+    if let Some(parts) = parts
+        && conversation_index.is_some()
+    {
+        parts.conversation_before = parts.conversation_before.saturating_add(before);
+        parts.conversation_after = parts.conversation_after.saturating_add(after);
+        if array {
+            parts.parts.add_conversation_item(&value, after);
+        } else {
+            parts.parts.message_bytes = parts.parts.message_bytes.saturating_add(after);
+        }
+    }
+    Ok((
+        ContextWireItem {
+            digest,
+            bytes: u64::try_from(raw.get().len())
+                .unwrap_or(u64::MAX)
+                .saturating_sub(before)
+                .saturating_add(after),
+            image_tokens,
+            response_output,
+            conversation_index,
+        },
+        before,
+    ))
 }
 
 pub(crate) fn context_admission_margin(ceiling: u64) -> u64 {

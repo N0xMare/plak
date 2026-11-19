@@ -1,6 +1,37 @@
 use super::ContextInputParts;
 
 #[test]
+fn combined_analysis_preserves_the_part_and_item_measurements() {
+    use super::{ContextContractError, ContextWireInput};
+
+    for body in [
+        r#"{"instructions":"characters: \" Æ","tools":[{"schema":{"z":2,"a":1}}],"input":"hello"}"#,
+        r#"{"system":[{"text":"rule","cache_control":{"type":"ephemeral"}}],"tools":[],"messages":[
+            {"role":"developer","content":"instructions"},
+            {"role":"assistant","content":[{"type":"thinking","thinking":"reasoning"}],"reasoning_details":{"x":true}},
+            {"role":"user","content":[{"type":"image"},{"type":"image","source":{"data":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}]},
+            {"role":"user","content":[{"type":"tool_result","content":[{"type":"image_url","image_url":"long data url here"}]}]}
+        ],"input":[{"type":"reasoning","encrypted_content":"reason"}],"model":"fixture"}"#,
+        r#"{"system":[],"tools":{"schema":"object"},"messages":[],"input":null}"#,
+    ] {
+        let body = body.as_bytes();
+        let (input, parts) =
+            ContextWireInput::measure_wire_and_parts(body, Some(100)).expect("combined");
+        assert_eq!(parts, ContextInputParts::measure_wire(body).expect("parts"));
+        assert_eq!(
+            input,
+            ContextWireInput::measure_wire(body, Some(100)).expect("items")
+        );
+    }
+
+    let image = br#"{"messages":[{"role":"user","content":[{"type":"image"}]}]}"#;
+    assert_eq!(
+        ContextWireInput::measure_wire_and_parts(image, None),
+        Err(ContextContractError::ImageBoundUnavailable)
+    );
+}
+
+#[test]
 fn responses_body_splits_instructions_tools_input_and_reasoning_items() {
     let body = br#"{"model":"m","instructions":"be brief","tools":[{"type":"function","name":"a"},{"type":"function","name":"b"}],"input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"reasoning","encrypted_content":"xxxxxxxx"},{"type":"compaction","encrypted_content":"yyyy"}],"include":["reasoning.encrypted_content"]}"#;
     let parts = ContextInputParts::measure_wire(body).expect("object body");

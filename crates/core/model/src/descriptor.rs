@@ -16,6 +16,11 @@ use crate::{
     Timestamp,
 };
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FIT_EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A neutral feature that may affect request preparation.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[non_exhaustive]
@@ -547,6 +552,8 @@ impl ResolvedModelDescriptor {
         prepared: &PreparedModelProjection,
         now: Timestamp,
     ) -> Result<ContextStatus, ContextContractError> {
+        #[cfg(test)]
+        FIT_EVALUATIONS.set(FIT_EVALUATIONS.get() + 1);
         let descriptor_binding = self.context_descriptor_binding()?;
         let request = plan.request();
         let model_input_identity = request.model_input_identity();

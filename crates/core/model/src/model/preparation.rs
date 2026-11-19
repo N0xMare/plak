@@ -587,13 +587,38 @@ impl PreparedTokenProjection {
     /// # Errors
     /// Rejects unknown image bounds and failed integrity construction.
     pub fn with_wire_input(
-        mut self,
+        self,
         body: &[u8],
         image_maximum: Option<u64>,
         context: &ModelPreparationContext,
     ) -> Result<Self, ModelPreparationError> {
         let input = crate::ContextWireInput::measure_wire(body, image_maximum)
             .map_err(ContextAdmissionError::from)?;
+        self.bind_wire_input(input, context)
+    }
+
+    /// Measures input parts and binds the item measurements from the same
+    /// serialized JSON request body.
+    ///
+    /// # Errors
+    /// Rejects malformed bodies, unknown image bounds and failed integrity construction.
+    pub fn with_wire_analysis(
+        mut self,
+        body: &[u8],
+        image_maximum: Option<u64>,
+        context: &ModelPreparationContext,
+    ) -> Result<Self, ModelPreparationError> {
+        let (input, parts) = crate::ContextWireInput::measure_wire_and_parts(body, image_maximum)
+            .map_err(ContextAdmissionError::from)?;
+        self.input_parts = Some(parts);
+        self.bind_wire_input(input, context)
+    }
+
+    fn bind_wire_input(
+        mut self,
+        input: crate::ContextWireInput,
+        context: &ModelPreparationContext,
+    ) -> Result<Self, ModelPreparationError> {
         self.wire_input_identity = Some(input.identity().map_err(ContextAdmissionError::from)?);
         self.wire_input = Some(input);
         self.input_parts = self.input_parts.map(|parts| {

@@ -636,6 +636,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
                 shown_skill_notices: crate::skills::ShownSkillNotices::default(),
                 prep_hooks: super::prompt::preparation::Hooks::new(),
                 idle_entry_pass_due: false,
+                pending_context_refresh: None,
                 root_loss_resume_due: false,
                 idle_since: None,
             },

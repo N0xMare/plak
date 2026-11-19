@@ -334,8 +334,8 @@ impl Driver {
             Ok(prepared) => {
                 let record = prepared.record();
                 wire_digest = Some(record.projection().wire_digest());
-                descriptor
-                    .context_status(&plan, record.projection(), prepared_at)
+                record
+                    .context_status(&descriptor, &plan, prepared_at)
                     .map_err(|_| {
                         AgentError::new(
                             AgentErrorKind::Model,

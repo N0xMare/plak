@@ -11,6 +11,87 @@ use crate::surface_protocol::HostEvent;
 use std::sync::Arc;
 
 #[test]
+fn immediate_send_replaces_terminal_context_refresh_then_idle_converges() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (event_tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = RootActor::open_blocking(
+        config,
+        &action_rx,
+        crate::runtime::Sender::over(event_tx),
+        None,
+    )
+    .unwrap();
+    for _ in events.try_iter() {}
+
+    for prompt in ["first prompt", "immediate follow-up"] {
+        actions.send(UserAction::Prompt(prompt.into())).unwrap();
+        let HostStep::Prompt {
+            text,
+            queued_delivery,
+            user_echoed,
+        } = host
+            .block(async |host| host.next_prompt(None).await)
+            .unwrap()
+        else {
+            panic!("the pending prompt should be taken before the idle context query");
+        };
+        assert!(
+            !events
+                .try_iter()
+                .any(|event| matches!(event, HostEvent::Usage(_)))
+        );
+        host.block(async |host| {
+            host.run_prompt(text, queued_delivery, user_echoed, None)
+                .await
+        })
+        .unwrap();
+        assert_eq!(
+            host.role.pending_context_refresh,
+            Some(host.opened.locator())
+        );
+        assert!(
+            events
+                .try_iter()
+                .any(|event| matches!(event, HostEvent::Usage(_)))
+        );
+    }
+
+    assert!(matches!(
+        host.block(async |host| host.next_prompt(None).await)
+            .unwrap(),
+        HostStep::Continue
+    ));
+    let measured = events
+        .try_iter()
+        .find_map(|event| match event {
+            HostEvent::Usage(usage) => Some(usage),
+            _ => None,
+        })
+        .expect("the first idle observation refreshes the settled head");
+    assert!(host.role.pending_context_refresh.is_none());
+    let expected = host.block(async |host| {
+        report_context(
+            &host.opened,
+            &host.role.events,
+            "test reference",
+            true,
+            host.role.config.session.context_counters(),
+        )
+        .await
+        .unwrap()
+    });
+    assert!(expected.prepared_input().is_some());
+    assert!(
+        events
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::Usage(usage) if usage == measured))
+    );
+    host.block(async |host| host.release().await).unwrap();
+}
+
+#[test]
 fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
     let root = tempfile::tempdir().unwrap();
     let (mut config, _) = fresh_injected_attached_host(root.path());

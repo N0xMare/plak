@@ -375,10 +375,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
         let token_projection =
             PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))
                 .map_err(|error| rejection(ModelPreparationErrorKind::InvalidConfiguration, error))?
-                .with_input_parts(plakous_model::ContextInputParts::measure_wire(
-                    prepared.body(),
-                ))
-                .with_wire_input(
+                .with_wire_analysis(
                     prepared.body(),
                     Some(crate::model::CLAUDE_IMAGE_MAX_TOKENS),
                     &context,

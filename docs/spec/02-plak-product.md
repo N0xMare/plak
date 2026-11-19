@@ -7819,6 +7819,13 @@ Terminal presentation takes its prepared-input peak only from the durable
 turn aggregate. A streamed-only peak is not carried across the drive/projector
 boundary; when the aggregate has no peak, that presentation value is unknown.
 
+After a completed interactive turn, the context meter keeps its last
+observation until the next prompt's exact pending-input preflight publishes a
+new one, or until the host reaches an idle observation with no work ready.
+That idle refresh measures the latest settled context on the attached branch;
+it does not measure each intermediate head in a burst of prompts. One-shot
+completion still publishes its settled context before returning.
+
 A Messages cache-miss diagnosis is not one of these counters. It stays in
 telemetry (chapter 01 §7.2) and is not printed here.
 

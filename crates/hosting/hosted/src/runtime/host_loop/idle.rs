@@ -1161,6 +1161,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     if one_shot.is_none() && self.idle_release_due(residency_seen).await {
                         return Ok(self.release_idle());
                     }
+                    self.refresh_context_if_idle().await;
                     return Ok(HostStep::Continue);
                 }
                 Err(RecvTimeoutError::Disconnected) => {
@@ -1192,6 +1193,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             },
             None => HostStep::Continue,
         })
+    }
+
+    async fn refresh_context_if_idle(&mut self) {
+        let Some(due) = self.role.pending_context_refresh else {
+            return;
+        };
+        // The timeout (and any intervening idle work) can race with a send.
+        // Give the mailbox the last word before asking the single driver.
+        tokio::select! {
+            biased;
+            () = self.role.actions.ready() => return,
+            () = std::future::ready(()) => {}
+        }
+        self.role.pending_context_refresh = None;
+        let current = self.opened.locator();
+        if !self.role.recovery.blocked()
+            && (due.session_id(), due.branch_id()) == (current.session_id(), current.branch_id())
+        {
+            self.refresh_terminal_context().await;
+        }
     }
 
     async fn idle_automatic_prompt(
