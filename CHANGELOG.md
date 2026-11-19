@@ -122,6 +122,9 @@ also keep compatibility with their immediately preceding version.
 
 ### plakd
 
+- Add the private native `plakd deploy` workflow for enrolled same-key host
+  upgrades from verified artifacts. Source and release installs share the
+  Rust snapshot installer; staging can leave command links untouched.
 - `just install release` now refuses a dirty tree, including untracked,
   nonignored files, or any setting of `RUSTFLAGS`. Plain shipping artifacts
   remap build paths and include a verified manifest; `install.sh` can stage
