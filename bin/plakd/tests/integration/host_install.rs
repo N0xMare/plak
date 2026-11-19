@@ -222,11 +222,10 @@ fn host_lifecycle(managed: bool) -> TestResult {
             .stdout(Stdio::null())
             .stderr(std::fs::File::create(&log)?),
     );
-    let started = wait_host_log(&log, &mut child, "plakd host: serving on ")?;
-    assert!(
-        started.contains("the login shell's PATH (7 entries)"),
-        "{started}"
-    );
+    // The log file can expose the serving prefix before stderr writes the
+    // PATH description at the end of that same line.
+    let started = wait_host_log(&log, &mut child, "the login shell's PATH (7 entries)")?;
+    assert!(started.contains("plakd host: serving on "), "{started}");
     wait_host_log(&fixture.log, &mut child, "--user\nis-system-running\n")?;
     assert!(!std::fs::read_to_string(&fixture.log)?.contains("UNRELATED_SECRET"));
     // Finish the deferred start before testing stop, so teardown cannot race
