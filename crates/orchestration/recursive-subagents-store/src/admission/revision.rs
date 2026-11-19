@@ -90,6 +90,7 @@ impl Schema {
     }
 
     fn copy(&self, conn: &Connection, path: &Path) -> Result<(), AdmissionError> {
+        let path = self.resolved_path(path)?;
         let name = path
             .to_str()
             .ok_or_else(|| self.unavailable("copy path is not UTF-8"))?;
@@ -101,14 +102,14 @@ impl Schema {
             .execute("VACUUM INTO ?1", [name])
             .map_err(|error| self.sql_error(&error, "consistent copy could not be made"))
             .and_then(|_| {
-                let file = File::open(path)
+                let file = File::open(&path)
                     .map_err(|_| self.unavailable("copy file could not be opened"))?;
                 file.set_permissions(Permissions::from_mode(0o600))
                     .and_then(|()| file.sync_all())
                     .map_err(|_| self.unavailable("copy file could not be protected and synced"))
             });
         if result.is_err() {
-            let _ = fs::remove_file(path);
+            let _ = fs::remove_file(&path);
         }
         result
     }

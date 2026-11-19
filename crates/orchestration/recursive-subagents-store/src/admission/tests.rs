@@ -156,3 +156,21 @@ fn a_locked_store_or_failed_copy_cannot_commit_a_revision() {
     assert_eq!(BASE.inspect(&path).unwrap(), Status::Current);
     assert_eq!(std::fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn admission_resolves_parent_aliases_but_never_follows_a_linked_database() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("real");
+    std::fs::create_dir(&dir).unwrap();
+    let alias = home.path().join("alias");
+    std::os::unix::fs::symlink(&dir, &alias).unwrap();
+    let path = alias.join("sample.sqlite3");
+    seed(&path);
+    assert_eq!(BASE.inspect(&path).unwrap(), Status::Current);
+    let linked = alias.join("link.sqlite3");
+    std::os::unix::fs::symlink(&path, &linked).unwrap();
+    assert!(matches!(
+        BASE.inspect(&linked),
+        Err(AdmissionError::Unavailable(_))
+    ));
+}

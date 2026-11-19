@@ -6,7 +6,7 @@ pub use revision::{BackedUpUpgrade, LockedUpgrade};
 #[cfg(test)]
 mod tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -124,7 +124,7 @@ impl Schema {
             _ => return Err(self.unavailable("is not an accessible regular file")),
         }
         let connection = Connection::open_with_flags(
-            path,
+            self.resolved_path(path)?,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(|_| self.unavailable("could not be opened read-only"))?;
@@ -176,12 +176,25 @@ impl Schema {
     fn writer(&self, path: &Path, create: bool) -> Result<Connection, AdmissionError> {
         let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW;
         flags.set(OpenFlags::SQLITE_OPEN_CREATE, create);
-        let connection = Connection::open_with_flags(path, flags)
+        let connection = Connection::open_with_flags(self.resolved_path(path)?, flags)
             .map_err(|error| self.sql_error(&error, "could not be opened for writing"))?;
         connection
             .busy_timeout(BUSY_TIMEOUT)
             .map_err(|_| self.unavailable("writer timeout could not be configured"))?;
         Ok(connection)
+    }
+
+    fn resolved_path(&self, path: &Path) -> Result<PathBuf, AdmissionError> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| self.unavailable("directory is missing"))?;
+        let parent = parent
+            .canonicalize()
+            .map_err(|_| self.unavailable("directory could not be resolved"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| self.unavailable("file name is missing"))?;
+        Ok(parent.join(name))
     }
 
     fn configure_writer(&self, connection: &Connection) -> Result<(), AdmissionError> {
