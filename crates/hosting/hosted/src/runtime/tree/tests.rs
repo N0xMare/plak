@@ -759,7 +759,8 @@ async fn tree_snapshot_pushes_on_any_node_revision_and_drops_non_advancing() {
     assert_eq!(snapshot.nodes.len(), 2);
     assert!(!snapshot.solicited);
 
-    // The same revision is never sent twice.
+    // The same revision neither reloads notice identities nor sends again.
+    let notice_reads = paths.records().notice_id_read_count();
     emit_tree_snapshot_if_revision_advanced(
         &paths,
         paths.records(),
@@ -770,6 +771,7 @@ async fn tree_snapshot_pushes_on_any_node_revision_and_drops_non_advancing() {
         false,
     );
     assert!(received.try_recv().is_err(), "non-advancing revision drops");
+    assert_eq!(paths.records().notice_id_read_count(), notice_reads);
 
     // A status transition on the child is another revision, and it pushes.
     let child = snapshot.nodes[1].agent_id.clone();

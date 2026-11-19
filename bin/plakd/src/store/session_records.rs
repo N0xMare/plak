@@ -246,6 +246,11 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load(id))
     }
 
+    fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
+        crate::store::sessions::canonical_product_session_id(id)?;
+        self.with_store(|store| store.load_tree_source(id))
+    }
+
     fn load_queue_head(
         &self,
         id: &str,
@@ -310,6 +315,21 @@ impl SessionRecordStore for SqliteSessionStore {
 
     fn load_intents(&self, id: &str) -> Result<ProductIntents, String> {
         self.with_store(|store| store.load_intents(id))
+    }
+
+    fn load_intents_without_notices(&self, id: &str) -> Result<ProductIntents, String> {
+        self.with_store(|store| store.load_intents_without_notices(id))
+    }
+
+    fn load_notice_ids(&self, id: &str) -> Result<std::collections::HashSet<String>, String> {
+        self.with_store(|store| store.load_notice_ids(id))
+    }
+
+    fn load_wake_controls(
+        &self,
+        id: &str,
+    ) -> Result<plakous_hosted::session_store::WakeControls, String> {
+        self.with_store(|store| store.load_wake_controls(id))
     }
 
     fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {

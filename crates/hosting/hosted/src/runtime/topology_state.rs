@@ -132,6 +132,12 @@ pub trait TopologyRows: TreeRows {
     /// # Errors
     /// Refuses missing, invalid or unreadable rows rather than synthesizing ancestry.
     fn session(&self, session_id: &str) -> Result<SessionRecord, String>;
+
+    /// The session's inherited tree source, without loading its record.
+    ///
+    /// # Errors
+    /// Refuses missing, invalid or unreadable lineage rows.
+    fn tree_source(&self, session_id: &str) -> Result<Option<String>, String>;
 }
 
 /// Stable tree identity across rebind branches. Rebind walks
@@ -139,7 +145,7 @@ pub trait TopologyRows: TreeRows {
 /// until a hub or stored tree exists, then that genesis id.
 pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> String {
     let mut candidate = session.id.clone();
-    let mut next_source = inherited_tree_source(session);
+    let mut next_source = session.inherited_tree_source().map(str::to_owned);
     let mut seen = std::collections::BTreeSet::new();
     loop {
         if !seen.insert(candidate.clone()) {
@@ -154,25 +160,10 @@ pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> Stri
         let Some(source) = next_source else {
             break;
         };
-        next_source = rows
-            .session(&source)
-            .ok()
-            .and_then(|record| inherited_tree_source(&record));
+        next_source = rows.tree_source(&source).ok().flatten();
         candidate = source;
     }
     session.id.clone()
-}
-
-/// The source whose tree `session` may still be on. A record whose node is
-/// the root of a tree named after itself opened a tree of its own (a new
-/// session, `/new`, a fork, a carry or import, a rebind onto its own tree)
-/// and inherits none; only a successor that stayed on its source's tree
-/// does. A carried-forward source lives in another build's store.
-fn inherited_tree_source(session: &SessionRecord) -> Option<String> {
-    if session.node.tree_id == session.id || session.carried_forward_from().is_some() {
-        return None;
-    }
-    session.source_product_session_id.clone()
 }
 
 /// Operator-facing reason when rebind is blocked.
@@ -753,6 +744,10 @@ impl TreeRows for HostRows<'_> {
 impl TopologyRows for HostRows<'_> {
     fn session(&self, session_id: &str) -> Result<SessionRecord, String> {
         self.records.load(session_id)
+    }
+
+    fn tree_source(&self, session_id: &str) -> Result<Option<String>, String> {
+        self.records.load_tree_source(session_id)
     }
 }
 

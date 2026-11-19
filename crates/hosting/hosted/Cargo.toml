@@ -17,7 +17,7 @@ layer = "host"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 101
+too-many-lines-ceiling = 100
 too-many-arguments-ceiling = 29
 large-file-ceiling = 0
 missing-docs-ceiling = 2

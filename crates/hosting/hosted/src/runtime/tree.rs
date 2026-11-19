@@ -109,6 +109,7 @@ impl TreeSnapshotPush {
             self.tree_id = None;
             self.retirement_faults = None;
             self.last_revision = None;
+            self.last_notice_revision = None;
             self.notified_results.clear();
         }
         let cached = self
@@ -124,6 +125,7 @@ impl TreeSnapshotPush {
         let runtime = crate::topology_runtime::lookup(&session.id)?;
         session.id.clone_into(cached);
         self.last_revision = None;
+        self.last_notice_revision = None;
         self.retirement_faults = Some(runtime.observe_retirement_faults());
         Some(runtime)
     }
@@ -384,10 +386,6 @@ fn ask_milestone(
 
 /// Publish on durable revisions or material child progress changes. Progress-only
 /// snapshots are limited to one per second; timestamps alone never project rows.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Tree snapshot publication reconciles revisions, child attention, adoption notices, and navigator state before emitting one view."
-)]
 pub(super) fn emit_tree_snapshot_if_revision_advanced<
     P: plakous_host_protocol::ProtocolExtension,
 >(
@@ -400,6 +398,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     skip_if_first: bool,
 ) {
     let Some(runtime) = push.runtime(rows, session) else {
+        push.last_notice_revision = None;
         return;
     };
     if let Some(faults) = &mut push.retirement_faults {
@@ -421,123 +420,35 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     if tokio::runtime::Handle::try_current().is_ok() {
         push.child_live.sync(&runtime);
     }
-    let Ok(mut notice_ids) = known_notice_ids(store, session) else {
+    let Ok(revision) = runtime.read(|tree| tree.revision) else {
         return;
     };
+    if push.last_notice_revision != Some(revision) {
+        let Ok(mut notice_ids) = known_notice_ids(store, session) else {
+            return;
+        };
+        let settled = observe_tree_notices(
+            &runtime,
+            store,
+            home,
+            session,
+            events,
+            &mut notice_ids,
+            &mut push.notified_results,
+        );
+        // A named pending row prevents duplicate publication but is not evidence
+        // that a revision's notices are durable yet.
+        push.last_notice_revision = settled.filter(|_| {
+            !session
+                .transcript
+                .pending_notice_entries()
+                .any(|(id, _)| id.is_some())
+        });
+    }
     let child_live = &mut push.child_live;
     let last_revision = &mut push.last_revision;
     let next_progress_snapshot = &mut push.next_progress_snapshot;
-    let notified_results = &mut push.notified_results;
     let announced_abandoned = &mut push.announced_abandoned_turns;
-    let (milestones, result_ids, results) = runtime
-        .read(|tree| {
-            let mut rows = Vec::new();
-            for node in tree.nodes().values() {
-                if node.agent_id == tree.root_agent_id {
-                    continue;
-                }
-                rows.extend(
-                    child_milestones(tree, node)
-                        .into_iter()
-                        .map(|(id, milestone)| (id, TranscriptRow::Milestone(milestone))),
-                );
-            }
-            for question in root_questions(tree) {
-                rows.push((
-                    format!("tree:{}:question:{}", tree.tree_id, question.message_id),
-                    TranscriptRow::Milestone(ask_milestone(tree, question)),
-                ));
-            }
-            rows.extend(adoption_notices(tree));
-            let results = tree
-                .messages()
-                .values()
-                .filter(|mail| {
-                    mail.to == tree.root_agent_id
-                        && mail.purpose == crate::agent_tree_protocol::MessagePurpose::Result
-                })
-                .collect::<Vec<_>>();
-            let result_ids = results
-                .iter()
-                .map(|mail| mail.message_id.clone())
-                .collect::<std::collections::HashSet<_>>();
-            let results = results
-                .into_iter()
-                .filter(|mail| !notified_results.contains(&mail.message_id))
-                .map(|mail| {
-                    (
-                        format!("tree:{}:result:{}", tree.tree_id, mail.message_id),
-                        mail.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            (rows, result_ids, results)
-        })
-        .unwrap_or_default();
-    // No session feed fact implies a tree milestone, so each is an operator
-    // notice intent (spec 02 §2.6) and a restore shows what the live face did.
-    for (id, row) in milestones {
-        let _ = publish_notice_once(store, home, session, events, &mut notice_ids, &id, row);
-    }
-    notified_results.retain(|id| result_ids.contains(id));
-    for (notice_id, mail) in results {
-        let recorded = notice_ids.contains(&notice_id);
-        if recorded && mail.durable != crate::agent_tree::MailDurableState::Accepted {
-            notified_results.insert(mail.message_id);
-            continue;
-        }
-        let call_id = format!("child-result:{}", mail.message_id);
-        let subject = crate::sessions::bound_subject(&child_result_available_subject(
-            &mail.message_id,
-            &mail.body,
-        ));
-        // A tree row is a product notice intent (spec 02 §2.6), recorded
-        // once per mail: a restored transcript already holds it.
-        let row = crate::sessions::ToolItem {
-            wire_operation: None,
-            call_id: call_id.clone(),
-            name: "child_result".into(),
-            exposed_name: None,
-            kind: crate::activity::tool_activity_kind("child_result"),
-            state: "done".into(),
-            subject: Some(subject.clone()),
-            detail: None,
-            started_at_ms: None,
-            finished_at_ms: None,
-            parent_call_id: None,
-            cell_id: None,
-            wait: None,
-        };
-        if !recorded {
-            let committed =
-                super::admission::commit_session_update(store, home, session, |candidate| {
-                    candidate
-                        .transcript
-                        .record_named_notice(notice_id.clone(), TranscriptRow::Tool(row));
-                    true
-                });
-            if committed != Ok(true) {
-                continue;
-            }
-            notice_ids.insert(notice_id);
-        }
-        if events.send(ContentEvent::ToolLine {
-            call_id: Some(call_id),
-            parent_call_id: None,
-            cell_id: None,
-            kind: plakous_host_protocol::views::presentation::ActivityKind::Agent,
-            name: "child_result".into(),
-            state: "done".into(),
-            subject: Some(subject),
-            detail: None,
-            duration_ms: None,
-            started_at_ms: None,
-            finished_at_ms: None,
-            wait: None,
-        }) {
-            notified_results.insert(mail.message_id);
-        }
-    }
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
         let now = std::time::Instant::now();
@@ -591,6 +502,139 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     });
 }
 
+fn tree_milestones(
+    tree: &plakous_recursive_subagents::tree::ProductAgentTree,
+) -> Vec<(String, TranscriptRow)> {
+    let mut rows = Vec::new();
+    for node in tree.nodes().values() {
+        if node.agent_id == tree.root_agent_id {
+            continue;
+        }
+        rows.extend(
+            child_milestones(tree, node)
+                .into_iter()
+                .map(|(id, milestone)| (id, TranscriptRow::Milestone(milestone))),
+        );
+    }
+    for question in root_questions(tree) {
+        rows.push((
+            format!("tree:{}:question:{}", tree.tree_id, question.message_id),
+            TranscriptRow::Milestone(ask_milestone(tree, question)),
+        ));
+    }
+    rows.extend(adoption_notices(tree));
+    rows
+}
+
+/// Returns the revision whose notices all settled. A refused write or result
+/// send leaves the same revision due again, independently of navigator pushes.
+fn observe_tree_notices<P: plakous_host_protocol::ProtocolExtension>(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    store: &dyn crate::session_store::SessionRecordStore,
+    home: &crate::session_home::SessionHome,
+    session: &mut SessionRecord,
+    events: &Sender<P>,
+    notice_ids: &mut std::collections::HashSet<String>,
+    notified_results: &mut std::collections::BTreeSet<String>,
+) -> Option<u64> {
+    let (revision, milestones, result_ids, results) = runtime
+        .read(|tree| {
+            let results = tree
+                .messages()
+                .values()
+                .filter(|mail| {
+                    mail.to == tree.root_agent_id
+                        && mail.purpose == crate::agent_tree_protocol::MessagePurpose::Result
+                })
+                .collect::<Vec<_>>();
+            let result_ids = results
+                .iter()
+                .map(|mail| mail.message_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            let results = results
+                .into_iter()
+                .filter(|mail| !notified_results.contains(&mail.message_id))
+                .map(|mail| {
+                    (
+                        format!("tree:{}:result:{}", tree.tree_id, mail.message_id),
+                        mail.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            (tree.revision, tree_milestones(tree), result_ids, results)
+        })
+        .ok()?;
+    let mut settled = true;
+    // No session feed fact implies a tree milestone, so each is an operator
+    // notice intent (spec 02 §2.6) and a restore shows what the live face did.
+    for (id, row) in milestones {
+        settled &= publish_notice_once(store, home, session, events, notice_ids, &id, row).is_ok();
+    }
+    notified_results.retain(|id| result_ids.contains(id));
+    for (notice_id, mail) in results {
+        let recorded = notice_ids.contains(&notice_id);
+        if recorded && mail.durable != crate::agent_tree::MailDurableState::Accepted {
+            notified_results.insert(mail.message_id);
+            continue;
+        }
+        let call_id = format!("child-result:{}", mail.message_id);
+        let subject = crate::sessions::bound_subject(&child_result_available_subject(
+            &mail.message_id,
+            &mail.body,
+        ));
+        // A tree row is a product notice intent (spec 02 §2.6), recorded
+        // once per mail: a restored transcript already holds it.
+        let row = crate::sessions::ToolItem {
+            wire_operation: None,
+            call_id: call_id.clone(),
+            name: "child_result".into(),
+            exposed_name: None,
+            kind: crate::activity::tool_activity_kind("child_result"),
+            state: "done".into(),
+            subject: Some(subject.clone()),
+            detail: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            parent_call_id: None,
+            cell_id: None,
+            wait: None,
+        };
+        if !recorded {
+            let committed =
+                super::admission::commit_session_update(store, home, session, |candidate| {
+                    candidate
+                        .transcript
+                        .record_named_notice(notice_id.clone(), TranscriptRow::Tool(row));
+                    true
+                });
+            if committed != Ok(true) {
+                settled = false;
+                continue;
+            }
+            notice_ids.insert(notice_id);
+        }
+        if events.send(ContentEvent::ToolLine {
+            call_id: Some(call_id),
+            parent_call_id: None,
+            cell_id: None,
+            kind: plakous_host_protocol::views::presentation::ActivityKind::Agent,
+            name: "child_result".into(),
+            state: "done".into(),
+            subject: Some(subject),
+            detail: None,
+            duration_ms: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            wait: None,
+        }) {
+            notified_results.insert(mail.message_id);
+        } else {
+            settled = false;
+        }
+    }
+    settled.then_some(revision)
+}
+
 pub(super) fn publish_notice_once<P: plakous_host_protocol::ProtocolExtension>(
     store: &dyn crate::session_store::SessionRecordStore,
     home: &crate::session_home::SessionHome,
@@ -626,12 +670,8 @@ pub(super) fn known_notice_ids(
     store: &dyn crate::session_store::SessionRecordStore,
     session: &SessionRecord,
 ) -> Result<std::collections::HashSet<String>, String> {
-    let mut ids: std::collections::HashSet<_> = match store.load_intents(&session.id) {
-        Ok(intents) => intents
-            .notices
-            .into_iter()
-            .map(|notice| notice.notice_id)
-            .collect(),
+    let mut ids = match store.load_notice_ids(&session.id) {
+        Ok(ids) => ids,
         Err(_) if session.store_revision == 0 => std::collections::HashSet::new(),
         Err(error) => return Err(error),
     };

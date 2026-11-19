@@ -41,6 +41,15 @@ struct TransientRetry {
 }
 
 impl RootWake {
+    pub(super) fn pending(&self, session_id: &str) -> bool {
+        self.suppression_pending
+            || (self.session_id == session_id && self.coalescer.has_arrivals())
+            || self
+                .retry
+                .as_ref()
+                .is_some_and(|retry| retry.session_id == session_id)
+    }
+
     fn observe(&mut self, session_id: &str, ids: Vec<String>, now: Instant) -> bool {
         if self.session_id != session_id {
             let diagnostics = std::mem::take(&mut self.diagnostics);
@@ -102,15 +111,9 @@ pub(in crate::runtime) fn wake_suppression_durable(
     store: &dyn crate::session_store::SessionRecordStore,
     session_id: &str,
 ) -> bool {
-    let Ok(intents) = store.load_intents(session_id) else {
-        return false;
-    };
-    let Ok(views) = store.load_views(session_id) else {
-        return false;
-    };
-    views
-        .unwrap_or_else(crate::sessions::projector::SessionViews::empty)
-        .wake_suppressed(&intents)
+    store
+        .load_wake_controls(session_id)
+        .is_ok_and(|controls| controls.suppressed)
 }
 
 pub(in crate::runtime) fn is_wake_delivery(
@@ -407,23 +410,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             self.wake_decision("deferred", "placement_pending", now);
             return Ok(HostStep::Continue);
         }
-        let views = self
+        let controls = self
             .role
             .config
             .store
-            .load_views(&self.role.config.session.id)
-            .map_err(CliFailure::new)?
-            .unwrap_or_else(crate::sessions::projector::SessionViews::empty);
-        let intents = self
-            .role
-            .config
-            .store
-            .load_intents(&self.role.config.session.id)
+            .load_wake_controls(&self.role.config.session.id)
             .map_err(CliFailure::new)?;
         // Suppression is the refusal. A later root turn's admission clears
         // it, so a child result after that prompt wakes the root again.
-        self.role.config.session.child_wake_suppressed = views.wake_suppressed(&intents);
-        if views.pause_cause(&intents).is_some() {
+        self.role.config.session.child_wake_suppressed = controls.suppressed;
+        if controls.paused {
             self.role.child_wake.park();
             self.wake_decision("parked", "pause_cause", now);
             return Ok(HostStep::Continue);

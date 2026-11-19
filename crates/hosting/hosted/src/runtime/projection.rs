@@ -540,8 +540,14 @@ async fn page_with_intents(
     let page = page.await?;
     // Every intent precedes its submission, so a page read before this
     // snapshot cannot name an intent the snapshot missed.
-    let mut intents = blocking(store, product_id, |store, id| {
-        store.load_intents(id).map_err(ReadFailure::from)
+    let empty = matches!(&page, FeedPage::Records { records, .. } if records.is_empty());
+    let mut intents = blocking(store, product_id, move |store, id| {
+        if empty {
+            store.load_intents_without_notices(id)
+        } else {
+            store.load_intents(id)
+        }
+        .map_err(ReadFailure::from)
     })
     .await?;
     // Ancestor submissions are immutable; only our own intent snapshot must

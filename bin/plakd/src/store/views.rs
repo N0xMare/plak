@@ -19,7 +19,10 @@ use plakous_hosted::sessions::projector::{
 use plakous_hosted::sessions::{TranscriptRow, encode_workflow_kind};
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, TransactionState, params};
 
-use super::{ProductStore, decode_workflow_kind, from_i64, to_i64};
+use super::{ProductStore, from_i64, to_i64};
+
+mod intents;
+pub(super) use intents::intents_of;
 
 const WAKE_SUPPRESSION: &str = "wake_suppression";
 const PAUSE_CAUSE: &str = "pause_cause";
@@ -480,11 +483,6 @@ impl ProductStore {
             )
             .map_err(|error| super::write_error(error, format!("could not record the {kind} intent")))?;
         Ok(())
-    }
-
-    /// Every intent of one session the projector reads.
-    pub fn load_intents(&mut self, session_id: &str) -> Result<ProductIntents, String> {
-        intents_of(&self.connection, &mut self.verified_submissions, session_id)
     }
 
     pub(crate) fn submission_owner(&mut self, command_id: &str) -> Result<Option<String>, String> {
@@ -1062,105 +1060,28 @@ fn inherited_submissions_of(
     Ok(submissions)
 }
 
-pub(super) fn intents_of(
+fn view_cursor_and_state(
     connection: &Connection,
-    verified: &mut VerifiedSubmissions,
     session_id: &str,
-) -> Result<ProductIntents, String> {
-    let submissions = load_submissions_where(connection, verified, "session_id=?1", session_id)?
-        .into_iter()
-        .map(|(_, submission)| submission)
-        .collect();
-    let mut statement = connection
-        .prepare("SELECT operation_id,source_locator,kind,compact_reason,selection FROM workflow_requests WHERE session_id=?1 ORDER BY rowid")
+) -> Result<Option<(FeedSeq, SessionViewState)>, String> {
+    let row: Option<(i64, Option<String>)> = connection
+        .query_row(
+            "SELECT applied_seq,state FROM projector_cursors LEFT JOIN session_views USING (session_id) WHERE session_id=?1",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
         .map_err(unavailable)?;
-    let workflow_requests = statement
-        .query_map([session_id], |row| {
-            let locator: String = row.get(1)?;
-            Ok(WorkflowRequest {
-                operation_id: row.get(0)?,
-                source_locator: locator
-                    .parse::<SessionLocator>()
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                kind: decode_workflow_kind(&row.get::<_, String>(2)?, row.get(3)?, row.get(4)?)?,
-            })
-        })
-        .map_err(unavailable)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(invalid)?;
-    drop(statement);
-    let mut statement = connection
-        .prepare("SELECT notice_id,anchor,ordinal,row FROM operator_notices WHERE session_id=?1 ORDER BY anchor,ordinal")
-        .map_err(unavailable)?;
-    let notices = statement
-        .query_map([session_id], |row| {
-            let text: String = row.get(3)?;
-            Ok(OperatorNotice {
-                notice_id: row.get(0)?,
-                anchor: from_i64(row.get(1)?)?,
-                ordinal: row.get(2)?,
-                row: serde_json::from_str(&text).map_err(|_| rusqlite::Error::InvalidQuery)?,
-            })
-        })
-        .map_err(unavailable)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(invalid)?;
-    drop(statement);
-    let mut statement = connection
-        .prepare("SELECT kind,anchor,ordinal,value FROM host_intents WHERE session_id=?1 ORDER BY anchor,ordinal")
-        .map_err(unavailable)?;
-    let mut intents = ProductIntents {
-        submission_anchors: intent_anchors(connection, session_id, "submissions", "command_id")?,
-        workflow_anchors: intent_anchors(
-            connection,
-            session_id,
-            "workflow_requests",
-            "operation_id",
-        )?,
-        submissions,
-        workflow_requests,
-        notices,
-        ..ProductIntents::default()
+    let Some((cursor, state)) = row else {
+        return Ok(None);
     };
-    let rows = statement
-        .query_map([session_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                from_i64(row.get(1)?)?,
-                row.get::<_, u32>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })
-        .map_err(unavailable)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(invalid)?;
-    for (kind, anchor, ordinal, value) in rows {
-        match kind.as_str() {
-            WAKE_SUPPRESSION => intents.wake_suppressions.push(AnchoredIntent {
-                anchor,
-                ordinal,
-                value: (),
-            }),
-            PAUSE_CAUSE => intents.pause_causes.push(AnchoredIntent {
-                anchor,
-                ordinal,
-                value: serde_json::from_str(&value)
-                    .map_err(|_| "pause cause intent is invalid".to_owned())?,
-            }),
-            ROOT_INTERRUPT => intents.root_interrupts.push(AnchoredIntent {
-                anchor,
-                ordinal,
-                value: RootInterrupt::decode(&value)?,
-            }),
-            ROOT_CONTINUATION => intents.root_continuations.push(AnchoredIntent {
-                anchor,
-                ordinal,
-                value: RootContinuation::decode(&value)?,
-            }),
-            _ => return Err("host intent is invalid".to_owned()),
-        }
-    }
-    Ok(intents)
+    let state = state.ok_or_else(|| "product session views are missing their state".to_owned())?;
+    let state =
+        serde_json::from_str(&state).map_err(|_| "product session views are invalid".to_owned())?;
+    Ok(Some((
+        FeedSeq::new(from_i64(cursor).map_err(invalid)?),
+        state,
+    )))
 }
 
 /// The stored views of one session, or `None` before its first projector
@@ -1169,26 +1090,9 @@ pub(super) fn views_of(
     connection: &Connection,
     session_id: &str,
 ) -> Result<Option<SessionViews>, String> {
-    let cursor: Option<i64> = connection
-        .query_row(
-            "SELECT applied_seq FROM projector_cursors WHERE session_id=?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(unavailable)?;
-    let Some(cursor) = cursor else {
+    let Some((cursor, mut state)) = view_cursor_and_state(connection, session_id)? else {
         return Ok(None);
     };
-    let state: String = connection
-        .query_row(
-            "SELECT state FROM session_views WHERE session_id=?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "product session views are missing their state".to_owned())?;
-    let mut state: SessionViewState =
-        serde_json::from_str(&state).map_err(|_| "product session views are invalid".to_owned())?;
     state.calls = keyed_of(connection, session_id, "session_call_views", "call_id")?;
     state.open_turns = keyed_of(connection, session_id, "session_open_turn_views", "turn_id")?;
     let processes: BTreeMap<i64, _> = keyed_of(
@@ -1221,7 +1125,7 @@ pub(super) fn views_of(
         .collect::<Result<BTreeMap<_, _>, _>>()
         .map_err(invalid)?;
     Ok(Some(SessionViews {
-        cursor: FeedSeq::new(from_i64(cursor).map_err(invalid)?),
+        cursor,
         state,
         rows,
     }))

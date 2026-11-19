@@ -1190,7 +1190,34 @@ fn notice_intent_commits_are_cas_bound_and_a_refused_notice_rides_the_next_commi
 }
 
 #[test]
+fn narrow_notice_reads_preserve_ids_and_projector_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SqliteSessionStore::new(PlakPaths::explicit(root.path().join("product")));
+    let mut session = record(root.path());
+    for text in ["same body", "same body", "different body"] {
+        session.record_notice(TranscriptRow::info(NoticeScope::Tree, text));
+    }
+    store.save(&mut session).unwrap();
+    store.write_host_controls(&session.id, true, None).unwrap();
+    let mut full = store.load_intents(&session.id).unwrap();
+    let ids = full
+        .notices
+        .iter()
+        .map(|notice| notice.notice_id.clone())
+        .collect();
+    let narrow = store.load_notice_ids(&session.id).unwrap();
+    assert_eq!(narrow.len(), 3);
+    assert_eq!(narrow, ids);
+    full.notices.clear();
+    assert_eq!(
+        store.load_intents_without_notices(&session.id).unwrap(),
+        full
+    );
+}
+
+#[test]
 fn host_controls_are_intents_not_session_flags() {
+    use plakous_hosted::session_store::WakeControls;
     use plakous_hosted::sessions::projector::{Anchored, HostPauseCause, SessionViews, ViewWrites};
 
     each_store(|store, workspace| {
@@ -1204,6 +1231,13 @@ fn host_controls_are_intents_not_session_flags() {
             .unwrap();
         let intents = store.load_intents(&session.id).unwrap();
         let views = SessionViews::empty();
+        assert_eq!(
+            store.load_wake_controls(&session.id).unwrap(),
+            WakeControls {
+                suppressed: true,
+                paused: true
+            }
+        );
         assert!(views.wake_suppressed(&intents));
         assert_eq!(
             views.pause_cause(&intents),
@@ -1237,6 +1271,13 @@ fn host_controls_are_intents_not_session_flags() {
             .unwrap();
         let loaded = store.load(&session.id).unwrap();
         assert!(!loaded.child_wake_suppressed);
+        assert_eq!(
+            store.load_wake_controls(&session.id).unwrap(),
+            WakeControls {
+                suppressed: false,
+                paused: false
+            }
+        );
         assert_eq!(
             loaded.queue_drain_state,
             crate::store::sessions::QueueDrainState::LiveAutoDrain

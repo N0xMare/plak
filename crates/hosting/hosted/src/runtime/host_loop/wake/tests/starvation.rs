@@ -4,6 +4,35 @@ use super::*;
 use plakous_host_protocol::views::transcript::TranscriptScope;
 
 #[test]
+fn a_coalescing_child_wake_takes_precedence_over_release_now() {
+    with_host(1, |host, _, _, _| {
+        let attachments = crate::host_service::AttachmentCount::default();
+        attachments.request_release_now();
+        host.role.config.idle_release = Some(crate::runtime::IdleRelease {
+            attachments: attachments.clone(),
+            after: Duration::ZERO,
+        });
+        let now = Instant::now();
+        let seen = host.residency_seen();
+        assert!(matches!(
+            host.block(async |host| host.idle_timeout(false, true, seen).await)
+                .unwrap(),
+            HostStep::Continue
+        ));
+        assert!(
+            !attachments.releasing(),
+            "a coalescing batch keeps the session resident"
+        );
+        assert!(matches!(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW * 2).await)
+                .unwrap(),
+            HostStep::Prompt { .. }
+        ));
+        assert_eq!(submissions(host).len(), 1);
+    });
+}
+
+#[test]
 fn escape_arriving_after_an_idle_read_stays_deferred() {
     with_host(1, |host, _, actions, _| {
         host.role.config.continuation = Some("carry on".into());

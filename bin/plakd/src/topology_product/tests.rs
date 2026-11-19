@@ -139,23 +139,46 @@ async fn headless_successor_epoch_and_a_live_hub_cannot_overwrite_each_other() {
 
 #[test]
 fn durable_tree_id_walks_rebind_source_to_persisted_tree() {
+    use crate::store::sessions::SessionRecord;
     let (_tmp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
     paths.ensure_layout().unwrap();
-    let genesis = crate::store::sessions::SessionRecord::new(paths.home().to_path_buf());
+    let mut product = crate::store::ProductStore::open(&paths).unwrap();
+    let new = || SessionRecord::new(paths.home().to_path_buf());
+    let mut genesis = new();
+    product.commit(&mut genesis).unwrap();
     let mut tree = bootstrap(&genesis.id, paths.home().to_path_buf());
     crate::store::tree::save_tree(&paths, &mut tree).unwrap();
-    let mut rebound = crate::store::sessions::SessionRecord::new(paths.home().to_path_buf());
-    rebound.source_product_session_id = Some(genesis.id.clone());
-    // A rebind that stayed on its source's tree carries the source's node.
-    rebound.node = genesis.node.clone();
-    assert_eq!(
-        durable_topology_tree_id(&crate::shell::host::product_state_roots(&paths), &rebound),
-        genesis.id
-    );
-    assert_eq!(
-        durable_topology_tree_id(&crate::shell::host::product_state_roots(&paths), &genesis),
-        genesis.id
-    );
+
+    let successor = |source: &SessionRecord, inherit: bool| {
+        let mut target = new();
+        target.source_product_session_id = Some(source.id.clone());
+        target.source_workflow_operation_id = Some("test:successor".into());
+        if inherit {
+            target.node.clone_from(&source.node);
+        }
+        target
+    };
+    let mut first_rebind = successor(&genesis, true);
+    first_rebind.record_notice(crate::store::sessions::TranscriptRow::info(
+        plakous_hosted::sessions::NoticeScope::Session,
+        "older history",
+    ));
+    product.commit(&mut first_rebind).unwrap();
+    let rebound = successor(&first_rebind, true);
+    let fork = successor(&first_rebind, false);
+    let mut carried = successor(&first_rebind, true);
+    carried.link_carried_forward(&first_rebind.id, "foreign-state");
+    let roots = crate::shell::host::product_state_roots(&paths);
+    for (record, expected) in [
+        (&genesis, &genesis.id),
+        (&rebound, &genesis.id),
+        (&fork, &fork.id),
+        (&carried, &carried.id),
+    ] {
+        let (full_read, _) = inspect_session_tree(&paths, record).unwrap();
+        assert_eq!(&full_read, expected);
+        assert_eq!(durable_topology_tree_id(&roots, record), full_read);
+    }
 }
 
 #[test]

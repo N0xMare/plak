@@ -1396,6 +1396,7 @@ struct TreeSnapshotPush {
     session_id: Option<String>,
     tree_id: Option<String>,
     last_revision: Option<u64>,
+    last_notice_revision: Option<u64>,
     next_progress_snapshot: Option<Instant>,
     notified_results: std::collections::BTreeSet<String>,
     /// Nodes whose abandoned-turn notice this face has already said.

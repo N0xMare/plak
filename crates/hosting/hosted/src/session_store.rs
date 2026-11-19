@@ -8,70 +8,34 @@
 //! The record carries its CAS token (`store_revision`) as plain data; a store
 //! keeps whatever else it needs to diff a commit.
 
+use std::collections::HashSet;
 use std::path::Path;
 
-use crate::error::StoreRefusal;
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
     ProductIntents, ProjectionCommit, SessionViews, Submission, ViewWrites,
 };
 
-/// A product-store failure. With a [`StoreRefusal`] it wrote nothing and the
-/// same call may succeed when retried; without one it is final for the call.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecordStoreError {
-    message: String,
-    refusal: Option<StoreRefusal>,
+mod refusal;
+pub use refusal::RecordStoreError;
+
+/// The joined product facts and host controls for automatic wake admission.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WakeControls {
+    /// Whether a host suppression is still in effect.
+    pub suppressed: bool,
+    /// Whether a fact or host decision still pauses delivery.
+    pub paused: bool,
 }
 
-impl RecordStoreError {
-    /// A transient refusal: nothing was written.
-    pub fn refused(refusal: StoreRefusal, message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            refusal: Some(refusal),
-        }
-    }
-
-    /// The transient refusal class, when the failure is one.
+impl WakeControls {
+    /// Join the latest facts and intents by their durable positions.
     #[must_use]
-    pub const fn refusal(&self) -> Option<StoreRefusal> {
-        self.refusal
-    }
-
-    /// Human-readable failure message.
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl std::fmt::Display for RecordStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for RecordStoreError {}
-
-impl From<String> for RecordStoreError {
-    fn from(message: String) -> Self {
+    pub fn from_join(views: &SessionViews, intents: &ProductIntents) -> Self {
         Self {
-            message,
-            refusal: None,
+            suppressed: views.wake_suppressed(intents),
+            paused: views.pause_cause(intents).is_some(),
         }
-    }
-}
-
-impl From<&str> for RecordStoreError {
-    fn from(message: &str) -> Self {
-        message.to_owned().into()
-    }
-}
-
-impl From<RecordStoreError> for String {
-    fn from(error: RecordStoreError) -> Self {
-        error.message
     }
 }
 
@@ -194,6 +158,12 @@ pub trait SessionRecordStore: Send + Sync {
     /// `session not found`, or a message when the row is invalid.
     fn load(&self, id: &str) -> Result<SessionRecord, String>;
 
+    /// Reads only the metadata needed to follow a product session's tree lineage.
+    ///
+    /// # Errors
+    /// A missing session or invalid lineage metadata.
+    fn load_tree_source(&self, id: &str) -> Result<Option<String>, String>;
+
     /// Reads queue intents and the recorded locator together, without hydrating
     /// the transcript, views, prompt history, or the rest of the record.
     ///
@@ -237,7 +207,7 @@ pub trait SessionRecordStore: Send + Sync {
     ///
     /// # Errors
     /// A concurrent commit, an identity conflict, or a store failure; a store
-    /// that another writer holds refuses with [`StoreRefusal::Busy`].
+    /// that another writer holds refuses with [`crate::error::StoreRefusal::Busy`].
     fn save_submission(
         &self,
         session: &mut SessionRecord,
@@ -308,6 +278,25 @@ pub trait SessionRecordStore: Send + Sync {
     /// # Errors
     /// A message when the store cannot be read or a row is invalid.
     fn load_intents(&self, id: &str) -> Result<ProductIntents, String>;
+
+    /// The same authority inputs, except operator notices. A feed page with no
+    /// records still joins submissions and workflows, but never folds notice rows.
+    ///
+    /// # Errors
+    /// Unreadable store or invalid authority inputs.
+    fn load_intents_without_notices(&self, id: &str) -> Result<ProductIntents, String>;
+
+    /// The identities of all stored operator notices, without their bodies.
+    ///
+    /// # Errors
+    /// Unreadable store or notice identity.
+    fn load_notice_ids(&self, id: &str) -> Result<HashSet<String>, String>;
+
+    /// The joined wake suppression and pause, without transcript or notice bodies.
+    ///
+    /// # Errors
+    /// Unreadable store or invalid wake control rows.
+    fn load_wake_controls(&self, id: &str) -> Result<WakeControls, String>;
 
     /// Verified owner of an immutable product submission, across sessions.
     /// Absence is not proof of canonical runtime non-admission.
@@ -426,6 +415,8 @@ mod memory {
         intent_reads: std::sync::atomic::AtomicUsize,
         #[cfg(test)]
         inherited_reads: std::sync::atomic::AtomicUsize,
+        #[cfg(test)]
+        notice_id_reads: std::sync::atomic::AtomicUsize,
     }
 
     impl MemoryStore {
@@ -477,6 +468,12 @@ mod memory {
         #[cfg(test)]
         pub(crate) fn inherited_read_count(&self) -> usize {
             self.inherited_reads
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn notice_id_read_count(&self) -> usize {
+            self.notice_id_reads
                 .load(std::sync::atomic::Ordering::Relaxed)
         }
 
@@ -992,6 +989,16 @@ mod memory {
                 .ok_or_else(|| "session not found".to_owned())
         }
 
+        fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .records
+                .get(id)
+                .map(|record| record.inherited_tree_source().map(str::to_owned))
+                .ok_or_else(|| "session not found".to_owned())
+        }
+
         fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
             let state = self
                 .state
@@ -1359,6 +1366,58 @@ mod memory {
                 .get(id)
                 .cloned()
                 .unwrap_or_default())
+        }
+
+        fn load_intents_without_notices(&self, id: &str) -> Result<ProductIntents, String> {
+            #[cfg(test)]
+            self.intent_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(intents) = state.intents.get(id) else {
+                return Ok(ProductIntents::default());
+            };
+            Ok(ProductIntents {
+                notices: Vec::new(),
+                submissions: intents.submissions.clone(),
+                submission_anchors: intents.submission_anchors.clone(),
+                workflow_requests: intents.workflow_requests.clone(),
+                workflow_anchors: intents.workflow_anchors.clone(),
+                wake_suppressions: intents.wake_suppressions.clone(),
+                pause_causes: intents.pause_causes.clone(),
+                root_interrupts: intents.root_interrupts.clone(),
+                root_continuations: intents.root_continuations.clone(),
+            })
+        }
+
+        fn load_notice_ids(&self, id: &str) -> Result<std::collections::HashSet<String>, String> {
+            #[cfg(test)]
+            self.notice_id_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(state
+                .intents
+                .get(id)
+                .into_iter()
+                .flat_map(|intents| &intents.notices)
+                .map(|notice| notice.notice_id.clone())
+                .collect())
+        }
+
+        fn load_wake_controls(&self, id: &str) -> Result<super::WakeControls, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(super::WakeControls::from_join(
+                state.views.get(id).unwrap_or(&SessionViews::empty()),
+                state.intents.get(id).unwrap_or(&ProductIntents::default()),
+            ))
         }
 
         fn load_views(&self, id: &str) -> Result<Option<SessionViews>, String> {

@@ -492,6 +492,17 @@ impl SessionRecord {
         Some((self.source_product_session_id.as_deref()?, key))
     }
 
+    /// The source whose tree this session may still be on.
+    #[must_use]
+    pub fn inherited_tree_source(&self) -> Option<&str> {
+        inherited_tree_source(
+            &self.id,
+            &self.node.tree_id,
+            self.source_product_session_id.as_deref(),
+            self.source_workflow_operation_id.as_deref(),
+        )
+    }
+
     /// Records that this session was carried forward from `source_id`, which
     /// lives under another build's `state_key`.
     pub fn link_carried_forward(&mut self, source_id: &str, state_key: &str) {
@@ -665,7 +676,11 @@ impl SessionRecord {
         validate_prompt_history(&self.prompt_history)?;
         validate_pending_queue(&self.pending_queue)?;
         validate_portable_identity(&self.create_operation_id, "create operation")?;
-        validate_product_lineage(self)?;
+        validate_product_lineage(
+            &self.id,
+            self.source_product_session_id.as_deref(),
+            self.source_workflow_operation_id.as_deref(),
+        )?;
         self.validate_account_choices()?;
 
         Ok(())
@@ -812,21 +827,44 @@ fn validate_pending_queue(pending_queue: &[QueueItem]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_product_lineage(session: &SessionRecord) -> Result<(), String> {
-    canonical_product_session_id(&session.id)?;
-    match (
-        session.source_product_session_id.as_deref(),
-        session.source_workflow_operation_id.as_deref(),
-    ) {
+/// Validate the product record's identity and its optional source link.
+///
+/// # Errors
+/// Refuses invalid session ids, a self-link, or an incomplete source link.
+pub fn validate_product_lineage(
+    id: &str,
+    source: Option<&str>,
+    operation: Option<&str>,
+) -> Result<(), String> {
+    canonical_product_session_id(id)?;
+    match (source, operation) {
         (None, None) => {}
         (Some(source), Some(operation))
-            if canonical_product_session_id(source).is_ok() && source != session.id =>
+            if canonical_product_session_id(source).is_ok() && source != id =>
         {
             validate_portable_identity(operation, "source workflow operation")?;
         }
         _ => return Err("session has incomplete or invalid product lineage".to_owned()),
     }
     Ok(())
+}
+
+/// A genesis or cross-build carry owns a tree of its own. Only a successor
+/// staying on its source's tree can inherit it.
+#[must_use]
+pub fn inherited_tree_source<'a>(
+    id: &str,
+    node_tree_id: &str,
+    source: Option<&'a str>,
+    operation: Option<&str>,
+) -> Option<&'a str> {
+    if node_tree_id == id
+        || operation.is_some_and(|operation| operation.starts_with(CARRY_FORWARD_OPERATION_PREFIX))
+    {
+        None
+    } else {
+        source
+    }
 }
 
 fn validate_portable_identity(value: &str, label: &str) -> Result<(), String> {

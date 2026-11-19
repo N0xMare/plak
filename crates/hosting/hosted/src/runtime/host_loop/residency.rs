@@ -65,10 +65,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             || role.pending_resume.is_some()
             || role.root_loss_resume_due
             || role.config.continuation.is_some()
+            || role.child_wake.pending(&role.config.session.id)
             || role.recovery.blocked()
             || role.interrupt_state.borrow().has_deferred()
             || role.interrupt_state.borrow().has_stops()
-            || !role.config.session.pending_queue.is_empty();
+            || !role.config.session.pending_queue.is_empty()
+            || role.config.session.queue_commands.has_pending()
+            || role.config.session.queue_projection_debt;
         if pending || role.config.state_roots.job_registry().running_count() > 0 {
             return false;
         }

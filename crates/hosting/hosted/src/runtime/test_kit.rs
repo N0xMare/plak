@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::views::ProviderSection;
 
+use crate::agent_tree::TreeStore as _;
 use crate::binding::CompositionSelection;
+use crate::session_store::SessionRecordStore as _;
 
 use super::surface::{ReadinessRead, SurfaceEffect, SurfaceFacts};
 use super::{
@@ -313,7 +315,6 @@ impl MemoryRows {
 
 impl super::TreeRows for MemoryRows {
     fn tree(&self, tree_id: &str) -> Result<Option<crate::agent_tree::ProductAgentTree>, String> {
-        use crate::agent_tree::TreeStore as _;
         Ok(self
             .trees
             .load(tree_id)
@@ -322,7 +323,6 @@ impl super::TreeRows for MemoryRows {
     }
 
     fn tree_exists(&self, tree_id: &str) -> Result<bool, String> {
-        use crate::agent_tree::TreeStore as _;
         self.trees
             .exists(tree_id)
             .map_err(|error| error.detail.clone())
@@ -332,14 +332,12 @@ impl super::TreeRows for MemoryRows {
         &self,
         tree: &mut crate::agent_tree::ProductAgentTree,
     ) -> Result<(), super::TreeWriteError> {
-        use crate::agent_tree::TreeStore as _;
         let acknowledged = self.trees.save_in_custody(tree)?;
         tree.acknowledge_revision(acknowledged);
         Ok(())
     }
 
     fn delete_tree(&self, tree_id: &str, expected_revision: u64) -> Result<(), String> {
-        use crate::agent_tree::TreeStore as _;
         self.trees
             .delete_in_custody(tree_id, expected_revision)
             .map_err(|error| error.detail.clone())
@@ -348,8 +346,11 @@ impl super::TreeRows for MemoryRows {
 
 impl super::TopologyRows for MemoryRows {
     fn session(&self, session_id: &str) -> Result<SessionRecord, String> {
-        use crate::session_store::SessionRecordStore as _;
         self.records.load(session_id)
+    }
+
+    fn tree_source(&self, session_id: &str) -> Result<Option<String>, String> {
+        self.records.load_tree_source(session_id)
     }
 }
 
@@ -404,8 +405,6 @@ pub fn shell_host_on_doubles<P: plakous_host_protocol::ProtocolExtension>(
     session: SessionRecord,
     binding: Option<RootBindingDraft>,
 ) -> ShellHostFixture<P> {
-    use crate::session_store::SessionRecordStore as _;
-
     let document =
         binding.map_or_else(MemoryBindingDocument::empty, MemoryBindingDocument::holding);
     let store = Arc::new(crate::session_store::MemoryStore::new());

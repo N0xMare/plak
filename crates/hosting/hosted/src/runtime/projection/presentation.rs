@@ -65,6 +65,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load(id)
     }
 
+    fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
+        self.inner.load_tree_source(id)
+    }
+
     fn load_queue_head(&self, id: &str) -> Result<crate::session_store::SessionQueueHead, String> {
         self.inner.load_queue_head(id)
     }
@@ -141,6 +145,18 @@ impl SessionRecordStore for PresentingStore {
 
     fn load_intents(&self, id: &str) -> Result<ProductIntents, String> {
         self.inner.load_intents(id)
+    }
+
+    fn load_intents_without_notices(&self, id: &str) -> Result<ProductIntents, String> {
+        self.inner.load_intents_without_notices(id)
+    }
+
+    fn load_notice_ids(&self, id: &str) -> Result<std::collections::HashSet<String>, String> {
+        self.inner.load_notice_ids(id)
+    }
+
+    fn load_wake_controls(&self, id: &str) -> Result<crate::session_store::WakeControls, String> {
+        self.inner.load_wake_controls(id)
     }
 
     fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {

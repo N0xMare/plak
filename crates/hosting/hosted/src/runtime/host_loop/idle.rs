@@ -1158,21 +1158,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     None
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Some(step) = self
-                        .idle_automatic_prompt(one_shot.is_some(), observed_tree)
-                        .await?
-                    {
-                        return Ok(step);
-                    }
-                    // The word read before the receive. A test pauses here,
-                    // between that read and the decision, which is the gap a
-                    // re-read of the residency word would close.
-                    #[cfg(test)]
-                    crate::runtime::test_seams::before_idle_release(&self.role.config.session.id);
-                    if one_shot.is_none() && self.idle_release_due(residency_seen).await {
-                        return Ok(self.release_idle());
-                    }
-                    return Ok(HostStep::Continue);
+                    return self
+                        .idle_timeout(one_shot.is_some(), observed_tree, residency_seen)
+                        .await;
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     self.quit_started_at.get_or_insert_with(Instant::now);
@@ -1231,6 +1219,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
+    pub(super) async fn idle_timeout(
+        &mut self,
+        one_shot: bool,
+        observed_tree: bool,
+        residency_seen: Option<crate::host_service::CountSeen>,
+    ) -> CliResult<HostStep> {
+        if let Some(step) = self.idle_automatic_prompt(one_shot, observed_tree).await? {
+            self.role.idle_since = None;
+            return Ok(step);
+        }
+        // The word read before the receive still fences this decision.
+        #[cfg(test)]
+        crate::runtime::test_seams::before_idle_release(&self.role.config.session.id);
+        if !one_shot && self.idle_release_due(residency_seen).await {
+            return Ok(self.release_idle());
+        }
+        Ok(HostStep::Continue)
+    }
+
     async fn idle_automatic_prompt(
         &mut self,
         one_shot: bool,
@@ -1259,7 +1266,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return self.continuation_prompt().await.map(Some);
         }
         if observed_tree {
-            return self.child_wake_prompt(Instant::now()).await.map(Some);
+            let step = self.child_wake_prompt(Instant::now()).await?;
+            // A check that admitted nothing still leaves the timeout available
+            // for residency. Coalescing arrivals and recovery can keep it held.
+            return Ok((!matches!(step, HostStep::Continue)).then_some(step));
         }
         Ok(None)
     }

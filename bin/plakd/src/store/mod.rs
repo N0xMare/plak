@@ -592,6 +592,39 @@ impl ProductStore {
         Ok(session)
     }
 
+    pub(crate) fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
+        self.connection
+            .query_row(
+                "SELECT node_tree_id,node_agent_id,source_session_id,source_operation_id FROM sessions WHERE id=?1",
+                [id],
+                |row| {
+                    let node = decode_node(row, 0)?;
+                    let source: Option<String> = row.get(2)?;
+                    let operation: Option<String> = row.get(3)?;
+                    plakous_hosted::sessions::validate_product_lineage(
+                        id,
+                        source.as_deref(),
+                        operation.as_deref(),
+                    )
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    Ok(plakous_hosted::sessions::inherited_tree_source(
+                        id,
+                        &node.tree_id,
+                        source.as_deref(),
+                        operation.as_deref(),
+                    )
+                    .map(str::to_owned))
+                },
+            )
+            .map_err(|error| {
+                if error == rusqlite::Error::QueryReturnedNoRows {
+                    "session not found".to_owned()
+                } else {
+                    "product session lineage is invalid".to_owned()
+                }
+            })
+    }
+
     fn load_turn_attribution(
         &self,
         id: &str,

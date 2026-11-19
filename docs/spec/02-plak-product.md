@@ -2165,6 +2165,8 @@ join read may be outstanding; neither periodic pass nor periodic join read holds
 the streaming/control loop. An asynchronous join cannot replace a submission
 snapshot that changed while it was in flight. Send-now also refreshes the applied join before checking
 its guard. Caught-up facts clear the live debt without waiting for turn settlement.
+A feed page with no records still reads the submission and workflow authority
+for retention and settlement, but does not decode operator notice bodies.
 Debt gates automatic queue delivery and send-now of a different queued command:
 an unresolved immutable submission might already have dispatched, so missing
 projection is never evidence of non-dispatch. It does not gate a new queued
@@ -4885,7 +4887,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   stays resident. Once none has held for the idle release, 300 s, the
   session's own actor releases it through its joined quit: its runtime
   lease and holder record, then the root's hub entry, and the tree's
-  custody last, since nothing else in the tree is resident. Every
+  custody last, since nothing else in the tree is resident. An
+  idle receive timeout can make that decision even if a scheduled tree and
+  child-wake check found nothing to run. Admitted work and pending
+  continuations, including a child-wake batch still coalescing, take
+  precedence. An idle wake check reads the joined pause and suppression
+  controls without rebuilding the transcript. Every
   condition is read in the actor when it decides, so a job terminal or an
   intent racing the timer is never lost: it lands before the decision and
   keeps the session, or after the release and opens it again. The decision

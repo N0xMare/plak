@@ -4718,6 +4718,13 @@ same `mint_hook_failed`.
 
 ### 14.3 Intents, views, and the tree projector
 
+On the attached host's observation tick, tree identity follows the same
+product lineage through rebinds using only session and lineage metadata.
+The tree observer checks the durable revision before enumerating operator
+notices. It reads their identities, not their bodies, and retries a revision
+if publication did not settle. Live child progress and retirement faults are
+still observed independently of the durable revision.
+
 A `Resume { round }` decision from the shared continuation plan is durable
 before the failed terminal is projected.
 For the current bound turn only, it suppresses failed settlement and releases the

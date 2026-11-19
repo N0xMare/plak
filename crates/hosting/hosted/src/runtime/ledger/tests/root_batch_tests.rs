@@ -74,6 +74,10 @@ impl TopologyRows for Rows {
     fn session(&self, id: &str) -> Result<SessionRecord, String> {
         self.records.load(id)
     }
+
+    fn tree_source(&self, id: &str) -> Result<Option<String>, String> {
+        self.records.load_tree_source(id)
+    }
 }
 
 fn result_tree(session: &SessionRecord) -> ProductAgentTree {

@@ -7,12 +7,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::super::{RootActor, RootRecovery, Sender};
+use super::super::{HostStep, RootActor, RootLoop, RootPrompt, RootRecovery, RootRole, Sender};
 use crate::agent_tree_protocol::SpawnAgentRequest;
 use crate::host_service::AttachmentCount;
+use crate::node::{Next, Role as _};
 use crate::runtime::recover_tests::{script, scripted_host_with};
 use crate::runtime::test_kit::{BlockOn as _, TestExtension, install_idle_topology_hub};
 use crate::runtime::{HostConfig, IdleRelease};
+use crate::session_store::{MemoryStore, SessionRecordStore as _};
 
 /// Opens a scripted session whose host releases it the moment nothing
 /// keeps it resident, after `prepare`, and hands its actor to `check`.
@@ -35,6 +37,149 @@ fn with_actor(
     let (sent, _observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host = RootActor::open_blocking(config, &actions, Sender::over(sent), None).unwrap();
     check(&mut host, &attachments);
+}
+
+fn observed_tick(
+    host: &mut RootActor<'_, TestExtension>,
+) -> Next<RootPrompt, crate::CliResult<()>> {
+    host.role.last_tree_observed_at = Instant::now()
+        .checked_sub(super::super::TREE_OBSERVE_INTERVAL)
+        .unwrap();
+    host.role.events.step_control.changed.notify_one();
+    host.block(async |host| {
+        RootRole::next(
+            host,
+            &mut RootLoop {
+                one_shot: None,
+                passive_checkpoint_scheduled: false,
+            },
+        )
+        .await
+    })
+}
+
+#[test]
+fn empty_tree_wakes_leave_release_now_and_idle_expiry_available() {
+    for release_now in [false, true] {
+        let store = Arc::new(MemoryStore::new());
+        let after = Duration::from_secs(300);
+        with_actor(
+            |config| {
+                config.store = store.clone();
+                config.auto_continue = true;
+                config.topology_enabled = true;
+                config.idle_release.as_mut().unwrap().after = after;
+                store.save(&mut config.session).unwrap();
+                let _runtime =
+                    install_idle_topology_hub(&config.session.id, &config.session.workspace_root);
+            },
+            |host, attachments| {
+                assert!(matches!(observed_tick(host), Next::Again));
+                assert!(
+                    host.role.idle_since.is_some(),
+                    "the no-op wake hid the idle timer"
+                );
+                if release_now {
+                    attachments.request_release_now();
+                } else {
+                    host.role.idle_since = Instant::now().checked_sub(after);
+                }
+                assert!(matches!(observed_tick(host), Next::End(Ok(()))));
+                assert!(attachments.releasing());
+                let id = host.role.config.session.id.clone();
+                host.block(async |host| host.release().await).unwrap();
+                assert!(store.load_views(&id).unwrap().unwrap().state.released);
+            },
+        );
+    }
+}
+
+#[test]
+fn an_observed_empty_wake_does_not_bypass_work_or_a_racing_hold() {
+    with_actor(
+        |config| {
+            config.store.save(&mut config.session).unwrap();
+        },
+        |host, attachments| {
+            attachments.request_release_now();
+            host.role
+                .config
+                .session
+                .pending_queue
+                .push(crate::sessions::QueueItem::new("keeps its place"));
+            host.role.config.session.queue_drain_state =
+                crate::sessions::QueueDrainState::RestoredPaused;
+            assert!(matches!(observed_tick(host), Next::Again));
+            assert!(!attachments.releasing());
+            assert_eq!(host.role.config.session.pending_queue.len(), 1);
+            host.role.config.session.pending_queue.clear();
+
+            let seen = host.residency_seen();
+            drop(attachments.hold().unwrap());
+            assert!(matches!(
+                host.block(async |host| host.idle_timeout(false, true, seen).await)
+                    .unwrap(),
+                HostStep::Continue
+            ));
+            assert!(!attachments.releasing());
+            assert!(matches!(observed_tick(host), Next::End(Ok(()))));
+            host.block(async |host| host.release().await).unwrap();
+        },
+    );
+}
+
+#[test]
+fn rebound_root_idle_ticks_do_not_load_full_product_records() {
+    use crate::sessions::projector::{Lane, RowKey, SessionViews, ViewWrites};
+    use crate::sessions::{NoticeScope, SessionRecord, TranscriptRow};
+
+    let store = Arc::new(MemoryStore::new());
+    with_actor(
+        |config| {
+            config.store = store.clone();
+            config.topology_enabled = true;
+            config.idle_release.as_mut().unwrap().after = Duration::from_secs(300);
+            let mut ancestor = SessionRecord::new(config.session.workspace_root.clone());
+            for _ in 0..5_000 {
+                ancestor.record_notice(TranscriptRow::info(NoticeScope::Session, "history"));
+            }
+            store.save(&mut ancestor).unwrap();
+            let empty = SessionViews::empty();
+            let mut views = empty.clone();
+            for i in 0..1_000 {
+                views.rows.insert(
+                    RowKey::new(0, Lane::Runtime, i),
+                    TranscriptRow::user("history"),
+                );
+            }
+            store
+                .commit_projection_views(
+                    &ancestor.id,
+                    &ViewWrites::between(&empty, &views),
+                    &views.state,
+                )
+                .unwrap();
+            config.session.node = ancestor.node;
+            config.session.source_product_session_id = Some(ancestor.id.clone());
+            config.session.source_workflow_operation_id = Some("plak:rebind:fixture".into());
+            store.save(&mut config.session).unwrap();
+            let _runtime = install_idle_topology_hub(&ancestor.id, &config.session.workspace_root);
+        },
+        |host, _| {
+            assert!(matches!(observed_tick(host), Next::Again));
+            let drain = async |host: &mut RootActor<'_, TestExtension>| {
+                host.role.live.as_mut().unwrap().drain_ticks().await;
+            };
+            host.block(drain);
+            let before = store.record_read_count();
+            for _ in 0..5 {
+                assert!(matches!(observed_tick(host), Next::Again));
+                host.block(drain);
+                assert_eq!(store.record_read_count(), before);
+            }
+            host.block(async |host| host.release().await).unwrap();
+        },
+    );
 }
 
 /// The decision at a receive's timeout, from the word read just before.

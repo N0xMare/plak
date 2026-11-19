@@ -229,6 +229,25 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
         self.inner.load_intents(id)
     }
 
+    fn load_intents_without_notices(
+        &self,
+        id: &str,
+    ) -> Result<sessions::projector::ProductIntents, String> {
+        self.faults.before(StoreCall::LoadIntents, None)?;
+        self.inner.load_intents_without_notices(id)
+    }
+
+    fn load_notice_ids(&self, id: &str) -> Result<std::collections::HashSet<String>, String> {
+        self.faults.before(StoreCall::LoadIntents, None)?;
+        self.inner.load_notice_ids(id)
+    }
+
+    fn load_wake_controls(&self, id: &str) -> Result<crate::session_store::WakeControls, String> {
+        self.faults.before(StoreCall::LoadViews, None)?;
+        self.faults.before(StoreCall::LoadIntents, None)?;
+        self.inner.load_wake_controls(id)
+    }
+
     fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
         self.faults.before(StoreCall::SubmissionOwner, None)?;
         self.inner.submission_owner(command_id)
@@ -246,6 +265,10 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
     fn load_views(&self, id: &str) -> Result<Option<sessions::projector::SessionViews>, String> {
         self.faults.before(StoreCall::LoadViews, None)?;
         self.inner.load_views(id)
+    }
+
+    fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
+        self.inner.load_tree_source(id)
     }
 
     fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
