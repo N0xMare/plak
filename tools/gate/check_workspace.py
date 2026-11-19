@@ -411,10 +411,10 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "SSH_TTY"),)),
         ("var_os", (("string", "SSH_CLIENT"),)),
         ("var_os", (("string", "SYSTEMD_UNIT_PATH"),)),
-        ("var_os", (("string", "SHELL"),)),
-        # Provider-key presence for the host refusal, and the gateway socket's
-        # runtime directory. Values are not returned from the presence check.
+        # Provider-key presence for the host refusal; values are not returned.
         ("var_os", (("identifier", "name"),)),
+        ("var_os", (("string", "SHELL"),)),
+        # The gateway socket's runtime directory.
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
     # Maintainer/test-hooks private inference capture, explicitly selected per process.
@@ -838,7 +838,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # Private login cancellation races only; no process signal handler.
     ("plakd", "src/host/console/account_writes/login.rs"): {"select"},
     ("plakd", "src/host/console/account_writes/login/gateway.rs"): {"select"},
-    ("plakd", "src/commands/application/host.rs"): {"select"},
+    ("plakd", "src/commands/application/host/login.rs"): {"select"},
     # Bounded categorical operator audit fields, never frames or secrets.
     ("plakd", "src/host/console/audit.rs"): {"json"},
     ("plakd-wire-types", "src/console/secret.rs"): {"json_schema"},
