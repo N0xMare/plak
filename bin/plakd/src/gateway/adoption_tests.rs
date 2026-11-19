@@ -254,7 +254,10 @@ mod equal_binding {
         let mut grok_legacy = Sha256::new();
         grok_legacy.update(grok_path.as_os_str().as_encoded_bytes());
         grok_legacy.update(b"\0xai-route-credential-authority-v2\0primary");
-        let grok_legacy = format!("{:x}", grok_legacy.finalize());
+        let grok_legacy = format!(
+            "plak-native-xai-route:{}",
+            plakous::model::hex_lower(&grok_legacy.finalize()),
+        );
         assert_eq!(
             legacy[1].wire_identity.get("grok_authority_id"),
             Some(grok_legacy.as_str())
