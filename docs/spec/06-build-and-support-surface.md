@@ -1800,6 +1800,21 @@ under `~/.local/bin`, replaces only links already pointing into plakd's
 snapshot or sidecar roots, and updates existing owned Cargo links without
 creating new Cargo entries. Neither local step starts or changes a service.
 
+The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
+product surface and does not change either publishing or installation policy.
+It requires Python 3.11+ on the operator and target and a read-capable source
+checkout of the origin. It accepts a full revision on the advertised
+`origin/main` first-parent history, never accepts a branch name or builds
+bits itself, and takes the installer and verifier from that revision. Supply
+the S1 artifact directory and its full pinned manifest digest out of band.
+Rehash the manifest and exact files at ingest, during transfer and on the
+target; the installer checks target build-info and publishes without linking.
+Client inputs are a separate pinned manifest and one blob, hashed at all three
+boundaries. Production requires a green staging transition less than 24 hours
+old for identical host and client manifest digests and the same canary routes.
+A rehearsal of different bytes, including a fresh rebuild with different
+digests, is not promotion evidence.
+
 Publication retries only Cargo HTTP 429 failures: at most five attempts per
 crate, honoring a numeric or HTTP-date Retry-After, or Cargo's crates.io body
 deadline (`Please try again after <HTTP-date>`), when reported. Honored delays

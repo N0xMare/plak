@@ -285,6 +285,17 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 enum TopCommand {
+    #[command(hide = true)]
+    Deploy {
+        #[command(subcommand)]
+        action: crate::deploy::Action,
+    },
+    #[command(hide = true)]
+    DeployCanary(crate::deploy::canary::Options),
+    #[command(hide = true)]
+    DeployCredentialGeneration {
+        account: String,
+    },
     /// List or remove local account selections.
     Accounts {
         #[command(subcommand)]

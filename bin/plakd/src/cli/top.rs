@@ -69,6 +69,11 @@ impl TopCommand {
     )]
     pub(super) fn into_command(self) -> Result<Command, String> {
         match self {
+            Self::Deploy { action } => Ok(Command::Deploy(action)),
+            Self::DeployCanary(options) => Ok(Command::DeployCanary(options)),
+            Self::DeployCredentialGeneration { account } => {
+                Ok(Command::DeployCredentialGeneration(account))
+            }
             Self::Accounts { action } => match action {
                 super::AccountAction::List => Ok(Command::AccountsList),
                 super::AccountAction::Rm { account, confirmed } => Ok(Command::AccountsRemove {

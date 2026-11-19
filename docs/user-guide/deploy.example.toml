@@ -1,0 +1,48 @@
+# Copy outside the source checkout. Replace every placeholder before use.
+schema = 1
+repo = "/path/to/source-checkout"
+revision = "0000000000000000000000000000000000000000"
+artifact = "/path/to/shipping-artifact-directory"
+manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# An unused stage is an empty table. A production stage uses the same schema
+# as staging, with independent SSH homes and evidence, and the staging receipt.
+[production]
+
+[staging]
+drain_seconds = 60
+evidence = "/path/to/private/operations.jsonl"
+receipt = "/path/to/private/staging-receipt.json"
+
+[staging.host]
+product_home = "/srv/example/.plak"
+source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+web_socket = "/srv/example/.plak/host/web.sock"
+ui = "/srv/example/.plak/web-ui"
+gateway_unit = "plakd-gateway.service"
+gateway_socket = "/srv/example/.plak/gateway.sock"
+gateway_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[staging.host.node]
+ssh = "example-host"
+home = "/srv/example"
+uid = 1000
+
+[[staging.routes]]
+account = "grok"
+model = "example-model"
+effort = "low"
+protocol = ""
+
+[[staging.clients]]
+id = "example"
+link = "/srv/example/.local/bin/example-client"
+blob = "/path/to/client-artifact"
+manifest = "/path/to/client-manifest.json"
+manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[staging.clients.node]
+ssh = "example-client"
+home = "/srv/example"
+uid = 1000

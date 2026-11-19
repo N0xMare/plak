@@ -55,6 +55,7 @@ mod command;
 pub mod commands;
 #[cfg(test)]
 mod composition_tests;
+mod deploy;
 mod diagnostics;
 mod dispatch;
 mod environment;
@@ -464,6 +465,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     match command {
         Command::WireSchema => return wire_schema::print(&mut io::stdout().lock()),
         Command::BuildInfo => return build_identity::print_build_info(&mut io::stdout().lock()),
+        Command::Deploy(action) => return deploy::run(action),
+        Command::DeployCanary(ref options) if options.capabilities => {
+            return deploy::canary::capabilities(&mut io::stdout().lock());
+        }
         _ => {}
     }
 
@@ -549,6 +554,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     }
     if let Command::HostInstall(install) = &command {
         return commands::host_install::run(install, services.paths(), &mut io::stdout().lock());
+    }
+    if let Command::DeployCanary(options) = command {
+        return deploy::canary::run(&services, options, &mut io::stdout().lock());
+    }
+    if let Command::DeployCredentialGeneration(account) = command {
+        let generation = gateway::deployment_generation(&services, &account)?;
+        writeln!(io::stdout().lock(), "{generation}")
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+        return Ok(ProcessOutcome::Success);
     }
     let _upgrade_admission = if (command_needs_product_state(&command)
         && !matches!(command, Command::Host(_)))
@@ -1450,6 +1464,9 @@ fn execute_command(
         | Command::WireSchema
         | Command::BuildInfo
         | Command::SessionCheckBinding { .. }
+        | Command::Deploy(_)
+        | Command::DeployCanary(_)
+        | Command::DeployCredentialGeneration(_)
         | Command::Help
         | Command::CommandHelp { .. }
         | Command::Version

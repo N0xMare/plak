@@ -545,6 +545,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
     ("plakd", "src/cli/render.rs"): ("include_str",) * 29,
+    ("plakd", "src/deploy.rs"): ("include_str",) * 2,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plakd", "src/build_identity.rs"): ("option_env",),
@@ -569,6 +570,10 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     # Explicit user-unit publication reloads definitions, never starts a unit.
     ("plakd", "src/commands/host_install.rs"): [
         ("std::process::Command", (("identifier", "manager"),)),
+    ],
+    # The private deploy CLI runs only its bundled Python driver.
+    ("plakd", "src/deploy.rs"): [
+        ("std::process::Command", (("string", "python3"),)),
     ],
     # Explicit opt-in host starter and its log/reaping supervisor, all stages
     # exec this build only; the launch clears and curates its environment.
@@ -741,6 +746,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/lib.rs"): {"eprint", "info", "join"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plakd", "src/cli/render.rs"): {"include_str"},
+    ("plakd", "src/deploy.rs"): {"include_str"},
     ("plakd", "src/profiles.rs"): {"include_str"},
     ("plakd", "src/capabilities/codex.rs"): {"include_str"},
     ("plakd", "src/capabilities/claude.rs"): {"include_str"},

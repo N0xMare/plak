@@ -10,6 +10,39 @@ use super::ServerConfig;
 use super::address::GatewayAddress;
 use super::route::AccountRoute;
 
+pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate::CliResult<u64> {
+    use plakous::gateway::protocol::GatewayAccount;
+    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
+    use plakous::gateway::protocol::facts::CredentialStatus;
+
+    let (route, key) = route(services).map_err(crate::CliFailure::new)?;
+    let address = route
+        .remote()
+        .ok_or_else(|| crate::CliFailure::new("deploy requires an enrolled gateway"))?;
+    verify_holder(services).map_err(crate::CliFailure::new)?;
+    let account = GatewayAccount::new(account.to_owned())
+        .map_err(|_| crate::CliFailure::new("invalid deploy account"))?;
+    let answer = super::client::admin::<AdminResponse>(
+        address,
+        key.as_deref(),
+        &AdminRequest::Status {
+            accounts: vec![account.clone()],
+        },
+    )
+    .map_err(crate::CliFailure::new)?;
+    if let AdminResponse::Status { rows } = answer
+        && let [row] = rows.as_slice()
+        && row.facts.account == account
+        && row.facts.credential.status == CredentialStatus::Ready
+        && let Some(generation) = row.facts.credential.generation
+    {
+        return Ok(generation);
+    }
+    Err(crate::CliFailure::new(
+        "deploy credential generation is unavailable",
+    ))
+}
+
 pub(crate) fn execute(
     services: &Services,
     command: GatewayCommand,

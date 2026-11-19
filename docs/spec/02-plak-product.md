@@ -6414,6 +6414,61 @@ UMask=0077
 # WorkingDirectory is unset: the systemd user default is HOME.
 ```
 
+#### Operator deployment
+
+`plakd deploy plan|apply|status --inventory PATH --stage staging|production`
+is hidden, maintainer tooling, not a supported CLI or an extension protocol.
+Run it from an independent operator machine with a private inventory; it
+does not run in the target service, start a deployment daemon, or modify a
+runner, gateway, systemd unit or credential configuration. It enrolls one
+Linux x86_64 systemd-user host executing the generated stable-link unit,
+an unchanged local gateway, a home-local runner with unchanged protocol,
+and optionally exact-wire clients. Plan and status are JSON, observational,
+and never dispatch a model request. A pinned ExecStart drop-in refuses:
+verify that the stable link resolves to the running snapshot, move the
+pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
+
+Plan compares the systemd process image, upgrade coordinator instance, state
+key, exact wire schema, local runner protocol, gateway image and holder, and
+enrolled command links. A state-key change requires the manual settled upgrade
+runbook, a paired placement or gateway image change requires later deployment
+tooling, and a custody change is a separate manual leg. Legacy versions use
+the existing host upgrade, state-key, export-version and wire-schema probes;
+missing facts do not become defaults. An incumbent without the bounded
+canary yields `bootstrap_required`: upgrade the pre-S2 incumbent using the
+existing manual same-key procedure, wait for Ready before linking, and
+re-plan with an S2 incumbent. Ordinary `run --max-turns 1` is not a substitute.
+
+Apply re-plans and runs BASELINE before staging: doctor, credential status,
+`session check-binding --all`, and one CLI canary per enrolled route in use.
+The canary uses the existing Plakous admission and agent loop against the
+enrolled gateway, an empty tool registry, no compaction or topology, a physical
+inference allowance of one with no retry reserve, a 16-output-token request
+cap, and a 90-second deadline with bounded cleanup. It publishes only an
+archived product session, releases and archives its runtime, and emits no
+assistant text. Routes unable to prove these bounds refuse; the initial
+adapter is for qualifying Grok and Claude OAuth routes. Compare the gateway's
+OAuth generation before and after each canary and across BASELINE and
+verification; an increase is normal and a decrease refuses.
+
+Stage the immutable host snapshot with the chapter 06 installer and stage
+client blobs before switching anything. Run the staged destination's
+`host upgrade --expect-binary <id> --drain <duration>` and verify its Ready
+instance before moving the host command link. Then check the clients against
+the new exact wire and switch their dedicated links, and verify them in place
+with `--check-connection`. Verify the serving image, state key, instance and
+unchanged dependencies and repeat BASELINE health and canary checks. An exact
+healthy no-op performs only read-only verification and does not mint a
+promotion receipt.
+
+Apply appends evidence, halts on error, and emits the exact status command.
+There is no automatic rollback, unit rewrite, timed restart or CAS journal.
+Record handoff intent before invoking the requester. A missing Ready verdict
+reports `needs_reconcile`; re-plan only finishes the recorded cut if the exact
+new image is Ready under a new instance with unchanged dependencies. An old
+or unknown owner does not authorize another surrender. Staging's green JSON
+report is a receipt for production apply, not a store or custody authority.
+
 ### 4.7 `plakd gateway`
 
 `plakd gateway serve` is one process. It takes the exclusive credential holder

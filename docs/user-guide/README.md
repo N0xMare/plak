@@ -16,6 +16,7 @@ Start here:
   the exit codes.
 - **[Run plakd host as a service](host-service.md)** -- Linux user units and macOS LaunchAgents,
   Tailscale Serve, upgrades and logs.
+- **[Operator deployment](deploy.md)** — private tooling for an enrolled same-key Linux host.
 - **[Agents and orchestration](agents-and-orchestration.md)** — agent templates,
   the working set, tiers, spawning children, candidates and adoption, and the
   `plakd agent` JSONL protocol.
