@@ -13,8 +13,8 @@ use super::artifacts::ClientManifest;
 use super::inventory::{self, Node, Route, Stage};
 use super::probe::{self, Target, UNIT_DRIFT};
 use super::protocol::{
-    Call, Canary, Candidate, ClientOp, ClientSpec, Connection, Health, HostOp, Observed, Reply,
-    Request, StageIdentity, VERSION,
+    AccountIdentity, Call, Canary, Candidate, ClientObserved, ClientOp, ClientSpec, Connection,
+    Health, HostOp, Observed, Reply, Request, VERSION,
 };
 use super::timing;
 
@@ -72,20 +72,45 @@ fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value
             execute_host(&target, op, body)
         }
         Call::Client { node, client, op } => {
-            probe::validate_node(&node)?;
+            let account = probe::validate_node(&node, request.operator_machine.as_deref())?;
             let client = ClientTarget::new(&node, client)?;
             if !matches!(op, ClientOp::Stage) {
                 eof(body)?;
             }
+            if matches!(op, ClientOp::Observe) {
+                return data(&ClientObserved {
+                    account,
+                    production_history: probe::production_history(&node),
+                    current: client.observe()?,
+                });
+            }
+            guard_account(&node, request.stage)?;
+            if request.stage == Stage::Production && !matches!(op, ClientOp::Check { .. }) {
+                mark_production(&node, &account)?;
+            }
             execute_client(&client, op, body)
         }
+        Call::Runner { runner, op } => super::runner::execute(
+            &runner,
+            op,
+            body,
+            request.stage,
+            request.operator_machine.as_deref(),
+        ),
     }
 }
 
 pub(super) fn guard_stage(target: &Target<'_>, stage: Stage, op: &HostOp) -> CliResult<()> {
     check(
         stage != Stage::Staging || matches!(op, HostOp::Observe) || !target.production_history(),
-        "target has production history; use an isolated staging host",
+        "target has production history; use an isolated staging login",
+    )
+}
+
+pub(super) fn guard_account(node: &Node, stage: Stage) -> CliResult<()> {
+    check(
+        stage != Stage::Staging || !probe::production_history(node),
+        "target has production history; use an isolated staging login",
     )
 }
 
@@ -96,6 +121,18 @@ pub(super) fn execute_host(
 ) -> CliResult<serde_json::Value> {
     match op {
         HostOp::Observe => data(&target.observe()?.1),
+        HostOp::RunnerPreflight {
+            expected,
+            placements,
+        } => {
+            let (_, observed) = target.observe()?;
+            check(
+                expected == observed.instance && placements == observed.paired,
+                "source runner placements changed; replan",
+            )?;
+            target.runner_preflight(&observed)?;
+            data(&())
+        }
         HostOp::Health { expected, routes } => data(&health(target, &expected, &routes)?),
         HostOp::CanaryPreflight { expected, route } => {
             qualify(target, &current(target, &expected)?, &route)?;
@@ -118,9 +155,29 @@ pub(super) fn execute_host(
             candidate,
             drain,
             previous,
+            ticket,
         } => {
+            let fence = super::fence::Fence::lock(&target.host.node, "upgrade", ticket)?;
+            fence.active()?;
             upgrade(target, &candidate, &previous, drain)?;
             data(&())
+        }
+        HostOp::WithdrawUpgrade {
+            ticket,
+            instance,
+            source_sha256,
+        } => {
+            let mut fence = super::fence::Fence::lock(&target.host.node, "upgrade", ticket)?;
+            let (_, observed) = target.observe()?;
+            check(
+                observed.instance == instance
+                    && observed.sha256 == source_sha256
+                    && observed.link_sha256 == source_sha256
+                    && observed.upgrade_idle,
+                "cannot prove the source remains authoritative",
+            )?;
+            fence.cancel()?;
+            data(&observed)
         }
         HostOp::HostLink {
             candidate,
@@ -136,23 +193,30 @@ pub(super) fn execute_host(
             data(&())
         }
         HostOp::MarkProduction { expected } => {
-            mark_production(target, &expected)?;
+            check(
+                target.stage_identity() == expected,
+                "target stage identity changed",
+            )?;
+            mark_production(&target.host.node, &expected.account())?;
             data(&())
         }
     }
 }
 
-fn data(result: &impl Serialize) -> CliResult<serde_json::Value> {
+pub(super) fn data(result: &impl Serialize) -> CliResult<serde_json::Value> {
     serde_json::to_value(result).map_err(|_| fail("cannot encode target response"))
 }
 
 fn staged(target: &Target<'_>, candidate: &Candidate) -> CliResult<PathBuf> {
-    let binary =
-        snapshot_install::verified_snapshot_in(&target.host.node.home, &candidate.snapshot)
-            .map_err(|_| {
-                fail("candidate snapshot is missing or unverified; restage the exact artifact")
-            })?
-            .join("plakd");
+    staged_in(&target.host.node, candidate)
+}
+
+pub(super) fn staged_in(node: &Node, candidate: &Candidate) -> CliResult<PathBuf> {
+    let binary = snapshot_install::verified_snapshot_in(&node.home, &candidate.snapshot)
+        .map_err(|_| {
+            fail("candidate snapshot is missing or unverified; restage the exact artifact")
+        })?
+        .join("plakd");
     check(
         FileFacts::read(&binary)?.sha256 == candidate.sha256,
         "staged binary digest differs",
@@ -214,7 +278,7 @@ pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str)
     )
 }
 
-fn stage_host(raw: &[u8], pin: &str, body: &mut dyn Read) -> CliResult<PathBuf> {
+pub(super) fn stage_host(raw: &[u8], pin: &str, body: &mut dyn Read) -> CliResult<PathBuf> {
     let bootstrap = crate::build_identity::running_executable()
         .ok_or_else(|| fail("cannot identify staged installer image"))?;
     let work = receive_host(bootstrap, raw, pin, body)?;
@@ -265,19 +329,16 @@ fn receive(body: &mut dyn Read, path: &Path, facts: &FileFacts) -> CliResult<()>
     facts.verify(path)
 }
 
-fn eof(input: &mut dyn Read) -> CliResult<()> {
+pub(super) fn eof(input: &mut dyn Read) -> CliResult<()> {
     check(
         input.read(&mut [0]).map_err(io)? == 0,
         "trailing SSH transfer data",
     )
 }
 
-fn mark_production(target: &Target<'_>, expected: &StageIdentity) -> CliResult<()> {
-    check(
-        &target.stage_identity() == expected,
-        "target stage identity changed",
-    )?;
-    let path = target.production_marker();
+pub(super) fn mark_production(node: &Node, expected: &AccountIdentity) -> CliResult<()> {
+    let path = probe::production_marker(node);
+    snapshot_install::ensure(snapshot_install::parent(&path)?)?;
     snapshot_install::require_owned(snapshot_install::parent(&path)?)?;
     let bytes = shipping::canonical(expected)?;
     match OpenOptions::new()
@@ -293,10 +354,9 @@ fn mark_production(target: &Target<'_>, expected: &StageIdentity) -> CliResult<(
                 .and_then(|dir| dir.sync_all())
                 .map_err(io)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => check(
-            shipping::read(&path, shipping::LIMIT)? == bytes,
-            "invalid production history marker",
-        ),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            super::evidence::private(&shipping::open(&path)?)
+        }
         Err(error) => Err(io(error)),
     }
 }
@@ -433,16 +493,16 @@ struct ClientTarget<'a> {
 
 impl<'a> ClientTarget<'a> {
     fn new(node: &'a Node, client: ClientSpec) -> CliResult<Self> {
-        inventory::absolute(&client.link)?;
+        inventory::dedicated_link(node, &client.link)?;
         check(
-            client.link.parent() == Some(node.home.join(".local/bin").as_path())
-                && client
-                    .link
-                    .file_name()
-                    .is_some_and(|name| !NAMES.iter().any(|product| *product == name)),
-            "client link must be a dedicated ~/.local/bin link",
+            shipping::hex(&client.source_sha256, 64),
+            "invalid source client digest",
         )?;
-        let manifest = ClientManifest::read(client.manifest.as_bytes(), &client.manifest_sha256)?;
+        let manifest = ClientManifest::read(
+            client.manifest.as_bytes(),
+            &client.manifest_sha256,
+            node.platform,
+        )?;
         let blob = node
             .home
             .join(".local/lib/plak/clients")
@@ -535,6 +595,7 @@ fn execute_client(
     body: &mut dyn Read,
 ) -> CliResult<serde_json::Value> {
     match op {
+        ClientOp::Observe => unreachable!(),
         ClientOp::Stage => target.stage(body)?,
         ClientOp::Link { connection } => {
             target.observe()?;

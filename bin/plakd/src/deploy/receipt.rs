@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read, Write as _};
 use std::path::Path;
@@ -10,7 +11,7 @@ use crate::shipping_artifact::{self as shipping, check, fail, io};
 use super::artifacts::Pins;
 use super::evidence::{self, SCHEMA};
 use super::inventory::{Route, Stage, kind};
-use super::protocol::{Health, SourceTransition, StageIdentity};
+use super::protocol::{AccountIdentity, Health, SourceTransition, StageIdentity};
 
 const REQUIRED: &str =
     "production requires a fresh green staging receipt for these exact manifest digests and routes";
@@ -25,6 +26,7 @@ struct Receipt {
     completed_at: u64,
     manifests: Pins,
     stage_identity: StageIdentity,
+    target_accounts: BTreeSet<AccountIdentity>,
     source_transition: SourceTransition,
     canary_models: Models,
     baseline: Health,
@@ -49,7 +51,7 @@ pub(super) fn models(routes: &[Route]) -> Models {
 pub(super) fn verify(
     path: &Path,
     pins: &Pins,
-    target: &StageIdentity,
+    targets: &BTreeSet<AccountIdentity>,
     transition: &SourceTransition,
     models: &Models,
 ) -> CliResult<()> {
@@ -70,7 +72,14 @@ pub(super) fn verify(
             && evidence::now()
                 .checked_sub(receipt.completed_at)
                 .is_some_and(|age| age <= 86_400)
-            && receipt.stage_identity.machine_sha256 != target.machine_sha256
+            && receipt
+                .target_accounts
+                .contains(&receipt.stage_identity.account())
+            && receipt.target_accounts.iter().all(|staging| {
+                targets
+                    .iter()
+                    .all(|production| staging.isolated_from(production))
+            })
             && receipt.source_transition == *transition
             && receipt.canary_models == *models
             && coverage(&receipt),

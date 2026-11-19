@@ -2,6 +2,7 @@
 
 use super::{CliFailure, CliResult, Duration, Services};
 use plakous::runner::protocol::{LineStatus, VersionTriple};
+use std::collections::BTreeMap;
 
 pub(super) fn check(
     services: &Services,
@@ -11,9 +12,40 @@ pub(super) fn check(
     if destination == &crate::commands::runner::version() {
         return Ok(());
     }
-    let mut clients = std::collections::BTreeMap::new();
+    inspect(services, &[], runtime)
+}
+
+pub(super) fn inspect_deploy(
+    services: &Services,
+    runners: &[String],
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<()> {
+    if runners.is_empty()
+        || runners.len() > 8
+        || runners
+            .iter()
+            .any(|id| crate::product_config::validate_runner_name(id).is_err())
+    {
+        return Err(CliFailure::new("invalid deploy runner inspection"));
+    }
+    inspect(services, runners, runtime)
+}
+
+fn inspect(
+    services: &Services,
+    runners: &[String],
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<()> {
+    let mut clients = BTreeMap::new();
     if let Some(client) = services.local_runner_client() {
         clients.insert("local".to_owned(), client);
+    }
+    for id in runners {
+        let client = services
+            .runners()
+            .client(id)
+            .ok_or_else(|| unavailable(id))?;
+        clients.insert(id.clone(), client);
     }
     for record in crate::store::ProductStore::inspect_upgrade_roots(services.paths()?)
         .map_err(CliFailure::new)?

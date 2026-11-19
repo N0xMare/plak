@@ -1,49 +1,65 @@
 # Copy outside the source checkout. Replace every placeholder before use.
-schema = 1
+schema = 2
 repo = "/path/to/source-checkout"
 revision = "0000000000000000000000000000000000000000"
-artifact = "/path/to/shipping-artifact-directory"
+
+[manifests.x86_64-unknown-linux-musl]
+artifact = "/path/to/linux-artifact"
 manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
-# An unused stage is an empty table. A production stage uses the same schema
-# as staging, with independent SSH homes and evidence, and the staging receipt.
-[production]
+[manifests.aarch64-apple-darwin]
+artifact = "/path/to/macos-artifact"
+manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
+# Omit an unused stage. Production has the same structure with its own
+# logins and evidence path. Both stages name the staging receipt.
 [staging]
 drain_seconds = 60
-evidence = "/path/to/private/operations.jsonl"
+evidence = "/path/to/private/staging.jsonl"
 receipt = "/path/to/private/staging-receipt.json"
-
-[staging.host]
-product_home = "/srv/example/.plak"
-source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-web_socket = "/srv/example/.plak/host/web.sock"
-ui = "/srv/example/.plak/web-ui"
-gateway_unit = "plakd-gateway.service"
-gateway_socket = "/srv/example/.plak/gateway.sock"
-gateway_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-
-[staging.host.node]
-ssh = "example-host"
-login = "example"
-home = "/srv/example"
-uid = 1000
 
 [[staging.routes]]
 account = "grok"
 model = "example-model"
 effort = "low"
 
-[[staging.clients]]
-id = "example"
-link = "/srv/example/.local/bin/example-client"
-blob = "/path/to/client-artifact"
-manifest = "/path/to/client-manifest.json"
-manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-
-[staging.clients.node]
-ssh = "example-client"
+[[staging.machines]]
+[staging.machines.node]
+ssh = "example-host"
 login = "example"
 home = "/srv/example"
 uid = 1000
+platform = "x86_64-unknown-linux-musl"
+
+[staging.machines.host]
+product_home = "/srv/example/.plak"
+source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+web_socket = "/srv/example/.plak/host/web.sock"
+ui = "/srv/example/.plak/web-ui"
+
+[staging.machines.gateway]
+service = "plakd-gateway.service"
+socket = "/srv/example/.plak/gateway.sock"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# A second macOS user may use this same SSH host for production. Give that
+# user a distinct home, UID, pairing, runner link, and client configuration.
+[[staging.machines]]
+[staging.machines.node]
+ssh = "example-mac"
+login = "example-stage"
+home = "/Volumes/example/example-stage"
+uid = 501
+platform = "aarch64-apple-darwin"
+
+[[staging.machines.runners]]
+id = "desk"
+link = "/Volumes/example/example-stage/.local/bin/example-runner"
+source_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[staging.machines.clients]]
+id = "example"
+link = "/Volumes/example/example-stage/.local/bin/example-client"
+blob = "/path/to/client-artifact"
+manifest = "/path/to/client-manifest.json"
+manifest_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

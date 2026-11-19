@@ -3,13 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::CliResult;
-use crate::shipping_artifact::{NAMES, check, fail};
+use crate::shipping_artifact::{NAMES, check};
 
 use super::Halt;
 use super::artifacts::Artifacts;
-use super::evidence::Pending;
+use super::evidence::{Cohort, Pending};
 use super::inventory::{Route, Selected, Stage};
-use super::protocol::{Observed, SourceTransition};
+use super::protocol::{
+    AccountIdentity, Observed, RunnerObserved, RunnerPlacement, RunnerTransition, SourceTransition,
+};
 
 pub(super) const BOOTSTRAP: &str = "bootstrap_required: upgrade the pre-S2 incumbent using the existing manual same-key procedure (stage with install.sh --no-link, run the destination's host upgrade --expect-binary <id> --drain <duration>, then run install.sh link <snapshot-id> after Ready); re-run deploy plan with an S2 incumbent";
 
@@ -19,6 +21,8 @@ pub(super) enum Step {
     Baseline,
     StageHost,
     StageClients,
+    StageRunners,
+    RunnerLinks,
     HostUpgrade,
     HostLink,
     ClientLinks,
@@ -29,6 +33,9 @@ pub(super) enum Step {
 pub(super) struct Plan {
     pub(super) observed: Observed,
     pub(super) clients: BTreeSet<String>,
+    pub(super) runners: BTreeMap<String, RunnerObserved>,
+    pub(super) runner_changes: BTreeSet<String>,
+    pub(super) accounts: BTreeSet<AccountIdentity>,
     pub(super) routes: Vec<Route>,
     pub(super) steps: Vec<Step>,
     pub(super) resume: Option<Pending>,
@@ -38,7 +45,9 @@ pub(super) struct Plan {
 impl Plan {
     pub(super) fn new(
         observed: Observed,
+        targets: Targets,
         artifacts: &Artifacts,
+        configuration: &Selected<'_>,
         clients: BTreeSet<String>,
         routes: Vec<Route>,
         resume: Option<Pending>,
@@ -49,15 +58,22 @@ impl Plan {
         let host_link =
             observed.link_sha256 != desired.sha256 || observed.link_sidecars != sidecars;
         let client_change = !clients.is_empty();
+        let runner_change = !targets.runner_changes.is_empty();
         let mut steps = Vec::new();
-        if resume.is_none() && (host_change || host_link || client_change) {
+        if resume.is_none() && (host_change || host_link || client_change || runner_change) {
             steps.push(Step::Baseline);
         }
-        if host_change {
+        if host_change && resume.is_none() {
             steps.push(Step::StageHost);
         }
         if client_change {
             steps.push(Step::StageClients);
+        }
+        if runner_change && resume.is_none() {
+            steps.push(Step::StageRunners);
+        }
+        if runner_change {
+            steps.push(Step::RunnerLinks);
         }
         if host_change {
             steps.push(Step::HostUpgrade);
@@ -74,12 +90,37 @@ impl Plan {
             Step::Verify
         });
         let source_transition = resume.as_ref().map_or_else(
-            || observed.source_transition(),
+            || {
+                let mut transition = observed.source_transition();
+                transition.runners = configuration
+                    .runners
+                    .iter()
+                    .map(|runner| {
+                        let class = if !targets.runner_changes.contains(&runner.id) {
+                            RunnerTransition::Unchanged
+                        } else if observed.facts.runner_triple.source_revision
+                            == artifacts.host().manifest.revision
+                            && observed.facts.runner_triple.flavor
+                                == artifacts.host().manifest.build_info.flavor
+                        {
+                            RunnerTransition::SameTriple
+                        } else {
+                            RunnerTransition::ChangedTriple
+                        };
+                        (runner.node.platform, class)
+                    })
+                    .collect();
+                transition.runners.sort_unstable();
+                transition
+            },
             |prior| prior.source_transition.clone(),
         );
         Self {
             observed,
             clients,
+            runners: targets.runners,
+            runner_changes: targets.runner_changes,
+            accounts: targets.accounts,
             routes,
             steps,
             resume,
@@ -92,6 +133,12 @@ impl Plan {
     }
 }
 
+pub(super) struct Targets {
+    pub(super) accounts: BTreeSet<AccountIdentity>,
+    pub(super) runners: BTreeMap<String, RunnerObserved>,
+    pub(super) runner_changes: BTreeSet<String>,
+}
+
 pub(super) fn desired_sidecars(artifacts: &Artifacts) -> BTreeMap<String, String> {
     NAMES
         .into_iter()
@@ -99,7 +146,7 @@ pub(super) fn desired_sidecars(artifacts: &Artifacts) -> BTreeMap<String, String
         .map(|name| {
             (
                 name.to_owned(),
-                artifacts.manifest.files[name].sha256.clone(),
+                artifacts.host().manifest.files[name].sha256.clone(),
             )
         })
         .collect()
@@ -111,7 +158,7 @@ pub(super) fn qualify(
     artifacts: &Artifacts,
     stage: Stage,
 ) -> super::Result<Vec<Route>> {
-    let want = &artifacts.manifest.build_info;
+    let want = &artifacts.host().manifest.build_info;
     check(
         stage != Stage::Staging || !observed.production_history,
         "target has production history; use an isolated staging host",
@@ -121,19 +168,22 @@ pub(super) fn qualify(
         "cross-key: use the settled host upgrade runbook",
     )?;
     let triple = &observed.facts.runner_triple;
-    if observed.paired
-        && (triple.protocol != want.runner.protocol
-            || triple.source_revision != want.revision
-            || triple.flavor != "release")
-    {
-        return Err(fail(
-            "paired-runner triple change: settle and qualify the old placements; use S3",
-        )
-        .into());
-    }
+    let placements: BTreeMap<_, _> = configuration
+        .runners
+        .iter()
+        .map(|runner| {
+            (
+                runner.id.clone(),
+                RunnerPlacement {
+                    ssh: format!("{}@{}", runner.node.login, runner.node.ssh),
+                    command: runner.link.clone(),
+                },
+            )
+        })
+        .collect();
     check(
-        !observed.paired,
-        "paired runner placement is outside S2; use S3",
+        observed.paired == placements,
+        "paired runner placements must match inventory IDs, login@host and dedicated command paths",
     )?;
     check(
         triple.protocol == want.runner.protocol,
@@ -157,7 +207,7 @@ pub(super) fn qualify(
             .gateway_versions
             .iter()
             .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
-        &format!("in-use accounts require unchanged gateway protocol v{minimum} or newer; use S3"),
+        &format!("in-use accounts require unchanged gateway protocol v{minimum} or newer"),
     )?;
     let candidate = artifacts.candidate();
     let source = &configuration.host.source_sha256;
@@ -225,16 +275,20 @@ pub(super) fn can_withdraw(observed: &Observed, prior: &Pending) -> bool {
         && observed.dependencies() == prior.dependencies
 }
 
-pub(super) fn resume(
+pub(super) fn verify_resume(
     observed: &Observed,
-    prior: Pending,
+    prior: &Pending,
     candidate: &str,
-) -> super::Result<Pending> {
-    if observed.sha256 == candidate
-        && observed.instance != prior.instance
-        && observed.dependencies() == prior.dependencies
-    {
-        Ok(prior)
+) -> super::Result<()> {
+    let identity = if prior.cohort == Cohort::Runner {
+        can_withdraw(observed, prior)
+    } else if !prior.host_upgrade {
+        observed.instance == prior.instance && observed.sha256 == prior.source_sha256
+    } else {
+        observed.instance != prior.instance && observed.sha256 == candidate
+    };
+    if identity && observed.dependencies() == prior.dependencies {
+        Ok(())
     } else {
         Err(Halt::reconcile(
             "recorded upgrade outcome is unresolved; inspect the serving coordinator and unit before any new handoff",

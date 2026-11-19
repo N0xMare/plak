@@ -13,6 +13,7 @@ use sha2::{Digest as _, Sha256};
 
 const NAMES: [&str; 3] = ["plakd", "plakous-js-host", "plakous-py-host"];
 const PLATFORM: &str = "x86_64-unknown-linux-musl";
+const MAC: &str = "aarch64-apple-darwin";
 const KEY: &str = "r28.e39.p39.t11";
 const NO_EVENTS: [String; 0] = [];
 
@@ -53,14 +54,14 @@ fn file_facts(bytes: &[u8]) -> Value {
     json!({"length":bytes.len(), "sha256":digest, "display_id":&digest[..12]})
 }
 
-fn artifacts(root: &Path) {
-    let root = root.join("host");
-    fs::create_dir(&root).unwrap();
+fn artifacts(root: &Path, platform: &str) {
+    fs::create_dir(root).unwrap();
     let mut files = serde_json::Map::new();
     let mut facts = String::new();
     for name in NAMES {
-        fs::write(root.join(name), name).unwrap();
-        let file = file_facts(name.as_bytes());
+        let bytes = artifact_bytes(name, platform);
+        fs::write(root.join(name), &bytes).unwrap();
+        let file = file_facts(&bytes);
         writeln!(facts, "{name} {}", file["sha256"].as_str().unwrap()).unwrap();
         files.insert(name.into(), file);
     }
@@ -68,11 +69,11 @@ fn artifacts(root: &Path) {
     write(
         &root.join("manifest.json"),
         &json!({
-            "schema":1, "revision":revision, "platform":PLATFORM, "flavor":"release",
+            "schema":1, "revision":revision, "platform":platform, "flavor":"release",
             "product_version":"0.0.4", "lock_sha256":"e".repeat(64),
             "toolchain":{
                 "cargo":{"release":"1.100.0","commit_hash":"b".repeat(9)},
-                "rustc":{"release":"1.100.0","commit_hash":"c".repeat(40),"host":PLATFORM,"llvm_version":"22.1.0"}
+                "rustc":{"release":"1.100.0","commit_hash":"c".repeat(40),"host":platform,"llvm_version":"22.1.0"}
             },
             "files":files, "snapshot_id":hash(facts),
             "build_info":{
@@ -86,6 +87,14 @@ fn artifacts(root: &Path) {
     );
 }
 
+fn artifact_bytes(name: &str, platform: &str) -> Vec<u8> {
+    if platform == MAC {
+        format!("mac-{name}").into_bytes()
+    } else {
+        name.as_bytes().to_vec()
+    }
+}
+
 struct Fleet {
     temp: tempfile::TempDir,
 }
@@ -95,7 +104,8 @@ impl Fleet {
         let fleet = Self {
             temp: tempfile::tempdir().unwrap(),
         };
-        artifacts(fleet.temp.path());
+        artifacts(&fleet.path("host"), PLATFORM);
+        artifacts(&fleet.path("mac"), MAC);
         let data = b"exact-match client fixture\n";
         fs::write(fleet.path("client"), data).unwrap();
         write(
@@ -132,18 +142,27 @@ exit "$(cat "$DEPLOY_FIXTURE_DIR/exit")"
     }
 
     fn configure(&self, revision: &str, accounts: &[&str]) {
+        self.enroll(revision, accounts, false);
+    }
+
+    fn enroll(&self, revision: &str, accounts: &[&str], paired: bool) {
         let root = self.temp.path().display();
         let host_pin = hash(fs::read(self.path("host/manifest.json")).unwrap());
+        let mac_pin = hash(fs::read(self.path("mac/manifest.json")).unwrap());
         let client_pin = hash(fs::read(self.path("client.json")).unwrap());
         let source = "1".repeat(64);
         let gateway = "2".repeat(64);
         let mut text = format!(
             r#"
-schema = 1
+schema = 2
 repo = "{root}"
 revision = "{revision}"
+[manifests.{PLATFORM}]
 artifact = "{root}/host"
 manifest_sha256 = "{host_pin}"
+[manifests.{MAC}]
+artifact = "{root}/mac"
+manifest_sha256 = "{mac_pin}"
 "#
         );
         for stage in ["staging", "production"] {
@@ -154,34 +173,59 @@ manifest_sha256 = "{host_pin}"
 drain_seconds = 60
 evidence = "{root}/{stage}.jsonl"
 receipt = "{root}/receipt.json"
-[{stage}.host]
+[[{stage}.machines]]
+[{stage}.machines.host]
 product_home = "/srv/example/.plak"
 source_sha256 = "{source}"
 web_socket = "/srv/example/host.sock"
 ui = "/srv/example/ui"
-gateway_unit = "example-gateway.service"
-gateway_socket = "/srv/example/gateway.sock"
-gateway_sha256 = "{gateway}"
-[{stage}.host.node]
+[{stage}.machines.gateway]
+service = "example-gateway.service"
+socket = "/srv/example/gateway.sock"
+sha256 = "{gateway}"
+[{stage}.machines.node]
 ssh = "example-{stage}"
 login = "example"
 home = "/srv/example"
 uid = 1000
-[[{stage}.clients]]
+platform = "{PLATFORM}"
+[[{stage}.machines]]
+[{stage}.machines.node]
+ssh = "example-client-{stage}"
+login = "example"
+home = "/srv/example"
+uid = 1000
+platform = "{PLATFORM}"
+[[{stage}.machines.clients]]
 id = "example"
 link = "/srv/example/.local/bin/example-client"
 blob = "{root}/client"
 manifest = "{root}/client.json"
 manifest_sha256 = "{client_pin}"
 source_sha256 = "{source}"
-[{stage}.clients.node]
-ssh = "example-client"
-login = "example"
-home = "/srv/example"
-uid = 1000
 "#
             )
             .unwrap();
+            if paired {
+                let uid = if stage == "staging" { 501 } else { 502 };
+                write!(
+                    text,
+                    r#"
+[[{stage}.machines]]
+[{stage}.machines.node]
+ssh = "example-mac"
+login = "runner-{stage}"
+home = "/Volumes/example/runner-{stage}"
+uid = {uid}
+platform = "{MAC}"
+[[{stage}.machines.runners]]
+id = "desk"
+link = "/Volumes/example/runner-{stage}/.local/bin/example-runner"
+source_sha256 = "{source}"
+"#
+                )
+                .unwrap();
+            }
             for account in accounts {
                 write!(
                     text,
@@ -191,6 +235,11 @@ uid = 1000
             }
         }
         fs::write(self.path("inventory.toml"), text).unwrap();
+    }
+
+    fn paired(&self) {
+        self.enroll(&"a".repeat(40), &["grok"], true);
+        self.change(|data| data["paired_fleet"] = json!(true));
     }
 
     fn reset(&self) {
@@ -204,8 +253,8 @@ uid = 1000
                     "link_sidecars":{(NAMES[1]):source,(NAMES[2]):source},
                     "unit_sha256":source, "custody_sha256":"2".repeat(64),
                     "gateway_instance":"unchanged", "gateway_versions":[1,2],
-                    "stage_identity":{"machine_sha256":"0".repeat(64),"product_home":"/srv/example/.plak"},
-                    "paired":false, "canary":["claude","grok"],
+                    "stage_identity":{"machine_sha256":"0".repeat(64),"platform":PLATFORM,"uid":1000,"home":"/srv/example","product_home":"/srv/example/.plak"},
+                    "paired":{}, "canary":["claude","grok"],
                     "accounts":{"grok":"ready","openai":"not_enrolled"}, "upgrade_idle":true,
                     "production_history":false,
                     "facts":{
@@ -280,7 +329,11 @@ fn deploy_fake_fleet_refuses_without_mutation() {
             json!("r29.e39.p39.t11"),
             "cross-key",
         ),
-        ("/host/paired", json!(true), "paired-runner triple change"),
+        (
+            "/host/paired",
+            json!({"other":{"ssh":"example@other","command":"/example/link"}}),
+            "paired runner placements",
+        ),
         ("/host/gateway_versions", json!([1]), "gateway protocol v2"),
         (
             "/host/production_history",
@@ -503,6 +556,106 @@ fn deploy_canaries_are_keyed_by_exact_account() {
 }
 
 #[test]
+fn deploy_paired_macos_runner_blocks_live_jobs_and_missing_attachment_before_baseline() {
+    let f = Fleet::new();
+    f.paired();
+    for (flag, remedy) in [
+        (
+            "live_runner_jobs",
+            "settle and drain them using the old build",
+        ),
+        (
+            "missing_runner_attachment",
+            "read-only and keep it attached",
+        ),
+    ] {
+        f.change(|data| data[flag] = json!(true));
+        let report = f.staging("plan", "blocked", remedy);
+        assert_eq!(report["runner_links"]["desk"]["account"]["platform"], MAC);
+        assert!(!f.path("staging.jsonl").exists());
+        assert_eq!(f.events(), NO_EVENTS);
+        f.change(|data| data[flag] = json!(false));
+    }
+    let plan = f.staging("plan", "ready", "");
+    assert_eq!(
+        plan["source_transition"]["runners"],
+        json!([[MAC, "changed_triple"]])
+    );
+    assert_eq!(
+        plan["plan"],
+        json!([
+            "baseline",
+            "stage_host",
+            "stage_clients",
+            "stage_runners",
+            "runner_links",
+            "host_upgrade",
+            "host_link",
+            "client_links",
+            "verify"
+        ])
+    );
+}
+
+#[test]
+fn deploy_paired_macos_transition_promotes_between_separate_users() {
+    let f = Fleet::new();
+    f.paired();
+    let receipt = f.staging("apply", "green", "");
+    let stage = &receipt["target_accounts"];
+    assert!(
+        stage
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|account| account["uid"] == 501 && account["machine_sha256"] == "5".repeat(64))
+    );
+    let events = f.events();
+    let event = |name| events.iter().position(|value| value == name).unwrap();
+    assert!(event("runner_stage") < event("runner_advance"));
+    assert!(event("runner_advance") < event("upgrade"));
+    assert!(event("host_link") < event("client_link"));
+    let before = fs::read(f.path("receipt.json")).unwrap();
+    f.staging("apply", "no_op", "");
+    assert_eq!(fs::read(f.path("receipt.json")).unwrap(), before);
+    f.reset();
+    f.paired();
+    let mut invalid = receipt.clone();
+    invalid["source_transition"]["runners"] = json!([[MAC, "same_triple"]]);
+    write(&f.path("receipt.json"), &invalid);
+    f.deploy(
+        "apply",
+        "production",
+        "blocked",
+        "fresh green staging receipt",
+    );
+    write(&f.path("receipt.json"), &receipt);
+    f.deploy("apply", "production", "green", "");
+}
+
+#[test]
+fn deploy_paired_runner_restores_exact_link_on_pre_surrender_refusal() {
+    let f = Fleet::new();
+    f.paired();
+    f.change(|data| data["refuse_upgrade"] = json!(true));
+    let report = f.staging("apply", "blocked", "source refused before surrender");
+    assert_eq!(report["withdrawn"], true);
+    let events = f.events();
+    assert!(events.ends_with(&[
+        "upgrade".into(),
+        "withdraw_upgrade".into(),
+        "runner_restore".into()
+    ]));
+    let facts = read(&f.path("fleet.json"));
+    assert_eq!(facts["runner"], "source");
+    assert_eq!(facts["host"]["sha256"], "1".repeat(64));
+    assert!(!f.path("receipt.json").exists());
+    f.change(|data| data["refuse_upgrade"] = json!(false));
+    f.staging("apply", "green", "");
+    f.staging("apply", "no_op", "");
+}
+
+#[test]
 fn deploy_requester_loss_does_not_repeat_surrender() {
     let f = Fleet::new();
     f.change(|d| d["lose_reply"] = json!("upgrade"));
@@ -554,6 +707,50 @@ fn deploy_requester_loss_does_not_repeat_surrender() {
             assert_eq!(f.events().iter().filter(|x| *x == event).count(), 1);
         }
     }
+    let f = Fleet::new();
+    f.paired();
+    f.change(|data| data["lose_reply"] = json!("runner_advance"));
+    let report = f.staging("apply", "needs_reconcile", "link outcome");
+    assert_eq!(report["step"], "runner_link_desk");
+    assert!(!f.events().iter().any(|event| event == "upgrade"));
+    let plan = f.staging("status", "ready", "");
+    assert_eq!(plan["last_evidence"]["phase"], "halt");
+    assert!(
+        !plan["plan"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("runner_links"))
+    );
+    f.staging("apply", "green", "");
+    assert_eq!(
+        f.events().iter().filter(|x| *x == "runner_advance").count(),
+        1
+    );
+    assert_eq!(f.events().iter().filter(|x| *x == "upgrade").count(), 1);
+    let evidence = fs::read_to_string(f.path("staging.jsonl")).unwrap();
+    let phases: Vec<_> = evidence
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter_map(|row| row.get("cohort").cloned())
+        .collect();
+    assert_eq!(phases, [json!("runner"), json!("host"), json!("clients")]);
+    f.staging("apply", "no_op", "");
+
+    let f = Fleet::new();
+    f.paired();
+    f.change(|data| {
+        data["refuse_upgrade"] = json!(true);
+        data["lose_reply"] = json!("runner_restore");
+    });
+    f.staging("apply", "needs_reconcile", "link outcome");
+    assert_eq!(read(&f.path("fleet.json"))["runner"], "source");
+    f.change(|data| data["lose_reply"] = Value::Null);
+    assert_eq!(f.staging("status", "ready", "")["withdrawn"], true);
+    assert_eq!(
+        f.events().iter().filter(|x| *x == "runner_advance").count(),
+        1
+    );
+    assert_eq!(f.events().iter().filter(|x| *x == "upgrade").count(), 1);
 }
 
 #[test]
@@ -615,37 +812,55 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         .join("\n");
     let path = root.join("fleet.json");
     let mut data = read(&path);
-    if script.contains("test -L") {
-        let current = data["client"] == "current";
-        let digest = if current {
-            hash(fs::read(root.join("client")).unwrap())
-        } else {
-            "1".repeat(64)
-        };
-        let resolved = if current {
-            format!("/srv/example/.local/lib/plak/clients/{digest}/client")
-        } else {
-            "/srv/example/old-client".into()
-        };
-        assert_eq!(next(input), "/srv/example");
-        assert_eq!(next(input), "1000");
-        assert_eq!(next(input), "/srv/example/.local/bin/example-client");
-        assert_eq!(next(input), "example");
-        return (format!("{digest}\n{resolved}\n").into_bytes(), 0);
-    }
-    let transferred = script.contains("sha256sum -c");
-    assert_candidate_bytes(root, input, transferred);
+    let transferred = script.contains("head -c");
+    assert!(script.contains("/usr/bin/shasum -a 256"));
+    let image = read_candidate(input, transferred);
     let call: Value = serde_json::from_str(&next(input)).unwrap();
-    assert_eq!(call["deploy_protocol"], 1);
-    let op = &call["call"]["request"]["op"];
+    assert_eq!(call["deploy_protocol"], 2);
+    let request = &call["call"]["request"];
+    let op = &request["op"];
     let mut name = op["op"].as_str().unwrap().to_owned();
     let mut remaining = Vec::new();
     input.read_to_end(&mut remaining).unwrap();
-    if call["call"]["role"] == "client" {
-        assert!(transferred);
-        name = format!("client_{name}");
-    } else {
-        assert_host_loader(root, &data, &name, transferred);
+    let role = call["call"]["role"].as_str().unwrap();
+    let node = match role {
+        "client" => {
+            assert!(transferred);
+            name = format!("client_{name}");
+            &request["node"]
+        }
+        "runner" => {
+            assert_eq!(transferred, matches!(name.as_str(), "observe" | "stage"));
+            name = format!("runner_{name}");
+            &request["runner"]["node"]
+        }
+        "host" => {
+            assert_host_loader(root, &data, &name, transferred);
+            &request["host"]["node"]
+        }
+        _ => panic!("unexpected role {role}"),
+    };
+    assert_candidate_bytes(root, &image, node, transferred);
+    let prod = call["stage"] == "production";
+    if name == "client_observe" {
+        return (
+            encoded(&json!({"ok":{"current":data["client"] == "current",
+            "production_history": false,
+            "account": {"machine_sha256":if prod {"7"} else {"6"}.repeat(64), "platform":PLATFORM,
+                "uid":1000, "home":"/srv/example"}}})),
+            0,
+        );
+    }
+    if role == "runner" {
+        return runner_ssh(root, path.as_path(), &mut data, &name, node, op, &remaining);
+    }
+    let mut observed = data["host"].clone();
+    let stage = if prod { "production" } else { "staging" };
+    if prod {
+        observed["stage_identity"]["machine_sha256"] = json!("9".repeat(64));
+    }
+    if data["paired_fleet"] == true {
+        observed["paired"] = paired_placements(stage);
     }
     if name == "observe" {
         if data["transport_loss"] == true {
@@ -654,35 +869,132 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         if let Some(reason) = data["refusal"].as_str() {
             return (encoded(&json!({"error":reason})), 0);
         }
-        let mut observed = data["host"].clone();
-        if call["stage"] == "production" {
-            observed["stage_identity"]["machine_sha256"] = json!("9".repeat(64));
-        }
         return (encoded(&json!({"ok":observed})), 0);
     }
+    if name == "runner_preflight" {
+        assert_eq!(op["expected"], observed["instance"]);
+        assert_eq!(op["placements"], paired_placements(stage));
+        if !root.join("staging.jsonl").exists() {
+            return (encoded(&runner_preflight(&data)), 0);
+        }
+    }
     data["events"].as_array_mut().unwrap().push(json!(name));
-    let response = simulate(root, &mut data, &name, op, &remaining);
+    let response = if name == "withdraw_upgrade" {
+        assert_eq!(op["instance"], observed["instance"]);
+        assert_eq!(op["source_sha256"], observed["sha256"]);
+        assert_eq!(observed["upgrade_idle"], true);
+        data["withdrawn_ticket"] = op["ticket"].clone();
+        json!({"ok":observed})
+    } else {
+        simulate(root, &mut data, &name, op, &remaining)
+    };
     let lost = data["lose_reply"] == name || name == "upgrade" && data["lose_reply"] == "old";
     write(&path, &data);
     (encoded(&response), if lost { 255 } else { 0 })
 }
 
-fn assert_candidate_bytes(root: &Path, input: &mut impl BufRead, transferred: bool) {
-    let pin = hash(b"plakd");
+fn read_candidate(input: &mut impl BufRead, transferred: bool) -> (String, Vec<u8>) {
+    let header = next(input);
+    let pin = next(input);
     if transferred {
-        let mut binary = vec![0; next(input).parse().unwrap()];
-        assert_eq!(next(input), pin);
+        let mut binary = vec![0; header.parse().unwrap()];
         input.read_exact(&mut binary).unwrap();
-        assert_eq!(binary, b"plakd");
+        (pin, binary)
     } else {
-        let manifest = read(&root.join("host/manifest.json"));
-        let snapshot = manifest["snapshot_id"].as_str().unwrap();
-        assert_eq!(
-            next(input),
-            format!("/srv/example/.local/lib/plak/release/{snapshot}/plakd")
-        );
-        assert_eq!(next(input), pin);
+        (pin, header.into_bytes())
     }
+}
+
+fn assert_candidate_bytes(root: &Path, image: &(String, Vec<u8>), node: &Value, transferred: bool) {
+    let platform = node["platform"].as_str().unwrap();
+    let expected = artifact_bytes("plakd", platform);
+    assert_eq!(image.0, hash(&expected));
+    if transferred {
+        assert_eq!(image.1, expected);
+    } else {
+        assert_eq!(image.1, deployed(root, node).into_bytes());
+    }
+}
+
+fn deployed(root: &Path, node: &Value) -> String {
+    let directory = if node["platform"] == MAC {
+        "mac"
+    } else {
+        "host"
+    };
+    let manifest = read(&root.join(directory).join("manifest.json"));
+    let snapshot = manifest["snapshot_id"].as_str().unwrap();
+    let home = node["home"].as_str().unwrap();
+    format!("{home}/.local/lib/plak/release/{snapshot}/plakd")
+}
+
+fn paired_placements(stage: &str) -> Value {
+    json!({"desk":{"ssh":format!("runner-{stage}@example-mac"),
+        "command":format!("/Volumes/example/runner-{stage}/.local/bin/example-runner")}})
+}
+
+fn runner_preflight(data: &Value) -> Value {
+    if data["live_runner_jobs"] == true {
+        json!({"error":"foreground/background processes are live; settle and drain them using the old build"})
+    } else if data["missing_runner_attachment"] == true {
+        json!({"error":"reconnect a settled source root on that runner read-only and keep it attached until upgrade completes"})
+    } else {
+        json!({"ok":null})
+    }
+}
+
+fn runner_ssh(
+    root: &Path,
+    path: &Path,
+    data: &mut Value,
+    name: &str,
+    node: &Value,
+    op: &Value,
+    bytes: &[u8],
+) -> (Vec<u8>, i32) {
+    let home = node["home"].as_str().unwrap();
+    let source = json!({"path":format!("{home}/.local/lib/plak/maintainer/retained/plakd"),"sha256":"1".repeat(64)});
+    let desired = json!({"path":deployed(root,node),"sha256":hash(artifact_bytes("plakd", MAC))});
+    if name == "runner_observe" {
+        let link = if data["runner"] == "current" {
+            &desired
+        } else {
+            &source
+        };
+        return (
+            encoded(&json!({"ok":{"link":link,"production_history":false,
+            "account":{"machine_sha256":"5".repeat(64),"platform":MAC,"uid":node["uid"],"home":node["home"]}}})),
+            0,
+        );
+    }
+    data["events"].as_array_mut().unwrap().push(json!(name));
+    match name {
+        "runner_stage" => {
+            assert_eq!(
+                hash(op["manifest"].as_str().unwrap()),
+                op["manifest_sha256"]
+            );
+            assert_eq!(bytes, b"mac-plakous-js-hostmac-plakous-py-host");
+            data["runner_staged"] = json!(true);
+        }
+        "runner_advance" => {
+            assert_eq!(data["runner_staged"], true);
+            assert_eq!(op["candidate"]["sha256"], desired["sha256"]);
+            assert_eq!(op["source"], source);
+            assert_ne!(op["ticket"], data["runner_withdrawn_ticket"]);
+            data["runner"] = json!("current");
+        }
+        "runner_restore" => {
+            assert_eq!(op["ticket"], data["withdrawn_ticket"]);
+            assert_eq!(op["source"], source);
+            data["runner_withdrawn_ticket"] = op["ticket"].clone();
+            data["runner"] = json!("source");
+        }
+        _ => panic!("unexpected runner operation {name}"),
+    }
+    let lost = data["lose_reply"] == name;
+    write(path, data);
+    (encoded(&json!({"ok":null})), if lost { 255 } else { 0 })
 }
 
 fn assert_host_loader(root: &Path, data: &Value, op: &str, transferred: bool) {
@@ -698,7 +1010,12 @@ fn assert_host_loader(root: &Path, data: &Value, op: &str, transferred: bool) {
             fs::write(&progress, b"installed").unwrap();
             true
         }
-        ("planned", _) => !already_serving_candidate,
+        ("planned", _) => {
+            if !transferred {
+                assert!(already_serving_candidate || data["candidate"] == hash(b"plakd"));
+            }
+            transferred
+        }
         ("installed", _) => false,
         _ => panic!("unexpected call order: {phase}/{op}"),
     };
@@ -739,6 +1056,12 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
             assert_eq!(op["candidate"]["sha256"], data["candidate"]);
             assert_eq!(data["client"], "staged");
             assert_eq!(op["previous"]["instance"], data["host"]["instance"]);
+            if data["paired_fleet"] == true {
+                assert_eq!(data["runner"], "current");
+            }
+            if data["refuse_upgrade"] == true {
+                return json!({"error":"source refused before surrender"});
+            }
             if data["lose_reply"] == "old" {
                 data["host"]["upgrade_idle"] = json!(false);
             } else {
@@ -781,6 +1104,7 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
             assert_eq!(op["expected"], data["host"]["sha256"]);
             Value::Null
         }
+        "runner_preflight" => return runner_preflight(data),
         "canary" => {
             assert_eq!(op["expected"], data["host"]["sha256"]);
             if data["canary_fail"] == true {

@@ -1,27 +1,39 @@
 # Operator deployment (private tooling)
 
 The hidden `plakd deploy` command is for a generated Linux systemd user host
-with an unchanged local gateway, a home-local runner, and any exact-match
-clients enrolled on Linux x86_64. It does not update the gateway, migrate
+or Apple Silicon macOS LaunchAgent, with an unchanged local gateway and
+optional paired runners and exact-match clients. It does not update the gateway, migrate
 custody, move state across keys, or write service units. Run it from an
 independent machine with Git and OpenSSH; the remote login needs a working
 user service manager and an enrolled SSH host key. No Python interpreter is
 needed. Name a resolvable SSH host and login; deploy uses an empty SSH config,
 not per-user aliases or shared master sockets. Never run apply inside the
-host or runner being replaced.
+host or runner being replaced. For a macOS host, enroll the running
+`com.plakd.host` and local gateway LaunchAgents in that user's logged-in GUI
+domain. The gateway agent must run the enrolled executable directly. The
+on-disk host plist and loaded arguments must match; deploy does not load or
+restart a LaunchAgent.
 
 Copy [the placeholder inventory](deploy.example.toml) to a private path
-outside the checkout. Pin full SHA-256 digests and the full revision of the
-shipping artifact directory. The revision must appear on origin/main; fetch
+outside the checkout. Schema 2 uses `[[staging.machines]]` and optionally
+`[[production.machines]]` with a `node` and its role tables. Place the gateway
+with the host; omit runner and client tables where unused. Omit an unused
+stage entirely. Pin the full manifest SHA-256 for every platform you enroll.
+All artifacts must be from one full revision on origin/main; fetch
 that branch separately if the local checkout cannot validate its history.
 List every account in use with its exact name and cheap canary model. Plan
 refuses any missing in-use account; signed-out accounts show `not_enrolled`. Grok
 and Claude OAuth models must admit the tool-free 16-token canary at the
 specified low or disabled effort; do not omit a route to bypass admission.
-Use `clients = []` in the stage table if there are no clients.
 
-A client's manifest has exactly `schema: 1`, `platform:
-"x86_64-unknown-linux-musl"`, `wire: {"number": N, "schema_pin": "…"}`,
+For a one-Mac fleet, use a separate macOS user for staging, not another
+product home under the production UID. Give each user their own HOME,
+product home, service/runner pairing, links and credentials. Linux stage
+targets must be on separate machines. The operator machine is separate from
+both. Use distinct evidence paths, and give both stages the same receipt path.
+
+A client's manifest has exactly `schema: 1`, `platform` matching its node,
+`wire: {"number": N, "schema_pin": "…"}`,
 and `file: {"length": N, "sha256": "…"}`. Enroll a dedicated symlink under
 `~/.local/bin` and pin its existing target's digest. The new executable's
 read-only `--check-connection` must actually connect and echo a single JSON
@@ -29,6 +41,18 @@ object `{"connected": true, "binary_id": "…", "wire": {"number": N,
 "schema_pin": "…"}}`. Configure the client's endpoint independently before
 deploy; the tool never interpolates a connection shell command or edits
 client configuration.
+
+For each paired runner, the enrolled ID, literal `login@host` SSH destination
+and dedicated link must match the source host's `[runners.<id>]` table.
+Do not remap that destination in the host's SSH config. The link must point
+directly to an owned immutable snapshot, and must not be one of the ordinary
+PATH commands that `install.sh link` moves. Settle live jobs using the old
+build. If plan cannot inspect a runner, use its source-compatible command
+link, attach a settled source root read-only on that runner, and keep the
+attachment open through upgrade. Do not advance the link manually once
+deploy owns its intent. A picker Ready row alone does not hold the connection.
+If the incumbent predates the source-side inspection, use the manual paired
+upgrade once before enrolling it.
 
 If plan returns `bootstrap_required`, use the manual same-key procedure
 for the first upgrade onto an S2 build. Follow the existing settlement and
@@ -49,21 +73,26 @@ plakd deploy status --inventory "$inventory" --stage staging
 ```
 
 Review the JSON plan before applying. Apply runs the old image's health and
-paid canaries before staging, then installs, switches and verifies. The
+paid canaries before staging. It stages immutable bits, advances dedicated
+runner links, upgrades and links the host, then switches exact-wire clients
+and verifies. The
 candidate's generated unit must match the on-disk bytes before it can request
 handoff; use the manual same-key procedure if the template differs.
 A green staging transition writes the JSON receipt at the configured path.
 An unchanged, verified re-apply is a no-op and never refreshes that receipt.
-For production use the exact staging manifest digests, route coverage and an
-unexpired green staging receipt. Resuming a recorded production handoff
+For production use the exact staging platform and client manifest digests,
+equivalent runner transition classes and route coverage, and an unexpired
+green staging receipt. Resuming a recorded production handoff
 does not re-check the receipt that already qualified it. Keep the evidence and receipt in an
 operator-owned directory.
 
 On failure use the command in the JSON `retry` field. For
 `needs_reconcile`, inspect the actual service and upgrade outcome before
 continuing. If the replacement is already Ready, the same apply can finish
-the remaining links and verification without surrender again. If only the
-incumbent answers and proves it is idle with no pending receipt, status or
-apply can record a withdrawal without issuing another upgrade. If the outcome
-is still uncertain, follow the manual same-key procedure. Do not discard the evidence log just to retry an
-uncertain surrender. There is no automatic rollback.
+the remaining links and verification without surrender again. If the
+incumbent proves it is idle with no pending receipt, status or apply
+withdraws the intent and restores any runner links it advanced. It does not
+issue a new upgrade in that invocation. If the outcome is still uncertain,
+leave the runner links in place while inspecting the host. Do not discard the
+evidence log or race a manual handoff against an open intent. There is no
+automatic host rollback after surrender.

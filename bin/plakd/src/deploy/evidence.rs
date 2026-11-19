@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek as _, Write as _};
 use std::os::unix::fs::MetadataExt as _;
@@ -9,10 +10,32 @@ use serde::{Deserialize, Serialize};
 use crate::CliResult;
 use crate::shipping_artifact::{self as shipping, check, io};
 
-use super::protocol::{Dependencies, Health, SourceTransition, StageIdentity};
+use super::protocol::{
+    AccountIdentity, Dependencies, Health, RunnerObserved, SourceTransition, StageIdentity,
+};
 use super::{Halt, Result};
 
-pub(super) const SCHEMA: u32 = 2;
+pub(super) const SCHEMA: u32 = 3;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Cohort {
+    Runner,
+    RunnerWithdrawal,
+    Host,
+    Clients,
+}
+
+impl Cohort {
+    pub(super) fn phase(self) -> &'static str {
+        match self {
+            Self::Runner => "runner_intent",
+            Self::RunnerWithdrawal => "runner_withdrawal",
+            Self::Host => "upgrade_intent",
+            Self::Clients => "client_intent",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct Row {
@@ -27,12 +50,18 @@ pub(super) struct Row {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Pending {
+    pub(super) cohort: Cohort,
+    pub(super) ticket: uuid::Uuid,
     pub(super) instance: String,
     pub(super) source_sha256: String,
     pub(super) source_transition: SourceTransition,
     pub(super) dependencies: Dependencies,
     pub(super) baseline: Health,
+    pub(super) accounts: BTreeSet<AccountIdentity>,
+    pub(super) runners: BTreeMap<String, RunnerObserved>,
+    pub(super) host_upgrade: bool,
 }
 
 pub(super) struct Log {
@@ -134,9 +163,14 @@ pub(super) fn pending(rows: &[Row]) -> Result<Option<(&str, Pending)>> {
     for row in rows.iter().rev() {
         match row.phase.as_str() {
             "verified" | "withdrawn" => return Ok(None),
-            "upgrade_intent" => {
-                let pending = serde_json::from_value(serde_json::Value::Object(row.fields.clone()))
-                    .map_err(|_| Halt::reconcile("recorded upgrade intent lacks required facts"))?;
+            "runner_intent" | "runner_withdrawal" | "upgrade_intent" | "client_intent" => {
+                let pending: Pending = serde_json::from_value(serde_json::Value::Object(
+                    row.fields.clone(),
+                ))
+                .map_err(|_| Halt::reconcile("recorded cohort intent lacks required facts"))?;
+                if pending.cohort.phase() != row.phase {
+                    return Err(Halt::reconcile("recorded cohort and evidence phase differ"));
+                }
                 return Ok(Some((&row.intent, pending)));
             }
             _ => {}

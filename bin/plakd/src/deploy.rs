@@ -11,15 +11,19 @@ mod apply;
 mod artifacts;
 pub(crate) mod canary;
 mod evidence;
+mod fence;
 mod fleet;
 mod inventory;
+mod launchd;
 mod plan;
 mod probe;
 mod protocol;
 mod receipt;
+mod runner;
 mod ssh;
 mod target;
 mod timing;
+pub(crate) use protocol::{DeployRunnerInspection, DeployRunnerVerdict};
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {
@@ -208,7 +212,7 @@ fn work(
         }
         if evidence::pending(&rows)?.is_some() {
             let mut log = evidence::Log::open(path, false)?;
-            deployment.plan(&log.rows.clone(), Some(&mut log), report)?;
+            deployment.plan(&log.rows.clone(), Some(&mut log), false, report)?;
             if let Some(last) = log.rows.last() {
                 report.put("last_evidence", last)?;
             }
@@ -216,7 +220,7 @@ fn work(
             return Ok(());
         }
     }
-    deployment.plan(&rows, None, report)?;
+    deployment.plan(&rows, None, false, report)?;
     report.put("result", &"ready")?;
     Ok(())
 }

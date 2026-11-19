@@ -24,6 +24,7 @@ use crate::carry::upgrade::{
     DestinationProbe, process,
     receipt::{self, Phase, Receipt},
 };
+use crate::deploy::{DeployRunnerInspection, DeployRunnerVerdict};
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
 use crate::surface_protocol::PlakExtension;
@@ -52,6 +53,13 @@ struct Request {
     wait_seconds: u64,
     drain: crate::command::HostDrain,
     abandon: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Incoming {
+    Upgrade(Request),
+    DeployInspection(DeployRunnerInspection),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -706,6 +714,56 @@ pub(super) async fn serve(
     }
 }
 
+fn next_upgrade(
+    stream: &mut UnixStream,
+    services: &Services,
+    pending: &Pending,
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<Option<Request>> {
+    stream
+        .set_read_timeout(Some(PROBE_BOUND))
+        .map_err(io_failure)?;
+    stream
+        .set_write_timeout(Some(PROBE_BOUND))
+        .map_err(io_failure)?;
+    let identity = plakous_recursive_subagents::tree::custody_host();
+    write(
+        stream,
+        &Identity {
+            protocol: crate::carry::upgrade::PROTOCOL,
+            key: crate::home::state::state_key(),
+            instance: identity.instance.to_string(),
+            binary: crate::build_identity::binary_id().to_owned(),
+            deploy_idle: deploy_idle(services, pending)?,
+        },
+    )?;
+    match read(stream)? {
+        Incoming::Upgrade(request) => Ok(Some(request)),
+        Incoming::DeployInspection(request) => {
+            let verdict = if request.source_instance != identity.instance.to_string()
+                || deploy_idle(services, pending)? != Some(true)
+            {
+                DeployRunnerVerdict::Blocked {
+                    detail: "source coordinator changed or is not idle; replan".into(),
+                }
+            } else {
+                match process_safety::inspect_deploy(
+                    services,
+                    &request.deploy_inspect_runners,
+                    runtime,
+                ) {
+                    Ok(()) => DeployRunnerVerdict::Settled,
+                    Err(error) => DeployRunnerVerdict::Blocked {
+                        detail: error.message().to_owned(),
+                    },
+                }
+            };
+            write(stream, &verdict)?;
+            Ok(None)
+        }
+    }
+}
+
 fn handle(
     mut stream: UnixStream,
     host: &Arc<SessionHost<PlakExtension>>,
@@ -715,24 +773,9 @@ fn handle(
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
-    stream
-        .set_read_timeout(Some(PROBE_BOUND))
-        .map_err(io_failure)?;
-    stream
-        .set_write_timeout(Some(PROBE_BOUND))
-        .map_err(io_failure)?;
-    let identity = plakous_recursive_subagents::tree::custody_host();
-    write(
-        &mut stream,
-        &Identity {
-            protocol: crate::carry::upgrade::PROTOCOL,
-            key: crate::home::state::state_key(),
-            instance: identity.instance.to_string(),
-            binary: crate::build_identity::binary_id().to_owned(),
-            deploy_idle: deploy_idle(services, pending)?,
-        },
-    )?;
-    let request: Request = read(&stream)?;
+    let Some(request) = next_upgrade(&mut stream, services, pending, runtime)? else {
+        return Ok(());
+    };
     if request.abandon.is_some() {
         let answer = match abandon::apply(services, &request) {
             Ok(mappings) => {

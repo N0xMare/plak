@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{BufRead, BufReader, Read as _, Write as _};
 use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -15,15 +15,19 @@ use crate::shipping_artifact::{
     self as shipping, BuildInfo, FileFacts, NAMES, Upgrade, Wire, check, fail, io,
 };
 
-use super::inventory::{self, Host, Node};
-use super::protocol::{Export, Facts, Observed, RunnerTriple, StageIdentity};
+use super::inventory::{self, Host, Node, Platform};
+use super::protocol::{
+    AccountIdentity, Export, Facts, Observed, RunnerPlacement, RunnerTriple, StageIdentity,
+};
 use super::ssh;
 use super::timing;
+use super::{DeployRunnerInspection, DeployRunnerVerdict};
 
 const UNIT: &str = "plakd-host.service";
+const HOST_AGENT: &str = "com.plakd.host";
 pub(super) const NORMALIZE: &str = "host unit is not the generated stable-link unit: verify ~/.local/bin/plakd resolves to the running snapshot, move the pinned ExecStart drop-in aside, then run systemctl --user daemon-reload; do not restart";
 pub(super) const UNIT_DRIFT: &str = "candidate unit template differs: review the candidate's host install --dry-run output and normalize the unit using the manual same-key procedure before retrying";
-const GATEWAY_IMAGE: &str = "gateway image change: restore the enrolled gateway or use S3";
+const GATEWAY_IMAGE: &str = "gateway image change: restore the enrolled gateway or use the manual gateway upgrade procedure";
 const CUSTODY: &str = "custody change: restore the enrolled local gateway; use the custody runbook";
 
 pub(super) struct Target<'a> {
@@ -62,11 +66,11 @@ struct Gateway {
     accounts: Vec<String>,
 }
 
-pub(super) fn validate_node(node: &Node) -> CliResult<()> {
+pub(super) fn validate_node(node: &Node, operator: Option<&str>) -> CliResult<AccountIdentity> {
     node.validate()?;
     check(
-        std::env::consts::OS == "linux" && std::env::consts::ARCH == "x86_64",
-        "target must be Linux x86_64",
+        Platform::native() == Some(node.platform),
+        "unexpected target platform",
     )?;
     let uid = rustix::process::geteuid().as_raw();
     check(uid == node.uid && uid != 0, "unexpected SSH effective UID")?;
@@ -80,18 +84,24 @@ pub(super) fn validate_node(node: &Node) -> CliResult<()> {
             && fs::metadata(&node.home).map_err(io)?.uid() == uid
             && line(&capture(login, timing::LOGIN)?)? == node.login,
         "unexpected SSH login or home",
-    )
+    )?;
+    let machine_sha256 = ssh::machine_id(node.platform)?;
+    check(
+        operator != Some(machine_sha256.as_str()),
+        "run deploy from an operator machine independent of the targets",
+    )?;
+    Ok(AccountIdentity {
+        machine_sha256,
+        platform: node.platform,
+        uid,
+        home: node.home.clone(),
+    })
 }
 
 impl<'a> Target<'a> {
     pub(super) fn new(host: &'a Host, operator: Option<&str>) -> CliResult<Self> {
         host.validate()?;
-        validate_node(&host.node)?;
-        let machine = ssh::machine_id()?;
-        check(
-            operator != Some(machine.as_str()),
-            "run deploy from an operator machine independent of the target host",
-        )?;
+        let account = validate_node(&host.node, operator)?;
         check(
             host.product_home.canonicalize().map_err(io)? == host.product_home
                 && fs::metadata(&host.product_home).map_err(io)?.uid() == host.node.uid,
@@ -99,7 +109,7 @@ impl<'a> Target<'a> {
         )?;
         Ok(Self {
             host,
-            machine,
+            machine: account.machine_sha256,
             proc_root: PathBuf::from("/proc"),
         })
     }
@@ -107,24 +117,30 @@ impl<'a> Target<'a> {
     pub(super) fn stage_identity(&self) -> StageIdentity {
         StageIdentity {
             machine_sha256: self.machine.clone(),
+            platform: self.host.node.platform,
+            uid: self.host.node.uid,
+            home: self.host.node.home.clone(),
             product_home: self.host.product_home.clone(),
         }
     }
 
-    pub(super) fn production_marker(&self) -> PathBuf {
-        self.host
-            .node
-            .home
-            .join(".local/lib/plak/deploy-production")
-    }
-
     pub(super) fn production_history(&self) -> bool {
-        !fs::symlink_metadata(self.production_marker())
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        production_history(&self.host.node)
     }
 
     pub(super) fn unit_path(&self) -> PathBuf {
-        self.host.node.home.join(".config/systemd/user").join(UNIT)
+        match self.host.node.platform {
+            Platform::Linux => self.host.node.home.join(".config/systemd/user").join(UNIT),
+            Platform::Mac => self.plist(HOST_AGENT),
+        }
+    }
+
+    fn plist(&self, label: &str) -> PathBuf {
+        self.host
+            .node
+            .home
+            .join("Library/LaunchAgents")
+            .join(format!("{label}.plist"))
     }
 
     pub(super) fn render_unit(&self, binary: &Path) -> CliResult<Vec<u8>> {
@@ -155,7 +171,10 @@ impl<'a> Target<'a> {
         capture(cmd, seconds)
     }
 
-    pub(super) fn observe(&self) -> CliResult<(PathBuf, Observed)> {
+    fn host_pid(&self) -> CliResult<String> {
+        if self.host.node.platform == Platform::Mac {
+            return Ok(super::launchd::observe(self, HOST_AGENT, &self.unit_path())?.pid);
+        }
         let unit = self.unit_path();
         let host_props = self.properties(
             UNIT,
@@ -177,9 +196,29 @@ impl<'a> Target<'a> {
                     .is_some_and(|value| value == "no"),
             NORMALIZE,
         )?;
-        let pid = active_pid(&host_props)?;
-        let process = self.proc_root.join(pid).join("exe");
-        let binary = process.canonicalize().map_err(io)?;
+        Ok(active_pid(&host_props)?.to_owned())
+    }
+
+    fn process_image(&self, pid: &str) -> CliResult<PathBuf> {
+        match self.host.node.platform {
+            Platform::Linux => {
+                let exe = self.proc_root.join(pid).join("exe");
+                let path = exe.canonicalize().map_err(io)?;
+                let running = fs::metadata(exe).map_err(io)?;
+                let found = fs::metadata(&path).map_err(io)?;
+                check(
+                    running.dev() == found.dev() && running.ino() == found.ino(),
+                    "running executable inode differs from the image on disk",
+                )?;
+                Ok(path)
+            }
+            Platform::Mac => super::launchd::process_image(self, pid),
+        }
+    }
+
+    pub(super) fn observe(&self) -> CliResult<(PathBuf, Observed)> {
+        let pid = self.host_pid()?;
+        let binary = self.process_image(&pid)?;
         let link = ssh::stable(&self.host.node);
         let linked = link.canonicalize().map_err(io)?;
         check(
@@ -187,7 +226,7 @@ impl<'a> Target<'a> {
             NORMALIZE,
         )?;
         let image = FileFacts::read(&binary)?;
-        let unit = shipping::read(&unit, shipping::LIMIT)?;
+        let unit = shipping::read(&self.unit_path(), shipping::LIMIT)?;
         check(self.render_unit(&binary)? == unit, NORMALIZE)?;
         let facts = self.facts(&binary)?;
         let identity = self.identity()?;
@@ -200,7 +239,7 @@ impl<'a> Target<'a> {
                     .is_some_and(|(owner, nonce)| owner == pid && shipping::hex(nonce, 16))
                 && identity.key == facts.state_key
                 && identity.protocol == facts.host_upgrade.coordinator,
-            "systemd image and coordinator identity differ",
+            "service process image and coordinator identity differ",
         )?;
         self.welcome(&facts)?;
         let gateway = self.gateway(&binary)?;
@@ -209,7 +248,7 @@ impl<'a> Target<'a> {
         let canary = self.canary_routes(&binary)?;
         check(
             self.identity()? == identity
-                && process.canonicalize().map_err(io)? == binary
+                && self.process_image(&pid)? == binary
                 && FileFacts::read(&binary)? == image,
             "host changed during observation",
         )?;
@@ -293,19 +332,23 @@ impl<'a> Target<'a> {
         Ok(Some(lines.map(str::to_owned).collect()))
     }
 
-    fn paired(&self) -> CliResult<bool> {
+    fn paired(&self) -> CliResult<BTreeMap<String, RunnerPlacement>> {
+        #[derive(Deserialize)]
+        struct Placements {
+            #[serde(default)]
+            runners: BTreeMap<String, RunnerPlacement>,
+        }
         let config = self.host.product_home.join("config.toml");
-        if !config.exists() {
-            return Ok(false);
+        if fs::symlink_metadata(&config)
+            .is_err_and(|err| err.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Ok(BTreeMap::new());
         }
         let data = shipping::read(&config, shipping::LIMIT)?;
         let text = std::str::from_utf8(&data).map_err(|_| fail("host config is not UTF-8"))?;
-        let config: toml::Table =
+        let cfg: Placements =
             toml::from_str(text).map_err(|_| fail("cannot inspect host runners"))?;
-        Ok(config
-            .get("runners")
-            .and_then(toml::Value::as_table)
-            .is_some_and(|runners| !runners.is_empty()))
+        Ok(cfg.runners)
     }
 
     fn properties(&self, unit: &str, names: &[&str]) -> CliResult<BTreeMap<String, String>> {
@@ -342,34 +385,22 @@ impl<'a> Target<'a> {
             .ok_or_else(|| fail("gateway instance is unavailable"))?;
         let raw = self.product(binary, ["gateway", "check"], timing::PROBE)?;
         let (versions, accounts) = gateway_reply(text(&raw)?, &expected, instance)?;
-        let props = self.properties(
-            &self.host.gateway_unit,
-            &["ActiveState", "MainPID", "ExecStart", "NeedDaemonReload"],
-        )?;
-        let pid = active_pid(&props)?;
-        let process = self
-            .proc_root
-            .join(pid)
-            .join("exe")
-            .canonicalize()
-            .map_err(io)?;
+        let (pid, start) = self.gateway_service()?;
+        let process = self.process_image(&pid)?;
         check(
             FileFacts::read(&process)?.sha256 == self.host.gateway_sha256,
             GATEWAY_IMAGE,
         )?;
-        let start = props
-            .get("ExecStart")
-            .and_then(|row| row.strip_prefix("{ path="))
-            .and_then(|row| row.split_once(" ; argv[]="))
-            .map(|row| Path::new(row.0))
-            .filter(|path| path.is_absolute())
-            .and_then(|path| path.canonicalize().ok());
         check(
-            start.as_ref() == Some(&process)
-                && props
-                    .get("NeedDaemonReload")
-                    .is_some_and(|value| value == "no"),
-            "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway or use S3",
+            start.canonicalize().ok().as_ref() == Some(&process),
+            match self.host.node.platform {
+                Platform::Linux => {
+                    "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway"
+                }
+                Platform::Mac => {
+                    "gateway image change: LaunchAgent program does not resolve to the running image; restore the enrolled gateway"
+                }
+            },
         )?;
         let socket = fs::metadata(&self.host.gateway_socket).map_err(|_| fail(CUSTODY))?;
         check(socket.file_type().is_socket(), CUSTODY)?;
@@ -394,6 +425,32 @@ impl<'a> Target<'a> {
         })
     }
 
+    fn gateway_service(&self) -> CliResult<(String, PathBuf)> {
+        if self.host.node.platform == Platform::Mac {
+            let label = &self.host.gateway_unit;
+            let agent = super::launchd::observe(self, label, &self.plist(label))?;
+            return Ok((agent.pid, agent.program));
+        }
+        let props = self.properties(
+            &self.host.gateway_unit,
+            &["ActiveState", "MainPID", "ExecStart", "NeedDaemonReload"],
+        )?;
+        let start = props
+            .get("ExecStart")
+            .and_then(|row| row.strip_prefix("{ path="))
+            .and_then(|row| row.split_once(" ; argv[]="))
+            .map(|row| Path::new(row.0))
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| fail("cannot inspect the enrolled gateway command"))?;
+        check(
+            props
+                .get("NeedDaemonReload")
+                .is_some_and(|value| value == "no"),
+            "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway or use S3",
+        )?;
+        Ok((active_pid(&props)?.to_owned(), start.into()))
+    }
+
     fn accounts(&self, binary: &Path, listed: &[String]) -> CliResult<BTreeMap<String, String>> {
         let output = self.product(binary, ["status"], timing::PROBE)?;
         let custody = format!("via gateway unix:{}", self.host.gateway_socket.display());
@@ -405,6 +462,35 @@ impl<'a> Target<'a> {
     fn identity(&self) -> CliResult<Identity> {
         let socket = connect(&self.host.product_home.join("host/upgrade.sock"))?;
         frame(socket)
+    }
+
+    pub(super) fn runner_preflight(&self, observed: &Observed) -> CliResult<()> {
+        let mut socket = connect(&self.host.product_home.join("host/upgrade.sock"))?;
+        let mut reader = BufReader::new(socket.try_clone().map_err(io)?);
+        let identity: Identity = read_frame(&mut reader)?;
+        check(
+            identity.instance == observed.instance
+                && identity.binary == observed.facts.binary_id
+                && identity.deploy_idle == Some(true),
+            "source coordinator changed or is not idle; replan",
+        )?;
+        reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(timing::RUNNER_INSPECTION)))
+            .map_err(io)?;
+        let request = DeployRunnerInspection {
+            source_instance: identity.instance,
+            deploy_inspect_runners: observed.paired.keys().cloned().collect(),
+        };
+        socket
+            .write_all(&shipping::canonical(&request)?)
+            .map_err(io)?;
+        let answer: DeployRunnerVerdict = read_frame(&mut reader)
+            .map_err(|_| fail("source cannot prove paired-runner inspection; use a source with deploy runner inspection or the manual paired upgrade"))?;
+        match answer {
+            DeployRunnerVerdict::Settled => Ok(()),
+            DeployRunnerVerdict::Blocked { detail } => Err(fail(&detail)),
+        }
     }
 
     fn welcome(&self, facts: &Facts) -> CliResult<()> {
@@ -622,8 +708,12 @@ fn connect(path: &Path) -> CliResult<UnixStream> {
 }
 
 fn frame<T: serde::de::DeserializeOwned>(stream: UnixStream) -> CliResult<T> {
+    read_frame(&mut BufReader::new(stream))
+}
+
+fn read_frame<T: serde::de::DeserializeOwned>(reader: &mut impl BufRead) -> CliResult<T> {
     let mut buffer = Vec::new();
-    BufReader::new(stream)
+    reader
         .take(shipping::LIMIT + 1)
         .read_until(b'\n', &mut buffer)
         .map_err(io)?;
@@ -632,6 +722,15 @@ fn frame<T: serde::de::DeserializeOwned>(stream: UnixStream) -> CliResult<T> {
         "invalid service identity frame",
     )?;
     decode(&buffer)
+}
+
+pub(super) fn production_marker(node: &Node) -> PathBuf {
+    node.home.join(".local/lib/plak/deploy-production")
+}
+
+pub(super) fn production_history(node: &Node) -> bool {
+    !fs::symlink_metadata(production_marker(node))
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
 }
 
 pub(super) fn command(binary: &OsStr, node: &Node, product_home: &Path) -> std::process::Command {
@@ -647,13 +746,21 @@ pub(super) fn command(binary: &OsStr, node: &Node, product_home: &Path) -> std::
                 node.home.display()
             ),
         )
-        .env("LANG", "C.UTF-8")
-        .env("XDG_RUNTIME_DIR", &runtime)
         .env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path={runtime}/bus"),
+            "LANG",
+            if node.platform == Platform::Mac {
+                "en_US.UTF-8"
+            } else {
+                "C.UTF-8"
+            },
         )
         .current_dir(&node.home);
+    if node.platform == Platform::Linux {
+        cmd.env("XDG_RUNTIME_DIR", &runtime).env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={runtime}/bus"),
+        );
+    }
     cmd
 }
 

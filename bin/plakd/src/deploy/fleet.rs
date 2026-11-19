@@ -1,22 +1,18 @@
-use std::{
-    cell::Cell,
-    path::{Path, PathBuf},
-};
+use std::{cell::Cell, path::PathBuf};
 
 use crate::CliResult;
-use crate::shipping_artifact::{NAMES, check, fail};
+use crate::shipping_artifact::{NAMES, fail};
 
-use super::artifacts::Artifacts;
-use super::inventory::{Client, Host, Stage};
-use super::probe;
-use super::protocol::{Call, ClientOp, HostOp, Observed};
+use super::artifacts::{Artifacts, ProductArtifact};
+use super::inventory::{Client, Host, Node, Runner, Stage};
+use super::protocol::{Call, ClientObserved, ClientOp, HostOp, Observed, RunnerObserved, RunnerOp};
 use super::ssh::{Blob, Image, Ssh};
 use super::timing;
 
 pub(super) trait Fleet {
     fn host(&self, op: HostOp) -> CliResult<serde_json::Value>;
-    fn client_current(&self, client: &Client) -> CliResult<bool>;
-    fn client(&self, client: &Client, op: ClientOp) -> CliResult<()>;
+    fn runner(&self, runner: &Runner, op: RunnerOp) -> CliResult<serde_json::Value>;
+    fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value>;
     fn use_installed_candidate(&self);
 }
 
@@ -37,49 +33,60 @@ impl<'a> Remote<'a> {
         })
     }
 
-    fn deployed(&self) -> PathBuf {
-        self.host
-            .node
-            .home
-            .join(".local/lib/plak/release")
-            .join(&self.artifacts.manifest.snapshot_id)
-            .join("plakd")
+    fn product(
+        &self,
+        node: &Node,
+        call: Call,
+        staging: bool,
+        installed: bool,
+        timeout: u64,
+    ) -> CliResult<serde_json::Value> {
+        let artifact = self.artifacts.image(node.platform);
+        let bootstrap = artifact.root.join("plakd");
+        let deployed = deployed(node, artifact);
+        let sidecars = NAMES.map(|name| artifact.root.join(name));
+        let files: Vec<_> = if staging {
+            NAMES
+                .into_iter()
+                .zip(&sidecars)
+                .skip(1)
+                .map(|(name, path)| Blob {
+                    path,
+                    facts: &artifact.manifest.files[name],
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let facts = &artifact.manifest.files["plakd"];
+        let image = if installed && !staging {
+            Image::Installed(&deployed, facts)
+        } else {
+            Image::Transfer(&bootstrap, facts)
+        };
+        self.ssh.call(node, image, call, &files, timeout)
     }
+}
 
-    fn transfer<'b>(&'b self, path: &'b Path) -> Image<'b> {
-        Image::Transfer(path, &self.artifacts.manifest.files["plakd"])
-    }
+pub(super) fn deployed(node: &Node, artifact: &ProductArtifact) -> PathBuf {
+    node.home
+        .join(".local/lib/plak/release")
+        .join(&artifact.manifest.snapshot_id)
+        .join("plakd")
 }
 
 impl Fleet for Remote<'_> {
     fn host(&self, op: HostOp) -> CliResult<serde_json::Value> {
-        let deployed = self.deployed();
-        let bootstrap = self.artifacts.root.join("plakd");
-        let sidecars = NAMES.map(|name| self.artifacts.root.join(name));
-        let mut files = Vec::new();
         let staging = matches!(op, HostOp::StageHost { .. });
-        if staging {
-            for (name, file) in NAMES.into_iter().zip(&sidecars).skip(1) {
-                files.push(Blob {
-                    path: file,
-                    facts: &self.artifacts.manifest.files[name],
-                });
-            }
-        }
-        let image = if self.staged.get() && !staging {
-            Image::Installed(&deployed, &self.artifacts.manifest.files["plakd"])
-        } else {
-            self.transfer(&bootstrap)
-        };
         let timeout = timing::host(&op);
-        let reply = self.ssh.call(
+        let reply = self.product(
             &self.host.node,
-            image,
             Call::Host {
                 host: self.host.clone(),
                 op,
             },
-            &files,
+            staging,
+            self.staged.get(),
             timeout,
         )?;
         if staging {
@@ -88,39 +95,26 @@ impl Fleet for Remote<'_> {
         Ok(reply)
     }
 
-    fn client_current(&self, client: &Client) -> CliResult<bool> {
-        let artifact = &self.artifacts.clients[&client.id];
-        let raw = Ssh::script(
-            &client.node,
-            CLIENT_OBSERVE,
-            &[
-                path(&client.node.home)?,
-                &client.node.uid.to_string(),
-                path(&client.link)?,
-                &client.node.login,
-            ],
-        )?;
-        let value = probe::text(&raw)?;
-        let (hash, resolved) = value
-            .split_once('\n')
-            .ok_or_else(|| fail("invalid client link verdict"))?;
-        let resolved = probe::line(resolved.as_bytes())?;
-        check(
-            hash == client.source_sha256 || hash == artifact.file.sha256,
-            "unexpected client link digest; inspect and re-enroll",
-        )?;
-        let desired = client
-            .node
-            .home
-            .join(".local/lib/plak/clients")
-            .join(&artifact.file.sha256)
-            .join("client");
-        Ok(Path::new(resolved) == desired && hash == artifact.file.sha256)
+    fn runner(&self, runner: &Runner, op: RunnerOp) -> CliResult<serde_json::Value> {
+        let staging = matches!(op, RunnerOp::Stage { .. });
+        let installed = matches!(op, RunnerOp::Advance { .. } | RunnerOp::Restore { .. });
+        let timeout = timing::runner(&op);
+        self.product(
+            &runner.node,
+            Call::Runner {
+                runner: runner.clone(),
+                op,
+            },
+            staging,
+            installed,
+            timeout,
+        )
     }
 
-    fn client(&self, client: &Client, op: ClientOp) -> CliResult<()> {
+    fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value> {
         let artifact = &self.artifacts.clients[&client.id];
-        let bootstrap = self.artifacts.root.join("plakd");
+        let native = self.artifacts.image(client.node.platform);
+        let bootstrap = native.root.join("plakd");
         let files = matches!(op, ClientOp::Stage).then(|| {
             [Blob {
                 path: &client.blob,
@@ -130,7 +124,7 @@ impl Fleet for Remote<'_> {
         let timeout = timing::client(&op);
         self.ssh.call(
             &client.node,
-            self.transfer(&bootstrap),
+            Image::Transfer(&bootstrap, &native.manifest.files["plakd"]),
             Call::Client {
                 node: client.node.clone(),
                 client: artifact.request(client),
@@ -150,33 +144,16 @@ pub(super) fn observed(fleet: &impl Fleet) -> CliResult<Observed> {
     evidence_decode(fleet.host(HostOp::Observe)?)
 }
 
+pub(super) fn runner(fleet: &impl Fleet, runner: &Runner) -> CliResult<RunnerObserved> {
+    evidence_decode(fleet.runner(runner, RunnerOp::Observe)?)
+}
+
+pub(super) fn client(fleet: &impl Fleet, client: &Client) -> CliResult<ClientObserved> {
+    evidence_decode(fleet.client(client, ClientOp::Observe)?)
+}
+
 pub(super) fn evidence_decode<T: serde::de::DeserializeOwned>(
     value: serde_json::Value,
 ) -> CliResult<T> {
     serde_json::from_value(value).map_err(|_| fail("unexpected typed deployment reply"))
 }
-
-fn path(path: &Path) -> CliResult<&str> {
-    path.to_str()
-        .ok_or_else(|| fail("deployment path is not UTF-8"))
-}
-
-const CLIENT_OBSERVE: &str = r#"sh -c '
-set -eu
-IFS= read -r home
-IFS= read -r uid
-IFS= read -r link
-IFS= read -r login
-test "$HOME" = "$home" && test "$(id -u)" = "$uid" && test "$(id -un)" = "$login"
-for dir in "$home" "$home/.local" "$home/.local/bin"; do
-    test -d "$dir" && test ! -L "$dir"
-    test "$(stat -c %u -- "$dir")" = "$uid"
-    mode=$(stat -c %a -- "$dir")
-    test "$((0$mode & 022))" -eq 0
-done
-test -L "$link"
-image=$(readlink -f -- "$link")
-test -f "$image"
-hash=$(sha256sum -- "$image")
-printf "%s\n%s\n" "${hash%% *}" "$image"
-'"#;

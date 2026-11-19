@@ -8,30 +8,36 @@ use crate::CliResult;
 use crate::operator_process;
 use crate::shipping_artifact::{self as shipping, FileFacts, Manifest, Wire, check, fail, hex};
 
-use super::inventory::{Client, Inventory, Selected};
+use super::inventory::{ArtifactPin, Client, Inventory, Platform, Selected};
 use super::protocol::{Candidate, ClientSpec};
 
-const PLATFORM: &str = "x86_64-unknown-linux-musl";
-
 pub(super) struct Artifacts {
-    pub(super) manifest: Manifest,
-    pub(super) raw: String,
+    host: Platform,
+    images: BTreeMap<Platform, ProductArtifact>,
     pub(super) pins: Pins,
-    pub(super) root: PathBuf,
     pub(super) repo: PathBuf,
     pub(super) clients: BTreeMap<String, ClientArtifact>,
+}
+
+pub(super) struct ProductArtifact {
+    pub(super) manifest: Manifest,
+    pub(super) raw: String,
+    pub(super) pin: String,
+    pub(super) root: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Pins {
     pub(super) host: String,
+    pub(super) platforms: BTreeMap<Platform, String>,
     pub(super) clients: BTreeMap<String, String>,
 }
 
 impl Pins {
     pub(super) fn same_digests(&self, expected: &Self) -> bool {
         self.host == expected.host
+            && self.platforms == expected.platforms
             && self.clients.values().collect::<BTreeSet<_>>()
                 == expected.clients.values().collect::<BTreeSet<_>>()
     }
@@ -59,7 +65,7 @@ pub(super) struct ClientArtifact {
 }
 
 impl ClientManifest {
-    pub(super) fn read(raw: &[u8], pin: &str) -> CliResult<Self> {
+    pub(super) fn read(raw: &[u8], pin: &str, platform: Platform) -> CliResult<Self> {
         check(
             shipping::digest(raw) == pin,
             "client manifest digest differs",
@@ -68,7 +74,7 @@ impl ClientManifest {
             serde_json::from_slice(raw).map_err(|_| fail("invalid client manifest"))?;
         check(
             manifest.schema == 1
-                && manifest.platform == PLATFORM
+                && manifest.platform == platform.triple()
                 && manifest.file.length > 0
                 && manifest.file.length <= shipping::BLOB_LIMIT
                 && hex(&manifest.file.sha256, 64)
@@ -102,25 +108,43 @@ impl ClientArtifact {
 impl Artifacts {
     pub(super) fn import(data: &Inventory, config: &Selected<'_>) -> CliResult<Self> {
         from_main(&data.repo, &data.revision)?;
-        let raw = shipping::read(&data.artifact.join("manifest.json"), shipping::LIMIT)?;
-        check(
-            shipping::digest(&raw) == data.manifest_sha256,
-            "host manifest digest differs",
-        )?;
-        let manifest = Manifest::parse(&raw)?;
-        check(
-            manifest.revision == data.revision && manifest.platform == PLATFORM,
-            "wrong host revision or target",
-        )?;
-        manifest.verify_dir(&data.artifact)?;
+        let host = config.host.node.platform;
+        let mut images = BTreeMap::new();
+        for platform in config
+            .nodes()
+            .map(|node| node.platform)
+            .collect::<BTreeSet<_>>()
+        {
+            images.insert(
+                platform,
+                ProductArtifact::read(&data.manifests[&platform], platform, &data.revision)?,
+            );
+        }
+        let manifest = &images[&host].manifest;
+        for runner in config.runners {
+            check(
+                images[&runner.node.platform]
+                    .manifest
+                    .build_info
+                    .runner
+                    .protocol
+                    == manifest.build_info.runner.protocol,
+                "runner platform artifact has a different runner protocol",
+            )?;
+        }
         let mut pins = Pins {
-            host: data.manifest_sha256.clone(),
+            host: images[&host].pin.clone(),
+            platforms: images
+                .iter()
+                .map(|(platform, image)| (*platform, image.pin.clone()))
+                .collect(),
             clients: BTreeMap::new(),
         };
         let mut clients = BTreeMap::new();
         for client in config.clients {
             let raw = shipping::read(&client.manifest, shipping::LIMIT)?;
-            let client_manifest = ClientManifest::read(&raw, &client.manifest_sha256)?;
+            let client_manifest =
+                ClientManifest::read(&raw, &client.manifest_sha256, client.node.platform)?;
             check(
                 client_manifest.wire == manifest.build_info.wire,
                 "client wire/schema pin differs; build an exact-match client",
@@ -139,20 +163,24 @@ impl Artifacts {
             );
         }
         Ok(Self {
-            manifest,
-            raw: String::from_utf8(raw).map_err(|_| fail("host manifest is not UTF-8"))?,
+            host,
+            images,
             pins,
             clients,
-            root: data.artifact.clone(),
             repo: data.repo.clone(),
         })
     }
 
+    pub(super) fn host(&self) -> &ProductArtifact {
+        self.image(self.host)
+    }
+
+    pub(super) fn image(&self, platform: Platform) -> &ProductArtifact {
+        &self.images[&platform]
+    }
+
     pub(super) fn candidate(&self) -> Candidate {
-        Candidate {
-            snapshot: self.manifest.snapshot_id.clone(),
-            sha256: self.manifest.files["plakd"].sha256.clone(),
-        }
+        self.host().candidate()
     }
 
     pub(super) fn check_ancestor(&self, source: &str) -> CliResult<()> {
@@ -166,7 +194,7 @@ impl Artifacts {
                 "merge-base",
                 "--is-ancestor",
                 source,
-                &self.manifest.revision,
+                &self.host().manifest.revision,
             ],
         )?;
         match result.status.code() {
@@ -177,6 +205,35 @@ impl Artifacts {
             _ => Err(fail(
                 "serving revision cannot be verified; fetch its history before deploying",
             )),
+        }
+    }
+}
+
+impl ProductArtifact {
+    fn read(pin: &ArtifactPin, platform: Platform, revision: &str) -> CliResult<Self> {
+        let bytes = shipping::read(&pin.artifact.join("manifest.json"), shipping::LIMIT)?;
+        check(
+            shipping::digest(&bytes) == pin.manifest_sha256,
+            "platform manifest digest differs",
+        )?;
+        let manifest = Manifest::parse(&bytes)?;
+        check(
+            manifest.revision == revision && manifest.platform == platform.triple(),
+            "wrong artifact revision or platform",
+        )?;
+        manifest.verify_dir(&pin.artifact)?;
+        Ok(Self {
+            manifest,
+            pin: pin.manifest_sha256.clone(),
+            root: pin.artifact.clone(),
+            raw: String::from_utf8(bytes).map_err(|_| fail("manifest is not UTF-8"))?,
+        })
+    }
+
+    pub(super) fn candidate(&self) -> Candidate {
+        Candidate {
+            snapshot: self.manifest.snapshot_id.clone(),
+            sha256: self.manifest.files["plakd"].sha256.clone(),
         }
     }
 }

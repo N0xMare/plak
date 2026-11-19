@@ -5,9 +5,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::shipping_artifact::{Upgrade, Wire};
 
-use super::inventory::{Host, Node, Route, Stage};
+use super::inventory::{Host, Node, Platform, Route, Runner, Stage};
 
-pub(super) const VERSION: u32 = 1;
+pub(super) const VERSION: u32 = 2;
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeployRunnerInspection {
+    pub(crate) source_instance: String,
+    pub(crate) deploy_inspect_runners: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum DeployRunnerVerdict {
+    Settled,
+    Blocked { detail: String },
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +44,10 @@ pub(super) enum Call {
         host: Host,
         op: HostOp,
     },
+    Runner {
+        runner: Runner,
+        op: RunnerOp,
+    },
     Client {
         node: Node,
         client: ClientSpec,
@@ -41,6 +59,10 @@ pub(super) enum Call {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum HostOp {
     Observe,
+    RunnerPreflight {
+        expected: String,
+        placements: BTreeMap<String, RunnerPlacement>,
+    },
     Health {
         expected: String,
         routes: Vec<Route>,
@@ -68,6 +90,12 @@ pub(super) enum HostOp {
         candidate: Candidate,
         drain: u32,
         previous: Box<Observed>,
+        ticket: uuid::Uuid,
+    },
+    WithdrawUpgrade {
+        ticket: uuid::Uuid,
+        instance: String,
+        source_sha256: String,
     },
     HostLink {
         candidate: Candidate,
@@ -81,9 +109,30 @@ pub(super) enum HostOp {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum ClientOp {
+    Observe,
     Stage,
     Link { connection: Connection },
     Check { connection: Connection },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum RunnerOp {
+    Observe,
+    Stage {
+        manifest: String,
+        manifest_sha256: String,
+    },
+    Advance {
+        ticket: uuid::Uuid,
+        candidate: Candidate,
+        source: RunnerLink,
+    },
+    Restore {
+        ticket: uuid::Uuid,
+        candidate: Candidate,
+        source: RunnerLink,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -97,7 +146,70 @@ pub(super) struct Candidate {
 #[serde(deny_unknown_fields)]
 pub(super) struct StageIdentity {
     pub(super) machine_sha256: String,
+    pub(super) platform: Platform,
+    pub(super) uid: u32,
+    pub(super) home: PathBuf,
     pub(super) product_home: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AccountIdentity {
+    pub(super) machine_sha256: String,
+    pub(super) platform: Platform,
+    pub(super) uid: u32,
+    pub(super) home: PathBuf,
+}
+
+impl AccountIdentity {
+    pub(super) fn isolated_from(&self, other: &Self) -> bool {
+        self.machine_sha256 != other.machine_sha256
+            || (self.platform == Platform::Mac
+                && other.platform == Platform::Mac
+                && self.uid != other.uid
+                && self.home != other.home)
+    }
+}
+
+impl StageIdentity {
+    pub(super) fn account(&self) -> AccountIdentity {
+        AccountIdentity {
+            machine_sha256: self.machine_sha256.clone(),
+            platform: self.platform,
+            uid: self.uid,
+            home: self.home.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RunnerPlacement {
+    pub(super) ssh: String,
+    pub(super) command: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RunnerLink {
+    pub(super) path: PathBuf,
+    pub(super) sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RunnerObserved {
+    pub(super) account: AccountIdentity,
+    pub(super) production_history: bool,
+    pub(super) link: RunnerLink,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ClientObserved {
+    pub(super) account: AccountIdentity,
+    pub(super) production_history: bool,
+    pub(super) current: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -140,7 +252,7 @@ pub(super) struct Observed {
     pub(super) gateway_instance: String,
     pub(super) gateway_versions: Vec<u32>,
     pub(super) stage_identity: StageIdentity,
-    pub(super) paired: bool,
+    pub(super) paired: BTreeMap<String, RunnerPlacement>,
     pub(super) canary: Option<Vec<String>>,
     pub(super) accounts: BTreeMap<String, String>,
     pub(super) upgrade_idle: bool,
@@ -163,6 +275,7 @@ impl Observed {
             wire: self.facts.wire.clone(),
             coordinator: self.facts.host_upgrade.clone(),
             runner_protocol: self.facts.runner_triple.protocol,
+            runners: Vec::new(),
             gateway_versions: self.gateway_versions.clone(),
         }
     }
@@ -184,7 +297,16 @@ pub(super) struct SourceTransition {
     pub(super) wire: Wire,
     pub(super) coordinator: Upgrade,
     pub(super) runner_protocol: u32,
+    pub(super) runners: Vec<(Platform, RunnerTransition)>,
     pub(super) gateway_versions: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RunnerTransition {
+    Unchanged,
+    SameTriple,
+    ChangedTriple,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

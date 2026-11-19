@@ -6430,30 +6430,43 @@ UMask=0077
 
 `plakd deploy plan|apply|status --inventory PATH --stage staging|production`
 is hidden, maintainer tooling, not a supported CLI or an extension protocol.
-Run it from an independent operator machine with a private inventory; it
-does not run in the target service, start a deployment daemon, or modify a
-runner, gateway, systemd unit or credential configuration. It enrolls one
-Linux x86_64 systemd-user host executing the generated stable-link unit,
-an unchanged local gateway, a home-local runner with unchanged protocol,
-and optionally exact-wire clients. Plan and status are JSON, observational,
-and never dispatch a model request. OpenSSH uses a minimal configuration,
+Run it from an independent operator machine with a private inventory. It
+does not run in the target service, start a deployment daemon, or edit
+service, pairing or credential configuration. Strict schema-2 TOML declares
+one revision, platform-pinned artifacts, and stage-scoped machine logins
+carrying host, gateway, paired-runner and client roles. A stage has one
+host executing the generated stable-link service, one unchanged gateway
+in that login, optionally paired runners, and optionally exact-wire clients.
+Linux x86_64 targets use systemd user services; Apple Silicon macOS targets
+use LaunchAgents in the enrolled user's GUI domain. Stage data and evidence
+are disjoint except for the staging receipt. Only on macOS may staging and
+production use the same machine, with distinct logins, UIDs and homes.
+Plan and status are JSON and never dispatch a model request. Plan is
+observational; status may finish withdrawal of a recorded pre-surrender
+attempt. OpenSSH uses a minimal configuration,
 strict host keys, batch mode and no shared connections or agent forwarding.
 Fixed remote loaders read request data on stdin; native target operations
 use closed JSON requests and replies and verified payload lengths and hashes.
 The operator starts those operations with a verified transfer of the candidate
 image and uses the verified installed candidate after staging. The target
-refuses an operator whose deploy protocol number differs.
-Neither deployment endpoint needs Python. A pinned ExecStart drop-in refuses:
+refuses an operator whose deploy protocol number differs (currently v2).
+Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
+On macOS the loaded LaunchAgent path and arguments must agree with the plist
+on disk and the service PID must prove its executable vnode. The host
+plist must match the product renderer. Unloaded, edited or stale services
+need manual enrollment; deploy does not bootstrap or kickstart them.
 
-Plan compares the systemd process image, upgrade coordinator instance, state
+Plan compares the service process image, upgrade coordinator instance, state
 key, exact wire schema, local runner protocol, gateway image and holder, and
 enrolled command links. A candidate must descend from the serving revision.
 The unchanged gateway must admit the minimum of every active family (v2
 for Codex and Grok). A state-key change requires the manual settled upgrade
-runbook, a paired placement or gateway image change requires later deployment
-tooling, and a custody change is a separate manual leg. Legacy versions use
+runbook; a gateway image or holder change still refuses, and a custody
+change is a separate manual leg. Paired runner IDs, literal `login@host`
+destinations and dedicated command paths must match the serving host's
+configured placements. Legacy versions use
 the existing host upgrade, state-key, export-version and wire-schema probes;
 missing facts do not become defaults. Only absence of the incumbent's
 `deploy-canary --capabilities` reply identifies a pre-S2 bootstrap;
@@ -6463,6 +6476,18 @@ existing manual same-key procedure, wait for Ready before linking, and
 re-plan with an S2 incumbent. Stage with the candidate's installer before
 using its link command, which cannot relink pre-port snapshots.
 Ordinary `run --max-turns 1` is not a substitute.
+
+When replacing a host with paired placements, plan asks its exact source
+coordinator to inspect incumbent runner connections and refuses live or
+unknown job state. This same-user request has no admission or connection
+lifetime effects. If inspection is unavailable, use the source-compatible
+link to attach a settled root read-only and **keep that attachment open**
+on the source through handoff; a picker Ready row is not enough.
+Apply checks again before the runner links move. The source upgrade's
+ordinary changed-triple gates still check before drain and before surrender.
+A source without this inspection request must be upgraded by the manual
+procedure first. Runner links must be dedicated links to owned, immutable
+snapshots. Install does not move them.
 
 Plan refuses any in-use account missing from inventory, and reports signed-out
 accounts as `not_enrolled`. Named logins of the same kind remain distinct.
@@ -6481,10 +6506,12 @@ OAuth generation before and after each canary and across BASELINE and
 verification; an increase is normal and a decrease refuses.
 
 The staged destination binary runs the handoff operations. Stage the
-immutable host snapshot without linking with the chapter 06 installer and stage
-client blobs before switching anything. Verify the candidate's rendered
+immutable host and runner snapshots without linking with the chapter 06
+installer, and stage client blobs before switching anything. Verify the candidate's rendered
 unit against the unit bytes on disk before recording surrender intent;
-template drift requires the manual procedure. Recheck the candidate's
+template drift requires the manual procedure. Atomically advance paired
+runner links to the destination snapshot for their platform before requesting
+host upgrade. Recheck the candidate's
 state key immediately before invoking the staged destination's
 `host upgrade --expect-binary <id> --drain <duration>` and verify its Ready
 instance before moving the host command link. Then check the clients against
@@ -6494,18 +6521,23 @@ unchanged dependencies and repeat BASELINE health and canary checks. An exact
 healthy no-op performs only read-only verification and does not mint a
 promotion receipt.
 
-Apply appends evidence, halts on error, and emits the exact status command.
-There is no automatic rollback, unit rewrite, timed restart or CAS journal.
-Record handoff intent before invoking the requester. A missing Ready verdict
-reports `needs_reconcile`; re-plan only finishes the recorded cut if the exact
-new image is Ready under a new instance with unchanged dependencies. An old
-or unknown owner does not authorize another surrender. When the exact
-predecessor's serialized coordinator proves idle with no pending receipt,
-status or apply records `withdrawn` without surrendering in that invocation.
-Evidence and receipts record the machine-id digest and product home. The
-staging receipt must identify a different machine; a production history
-marker in the target login's installation root also fences staging.
-The green schema-2 staging JSON
+Apply appends an intent before each mutating cohort (runner links → host →
+client links), halts on error, and emits the exact status command. A missing
+acknowledgement is reconciled by observing exact links and service/process
+identity, not by reissuing surrender or repeating a completed link change.
+An unknown outcome leaves the runner links in place. If the exact predecessor's
+serialized coordinator proves idle with no pending receipt, apply or status
+fences the withdrawn target request and restores the recorded runner links
+before closing the intent. Target-local, per-operation cancellation
+fences under the login's installation root prevent a delayed request from
+undoing withdrawal. There is no service rollback after surrender, unit
+rewrite, timed restart or CAS journal. Do not race another deploy or manual
+handoff against an open intent. A Ready replacement must be the exact new
+image under a new instance with unchanged non-transitioning dependencies.
+Evidence and receipts identify accounts by platform, machine digest, UID
+and home, and record the host product home. A production history marker in
+each mutated target login's installation root fences staging.
+The green schema-3 staging JSON
 report is a receipt for production apply, not a store or custody authority.
 
 ### 4.7 `plakd gateway`

@@ -9,14 +9,21 @@ use crate::CliResult;
 use crate::operator_process;
 use crate::shipping_artifact::{self as shipping, FileFacts, check, fail, io};
 
-use super::inventory::{Node, Stage};
+use super::inventory::{Node, Platform, Stage};
 use super::protocol::{Call, Reply, Request, VERSION};
 
+// Fixed loaders; the path, size and digest are data, never shell arguments.
 const RUN: &str = r#"sh -c '
 set -eu
+PATH=/usr/bin:/bin
+export PATH
 IFS= read -r binary
 IFS= read -r digest
-actual=$(sha256sum <"$binary")
+case "$(uname -s)" in
+  Darwin) actual=$(/usr/bin/shasum -a 256 <"$binary") ;;
+  Linux) actual=$(/usr/bin/sha256sum <"$binary") ;;
+  *) exit 1 ;;
+esac
 test "${actual%% *}" = "$digest"
 exec "$binary" deploy-target
 '"#;
@@ -24,6 +31,8 @@ exec "$binary" deploy-target
 // operator-pinned digest before executing the temporary image with stdin intact.
 const BOOT: &str = r#"sh -c '
 set -eu
+PATH=/usr/bin:/bin
+export PATH
 umask 077
 IFS= read -r size
 IFS= read -r digest
@@ -31,7 +40,13 @@ work=$(mktemp -d /tmp/plakd-deploy.XXXXXXXX)
 trap "rm -rf -- \"$work\"" 0
 trap "exit 1" HUP INT TERM
 head -c "$size" >"$work/plakd"
-printf "%s  %s\n" "$digest" "$work/plakd" | sha256sum -c --status
+test "$(wc -c <"$work/plakd" | tr -d " ")" = "$size"
+case "$(uname -s)" in
+  Darwin) actual=$(/usr/bin/shasum -a 256 <"$work/plakd") ;;
+  Linux) actual=$(/usr/bin/sha256sum <"$work/plakd") ;;
+  *) exit 1 ;;
+esac
+test "${actual%% *}" = "$digest"
 chmod 0500 "$work/plakd"
 "$work/plakd" deploy-target
 '"#;
@@ -53,11 +68,7 @@ pub(super) struct Ssh {
 
 impl Ssh {
     pub(super) fn new(stage: Stage) -> CliResult<Self> {
-        let operator_machine = if std::env::consts::OS == "linux" {
-            Some(machine_id()?)
-        } else {
-            None
-        };
+        let operator_machine = Platform::native().map(machine_id).transpose()?;
         Ok(Self {
             operator_machine,
             stage,
@@ -110,15 +121,6 @@ impl Ssh {
                 "deploy protocol mismatch: operator v{VERSION}, target v{supported}; {remedy}"
             ))),
         }
-    }
-
-    pub(super) fn script(node: &Node, script: &str, lines: &[&str]) -> CliResult<Vec<u8>> {
-        let mut file = tempfile::tempfile().map_err(io)?;
-        for line in lines {
-            check(!line.chars().any(char::is_control), "invalid SSH argument")?;
-            writeln!(file, "{line}").map_err(io)?;
-        }
-        run(node, script, file, 45)
     }
 }
 
@@ -177,13 +179,36 @@ fn stderr_class(bytes: &[u8]) -> &'static str {
     .unwrap_or("remote_command_or_transport")
 }
 
-pub(super) fn machine_id() -> CliResult<String> {
+pub(super) fn machine_id(platform: Platform) -> CliResult<String> {
+    if platform == Platform::Mac {
+        let mut command = operator_process::command("/usr/sbin/ioreg".as_ref());
+        command
+            .env_clear()
+            .args(["-rd1", "-c", "IOPlatformExpertDevice"]);
+        let raw = super::probe::capture(command, super::timing::LOGIN)?;
+        return mac_machine_id(super::probe::text(&raw)?);
+    }
     let id =
         std::fs::read("/etc/machine-id").map_err(|_| fail("cannot establish machine identity"))?;
     let id = std::str::from_utf8(&id)
         .map_err(|_| fail("invalid machine identity"))?
         .trim();
     check(shipping::hex(id, 32), "invalid machine identity")?;
+    Ok(shipping::digest(id.as_bytes()))
+}
+
+fn mac_machine_id(output: &str) -> CliResult<String> {
+    let id = output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("\"IOPlatformUUID\" = \""))
+        .filter_map(|line| line.strip_suffix('"'))
+        .map(uuid::Uuid::parse_str)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| fail("invalid macOS machine identity"))?;
+    let [id] = id.as_slice() else {
+        return Err(fail("cannot establish macOS machine identity"));
+    };
+    check(!id.is_nil(), "invalid macOS machine identity")?;
     Ok(shipping::digest(id.as_bytes()))
 }
 

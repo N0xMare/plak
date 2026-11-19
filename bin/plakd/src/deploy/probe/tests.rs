@@ -177,6 +177,7 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
             login: "example".into(),
             home: home.clone(),
             uid: 1000,
+            platform: super::Platform::Linux,
         },
         web_socket: product.join("web.sock"),
         gateway_socket: product.join("gateway.sock"),
@@ -275,7 +276,7 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
         fs::read_link(target.host.node.home.join(".local/bin/plakd")).unwrap(),
         source
     );
-    let marker = target.production_marker();
+    let marker = super::production_marker(&target.host.node);
     fs::write(&marker, b"production history").unwrap();
     let guarded = HostOp::MarkProduction {
         expected: target.stage_identity(),

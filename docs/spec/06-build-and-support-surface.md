@@ -1824,7 +1824,7 @@ under `~/.local/bin`, replaces only links already pointing into plakd's
 snapshot or sidecar roots, and updates existing owned Cargo links without
 creating new Cargo entries. Use this installer to stage the image first:
 its link command cannot relink pre-port snapshots. Neither local step
-starts or changes a service.
+starts or changes a service or moves a dedicated paired-runner command link.
 
 The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
 product surface and does not change either publishing or installation policy.
@@ -1832,15 +1832,23 @@ It requires Git, OpenSSH and a read-capable source checkout of the origin
 on the operator, and native target operations from the artifact binary on
 the target. It accepts a full revision on the advertised
 `origin/main` first-parent history, never accepts a branch name or builds
-bits itself, and stages through the artifact's native snapshot installer. Supply
-the S1 artifact directory and its full pinned manifest digest out of band.
+bits itself, and stages through the artifact's native snapshot installer.
+Supply a release artifact directory and full pinned manifest digest per
+enrolled target platform (`x86_64-unknown-linux-musl` or
+`aarch64-apple-darwin`). Each manifest names the same exact source revision;
+each SSH target executes the candidate for its own platform.
 Rehash the manifest and exact files at ingest, during transfer and on the
 target; the installer checks target build-info and publishes without linking.
 Client inputs are a separate pinned manifest and one blob, hashed at all three
 boundaries. Production requires a green staging transition less than 24 hours
-old for identical host and client manifest digests, source wire, coordinator,
-runner protocol and gateway versions, and equivalent canary model and effort
-coverage, including account counts. An already converged read-only check
+old for identical platform, serving-host and client manifest digests, source
+wire, coordinator, local runner protocol and gateway versions. It also
+requires an equivalent paired-runner transition multiset by platform
+(`unchanged`, `same_triple`, `changed_triple`), independent of runner
+names, and equivalent canary model and effort coverage, including account
+counts. Staging and production receipts must identify disjoint target
+logins; a shared physical machine is allowed only on macOS under different
+UIDs and homes. An already converged read-only check
 neither needs nor renews the receipt. Resuming a recorded production
 intent relies on its passed baseline and does not re-check receipt expiry.
 A rehearsal of different bytes, including a fresh rebuild with different
