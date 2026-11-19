@@ -171,13 +171,21 @@ for one version bump, without native protocol compatibility.
   allowance instead of always reporting it unobserved.
 - A remote admin login is held to the slot's signed-in provider account;
   replacing it with another account needs the local administrator.
+- Refuse excess gateway login attempts before changing the store, and
+  return an already available device login result on cancellation. A
+  panicking account call is refused and logged without its payload; the
+  worker continues serving.
+- With remote custody, unqualified `status`, `key status` and `usage`
+  show errors per account without hiding successful rows. The console
+  shows an empty roster with a diagnostic when account listing fails.
 - A global disable no longer locks out the local administrator's `enable`,
   `disable`, `drain`, `caller list` and `status`, and a flag verb is not
   blocked by its own target's flag. `disable --cut` now ends matching relays in flight.
 - `plakd run`, `continue` and `models` run under a configured gateway instead
   of refusing.
-- Drain lets refresh claims finish on their own task and releases the holder
-  lock only after the runtime shut down. The caller key file must be
+- Drain waits for in-flight admin calls as well as refresh claims. If the
+  account worker misses the shutdown deadline, the holder lock stays held
+  until process exit. The caller key file must be
   owner-only, and a unix gateway gets a key only from an explicit
   `gateway.key_file`. Failed audit appends are counted in `gateway status`;
   `audit --since` takes an RFC 3339 timestamp. The service replaces only its

@@ -63,6 +63,21 @@ fn gateway_names(link: &crate::gateway::AdminLink) -> Result<Vec<String>, String
     link.accounts()
 }
 
+fn gateway_roster(link: &crate::gateway::AdminLink) -> Roster {
+    match gateway_names(link) {
+        Ok(names) => roster_from_names(names),
+        Err(_) => Roster {
+            accounts: Vec::new(),
+            diagnostics: vec![diagnostic(
+                "enumeration_unavailable",
+                None,
+                "the gateway did not answer account enumeration",
+            )],
+            truncated: false,
+        },
+    }
+}
+
 /// One API-key account's key facts from the gateway's admin status.
 fn gateway_key(
     link: &crate::gateway::AdminLink,
@@ -135,9 +150,7 @@ pub(super) async fn roster(
         });
     }
     if let Some(link) = application.custody.admin() {
-        let names = gateway_names(link)
-            .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))?;
-        return Ok(roster_from_names(names));
+        return Ok(gateway_roster(link));
     }
     let mut accounts = BTreeSet::new();
     let mut diagnostics = Vec::new();

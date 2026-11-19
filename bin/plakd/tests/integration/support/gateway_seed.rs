@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, reason = "offline subscription store fixture")]
 
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use plakous::model::{FixedClock, Timestamp};
@@ -9,6 +9,13 @@ use plakous::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPa
 
 pub(crate) const CODEX_EPOCH: &str = "seeded-login-selection-epoch-0123456789abcd";
 pub(crate) const GROK_EPOCH: &str = "grok-login-selection-epoch-0123456789abcdef";
+
+pub(crate) fn primary_record(state: &Path, provider: NativeProvider) -> PathBuf {
+    state
+        .join("plak/subscriptions")
+        .join(provider.as_str())
+        .join("credential.json")
+}
 
 pub(crate) fn seed(state: &Path, provider: NativeProvider, name: Option<&str>, expires_at: u64) {
     let paths = SubscriptionPaths::from_xdg_state_home(state).unwrap();
@@ -36,7 +43,7 @@ pub(crate) fn seed(state: &Path, provider: NativeProvider, name: Option<&str>, e
     let root = state.join("plak/subscriptions");
     let (root, record, slot_name) = name.map_or_else(
         || {
-            let record = root.join(provider.as_str()).join("credential.json");
+            let record = primary_record(state, provider);
             (root.clone(), record, "primary".to_owned())
         },
         |name| {

@@ -6,13 +6,13 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use plakous::gateway::server::{Peer, RelayServer};
 use tokio::net::{TcpListener, UnixListener};
 
 use super::audit::Audit;
-use super::bridge::{AccountBridge, AccountWorker};
+use super::bridge::{AccountBridge, AccountThread, AccountWorker};
 use super::callers::Callers;
 use super::dispatch::GatewayState;
 use super::flags::Flags;
@@ -25,7 +25,8 @@ use crate::home::paths::PlakPaths;
 pub(crate) struct Gateway {
     state: Arc<GatewayState>,
     server: RelayServer<ProductGateway>,
-    lock: HolderLock,
+    accounts: AccountThread,
+    lock: Arc<HolderLock>,
 }
 
 impl Gateway {
@@ -56,7 +57,10 @@ impl Gateway {
         let audit = Audit::open(server_config::audit_dir(home), config.audit_retention_days)
             .map_err(|error| error.to_string())?
             .publishing_failures(server_config::audit_failures_path(home), instance.as_str());
-        let bridge = AccountWorker::start(bridge)
+        let upstream = plakous::gateway::server::http1_upstream()
+            .map_err(|error| format!("gateway upstream client: {error}"))?;
+        let lock = Arc::new(lock);
+        let (bridge, accounts) = AccountWorker::start(bridge, Arc::clone(&lock))
             .map_err(|error| format!("could not start gateway account worker: {error}"))?;
         let state = Arc::new(GatewayState {
             instance,
@@ -73,21 +77,21 @@ impl Gateway {
             relays: Mutex::new(std::collections::HashMap::new()),
         });
         let product = Arc::new(ProductGateway::new(home, Arc::clone(&state)));
-        let upstream = plakous::gateway::server::http1_upstream()
-            .map_err(|error| format!("gateway upstream client: {error}"))?;
         let bound = usize::try_from(state.config.max_request_body_bytes).unwrap_or(usize::MAX);
         let server = RelayServer::new(product, upstream, state.instance.clone())
             .with_max_request_body_bytes(bound);
         Ok(Self {
             state,
             server,
+            accounts,
             lock,
         })
     }
 
     /// Foreground serve until SIGTERM, Ctrl-C or an admin drain. The holder
     /// lock is released only after in-flight relays and refresh claims
-    /// settled (or their deadline passed) and the runtime shut down.
+    /// settled (or their deadline passed), the runtime shuts down and the
+    /// account worker joins.
     pub(crate) fn serve_foreground(self) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -96,12 +100,10 @@ impl Gateway {
         let Self {
             state,
             server,
+            accounts,
             lock,
         } = self;
         let stop_state = Arc::clone(&state);
-        // Keep the account worker through runtime shutdown, so normal drain
-        // drops its executor (including pending logins) before the holder.
-        let held = Arc::clone(&state);
         let result = runtime.block_on(async move {
             let stop = async move {
                 let mut terminate =
@@ -119,9 +121,17 @@ impl Gateway {
             };
             run(state, server, stop).await
         });
-        runtime.shutdown_timeout(RUNTIME_SHUTDOWN);
-        drop(held);
-        drop(lock);
+        let deadline = Instant::now() + RUNTIME_SHUTDOWN;
+        accounts.close();
+        runtime.shutdown_timeout(deadline.saturating_duration_since(Instant::now()));
+        if !accounts.join_until(deadline) {
+            // Keep the exclusive holder advertised until process exit even
+            // if the detached account worker eventually finishes.
+            std::mem::forget(lock);
+            return Err(
+                "gateway account worker did not stop before the shutdown deadline".to_owned(),
+            );
+        }
         result
     }
 }

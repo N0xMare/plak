@@ -178,13 +178,15 @@ fn list_accounts(
     key: Option<&str>,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
+    for account in listed_accounts(address, key)? {
+        writeln!(stdout, "{account}").map_err(|_| CliFailure::new("stdout failed"))?;
+    }
+    Ok(ProcessOutcome::Success)
+}
+
+fn listed_accounts(address: &GatewayAddress, key: Option<&str>) -> CliResult<Vec<GatewayAccount>> {
     match ask(address, key, AdminRequest::List {})? {
-        AdminResponse::Accounts { accounts } => {
-            for account in accounts {
-                writeln!(stdout, "{account}").map_err(|_| CliFailure::new("stdout failed"))?;
-            }
-            Ok(ProcessOutcome::Success)
-        }
+        AdminResponse::Accounts { accounts } => Ok(accounts),
         other => unexpected(other),
     }
 }
@@ -260,45 +262,57 @@ fn status(
     account: Option<&str>,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let accounts = match account {
-        Some(account) => vec![account_of(account)?],
-        None => Vec::new(),
+    account_rows(address, key, account, stdout, status_cell)
+}
+
+fn status_cell(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    account: &GatewayAccount,
+) -> CliResult<String> {
+    let response = ask(
+        address,
+        key,
+        AdminRequest::Status {
+            accounts: vec![account.clone()],
+        },
+    )?;
+    let AdminResponse::Status { rows } = response else {
+        return unexpected(response);
     };
-    match ask(address, key, AdminRequest::Status { accounts })? {
-        AdminResponse::Status { rows } => {
-            for row in rows {
-                let source = row.facts.key.as_ref().map_or_else(String::new, |key| {
-                    match (&key.source, &key.env_var) {
-                        (KeySource::Environment, Some(variable)) => {
-                            format!(" source=environment ({})", variable.as_str())
-                        }
-                        (KeySource::Environment, None) => " source=environment".to_owned(),
-                        (KeySource::File, _) => " source=file".to_owned(),
-                        (KeySource::Missing, _) => " source=missing".to_owned(),
-                    }
-                });
-                // The fingerprint `plakd key status` prints in-process, so the
-                // two can be compared across a custody flip.
-                let fingerprint = row
-                    .facts
-                    .key
-                    .as_ref()
-                    .and_then(|key| key.fingerprint.as_ref())
-                    .map_or_else(String::new, |fingerprint| {
-                        format!(" fingerprint={}", fingerprint.as_str())
-                    });
-                writeln!(
-                    stdout,
-                    "{}: credential={}{source}{fingerprint}",
-                    row.facts.account,
-                    credential_word(row.facts.credential.status)
-                )
-                .map_err(|_| CliFailure::new("stdout failed"))?;
-            }
-            Ok(ProcessOutcome::Success)
-        }
-        other => unexpected(other),
+    let [row] = rows.as_slice() else {
+        return Err(CliFailure::new("the gateway did not return one status row"));
+    };
+    if row.facts.account != *account {
+        return Err(CliFailure::new(
+            "the gateway returned status for a different account",
+        ));
     }
+    let source =
+        row.facts
+            .key
+            .as_ref()
+            .map_or_else(String::new, |key| match (&key.source, &key.env_var) {
+                (KeySource::Environment, Some(variable)) => {
+                    format!(" source=environment ({})", variable.as_str())
+                }
+                (KeySource::Environment, None) => " source=environment".to_owned(),
+                (KeySource::File, _) => " source=file".to_owned(),
+                (KeySource::Missing, _) => " source=missing".to_owned(),
+            });
+    // Same fingerprint as in-process key status, for comparison across custody flips.
+    let fingerprint = row
+        .facts
+        .key
+        .as_ref()
+        .and_then(|key| key.fingerprint.as_ref())
+        .map_or_else(String::new, |fingerprint| {
+            format!(" fingerprint={}", fingerprint.as_str())
+        });
+    Ok(format!(
+        "credential={}{source}{fingerprint}",
+        credential_word(row.facts.credential.status)
+    ))
 }
 
 fn refresh(
@@ -370,33 +384,56 @@ fn usage(
     account: Option<&AccountRef>,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let accounts = match account {
-        Some(account) => vec![account_of(account.as_str())?],
-        None => match ask(address, key, AdminRequest::List {})? {
-            AdminResponse::Accounts { accounts } => accounts,
-            other => return unexpected(other),
+    account_rows(
+        address,
+        key,
+        account.map(AccountRef::as_str),
+        stdout,
+        usage_cell,
+    )
+}
+
+fn usage_cell(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    account: &GatewayAccount,
+) -> CliResult<String> {
+    match ask(
+        address,
+        key,
+        AdminRequest::Allowance {
+            account: account.clone(),
         },
+    )? {
+        AdminResponse::Allowance {
+            unavailable, view, ..
+        } => Ok(unavailable
+            .map(|text| text.as_str().to_owned())
+            .or_else(|| view.map(|value| value.to_string()))
+            .unwrap_or_else(|| "unavailable".to_owned())),
+        other => unexpected(other),
+    }
+}
+
+fn account_rows(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    account: Option<&str>,
+    stdout: &mut dyn Write,
+    cell: impl Fn(&GatewayAddress, Option<&str>, &GatewayAccount) -> CliResult<String>,
+) -> CliResult<ProcessOutcome> {
+    let all = account.is_none();
+    let accounts = match account {
+        Some(account) => vec![account_of(account)?],
+        None => listed_accounts(address, key)?,
     };
     for account in accounts {
-        match ask(
-            address,
-            key,
-            AdminRequest::Allowance {
-                account: account.clone(),
-            },
-        )? {
-            AdminResponse::Allowance {
-                unavailable, view, ..
-            } => {
-                let detail = unavailable
-                    .map(|text| text.as_str().to_owned())
-                    .or_else(|| view.map(|value| value.to_string()))
-                    .unwrap_or_else(|| "unavailable".to_owned());
-                writeln!(stdout, "{account}: {detail}")
-                    .map_err(|_| CliFailure::new("stdout failed"))?;
-            }
-            other => return unexpected(other),
-        }
+        let detail = match cell(address, key, &account) {
+            Ok(detail) => detail,
+            Err(error) if all => format!("error={}", error.message()),
+            Err(error) => return Err(error),
+        };
+        writeln!(stdout, "{account}: {detail}").map_err(|_| CliFailure::new("stdout failed"))?;
     }
     Ok(ProcessOutcome::Success)
 }

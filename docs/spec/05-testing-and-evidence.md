@@ -4385,6 +4385,17 @@ transport evidence, not pin-enforcement evidence; each provider's
 `upstream_pins` tests and the custody tests over the real pin tables own pin
 enforcement.
 
+The real `plakd gateway serve` process also runs against an offline OAuth
+peer. Under `fault-injection`, `PLAK_TEST_GATEWAY_OAUTH_PORT` routes only the
+pinned Codex device-code POSTs and the Claude token POST to that loopback
+port; other exchanges use the test's fault plan. The process tests cover a
+Codex device challenge and polling, refusal of a duplicate start before
+credential retirement, and a TCP admin being refused replacement of a
+Ready Claude record without changing the record. Concurrent admin calls
+and Drain are exercised with a held provider request; the holder lock
+remains exclusive until that request and the service settle. A separate
+worker test checks that a panicking call is refused and Status still works.
+
 Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
 peer. Those bytes, with the dial authority normalized, are pinned equal to a
 direct client exchange to the same peer, with the custodied value substituted

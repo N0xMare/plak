@@ -1378,6 +1378,10 @@ replaces a stale socket only when it is this user's socket. The audit log
 records metadata only; a failed append is counted and shown by `plakd gateway
 status`.
 
+Drain does not hand off the credential store while the account bridge may
+still write. If the account worker outlasts the shutdown budget, the
+exclusive holder lock stays held until process exit.
+
 ## 3. Credentials
 
 Claude OAuth account UUIDs come only from the authenticated token grant or the

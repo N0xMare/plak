@@ -3,6 +3,10 @@
 
 #[cfg(test)]
 use std::collections::HashMap;
+use std::io::Write as _;
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::{Arc, Mutex, Once, mpsc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use plakous::gateway::protocol::GatewayAccount;
@@ -15,6 +19,8 @@ use plakous::gateway::protocol::admin::{LoginMethod, LoginPhase};
 use plakous::gateway::protocol::facts::{AccountFacts, RefreshRequest};
 use plakous::gateway::protocol::refusal::GatewayRefusal;
 
+use super::holder::HolderLock;
+
 pub(crate) const MAX_PENDING_LOGINS: usize = 3;
 const LOGIN_LIFETIME: Duration = Duration::from_secs(15 * 60);
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -26,36 +32,65 @@ pub(crate) trait AccountBridge: Send {
 }
 
 type BridgeCall = Box<dyn FnOnce(&mut dyn AccountBridge) + Send>;
+type BridgeQueue = Arc<Mutex<Option<mpsc::Sender<BridgeCall>>>>;
 
 pub(super) struct AccountWorker {
-    calls: Option<std::sync::mpsc::SyncSender<BridgeCall>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    calls: BridgeQueue,
+}
+
+pub(super) struct AccountThread {
+    calls: BridgeQueue,
+    thread: JoinHandle<()>,
 }
 
 impl AccountWorker {
-    pub(super) fn start(mut bridge: Box<dyn AccountBridge>) -> std::io::Result<Self> {
-        let (calls, receiver) = std::sync::mpsc::sync_channel::<BridgeCall>(0);
+    pub(super) fn start(
+        bridge: Box<dyn AccountBridge>,
+        lock: Arc<HolderLock>,
+    ) -> std::io::Result<(Self, AccountThread)> {
+        redact_bridge_panics();
+        let (sender, receiver) = mpsc::channel::<BridgeCall>();
+        let calls = Arc::new(Mutex::new(Some(sender)));
         // Tokio's spawn_blocking still enters a runtime. The synchronous
         // application edge owns its own executor and must run outside it.
-        let thread = std::thread::Builder::new()
+        let thread = thread::Builder::new()
             .name("gateway-accounts".to_owned())
+            .stack_size(plakous::agent::RUNTIME_EXECUTOR_STACK_BYTES)
             .spawn(move || {
+                let _hold = lock;
+                let mut bridge = bridge;
                 for call in receiver {
-                    call(bridge.as_mut());
+                    IN_BRIDGE_CALL.with(|active| active.set(true));
+                    if let Err(payload) = panic::catch_unwind(AssertUnwindSafe(|| {
+                        call(bridge.as_mut());
+                    })) {
+                        // Dropping the reply sender already refused this call.
+                        // A custom panic payload may itself panic on drop.
+                        if let Err(nested) = panic::catch_unwind(AssertUnwindSafe(|| drop(payload)))
+                        {
+                            std::mem::forget(nested);
+                        }
+                        let _ = writeln!(std::io::stderr(), "gateway account bridge call panicked");
+                    }
+                    IN_BRIDGE_CALL.with(|active| active.set(false));
                 }
             })?;
-        Ok(Self {
-            calls: Some(calls),
-            thread: Some(thread),
-        })
+        Ok((
+            Self {
+                calls: Arc::clone(&calls),
+            },
+            AccountThread { calls, thread },
+        ))
     }
 
     fn run<T: Send + 'static>(
         &self,
         operation: impl FnOnce(&mut dyn AccountBridge) -> T + Send + 'static,
     ) -> Option<T> {
-        let (reply, result) = std::sync::mpsc::sync_channel(1);
+        let (reply, result) = mpsc::sync_channel(1);
         self.calls
+            .lock()
+            .ok()?
             .as_ref()?
             .send(Box::new(move |bridge| {
                 let _ = reply.send(operation(bridge));
@@ -86,13 +121,92 @@ impl AccountBridge for AccountWorker {
     }
 }
 
-impl Drop for AccountWorker {
-    fn drop(&mut self) {
-        drop(self.calls.take());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+impl AccountThread {
+    pub(super) fn close(&self) {
+        self.calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+
+    pub(super) fn join_until(self, deadline: Instant) -> bool {
+        while !self.thread.is_finished() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            thread::sleep(remaining.min(Duration::from_millis(10)));
+        }
+        let _ = self.thread.join();
+        true
+    }
+}
+
+thread_local! {
+    static IN_BRIDGE_CALL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn redact_bridge_panics() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if !IN_BRIDGE_CALL
+                .try_with(std::cell::Cell::get)
+                .unwrap_or(false)
+            {
+                previous(info);
+            }
+        }));
+    });
+}
+
+#[cfg(test)]
+#[test]
+fn panicking_bridge_call_refuses_then_serves_status() {
+    struct PanicOnList(MemoryBridge);
+
+    impl AccountBridge for PanicOnList {
+        fn call(&mut self, local_admin: bool, request: AdminRequest) -> AdminResponse {
+            assert!(!matches!(request, AdminRequest::List {}), "fixture panic");
+            self.0.call(local_admin, request)
+        }
+
+        fn facts(
+            &mut self,
+            accounts: &[GatewayAccount],
+        ) -> Result<Vec<AccountFacts>, GatewayRefusal> {
+            self.0.facts(accounts)
+        }
+
+        fn refresh(&mut self, request: &RefreshRequest) -> Result<AccountFacts, GatewayRefusal> {
+            self.0.refresh(request)
         }
     }
+
+    let instance = UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();
+    let (mut worker, thread) = AccountWorker::start(
+        Box::new(PanicOnList(MemoryBridge::new(instance))),
+        Arc::new(HolderLock::vacant()),
+    )
+    .unwrap();
+    assert_eq!(
+        worker.call(true, AdminRequest::List {}),
+        AdminResponse::Refused {
+            refusal: AdminRefusal::Unavailable {}
+        },
+    );
+    assert!(matches!(
+        worker.call(
+            true,
+            AdminRequest::Status {
+                accounts: Vec::new()
+            }
+        ),
+        AdminResponse::Status { .. }
+    ));
+    thread.close();
+    assert!(thread.join_until(Instant::now() + Duration::from_secs(2)));
 }
 
 pub(crate) struct Attempt<T> {
@@ -119,20 +233,25 @@ impl<T> AttemptBook<T> {
             .retain(|attempt| attempt.started.elapsed() < LOGIN_LIFETIME);
     }
 
-    pub(crate) fn begin(
-        &mut self,
-        account: GatewayAccount,
-        payload: T,
-    ) -> Result<UuidText, AdminRefusal> {
+    pub(super) fn check_start(&mut self, account: &GatewayAccount) -> Result<(), AdminRefusal> {
         self.expire();
         if self.entries.len() >= MAX_PENDING_LOGINS
             || self
                 .entries
                 .iter()
-                .any(|attempt| attempt.account == account)
+                .any(|attempt| &attempt.account == account)
         {
             return Err(AdminRefusal::AttemptLimit {});
         }
+        Ok(())
+    }
+
+    pub(crate) fn begin(
+        &mut self,
+        account: GatewayAccount,
+        payload: T,
+    ) -> Result<UuidText, AdminRefusal> {
+        self.check_start(&account)?;
         let Ok(id) = UuidText::new(uuid::Uuid::new_v4().to_string()) else {
             return Err(AdminRefusal::Unavailable {});
         };

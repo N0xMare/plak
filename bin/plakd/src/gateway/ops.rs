@@ -14,7 +14,7 @@ use plakous::gateway::protocol::facts::{
 use plakous::gateway::protocol::refusal::GatewayRefusal;
 use plakous::gateway::protocol::{BoundedText, UuidText};
 use plakous::gateway::protocol::{GatewayAccount, SecretText};
-use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode};
+use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode, NativeSubscriptionError};
 use plakous_hosted::account::AccountRef;
 use tokio::sync::oneshot;
 
@@ -47,6 +47,20 @@ struct DeviceLogin {
 impl Drop for DeviceLogin {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+impl DeviceLogin {
+    fn outcome(&mut self, attempt: &UuidText) -> Option<AdminResponse> {
+        Some(match self.result.try_recv() {
+            Ok(Ok(_)) => progress(attempt.clone(), LoginPhase::Succeeded),
+            Ok(Err(NativeSubscriptionError::AccountReplacementRefused)) => {
+                refused(AdminRefusal::LocalAdminRequired {})
+            }
+            Ok(Err(_)) => refused(AdminRefusal::ProviderRejected {}),
+            Err(oneshot::error::TryRecvError::Closed) => refused(AdminRefusal::OutcomeUnknown {}),
+            Err(oneshot::error::TryRecvError::Empty) => return None,
+        })
     }
 }
 
@@ -320,6 +334,9 @@ impl OpsBridge {
         let Ok(parsed) = Self::account(&account) else {
             return refused(AdminRefusal::WrongAccountClass {});
         };
+        if let Err(refusal) = self.attempts.check_start(&account) {
+            return refused(refusal);
+        }
         // Captured before the login can retire an unusable record: a remote
         // admin may only re-login the account this slot held (spec 04 §2.11).
         let keep_account = !local_admin && self.signed_in(&parsed);
@@ -371,15 +388,16 @@ impl OpsBridge {
         } else {
             (Some(challenge.pending), None)
         };
-        let Ok(id) = self.attempts.begin(
+        let id = match self.attempts.begin(
             account,
             LiveLogin {
                 method,
                 pending: stored_pending,
                 device,
             },
-        ) else {
-            return refused(AdminRefusal::AttemptLimit {});
+        ) {
+            Ok(id) => id,
+            Err(refusal) => return refused(refusal),
         };
         AdminResponse::Challenge {
             attempt: id,
@@ -432,40 +450,30 @@ impl OpsBridge {
         let Ok(found) = self.attempts.get_mut(attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
-        if let Some(device) = &mut found.payload.device {
-            match device.result.try_recv() {
-                Ok(Ok(_)) => {
-                    let id = found.id.clone();
-                    let _ = self.attempts.take(attempt);
-                    return progress(id, LoginPhase::Succeeded);
-                }
-                Ok(Err(
-                    plakous::subscriptions::NativeSubscriptionError::AccountReplacementRefused,
-                )) => {
-                    let _ = self.attempts.take(attempt);
-                    return refused(AdminRefusal::LocalAdminRequired {});
-                }
-                Ok(Err(_)) => {
-                    let _ = self.attempts.take(attempt);
-                    return refused(AdminRefusal::ProviderRejected {});
-                }
-                Err(oneshot::error::TryRecvError::Empty) => {
-                    let id = found.id.clone();
-                    return progress(id, LoginPhase::AwaitingInput);
-                }
-                Err(oneshot::error::TryRecvError::Closed) => {
-                    let _ = self.attempts.take(attempt);
-                    return refused(AdminRefusal::OutcomeUnknown {});
-                }
-            }
+        if let Some(outcome) = found
+            .payload
+            .device
+            .as_mut()
+            .and_then(|device| device.outcome(attempt))
+        {
+            let _ = self.attempts.take(attempt);
+            return outcome;
         }
         progress(found.id.clone(), LoginPhase::AwaitingInput)
     }
 
     fn login_cancel(&mut self, attempt: &UuidText) -> AdminResponse {
-        let Ok(found) = self.attempts.take(attempt) else {
+        let Ok(mut found) = self.attempts.take(attempt) else {
             return refused(AdminRefusal::AttemptUnknown {});
         };
+        if let Some(outcome) = found
+            .payload
+            .device
+            .as_mut()
+            .and_then(|device| device.outcome(attempt))
+        {
+            return outcome;
+        }
         progress(found.id, LoginPhase::Cancelled)
     }
 

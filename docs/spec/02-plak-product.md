@@ -6379,10 +6379,12 @@ query strings, keys, tokens or pastes.
 caller management and `drain` are local-admin only. A global disable still
 admits the local administrator's `enable`, `disable`, `drain`, `caller
 list` and `status`; relays, facts and refresh stay blocked for everyone. `drain` stops
-accepting and waits up to 30 seconds for in-flight relays and refresh claims;
-a refresh claim runs to completion on its own task even when its caller
-leaves. The runtime then shuts down with a bounded timeout, and only after
-that is the holder lock released. A failed audit append is counted; `plakd
+accepting and waits up to 30 seconds for in-flight relays, refresh claims
+and admin calls. A refresh claim runs to completion on its own task even
+when its caller leaves. The listener runtime shutdown and account worker
+join share a further five seconds. If the worker has not joined by that
+deadline, the service exits with an error and keeps the holder lock until
+process exit. A failed audit append is counted; `plakd
 gateway status` prints the running instance's count. `audit --since` takes an
 RFC 3339 timestamp and compares instants. Admin account verbs map
 to today's account operations on a blocking bridge. The listener serves each
@@ -6392,6 +6394,11 @@ already holds exclusively; it never takes a second holder lock. Status
 reads subscription posture without provider I/O. If a requested row cannot
 be read, Status refuses the call rather than returning a partial roster.
 List also refuses on a store read failure rather than reporting no accounts.
+The account bridge logs a panicking call without its payload and continues
+serving; that admin call returns `unavailable`. LoginStart checks the
+pending-attempt limits before writing consent or retiring a credential.
+LoginCancel returns a device login's terminal result if it is already
+available instead of reporting cancellation.
 API-key accounts and the
 subscription logins are custodied in the gateway process and relayed only to
 those providers' pin rows. Other admin verbs stay on the account bridge. The
@@ -6426,7 +6433,12 @@ an existing session reopens with its recorded binding, because the binding
 names the provider account and key generation, never where the credential is
 held. Login, logout, consent, key status and account listing use the gateway's
 admin verbs; `plakd key status` through a gateway prints each key's
-fingerprint as the in-process command does. `plakd run`, `continue` and
+fingerprint as the in-process command does. Without an account selection,
+`plakd status`, `plakd key status` and `plakd usage` list accounts first,
+then query one row per account. A failed row shows its own error without
+hiding other rows; a failed list still fails the command. The host console
+shows an empty roster with a diagnostic when the gateway cannot list
+accounts instead of refusing the whole read. `plakd run`, `continue` and
 `models` run in the CLI process, whose routes relay through the gateway the
 same way. Unset, the host keeps direct in-process credential access and takes
 the holder lock shared.
