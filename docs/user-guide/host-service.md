@@ -115,6 +115,24 @@ unmanaged host; load the intended service yourself.
 
 ## Upgrade, reload and logs
 
+For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
+
+1. Rewrite named account references in templates to provider kinds (for
+   example, `account = "codex/work"` becomes `account = "codex"`).
+2. Settle work: finish or stop running turns, live children and non-terminal
+   daemon jobs.
+3. Upgrade each paired runner to the matching snapshot and advance its
+   dedicated executable link.
+4. If using a [gateway](gateway.md), drain it, point its service at the new
+   immutable snapshot, start it and run `plakd gateway check`.
+5. From the destination snapshot, run
+   `plakd host upgrade --expect-binary <id>` to carry settled sessions.
+6. Re-pin clients to host wire protocol 12. A protocol-11 client receives a
+   typed `VersionMismatch`.
+
+Once the carry commits, recovery is fix-forward only; do not restart the old
+host as a rollback.
+
 Install a tested matching snapshot. For a host already supporting the upgrade
 coordinator, invoke the destination build with its binary ID (shown by
 `plakd version`):
@@ -312,7 +330,7 @@ both. Once a host/line becomes retention-only, reinstalling or downgrading
 cannot restore native control. An incompatible endpoint requires its matching
 build to settle the original jobs; if the original process is proved lost,
 follow the reported lost-job remedy rather than starting or replaying it.
-Retention endpoint 1, native runner protocol 9, host wire 11 and JSONL 1 are
+Retention endpoint 1, native runner protocol 9, host wire 12 and JSONL 1 are
 independent versions. Retention support does not remove `host upgrade`'s
 settled-job restriction across changed triples.
 

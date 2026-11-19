@@ -6721,11 +6721,11 @@ exclusive-link and replacement-rename paths are checked separately. The
 legacy remote settings/default/credential-refresh path refuses at role
 classification; local-face dispatch remains available. Schema/DTO and public
 compile contracts follow exact client protocol 12 and runner protocol 9.
-Wire-11 lifecycle tests observe real host sockets and authenticated WebSockets through planned stop and
+Wire-12 lifecycle tests observe real host sockets and authenticated WebSockets through planned stop and
 same/cross-key upgrade, assert advisory notices precede EOF, and assert an
 aborted preparation returns to `running`. A publication-lock observer pins
 `restarting` before a committed ready result can be observed; web tests pin
-`stopping`/`shutdown` and `draining` then `restarting` before transport close. A wire-10 hello receives only
+`stopping`/`shutdown` and `draining` then `restarting` before transport close. A wire-11 hello receives only
 `version_mismatch`. Bridge discovery tests distinguish typed stdout refusals
 for absence, starting, stopping, incompatible state and unverified authority;
 the schema pin includes typed bridge-unavailable handshake refusals. Existing

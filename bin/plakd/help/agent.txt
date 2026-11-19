@@ -21,6 +21,7 @@ EXAMPLES:
 OPTIONS:
   --account <id>     codex | grok | claude | openrouter | openai | anthropic | xai-api
                        (alias: --provider)
+  [--account <kind>=<ref>]...  Choose an account for a provider kind. Repeatable.
   --model <exact-id> Exact catalog model id
   --effort <level>   none | low | medium | high | xhigh | max | ultra
   --composition <c>  plakous-default | direct | native-ptc | js-ptc | py-ptc | py-sdk

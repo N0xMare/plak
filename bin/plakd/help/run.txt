@@ -15,6 +15,7 @@ EXAMPLES:
 OPTIONS:
   --account <id>       codex | grok | claude | openrouter | openai | anthropic | xai-api
                        (alias: --provider)
+  [--account <kind>=<ref>]...  Choose an account for a provider kind. Repeatable.
   --model <exact-id>   Exact catalog model id; no prefixes, no inference
   --effort <level>     none | low | medium | high | xhigh | max | ultra
                        Required for a reasoning model, refused for the rest.

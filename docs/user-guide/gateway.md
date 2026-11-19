@@ -40,6 +40,21 @@ for API-key variables, `Restart=on-failure`, `RestartSec=2` and a stop timeout
 longer than the drain. Point `ExecStart` at an immutable build before enabling
 it.
 
+## Upgrade with the host
+
+For 0.0.5, follow the [cross-key upgrade order](host-service.md#upgrade-reload-and-logs):
+rewrite named account references in templates to kinds, settle turns, live
+children and daemon jobs, then upgrade paired runners and advance their
+dedicated links. Upgrade the gateway **before** carrying the host: run
+`plakd gateway drain`, point the service's `ExecStart` (the executable in
+the LaunchAgent on macOS) at the new immutable snapshot, reload the service
+definition, start it and run `plakd gateway check`.
+
+The new gateway serves v1 to the old host and v2 to the new host. Then run
+the destination's `plakd host upgrade --expect-binary <id>` and re-pin clients
+to host wire protocol 12; protocol 11 receives a typed `VersionMismatch`.
+Once the carry commits, recovery is fix-forward only.
+
 ## Client configuration
 
 In the home `config.toml`:

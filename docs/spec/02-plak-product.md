@@ -623,14 +623,14 @@ immutable terminal set in `runtime_move_members`. Later lease-only terminal
 observations remain in `line_job_terminals`; they cannot alter recovery of the
 batch fingerprint or mark output consumed (chapter 01 §5.2).
 
-Product schema 38 additionally holds `session_move_seeds`: the immutable semantic
+Product schema 39 additionally holds `session_move_seeds`: the immutable semantic
 ownership-move base (intent, keyed by product session), including its view seed,
 original projection floor and acknowledged agent-attention occurrences. Views
 rebuild from this base and subsequent feed facts; the seed is not a synthetic
 historical feed. Attention acknowledgements retain their original occurrence
 and acknowledgement timestamps so a move does not resurface acknowledged work.
 
-Product schema 38 holds the intents of §2.6 in `submissions` (keyed by command id),
+Product schema 39 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression`,
@@ -651,7 +651,7 @@ them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
-and product schema 38 has no legacy `workflows` table. Recovery
+and product schema 39 has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 **Operator-terminal pins.** The private host registry owns terminals separately
@@ -1425,7 +1425,7 @@ never restores jobs. Frozen tool selections are not exported (below), so the
 successor freezes the destination's tools and MCP placement. Both admitted
 versions name their saved runner and profile; there is no v11 fallback reader.
 This build writes v13, imports v13 and v12, and refuses v11 and older. The
-document bump is not an in-place database migration; product schema stays 37.
+export version does not migrate native databases; the current product schema is 39.
 
 `plakd session export <id> [--out <path>]` writes one JSON document with
 `"format": "plak-session-export", "version": 13` and prints its path. The
@@ -2057,7 +2057,7 @@ opening note `session <id> was carried forward as <successor>; resuming it`,
 instead of a read-only refusal; the headless faces print it on stderr.
 
 Carries keep their own write-ahead marker rather than a `workflow_requests`
-row. Product schema 38 retains the node, virtual root profile, runner display
+row. Product schema 39 retains the node, virtual root profile, runner display
 copy, frozen MCP placement, `switch` workflow kind, root interrupt cause and
 continuation decision intents. It also owns terminal workspace pins (§2.2);
 none of those pins turns a carry into a terminal or an agent job.
@@ -2730,8 +2730,8 @@ version. There is no top-level prompt positional or terminal resume command.
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
 | `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret SECRET_NAME \| --oauth [--oauth-issuer <url>] [--oauth-client-id <id>] [--oauth-client-secret SECRET_NAME] [--oauth-callback-port <port>]] [--header N=V]… [--header-secret N=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>`, `mcp login <id> [--scope <scopes>] [--remote]`, `mcp logout <id> [--local]`, `mcp prompts <id> [<prompt> [--arg NAME=VALUE]…]` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only; `--oauth` writes `auth = "oauth"` and the `oauth_*` keys given, and `--resources` writes `resources = true`. `list` and `show` print transport, scope, the templates that enable each server, the secrets it names that are not stored, whether resources are enabled, and an OAuth server's login state (§2.3). `test` starts or connects to the server through the bind's spawn, environment, secret and login path on a pool of its own, lists the tools `mcp:<id>` would bind (with `read_resource` when resources are enabled) and the ones left out with the reason (schema not representable, not in the allowlist), reports with resources enabled how many resources and resource templates the server lists, stops it, and exits non-zero with the cause on failure; it calls no model. `login` runs the server's OAuth login (§8.3): discovery, registration, the browser or remote flow, and the token exchange, then stores the login; `--scope` replaces the discovered scope (space-separated, quoted as one argument) and is united with the replaced login's scope, so a step-up keeps earlier grants; it refuses for a server without `auth = "oauth"`. `logout` revokes at the authorization server when it offers revocation, else and with `--local` retires the login locally and says the grant may remain; a revocation that fails retires nothing and names `--local`. `prompts <id>` lists the server's prompts with their arguments; `prompts <id> <prompt>` gets one with the given arguments and prints its flattened expansion, exactly the user message a prompt invocation would send, with control characters shown as `�`; neither calls a model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template would be left listing what its layer no longer serves unless `--force`, which removes those entries first; it leaves a stored login in place, which `logout` retires; every edit is checked against the home alone and with the trusted project over it (spec 07 §3.5); secret flags take `SECRET_NAME`s and a rejected one is never echoed |
-| `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
-| `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
+| `run [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
+| `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports whether account calls stay in-process or name a gateway |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
@@ -5329,7 +5329,7 @@ never submits it. A continue whose rebind published but whose root-start could
 not be queued answers the choice (the root moved) with that same warning. A queued or written root-start is
 restored paused like any other queued prompt.
 
-**Host move.** The export v13 capsule carries neither the session's stored
+**Dormant host move.** The export v13 capsule carries neither the session's stored
 choices nor the `last_root_turn` view, so the document is unchanged: a moved
 session starts with no stored choices (spawns fill each kind best effort, then
 fail closed) and can continue only after its next failed root turn.
@@ -5508,7 +5508,7 @@ older unsupported coordinators refuse without signalling or stopping anything.
 The private coordinator protocol is 3: it includes bounded categorical progress
 replies as well as the drain budget; older coordinator identities refuse before
 any drain, without a compatibility reader. Operational
-receipt version 1 and export document version 12 are unchanged.
+receipt version 1 and export document version 13 are unchanged.
 The source independently hashes the destination image and probes its host
 capability, key, import versions and configuration. Cross-key capacity and
 credential probes must give a usable known input window; an insufficient or
@@ -5815,7 +5815,7 @@ abandoned, the operation acknowledges and no longer blocks later upgrades or
 ordinary standalone session commands.
 
 The action prints each retained source export path. To recover elsewhere, copy
-that v12 document, set its placement fields (`runner` and `workspace_root`) to
+that v13 document, set its placement fields (`runner` and `workspace_root`) to
 the intended admitted placement, and use ordinary `plakd session import` on the
 copy. For local recovery use `runner: {"name":"local","runner_id":"local"}`
 and an absolute local workspace.

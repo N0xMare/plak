@@ -4,10 +4,20 @@ All notable changes to Plak and Plakous are recorded here. Every workspace
 package shares one version. `0.0.x` releases carry no API, wire or
 persisted-format compatibility promise; the session export document is the
 cross-build session carrier (a build imports its own and the previous version).
-The separate runner job-retention endpoint also retains its previous speaker
-for one version bump, without native protocol compatibility.
+The separate runner job-retention endpoint and credential gateway protocol
+also keep compatibility with their immediately preceding version.
 
 ## Unreleased
+
+### Persisted formats
+
+- State key `r28.e39.p39.t11` (runtime format epoch 39, product schema 39).
+  Sessions under `r28.e38.p38.t11` cannot reopen exactly; carry them with
+  `plakd host upgrade` or export/import. Export v13 is unchanged and still
+  imports v13 and v12. Native runner protocol 9 and retention v1 are unchanged.
+- Credential gateway protocol v2 serves v1 as well. Before carrying the
+  host, rewrite named account references in templates to provider kinds
+  and upgrade the gateway. Re-pin clients to host wire protocol 12.
 
 ### Plakous
 
@@ -21,7 +31,8 @@ for one version bump, without native protocol compatibility.
   is still working. The stop is attributed to quit. A later commit cannot
   clear that evidence.
 - Process-tool descriptions state that a daemon or paired runner keeps
-  background jobs across quit, including an escalated quit, and across upgrade.
+  background jobs across quit, including an escalated quit, and across a
+  same-build restart or upgrade.
 
 - State the existing prefix rule for replay reasoning, including OpenRouter Chat
   `reasoning_details`: an unchanged prefix stays byte-exact, and only reasoning
@@ -110,8 +121,8 @@ for one version bump, without native protocol compatibility.
 - JSONL `stop_processes` stops one background job (`pN`) as a user stop.
   Two visible jobs with the same number are refused and neither is stopped.
 - Host wire protocol 12 schema pin covers `DeleteSession.abandon_jobs` and
-  the `running_jobs` lifecycle reason. Clients carry the projection from the
-  previous protocol pin.
+  the `running_jobs` lifecycle reason, and supersedes protocol 11. Clients
+  must use the new pin; protocol 11 receives `VersionMismatch`.
 
 - Restore subscription model picking and Codex root prompts under gateway
   custody. Host startup and `plakd models` populate a host-owned catalog
