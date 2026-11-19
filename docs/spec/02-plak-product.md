@@ -5281,7 +5281,8 @@ steps 2 to 4, and a profile whose binding is unchanged but whose filled
 choices differ still rebinds. A profile rebind onto a named account does not
 require its kind's default slot to be Ready. The target resolver admits the
 model and effort against that account's own route and authenticated catalog,
-not the default slot's catalog.
+not the default slot's catalog. A profile rebind that selects the default
+slot still uses the host's Ready catalog for that slot.
 
 **`ChooseAccount {kind, account, continue_failed}`** validates the choice as
 step 1 does. The attached host reads readiness in the background and only

@@ -1690,6 +1690,12 @@ fn use_now_binds_an_openrouter_or_api_root_from_its_template() {
         )
         .unwrap();
         paths.ensure_layout().unwrap();
+        crate::home::secrets::set_api_key(
+            &paths,
+            &account,
+            zeroize::Zeroizing::new("synthetic-profile-key".to_owned()),
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join("agents")).unwrap();
         std::fs::create_dir_all(dir.path().join("profiles")).unwrap();
         std::fs::write(

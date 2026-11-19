@@ -379,12 +379,13 @@ fn apply_profile(
     };
     let root = &prepared.root;
     if apply == crate::surface_protocol::ProfileApply::Default {
-        if !profile_route_ready(facts.catalog, &root.account, &root.model) {
-            refuse_profile(
-                &prepared.id,
-                format!("{} is not ready; log in before applying it", root.account),
-                events,
-            );
+        if !admit_profile_route(
+            facts.catalog,
+            &prepared.id,
+            &root.account,
+            &root.model,
+            events,
+        ) {
             return None;
         }
         commit_profile(
@@ -403,6 +404,19 @@ fn apply_profile(
         return None;
     }
     let (root_account, choices) = accounts::fill_profile(&prepared, accounts, &facts, events)?;
+    if root_account
+        .parse::<plakous_hosted::account::AccountRef>()
+        .is_ok_and(|account| !account.is_named())
+        && !admit_profile_route(
+            facts.catalog,
+            &prepared.id,
+            &root_account,
+            &root.model,
+            events,
+        )
+    {
+        return None;
+    }
     let roster = crate::roster_input::roster_input_from_config(
         &prepared.config,
         root_account.clone(),
@@ -449,16 +463,27 @@ fn apply_profile(
     Some(fork)
 }
 
-fn profile_route_ready(
+fn admit_profile_route(
     catalog: &[plakous_host_protocol::views::ProviderSection],
+    profile: &str,
     account: &str,
     model: &str,
+    events: &Sender<PlakExtension>,
 ) -> bool {
-    crate::test_hooks::profile_route_ready(catalog, account, model).unwrap_or_else(|| {
-        catalog
-            .iter()
-            .any(|section| section.ready && section.account == account)
-    })
+    let ready =
+        crate::test_hooks::profile_route_ready(catalog, account, model).unwrap_or_else(|| {
+            catalog
+                .iter()
+                .any(|section| section.ready && section.account == account)
+        });
+    if !ready {
+        refuse_profile(
+            profile,
+            format!("{account} is not ready; log in before applying it"),
+            events,
+        );
+    }
+    ready
 }
 
 /// Why the profile cannot apply in this session now: a running turn, or for
