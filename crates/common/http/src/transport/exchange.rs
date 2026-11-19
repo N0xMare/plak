@@ -48,8 +48,14 @@ impl Client {
         }
         let (origin, method, path_and_query, headers, body) = request.into_parts();
         #[cfg(feature = "fault-injection")]
-        let (control, stream_fault) = if self.inner.dial.is_some() {
-            // A dialed hop (the gateway socket) is not a fault-selection site.
+        let fixture = if self.inner.dial.is_none() && method == http::Method::POST {
+            super::test_dial::gateway_oauth_fixture(&origin, path_and_query.as_str())?
+        } else {
+            None
+        };
+        #[cfg(feature = "fault-injection")]
+        let (control, stream_fault) = if self.inner.dial.is_some() || fixture.is_some() {
+            // A dialed hop (gateway socket or OAuth fixture) does not select faults.
             (control, None)
         } else {
             match super::fault::apply(
@@ -65,6 +71,8 @@ impl Client {
                 super::fault::Applied::Continue(control, fault) => (control, fault),
             }
         };
+        #[cfg(feature = "fault-injection")]
+        let origin = fixture.unwrap_or(origin);
         let parts = RequestParts {
             origin,
             method,

@@ -1,6 +1,7 @@
 //! The repository-only dial override for a direct client (`fault-injection`):
 //! absent from product builds.
 
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use super::hooks::{HookFuture, Relay};
@@ -64,4 +65,35 @@ impl Client {
             upstream,
         }))
     }
+}
+
+/// Lets the real gateway process drive the offline OAuth fixture without
+/// changing the endpoints the provider workflows validate.
+pub(super) fn gateway_oauth_fixture(
+    origin: &Origin,
+    path: &str,
+) -> Result<Option<Origin>, Failure> {
+    if !matches!(
+        (origin.host(), path),
+        (
+            "auth.openai.com",
+            "/api/accounts/deviceauth/usercode" | "/api/accounts/deviceauth/token"
+        ) | ("platform.claude.com", "/v1/oauth/token")
+    ) {
+        return Ok(None);
+    }
+    let Some(port) = std::env::var_os("PLAK_TEST_GATEWAY_OAUTH_PORT") else {
+        return Ok(None);
+    };
+    port.to_str()
+        .and_then(|value| value.parse().ok())
+        .and_then(|port| Origin::loopback_http(IpAddr::V4(Ipv4Addr::LOCALHOST), port).ok())
+        .map(Some)
+        .ok_or_else(|| {
+            Failure::new(
+                Phase::Resolution,
+                TransmissionFact::NotStarted,
+                ErrorKind::Internal,
+            )
+        })
 }
