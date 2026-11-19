@@ -284,7 +284,7 @@ impl Fixture {
         command
     }
 
-    fn gateway_socket(&self) -> PathBuf {
+    pub(super) fn gateway_socket(&self) -> PathBuf {
         self.root.join("g.sock")
     }
 

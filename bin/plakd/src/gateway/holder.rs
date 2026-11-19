@@ -24,6 +24,21 @@ pub(crate) enum HolderMode {
 }
 
 impl HolderLock {
+    /// A concurrent startup probe may briefly hold a shared lock on a vacant
+    /// store. Give it time to release without waiting for an active gateway.
+    pub(super) fn acquire_service(path: &Path) -> io::Result<Self> {
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_millis(150);
+        loop {
+            match Self::try_acquire(path, HolderMode::Exclusive) {
+                Err(error) if is_busy(&error) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                result => return result,
+            }
+        }
+    }
+
     /// Takes the lock without waiting. `Busy` means the other mode holds it.
     pub(crate) fn try_acquire(path: &Path, mode: HolderMode) -> io::Result<Self> {
         if let Some(parent) = path.parent() {

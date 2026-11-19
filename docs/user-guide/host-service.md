@@ -52,8 +52,9 @@ Installation writes
 `systemctl --user daemon-reload`. It does **not** enable, start or restart
 anything.
 
-The host unit requires and orders after the gateway unit. Starting the host
-starts the gateway first, and the host verifies the gateway is ready.
+The host unit wants and orders after the gateway unit. Starting the host
+starts the gateway first, and the host verifies the gateway is ready. A gateway
+drain or crash and restart leaves a running host up.
 
 Follow the printed commands:
 
@@ -109,7 +110,8 @@ tail -F "$HOME/Library/Logs/Plak/host.stdout.log" \
 
 `RunAtLoad` starts the agent when it is loaded, including at a later GUI login;
 `KeepAlive` restarts it only after unsuccessful exit. A clean host handoff does
-not trigger a restart. The job allows 90 seconds to stop and does not kill its
+not trigger a restart. The job allows 60 seconds to stop (the host's deadline is
+50 seconds, with 45 seconds for session handoff) and does not kill its
 remaining process group on exit. It uses a private umask and runs from HOME.
 These are GUI-login agents, not daemons that run before login. launchd does
 not order them; bootstrap the gateway first. At GUI login or manual startup,
@@ -117,7 +119,7 @@ the host waits for the gateway and refuses if it is not reachable.
 
 The agent uses the same stable binary link and explicit host arguments as the
 Linux unit. A fixed shell wrapper forwards only the manager's SHELL, USER and
-LOGNAME into `/usr/bin/env -i`, followed by HOME, PLAK_HOME and the same curated
+LOGNAME into `/usr/bin/env -i`, followed by HOME, PLAK_HOME, XDG_STATE_HOME and the same curated
 PATH. Paths are separate literal arguments, not shell source. No credentials,
 proxy settings or installer-shell variables are embedded or inherited by the
 host. Configure credentials through plakd's normal account commands. XDG_CONFIG_HOME
@@ -136,7 +138,7 @@ For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
 3. Upgrade each paired runner to the matching snapshot and advance its
    dedicated executable link.
 4. Drain and [upgrade the gateway](gateway.md#upgrade-with-the-host) by
-   flipping its dedicated link, restarting it, and running `plakd gateway check`.
+   flipping its dedicated link, starting it, and running `plakd gateway check`.
 5. From the destination snapshot, run
    `plakd host upgrade --expect-binary <id>` to carry settled sessions.
 6. Re-pin clients to host wire protocol 12. A protocol-11 client receives a
@@ -144,7 +146,10 @@ For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
 
 Once the carry commits, recovery is fix-forward only; do not restart the old
 host as a rollback.
-If the host was carried first, upgrade the gateway, then restart the host.
+If you still have pinned units, follow the [one-time migration](gateway.md#migrate-an-existing-service-once)
+instead. It moves paired runners first (they do not need a gateway), then the
+gateway while the old host keeps running, then carries the host before replacing
+its old unit and drop-ins.
 Codex and SuperGrok refuse while the running host is still using protocol 1.
 
 Install a tested matching snapshot. For a host already supporting the upgrade

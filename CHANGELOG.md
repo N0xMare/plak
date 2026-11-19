@@ -181,10 +181,13 @@ also keep compatibility with their immediately preceding version.
   gateway reports `gateway_unavailable` instead of opening credentials in
   process. `host install` installs both user services and sets the default
   Unix gateway address. The gateway runs through `~/.local/bin/plakd-gateway`,
-  which normal installation does not advance. Drain, flip that link, restart
-  and run `gateway check` before upgrading the host. Existing edited units
-  or gateway definitions pinned to a snapshot must be stopped, backed up and
-  replaced explicitly. No persisted format changes.
+  which normal installation does not advance. Drain, flip that link, start
+  the gateway and run `gateway check` without stopping the host. For pinned
+  installs, move paired runners first, then back up and replace the drained
+  gateway's old unit and drop-ins, moving key environment settings to
+  `gateway.env`. Install the gateway from the destination snapshot, check
+  the link and service, then carry the host before replacing its old unit
+  and drop-ins. No persisted format changes.
 - Resolve credential custody once per process from the home `config.toml`:
   a host resolves it at startup and every route, console read and write,
   carry probe and catalog refresh uses it. `[gateway]` changes need a host

@@ -33,7 +33,7 @@
     <false/>
   </dict>
   <key>ExitTimeOut</key>
-  <integer>90</integer>
+  <integer>60</integer>
   <key>AbandonProcessGroup</key>
   <true/>
   <key>Umask</key>

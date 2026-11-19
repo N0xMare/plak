@@ -12,7 +12,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let root = tempfile::tempdir()?;
+        let root = tempfile::tempdir_in("/tmp")?;
         let bin = root.path().join(".local/bin");
         std::fs::create_dir_all(&bin)?;
         let manager = bin.join("launchctl");
@@ -142,7 +142,13 @@ fn launchd_install_is_atomic_idempotent_and_never_loads_or_starts() -> TestResul
     }
     let reinstalled = fixture.command().output()?;
     success(&reinstalled);
-    assert!(String::from_utf8_lossy(&reinstalled.stdout).starts_with("Already installed"));
+    assert_eq!(
+        String::from_utf8_lossy(&reinstalled.stdout)
+            .lines()
+            .filter(|line| line.starts_with("Already installed"))
+            .count(),
+        2
+    );
     assert_eq!(std::fs::read_to_string(fixture.plist())?, plist);
     assert!(!fixture.root.path().join("manager-called").exists());
     Ok(())
@@ -193,6 +199,16 @@ fn launchd_install_refuses_symlinked_and_public_logs_without_overwriting_them() 
     assert!(!fixture.command().output()?.status.success());
     assert!(!fixture.plist().exists());
     assert_eq!(std::fs::read_to_string(log)?, "existing public log");
+    assert!(!logs.join("host.stdout.log").exists());
+    assert!(!fixture.root.path().join("product").exists());
+    assert!(!fixture.root.path().join("Library/LaunchAgents").exists());
+    assert!(
+        !fixture
+            .root
+            .path()
+            .join(".local/bin/plakd-gateway")
+            .exists()
+    );
     assert!(!fixture.root.path().join("manager-called").exists());
     Ok(())
 }

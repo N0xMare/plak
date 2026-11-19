@@ -39,7 +39,7 @@ impl Gateway {
     ) -> Result<Self, String> {
         let _ = ensure_private_dir(&ServerConfig::gateway_dir(home));
         let lock_path = holder::lock_path(&config.state_root);
-        let lock = HolderLock::try_acquire(&lock_path, HolderMode::Exclusive).map_err(|error| {
+        let lock = HolderLock::acquire_service(&lock_path).map_err(|error| {
             if holder::is_busy(&error) {
                 "the credential store already has a gateway; stop it before plakd gateway serve"
                     .to_owned()
@@ -92,7 +92,6 @@ impl Gateway {
     /// account worker joins.
     pub(crate) fn serve_foreground(self) -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;

@@ -65,7 +65,7 @@ pub(super) fn render(
     <false/>
   </dict>
   <key>ExitTimeOut</key>
-  <integer>90</integer>
+  <integer>60</integer>
   <key>AbandonProcessGroup</key>
   <true/>
   <key>Umask</key>
@@ -103,9 +103,51 @@ pub(super) fn next_steps(home: &Path, args: &HostInstall, uid: u32, gateway: &Pa
 }
 
 #[cfg(target_os = "macos")]
+pub(super) fn check_logs(home: &Path) -> CliResult<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let directory = home.join(LOG_DIRECTORY);
+    let uid = rustix::process::geteuid().as_raw();
+    match std::fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.is_dir() && metadata.uid() == uid => {}
+        Ok(_) => {
+            return Err(CliFailure::new(format!(
+                "{} is not this user's log directory",
+                directory.display()
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(super::failed(error)),
+    }
+    for name in ["host.stdout.log", "host.stderr.log"] {
+        let path = directory.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => check_log(&path, &metadata)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(super::failed(error)),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn check_log(path: &Path, metadata: &std::fs::Metadata) -> CliResult<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(CliFailure::new(format!(
+            "{} is not this user's private regular log file",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn prepare_logs(home: &Path) -> CliResult<()> {
     use rustix::fs::{Mode, OFlags};
-    use std::os::unix::fs::MetadataExt as _;
 
     let directory = home.join(LOG_DIRECTORY);
     crate::commands::runner::private_directory(&directory)?;
@@ -124,17 +166,7 @@ fn prepare_logs(home: &Path) -> CliResult<()> {
             )
             .map_err(|error| super::failed(error.into()))?,
         );
-        let metadata = file.metadata().map_err(super::failed)?;
-        if !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.uid() != rustix::process::geteuid().as_raw()
-            || metadata.mode() & 0o077 != 0
-        {
-            return Err(CliFailure::new(format!(
-                "{} is not this user's private regular log file",
-                path.display()
-            )));
-        }
+        check_log(&path, &file.metadata().map_err(super::failed)?)?;
     }
     Ok(())
 }
@@ -148,7 +180,6 @@ pub(super) fn install(
     gateway: &Path,
 ) -> CliResult<super::ProcessOutcome> {
     let path = home.join("Library/LaunchAgents").join(PLIST);
-    super::matching_unit(&path, plist).map_err(super::failed)?;
     // Logs must exist before launchd opens its output files, not after host startup.
     prepare_logs(home)?;
     let created = super::install_file(&path, plist).map_err(super::failed)?;

@@ -67,7 +67,7 @@ use crate::shell::services::Services;
 /// How long a stopping host may take to hand its sessions off before the
 /// process exits regardless; under the unit's `TimeoutStopSec` (spec 02
 /// §4.6).
-pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(60);
+pub(crate) const HANDOFF_DEADLINE: Duration = Duration::from_secs(50);
 
 /// What the sessions' handoff leaves of the deadline for the rest of the
 /// stop: the socket, the lock and the runtime.

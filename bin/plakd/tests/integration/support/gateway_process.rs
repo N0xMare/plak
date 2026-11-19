@@ -49,6 +49,7 @@ impl GatewayProcess {
         let mut process = Self(
             command
                 .args(["gateway", "serve"])
+                .env("TOKIO_WORKER_THREADS", "2")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(output)

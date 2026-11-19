@@ -50,24 +50,39 @@ moves an existing gateway link. Neither service installer starts a process.
 
 ## Migrate an existing service once
 
-If the old host uses in-process credentials or the old gateway unit points
-directly at a snapshot, settle work first. Stop the old host, drain the old
-gateway if present, then disable or unload both units. On Linux run
-`systemctl --user disable --now plakd-host.service plak-gateway.service` for
-the units that exist. On macOS run
-`launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.plakd.host.plist"`
-and the corresponding command for `com.plakd.gateway.plist` if loaded.
-Back up the old definitions outside the service manager's search path, then
-remove them. The installers refuse to replace edited or pinned definitions and
-print the exact stop and removal commands.
+Settle work and move paired runners first; runners do not need a gateway.
+Keep the same `PLAK_HOME` and `XDG_STATE_HOME`. Migrate the gateway while the
+old host keeps running:
 
-Keep the credential stores and use the same `PLAK_HOME` and `XDG_STATE_HOME`;
-no secret copy or re-login is needed. For a co-located gateway, remove a
-custom `socket` override from `gateway.toml` and a conflicting
-`[gateway] address` from the host home config before running
-`plakd host install` with the original web/UI arguments. On a gateway-only
-machine, run `plakd gateway install` and keep the intended listener settings.
-Start the gateway, run `plakd gateway check`, then start or upgrade the host.
+1. Run `plakd gateway drain` if the old gateway exists and wait for it to exit.
+2. On Linux run `systemctl --user disable --now plak-gateway.service` for the
+   old gateway unit. On macOS boot out only
+   `"$HOME/Library/LaunchAgents/com.plakd.gateway.plist"` from `gui/$(id -u)`.
+3. Back up and remove the pinned gateway unit and its
+   `plak-gateway.service.d/` drop-ins outside the manager's search path. Move
+   provider-key `Environment=` entries to the private, mode-0600
+   `~/.config/plak/gateway.env` on Linux; do not keep them in the unit.
+4. Run `<destination snapshot>/plakd gateway install`. This seeds the
+   dedicated link from the destination binary. On Linux reload the user
+   manager, then enable and start the gateway; on macOS bootstrap its plist.
+   Run `plakd gateway check` and confirm the destination with
+   `readlink ~/.local/bin/plakd-gateway`.
+
+If the old host still holds credentials itself, the gateway cannot take
+custody while that host holds its store. Settle and stop that old host before
+starting the gateway. For an already separated deployment keep the host up
+through the gateway migration. Remove any conflicting custom listener socket
+or host `[gateway] address` before the later co-located `host install`.
+Gateway-only systems keep their intended listener settings and stop here.
+
+Carry the host with `plakd host upgrade` before removing its old definition.
+Then back up and remove the pinned host unit and its `plakd-host.service.d/`
+drop-ins, advance `~/.local/bin/plakd`, and run `plakd host install` with the
+original web/UI flags. Reload the user manager where needed and enable and
+start the host. On macOS boot out the old host plist before removal and
+bootstrap the new one after installation. Local macOS commands against a
+local product home also need a local gateway: run `plakd gateway install`
+and bootstrap its LaunchAgent, even if you do not run a host there.
 
 ## Upgrade with the host
 
@@ -81,11 +96,11 @@ dedicated links. Upgrade the gateway **before** carrying the host:
 2. Create a temporary link to the new immutable snapshot in the same
    directory as `~/.local/bin/plakd-gateway`, then rename it over that link.
    Leave the host link and the service definition alone.
-3. Run `systemctl --user restart plak-gateway.service` or
+3. After the drain exits successfully, run `systemctl --user start plak-gateway.service` or
    `launchctl kickstart "gui/$(id -u)/com.plakd.gateway"`, then run
-   `plakd gateway check`. No service-definition reload is needed. An
-   explicit Linux service stop can also stop the dependent host; after
-   the gateway check, start the host if needed for the coordinated upgrade.
+   `plakd gateway check`. Do not stop or restart the Linux unit in place of
+   the drain and start. No service-definition reload is needed, and the
+   running host stays up.
 
 The new gateway serves v1 to the old host and v2 to the new host. Then run
 the destination's `plakd host upgrade --expect-binary <id>` and re-pin clients

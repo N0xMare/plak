@@ -106,6 +106,125 @@ fn host_refuses_without_a_configured_reachable_gateway() {
     assert!(!home.path().join(".local/state/plak/subscriptions").exists());
 }
 
+#[cfg(feature = "web")]
+#[test]
+fn host_refuses_an_unreachable_tcp_gateway() {
+    let home = Home::new();
+    let product = home.path().join("home");
+    std::fs::create_dir(&product).unwrap();
+    std::fs::set_permissions(&product, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    // A reserved port that never answers the versions request.
+    let key = product.join("caller-key");
+    std::fs::write(&key, "synthetic-fixture-key").unwrap();
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(
+        product.join("config.toml"),
+        format!(
+            "[gateway]\naddress = \"tcp:{address}\"\nkey_file = {:?}\n",
+            key.to_str().unwrap()
+        ),
+    )
+    .unwrap();
+    let result = home.cli(&["host"]);
+    assert_eq!(result.status.code(), Some(1));
+    let error = String::from_utf8(result.stderr).unwrap();
+    assert_eq!(error.lines().count(), 1, "{error}");
+    assert!(
+        error.contains("gateway_unavailable:")
+            && error.contains("start the gateway service on that machine"),
+        "{error}"
+    );
+    assert!(!product.join("host").exists());
+}
+
+#[test]
+fn installers_refuse_regular_and_dangling_gateway_links_before_writing() {
+    let home = Home::new();
+    let link = home.path().join(".local/bin/plakd-gateway");
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::fs::write(&link, "keep me").unwrap();
+    for dangling in [false, true] {
+        if dangling {
+            std::fs::remove_file(&link).unwrap();
+            symlink(home.path().join("missing"), &link).unwrap();
+        }
+        for args in [
+            &["gateway", "install"][..],
+            #[cfg(feature = "web")]
+            &[
+                "host",
+                "install",
+                "--web",
+                "unix:/tmp/web.sock",
+                "--ui",
+                "/tmp/ui",
+            ],
+        ] {
+            let output = home.cli(args);
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("refusing to replace"));
+            assert!(!home.unit().exists());
+            assert!(!home.path().join("home").exists());
+            if dangling {
+                assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+            } else {
+                assert_eq!(std::fs::read_to_string(&link).unwrap(), "keep me");
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn installers_refuse_systemd_drop_ins_before_writing() {
+    let home = Home::new();
+    for (unit, args) in [
+        ("plak-gateway.service", &["gateway", "install"][..]),
+        #[cfg(feature = "web")]
+        (
+            "plak-gateway.service",
+            &[
+                "host",
+                "install",
+                "--web",
+                "unix:/tmp/web.sock",
+                "--ui",
+                "/tmp/ui",
+            ],
+        ),
+        #[cfg(feature = "web")]
+        (
+            "plakd-host.service",
+            &[
+                "host",
+                "install",
+                "--web",
+                "unix:/tmp/web.sock",
+                "--ui",
+                "/tmp/ui",
+            ],
+        ),
+    ] {
+        let directory = home.unit().with_file_name(format!("{unit}.d"));
+        std::fs::create_dir_all(&directory).unwrap();
+        let drop_in = directory.join("override.conf");
+        std::fs::write(&drop_in, "[Service]\n").unwrap();
+        let output = home.cli(args);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains(&format!("systemctl --user revert {unit}"))
+        );
+        assert_eq!(std::fs::read_to_string(&drop_in).unwrap(), "[Service]\n");
+        assert!(!home.path().join("home").exists());
+        assert!(!home.path().join(".local/bin").exists());
+        assert!(!home.unit().exists());
+        std::fs::remove_file(drop_in).unwrap();
+    }
+}
+
 #[test]
 fn installers_refuse_a_gateway_unit_pinned_to_an_old_snapshot() {
     let home = Home::new();
@@ -113,24 +232,27 @@ fn installers_refuse_a_gateway_unit_pinned_to_an_old_snapshot() {
     let pinned = "ExecStart=/old/snapshot/plakd gateway serve\n";
     std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
     std::fs::write(&unit, pinned).unwrap();
-    for args in [
-        &["gateway", "install"][..],
+    for (installer, args) in [
+        ("gateway", &["gateway", "install"][..]),
         #[cfg(feature = "web")]
-        &[
+        (
             "host",
-            "install",
-            "--web",
-            "unix:/tmp/web.sock",
-            "--ui",
-            "/tmp/ui",
-        ],
+            &[
+                "host",
+                "install",
+                "--web",
+                "unix:/tmp/web.sock",
+                "--ui",
+                "/tmp/ui",
+            ],
+        ),
     ] {
         let output = home.cli(args);
         assert!(!output.status.success());
         let error = String::from_utf8(output.stderr).unwrap();
         assert!(error.contains("refusing to overwrite"), "{error}");
         assert!(
-            error.contains("rm -- ") && error.contains("plakd gateway install"),
+            error.contains("rm -- ") && error.contains(&format!("plakd {installer} install")),
             "{error}"
         );
         assert!(error.contains(unit.to_str().unwrap()), "{error}");

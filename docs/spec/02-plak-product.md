@@ -6055,7 +6055,7 @@ settles asynchronously after endpoint binding, before local admission.
   neither a slow nor a stalled client holds up another client's sends.
   Sending checks host stop within 50 ms and abandons the connection
   on stop, including idle-exit stop; the hard batch bound cannot delay the
-  planned 55 s session handoff. The WebSocket sender obeys the same stop
+  planned 45 s session handoff. The WebSocket sender obeys the same stop
   rule. Client frames on that same connection are processed only after
   its current send completes (or the transport is abandoned); a progressing
   large baseline can therefore delay intent answers beyond the client's
@@ -6282,9 +6282,9 @@ keeps its separate readiness path.
   open and create from then on (`session_unavailable`, the host is stopping;
   an open already running finishes, and is handed off with the rest), then
   releases every resident session as a planned handoff, all at once, each
-  joined within 55 s, leaving daemon-held jobs running (a session's work in flight is recorded handed off,
+  joined within 45 s, leaving daemon-held jobs running (a session's work in flight is recorded handed off,
   and its next open continues it once by itself), and releases the lock.
-  The stop is bounded: the process exits within 60 s of the signal however
+  The stop is bounded: the process exits within 50 s of the signal however
   its work stands, under the unit's `TimeoutStopSec`; a session not
   released by then is left to the crash law (`owner_lost`). It prints
   `plakd host: serving on <socket> (host <host id>, instance <instance>);
@@ -6326,8 +6326,9 @@ stable binary is warned about, without preventing installation or dry run.
 
 On Linux, the generated unit executes the installed stable `$HOME/.local/bin/plakd`
 link, not the invoking executable or a pinned snapshot, from `$HOME`.
-It declares `Requires=plak-gateway.service` and `After=plak-gateway.service`;
-starting the host pulls in the gateway before the host's readiness check.
+It declares `Wants=plak-gateway.service` and `After=plak-gateway.service`.
+Starting the host pulls in the gateway before the host's readiness check,
+but a gateway drain or crash and restart does not stop an already serving host.
 WorkingDirectory remains unset: systemd user services use `$HOME` by default.
 `/usr/bin/env -i` clears ambient variables. Only HOME, PLAK_HOME, XDG_STATE_HOME, a curated
 PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
@@ -6342,7 +6343,9 @@ SIGTERM hands off; ExecReload sends SIGUSR1 for UI-only reload.
 SSH_AUTH_SOCK and locale variables are not inherited: the service starts in
 the C locale. Remote runners need IdentityAgent or IdentityFile in ssh config.
 
-Install checks both service definitions before changing either one and
+Install checks both service definitions and the gateway link before changing
+configuration or either service definition, refuses nonempty systemd unit
+drop-in directories (back up and run `systemctl --user revert <unit>`), and
 publishes each complete service file atomically without replacement.
 On Linux it then runs only `systemctl --user daemon-reload` (bounded at five
 seconds). It resolves the first executable systemctl on the installer's PATH to an absolute
@@ -6363,7 +6366,7 @@ plakd-host.service`, remove the file, and run `systemctl --user daemon-reload`.
 On macOS, the plist uses label `com.plakd.host`, `RunAtLoad=true` and
 `KeepAlive.SuccessfulExit=false`: loading it starts the host, and only an
 unsuccessful exit restarts it. A clean planned handoff does not restart the
-source. `ExitTimeOut=90`, `AbandonProcessGroup=true` and `Umask=63` (0077) keep
+source. `ExitTimeOut=60`, `AbandonProcessGroup=true` and `Umask=63` (0077) keep
 planned-stop and private-file semantics. WorkingDirectory is HOME explicitly.
 A fixed `/bin/sh -c` wrapper execs `/usr/bin/env -i`, forwarding only the
 manager's SHELL, USER and LOGNAME, followed by the same fixed HOME, PLAK_HOME, XDG_STATE_HOME,
@@ -6374,7 +6377,8 @@ refused; the macOS web socket path is at most 103 bytes (Linux: 107).
 No secrets or installer-shell environment values are stored in the plist.
 XDG_CONFIG_HOME does not affect LaunchAgent placement.
 
-Before publishing the plist, install prepares the private, user-owned directory
+Before changing configuration or publishing either plist or link, install
+checks existing log paths. It prepares the private, user-owned directory
 `$HOME/Library/Logs/Plak` (0700) and two log files (0600), opened without
 following symlinks or truncating existing contents. Existing logs must be
 single-link, user-owned private regular files. StandardOutPath is
@@ -6604,22 +6608,26 @@ machines. Neither command starts a service. The gateway definition executes
 `$HOME/.local/bin/plakd-gateway gateway serve`, not the host's stable link or
 a snapshot path. The installer seeds a missing gateway link to the invoking
 executable's resolved path; it never changes an existing link. Normal binary
-installation changes only the host link. Linux uses `plak-gateway.service`,
+installation changes only the host link. Linux uses `plak-gateway.service`, the
+manager's `XDG_RUNTIME_DIR=%t`,
 the optional `EnvironmentFile=-%h/.config/plak/gateway.env` for provider keys,
 `Restart=on-failure`, `RestartSec=2` and `TimeoutStopSec=45`. macOS uses
 `com.plakd.gateway`, `RunAtLoad`, unsuccessful-exit restart and a 45 second
 exit timeout. Both use a private umask and the resolved product and XDG state
 homes. Exact generated definitions are left in place; a pinned old definition,
-hand edit or symlink is refused with commands to stop and remove it before
-retrying.
+hand edit, symlink or nonempty systemd drop-in directory is refused with an
+operator remedy before retrying.
 
 To upgrade, drain the gateway and wait for exit, atomically replace only its
-dedicated link with a link to the tested destination snapshot, restart the
-gateway, and run `plakd gateway check` before upgrading the host. Do not edit
+dedicated link with a link to the tested destination snapshot, start the
+gateway, and run `plakd gateway check` before upgrading the host. After a
+successful drain use `systemctl --user start plak-gateway.service`, never stop
+or restart it. Do not edit
 or reload the service definition for a link flip. This preserves the host link,
 credential store and account authority. Existing installations with an old
-host unit and a gateway unit pinned to a snapshot need one explicit
-stop, backup and reinstall; see the user guide.
+host unit and a gateway unit pinned to a snapshot migrate the gateway while the
+old host keeps serving, then carry the host and replace its unit; see the user
+guide for the exact order and drop-in removal.
 
 The host reads its own `config.toml` once at startup; project overlays cannot
 select the gateway. Every route, subscription, console operation, carry probe

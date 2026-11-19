@@ -63,7 +63,7 @@ impl AccountCustody {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum CustodyMode {
-    /// The host's in-process gateway holds the credential.
+    /// Legacy wire value retained for older senders. A current host never sends it.
     #[default]
     InProcess,
     /// A gateway service holds the credential.

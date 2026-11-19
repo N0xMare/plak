@@ -149,7 +149,7 @@ fn host_install_publication_cannot_replace_a_racing_unit() -> TestResult {
     let root = tempfile::tempdir()?;
     let path = root.path().join("plakd-host.service");
     let unit = format!("{MARKER}[Service]\n");
-    assert!(!matching_unit(&path, &unit)?);
+    assert!(!matching_unit(&path, &unit, "host")?);
     let planted = "[Service]\nExecStart=/unrelated\n";
     std::fs::write(&path, planted)?;
     assert!(publish_unit(&path, &unit).is_err());

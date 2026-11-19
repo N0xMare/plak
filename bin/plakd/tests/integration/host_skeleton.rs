@@ -99,6 +99,72 @@ fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Optio
     serving_host(spawn_env(fixture, extra, env))
 }
 
+#[test]
+fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
+    use super::gateway_process::GatewayProcess;
+    use plakd_wire_types::console::{CustodyMode, HostRequest, HostResponse};
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    let socket = fixture.gateway_socket();
+    write_private(
+        &fixture.home().join("gateway.toml"),
+        &format!("socket = {:?}\n", socket.to_str().unwrap()),
+    );
+    let start_gateway = || {
+        GatewayProcess::start(
+            &mut fixture
+                .base_command()
+                .env("PLAK_TEST_FAULTS", "fault=connect"),
+            &socket,
+            &fixture.root.join("gateway.log"),
+        )
+    };
+    let mut gateway = start_gateway();
+    let mut host = serving_host(spawn_host(fixture.base_command().arg("host"))).unwrap();
+    let mut client = Client::connect(&host);
+    let status = |client: &mut Client, id| {
+        let answer = client.request(
+            id,
+            Op::Host {
+                request: HostRequest::AccountsStatus {
+                    account_id: Some("openai".into()),
+                    cursor: None,
+                    limit: None,
+                },
+            },
+        );
+        let Outcome::Ok(Answer::Host {
+            response:
+                HostResponse::AccountsStatus {
+                    rows, diagnostics, ..
+                },
+        }) = answer
+        else {
+            panic!("expected account status: {answer:?}");
+        };
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].custody.mode, CustodyMode::Service);
+    };
+    status(&mut client, 1);
+    let drained = fixture
+        .base_command()
+        .args(["gateway", "drain"])
+        .output()
+        .unwrap();
+    assert!(
+        drained.status.success(),
+        "{}",
+        String::from_utf8_lossy(&drained.stderr)
+    );
+    gateway.wait_for_drain();
+    let gateway = start_gateway();
+    status(&mut client, 2);
+    drop(gateway);
+    let _gateway = start_gateway();
+    status(&mut client, 3);
+    stop(&mut host);
+}
+
 fn serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Option<Host> {
     let line = loop {
         let line = lines.recv_timeout(WAIT).ok()?;

@@ -85,10 +85,12 @@ pub(crate) fn run(
     } else {
         home.join(".config/systemd/user/plakd-host.service")
     };
-    matching_unit(&path, &unit).map_err(failed)?;
-    gateway.check().map_err(failed)?;
+    matching_unit(&path, &unit, "host").map_err(failed)?;
+    gateway.check("host").map_err(failed)?;
+    #[cfg(target_os = "macos")]
+    launchd::check_logs(home)?;
     crate::product_config::install_gateway_address(paths, &address).map_err(CliFailure::new)?;
-    let gateway_created = gateway.install().map_err(failed)?;
+    let gateway_created = gateway.install("host").map_err(failed)?;
     writeln!(
         output,
         "{} {}",
@@ -247,19 +249,29 @@ fn render(
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "{MARKER}[Unit]\nDescription=Plak host\nRequires={SYSTEMD_UNIT}\nAfter={SYSTEMD_UNIT}\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
+        "{MARKER}[Unit]\nDescription=Plak host\nWants={SYSTEMD_UNIT}\nAfter={SYSTEMD_UNIT}\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 
 fn install_file(path: &Path, unit: &str) -> io::Result<bool> {
-    if matching_unit(path, unit)? {
+    if matching_unit(path, unit, "host")? {
         return Ok(false);
     }
     publish_unit(path, unit)?;
     Ok(true)
 }
 
-pub(crate) fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
+pub(crate) fn matching_unit(path: &Path, unit: &str, installer: &str) -> io::Result<bool> {
+    let is_plist = path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("plist"));
+    let name = path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or_default();
+    if !is_plist {
+        check_drop_ins(path, name, installer)?;
+    }
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.is_file() && metadata.len() == unit.len() as u64 {
@@ -270,14 +282,7 @@ pub(crate) fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
                 }
             }
             let quoted = shell_words::quote(path.to_str().unwrap_or_default());
-            let name = path
-                .file_name()
-                .and_then(std::ffi::OsStr::to_str)
-                .unwrap_or_default();
-            let stop = if path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("plist"))
-            {
+            let stop = if is_plist {
                 format!(
                     "launchctl bootout gui/{} {quoted}",
                     rustix::process::getuid().as_raw()
@@ -285,19 +290,30 @@ pub(crate) fn matching_unit(path: &Path, unit: &str) -> io::Result<bool> {
             } else {
                 format!("systemctl --user disable --now {name}")
             };
-            let command = if name.contains("gateway") {
-                "gateway"
-            } else {
-                "host"
-            };
             Err(io::Error::other(format!(
-                "refusing to overwrite {}: not the exact generated service file; run `{stop}` if loaded, back it up, run `rm -- {quoted}`, then retry `plakd {command} install`",
+                "refusing to overwrite {}: not the exact generated service file; run `{stop}` if loaded, back it up, run `rm -- {quoted}`, then retry `plakd {installer} install`",
                 path.display(),
             )))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
+}
+
+fn check_drop_ins(path: &Path, name: &str, installer: &str) -> io::Result<()> {
+    let directory = path.with_file_name(format!("{name}.d"));
+    let mut entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if entries.next().transpose()?.is_some() {
+        return Err(io::Error::other(format!(
+            "refusing to install with drop-ins at {}; back them up, run `systemctl --user revert {name}`, then retry `plakd {installer} install`",
+            directory.display()
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn publish_unit(path: &Path, unit: &str) -> io::Result<()> {
