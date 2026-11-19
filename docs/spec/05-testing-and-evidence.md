@@ -2391,6 +2391,7 @@ full-tier retirement soaks in both profiles still run alone.
 | Real JSONL face SIGKILL | `jsonl_face_cut_before_the_turn_reopens_exactly`, `jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note`, `jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note`, `jsonl_face_cut_after_the_answer_reopens_exactly`; `jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen` is explicitly ignored under `JSONL-APPROVAL-RESUME` |
 | GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
 | Runtime commit cuts | `every_runtime_commit_cut_reopens_without_redispatch` |
+| In-place store revisions | `host_skeleton::revision_cuts::` cuts the real host immediately before and after each store's commit; an older host leaves every database untouched, and the destination completes a mixed-revision directory without rerunning committed steps. The same-key upgrade lane exercises scratch-only qualification and planned handoff over a real root. |
 | Crash-matrix completion control | `complete_run_is_one_exact_new_state_and_probe_is_inert` — the same harness child and evidence probe, without SIGKILL; the bounded child lifetime is the load sensitivity |
 | SQLite paid-compaction SIGKILL | `sqlite_paid_compaction_sigkill_reopens_exactly_once`, `sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched` |
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
@@ -2398,6 +2399,9 @@ full-tier retirement soaks in both profiles still run alone.
 | Cross-runner fork stages | `cross_runner_fork_stages` — over two loopback runners, the process ends once each mint and seal-back stage (chapter 03 §14) is published and again once each has run before its answer is recorded; the reopened tree settles without a fault and the rerun converges. It is in process rather than a crash-sweep shape because the sweep drives one product process, whose port reaches only its selected runner |
 
 `durability::` stays in the serial lane, as that lane's table says.
+Every product and tree revision step ships with before- and after-commit crash
+cuts, reopen and older-build unchanged-byte refusal tests, and a test that the
+fresh and upgraded databases have the same pinned schema fingerprint.
 `unsupported_runtime_schemas_refuse_without_changing_files` and
 `real_binary_refuses_unsupported_runtime_without_moving_state` are not members
 of either lane; they run in the parallel lane.

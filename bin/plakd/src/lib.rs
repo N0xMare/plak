@@ -144,6 +144,12 @@ pub mod telemetry_store;
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 mod test_hooks {
+    pub(crate) const fn product_store_schema(
+        base: plakous_recursive_subagents_store::admission::Schema,
+    ) -> plakous_recursive_subagents_store::admission::Schema {
+        base
+    }
+
     pub(crate) const fn gateway_review_clock(
         subscriptions: plakous::subscriptions::NativeSubscriptions,
         _provider: plakous::subscriptions::NativeProvider,
@@ -506,7 +512,18 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
     #[cfg(not(feature = "otel"))]
     let services = Services::from_env(None, launch.as_deref());
-    if let Command::SessionCheckBinding { inspection } = &command {
+    let services = match &command {
+        Command::SessionCheckBinding {
+            store_probe: Some(path),
+            ..
+        }
+        | Command::ReopenProbe {
+            store_probe: Some(path),
+            ..
+        } => services.with_store_probe(path)?,
+        _ => services,
+    };
+    if let Command::SessionCheckBinding { inspection, .. } = &command {
         if let Some(path) = inspection {
             return host::inspect_binding(path, &mut io::stdout().lock());
         }
@@ -543,7 +560,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             .paths()?
             .ensure_private_state_home()
             .map_err(CliFailure::new)?;
-        Some(carry::upgrade::admission(services.paths()?, false)?)
+        let admission = carry::upgrade::admission(services.paths()?, false)?;
+        if !matches!(command, Command::StatePruneLegacy { .. })
+            && store::revisions::pending(services.paths()?)?
+        {
+            return Err(CliFailure::new(
+                "store upgrade pending: start this build's host with the old host stopped",
+            ));
+        }
+        Some(admission)
     } else {
         None
     };
@@ -728,6 +753,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::ReopenProbe {
             session,
             host_upgrade_reopen,
+            ..
         } => {
             let verdict = carry::reopen_probe(&services, &session, host_upgrade_reopen);
             serde_json::to_writer(&mut stdout, &verdict)

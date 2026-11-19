@@ -83,9 +83,10 @@ budget by default; `--drain` changes that budget. Cross-key upgrades carry
 settled roots into new successor sessions. The separate settling wait defaults
 to 0 and accepts at most 3600 seconds; explicit `--drain` and `--wait` cannot
 be combined. Before surrender, a refusal leaves the old owner
-authoritative; after surrender, recover through the destination's receipts,
-never by reopening the old owner. Retry the same destination command after an
-unknown outcome. `plakd host upgrade --abandon <successor-uuid-or-runner-id>`
+authoritative. After a cross-key surrender, retry the same destination command
+to recover through its receipts. After a same-key store revision commits, start
+the destination if it is no longer running; the older build refuses that store.
+`plakd host upgrade --abandon <successor-uuid-or-runner-id>`
 irreversibly abandons pending remote successors only. Read
 [upgrade, reload and logs](host-service.md#upgrade-reload-and-logs) before
 changing a host or its paired runners.

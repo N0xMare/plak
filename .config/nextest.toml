@@ -299,6 +299,7 @@ not (
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |
   test(host_skeleton::upgrade::)
+  | test(host_skeleton::revision_cuts::)
   | test(web_endpoint::lifecycle::)
   | test(host_skeleton::continuation_identity::)
   |
@@ -625,6 +626,7 @@ default-filter = '''
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
   |
   test(host_skeleton::upgrade::)
+  | test(host_skeleton::revision_cuts::)
   | test(web_endpoint::lifecycle::)
   | test(host_skeleton::continuation_identity::)
   |

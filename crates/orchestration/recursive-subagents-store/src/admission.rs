@@ -1,33 +1,58 @@
-//! Single-file `SQLite` admission, shared by this store and the product store.
-//!
-//! A writer connection runs WAL with `synchronous=FULL` and foreign keys on,
-//! and a file is admitted only at its exact schema: an unversioned file with
-//! tables in it, another version, or DDL or a fingerprint that differs from
-//! the descriptors is refused, never migrated. Each store keeps its own
-//! descriptors, version, file and messages; this module only owns the steps.
+//! Single-file SQLite admission shared by the product and tree stores.
+
+mod revision;
+pub use revision::{BackedUpUpgrade, LockedUpgrade};
+
+#[cfg(test)]
+mod tests;
 
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-/// How long a writer waits on another connection's lock before failing.
+/// How long a normal connection waits on another connection's lock.
 pub const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// One store's schema, as its admission refers to it.
+type Objects = &'static [(&'static str, &'static str)];
+
+/// One additive step; the registry position gives its source revision.
+pub struct Revision {
+    /// Reviewed DDL and deterministic same-store backfill.
+    pub sql: &'static str,
+    /// Exact resulting DDL for only the new or changed objects.
+    pub objects: Objects,
+    /// Pinned fingerprint of the complete destination shape.
+    pub fingerprint: &'static str,
+}
+
+/// One generation's frozen base and its ordered revision registry.
 pub struct Schema {
     /// The store's name in messages: `tree` reads "tree store".
     pub noun: &'static str,
-    /// The file stem, which also names the schema and its identity table:
-    /// `subagents` is `subagents.sqlite3`, "subagents schema 10" and
-    /// `subagents_schema`.
+    /// The database and identity-table stem: e.g. `subagents`.
     pub stem: &'static str,
     /// What an operator archives before retrying over an unversioned file.
     pub archive: &'static str,
-    /// `PRAGMA user_version` of the current cohort.
-    pub version: i64,
-    /// Every object the file holds, name and exact DDL, in creation order.
-    pub objects: &'static [(&'static str, &'static str)],
+    /// Oldest supported `PRAGMA user_version`, and state-key component.
+    pub generation: i64,
+    /// Frozen base DDL in creation and fingerprint order.
+    pub objects: Objects,
+    /// Pinned fingerprint of the base DDL.
+    pub base_fingerprint: &'static str,
+    /// Steps from the generation to the current revision, without gaps.
+    pub revisions: &'static [Revision],
+}
+
+/// Whether an admitted store needs an in-place upgrade.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Status {
+    /// No initialized store.
+    Fresh,
+    /// The store is at the current revision.
+    Current,
+    /// The store has a supported older revision.
+    Pending(i64),
 }
 
 /// Why a file was not admitted.
@@ -37,197 +62,309 @@ pub enum AdmissionError {
     Unavailable(String),
     /// It belongs to a schema cohort this build does not read.
     Unsupported(String),
+    /// A stopped-store upgrade is required before ordinary opens.
+    UpgradePending(String),
+    /// The exclusive upgrade lock was unavailable.
+    Busy(String),
 }
 
 impl std::fmt::Display for AdmissionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unavailable(message) | Self::Unsupported(message) => formatter.write_str(message),
+            Self::Unavailable(message)
+            | Self::Unsupported(message)
+            | Self::UpgradePending(message)
+            | Self::Busy(message) => formatter.write_str(message),
         }
     }
 }
 
 impl std::error::Error for AdmissionError {}
 
-/// Opens `path` read-write, creating it, without following a final symlink,
-/// and configures it as a durable writer: busy timeout, WAL,
-/// `foreign_keys=ON` and `synchronous=FULL`, each read back.
-pub fn open_writer(path: &Path, noun: &str) -> Result<Connection, String> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(|error| format!("could not open {noun} store: {error}"))?;
-    connection
-        .busy_timeout(BUSY_TIMEOUT)
-        .map_err(|_| format!("could not configure {noun} store timeout"))?;
-    let mode: String = connection
-        .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-        .map_err(|_| format!("could not enable {noun} store WAL"))?;
-    if mode != "wal" {
-        return Err(format!("{noun} store refused WAL mode"));
-    }
-    connection
-        .execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")
-        .map_err(|_| format!("could not configure {noun} store durability"))?;
-    let foreign_keys: i64 = connection
-        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-        .map_err(|_| format!("could not inspect {noun} store"))?;
-    let synchronous: i64 = connection
-        .query_row("PRAGMA synchronous", [], |row| row.get(0))
-        .map_err(|_| format!("could not inspect {noun} store"))?;
-    if foreign_keys != 1 || synchronous != 2 {
-        return Err(format!(
-            "{noun} store durability configuration was not retained"
-        ));
-    }
-    Ok(connection)
-}
-
 impl Schema {
-    /// This schema's DDL fingerprint: SHA-256 over each object's name and
-    /// statement, each prefixed by its big-endian `u64` length, as lowercase
-    /// hex.
+    /// The highest supported SQLite user version.
+    #[must_use]
+    pub const fn version(&self) -> i64 {
+        self.generation + self.revisions.len().cast_signed() as i64
+    }
+
+    /// The DDL fingerprint this build expects at its current revision.
     #[must_use]
     pub fn fingerprint(&self) -> String {
-        let mut digest = Sha256::new();
-        for (name, sql) in self.objects {
-            for part in [name, sql] {
-                digest.update((part.len() as u64).to_be_bytes());
-                digest.update(part.as_bytes());
-            }
-        }
-        let mut hex = String::with_capacity(64);
-        for byte in digest.finalize() {
-            use std::fmt::Write as _;
-            let _ = write!(hex, "{byte:02x}");
-        }
-        hex
+        self.revisions
+            .last()
+            .map_or(self.base_fingerprint, |step| step.fingerprint)
+            .to_owned()
     }
 
-    /// Admits the file behind `connection`: creates and versions an empty
-    /// one, and otherwise requires this exact version, shape and
-    /// fingerprint.
-    pub fn admit(&self, connection: &Connection) -> Result<(), AdmissionError> {
-        let Self {
-            noun,
-            stem,
-            archive,
-            version: expected,
-            ..
-        } = self;
-        let unavailable = |message: String| AdmissionError::Unavailable(message);
+    /// Verify a read-only snapshot at the current revision.
+    pub fn require_current(&self, snapshot: &Connection) -> Result<(), AdmissionError> {
+        match self.classify(snapshot)? {
+            Status::Current => Ok(()),
+            Status::Pending(version) => Err(self.pending_error(version)),
+            Status::Fresh => Err(self.unavailable("is not initialized")),
+        }
+    }
+
+    /// Classify and verify a file without configuring a writer or creating it.
+    pub fn inspect(&self, path: &Path) -> Result<Status, AdmissionError> {
+        let Some(connection) = self.open_reader(path)? else {
+            return Ok(Status::Fresh);
+        };
+        let snapshot = connection
+            .unchecked_transaction()
+            .map_err(|_| self.unavailable("inspection could not start"))?;
+        self.classify(&snapshot)
+    }
+
+    fn open_reader(&self, path: &Path) -> Result<Option<Connection>, AdmissionError> {
+        match path.symlink_metadata() {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Ok(metadata) if metadata.is_file() => {}
+            _ => return Err(self.unavailable("is not an accessible regular file")),
+        }
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(|_| self.unavailable("could not be opened read-only"))?;
+        connection
+            .busy_timeout(BUSY_TIMEOUT)
+            .map_err(|_| self.unavailable("inspection timeout could not be configured"))?;
+        Ok(Some(connection))
+    }
+
+    /// Open a normal writer. Only an empty file can change schema here;
+    /// existing stores first need stopped-store owner admission.
+    pub fn open_writer(
+        &self,
+        path: &Path,
+        install: impl FnOnce(&mut Connection) -> Result<(), AdmissionError>,
+    ) -> Result<Connection, AdmissionError> {
+        let initial = self.inspect(path)?;
+        if let Status::Pending(version) = initial {
+            return Err(self.pending_error(version));
+        }
+        let mut connection = self.writer(path, initial == Status::Fresh)?;
+        let status = {
+            let snapshot = connection
+                .unchecked_transaction()
+                .map_err(|_| self.unavailable("admission snapshot could not start"))?;
+            self.classify(&snapshot)?
+        };
+        if let Status::Pending(version) = status {
+            return Err(self.pending_error(version));
+        }
+        self.configure_writer(&connection)?;
+        install(&mut connection)?;
+        if status == Status::Fresh {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|error| self.sql_error(&error, "initialization could not lock"))?;
+            match self.classify(&transaction)? {
+                Status::Fresh => self.initialize(&transaction)?,
+                Status::Current => {}
+                Status::Pending(version) => return Err(self.pending_error(version)),
+            }
+            transaction
+                .commit()
+                .map_err(|error| self.sql_error(&error, "initialization could not commit"))?;
+        }
+        Ok(connection)
+    }
+
+    fn writer(&self, path: &Path, create: bool) -> Result<Connection, AdmissionError> {
+        let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        flags.set(OpenFlags::SQLITE_OPEN_CREATE, create);
+        let connection = Connection::open_with_flags(path, flags)
+            .map_err(|error| self.sql_error(&error, "could not be opened for writing"))?;
+        connection
+            .busy_timeout(BUSY_TIMEOUT)
+            .map_err(|_| self.unavailable("writer timeout could not be configured"))?;
+        Ok(connection)
+    }
+
+    fn configure_writer(&self, connection: &Connection) -> Result<(), AdmissionError> {
+        let mode: String = connection
+            .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+            .map_err(|error| self.sql_error(&error, "could not enable WAL"))?;
+        if mode != "wal" {
+            return Err(self.unavailable("refused WAL mode"));
+        }
+        self.configure_durability(connection)
+    }
+
+    fn configure_durability(&self, connection: &Connection) -> Result<(), AdmissionError> {
+        connection
+            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")
+            .map_err(|_| self.unavailable("could not configure durability"))?;
+        let pragma = |name| {
+            connection
+                .pragma_query_value(None, name, |row| row.get::<_, i64>(0))
+                .map_err(|_| self.unavailable("could not read back durability configuration"))
+        };
+        if pragma("foreign_keys")? != 1 || pragma("synchronous")? != 2 {
+            return Err(self.unavailable("did not retain durability configuration"));
+        }
+        Ok(())
+    }
+
+    fn classify(&self, connection: &Connection) -> Result<Status, AdmissionError> {
         let version: i64 = connection
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| unavailable(format!("could not inspect {noun} store schema")))?;
-        let has_schema: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|_| unavailable(format!("could not inspect {noun} store schema")))?;
-        if version == 0 && has_schema {
-            return Err(unavailable(format!(
-                "unversioned {noun} store contains unrecognized state; archive {archive}, then retry"
-            )));
-        }
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|error| self.sql_error(&error, "schema revision could not be inspected"))?;
         if version == 0 {
-            return self.initialize(connection).map_err(unavailable);
+            let has_schema: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%')",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| self.unavailable("schema could not be inspected"))?;
+            if has_schema {
+                return Err(AdmissionError::Unavailable(format!(
+                    "unversioned {} store contains unrecognized state; archive {}, then retry",
+                    self.noun, self.archive
+                )));
+            }
+            return Ok(Status::Fresh);
         }
-        if version != *expected {
+        let expected = self.version();
+        if !(self.generation..=expected).contains(&version) {
             return Err(AdmissionError::Unsupported(format!(
-                "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plakd build; move it aside to start fresh"
+                "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plakd build; move it aside to start fresh",
+                stem = self.stem
             )));
         }
-        self.validate(connection).map_err(|error| {
-            unavailable(format!(
-                "{error}; current-schema {noun} state is not authoritative"
-            ))
+        self.validate_revision(connection, version)
+            .map_err(|error| {
+                AdmissionError::Unavailable(format!(
+                    "{error}; current-schema {} state is not authoritative",
+                    self.noun
+                ))
+            })?;
+        Ok(if version == expected {
+            Status::Current
+        } else {
+            Status::Pending(version)
         })
     }
 
-    fn initialize(&self, connection: &Connection) -> Result<(), String> {
-        let Self {
-            noun,
-            stem,
-            version,
-            objects,
-            ..
-        } = self;
-        let transaction = connection
-            .unchecked_transaction()
-            .map_err(|_| format!("could not initialize {noun} store"))?;
-        for (_, sql) in *objects {
+    fn initialize(&self, transaction: &Transaction<'_>) -> Result<(), AdmissionError> {
+        for (_, sql) in self.objects {
             transaction
                 .execute_batch(sql)
-                .map_err(|_| format!("could not initialize {noun} store schema"))?;
+                .map_err(|error| self.sql_error(&error, "could not initialize schema"))?;
         }
-        let changed = transaction
+        transaction
             .execute(
                 &format!(
-                    "INSERT INTO {stem}_schema(singleton,instance_id,fingerprint) VALUES(1,?1,?2)"
+                    "INSERT INTO {}_schema(singleton,instance_id,fingerprint) VALUES(1,?1,?2)",
+                    self.stem
                 ),
-                rusqlite::params![uuid::Uuid::new_v4().to_string(), self.fingerprint()],
+                rusqlite::params![uuid::Uuid::new_v4().to_string(), self.base_fingerprint],
             )
-            .map_err(|_| format!("could not initialize {noun} store identity"))?;
-        if changed != 1 {
-            return Err(format!("could not initialize exact {noun} store identity"));
-        }
-        transaction
-            .pragma_update(None, "user_version", version)
-            .map_err(|_| format!("could not version {noun} store schema"))?;
-        transaction
-            .commit()
-            .map_err(|_| format!("could not commit {noun} store schema"))
+            .map_err(|error| self.sql_error(&error, "could not initialize identity"))?;
+        self.apply_steps(transaction, self.generation)
     }
 
-    /// Requires the file's objects to be exactly these descriptors and its
-    /// recorded fingerprint to be theirs. Ordinary open does not scan page
-    /// integrity or foreign keys.
+    /// Requires the current shape and its recorded fingerprint.
     pub fn validate(&self, connection: &Connection) -> Result<(), String> {
-        let Self {
-            noun,
-            stem,
-            objects,
-            ..
-        } = self;
-        let mut statement = connection
-            .prepare(
-                "SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY name",
-            )
-            .map_err(|_| format!("could not inspect {noun} store shape"))?;
-        let actual = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|_| format!("could not inspect {noun} store shape"))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| format!("{noun} store shape is invalid"))?;
-        let mut expected = objects
+        self.validate_revision(connection, self.version())
+    }
+
+    fn validate_revision(&self, connection: &Connection, version: i64) -> Result<(), String> {
+        let mut expected = self.objects.to_vec();
+        let mut pin = self.base_fingerprint;
+        for (_, step) in self.steps().take_while(|(source, _)| *source < version) {
+            for &(name, ddl) in step.objects {
+                if let Some((_, previous)) = expected.iter_mut().find(|(key, _)| *key == name) {
+                    *previous = ddl;
+                } else {
+                    expected.push((name, ddl));
+                }
+            }
+            pin = step.fingerprint;
+        }
+        let actual = self.read_shape(connection)?;
+        let fingerprint = fingerprint(&expected);
+        expected.sort_unstable_by_key(|(name, _)| *name);
+        if actual
             .iter()
-            .map(|(name, sql)| ((*name).to_owned(), (*sql).to_owned()))
-            .collect::<Vec<_>>();
-        expected.sort_by(|left, right| left.0.cmp(&right.0));
-        if actual != expected {
+            .map(|(n, s)| (n.as_str(), s.as_str()))
+            .ne(expected)
+        {
             return Err(format!(
-                "{noun} store schema shape does not match its exact revision"
+                "{} store schema shape does not match its exact revision",
+                self.noun
             ));
         }
-        let fingerprint: String = connection
+        let stored: String = connection
             .query_row(
-                &format!("SELECT fingerprint FROM {stem}_schema WHERE singleton=1"),
+                &format!(
+                    "SELECT fingerprint FROM {}_schema WHERE singleton=1",
+                    self.stem
+                ),
                 [],
                 |row| row.get(0),
             )
-            .map_err(|_| format!("{noun} store schema fingerprint is missing"))?;
-        if fingerprint != self.fingerprint() {
+            .map_err(|_| format!("{} store schema fingerprint is missing", self.noun))?;
+        if stored != pin || fingerprint != pin {
             return Err(format!(
-                "{noun} store schema fingerprint does not match its exact revision"
+                "{} store schema fingerprint does not match its exact revision",
+                self.noun
             ));
         }
         Ok(())
     }
+
+    fn read_shape(&self, connection: &Connection) -> Result<Vec<(String, String)>, String> {
+        let mut statement = connection
+            .prepare(
+                "SELECT name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY name",
+            )
+            .map_err(|_| format!("could not inspect {} store shape", self.noun))?;
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .and_then(|rows| rows.collect())
+            .map_err(|_| format!("{} store schema shape is invalid", self.noun))
+    }
+
+    fn unavailable(&self, detail: &str) -> AdmissionError {
+        AdmissionError::Unavailable(format!("{} store {detail}", self.noun))
+    }
+
+    fn pending_error(&self, version: i64) -> AdmissionError {
+        AdmissionError::UpgradePending(format!(
+            "{} store upgrade pending: revision {version} must advance to {} with the old host stopped",
+            self.noun,
+            self.version()
+        ))
+    }
+
+    fn sql_error(&self, error: &rusqlite::Error, detail: &str) -> AdmissionError {
+        if matches!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
+        ) {
+            return AdmissionError::Busy(format!("{} store is busy: {detail}", self.noun));
+        }
+        self.unavailable(detail)
+    }
+}
+
+fn fingerprint(objects: &[(&str, &str)]) -> String {
+    let mut digest = Sha256::new();
+    for (name, sql) in objects {
+        for part in [name, sql] {
+            digest.update((part.len() as u64).to_be_bytes());
+            digest.update(part.as_bytes());
+        }
+    }
+    let mut hex = String::with_capacity(64);
+    for byte in digest.finalize() {
+        use std::fmt::Write as _;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
 }

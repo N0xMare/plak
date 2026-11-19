@@ -1,28 +1,20 @@
 //! The tree's own database: `subagents.sqlite3` (spec 03 §14).
-//!
-//! One file, one schema version, one DDL fingerprint, and the same
-//! fail-closed law the product store keeps: an unversioned file with tables
-//! in it, a version that is not this one, a shape that does not match the
-//! descriptors, or a fingerprint that does not match them is refused, never
-//! migrated. A schema change moves the product's state directory (spec 02
-//! §2.5), so a build never finds another build's file in its own.
 
 use std::path::{Path, PathBuf};
 
 use plakous_recursive_subagents::tree::PersistedTree;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema, open_writer};
+use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema};
 use crate::rows::load_agent_tree;
 
-/// `subagents.sqlite3` starts at schema version 1. It is not the
-/// product schema's number and never follows it; both name the state
-/// directory.
-pub const SCHEMA_VERSION: i64 = 11;
+/// The tree store's component of the host's state directory key.
+pub const GENERATION: i64 = 11;
 
-/// Every object the tree's database holds, name and exact DDL. The
-/// fingerprint is taken over this list, so a changed byte here needs a new
-/// schema version, which moves the state directory.
+/// The tree store's current schema revision.
+pub const SCHEMA_VERSION: i64 = SCHEMA.version();
+
+/// Frozen base objects for this generation, by name and exact DDL.
 pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
         "subagents_schema",
@@ -101,7 +93,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
 /// The DDL fingerprint this cohort pins.
 #[must_use]
 pub fn expected_schema_fingerprint() -> String {
-    SCHEMA.fingerprint()
+    schema().fingerprint()
 }
 
 /// The tree file's admission descriptors.
@@ -109,15 +101,27 @@ const SCHEMA: Schema = Schema {
     noun: "tree",
     stem: "subagents",
     archive: "subagents.sqlite3",
-    version: SCHEMA_VERSION,
+    generation: GENERATION,
     objects: SCHEMA_OBJECTS,
+    base_fingerprint: "f853d767e6fb5d05a546fd1c32dbb7b160d85b35ae5caeb7fde2efade76ca23a",
+    revisions: &[],
 };
+
+/// Admission descriptors used by the host's stopped-store and scratch paths.
+#[must_use]
+pub fn schema() -> Schema {
+    crate::test_support::schema(SCHEMA)
+}
 
 /// Why the tree database could not be admitted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpenErrorKind {
     /// The file belongs to a schema cohort this build does not read.
     UnsupportedPersistence,
+    /// An in-generation revision requires a stopped-store upgrade.
+    UpgradePending,
+    /// The database was locked by another connection.
+    Busy,
     /// It could not be opened exactly, for any other reason.
     Unavailable,
 }
@@ -155,13 +159,6 @@ impl OpenError {
         }
     }
 
-    fn unsupported(message: impl Into<String>) -> Self {
-        Self {
-            kind: OpenErrorKind::UnsupportedPersistence,
-            message: message.into(),
-        }
-    }
-
     /// Which admission law refused the file, so a caller can tell a
     /// retirable schema mismatch from an unreadable file.
     #[must_use]
@@ -184,6 +181,20 @@ impl std::fmt::Display for OpenError {
 }
 
 impl std::error::Error for OpenError {}
+
+impl From<AdmissionError> for OpenError {
+    fn from(error: AdmissionError) -> Self {
+        let (kind, message) = match error {
+            AdmissionError::Unsupported(message) => {
+                (OpenErrorKind::UnsupportedPersistence, message)
+            }
+            AdmissionError::Unavailable(message) => (OpenErrorKind::Unavailable, message),
+            AdmissionError::UpgradePending(message) => (OpenErrorKind::UpgradePending, message),
+            AdmissionError::Busy(message) => (OpenErrorKind::Busy, message),
+        };
+        Self { kind, message }
+    }
+}
 
 /// One connection to the tree's database, held for the life of the runtime
 /// that owns it.
@@ -298,17 +309,7 @@ impl SubagentsDatabase {
         let tx = connection
             .unchecked_transaction()
             .map_err(|_| OpenError::unavailable("could not start tree inspection"))?;
-        let version: i64 = tx
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| OpenError::unavailable("could not inspect tree schema"))?;
-        if version != SCHEMA_VERSION {
-            return Err(OpenError::unsupported(format!(
-                "subagents schema {version}, expected {SCHEMA_VERSION}: created by an incompatible plakd build"
-            )));
-        }
-        SCHEMA.validate(&tx).map_err(|error| {
-            OpenError::unavailable(format!("{error}; tree inspection has no authority"))
-        })?;
+        schema().require_current(&tx)?;
         read(&tx)
     }
 
@@ -316,24 +317,23 @@ impl SubagentsDatabase {
     /// refusing it when it belongs to any other cohort.
     pub fn open(database: &Path) -> Result<Self, OpenError> {
         let database = resolved_path(database)?;
-        let connection = open_writer(&database, SCHEMA.noun).map_err(OpenError::unavailable)?;
-        #[cfg(feature = "commit-trace")]
-        let connection = {
-            let mut connection = connection;
-            plakous_store::commit_trace::install(&mut connection, "tree")
-                .map_err(|_| OpenError::unavailable("could not install commit trace"))?;
-            connection
-        };
-        let database = Self { connection };
-        database.readmit()?;
-        Ok(database)
+        let connection = schema().open_writer(&database, |connection| {
+            let _ = connection;
+            #[cfg(feature = "commit-trace")]
+            plakous_store::commit_trace::install(connection, "tree").map_err(|_| {
+                AdmissionError::Unavailable("could not install commit trace".into())
+            })?;
+            Ok(())
+        })?;
+        Ok(Self { connection })
     }
 
     pub(crate) fn readmit(&self) -> Result<(), OpenError> {
-        SCHEMA.admit(&self.connection).map_err(|error| match error {
-            AdmissionError::Unavailable(message) => OpenError::unavailable(message),
-            AdmissionError::Unsupported(message) => OpenError::unsupported(message),
-        })
+        let snapshot = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| OpenError::unavailable("tree admission snapshot could not start"))?;
+        schema().require_current(&snapshot).map_err(Into::into)
     }
 }
 

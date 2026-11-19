@@ -1092,22 +1092,62 @@ recovery authority.
 
 ### 2.5 Versioned state
 
-plakd does not migrate state. Each build keeps its state in
-`~/.plak/state/<key>/`, where the key names every persisted format the build
-reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r28.e39.p39.t11`. The key is derived from the stores'
-own version constants, never hand-bumped, so a format change cannot forget to
-move it. Runtime epoch 39 removes the credential-store path from the Codex and
+Each build keeps its state in `~/.plak/state/<key>/`, where the key is
+`r<runtime schema>.e<runtime format epoch>.p<product generation>.t<tree
+generation>`, for example `r28.e39.p39.t11`. The key is derived from those
+four constants, never hand-bumped. The runtime schema and format epoch are
+exact and do not support in-place changes. Runtime epoch 39 removes the
+credential-store path from the Codex and
 SuperGrok credential-authority digests. Product schema 39 stores
 `sessions.account_choices`, a JSON object mapping non-root provider kinds to full
 account references. The root kind's account is the root line head and is not a
-map entry. A cross-key cut is the only move; nothing is migrated in place. A
-build therefore never finds another build's files in its own
-directory, and a whole-store incompatibility never blocks startup. State-directory
+map entry. State-directory
 file formats outside the four stores ride the same key: a change to the runtime
 store's holder-claim files (chapter 01 §5.1) must ship with a bump of one of
-the four versions, because only the key keeps builds with different holder
+the four key components, because only the key keeps builds with different holder
 formats from reading each other's holder files.
+
+Product and tree store revisions are separate monotonic SQLite
+`PRAGMA user_version` values. A step advances one revision in one store and
+may only add tables, indexes, views, or nullable or defaulted columns whose
+default means exactly the old behavior. It uses only SQL and deterministic
+backfill from that store's own rows. It must stay correct while the previous
+revision's code keeps writing: a new table must not be an app-maintained mirror
+of an existing table. A change to authority, lineage, history encoding or
+binding digests instead bumps the generation and uses a cross-key settled
+carry. Steps accumulate within a generation and are deleted at its next
+generation bump. A fresh store creates the frozen generation base and runs
+the same steps in order. Each step starts at the pinned source fingerprint and
+validates the exact destination shape and fingerprint.
+
+Ordinary read-only opens and inspections never upgrade: they refuse an older
+revision in range with `upgrade pending`. A revision below the generation or
+above the build's current revision is incompatible and refused without
+writing. Host startup checks both stores before writing either or opening
+session authority, so an older host also refuses a mixed-revision directory
+without writing to any store there.
+
+Only the destination host, after the source drains and releases ownership,
+may revise live stores. It holds the state lock and exclusive standalone
+admission. It verifies each source revision and fingerprint read-only, then
+uses a dedicated exclusive SQLite connection for the copy and revision
+transaction. Busy admission refuses before a step commits. Before changing a
+store it makes a consistent, synced `VACUUM INTO` copy beside it:
+`product.pre-revision-<source>.sqlite3` or
+`subagents.pre-revision-<source>.sqlite3`. A failed copy refuses without
+revising the store. All pending steps in that store and its user-version update
+commit together. A crash before commit leaves that store at its source
+revision; a crash after commit does not rerun its steps. The stores commit
+independently: after an interruption between commits, the destination build
+completes the remaining revision on startup.
+
+After the first revision commit, same-key recovery is fix-forward: start the
+destination or another build supporting the committed revision. Before any
+restart, point the host service's stable executable link or pinned executable
+at that build. The copy is for manual disaster recovery only: stop all users
+of the store, restore the pre-upgrade copy, then run the older build. Writes
+after the copy are lost; restoring just one store does not roll back changes
+in the other stores. No host restores a copy automatically.
 
 Commands that cannot carry a foreign session automatically, including
 `run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely
@@ -5545,6 +5585,14 @@ This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
+When its destination needs a higher store revision, pre-drain qualification
+takes consistent read-only copies of the existing product and tree stores in
+a private scratch directory, applies the registered steps there, and probes
+binding and exact reopen against the copies. The live stores are not upgraded
+by the probes. Equal revisions retain the ordinary probe. The destination
+applies the live steps only after source drain and release and before
+announcing readiness; a failure after either commit is fixed forward under
+§2.5, not by restarting the source.
 Its exact-reopen probe refuses known binding/configuration/credential changes;
 an unfinished-turn verdict retains the existing planned-handoff recovery law.
 Verification restores process metadata only into detached, start-refusing

@@ -131,7 +131,7 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
             "destination cannot serve the recorded host arguments",
         ));
     };
-    crate::host::preflight_upgrade_service(services, &command)?;
+    crate::host::preflight_upgrade_service(services, &command, path)?;
     for placement in probe.placements {
         let _qualified = remote::Placement::prepare(services, &placement.id, &placement.workspace)?;
     }

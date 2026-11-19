@@ -208,6 +208,15 @@ in a change; amend the chapter that owns them.
   store authority. Any change to its endpoints, encodings or binding facts
   bumps its version;
   the previous version's speaker is kept for one bump only.
+- The fourth exception is in-place store revisions: a build MAY upgrade a
+  store in place when the change only adds tables, indexes, views, or nullable
+  or defaulted columns whose default means exactly the old behaviour. Each
+  revision runs in one transaction on one store, reads no other store, follows
+  a copy of the stopped store, and is never reversed; an older build refuses a
+  newer revision without writing. A change to authority, lineage, history
+  encoding or binding digests bumps the store's generation instead, which
+  changes the state key and uses settled carry. Revisions accumulate within a
+  generation and are deleted when the generation bumps.
 - Choose the simplest implementation that fully meets the current architecture.
   Avoid speculative abstractions, configuration, and indirection.
 - Grow in layers: smallest end-to-end product first, then add capability on a

@@ -73,8 +73,10 @@ const UNBOUND_HOST_ID: &str = "local";
 
 /// The tree store for this home, opened on its own file.
 pub fn open_tree_store(paths: &PlakPaths) -> Result<SqliteTreeStore, String> {
-    paths.ensure_layout()?;
-    bind_custody_host(paths)?;
+    if !paths.probing_stores() {
+        paths.ensure_layout()?;
+        bind_custody_host(paths)?;
+    }
     SqliteTreeStore::open(&paths.subagents_database()).map_err(|error| error.message().to_owned())
 }
 

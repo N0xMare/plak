@@ -22,6 +22,7 @@ pub(crate) mod send;
 mod sessions;
 mod socket;
 mod starter;
+mod store_revisions;
 mod upgrade;
 pub(crate) use crate::carry::host_move::live_protocol as live_move_protocol;
 
@@ -45,11 +46,12 @@ pub(crate) fn finish_move_source(services: &Services, id: uuid::Uuid) -> CliResu
 pub(crate) fn preflight_upgrade_service(
     services: &Services,
     command: &HostCommand,
+    probe: &std::path::Path,
 ) -> CliResult<()> {
     if let Some(web) = &command.web {
         crate::web::preflight(services, web)?;
     }
-    Ok(())
+    store_revisions::rehearse_for_service(services.paths()?, probe)
 }
 
 use std::sync::Arc;
@@ -150,6 +152,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
+    let stores_pending = crate::store::revisions::pending(paths)?;
     if let Some(replacement) = upgrade::startup_replacement(services)? {
         drop(holder);
         drop(lock);
@@ -157,6 +160,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
         runtime.shutdown_timeout(Duration::from_secs(1));
         return replacement.exec(paths);
     }
+    store_revisions::upgrade_stopped(paths, stores_pending, &lock)?;
     let opened = open_host(
         services,
         command,

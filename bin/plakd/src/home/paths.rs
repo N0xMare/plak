@@ -61,6 +61,7 @@ pub struct PlakPaths {
     /// The workspace this context was resolved for, when it has one: the
     /// launch directory at the CLI edge, or a session's workspace.
     workspace: Option<PathBuf>,
+    probe_stores: Option<PathBuf>,
 }
 
 impl PlakPaths {
@@ -74,6 +75,7 @@ impl PlakPaths {
             default_home: None,
             project_root: None,
             workspace: None,
+            probe_stores: None,
         }
     }
 
@@ -92,6 +94,7 @@ impl PlakPaths {
             default_home: self.default_home.clone(),
             project_root: discover_project_root(workspace, &product_homes, None),
             workspace: Some(workspace.to_path_buf()),
+            probe_stores: self.probe_stores.clone(),
         }
     }
 
@@ -104,6 +107,7 @@ impl PlakPaths {
             default_home: self.default_home.clone(),
             project_root: None,
             workspace: Some(workspace.to_owned()),
+            probe_stores: self.probe_stores.clone(),
         }
     }
 
@@ -134,6 +138,7 @@ impl PlakPaths {
                 default_home,
                 project_root: None,
                 workspace: None,
+                probe_stores: None,
             });
         }
         let home_path = user_home.ok_or_else(|| "HOME is unavailable".to_owned())?;
@@ -145,6 +150,7 @@ impl PlakPaths {
             default_home,
             project_root: None,
             workspace: None,
+            probe_stores: None,
         })
     }
 
@@ -417,7 +423,7 @@ impl PlakPaths {
     /// Plakous semantic runtime database above.
     #[must_use]
     pub fn product_database(&self) -> PathBuf {
-        self.state_dir().join("product.sqlite3")
+        self.store_directory().join("product.sqlite3")
     }
 
     /// The agent tree's own authority. A separate file from
@@ -426,7 +432,22 @@ impl PlakPaths {
     /// rows, so nothing was gained by sharing one.
     #[must_use]
     pub fn subagents_database(&self) -> PathBuf {
-        self.state_dir().join("subagents.sqlite3")
+        self.store_directory().join("subagents.sqlite3")
+    }
+
+    fn store_directory(&self) -> PathBuf {
+        self.probe_stores
+            .clone()
+            .unwrap_or_else(|| self.state_dir())
+    }
+
+    pub(crate) fn with_probe_stores(mut self, directory: PathBuf) -> Self {
+        self.probe_stores = Some(directory);
+        self
+    }
+
+    pub(crate) fn probing_stores(&self) -> bool {
+        self.probe_stores.is_some()
     }
 
     /// Disposable analytics root; never recovery authority. It sits outside

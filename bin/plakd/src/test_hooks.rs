@@ -81,6 +81,27 @@ pub(crate) fn upgrade_state_key() -> Option<String> {
         .filter(|key| crate::carry::upgrade::state_key_valid(key))
 }
 
+static STORE_REVISION_FIXTURE: AtomicBool = AtomicBool::new(false);
+const STORE_REVISION_DDL: &str =
+    "CREATE INDEX product_revision_fixture ON product_schema(fingerprint)";
+
+pub(crate) fn product_store_schema(
+    base: plakous_recursive_subagents_store::admission::Schema,
+) -> plakous_recursive_subagents_store::admission::Schema {
+    if STORE_REVISION_FIXTURE.load(Ordering::Relaxed) {
+        plakous_recursive_subagents_store::admission::Schema {
+            revisions: &[plakous_recursive_subagents_store::admission::Revision {
+                sql: STORE_REVISION_DDL,
+                objects: &[("product_revision_fixture", STORE_REVISION_DDL)],
+                fingerprint: "e156d5b66aaaffa97fe8c1aa8fa0e31c9c32d48a561d6a48dfc569d0ced0c1e5",
+            }],
+            ..base
+        }
+    } else {
+        base
+    }
+}
+
 pub(crate) fn upgrade_input_limit() -> Option<String> {
     std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT").ok()
 }
@@ -262,6 +283,12 @@ fn install_identity_hash_delay() {
 /// loopback or child runner when the offline script asks for one (spec 01
 /// §8.5). Nothing else selects a runner.
 pub(crate) fn install() -> Result<(), String> {
+    if hook_environment("PLAK_TEST_STORE_REVISION_IMAGE")
+        .is_some_and(|image| std::env::current_exe().is_ok_and(|path| path == Path::new(&image)))
+    {
+        STORE_REVISION_FIXTURE.store(true, Ordering::Relaxed);
+        plakous_recursive_subagents_store::test_support::enable_store_revision_fixture();
+    }
     client_fixtures::install_pending_gate()?;
     install_identity_hash_delay();
     if let Some(millis) = hook_environment("PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS")

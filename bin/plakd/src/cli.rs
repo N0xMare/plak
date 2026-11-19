@@ -497,6 +497,8 @@ enum TopCommand {
         reopen_probe: Option<String>,
         #[arg(long, hide = true, requires = "reopen_probe")]
         host_upgrade_reopen: bool,
+        #[arg(long, hide = true, requires = "host_upgrade_reopen")]
+        store_probe: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
         export_version: bool,
     },
@@ -970,6 +972,8 @@ enum SessionAction {
         all: bool,
         #[arg(long, hide = true, requires = "all")]
         inspection: Option<std::path::PathBuf>,
+        #[arg(long, hide = true, requires = "all", conflicts_with = "inspection")]
+        store_probe: Option<std::path::PathBuf>,
     },
     /// List sessions for the current workspace.
     List {
@@ -1063,7 +1067,11 @@ impl SessionAction {
             Self::CheckBinding {
                 all: true,
                 inspection,
-            } => Ok(Command::SessionCheckBinding { inspection }),
+                store_probe,
+            } => Ok(Command::SessionCheckBinding {
+                inspection,
+                store_probe,
+            }),
             Self::CheckBinding { all: false, .. } => Ok(Command::CommandHelp {
                 command: "session".to_owned(),
             }),

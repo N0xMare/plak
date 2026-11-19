@@ -201,8 +201,8 @@ Monty worker package needs.
 ## Persisted versions
 
 The latest workspace release is **0.0.4**. The current versions below are
-this build's state tuple, not the released tuple (`r28.e38.p38.t11`);
-older state is not opened. This build writes export v13,
+this build's state key, not the released key (`r28.e38.p38.t11`);
+foreign keys are not opened as native authority. This build writes export v13,
 imports v13 and v12, and refuses v11 and older (§2.5.1 of chapter 02). The
 0.0.3 release wrote v11, so its exports cannot be carried into this build
 directly. Older native state remains untouched for its matching build.
@@ -211,8 +211,8 @@ directly. Older native state remains untouched for its matching build.
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39** (location-independent Codex and SuperGrok credential authority; retains context codec **4** for semantic imported-compaction selections and recorded strategy/count facts) |
-| Product store (`product.sqlite3`): intents and feed-derived views | plakd | schema **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains immutable semantic move seeds and permanent identity claims) |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | schema **11** (adds immutable semantic move bases and imported custody floors) |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains immutable semantic move seeds and permanent identity claims) |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **11** (adds immutable semantic move bases and imported custody floors) |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
 | Host-upgrade ownership receipt | plakd | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
@@ -234,7 +234,7 @@ and typed targets. Their frontend command spelling is rendered only by plakd.
 
 The canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current version tuple as state authority. Export v13 carries
+only their current state key as native authority. Export v13 carries
 conversation history, CarryBinding (including `py-sdk`), session-owned named
 state, the session's runner and its profile, not tree seal outcomes. Its
 history preserves exact account/model replay scope. The v12 importer preserves
@@ -278,18 +278,20 @@ recovery. Its global Committed decision precedes native retirement;
 only whole-group Ready releases the destination admission/readoption gate.
 Receipts remain operational authority, not a second session-data carrier.
 
-There are no released persisted-format obligations. Each store has exactly one
-supported version, and nothing is migrated. The session export document is the
-first cross-build exception: a build imports documents of its own version and
-of the one before, and no other store crosses between builds. A pre-release
-format change bumps the store's schema or the runtime format epoch; the
-per-component revision constants inside the checkpoint graph are frozen. plakd
-keeps each build's stores in a state directory named by all four versions
+The runtime store has one supported schema and format epoch and is never
+migrated; the per-component revision constants inside the checkpoint graph are
+frozen. Product and tree stores may advance by forward-only additive revisions
+within a generation. The session export document is the first cross-build
+exception: a build imports documents of its own version and of the one before.
+Any change to runtime formats or breaking change to a product or tree store
+changes the state key and requires settled carry. plakd keeps each build's
+stores in a state directory named by the runtime schema, runtime format epoch,
+product generation and tree generation
 (chapter 02 §2.5), currently `r28.e39.p39.t11`. Product schema 39 stores session
 account choices (chapter 02 §4.4.1). Runtime epoch 39 removes the store path
 from Codex and SuperGrok credential-authority digests, changing persisted
 binding bytes without changing checkpoint fields. A build never opens another
-version tuple as session authority. Exact reopen of an epoch-38 session refuses;
+state key as session authority. Exact reopen of an epoch-38 session refuses;
 use export and import to carry it (chapter 01 §5.4). Explicit legacy pruning may
 take schema-blind SQLite and holder locks to prove a directory is unused
 (chapter 02 §2.5).
@@ -316,6 +318,13 @@ one bump only. The gateway serves v2 and v1. Only v1 reports the former
 path-based Codex and SuperGrok credential authority and selection digests.
 Upgrade the gateway first so the old host can keep speaking v1 and the new
 host can use v2 authority when carrying its sessions.
+
+The fourth exception is in-place product and tree store revisions. A build
+can advance an older revision of its own generation after exclusive owner
+admission, a consistent copy, and exact schema validation. Neither store
+reads the other; each moves in a single transaction, and older builds refuse
+newer revisions without writing. Generation changes discard the revision
+steps and continue to use settled carry (chapter 02 §2.5).
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

@@ -27,9 +27,18 @@ mod image;
 mod move_seed;
 pub mod rows;
 pub mod store;
+#[cfg(feature = "commit-trace")]
+pub mod test_support;
+#[cfg(not(feature = "commit-trace"))]
+mod test_support {
+    pub(super) const fn schema(base: crate::admission::Schema) -> crate::admission::Schema {
+        base
+    }
+}
 
 pub use database::{
-    OpenError, OpenErrorKind, SCHEMA_VERSION, TreeInspection, expected_schema_fingerprint,
+    GENERATION, OpenError, OpenErrorKind, SCHEMA_VERSION, TreeInspection,
+    expected_schema_fingerprint,
 };
 pub use store::SqliteTreeStore;
 

@@ -560,7 +560,7 @@ fn wait_host(
         std::thread::sleep(Duration::from_millis(25));
     }
     Err(CliFailure::new(
-        "host_upgrade_outcome_unknown: replacement has not acknowledged readiness; retry the upgrade using its recorded executable",
+        "host_upgrade_outcome_unknown: replacement has not acknowledged readiness; if the host stopped, start the destination build",
     ))
 }
 
@@ -999,6 +999,9 @@ fn qualify_destination(
     probe_command
         .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
         .arg(service_file);
+    if request.source_key == request.destination_key {
+        super::store_revisions::request_rehearsal(probe_directory.path())?;
+    }
     let probe: DestinationProbe = serde_json::from_slice(
         &process::run(probe_command, PROBE_BOUND)?.stdout,
     )
@@ -1035,7 +1038,9 @@ fn qualify_destination(
                 "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
             ));
         }
-        preflight_same_key(services, request)?;
+        let scratch = probe_directory.path().join("stores");
+        let scratch = scratch.is_dir().then_some(scratch.as_path());
+        preflight_same_key(services, request, scratch)?;
     }
     Ok(probe.runner_version)
 }
@@ -1177,9 +1182,18 @@ fn preflight_capacities(
     Ok(())
 }
 
-fn preflight_same_key(services: &Services, request: &Request) -> CliResult<()> {
+fn preflight_same_key(
+    services: &Services,
+    request: &Request,
+    scratch: Option<&std::path::Path>,
+) -> CliResult<()> {
     let paths = services.paths()?;
-    bindings::preflight(paths, &request.destination, &request.destination_key)?;
+    bindings::preflight(
+        paths,
+        &request.destination,
+        &request.destination_key,
+        scratch,
+    )?;
     for record in
         crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?
     {
@@ -1191,6 +1205,9 @@ fn preflight_same_key(services: &Services, request: &Request) -> CliResult<()> {
         command
             .args(["version", "--host-upgrade-reopen", "--reopen-probe"])
             .arg(&record.id);
+        if let Some(scratch) = scratch {
+            command.arg("--store-probe").arg(scratch);
+        }
         let verdict: crate::carry::ReopenProbe =
             serde_json::from_slice(&process::run(command, PROBE_BOUND)?.stdout).map_err(|_| {
                 CliFailure::new(

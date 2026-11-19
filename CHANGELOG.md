@@ -11,6 +11,10 @@ also keep compatibility with their immediately preceding version.
 
 ### Persisted formats
 
+- Permit forward-only additive revisions of product and tree stores during a
+  same-key host handoff, with a synced pre-upgrade copy. No revision is added
+  in this change; generations, schemas and the state key are unchanged.
+
 - State key `r28.e39.p39.t11` (runtime format epoch 39, product schema 39).
   Sessions under `r28.e38.p38.t11` cannot reopen exactly; carry them with
   `plakd host upgrade` or export/import. Export v13 is unchanged and still

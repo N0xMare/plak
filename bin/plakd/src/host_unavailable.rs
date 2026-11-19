@@ -27,6 +27,7 @@ pub(crate) fn inspect_binding(
 pub(crate) fn preflight_upgrade_service(
     services: &Services,
     command: &crate::command::HostCommand,
+    _probe: &std::path::Path,
 ) -> CliResult<()> {
     run_host_command(services, command).map(|_| ())
 }

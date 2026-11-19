@@ -13,9 +13,17 @@ const INSPECTION_TIME: Duration = Duration::from_secs(120);
 #[cfg(test)]
 mod tests;
 
-fn probe(image: &Path, paths: &PlakPaths, key: &str) -> CliResult<std::process::Output> {
+fn probe(
+    image: &Path,
+    paths: &PlakPaths,
+    key: &str,
+    scratch: Option<&Path>,
+) -> CliResult<std::process::Output> {
     let mut command = super::process::command(image, paths.home(), key);
     command.args(["session", "check-binding", "--all"]);
+    if let Some(scratch) = scratch {
+        command.arg("--store-probe").arg(scratch);
+    }
     super::process::run_output(command, INSPECTION_TIME, OUTPUT_BYTES)
 }
 
@@ -45,16 +53,21 @@ pub(super) fn regressions<'a>(source: Option<&Report>, destination: &'a Report) 
         .collect()
 }
 
-pub(super) fn preflight(paths: &PlakPaths, destination: &Path, key: &str) -> CliResult<()> {
+pub(super) fn preflight(
+    paths: &PlakPaths,
+    destination: &Path,
+    key: &str,
+    scratch: Option<&Path>,
+) -> CliResult<()> {
     let source = std::env::current_exe().map_err(|error| CliFailure::new(error.to_string()))?;
-    let baseline = probe(&source, paths, key)?;
+    let baseline = probe(&source, paths, key, None)?;
     let baseline = serde_json::from_slice::<Report>(&baseline.stdout).ok();
     if baseline.is_none() {
         eprintln!(
             "plakd host: binding baseline unavailable; source did not answer check-binding; no source verdict inferred"
         );
     }
-    let output = probe(destination, paths, key)?;
+    let output = probe(destination, paths, key, scratch)?;
     let destination: Report = serde_json::from_slice(&output.stdout).map_err(|_| {
         CliFailure::new(format!(
             "host_upgrade_binding_preflight_invalid: {}\n{}",

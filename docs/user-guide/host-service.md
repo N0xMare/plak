@@ -156,6 +156,22 @@ Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
 Same-key upgrade uses planned handoff and the existing session identities.
+An additive product or tree store revision can advance in place without
+changing the state key. The new host revises the stores after the old host
+stops. Before any restart, point the service's stable executable link or
+pinned `ExecStart` (on macOS, the executable in `ProgramArguments`) at the
+destination. If the old binary refuses after an interrupted upgrade, start
+the destination; it finishes any remaining steps.
+
+The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
+named `product.pre-revision-<source>.sqlite3` and
+`subagents.pre-revision-<source>.sqlite3`. They are for manual disaster
+recovery, not automatic rollback. To go back, stop the host and other store
+users, move each revised database and its SQLite WAL/SHM files aside, restore
+its pre-upgrade copy under the original name, and run the older build. This
+loses writes made since the copies; it does not undo writes to other stores.
+Use a coordinated backup if later work changed more than the restored stores.
+
 Its exact-reopen check accepts terminal job history on paired runners without
 reading or watching jobs over the qualification connection or taking custody.
 Live jobs across a changed runner triple still refuse with

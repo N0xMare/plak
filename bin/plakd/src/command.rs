@@ -232,6 +232,7 @@ pub(crate) enum Command {
     },
     SessionCheckBinding {
         inspection: Option<PathBuf>,
+        store_probe: Option<PathBuf>,
     },
     SessionRename {
         id: String,
@@ -296,6 +297,7 @@ pub(crate) enum Command {
     ReopenProbe {
         session: String,
         host_upgrade_reopen: bool,
+        store_probe: Option<PathBuf>,
     },
     CarryProbe {
         path: PathBuf,

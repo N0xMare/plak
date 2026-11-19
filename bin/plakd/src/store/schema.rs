@@ -2,7 +2,7 @@
 
 use plakous_recursive_subagents_store::admission::Schema;
 
-use super::SCHEMA_VERSION;
+use super::GENERATION;
 
 pub(super) const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
@@ -108,6 +108,12 @@ pub(super) const SCHEMA: Schema = Schema {
     noun: "product",
     stem: "product",
     archive: "product.sqlite3 and runtime.sqlite3 together",
-    version: SCHEMA_VERSION,
+    generation: GENERATION,
     objects: SCHEMA_OBJECTS,
+    base_fingerprint: "9c64f5a3da9370dfab12e9acd4cd6568bbf2ac4814e165141ef1dc930173fe50",
+    revisions: &[],
 };
+
+pub(super) fn schema() -> Schema {
+    crate::test_hooks::product_store_schema(SCHEMA)
+}

@@ -492,10 +492,12 @@ impl TopCommand {
             Self::Version {
                 reopen_probe: Some(session),
                 host_upgrade_reopen,
+                store_probe,
                 ..
             } => Ok(Command::ReopenProbe {
                 session,
                 host_upgrade_reopen,
+                store_probe,
             }),
             Self::Version {
                 reload_probe: true, ..

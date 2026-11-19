@@ -57,6 +57,13 @@ struct UpgradePlacement {
 }
 
 impl Services {
+    pub(crate) fn with_store_probe(mut self, root: &std::path::Path) -> CliResult<Self> {
+        let directory = crate::store::revisions::probe_stores(self.paths()?, root)?;
+        self.home.use_probe_stores(directory)?;
+        self.session_records = OnceLock::new();
+        Ok(self)
+    }
+
     /// Scoped only to qualification or host-owned dormant creation, never
     /// driver admission or publication of registry Ready.
     pub(crate) fn with_upgrade_runner(

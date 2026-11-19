@@ -2,10 +2,10 @@
 //!
 //! Every database and session log this build writes lives under
 //! `state/<key>/`, where the key names the runtime schema, the runtime format
-//! epoch, the product schema and the agent-tree schema. A build that reads a
+//! epoch, the product generation and the agent-tree generation. A build that reads a
 //! different format never opens another build's files as session authority:
 //! it starts fresh in its own directory and names the others once. Explicit
-//! legacy pruning uses schema-blind lock probes; nothing is migrated, moved
+//! legacy pruning uses schema-blind lock probes; no other generation is migrated, moved
 //! or deleted automatically.
 
 use std::fs;
@@ -19,12 +19,12 @@ use plakous::sessions::{AgentSessionsErrorKind, SessionBackend};
 use crate::home::paths::PlakPaths;
 
 /// This build's state directory name. Derived, never hand-bumped: a change to
-/// any persisted format moves the key with it.
+/// a runtime format or store generation moves the key with it.
 ///
 /// The runtime store's holder-claim files (`runtime.sqlite3-holders/`) have
 /// no version of their own in the key: builds of different holder formats are
 /// kept apart only by this key, so a holder-format change must ship with a
-/// bump of one of these four versions.
+/// bump of one of these four components.
 #[must_use]
 pub fn state_key() -> String {
     if let Some(key) = crate::test_hooks::upgrade_state_key() {
@@ -34,8 +34,8 @@ pub fn state_key() -> String {
         "r{}.e{}.p{}.t{}",
         plakous::sessions::RUNTIME_STORE_SCHEMA_VERSION,
         plakous::sessions::RUNTIME_FORMAT_EPOCH,
-        crate::store::SCHEMA_VERSION,
-        plakous_recursive_subagents_store::SCHEMA_VERSION,
+        crate::store::GENERATION,
+        plakous_recursive_subagents_store::GENERATION,
     )
 }
 

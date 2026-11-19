@@ -11,7 +11,7 @@ use plakous::sessions::SessionLocator;
 use plakous_hosted::error::StoreRefusal;
 use plakous_hosted::session_store::RecordStoreError;
 use plakous_hosted::sessions::TranscriptRow;
-use plakous_recursive_subagents_store::admission::{self, AdmissionError, BUSY_TIMEOUT};
+use plakous_recursive_subagents_store::admission::{AdmissionError, BUSY_TIMEOUT};
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, params};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt as _;
@@ -36,7 +36,8 @@ pub(crate) struct BindingRecordDisposition {
     pub(crate) superseded: bool,
 }
 
-pub(crate) const SCHEMA_VERSION: i64 = 39;
+pub(crate) const GENERATION: i64 = 39;
+pub(crate) const SCHEMA_VERSION: i64 = SCHEMA.version();
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
 const MAX_LIST_PROMPT_BYTES: usize = 1024 * 1024;
@@ -110,6 +111,10 @@ fn write_error<E: std::error::Error + 'static>(
 pub enum ProductStoreOpenErrorKind {
     /// Persistent state belongs to an unsupported pre-release schema cohort.
     UnsupportedPersistence,
+    /// An in-generation revision requires an upgrade under the host lock.
+    UpgradePending,
+    /// The database was locked by another connection.
+    Busy,
     /// The database could not be opened exactly for any other reason.
     Unavailable,
 }
@@ -129,13 +134,6 @@ impl ProductStoreOpenError {
         }
     }
 
-    fn unsupported(message: impl Into<String>) -> Self {
-        Self {
-            kind: ProductStoreOpenErrorKind::UnsupportedPersistence,
-            message: message.into(),
-        }
-    }
-
     #[must_use]
     pub const fn kind(&self) -> ProductStoreOpenErrorKind {
         self.kind
@@ -149,6 +147,19 @@ impl std::fmt::Display for ProductStoreOpenError {
 }
 
 impl std::error::Error for ProductStoreOpenError {}
+
+impl From<AdmissionError> for ProductStoreOpenError {
+    fn from(error: AdmissionError) -> Self {
+        use ProductStoreOpenErrorKind as Kind;
+        let (kind, message) = match error {
+            AdmissionError::Unsupported(message) => (Kind::UnsupportedPersistence, message),
+            AdmissionError::Unavailable(message) => (Kind::Unavailable, message),
+            AdmissionError::UpgradePending(message) => (Kind::UpgradePending, message),
+            AdmissionError::Busy(message) => (Kind::Busy, message),
+        };
+        Self { kind, message }
+    }
+}
 
 #[derive(Debug)]
 pub struct ProductStore {
@@ -309,14 +320,14 @@ impl ProductStore {
         let snapshot = connection
             .unchecked_transaction()
             .map_err(|_| "could not start product store inspection".to_owned())?;
-        let version: i64 = snapshot
-            .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| "could not inspect product store schema".to_owned())?;
-        if version != SCHEMA_VERSION {
-            return Err("product store schema is unavailable or unsupported".to_owned());
-        }
-        SCHEMA.validate(&snapshot)?;
+        Self::admit_read_only(&snapshot).map_err(|error| error.to_string())?;
         read(&snapshot)
+    }
+
+    fn admit_read_only(snapshot: &Connection) -> Result<(), ProductStoreOpenError> {
+        schema::schema()
+            .require_current(snapshot)
+            .map_err(Into::into)
     }
 
     pub fn open(paths: &PlakPaths) -> Result<Self, ProductStoreOpenError> {
@@ -326,40 +337,39 @@ impl ProductStore {
     }
 
     fn open_internal(paths: &PlakPaths) -> Result<Self, ProductStoreOpenError> {
-        paths
-            .ensure_layout()
-            .map_err(ProductStoreOpenError::unavailable)?;
+        if !paths.probing_stores() {
+            paths
+                .ensure_layout()
+                .map_err(ProductStoreOpenError::unavailable)?;
+        }
         let database = product_sqlite_path(paths)?;
-        let connection = admission::open_writer(&database, SCHEMA.noun)
-            .map_err(ProductStoreOpenError::unavailable)?;
         #[cfg(feature = "test-hooks")]
-        let connection = {
-            let mut connection = connection;
-            plakous_offline_crash_harness::commit_trace::install(&mut connection, "product")
-                .map_err(|_| {
-                    ProductStoreOpenError::unavailable("could not install commit trace")
-                })?;
-            connection
-        };
-        let mut store = Self {
+        let _settle = SettleCommitTrace;
+        let connection = schema::schema().open_writer(&database, |connection| {
+            let _ = connection;
+            #[cfg(feature = "test-hooks")]
+            plakous_offline_crash_harness::commit_trace::install(connection, "product").map_err(
+                |_| AdmissionError::Unavailable("could not install commit trace".into()),
+            )?;
+            Ok(())
+        })?;
+        Ok(Self {
             connection,
             #[cfg(unix)]
-            file_identity: (0, 0),
+            file_identity: {
+                let metadata = std::fs::metadata(&database).map_err(|_| {
+                    ProductStoreOpenError::unavailable(
+                        "could not inspect product store file identity",
+                    )
+                })?;
+                (metadata.dev(), metadata.ino())
+            },
             baselines: HashMap::new(),
             synchronous_full: true,
             verified_submissions: views::VerifiedSubmissions::default(),
             #[cfg(test)]
             capacity_fault: None,
-        };
-        store.admit_schema()?;
-        #[cfg(unix)]
-        {
-            let metadata = std::fs::metadata(&database).map_err(|_| {
-                ProductStoreOpenError::unavailable("could not inspect product store file identity")
-            })?;
-            store.file_identity = (metadata.dev(), metadata.ino());
-        }
-        Ok(store)
+        })
     }
 
     #[cfg(unix)]
@@ -367,15 +377,6 @@ impl ProductStore {
         std::fs::metadata(path)
             .map(|metadata| (metadata.dev(), metadata.ino()) == self.file_identity)
             .unwrap_or(false)
-    }
-
-    fn admit_schema(&self) -> Result<(), ProductStoreOpenError> {
-        #[cfg(feature = "test-hooks")]
-        let _settle = SettleCommitTrace;
-        SCHEMA.admit(&self.connection).map_err(|error| match error {
-            AdmissionError::Unavailable(message) => ProductStoreOpenError::unavailable(message),
-            AdmissionError::Unsupported(message) => ProductStoreOpenError::unsupported(message),
-        })
     }
 
     /// Remember the collections just loaded or committed for `session`.
@@ -1463,6 +1464,7 @@ pub mod directory;
 pub mod holders;
 mod host_move;
 mod lifecycle;
+pub(crate) mod revisions;
 mod schema;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;

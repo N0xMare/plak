@@ -31,6 +31,11 @@ pub struct Home {
 }
 
 impl Home {
+    pub(crate) fn use_probe_stores(&mut self, directory: PathBuf) -> CliResult<()> {
+        self.paths = Ok(self.paths()?.clone().with_probe_stores(directory));
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn explicit(paths: PlakPaths, state: PathBuf) -> Self {
         Self {

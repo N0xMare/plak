@@ -64,7 +64,12 @@ pub(crate) fn product_state_roots_from(
         crate::platform_product::ProductPlatformCredentials::shared(&paths, custody.clone());
     let runtime_database = paths.runtime_database();
     let job_outputs = paths.job_outputs();
-    let tree_store = crate::store::tree::ProductTreeStoreFactory::new(paths);
+    let tree_paths = if context.probing_stores() {
+        context.clone()
+    } else {
+        paths
+    };
+    let tree_store = crate::store::tree::ProductTreeStoreFactory::new(tree_paths);
     let exchange_observer = crate::commands::exchange_capture::from_environment(&product)
         .map_err(|error| CliFailure::classified(CliFailureKind::Usage, error))?;
     let roots = product_agent::ProductStateRoots::new(
