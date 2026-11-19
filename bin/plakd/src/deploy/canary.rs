@@ -3,15 +3,12 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use plakous::agent::{AgentBuilder, AgentConfig, AgentRequestPolicy, TurnResultOutcome};
+use plakous::agent::{Agent, AgentBuilder, AgentConfig, AgentRequestPolicy, TurnResultOutcome};
 use plakous::application::ApplicationExecutor;
 use plakous::model::{
-    CapabilityRequirement, GenerationLimits, ModelId, OutputBoundDisposition,
-    ParallelToolDisposition, ProcessingTierDisposition, ReasoningEffort, ReasoningPolicy,
-    SelectedProviderConfiguration, SessionLineage, ToolChoice,
-};
-use plakous::sessions::{
-    CreateSessionOutcome, CreateSessionRequest, SessionOperationId, SessionRuntimeBinding,
+    CapabilityRequirement, GenerationLimits, LocalDurabilityDisposition, ModelId,
+    OutputBoundDisposition, ParallelToolDisposition, ProcessingTierDisposition, ReasoningEffort,
+    ReasoningPolicy, SelectedProviderConfiguration, SessionLineage, ToolChoice,
 };
 use plakous::subscriptions::{NativeProvider, ResolvedProvider, SubscriptionRequestLimits};
 use plakous::tools::{ToolRegistryBuilder, WorkspacePolicy};
@@ -23,6 +20,7 @@ use crate::shell::services::Services;
 use crate::{CliFailure, CliResult, ProcessOutcome};
 
 const DEADLINE: Duration = Duration::from_secs(90);
+const CLEANUP_BOUND: Duration = Duration::from_secs(10);
 const OUTPUT_TOKENS: NonZeroU32 = NonZeroU32::new(16).expect("nonzero canary limit");
 
 pub(crate) fn capabilities(stdout: &mut dyn Write) -> CliResult<ProcessOutcome> {
@@ -95,6 +93,7 @@ fn selection(options: &Options, account: &AccountRef) -> CliResult<SelectedProvi
     requested.tool_choice = ToolChoice::None;
     requested.parallel_tools = ParallelToolDisposition::Disabled;
     requested.output_bound = OutputBoundDisposition::Enforced(OUTPUT_TOKENS);
+    requested.local_durability = LocalDurabilityDisposition::Ephemeral;
     SelectedProviderConfiguration::new(selected.route().clone(), requested)
         .map_err(|_| CliFailure::new("route did not admit bounded canary behavior"))
 }
@@ -105,6 +104,11 @@ fn effort(value: &str) -> ReasoningEffort {
     } else {
         ReasoningEffort::None
     }
+}
+
+fn limits() -> CliResult<SubscriptionRequestLimits> {
+    SubscriptionRequestLimits::new(1, 4, 1, 16_384, Some(DEADLINE), 0)
+        .map_err(|_| CliFailure::new("invalid canary request limits"))
 }
 
 pub(crate) fn run(
@@ -127,8 +131,7 @@ pub(crate) fn run(
         services.custody()?,
     )?;
     let subscriptions = backend.subscriptions_for(&account)?;
-    let limits = SubscriptionRequestLimits::new(1, 4, 1, 16_384, Some(DEADLINE), 0)
-        .map_err(|_| CliFailure::new("invalid canary request limits"))?;
+    let limits = limits()?;
     let executor = ApplicationExecutor::new()
         .map_err(|_| CliFailure::new("cannot construct the canary executor"))?;
     let resolved = executor
@@ -146,6 +149,7 @@ pub(crate) fn run(
     if !behavior.tools.is_empty()
         || !behavior.hosted_tools.is_empty()
         || behavior.tool_choice != ToolChoice::None
+        || behavior.local_durability != LocalDurabilityDisposition::Ephemeral
         || behavior.output_bound != OutputBoundDisposition::Enforced(OUTPUT_TOKENS)
     {
         return Err(CliFailure::new(
@@ -212,68 +216,55 @@ fn drive(
     record.title = Some("Deployment canary".to_owned());
     record.effort = effort_name;
     record.composition = ProductCompositionSelection::Direct;
-    let records = services.session_records()?;
-    let sessions = services.state_roots()?.runtime_sessions()?;
-    let operation = SessionOperationId::new(record.create_operation_id.clone())
-        .map_err(|_| CliFailure::new("invalid canary session identity"))?;
-    // Publish only an archived record. Even a killed canary is never an active
-    // product session that a serving host might dispatch or resume.
-    records
+    // Commit the archived audit row before any runtime admission. The agent is
+    // ephemeral: even SIGKILL cannot leave a runtime branch for the host to adopt.
+    services
+        .session_records()?
         .save(&mut record)
         .map_err(|_| CliFailure::new("cannot archive the canary session"))?;
     executor
         .block_on(async {
-            let create = sessions.create(CreateSessionRequest::new(
-                operation,
-                SessionRuntimeBinding::new(builder),
-            ));
-            let CreateSessionOutcome::Created { session, .. } =
-                tokio::time::timeout_at(deadline.into(), create)
-                    .await
-                    .map_err(|_| CliFailure::new("canary session creation deadline expired"))?
-                    .map_err(|_| CliFailure::new("cannot create the canary session"))?
-            else {
-                return Err(CliFailure::new("canary session was not newly created"));
-            };
-            record.plakous_locator = Some(session.locator());
-            records
-                .save(&mut record)
-                .map_err(|_| CliFailure::new("cannot link the archived canary session"))?;
-            let verdict = tokio::time::timeout_at(deadline.into(), async {
-                let turn = session
-                    .agent()
-                    .prompt("Reply with OK.")
-                    .await
-                    .map_err(|_| CliFailure::new("canary prompt was not admitted"))?;
-                let outcome = turn
-                    .result()
-                    .await
-                    .map_err(|_| CliFailure::new("canary turn did not settle"))?;
-                if matches!(outcome.outcome(), TurnResultOutcome::Completed(_)) {
-                    Ok(())
-                } else {
-                    Err(CliFailure::new("canary turn did not complete"))
-                }
-            })
-            .await;
-            let locator = tokio::time::timeout(Duration::from_secs(10), async {
-                let locator = session
-                    .release()
-                    .await
-                    .map_err(|_| CliFailure::new("canary session did not release"))?;
-                sessions
-                    .archive(locator)
-                    .await
-                    .map_err(|_| CliFailure::new("canary runtime did not archive"))?;
-                Ok::<_, CliFailure>(locator)
-            })
-            .await
-            .map_err(|_| CliFailure::new("canary cleanup deadline expired"))??;
-            record.plakous_locator = Some(locator);
-            records
-                .save(&mut record)
-                .map_err(|_| CliFailure::new("cannot persist canary cleanup"))?;
-            verdict.map_err(|_| CliFailure::new("canary turn deadline expired"))?
+            if Instant::now() >= deadline {
+                return Err(CliFailure::new("canary deadline expired before admission"));
+            }
+            let agent = builder
+                .build()
+                .map_err(|_| CliFailure::new("cannot start the canary runtime"))?;
+            join_after(deadline, prompt(&agent), || agent.shutdown()).await
         })
         .map_err(|_| CliFailure::new("cannot drive the canary executor"))?
 }
+
+async fn prompt(agent: &Agent) -> CliResult<()> {
+    let turn = agent
+        .prompt("Reply with OK.")
+        .await
+        .map_err(|_| CliFailure::new("canary prompt was not admitted"))?;
+    let outcome = turn
+        .result()
+        .await
+        .map_err(|_| CliFailure::new("canary turn did not settle"))?;
+    if !matches!(outcome.outcome(), TurnResultOutcome::Completed(_)) {
+        return Err(CliFailure::new("canary turn did not complete"));
+    }
+    Ok(())
+}
+
+async fn join_after<C, E>(
+    deadline: Instant,
+    turn: impl Future<Output = CliResult<()>>,
+    cleanup: impl FnOnce() -> C,
+) -> CliResult<()>
+where
+    C: Future<Output = Result<(), E>>,
+{
+    let verdict = tokio::time::timeout_at(deadline.into(), turn).await;
+    tokio::time::timeout(CLEANUP_BOUND, cleanup())
+        .await
+        .map_err(|_| CliFailure::new("canary cleanup deadline expired"))?
+        .map_err(|_| CliFailure::new("canary runtime did not shut down"))?;
+    verdict.map_err(|_| CliFailure::new("canary turn deadline expired"))?
+}
+
+#[cfg(test)]
+mod tests;

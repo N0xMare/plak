@@ -981,6 +981,8 @@ enum SessionAction {
     CheckBinding {
         #[arg(long)]
         all: bool,
+        #[arg(long, hide = true, requires = "all", conflicts_with = "inspection")]
+        summary: bool,
         #[arg(long, hide = true, requires = "all")]
         inspection: Option<std::path::PathBuf>,
         #[arg(long, hide = true, requires = "all", conflicts_with = "inspection")]
@@ -1077,9 +1079,11 @@ impl SessionAction {
             Self::List { include_archived } => Ok(Command::SessionList { include_archived }),
             Self::CheckBinding {
                 all: true,
+                summary,
                 inspection,
                 store_probe,
             } => Ok(Command::SessionCheckBinding {
+                summary,
                 inspection,
                 store_probe,
             }),

@@ -68,7 +68,7 @@ fmt:
     source tools/gate/dev-tools-prefix.sh; \
     export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"; \
     cargo fmt --all; \
-    ruff format tools tests/tooling tests/live eval bin/plakd/src/deploy bin/plakd/tests/deploy_fleet.py
+    ruff format tools tests/tooling tests/live eval bin/plakd/src/deploy bin/plakd/tests/deploy_*.py
 
 # Workspace clippy, then each supported package alone. Same invocations as static.
 [doc("workspace clippy, then each supported package alone")]

@@ -6430,7 +6430,9 @@ pinned drop-in aside, then run `systemctl --user daemon-reload` without restarti
 
 Plan compares the systemd process image, upgrade coordinator instance, state
 key, exact wire schema, local runner protocol, gateway image and holder, and
-enrolled command links. A state-key change requires the manual settled upgrade
+enrolled command links. A candidate must descend from the serving revision.
+The unchanged gateway must admit the minimum of every active family (v2
+for Codex and Grok). A state-key change requires the manual settled upgrade
 runbook, a paired placement or gateway image change requires later deployment
 tooling, and a custody change is a separate manual leg. Legacy versions use
 the existing host upgrade, state-key, export-version and wire-schema probes;
@@ -6439,20 +6441,27 @@ canary yields `bootstrap_required`: upgrade the pre-S2 incumbent using the
 existing manual same-key procedure, wait for Ready before linking, and
 re-plan with an S2 incumbent. Ordinary `run --max-turns 1` is not a substitute.
 
+Plan refuses any in-use account missing from inventory, and reports signed-out
+accounts as `not_enrolled`. Named logins of the same kind remain distinct.
 Apply re-plans and runs BASELINE before staging: doctor, credential status,
-`session check-binding --all`, and one CLI canary per enrolled route in use.
+`session check-binding --all --summary` (compatibility and count), and one
+CLI canary per account in use.
 The canary uses the existing Plakous admission and agent loop against the
 enrolled gateway, an empty tool registry, no compaction or topology, a physical
 inference allowance of one with no retry reserve, a 16-output-token request
-cap, and a 90-second deadline with bounded cleanup. It publishes only an
-archived product session, releases and archives its runtime, and emits no
+cap, and a 90-second deadline with bounded cleanup. It writes the archived
+product session before admission, uses an ephemeral runtime so there is
+no recoverable orphan, joins shutdown, and emits no
 assistant text. Routes unable to prove these bounds refuse; the initial
 adapter is for qualifying Grok and Claude OAuth routes. Compare the gateway's
 OAuth generation before and after each canary and across BASELINE and
 verification; an increase is normal and a decrease refuses.
 
 Stage the immutable host snapshot with the chapter 06 installer and stage
-client blobs before switching anything. Run the staged destination's
+client blobs before switching anything. Verify the candidate's rendered
+unit against the unit bytes on disk before recording surrender intent;
+template drift requires the manual procedure. Recheck the candidate's
+state key immediately before invoking the staged destination's
 `host upgrade --expect-binary <id> --drain <duration>` and verify its Ready
 instance before moving the host command link. Then check the clients against
 the new exact wire and switch their dedicated links, and verify them in place
@@ -6466,7 +6475,11 @@ There is no automatic rollback, unit rewrite, timed restart or CAS journal.
 Record handoff intent before invoking the requester. A missing Ready verdict
 reports `needs_reconcile`; re-plan only finishes the recorded cut if the exact
 new image is Ready under a new instance with unchanged dependencies. An old
-or unknown owner does not authorize another surrender. Staging's green JSON
+or unknown owner does not authorize another surrender. When the exact
+predecessor's serialized coordinator proves idle with no pending receipt,
+status or apply records `withdrawn` without surrendering in that invocation.
+Evidence and receipts record the machine-id digest and product home; a
+production history marker fences staging. The green schema-2 staging JSON
 report is a receipt for production apply, not a store or custody authority.
 
 ### 4.7 `plakd gateway`

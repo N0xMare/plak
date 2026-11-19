@@ -1811,7 +1811,10 @@ Rehash the manifest and exact files at ingest, during transfer and on the
 target; the installer checks target build-info and publishes without linking.
 Client inputs are a separate pinned manifest and one blob, hashed at all three
 boundaries. Production requires a green staging transition less than 24 hours
-old for identical host and client manifest digests and the same canary routes.
+old for identical host and client manifest digests, source wire, coordinator,
+runner protocol and gateway versions, and equivalent canary model and effort
+coverage, including account counts. An already converged read-only check
+neither needs nor renews the receipt.
 A rehearsal of different bytes, including a fresh rebuild with different
 digests, is not promotion evidence.
 

@@ -48,6 +48,10 @@ impl GatewayFixture {
     }
 
     fn start_with(tcp: Option<SocketAddr>, oauth: Option<&TcpListener>) -> Self {
+        Self::start_with_fault(tcp, oauth, "")
+    }
+
+    fn start_with_fault(tcp: Option<SocketAddr>, oauth: Option<&TcpListener>, fault: &str) -> Self {
         let root = tempfile::Builder::new().prefix("gw").tempdir().unwrap();
         let base = root.path();
         fs::set_permissions(base, fs::Permissions::from_mode(0o700)).unwrap();
@@ -79,10 +83,12 @@ impl GatewayFixture {
             .env("PLAK_TEST_GATEWAY_REVIEW_CLOCK", "1")
             .env(
                 "PLAK_TEST_FAULTS",
-                "host=api.anthropic.com,path=/api/oauth/usage,fault=429;\
+                format!(
+                    "{fault}host=api.anthropic.com,path=/api/oauth/usage,fault=429;\
                  host=api.anthropic.com,path=/api/oauth/profile,fault=503;\
                  host=platform.claude.com,path=/v1/oauth/token,fault=400;\
-                 fault=connect",
+                 fault=connect"
+                ),
             )
             .stdin(Stdio::null())
             .stdout(Stdio::null());
@@ -193,6 +199,67 @@ fn command(root: &Path) -> Command {
 
 fn account(name: &str) -> GatewayAccount {
     GatewayAccount::new(name.to_owned()).unwrap()
+}
+
+#[test]
+fn deploy_canary_429_has_one_inference_and_an_archived_ephemeral_record() {
+    let gateway = GatewayFixture::start_with_fault(
+        None,
+        None,
+        "host=api.anthropic.com,path=/v1/messages,fault=429,retry-after=0;",
+    );
+    let root = gateway.root.path();
+    let output = command(root)
+        .env("PLAK_TEST_GATEWAY_REVIEW_CLOCK", "1")
+        .args([
+            "deploy-canary",
+            "--account=claude/work",
+            "--model=claude-opus-5-5",
+            "--effort=low",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "the injected 429 must fail the canary"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "failure must not publish a canary pass"
+    );
+    let audit = command(root).args(["gateway", "audit"]).output().unwrap();
+    assert!(audit.status.success());
+    let inference: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| {
+            row["method"] == "POST"
+                && row["upstream_path"]
+                    .as_str()
+                    .is_some_and(|path| path.starts_with("/v1/messages"))
+        })
+        .collect();
+    assert_eq!(
+        inference.len(),
+        1,
+        "expected one physical inference: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(inference[0]["upstream_status"], 429);
+    assert_eq!(inference[0]["attempt"], 0);
+    let db = root
+        .join("home/state")
+        .join(plakd::home::state::state_key())
+        .join("product.sqlite3");
+    let db = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap();
+    let count: i64 = db.query_row(
+        "SELECT count(*) FROM sessions WHERE title='Deployment canary' AND archived=1 AND locator IS NULL",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 1);
+    gateway.finish();
 }
 
 #[test]

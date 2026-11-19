@@ -1,5 +1,6 @@
 """Exercise the real CLI through a local SSH substitute, with no inference."""
 
+import fcntl
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 REVISION = "a" * 40
+SOURCE_REVISION = "b" * 40
 SOURCE = "b" * 64
 GATEWAY = "c" * 64
 SCHEMA = "d" * 64
@@ -47,8 +49,9 @@ def fake_git(args):
         assert args[3:] == ["--exit-code", "origin", "refs/heads/main"]
         print(f"{REVISION}\trefs/heads/main")
     elif action == "rev-list":
-        assert args[3:] == ["--first-parent", REVISION]
+        assert args[3:] in (["--first-parent", REVISION], [REVISION])
         print(REVISION)
+        print(SOURCE_REVISION)
     elif action == "show":
         revision, filename = args[3].split(":", 1)
         assert filename in ("install.sh", "tools/build/artifact_manifest.py")
@@ -60,9 +63,11 @@ def fake_git(args):
 
 def target(args):
     assert "-oStrictHostKeyChecking=yes" in args and "-oForwardAgent=no" in args
+    assert "-oControlMaster=no" in args and args[args.index("-F") + 1] == "/dev/null"
     assert args[-2] in ("example-host", "example-client", "example-production")
     assert args[-1].startswith("python3 -I -c ")
     raw = sys.stdin.buffer
+    assert raw.read(int(raw.readline())) == (ROOT / "bin/plakd/src/deploy/target.py").read_bytes()
     request = json.loads(raw.readline())
     inputs = {}
     for entry in request["files"]:
@@ -74,6 +79,8 @@ def target(args):
     fleet = json.loads(path.read_bytes())
     operation = request["op"]
     payload = request["args"]
+    if args[-2] == "example-production":
+        fleet["host"]["stage_identity"]["machine_sha256"] = "1" * 64
     if operation.startswith("client_"):
         assert sha(payload["manifest"].encode()) == payload["manifest_sha256"]
     reply = {}
@@ -94,11 +101,19 @@ def target(args):
                 "doctor": "pass",
                 "status": "pass",
                 "bindings": "pass",
-                "generations": {"grok": 5},
+                "generations": {route["account"]: 5 for route in payload["routes"]},
             }
         elif operation == "canary":
             assert payload["expected"] == fleet["host"]["sha256"]
-            reply = {"adapter": "bounded_cli_v1", "generation_before": 5, "generation_after": 6}
+            if fleet.get("canary_fail"):
+                write(path, fleet)
+                print(json.dumps({"error": "canary failed"}))
+                return 0
+            reply = {
+                "adapter": "bounded_cli_v1",
+                "generation_before": 5,
+                "generation_after": 4 if fleet.get("generation_regression") else 6,
+            }
         elif operation == "stage_host":
             manifest = json.loads(payload["manifest"])
             assert sha(payload["manifest"].encode()) == payload["manifest_sha256"]
@@ -112,12 +127,19 @@ def target(args):
         elif operation == "client_stage":
             assert set(inputs) == {"client"} and fleet["candidate"]
             fleet["client"] = "staged"
-        elif operation == "destination_canary_preflight":
+        elif operation in ("destination_canary_preflight", "destination_unit"):
             assert fleet["candidate"] == payload["sha256"]
+        elif operation == "mark_production":
+            assert fleet["host"]["stage_identity"] == payload["expected"]
+            fleet["host"]["production_history"] = True
         elif operation == "upgrade":
             assert fleet["candidate"] == payload["sha256"]
             assert fleet["client"] == "staged"
             assert payload["previous"] == fleet["host"]
+            if fleet.get("lose_old_reply"):
+                fleet["host"]["upgrade_idle"] = False
+                write(path, fleet)
+                return 255
             fleet["host"].update(sha256=fleet["candidate"], instance=REPLACEMENT)
             fleet["host"]["facts"]["runner_triple"]["source_revision"] = REVISION
             if fleet.get("lose_reply"):
@@ -136,6 +158,8 @@ def target(args):
         else:
             raise AssertionError(operation)
         write(path, fleet)
+        if fleet.get("lose_link") == operation:
+            return 255
     print(json.dumps({"ok": reply}))
     return 0
 
@@ -243,13 +267,13 @@ gateway_socket = "/srv/example/gateway.sock"
 gateway_sha256 = "{GATEWAY}"
 [staging.host.node]
 ssh = "example-host"
+login = "example"
 home = "/srv/example"
 uid = 1000
 [[staging.routes]]
 account = "grok"
 model = "example-model"
 effort = "low"
-protocol = ""
 [[staging.clients]]
 id = "example"
 link = "/srv/example/.local/bin/example-client"
@@ -259,6 +283,7 @@ manifest_sha256 = "{client_pin}"
 source_sha256 = "{SOURCE}"
 [staging.clients.node]
 ssh = "example-client"
+login = "example"
 home = "/srv/example"
 uid = 1000
 """)
@@ -272,15 +297,23 @@ uid = 1000
             "unit_sha256": SOURCE,
             "custody_sha256": GATEWAY,
             "gateway_instance": "example",
-            "gateway_versions": [1],
+            "gateway_versions": [1, 2],
             "paired": False,
             "canary": ["claude", "grok"],
+            "accounts": {"grok": "ready", "openai": "not_enrolled"},
+            "upgrade_idle": True,
+            "stage_identity": {"machine_sha256": "0" * 64, "product_home": "/srv/example/.plak"},
+            "production_history": False,
             "facts": {
                 "source": "legacy facts",
                 "state_key": STATE_KEY,
                 "wire": WIRE,
                 "host_upgrade": COORDINATOR,
-                "runner_triple": {"protocol": 9, "source_revision": "b" * 40, "flavor": "release"},
+                "runner_triple": {
+                    "protocol": 9,
+                    "source_revision": SOURCE_REVISION,
+                    "flavor": "release",
+                },
                 **(facts or {}),
             },
             **(host or {}),
@@ -313,7 +346,9 @@ uid = 1000
         assert output.stdout, output.stderr.decode()
         report = json.loads(output.stdout)
         assert report["result"] == result, (report, output.stderr)
-        assert (output.returncode == 0) == (result in ("ready", "green", "no_op")), output
+        assert (output.returncode == 0) == (result in ("ready", "green", "no_op", "withdrawn")), (
+            output
+        )
         if contains:
             assert contains in report["reason"], report
         return report
@@ -331,6 +366,24 @@ def fleet_case(fleet):
         ({"host": {"paired": True}}, "paired-runner triple change"),
         ({"refusal": "gateway image change: use S3"}, "gateway image change"),
         ({"refusal": "custody change: use the custody runbook"}, "custody change"),
+        ({"host": {"gateway_versions": [1]}}, "require unchanged gateway protocol v2"),
+        ({"host": {"production_history": True}}, "production history"),
+        (
+            {"host": {"accounts": {"grok": "ready", "claude/work": "ready"}}},
+            "missing from inventory",
+        ),
+        (
+            {
+                "facts": {
+                    "runner_triple": {
+                        "protocol": 9,
+                        "source_revision": "c" * 40,
+                        "flavor": "release",
+                    }
+                }
+            },
+            "downgrade",
+        ),
     ]:
         fleet.reset(**kwargs)
         fleet.invoke("plan", "blocked", reason)
@@ -341,6 +394,7 @@ def fleet_case(fleet):
     assert fleet.read()["events"] == []
     fleet.reset()
     plan = fleet.invoke("plan", "ready")
+    assert plan["observed"]["accounts"]["openai"] == "not_enrolled"
     assert plan["plan"] == [
         "baseline",
         "stage_host",
@@ -357,6 +411,31 @@ def fleet_case(fleet):
     fleet.invoke("plan", "blocked", "blob digest differs")
     assert fleet.read()["events"] == []
     host_blob.write_bytes(original)
+    client_manifest = fleet.root / "client.json"
+    client_bytes = client_manifest.read_bytes()
+    bad_client = json.loads(client_bytes)
+    bad_client["wire"]["number"] += 1
+    write(client_manifest, bad_client)
+    fleet.configure()
+    fleet.invoke("plan", "blocked", "client wire/schema pin differs")
+    client_manifest.write_bytes(client_bytes)
+    fleet.configure()
+    for options, reason in (
+        ({"canary_fail": True}, "canary failed"),
+        ({"generation_regression": True}, "generation regressed"),
+    ):
+        fleet.reset(**options)
+        fleet.invoke("apply", "blocked", reason)
+        assert fleet.read()["events"] == ["canary_preflight", "health", "canary"]
+    with fleet.evidence.open("r+b") as evidence:
+        fcntl.flock(evidence, fcntl.LOCK_EX)
+        fleet.invoke("apply", "blocked", "holds the evidence log")
+    good_evidence = fleet.evidence.read_bytes()
+    fleet.evidence.write_bytes(good_evidence + b"{")
+    fleet.invoke("apply", "needs_reconcile", "incomplete evidence log")
+    assert fleet.evidence.read_bytes() == good_evidence + b"{"
+    fleet.evidence.write_bytes(good_evidence)
+    fleet.reset()
     report = fleet.invoke("apply", "green")
     assert json.loads(fleet.receipt.read_bytes()) == report
     assert fleet.read()["events"] == [
@@ -365,6 +444,7 @@ def fleet_case(fleet):
         "canary",
         "stage_host",
         "client_stage",
+        "destination_unit",
         "destination_canary_preflight",
         "upgrade",
         "host_link",
@@ -384,13 +464,30 @@ def fleet_case(fleet):
     inventory = fleet.inventory.read_text().replace("[production]\n", "")
     fleet.inventory.write_text(inventory + "\n" + production)
     fleet.reset()
-    invalid = json.loads(before)
-    invalid["manifests"]["host"] = SOURCE
-    write(fleet.receipt, invalid)
+    fleet.receipt.unlink()
     fleet.invoke("apply", "blocked", "exact manifest digests", stage="production")
+    fleet.receipt.touch(mode=0o600)
+    for change in ("digest", "expiry", "kind", "source", "model"):
+        invalid = json.loads(before)
+        if change == "digest":
+            invalid["manifests"]["host"] = SOURCE
+        elif change == "expiry":
+            invalid["completed_at"] = 1
+        elif change == "kind":
+            invalid["verification"]["canaries"] = {"claude": "bounded_cli_v1"}
+        elif change == "source":
+            invalid["source_transition"]["runner_protocol"] += 1
+        else:
+            invalid["canary_models"][0][1] = "other-model"
+        write(fleet.receipt, invalid)
+        fleet.invoke("apply", "blocked", "exact manifest digests", stage="production")
     assert fleet.read()["events"] == []
     fleet.receipt.write_bytes(before)
     assert fleet.invoke("apply", "green", stage="production")["stage"] == "production"
+    invalid = json.loads(before)
+    invalid["completed_at"] = 1
+    write(fleet.receipt, invalid)
+    assert fleet.invoke("apply", "no_op", stage="production")["plan"] == ["verify_read_only"]
 
 
 def requester_loss(fleet):
@@ -406,6 +503,48 @@ def requester_loss(fleet):
     fleet.invoke("apply", "green")
     assert fleet.read()["events"].count("upgrade") == 1
     assert fleet.read()["events"].count("canary") == 2
+    for reconcile in ("status", "apply"):
+        fleet.evidence.unlink()
+        fleet.receipt.unlink(missing_ok=True)
+        fleet.reset(lose_old_reply=True)
+        fleet.invoke("apply", "needs_reconcile")
+        fleet.invoke("status", "needs_reconcile")
+        fleet.invoke("apply", "needs_reconcile")
+        assert fleet.read()["events"].count("upgrade") == 1
+        restored = fleet.read()
+        restored["host"]["upgrade_idle"] = True
+        write(fleet.state, restored)
+        fleet.invoke("plan", "needs_reconcile")
+        result = fleet.invoke(reconcile, "ready" if reconcile == "status" else "withdrawn")
+        assert result["withdrawn"]
+        entries = [json.loads(row) for row in fleet.evidence.read_bytes().splitlines()]
+        assert entries[-1]["phase"] == "withdrawn"
+        assert fleet.read()["events"].count("upgrade") == 1
+    for lost in ("host_link", "client_link"):
+        fleet.evidence.unlink()
+        fleet.reset(lose_link=lost)
+        fleet.invoke("apply", "needs_reconcile", "link outcome")
+        plan = fleet.invoke("status", "ready")["plan"]
+        assert "host_upgrade" not in plan
+        fleet.invoke("apply", "green")
+        events = fleet.read()["events"]
+        assert events.count("upgrade") == 1 and events.count(lost) == 1
+
+
+def named_accounts(fleet):
+    fleet.reset(
+        host={"accounts": {"claude/work": "ready", "claude/other": "ready", "grok": "not_enrolled"}}
+    )
+    with fleet.inventory.open("a") as inventory:
+        for account in ("claude/work", "claude/other"):
+            inventory.write(
+                f'\n[[staging.routes]]\naccount = "{account}"\nmodel = "example-model"\neffort = "low"\n'
+            )
+    report = fleet.invoke("apply", "green")
+    for phase in ("baseline", "verification"):
+        assert set(report[phase]["canaries"]) == {"claude/work", "claude/other"}
+        assert report[phase]["generations"] == {"claude/work": 6, "claude/other": 6}
+    assert fleet.read()["events"].count("canary") == 4
 
 
 if __name__ == "__main__":
@@ -417,4 +556,8 @@ if __name__ == "__main__":
     else:
         with tempfile.TemporaryDirectory() as directory:
             fleet = Fleet(Path(directory), sys.argv[2])
-            {"fleet": fleet_case, "requester-loss": requester_loss}[case](fleet)
+            {
+                "fleet": fleet_case,
+                "requester-loss": requester_loss,
+                "named-accounts": named_accounts,
+            }[case](fleet)

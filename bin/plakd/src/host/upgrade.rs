@@ -37,6 +37,8 @@ struct Identity {
     key: String,
     instance: String,
     binary: String,
+    #[serde(default)]
+    deploy_idle: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -727,6 +729,14 @@ fn handle(
             key: crate::home::state::state_key(),
             instance: identity.instance.to_string(),
             binary: crate::build_identity::binary_id().to_owned(),
+            // The accept loop joins the prior coordinator worker before this
+            // greeting. A Ready transfer remains owned until replacement.
+            deploy_idle: receipt::all(services.paths()?).ok().map(|receipts| {
+                !has_ready(pending)
+                    && !receipts
+                        .iter()
+                        .any(|receipt| matches!(receipt.phase, Phase::Prepared | Phase::Committed))
+            }),
         },
     )?;
     let request: Request = read(&stream)?;

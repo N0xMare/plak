@@ -234,6 +234,7 @@ pub(crate) enum Command {
         include_archived: bool,
     },
     SessionCheckBinding {
+        summary: bool,
         inspection: Option<PathBuf>,
         store_probe: Option<PathBuf>,
     },

@@ -11,9 +11,8 @@ use super::address::GatewayAddress;
 use super::route::AccountRoute;
 
 pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate::CliResult<u64> {
-    use plakous::gateway::protocol::GatewayAccount;
-    use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
-    use plakous::gateway::protocol::facts::CredentialStatus;
+    use plakous::gateway::protocol::facts::{CredentialStatus, FactsReply, FactsRequest};
+    use plakous::gateway::protocol::{Endpoint, GatewayAccount};
 
     let (route, key) = route(services).map_err(crate::CliFailure::new)?;
     let address = route
@@ -22,19 +21,19 @@ pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate
     verify_holder(services).map_err(crate::CliFailure::new)?;
     let account = GatewayAccount::new(account.to_owned())
         .map_err(|_| crate::CliFailure::new("invalid deploy account"))?;
-    let answer = super::client::admin::<AdminResponse>(
+    let answer = super::client::request::<FactsReply>(
         address,
         key.as_deref(),
-        &AdminRequest::Status {
+        Endpoint::Facts,
+        &FactsRequest {
             accounts: vec![account.clone()],
         },
     )
     .map_err(crate::CliFailure::new)?;
-    if let AdminResponse::Status { rows } = answer
-        && let [row] = rows.as_slice()
-        && row.facts.account == account
-        && row.facts.credential.status == CredentialStatus::Ready
-        && let Some(generation) = row.facts.credential.generation
+    if let [row] = answer.facts.as_slice()
+        && row.account == account
+        && row.credential.status == CredentialStatus::Ready
+        && let Some(generation) = row.credential.generation
     {
         return Ok(generation);
     }

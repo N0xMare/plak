@@ -528,11 +528,20 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         } => services.with_store_probe(path)?,
         _ => services,
     };
-    if let Command::SessionCheckBinding { inspection, .. } = &command {
+    if let Command::SessionCheckBinding {
+        inspection,
+        summary,
+        ..
+    } = &command
+    {
         if let Some(path) = inspection {
             return host::inspect_binding(path, &mut io::stdout().lock());
         }
-        return commands::session::check_binding::run(services.paths()?, &mut io::stdout().lock());
+        return commands::session::check_binding::run(
+            services.paths()?,
+            *summary,
+            &mut io::stdout().lock(),
+        );
     }
     if let Command::HostUpgradeFinishSource { receipt } = command {
         host::finish_move_source(&services, receipt)?;

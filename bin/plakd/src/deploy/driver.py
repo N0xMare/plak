@@ -23,7 +23,13 @@ ID = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
 ACCOUNT = r"(?:codex|claude|grok|openai|anthropic|openrouter|xai-api)(?:/[A-Za-z0-9_-]+)?"
 PLATFORM = "x86_64-unknown-linux-musl"
 LIMIT = 1024 * 1024
+EVIDENCE_SCHEMA = 2
 RECIPES = ("install.sh", "tools/build/artifact_manifest.py")
+TARGET_LOADER = (
+    "import sys; r=sys.stdin.buffer; n=int(r.readline(16)); "
+    "assert 0 < n <= 1048576; s=r.read(n); assert len(s) == n; "
+    "exec(compile(s, '<deploy target>', 'exec'), {'__name__':'__main__'})"
+)
 BOOTSTRAP = (
     "bootstrap_required: upgrade the pre-S2 incumbent using the existing manual same-key "
     "procedure (stage with install.sh --no-link, run the destination's "
@@ -103,8 +109,9 @@ def decode(data):
 
 
 def node(value):
-    closed(value, "ssh home uid", "node")
-    match(value["ssh"], ID, "SSH alias")
+    closed(value, "ssh login home uid", "node")
+    match(value["ssh"], ID, "SSH host")
+    match(value["login"], r"[a-z_][a-z0-9_-]{0,63}", "SSH login")
     path(value["home"])
     integer(value["uid"], 1, 2**32 - 2, "UID")
 
@@ -156,15 +163,13 @@ def validate_stage(value, stage):
     match(host["gateway_unit"], rf"{ID}\.service", "gateway unit")
     need(host["gateway_unit"] != "plakd-host.service", "gateway and host unit must differ")
     routes = value["routes"]
-    need(isinstance(routes, list) and 1 <= len(routes) <= 7, "expected one to seven canary routes")
+    need(isinstance(routes, list) and len(routes) <= 32, "expected at most 32 canary accounts")
     for route in routes:
-        closed(route, "account model effort protocol", "canary route")
+        closed(route, "account model effort", "canary route")
         match(route["account"], ACCOUNT, "canary account")
         match(route["model"], r"[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}", "canary model")
-        need(route["effort"] in ("", "none", "minimal", "low"), "canary effort exceeds low")
-        need(route["protocol"] in ("", "responses", "messages", "chat"), "invalid canary protocol")
-    kinds = [route["account"].split("/", 1)[0] for route in routes]
-    need(len(set(kinds)) == len(kinds), "duplicate canary route")
+        need(route["effort"] in ("", "none", "low"), "canary effort must be omitted, none, or low")
+    need(len({route["account"] for route in routes}) == len(routes), "duplicate canary account")
     clients = value["clients"]
     need(isinstance(clients, list) and len(clients) <= 8, "expected at most eight clients")
     for client in clients:
@@ -228,6 +233,7 @@ def verify_file(filename, facts, *, allow_symlink=False):
 
 class Artifacts:
     def __init__(self, data, configuration):
+        self.repo = data["repo"]
         self.root = Path(data["artifact"])
         self.pins = {"host": data["manifest_sha256"], "clients": {}}
         revision = data["revision"]
@@ -271,7 +277,9 @@ class Artifacts:
 
 class SSH:
     def __init__(self, script):
-        self.command = "python3 -I -c " + shlex.quote(script)
+        self.command = "python3 -I -c " + shlex.quote(TARGET_LOADER)
+        self.script = script.encode()
+        need(0 < len(self.script) <= LIMIT, "target script exceeds its size bound")
         self.operator_machine = None
         if sys.platform == "linux":
             with Path("/etc/machine-id").open("rb") as stream:
@@ -295,6 +303,8 @@ class SSH:
                 header["files"].append({"name": name, **facts})
             payload = encode(header)
             need(len(payload) <= LIMIT, "SSH request exceeds its size limit")
+            upload.write(str(len(self.script)).encode() + b"\n")
+            upload.write(self.script)
             upload.write(payload + b"\n")
             for _, filename, facts in files:
                 with Path(filename).open("rb") as source:
@@ -314,32 +324,40 @@ class SSH:
             args = [
                 "ssh",
                 "-T",
+                "-F",
+                "/dev/null",
                 "-oBatchMode=yes",
+                "-oControlMaster=no",
+                "-oControlPath=none",
                 "-oStrictHostKeyChecking=yes",
                 "-oConnectTimeout=10",
                 "-oServerAliveInterval=5",
                 "-oServerAliveCountMax=2",
                 "-oForwardAgent=no",
                 "-oClearAllForwardings=yes",
+                "-l",
+                node["login"],
                 "--",
                 node["ssh"],
                 self.command,
             ]
             try:
-                with tempfile.TemporaryFile() as reply:
+                with tempfile.TemporaryFile() as reply, tempfile.TemporaryFile() as stderr:
                     result = subprocess.run(
                         args,
                         stdin=upload,
                         stdout=reply,
-                        stderr=subprocess.DEVNULL,
+                        stderr=stderr,
                         timeout=timeout,
                         check=False,
                     )
                     reply.seek(0)
                     data = reply.read(LIMIT + 1)
+                    stderr.seek(0)
+                    failure = ssh_failure(stderr.read(4096))
                 need(
                     result.returncode == 0 and len(data) <= LIMIT,
-                    f"SSH {operation} returned no bounded verdict",
+                    f"SSH {operation} returned no bounded verdict ({failure})",
                 )
                 response = decode(data)
                 need(isinstance(response, dict), f"invalid SSH {operation} reply")
@@ -347,8 +365,27 @@ class SSH:
                     raise Halt(response["error"])
                 closed(response, "ok", "target response")
                 return response["ok"]
+            except subprocess.TimeoutExpired as error:
+                raise Halt(f"SSH {operation} exceeded its deadline") from error
             except (OSError, subprocess.SubprocessError, ValueError) as error:
                 raise Halt(f"SSH {operation} returned no bounded verdict") from error
+
+
+def ssh_failure(stderr):
+    for needle, failure in (
+        (b"host key verification failed", "host_key"),
+        (b"remote host identification has changed", "host_key"),
+        (b"permission denied", "authentication"),
+        (b"could not resolve hostname", "name_resolution"),
+        (b"connection refused", "connection_refused"),
+        (b"timed out", "timeout"),
+        (b"python3", "remote_runtime"),
+        (b"broken pipe", "transport_lost"),
+        (b"closed by remote host", "transport_lost"),
+    ):
+        if needle in stderr.lower():
+            return failure
+    return "remote_command_or_transport"
 
 
 class Evidence:
@@ -356,6 +393,7 @@ class Evidence:
         self.path = Path(path)
         self.file = None
         self.rows = []
+        self.stage_identity = None
 
     def __enter__(self):
         fd = os.open(
@@ -370,7 +408,10 @@ class Evidence:
                 and not info.st_mode & 0o077,
                 "evidence log must be private and owned",
             )
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise Halt("another deploy holds the evidence log") from error
             self.rows = self.read(self.path)
         except BaseException:
             self.file.close()
@@ -391,10 +432,24 @@ class Evidence:
             "incomplete evidence log; reconcile before proceeding",
             "needs_reconcile",
         )
-        return [decode(line) for line in data.splitlines()]
+        rows = [decode(line) for line in data.splitlines()]
+        need(
+            all(isinstance(row, dict) and row.get("schema") == EVIDENCE_SCHEMA for row in rows),
+            "unrecognized evidence schema; reconcile before proceeding",
+            "needs_reconcile",
+        )
+        return rows
 
     def record(self, intent, phase, **facts):
-        row = {"intent": intent, "time": int(time.time()), "phase": phase, **facts}
+        row = {
+            "schema": EVIDENCE_SCHEMA,
+            "intent": intent,
+            "time": int(time.time()),
+            "phase": phase,
+            **facts,
+        }
+        if self.stage_identity is not None:
+            row["stage_identity"] = self.stage_identity
         self.file.write(encode(row) + b"\n")
         self.file.flush()
         os.fsync(self.file.fileno())
@@ -429,6 +484,7 @@ class Deploy:
         self.want = self.dest["files"]["plakd"]["sha256"]
         self.sidecars = {name: self.dest["files"][name]["sha256"] for name in NAMES[1:]}
         self.intent = sha(encode([stage, configuration, artifacts.pins]))
+        self.routes = []
 
     def host_call(self, operation, arguments=None, **options):
         return self.ssh.call(
@@ -455,7 +511,7 @@ class Deploy:
         self.report["observed"] = result
         return result
 
-    def plan(self, rows):
+    def plan(self, rows, evidence=None):
         prior = pending_upgrade(rows)
         try:
             observed = self.observe()
@@ -467,6 +523,13 @@ class Deploy:
             raise
         facts = observed["facts"]
         wanted = self.dest["build_info"]
+        self.report["stage_identity"] = observed["stage_identity"]
+        if evidence:
+            evidence.stage_identity = observed["stage_identity"]
+        need(
+            self.stage != "staging" or not observed["production_history"],
+            "target has production history; use an isolated staging host",
+        )
         need(
             facts["state_key"] == wanted["state_key"],
             "cross-key: use the settled host upgrade runbook",
@@ -490,10 +553,19 @@ class Deploy:
             facts["host_upgrade"] == wanted["host_upgrade"],
             "coordinator/receipt change: enroll a compatible incumbent first",
         )
+        enrolled = {route["account"]: route for route in self.config["routes"]}
+        in_use = {
+            account for account, status in observed["accounts"].items() if status != "not_enrolled"
+        }
+        missing = in_use - enrolled.keys()
+        need(not missing, "in-use accounts missing from inventory: " + ", ".join(sorted(missing)))
+        versions = set(observed["gateway_versions"]) & set(wanted["gateway"]["spoken"])
+        minimum = 2 if {account.split("/", 1)[0] for account in in_use} & {"codex", "grok"} else 1
         need(
-            set(observed["gateway_versions"]) & set(wanted["gateway"]["spoken"]),
-            "candidate cannot speak to the unchanged gateway",
+            any(version >= minimum for version in versions),
+            f"in-use accounts require unchanged gateway protocol v{minimum} or newer; use S3",
         )
+        self.routes = [enrolled[account] for account in sorted(in_use)]
         need(
             observed["sha256"] in (self.want, self.host["source_sha256"]),
             "unexpected serving image; inspect and re-enroll source",
@@ -502,6 +574,21 @@ class Deploy:
             observed["link_sha256"] in (self.want, self.host["source_sha256"]),
             "unexpected stable link; inspect and re-enroll source",
         )
+        if (
+            prior
+            and evidence
+            and prior["intent"] == self.intent
+            and (
+                observed["instance"] == prior["instance"]
+                and observed["sha256"] == prior["source_sha256"]
+                and observed["sha256"] == observed["link_sha256"]
+                and observed["upgrade_idle"]
+                and stable_dependencies(observed) == prior["dependencies"]
+            )
+        ):
+            evidence.record(self.intent, "withdrawn", instance=prior["instance"])
+            self.report["withdrawn"] = True
+            prior = None
         if prior:
             need(
                 prior["intent"] == self.intent
@@ -540,7 +627,17 @@ class Deploy:
         actions.extend(("verify",) if actions or prior else ("verify_read_only",))
         self.report["plan"] = actions
         need(observed["canary"] is not None, BOOTSTRAP, "bootstrap_required")
-        missing = {route["account"].split("/", 1)[0] for route in self.config["routes"]}.difference(
+        source = facts["runner_triple"]["source_revision"]
+        match(source, REVISION, "serving source revision; enroll a shipping build first")
+        if observed["sha256"] != self.want:
+            history = (
+                git(self.artifacts.repo, "rev-list", self.dest["revision"]).decode().splitlines()
+            )
+            need(
+                source in history,
+                "revision downgrade or divergence: choose a descendant of the serving revision",
+            )
+        missing = {route["account"].split("/", 1)[0] for route in self.routes}.difference(
             observed["canary"]
         )
         need(
@@ -549,18 +646,23 @@ class Deploy:
             + ", ".join(sorted(missing))
             + "; use the manual same-key procedure for this fleet",
         )
+        self.report["source_transition"] = (
+            prior["source_transition"] if prior else source_transition(observed)
+        )
+        self.report["canary_models"] = canary_models(self.routes)
         return observed, actions, clients, prior["baseline"] if prior else None
 
     def health(self, observed, paid, label):
         self.report["step"] = f"{label}_doctor_status_bindings"
         checks = self.host_call(
-            "health", {"expected": observed["sha256"], "routes": self.config["routes"]}, timeout=150
+            "health", {"expected": observed["sha256"], "routes": self.routes}, timeout=150
         )
         generations = checks["generations"]
         if paid:
-            for route in self.config["routes"]:
-                kind = route["account"].split("/", 1)[0]
-                self.report["step"] = f"{label}_canary_{kind}"
+            checks["canaries"] = {}
+            for route in self.routes:
+                account = route["account"]
+                self.report["step"] = f"{label}_canary_{account}"
                 result = self.host_call(
                     "canary", {"expected": observed["sha256"], "route": route}, timeout=125
                 )
@@ -569,13 +671,13 @@ class Deploy:
                     or result["generation_after"] >= result["generation_before"],
                     "OAuth generation regressed",
                 )
-                if generations[kind] is not None:
+                if generations[account] is not None:
                     need(
-                        result["generation_before"] >= generations[kind],
+                        result["generation_before"] >= generations[account],
                         "OAuth generation regressed",
                     )
-                generations[kind] = result["generation_after"]
-                checks.setdefault("canaries", {})[kind] = result["adapter"]
+                generations[account] = result["generation_after"]
+                checks["canaries"][account] = result["adapter"]
         self.report[label] = checks
         return checks
 
@@ -610,28 +712,36 @@ class Deploy:
         private_file(filename)
         receipt = decode(local_file(filename, LIMIT))
         age = int(time.time()) - receipt.get("completed_at", 0)
-        kinds = sorted(route["account"].split("/", 1)[0] for route in self.config["routes"])
         need(
-            receipt.get("schema") == 1
+            receipt.get("schema") == EVIDENCE_SCHEMA
             and receipt.get("stage") == "staging"
             and receipt.get("result") == "green"
             and receipt.get("host_transition") is True
             and manifest_digests(receipt.get("manifests", {}))
             == manifest_digests(self.artifacts.pins)
             and 0 <= age <= 86400
-            and sorted(receipt.get("baseline", {}).get("canaries", {})) == kinds
-            and sorted(receipt.get("verification", {}).get("canaries", {})) == kinds,
+            and receipt.get("stage_identity") != self.report["stage_identity"]
+            and receipt.get("source_transition") == self.report["source_transition"]
+            and receipt.get("canary_models") == self.report["canary_models"]
+            and canary_coverage(receipt),
             missing,
         )
 
     def apply(self, evidence):
-        observed, actions, clients, resumed = self.plan(evidence.rows)
-        self.check_receipt()
+        observed, actions, clients, resumed = self.plan(evidence.rows, evidence)
+        if self.report.get("withdrawn"):
+            self.report["result"] = "withdrawn"
+            return
+        if "verify" in actions:
+            self.check_receipt()
+            if self.stage == "production":
+                self.host_call("mark_production", {"expected": observed["stage_identity"]})
+                observed["production_history"] = True
         self.report["step"] = "baseline"
         if resumed:
             self.report["baseline"] = resumed
         elif "baseline" in actions:
-            for route in self.config["routes"]:
+            for route in self.routes:
                 self.host_call("canary_preflight", {"expected": observed["sha256"], "route": route})
             self.health(observed, True, "baseline")
         for step in ("stage_host", "stage_clients"):
@@ -652,8 +762,12 @@ class Deploy:
                         )
             evidence.record(self.intent, step)
         if "host_upgrade" in actions:
+            self.report["step"] = "destination_unit"
+            self.host_call(
+                "destination_unit", {"snapshot": self.dest["snapshot_id"], "sha256": self.want}
+            )
             self.report["step"] = "destination_canary_preflight"
-            for route in self.config["routes"]:
+            for route in self.routes:
                 self.host_call(
                     "destination_canary_preflight",
                     {
@@ -665,7 +779,8 @@ class Deploy:
             self.upgrade(evidence, observed)
         if "host_link" in actions:
             self.report["step"] = "host_link"
-            self.host_call(
+            self.link(
+                self.host_call,
                 "host_link",
                 {
                     "snapshot": self.dest["snapshot_id"],
@@ -690,15 +805,17 @@ class Deploy:
         for client in self.config["clients"]:
             if client["id"] in clients:
                 self.report["step"] = f"client_link_{client['id']}"
-                self.client_call(client, "client_link", {"connection": connection(current)})
+                self.link(
+                    self.client_call, client, "client_link", {"connection": connection(current)}
+                )
                 evidence.record(self.intent, "client_link", client=client["id"])
             self.report["step"] = f"client_check_{client['id']}"
             self.client_call(client, "client_check", {"connection": connection(current)})
         self.health(current, "verify" in actions, "verification")
-        for kind, generation in self.report.get("baseline", {}).get("generations", {}).items():
+        for account, generation in self.report.get("baseline", {}).get("generations", {}).items():
             need(
                 generation is None
-                or self.report["verification"]["generations"][kind] >= generation,
+                or self.report["verification"]["generations"][account] >= generation,
                 "OAuth generation regressed",
             )
         self.report["host_transition"] = "host_upgrade" in actions or bool(resumed)
@@ -709,6 +826,15 @@ class Deploy:
             publish(self.config["receipt"], self.report)
         evidence.record(self.intent, "verified", result=self.report["result"])
 
+    @staticmethod
+    def link(call, *args):
+        try:
+            call(*args)
+        except (Halt, KeyboardInterrupt) as error:
+            raise Halt(
+                "link outcome is unresolved; use deploy status before continuing", "needs_reconcile"
+            ) from error
+
     def upgrade(self, evidence, observed):
         self.report["step"] = "host_upgrade"
         need(self.observe() == observed, "serving facts changed after BASELINE; replan")
@@ -716,6 +842,8 @@ class Deploy:
             self.intent,
             "upgrade_intent",
             instance=observed["instance"],
+            source_sha256=observed["sha256"],
+            source_transition=self.report["source_transition"],
             dependencies=stable_dependencies(observed),
             baseline=self.report["baseline"],
         )
@@ -750,7 +878,13 @@ class Deploy:
 def stable_dependencies(observed):
     return {
         key: observed[key]
-        for key in ("unit_sha256", "custody_sha256", "gateway_instance", "gateway_versions")
+        for key in (
+            "unit_sha256",
+            "custody_sha256",
+            "gateway_instance",
+            "gateway_versions",
+            "stage_identity",
+        )
     }
 
 
@@ -762,18 +896,45 @@ def manifest_digests(pins):
     return pins.get("host"), set(pins.get("clients", {}).values())
 
 
+def source_transition(observed):
+    facts = observed["facts"]
+    return {
+        "wire": facts["wire"],
+        "coordinator": facts["host_upgrade"],
+        "runner_protocol": facts["runner_triple"]["protocol"],
+        "gateway_versions": sorted(observed["gateway_versions"]),
+    }
+
+
+def canary_models(routes):
+    # Account names may be different in the isolated staging home. Preserve
+    # multiplicity, so one named account cannot qualify several production accounts.
+    return sorted(
+        [route["account"].split("/", 1)[0], route["model"], route["effort"]] for route in routes
+    )
+
+
+def canary_coverage(receipt):
+    kinds = sorted(row[0] for row in receipt["canary_models"])
+    return all(
+        sorted(account.split("/", 1)[0] for account in receipt.get(phase, {}).get("canaries", {}))
+        == kinds
+        for phase in ("baseline", "verification")
+    )
+
+
 def pending_upgrade(rows):
     prior = None
     for row in rows:
         if row["phase"] == "upgrade_intent":
             prior = row
-        elif row["phase"] == "verified":
+        elif row["phase"] in ("verified", "withdrawn"):
             prior = None
     return prior
 
 
 def main(target_script, verb, stage, filename):
-    report = {"schema": 1, "stage": stage, "verb": verb, "result": "blocked"}
+    report = {"schema": EVIDENCE_SCHEMA, "stage": stage, "verb": verb, "result": "blocked"}
     report["retry"] = shlex.join(
         ["plakd", "deploy", "status", "--inventory", filename, "--stage", stage]
     )
@@ -807,6 +968,11 @@ def main(target_script, verb, stage, filename):
                         deployment.intent, "halt", step=report.get("step"), result=error.state
                     )
                     raise
+        elif verb == "status" and pending_upgrade(rows):
+            with Evidence(selected["evidence"]) as evidence:
+                deployment.plan(evidence.rows, evidence)
+                report["last_evidence"] = evidence.rows[-1]
+            report["result"] = "ready"
         else:
             deployment.plan(rows)
             report["result"] = "ready"
@@ -826,7 +992,7 @@ def main(target_script, verb, stage, filename):
             reason="invalid, unavailable or interrupted deploy input; inspect inventory, evidence and target",
         )
     print(encode(report).decode())
-    return 0 if report["result"] in ("ready", "green", "no_op") else 1
+    return 0 if report["result"] in ("ready", "green", "no_op", "withdrawn") else 1
 
 
 if __name__ == "__main__":

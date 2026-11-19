@@ -25,6 +25,7 @@ gateway_sha256 = "00000000000000000000000000000000000000000000000000000000000000
 
 [staging.host.node]
 ssh = "example-host"
+login = "example"
 home = "/srv/example"
 uid = 1000
 
@@ -32,7 +33,6 @@ uid = 1000
 account = "grok"
 model = "example-model"
 effort = "low"
-protocol = ""
 
 [[staging.clients]]
 id = "example"
@@ -44,5 +44,6 @@ source_sha256 = "000000000000000000000000000000000000000000000000000000000000000
 
 [staging.clients.node]
 ssh = "example-client"
+login = "example"
 home = "/srv/example"
 uid = 1000

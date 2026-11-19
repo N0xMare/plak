@@ -44,13 +44,22 @@ pub(crate) fn exchange(
 pub(crate) fn admin<T: serde::de::DeserializeOwned>(
     address: &GatewayAddress,
     key: Option<&str>,
+    value: &impl serde::Serialize,
+) -> Result<T, String> {
+    request(address, key, Endpoint::Admin, value)
+}
+
+pub(crate) fn request<T: serde::de::DeserializeOwned>(
+    address: &GatewayAddress,
+    key: Option<&str>,
+    endpoint: Endpoint,
     request: &impl serde::Serialize,
 ) -> Result<T, String> {
     let body = call::encode(request).map_err(|error| error.to_string())?;
     let served = versions(address, key)?.versions;
     let version = plakous::gateway::protocol::negotiate(SUPPORTED_VERSIONS, &served)
         .ok_or_else(|| format!("credential gateway protocol mismatch: serves {served:?}"))?;
-    let call = exchange(address, key, "POST", &Endpoint::Admin.path(version), &body)?;
+    let call = exchange(address, key, "POST", &endpoint.path(version), &body)?;
     decode_call(call)
 }
 

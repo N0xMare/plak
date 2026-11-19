@@ -102,14 +102,40 @@ fn qualified_change(
     })
 }
 
-pub(crate) fn run(paths: &PlakPaths, output: &mut dyn Write) -> CliResult<ProcessOutcome> {
-    write_report(inspect(paths)?, output)
+pub(crate) fn run(
+    paths: &PlakPaths,
+    summary: bool,
+    output: &mut dyn Write,
+) -> CliResult<ProcessOutcome> {
+    let report = inspect(paths)?;
+    if !summary {
+        return write_report(report, output);
+    }
+    #[derive(Serialize)]
+    struct Summary {
+        compatible: bool,
+        count: usize,
+    }
+    serde_json::to_writer(
+        &mut *output,
+        &Summary {
+            compatible: report.compatible,
+            count: report.sessions.len(),
+        },
+    )
+    .map_err(|_| CliFailure::new("stdout failed"))?;
+    writeln!(output).map_err(|_| CliFailure::new("stdout failed"))?;
+    verdict(report.compatible)
 }
 
 fn write_report(report: Report, output: &mut dyn Write) -> CliResult<ProcessOutcome> {
     serde_json::to_writer(&mut *output, &report).map_err(|_| CliFailure::new("stdout failed"))?;
     writeln!(output).map_err(|_| CliFailure::new("stdout failed"))?;
-    if report.compatible {
+    verdict(report.compatible)
+}
+
+fn verdict(compatible: bool) -> CliResult<ProcessOutcome> {
+    if compatible {
         Ok(ProcessOutcome::Success)
     } else {
         Err(CliFailure::new(

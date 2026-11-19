@@ -21,12 +21,21 @@ UNIT = "plakd-host.service"
 DIGEST = r"[a-f0-9]{64}"
 INSTANCE = r"[1-9][0-9]*-[a-f0-9]{16}"
 OAUTH = {"codex", "grok", "claude"}
+ACCOUNT = r"(?:codex|claude|grok|openai|anthropic|openrouter|xai-api)(?:/[A-Za-z0-9_-]+)?"
 RECIPES = ("install.sh", "tools/build/artifact_manifest.py")
 NORMALIZE = (
     "host unit is not the generated stable-link unit: verify ~/.local/bin/plakd "
     "resolves to the running snapshot, move the pinned ExecStart drop-in aside, "
     "then run systemctl --user daemon-reload; do not restart"
 )
+UNIT_DRIFT = (
+    "candidate unit template differs: review the candidate's host install --dry-run "
+    "output and normalize the unit using the manual same-key procedure before retrying"
+)
+
+
+def proc_image(pid):
+    return Path(f"/proc/{pid}/exe")
 
 
 class Refusal(Exception):
@@ -260,6 +269,8 @@ class Host:
         self.product = Path(spec["product_home"])
         self.env = environment(home, self.product)
         self.link = home / ".local/bin/plakd"
+        self.unit = home / ".config/systemd/user" / UNIT
+        self.production_marker = self.product / "host/deploy-production"
         require(
             self.product.resolve(strict=True) == self.product
             and self.product.stat().st_uid == os.geteuid(),
@@ -299,12 +310,22 @@ class Host:
             "cannot prove unchanged gateway holder/protocol",
         )
         properties = unit_properties(
-            self.env, self.spec["gateway_unit"], ("ActiveState", "MainPID")
+            self.env,
+            self.spec["gateway_unit"],
+            ("ActiveState", "MainPID", "ExecStart", "NeedDaemonReload"),
         )
-        process = Path(f"/proc/{active_pid(properties)}/exe")
+        process = proc_image(active_pid(properties))
         require(
             digest_file(process) == self.spec["gateway_sha256"],
             "gateway image change: restore the enrolled gateway or use S3",
+        )
+        start = re.fullmatch(r"\{\s*path=(.*?)\s+;\s+argv\[\]=[^{}]+\}", properties["ExecStart"])
+        require(
+            start
+            and properties["NeedDaemonReload"] == "no"
+            and Path(start[1]).is_absolute()
+            and Path(start[1]).resolve(strict=True) == process.resolve(strict=True),
+            "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway or use S3",
         )
         gateway_socket = Path(socket_path)
         require(
@@ -323,7 +344,63 @@ class Host:
                 ]
             )
         ).hexdigest()
-        return instance[0], accepted[0], custody_sha
+        accounts = [row.removeprefix("account ") for row in check if row.startswith("account ")]
+        require(
+            len(set(accounts)) == len(accounts) and all(re.fullmatch(ACCOUNT, a) for a in accounts),
+            "gateway account inventory is invalid",
+        )
+        return instance[0], accepted[0], custody_sha, accounts
+
+    def status_accounts(self, binary, enrolled):
+        rows = self.plaid(binary, "status").decode().splitlines()
+        require(
+            f"via gateway unix:{self.spec['gateway_socket']}" in rows,
+            "custody change: status does not affirm the enrolled gateway",
+        )
+        accounts = {}
+        for row in rows:
+            match = re.fullmatch(rf"({ACCOUNT}): .*?\bcredential=([a-z-]+)(?:\s.*)?", row)
+            if match:
+                require(match[1] not in accounts, "duplicate account in status")
+                accounts[match[1]] = "not_enrolled" if match[2] == "signed-out" else match[2]
+        require(set(accounts) == set(enrolled), "cannot enumerate all gateway account statuses")
+        return accounts
+
+    def render_unit(self, binary):
+        return self.plaid(
+            binary,
+            "host",
+            "install",
+            "--dry-run",
+            "--web",
+            "unix:" + self.spec["web_socket"],
+            "--ui",
+            self.spec["ui"],
+        )
+
+    def stage_identity(self):
+        local = contents("/etc/machine-id").strip()
+        require(re.fullmatch(rb"[0-9a-f]{32}", local), "cannot establish target machine identity")
+        return {
+            "machine_sha256": hashlib.sha256(local).hexdigest(),
+            "product_home": str(self.product),
+        }
+
+    def mark_production(self, expected):
+        require(self.stage_identity() == expected, "target stage identity changed")
+        data = encoded(expected) + b"\n"
+        try:
+            fd = os.open(
+                self.production_marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+            )
+        except FileExistsError:
+            require(contents(self.production_marker) == data, "invalid production history marker")
+        else:
+            with os.fdopen(fd, "wb") as output:
+                output.write(data)
+                output.flush()
+                os.fsync(output.fileno())
+        return {}
 
     def observe(self):
         props = unit_properties(
@@ -331,7 +408,7 @@ class Host:
             UNIT,
             ("ActiveState", "MainPID", "FragmentPath", "DropInPaths", "NeedDaemonReload"),
         )
-        expected_unit = self.home / ".config/systemd/user" / UNIT
+        expected_unit = self.unit
         require(
             props["FragmentPath"] == str(expected_unit)
             and not props["DropInPaths"]
@@ -341,7 +418,7 @@ class Host:
             NORMALIZE,
         )
         pid = active_pid(props)
-        process = Path(f"/proc/{pid}/exe")
+        process = proc_image(pid)
         binary = process.resolve(strict=True)
         roots = {self.home / ".local/lib/plak" / flavor for flavor in ("maintainer", "release")}
         require(
@@ -362,17 +439,8 @@ class Host:
                 continue
             resolved = worker.resolve(strict=True)
             sidecars[name] = digest_file(resolved)
-        unit = self.plaid(
-            binary,
-            "host",
-            "install",
-            "--dry-run",
-            "--web",
-            "unix:" + self.spec["web_socket"],
-            "--ui",
-            self.spec["ui"],
-        )
-        require(unit == contents(expected_unit), NORMALIZE)
+        unit = contents(expected_unit)
+        require(self.render_unit(binary) == unit, NORMALIZE)
         facts = build_facts(binary, self.env, self.product)
         identity = service_identity(self.product)
         require(
@@ -383,7 +451,7 @@ class Host:
             "systemd image and coordinator identity differ",
         )
         wire_welcome(self.product, facts, self.spec)
-        instance, protocol, custody = self.gateway(binary)
+        instance, protocol, custody, accounts = self.gateway(binary)
         config_path = self.product / "config.toml"
         config = tomllib.loads(contents(config_path).decode()) if config_path.exists() else {}
         canary = self.canary_routes(binary)
@@ -403,6 +471,10 @@ class Host:
             "custody_sha256": custody,
             "paired": bool(config.get("runners")),
             "canary": canary,
+            "accounts": self.status_accounts(binary, accounts),
+            "upgrade_idle": identity.get("deploy_idle") is True,
+            "stage_identity": self.stage_identity(),
+            "production_history": os.path.lexists(self.production_marker),
         }
 
     def current(self, expected):
@@ -421,9 +493,9 @@ class Host:
                     re.match(rf"{re.escape(account)}: .*\bcredential=ready\b", line)
                     for line in status
                 ),
-                f"credential not Ready for {kind}",
+                f"credential not Ready for {account}",
             )
-            values[kind] = None
+            values[account] = None
             if kind in OAUTH:
                 # Read through the gateway facts probe, not the credential file.
                 generation = one_line(self.plaid(binary, "deploy-credential-generation", account))
@@ -431,11 +503,18 @@ class Host:
                     generation.isascii() and generation.isdecimal(),
                     "unavailable OAuth credential generation",
                 )
-                values[kind] = int(generation)
+                values[account] = int(generation)
         return values
 
     def health(self, expected, routes):
-        binary = self.current(expected)
+        binary, observed = self.observe()
+        require(observed["sha256"] == expected, "serving host changed; replan")
+        require(
+            set(observed["accounts"])
+            - {a for a, s in observed["accounts"].items() if s == "not_enrolled"}
+            == {route["account"] for route in routes},
+            "in-use gateway accounts changed; replan",
+        )
         doctor = self.plaid(binary, "doctor", timeout=45).decode()
         require(
             doctor.strip() and not re.search(r"\tERROR(?:\t|$)", doctor, re.MULTILINE),
@@ -446,15 +525,23 @@ class Host:
             f"via gateway unix:{self.spec['gateway_socket']}" in status,
             "status does not affirm enrolled custody",
         )
-        bindings = self.plaid(binary, "session", "check-binding", "--all", timeout=75).splitlines()
+        bindings = json.loads(
+            one_line(
+                self.plaid(binary, "session", "check-binding", "--all", "--summary", timeout=75)
+            )
+        )
         require(
-            bindings and json.loads(bindings[-1])["compatible"] is True,
+            set(bindings) == {"compatible", "count"}
+            and bindings["compatible"] is True
+            and type(bindings["count"]) is int
+            and bindings["count"] >= 0,
             "session check-binding --all is not compatible",
         )
         return {
             "doctor": "pass",
             "status": "pass",
             "bindings": "pass",
+            "binding_count": bindings["count"],
             "generations": self.generations(binary, routes),
         }
 
@@ -486,6 +573,11 @@ class Host:
 
     def destination_canary_preflight(self, snapshot, sha256, route):
         self.qualify_canary(self.snapshot(snapshot, sha256), route)
+        return {}
+
+    def destination_unit(self, snapshot, sha256):
+        binary = self.snapshot(snapshot, sha256)
+        require(self.render_unit(binary) == contents(self.unit), UNIT_DRIFT)
         return {}
 
     def canary(self, expected, route):
@@ -535,8 +627,14 @@ class Host:
         return {}
 
     def upgrade(self, snapshot, sha256, drain, previous):
-        binary = self.snapshot(snapshot, sha256)
         require(self.observe()[1] == previous, "serving facts changed before handoff")
+        binary = self.snapshot(snapshot, sha256)
+        require(self.render_unit(binary) == contents(self.unit), UNIT_DRIFT)
+        require(
+            one_line(self.plaid(binary, "version", "--state-key"))
+            == previous["facts"]["state_key"],
+            "cross-key: staged binary does not match the serving state key; use the settled host upgrade runbook",
+        )
         self.plaid(
             binary,
             "host",
@@ -764,6 +862,10 @@ def execute(header, raw):
                 return host.canary(**args)
             if operation == "destination_canary_preflight":
                 return host.destination_canary_preflight(**args)
+            if operation == "destination_unit":
+                return host.destination_unit(**args)
+            if operation == "mark_production":
+                return host.mark_production(**args)
             if operation == "stage_host":
                 return host.stage_host(files, **args)
             if operation == "upgrade":

@@ -6,13 +6,16 @@ clients enrolled on Linux x86_64. It does not update the gateway, migrate
 custody, move state across keys, or render service units. Run it from an
 independent machine with Git, OpenSSH, and Python 3.11+; the remote login
 needs Python 3.11+, a working user service manager, and an enrolled SSH host
-key. Never run apply inside the host or runner being replaced.
+key. Name a resolvable SSH host and login; deploy uses an empty SSH config,
+not per-user aliases or shared master sockets. Never run apply inside the
+host or runner being replaced.
 
 Copy [the placeholder inventory](deploy.example.toml) to a private path
 outside the checkout. Pin full SHA-256 digests and the full revision of the
 shipping artifact directory. The revision must appear on origin/main; fetch
 that branch separately if the local checkout cannot validate its history.
-List every canary route in use with its exact account and cheap model. Grok
+List every account in use with its exact name and cheap canary model. Plan
+refuses any missing in-use account; signed-out accounts show `not_enrolled`. Grok
 and Claude OAuth models must admit the tool-free 16-token canary at the
 specified low or disabled effort; do not omit a route to bypass admission.
 Use `clients = []` in the stage table if there are no clients.
