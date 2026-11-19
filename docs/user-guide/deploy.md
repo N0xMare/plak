@@ -19,12 +19,22 @@ outside the checkout. Schema 2 uses `[[staging.machines]]` and optionally
 `[[production.machines]]` with a `node` and its role tables. Place the gateway
 with the host; omit runner and client tables where unused. Omit an unused
 stage entirely. Pin the full manifest SHA-256 for every platform you enroll.
-All artifacts must be from one full revision on origin/main; fetch
-that branch separately if the local checkout cannot validate its history.
+All artifacts, including those for staging, must be from one full revision
+in the advertised `origin/main` first-parent history. A candidate on an
+integration branch is not eligible yet. Fetch main separately if the local
+checkout cannot validate its history. Supply the unpacked shipping release
+artifact from `tools/release/package-release.sh` (`--untagged` for a
+rehearsal). Linux deploy takes x86-64 musl artifacts only. A native GNU or
+maintainer source-build snapshot is not a deploy artifact, even if it runs
+on the target.
+
 List every account in use with its exact name and cheap canary model. Plan
-refuses any missing in-use account; signed-out accounts show `not_enrolled`. Grok
-and Claude OAuth models must admit the tool-free 16-token canary at the
-specified low or disabled effort; do not omit a route to bypass admission.
+refuses any missing in-use account; signed-out accounts show `not_enrolled`.
+The built-in bounded canary covers Grok and Claude OAuth only. Use the
+manual same-key procedure for a fleet with an in-use account that has no
+bounded canary, such as Codex or an API route. Do not omit a route or
+sign out an account just to pass plan. Grok and Claude OAuth models must
+admit the tool-free 16-token canary at the specified low or disabled effort.
 
 For a one-Mac fleet, use a separate macOS user for staging, not another
 product home under the production UID. Give each user their own HOME,
@@ -73,7 +83,11 @@ snapshot's `plakd host upgrade --expect-binary ID --drain DURATION`, and
 only after Ready run `install.sh link SNAPSHOT_ID`. Use this build's installer
 to stage the destination: its link command cannot relink snapshots published
 by pre-port builds. Do not use an ordinary
-one-shot run as a bounded canary. If you have a pinned ExecStart drop-in,
+one-shot run as a bounded canary. On Linux, deploy requires the generated
+`plakd-host.service` and does not adopt or rename a custom host unit. For a
+fleet using a custom unit, use the manual same-key procedure or move the
+settled staging service to the generated unit as a separate operator
+step before enrolling it. If you have a pinned ExecStart drop-in,
 first verify that the stable `~/.local/bin/plakd` link resolves to the
 running snapshot; move the drop-in aside and run `systemctl --user
 daemon-reload` without restarting. Plan requires the exact generated unit.

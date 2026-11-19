@@ -320,9 +320,6 @@ source_sha256 = "{source}"
 #[test]
 fn deploy_fake_fleet_refuses_without_mutation() {
     let f = Fleet::new();
-    f.configure(&"f".repeat(40), &["grok"]);
-    f.staging("plan", "blocked", "not on origin/main");
-    f.configure(&"a".repeat(40), &["grok"]);
     for (pointer, value, reason) in [
         (
             "/host/facts/state_key",
@@ -384,6 +381,12 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     f.staging("plan", "blocked", "SSH returned no bounded verdict");
     assert_eq!(f.events(), NO_EVENTS);
     f.reset();
+    f.configure(&"a".repeat(40), &["grok", "codex"]);
+    f.change(|d| d["host"]["accounts"]["codex"] = json!("ready"));
+    f.staging("plan", "blocked", "no bounded deploy canary for codex");
+    assert_eq!(f.events(), NO_EVENTS);
+    f.reset();
+    f.configure(&"a".repeat(40), &["grok"]);
     let plan = f.staging("plan", "ready", "");
     assert_eq!(plan["observed"]["accounts"]["openai"], "not_enrolled");
     assert_eq!(
@@ -409,6 +412,41 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     f.configure(&"a".repeat(40), &["grok"]);
     f.staging("plan", "blocked", "client wire/schema pin differs");
     assert_eq!(f.events(), NO_EVENTS);
+}
+
+#[test]
+fn deploy_staging_rejects_ineligible_candidates_before_ssh() {
+    let f = Fleet::new();
+    let path = f.path("host/manifest.json");
+    let release = read(&path);
+    for (revision, field, value, reason) in [
+        ("f", "flavor", "release", "not on origin/main"),
+        (
+            "a",
+            "platform",
+            "x86_64-unknown-linux-gnu",
+            "wrong artifact revision or platform",
+        ),
+        (
+            "a",
+            "flavor",
+            "maintainer",
+            "expected a schema-1 release manifest",
+        ),
+    ] {
+        let mut manifest = release.clone();
+        manifest[field] = json!(value);
+        write(&path, &manifest);
+        f.configure(&revision.repeat(40), &["grok"]);
+        for verb in ["plan", "apply", "status"] {
+            f.staging(verb, "blocked", reason);
+            let args = fs::read_to_string(f.path("argv")).unwrap();
+            assert!(args.lines().any(|arg| arg == "--first-parent"), "{args}");
+            assert!(!f.path("staging.jsonl").exists());
+            assert!(!f.path("receipt.json").exists());
+            assert_eq!(f.events(), NO_EVENTS);
+        }
+    }
 }
 
 #[test]
