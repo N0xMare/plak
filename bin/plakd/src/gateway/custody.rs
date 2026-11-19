@@ -215,9 +215,12 @@ mod codex_login {
         let provider = NativeProvider::Codex;
         let subscriptions =
             crate::test_hooks::gateway_review_clock(subscriptions.clone(), provider);
-        custody.with_kind(
+        let current = SubscriptionCustodian::new(subscriptions, provider);
+        let v1 = current.for_gateway_v1();
+        custody.with_kind_versions(
             "codex",
-            Arc::new(SubscriptionCustodian::new(subscriptions, provider)),
+            Arc::new(current),
+            Some(Arc::new(v1)),
             plakous::gateway::pins::openai::CODEX_UPSTREAM_PINS,
         )
     }
@@ -303,9 +306,12 @@ mod grok_login {
         let provider = NativeProvider::Xai;
         let subscriptions =
             crate::test_hooks::gateway_review_clock(subscriptions.clone(), provider);
-        custody.with_kind(
+        let current = SubscriptionCustodian::new(subscriptions, provider);
+        let v1 = current.for_gateway_v1();
+        custody.with_kind_versions(
             "grok",
-            Arc::new(SubscriptionCustodian::new(subscriptions, provider)),
+            Arc::new(current),
+            Some(Arc::new(v1)),
             plakous::gateway::pins::xai::SUPERGROK_UPSTREAM_PINS,
         )
     }

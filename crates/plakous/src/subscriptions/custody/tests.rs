@@ -424,6 +424,66 @@ async fn a_codex_session_reopens_through_a_gateway_with_an_equal_binding_and_ide
 }
 
 #[tokio::test]
+async fn a_path_bound_codex_binding_revalidates_through_gateway_v1() -> TestResult {
+    use plakous_auth::custody::gateway::GatewayCustodian;
+    use plakous_http::relay::RelayClient;
+    use plakous_model::{Digest, DigestDomain};
+
+    let root = tempfile::tempdir()?;
+    let paths = SubscriptionPaths::from_xdg_state_home(root.path())?;
+    let provider = NativeProvider::Codex;
+    seed(&paths, super::super::unix_now()?)?;
+    let upstream = upstream().await?;
+    let subscriptions = NativeSubscriptions::new(paths);
+    let current = SubscriptionCustodian::new(subscriptions.clone(), provider);
+    let legacy = current.for_gateway_v1();
+    let custody = LocalCustody::new(new_instance().ok_or("gateway instance")?).with_kind_versions(
+        "codex",
+        Arc::new(current),
+        Some(Arc::new(legacy)),
+        CODEX_UPSTREAM_PINS,
+    );
+    let server = InProcessGateway::server(custody, upstream.client.clone())
+        .with_dial_override("https://chatgpt.com", upstream.origin.clone());
+    let relay = Arc::new(
+        RelayClient::new(InProcessGateway::endpoint_for(&server), None)?.with_test_versions(&[1]),
+    );
+    assert_eq!(relay.version(&RelayClient::call_control()).await?, 1);
+    let remote = Arc::new(GatewayCustodian::new(Arc::clone(&relay), |kind| {
+        (kind == "codex").then_some(CODEX_CREDENTIAL_HEADERS)
+    }));
+
+    let path = subscriptions.state.provider_record(provider);
+    let notice = NativeSubscriptions::notice(provider)?;
+    let recorded = Digest::sha256(
+        DigestDomain::ModelBinding,
+        1,
+        &[
+            b"plak-native-codex-authority",
+            notice.profile_id().as_bytes(),
+            path.as_os_str().as_encoded_bytes(),
+        ],
+    )?;
+    let host = subscriptions.with_custody(&crate::custody::Custody::gateway(
+        plakous_http::RouteTransport::relayed(relay),
+        remote,
+    ));
+    let reopened = host
+        .resolve_turn_scoped_provider(selection()?, limits()?, SessionLineage::Root)
+        .await?;
+    assert_eq!(
+        reopened.initial_authority().credential_authority_binding(),
+        recorded
+    );
+    let fresh = reopened
+        .model()
+        .revalidate_runtime_authority(reopened.initial_authority().observed_at())
+        .await?;
+    assert_eq!(fresh.credential_authority_binding(), recorded);
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_gateway_host_never_creates_the_subscription_store() -> TestResult {
     let root = tempfile::tempdir()?;
     let gateway_paths = SubscriptionPaths::from_xdg_state_home(root.path().join("gateway"))?;

@@ -6110,9 +6110,9 @@ injects them into one upstream exchange at a time and reports how far that
 exchange got. Local custody (§7.1-§7.4) is the default; a route reaches a
 gateway only through the custody seam below. It is the third cross-build exception (chapter 00): a gateway
 serves its own protocol version and the immediately previous one, a caller
-speaks the same two, and any change to an endpoint or encoding bumps the
-version. Each version's JSON and binary encodings are pinned by golden files
-in the crate.
+speaks the same two, and any change to an endpoint, encoding or binding fact
+bumps the version. The gateway serves v2 and v1. Each version's JSON and
+binary encodings are pinned by golden files in the crate.
 
 The carrier is HTTP/1.1, one exchange per connection use. Endpoints are
 `GET /versions` (served versions and the gateway instance id) and, under
@@ -6151,7 +6151,17 @@ generation, access expiry, login selection epoch digest, account binding and
 credential authority digests, presentation-only email and plan, profile and
 consent, key source and fingerprint, and bounded provider-keyed wire
 identity values a caller lowers into request bodies. Custody location is
-never a fact. Admin calls cover listing, status, key set and clear, logout,
+never sent. Under v1, the gateway derives Codex credential authority from
+the exact slot path and the SuperGrok authority id from the normalized record
+path, slot and source scope. Under v2, it uses profile and slot for Codex and
+profile, slot and source scope for SuperGrok. SuperGrok's
+`grok_authority_id`, both providers' credential-authority bindings and their
+selection digests follow the version, including in refresh replies and
+`fence_moved` facts. A refresh after rejection interprets the request's
+selection digest under the same version; both views use the same store and
+refresh lock. No other facts or relay encodings change. Current Codex and
+SuperGrok host routes require v2 authority; they never bind to v1 facts.
+Admin calls cover listing, status, key set and clear, logout,
 forced refresh, removal, login start, complete, poll and cancel, allowance
 reads, disable and, for the local administrator only, enable, caller
 management and drain; operation-level refusals are typed, and secret
@@ -6160,7 +6170,8 @@ zeroized and never printed.
 
 The relay client is a `plakous_http::Client` made with `with_relay` over a
 `RelayClient` (a Unix socket, a TCP address or an in-memory duplex, the
-caller key, and the version negotiated once from `GET /versions`). It keeps
+caller key, and the highest common version negotiated once from
+`GET /versions`). It keeps
 the client's limits, policy and behavior identity, so `Client::execute`
 remains the only send point and no protocol kernel changes. A custodied
 credential field (`CredentialField::custodied`) is a reserved placeholder

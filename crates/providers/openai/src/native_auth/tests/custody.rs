@@ -222,6 +222,7 @@ mod relayed {
         fn inject<'a>(
             &'a self,
             (): &'a (),
+            _version: u16,
             envelope: &'a RelayEnvelope,
         ) -> ServiceFuture<'a, Injection> {
             Box::pin(async move {
@@ -261,6 +262,7 @@ mod relayed {
         fn call<'a>(
             &'a self,
             (): &'a (),
+            _version: u16,
             _endpoint: Endpoint,
             _body: &'a [u8],
         ) -> ServiceFuture<'a, Vec<u8>> {

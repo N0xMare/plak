@@ -89,6 +89,7 @@ pub(super) trait NativeVertical: Sync {
     fn login_custody<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
+        gateway_v1_authority: bool,
     ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>;
 }
 pub(super) struct NativeVerticalEntry {

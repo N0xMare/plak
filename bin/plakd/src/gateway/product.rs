@@ -7,13 +7,13 @@ use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
+use plakous::gateway::protocol::Endpoint;
 use plakous::gateway::protocol::GatewayAccount;
 use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
 use plakous::gateway::protocol::call::{self, CallError};
 use plakous::gateway::protocol::envelope::RelayEnvelope;
 use plakous::gateway::protocol::facts::{FactsReply, FactsRequest, RefreshRequest};
 use plakous::gateway::protocol::refusal::{GatewayRefusal, RefusalBody};
-use plakous::gateway::protocol::{Endpoint, PROTOCOL_VERSION};
 use plakous::gateway::server::{
     GatewayService, Injection, Peer as ServerPeer, RelayOutcome, RelayRecord, ServiceFuture,
 };
@@ -126,6 +126,7 @@ impl GatewayService for ProductGateway {
     fn inject<'a>(
         &'a self,
         principal: &'a Authed,
+        version: u16,
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection> {
         Box::pin(async move {
@@ -143,7 +144,7 @@ impl GatewayService for ProductGateway {
                 principal.scopes.as_ref(),
                 &envelope.account,
             )?;
-            let injection = self.custody.inject(envelope).await?;
+            let injection = self.custody.inject(version, envelope).await?;
             let key = note_key(&envelope.operation, envelope.attempt);
             let token = plakous::gateway::server::CancellationToken::new();
             lock_relays(&self.state).insert(
@@ -172,14 +173,15 @@ impl GatewayService for ProductGateway {
     fn call<'a>(
         &'a self,
         principal: &'a Authed,
+        version: u16,
         endpoint: Endpoint,
         body: &'a [u8],
     ) -> ServiceFuture<'a, Vec<u8>> {
         Box::pin(async move {
             match endpoint {
-                Endpoint::Facts => self.facts(principal, body).await,
-                Endpoint::Refresh => self.refresh(principal, body).await,
-                Endpoint::Admin => self.admin(principal, body).await,
+                Endpoint::Facts => self.facts(principal, version, body).await,
+                Endpoint::Refresh => self.refresh(principal, version, body).await,
+                Endpoint::Admin => self.admin(principal, version, body).await,
                 Endpoint::Relay => Err(GatewayRefusal::EnvelopeInvalid {}),
             }
         })
@@ -204,13 +206,20 @@ impl GatewayService for ProductGateway {
 }
 
 impl ProductGateway {
-    async fn facts(&self, principal: &Authed, body: &[u8]) -> Result<Vec<u8>, GatewayRefusal> {
+    async fn facts(
+        &self,
+        principal: &Authed,
+        version: u16,
+        body: &[u8],
+    ) -> Result<Vec<u8>, GatewayRefusal> {
         let FactsRequest { accounts } = match decode(body) {
             Ok(request) => request,
             Err(refusal) => return Err(refusal),
         };
         if !accounts.iter().any(custody::custodied) {
-            return self.forward(principal, Endpoint::Facts, body).await;
+            return self
+                .forward(principal, version, Endpoint::Facts, body)
+                .await;
         }
         if accounts.len() > call::MAX_FACTS_ACCOUNTS {
             return Err(GatewayRefusal::LimitExceeded {});
@@ -224,7 +233,7 @@ impl ProductGateway {
                 principal.scopes.as_ref(),
                 account,
             )?;
-            facts.extend(self.one_facts(account).await?);
+            facts.extend(self.one_facts(version, account).await?);
         }
         self.record(principal, "facts", None, None);
         encode(&FactsReply { facts })
@@ -232,14 +241,18 @@ impl ProductGateway {
 
     async fn one_facts(
         &self,
+        version: u16,
         account: &GatewayAccount,
     ) -> Result<Vec<plakous::gateway::protocol::facts::AccountFacts>, GatewayRefusal> {
         if custody::custodied(account) {
             let reply = self
                 .custody
-                .facts(&FactsRequest {
-                    accounts: vec![account.clone()],
-                })
+                .facts(
+                    version,
+                    &FactsRequest {
+                        accounts: vec![account.clone()],
+                    },
+                )
                 .await?;
             return Ok(reply.facts);
         }
@@ -250,13 +263,20 @@ impl ProductGateway {
             .map_err(|_| GatewayRefusal::Internal {})?
     }
 
-    async fn refresh(&self, principal: &Authed, body: &[u8]) -> Result<Vec<u8>, GatewayRefusal> {
+    async fn refresh(
+        &self,
+        principal: &Authed,
+        version: u16,
+        body: &[u8],
+    ) -> Result<Vec<u8>, GatewayRefusal> {
         let request: RefreshRequest = match decode(body) {
             Ok(request) => request,
             Err(refusal) => return Err(refusal),
         };
         if !custody::custodied(&request.account) {
-            return self.forward(principal, Endpoint::Refresh, body).await;
+            return self
+                .forward(principal, version, Endpoint::Refresh, body)
+                .await;
         }
         let hold = CallHold::acquire(&self.state, &principal.principal)?;
         dispatch::gate_relay(
@@ -267,15 +287,28 @@ impl ProductGateway {
         )?;
         let account = request.account.clone();
         let custody = Arc::clone(&self.custody);
-        let reply = claim(hold, async move { custody.refresh(&request).await }).await?;
+        let reply = claim(
+            hold,
+            async move { custody.refresh(version, &request).await },
+        )
+        .await?;
         self.record(principal, "refresh", Some(&account), None);
         encode(&reply)
     }
 
-    async fn admin(&self, principal: &Authed, body: &[u8]) -> Result<Vec<u8>, GatewayRefusal> {
+    async fn admin(
+        &self,
+        principal: &Authed,
+        version: u16,
+        body: &[u8],
+    ) -> Result<Vec<u8>, GatewayRefusal> {
         let request: AdminRequest = match decode(body) {
             Ok(request) => request,
-            Err(_) => return self.forward(principal, Endpoint::Admin, body).await,
+            Err(_) => {
+                return self
+                    .forward(principal, version, Endpoint::Admin, body)
+                    .await;
+            }
         };
         if let AdminRequest::Allowance { account } = &request
             && custody::custodied_api_key(account)
@@ -283,10 +316,14 @@ impl ProductGateway {
             return self.allowance(principal, account).await;
         }
         let AdminRequest::Refresh { account } = &request else {
-            return self.forward(principal, Endpoint::Admin, body).await;
+            return self
+                .forward(principal, version, Endpoint::Admin, body)
+                .await;
         };
         if !custody::custodied(account) {
-            return self.forward(principal, Endpoint::Admin, body).await;
+            return self
+                .forward(principal, version, Endpoint::Admin, body)
+                .await;
         }
         let hold = CallHold::acquire(&self.state, &principal.principal)?;
         dispatch::gate_admin_refresh(
@@ -297,10 +334,9 @@ impl ProductGateway {
         )?;
         let custody = Arc::clone(&self.custody);
         let claimed = account.clone();
-        let facts = claim(
-            hold,
-            async move { custody.operator_refresh(&claimed).await },
-        )
+        let facts = claim(hold, async move {
+            custody.operator_refresh(version, &claimed).await
+        })
         .await?;
         self.record(principal, "refresh", Some(account), None);
         encode(&AdminResponse::Refreshed {
@@ -328,12 +364,13 @@ impl ProductGateway {
     async fn forward(
         &self,
         principal: &Authed,
+        version: u16,
         endpoint: Endpoint,
         body: &[u8],
     ) -> Result<Vec<u8>, GatewayRefusal> {
         let request = Request {
             method: "POST".to_owned(),
-            path: endpoint.path(PROTOCOL_VERSION),
+            path: endpoint.path(version),
             headers: std::collections::BTreeMap::new(),
             body: body.to_vec(),
         };

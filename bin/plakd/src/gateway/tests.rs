@@ -28,7 +28,7 @@ fn home() -> (tempfile::TempDir, PlakPaths) {
     (dir, paths)
 }
 
-fn state_for(paths: &PlakPaths) -> Arc<GatewayState> {
+pub(super) fn state_for(paths: &PlakPaths) -> Arc<GatewayState> {
     let socket = paths.home().join("gateway.sock");
     let state_root = paths.home().join("state");
     std::fs::create_dir_all(&state_root).unwrap();

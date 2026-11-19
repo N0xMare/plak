@@ -63,6 +63,7 @@ impl XaiNativeAuthManager {
         Ok(Self {
             core: Arc::new(ManagerCore {
                 source_scope: None,
+                gateway_v1_authority: false,
                 catalog_retries: true,
                 store: Some(store),
                 custodied: None,
@@ -104,6 +105,7 @@ impl XaiNativeAuthManager {
         Ok(Self {
             core: Arc::new(ManagerCore {
                 source_scope: None,
+                gateway_v1_authority: false,
                 catalog_retries: true,
                 store: None,
                 custodied: Some(login),
@@ -134,6 +136,18 @@ impl XaiNativeAuthManager {
     ) -> Result<Self, XaiNativeAuthError> {
         let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
         core.source_scope = Some(scope);
+        Ok(self)
+    }
+
+    /// Uses the path-based authority of the previous gateway protocol.
+    ///
+    /// # Errors
+    /// Refuses changing a remote or already shared manager.
+    #[doc(hidden)]
+    pub fn with_gateway_v1_authority(mut self) -> Result<Self, XaiNativeAuthError> {
+        let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
+        core.store()?;
+        core.gateway_v1_authority = true;
         Ok(self)
     }
 
@@ -876,6 +890,7 @@ impl XaiNativeAuthManager {
         Ok(Self {
             core: Arc::new(ManagerCore {
                 source_scope: None,
+                gateway_v1_authority: false,
                 catalog_retries: true,
                 store: Some(store),
                 custodied: None,

@@ -262,7 +262,7 @@ selection, committed per-turn cap facts and source provenance. The destination
 recomputes its canonical identities; no historical measurement, admission or
 cache grant is invented or carried. A retained-empty native feed begins above
 the exported tail floor, with product/tree views seeded semantically at the cut.
-Product schema 38 retains the immutable projection base, anchored intents and
+Product schema 39 retains the immutable projection base, anchored intents and
 permanent content bindings after ordinary view-cache deletion. Tree schema 11
 retains its semantic base and source custody floor; refolding starts at that
 base, not at invented old feed records or fresh admissions.
@@ -310,8 +310,12 @@ protocol of its own version and of the immediately previous version, so that
 a planned upgrade of either side keeps inference and account operations
 working. Its endpoints are fixed and path-versioned; it relays one upstream
 exchange per request, never retries, translates or fails over, and grants no
-session or store authority. Any change to its endpoints or encodings bumps
-its version; the previous version's speaker is kept for one bump only.
+session or store authority. Any change to its endpoints, encodings or
+binding facts bumps its version; the previous version's speaker is kept for
+one bump only. The gateway serves v2 and v1. Only v1 reports the former
+path-based Codex and SuperGrok credential authority and selection digests.
+Upgrade the gateway first so the old host can keep speaking v1 and the new
+host can use v2 authority when carrying its sessions.
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

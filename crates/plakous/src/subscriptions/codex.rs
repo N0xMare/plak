@@ -48,7 +48,7 @@ impl NativeSubscriptions {
         match &self.gateway {
             Some(gateway) => self.codex_custodied(gateway, request_gate).await,
             None => {
-                self.codex_online_local(request_gate, enforce_login_recovery)
+                self.codex_online_local(request_gate, enforce_login_recovery, false)
                     .await
             }
         }
@@ -58,6 +58,7 @@ impl NativeSubscriptions {
         &self,
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
+        gateway_v1_authority: bool,
     ) -> Result<CodexOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Codex)?;
@@ -126,6 +127,7 @@ impl NativeSubscriptions {
             let client = fixture_transport
                 .as_ref()
                 .map_or(client, |(client, _)| client.clone());
+            let legacy_path = gateway_v1_authority.then(|| path.clone());
             #[cfg(any(test, feature = "test-clock"))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new_with_clock(
                 path,
@@ -144,6 +146,11 @@ impl NativeSubscriptions {
             )
             .map_err(map_codex_error)?;
             let mut manager = manager;
+            if let Some(path) = legacy_path {
+                manager = manager
+                    .with_gateway_v1_authority(&path)
+                    .map_err(map_codex_error)?;
+            }
             if let Some(gate) = request_gate {
                 manager = manager.with_subscription_request_gate(gate);
             }
@@ -1002,11 +1009,14 @@ impl NativeVertical for Vertical {
     fn login_custody<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
+        gateway_v1_authority: bool,
     ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>
     {
         Box::pin(async move {
-            let manager: Arc<dyn super::custody::LoginCustody> =
-                subscriptions.codex_online().await?.manager;
+            let manager: Arc<dyn super::custody::LoginCustody> = subscriptions
+                .codex_online_local(None, true, gateway_v1_authority)
+                .await?
+                .manager;
             Ok(manager)
         })
     }

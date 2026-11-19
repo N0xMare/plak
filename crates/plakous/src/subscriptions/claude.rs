@@ -812,6 +812,7 @@ impl NativeVertical for Vertical {
     fn login_custody<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
+        _gateway_v1_authority: bool,
     ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>
     {
         Box::pin(async move {

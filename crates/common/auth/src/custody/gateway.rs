@@ -38,6 +38,7 @@ impl CredentialField {
 pub struct GatewayCustodian {
     relay: Arc<RelayClient>,
     injection: fn(&str) -> Option<&'static [&'static str]>,
+    current_authority_kinds: &'static [&'static str],
 }
 
 impl std::fmt::Debug for GatewayCustodian {
@@ -54,7 +55,18 @@ impl GatewayCustodian {
         relay: Arc<RelayClient>,
         injection: fn(&str) -> Option<&'static [&'static str]>,
     ) -> Self {
-        Self { relay, injection }
+        Self {
+            relay,
+            injection,
+            current_authority_kinds: &[],
+        }
+    }
+
+    /// Do not use a previous protocol's authority facts to authorize these kinds.
+    #[must_use]
+    pub fn with_current_authority_for(mut self, kinds: &'static [&'static str]) -> Self {
+        self.current_authority_kinds = kinds;
+        self
     }
 
     /// The relay client, for the `plakous_http::Client` routes dispatch
@@ -70,10 +82,23 @@ impl GatewayCustodian {
         endpoint: protocol::Endpoint,
         request: &impl serde::Serialize,
     ) -> Result<T, CustodyError> {
+        let control = RelayClient::call_control();
+        if self.current_authority_kinds.contains(&slot.kind()) {
+            let version = self
+                .relay
+                .version(&control)
+                .await
+                .map_err(|error| call_error(&error, slot))?;
+            if version < protocol::PROTOCOL_VERSION {
+                return Err(CustodyError::VersionMismatch {
+                    supported: vec![version],
+                });
+            }
+        }
         let body = protocol::call::encode(request).map_err(|_| CustodyError::Internal)?;
         let reply = self
             .relay
-            .call(endpoint, body, &RelayClient::call_control())
+            .call(endpoint, body, &control)
             .await
             .map_err(|error| call_error(&error, slot))?;
         protocol::call::decode(&reply).map_err(|_| CustodyError::Internal)

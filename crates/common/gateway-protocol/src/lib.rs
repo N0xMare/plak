@@ -1,4 +1,4 @@
-//! Credential gateway protocol, version 1: what a Plakous caller and the
+//! Credential gateway protocol, version 2: what a Plakous caller and the
 //! credential gateway that holds its credentials say to each other (spec 01
 //! §7.5). This crate does no I/O.
 //!
@@ -36,11 +36,14 @@ pub use secret::{SecretText, SecretTextTooLarge};
 pub use text::{BoundedText, HexDigest, TextError, UuidText};
 
 /// The newest protocol version this crate speaks.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
-/// Every version this crate speaks, ascending: its own and, once there is
-/// one, the immediately previous version.
-pub const SUPPORTED_VERSIONS: &[u16] = &[1];
+/// The previous protocol, which used path-based subscription authority.
+pub const PREVIOUS_VERSION: u16 = 1;
+
+/// Every version this crate speaks, ascending: its own and the immediately
+/// previous version.
+pub const SUPPORTED_VERSIONS: &[u16] = &[PREVIOUS_VERSION, PROTOCOL_VERSION];
 
 /// The request header carrying the caller key.
 pub const KEY_HEADER: &str = "plak-gateway-key";

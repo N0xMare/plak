@@ -53,7 +53,7 @@ impl NativeSubscriptions {
         match &self.gateway {
             Some(gateway) => self.xai_custodied(gateway, request_gate).await,
             None => {
-                self.xai_online_local(request_gate, enforce_login_recovery)
+                self.xai_online_local(request_gate, enforce_login_recovery, false)
                     .await
             }
         }
@@ -130,6 +130,7 @@ impl NativeSubscriptions {
         &self,
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
+        gateway_v1_authority: bool,
     ) -> Result<XaiOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Xai)?;
@@ -204,6 +205,9 @@ impl NativeSubscriptions {
                 provider_acceptance,
             )
             .map_err(map_xai_error)?;
+            if gateway_v1_authority {
+                manager = manager.with_gateway_v1_authority().map_err(map_xai_error)?;
+            }
             if let Some(scope) = source_scope {
                 manager = manager
                     .with_credential_source_scope(scope)
@@ -846,11 +850,14 @@ impl NativeVertical for Vertical {
     fn login_custody<'a>(
         &self,
         subscriptions: &'a NativeSubscriptions,
+        gateway_v1_authority: bool,
     ) -> NativeFuture<'a, Result<Arc<dyn super::custody::LoginCustody>, NativeSubscriptionError>>
     {
         Box::pin(async move {
-            let manager: Arc<dyn super::custody::LoginCustody> =
-                subscriptions.xai_online().await?.manager;
+            let manager: Arc<dyn super::custody::LoginCustody> = subscriptions
+                .xai_online_local(None, true, gateway_v1_authority)
+                .await?
+                .manager;
             Ok(manager)
         })
     }

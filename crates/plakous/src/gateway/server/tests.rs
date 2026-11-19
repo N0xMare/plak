@@ -101,12 +101,10 @@ async fn injection_checks_the_pin_row_names_and_fence_before_lowering_the_key() 
     let url = "https://api.openai.com/v1/responses";
 
     let injected = custody
-        .inject(&envelope(
-            "openai/work",
-            url,
-            expected.clone(),
-            &["authorization"],
-        ))
+        .inject(
+            plakous_gateway_protocol::PROTOCOL_VERSION,
+            &envelope("openai/work", url, expected.clone(), &["authorization"]),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -115,7 +113,12 @@ async fn injection_checks_the_pin_row_names_and_fence_before_lowering_the_key() 
     );
 
     let custody = &custody;
-    let refused = |envelope| async move { custody.inject(&envelope).await.unwrap_err() };
+    let refused = |envelope| async move {
+        custody
+            .inject(plakous_gateway_protocol::PROTOCOL_VERSION, &envelope)
+            .await
+            .unwrap_err()
+    };
     assert_eq!(
         refused(envelope(
             "openai/work",

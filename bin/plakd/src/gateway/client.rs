@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use plakous::gateway::protocol::call;
 use plakous::gateway::protocol::refusal::RefusalBody;
-use plakous::gateway::protocol::{Endpoint, KEY_HEADER};
+use plakous::gateway::protocol::{Endpoint, KEY_HEADER, SUPPORTED_VERSIONS, negotiate};
 
 use super::address::GatewayAddress;
 
@@ -47,13 +47,10 @@ pub(crate) fn admin<T: serde::de::DeserializeOwned>(
     request: &impl serde::Serialize,
 ) -> Result<T, String> {
     let body = call::encode(request).map_err(|error| error.to_string())?;
-    let call = exchange(
-        address,
-        key,
-        "POST",
-        &Endpoint::Admin.path(plakous::gateway::protocol::PROTOCOL_VERSION),
-        &body,
-    )?;
+    let served = versions(address, key)?.versions;
+    let version = negotiate(SUPPORTED_VERSIONS, &served)
+        .ok_or_else(|| format!("credential gateway protocol mismatch: serves {served:?}"))?;
+    let call = exchange(address, key, "POST", &Endpoint::Admin.path(version), &body)?;
     decode_call(call)
 }
 

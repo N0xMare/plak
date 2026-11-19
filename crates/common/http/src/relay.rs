@@ -225,6 +225,8 @@ pub struct RelayClient {
     hop: Client,
     key: Option<HeaderValue>,
     version: Mutex<Option<u16>>,
+    #[cfg(feature = "fault-injection")]
+    versions: &'static [u16],
 }
 
 impl std::fmt::Debug for RelayClient {
@@ -260,7 +262,18 @@ impl RelayClient {
             hop: hop.with_dialer(Arc::new(Dial(endpoint))).pooled(),
             key,
             version: Mutex::new(None),
+            #[cfg(feature = "fault-injection")]
+            versions: SUPPORTED_VERSIONS,
         })
+    }
+
+    /// Emulates an older caller in a repository test.
+    #[cfg(feature = "fault-injection")]
+    #[must_use]
+    pub fn with_test_versions(mut self, versions: &'static [u16]) -> Self {
+        self.versions = versions;
+        self.version = Mutex::new(None);
+        self
     }
 
     /// The protocol version both ends speak, negotiated once per client.
@@ -283,10 +296,15 @@ impl RelayClient {
                 .await?,
         )
         .map_err(|_| RelayCallError::InvalidReply)?;
-        let version = plakous_gateway_protocol::negotiate(SUPPORTED_VERSIONS, &reply.versions)
-            .ok_or(RelayCallError::VersionMismatch {
+        #[cfg(not(feature = "fault-injection"))]
+        let ours = SUPPORTED_VERSIONS;
+        #[cfg(feature = "fault-injection")]
+        let ours = self.versions;
+        let version = plakous_gateway_protocol::negotiate(ours, &reply.versions).ok_or(
+            RelayCallError::VersionMismatch {
                 supported: reply.versions,
-            })?;
+            },
+        )?;
         *self.version.lock().unwrap_or_else(PoisonError::into_inner) = Some(version);
         Ok(version)
     }

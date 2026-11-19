@@ -184,6 +184,7 @@ pub trait GatewayService: Send + Sync + 'static {
     fn inject<'a>(
         &'a self,
         principal: &'a Self::Principal,
+        version: u16,
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection>;
 
@@ -192,6 +193,7 @@ pub trait GatewayService: Send + Sync + 'static {
     fn call<'a>(
         &'a self,
         principal: &'a Self::Principal,
+        version: u16,
         endpoint: Endpoint,
         body: &'a [u8],
     ) -> ServiceFuture<'a, Vec<u8>>;
@@ -336,10 +338,13 @@ impl<S: GatewayService> ServerInner<S> {
             return Err(GatewayRefusal::EnvelopeInvalid {});
         }
         match endpoint {
-            Endpoint::Relay => self.relay(request, principal).await,
+            Endpoint::Relay => self.relay(request, principal, version).await,
             Endpoint::Facts | Endpoint::Refresh | Endpoint::Admin => {
                 let body = read_whole(request.into_body(), call::MAX_CALL_BYTES).await?;
-                let reply = self.service.call(&principal, endpoint, &body).await?;
+                let reply = self
+                    .service
+                    .call(&principal, version, endpoint, &body)
+                    .await?;
                 Ok(bytes_reply(StatusCode::OK, "application/json", reply))
             }
         }
@@ -349,6 +354,7 @@ impl<S: GatewayService> ServerInner<S> {
         self: &Arc<Self>,
         request: http::Request<Incoming>,
         principal: S::Principal,
+        version: u16,
     ) -> Result<Reply, GatewayRefusal> {
         let content_type = request.headers().get(http::header::CONTENT_TYPE);
         if content_type.map(HeaderValue::as_bytes)
@@ -384,7 +390,10 @@ impl<S: GatewayService> ServerInner<S> {
             duration: Duration::ZERO,
             outcome: RelayOutcome::Complete,
         };
-        let prepared = match self.prepare(&principal, &envelope, upstream_body).await {
+        let prepared = match self
+            .prepare(&principal, version, &envelope, upstream_body)
+            .await
+        {
             Ok(prepared) => prepared,
             Err(refusal) => {
                 record.outcome = RelayOutcome::Refused(refusal.code());
@@ -413,6 +422,7 @@ impl<S: GatewayService> ServerInner<S> {
     async fn prepare(
         &self,
         principal: &S::Principal,
+        version: u16,
         envelope: &RelayEnvelope,
         body: Bytes,
     ) -> Result<Prepared, GatewayRefusal> {
@@ -420,7 +430,8 @@ impl<S: GatewayService> ServerInner<S> {
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
         let method = Method::from_bytes(envelope.method.as_bytes())
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
-        let Injection { values, hold, cut } = self.service.inject(principal, envelope).await?;
+        let Injection { values, hold, cut } =
+            self.service.inject(principal, version, envelope).await?;
         let mut values = values.into_iter();
         let mut headers = HeaderMap::with_capacity(envelope.headers.len());
         for header in &envelope.headers {

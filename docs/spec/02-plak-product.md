@@ -6356,6 +6356,14 @@ taken and before the store is opened. When `state_root` is absent, serve uses
 the resolution. API keys are read from the home `secrets/` directory, as the
 host reads them; the server file does not name a key directory.
 
+The service advertises gateway protocols 1 and 2. Both use the same
+credential store and leases. V1 serves the former path-based Codex and
+SuperGrok binding and selection facts; v2 serves location-independent
+authority (chapter 01 §7.5). The host negotiates the highest common version,
+and Codex and SuperGrok cannot use a v1-only gateway for new-build admission
+or revalidation. Upgrade the gateway before carrying the host across state
+keys: the existing host keeps its v1 authority and the successor binds with v2.
+
 `<home>/gateway.toml` keys (absent file: every default):
 
 | key | default | meaning |

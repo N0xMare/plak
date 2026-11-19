@@ -46,10 +46,10 @@ impl GatewayCustody {
         credential_headers: fn(&str) -> Option<&'static [&'static str]>,
     ) -> Result<Self, plakous_http::ConfigError> {
         let relay = Arc::new(RelayClient::new(endpoint, caller_key)?);
-        let custodian = Arc::new(GatewayCustodian::new(
-            Arc::clone(&relay),
-            credential_headers,
-        ));
+        let custodian = Arc::new(
+            GatewayCustodian::new(Arc::clone(&relay), credential_headers)
+                .with_current_authority_for(&["codex", "grok"]),
+        );
         Ok(Self { relay, custodian })
     }
 

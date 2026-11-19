@@ -203,6 +203,7 @@ impl GatewayService for Service {
     fn inject<'a>(
         &'a self,
         (): &'a (),
+        _version: u16,
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection> {
         Box::pin(async move {
@@ -238,6 +239,7 @@ impl GatewayService for Service {
     fn call<'a>(
         &'a self,
         (): &'a (),
+        _version: u16,
         endpoint: Endpoint,
         body: &'a [u8],
     ) -> ServiceFuture<'a, Vec<u8>> {

@@ -156,6 +156,29 @@ impl CodexSubscriptionCredentialManager {
         })
     }
 
+    /// Uses the exact slot path the previous gateway protocol bound to.
+    /// Only the gateway v1 custodian uses this manager.
+    ///
+    /// # Errors
+    /// Refuses an invalid binding digest.
+    #[doc(hidden)]
+    pub fn with_gateway_v1_authority(
+        mut self,
+        slot_path: &Path,
+    ) -> Result<Self, NativeCodexAuthError> {
+        self.authority_binding = Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[
+                b"plak-native-codex-authority",
+                OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
+                slot_path.as_os_str().as_encoded_bytes(),
+            ],
+        )
+        .map_err(|_| NativeCodexAuthError::Validation)?;
+        Ok(self)
+    }
+
     /// Opens the login a credential custodian holds for `slot`: facts,
     /// fields and refresh are the custodian's, and no local slot is opened.
     /// `client` is the route's client (relayed through a gateway).

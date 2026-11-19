@@ -22,7 +22,7 @@ use plakous_gateway_protocol::admin::{AdminRequest, AdminResponse};
 use plakous_gateway_protocol::envelope::{self, RelayEnvelope};
 use plakous_gateway_protocol::facts::{self, FactsReply, FactsRequest, RefreshMode, RefreshReply};
 use plakous_gateway_protocol::refusal::GatewayRefusal;
-use plakous_gateway_protocol::{Endpoint, GatewayAccount, UuidText, call};
+use plakous_gateway_protocol::{Endpoint, GatewayAccount, PREVIOUS_VERSION, UuidText, call};
 pub use plakous_http::CancellationToken;
 use plakous_http::SensitiveBytes;
 pub use plakous_http::relay_server::{
@@ -35,7 +35,19 @@ use super::{GatewayEndpoint, InMemoryGateway};
 struct Kind {
     name: String,
     custodian: Arc<dyn CredentialCustodian>,
+    v1: Option<Arc<dyn CredentialCustodian>>,
     pins: &'static [UpstreamPin],
+}
+
+impl Kind {
+    fn custodian(&self, version: u16) -> &dyn CredentialCustodian {
+        if version == PREVIOUS_VERSION
+            && let Some(v1) = &self.v1
+        {
+            return v1.as_ref();
+        }
+        self.custodian.as_ref()
+    }
 }
 
 /// Each custodied kind's local custodian and exact upstream pin table.
@@ -74,14 +86,27 @@ impl LocalCustody {
     /// `custodian`, relaying only to `pins`.
     #[must_use]
     pub fn with_kind(
+        self,
+        kind: impl Into<String>,
+        custodian: Arc<dyn CredentialCustodian>,
+        pins: &'static [UpstreamPin],
+    ) -> Self {
+        self.with_kind_versions(kind, custodian, None, pins)
+    }
+
+    /// Like [`Self::with_kind`], with a v1 view when the kind's authority changed.
+    #[must_use]
+    pub fn with_kind_versions(
         mut self,
         kind: impl Into<String>,
         custodian: Arc<dyn CredentialCustodian>,
+        v1: Option<Arc<dyn CredentialCustodian>>,
         pins: &'static [UpstreamPin],
     ) -> Self {
         self.kinds.push(Kind {
             name: kind.into(),
             custodian,
+            v1,
             pins,
         });
         self
@@ -115,7 +140,11 @@ impl LocalCustody {
     ///
     /// # Errors
     /// The refusal the first failed check names.
-    pub async fn inject(&self, envelope: &RelayEnvelope) -> Result<Injection, GatewayRefusal> {
+    pub async fn inject(
+        &self,
+        version: u16,
+        envelope: &RelayEnvelope,
+    ) -> Result<Injection, GatewayRefusal> {
         let (kind, slot) = self.kind(&envelope.account)?;
         let (origin, path_and_query) = envelope::split_upstream_url(&envelope.url)
             .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
@@ -132,7 +161,7 @@ impl LocalCustody {
                 .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?,
         };
         let mut fields = kind
-            .custodian
+            .custodian(version)
             .fields(&slot, &expected)
             .await
             .map_err(|error| self.refusal(&error))?;
@@ -156,7 +185,11 @@ impl LocalCustody {
     ///
     /// # Errors
     /// The first account's custody refusal.
-    pub async fn facts(&self, request: &FactsRequest) -> Result<FactsReply, GatewayRefusal> {
+    pub async fn facts(
+        &self,
+        version: u16,
+        request: &FactsRequest,
+    ) -> Result<FactsReply, GatewayRefusal> {
         if request.accounts.len() > call::MAX_FACTS_ACCOUNTS {
             return Err(GatewayRefusal::LimitExceeded {});
         }
@@ -164,7 +197,7 @@ impl LocalCustody {
         for account in &request.accounts {
             let (kind, slot) = self.kind(account)?;
             let current = kind
-                .custodian
+                .custodian(version)
                 .facts(&slot)
                 .await
                 .map_err(|error| self.refusal(&error))?;
@@ -182,6 +215,7 @@ impl LocalCustody {
     /// The custody refusal.
     pub async fn refresh(
         &self,
+        version: u16,
         request: &facts::RefreshRequest,
     ) -> Result<RefreshReply, GatewayRefusal> {
         let fence = |fence: &envelope::ExpectedFence| {
@@ -210,7 +244,9 @@ impl LocalCustody {
                     .transpose()?,
             },
         };
-        let facts = self.refresh_with(&request.account, refresh).await?;
+        let facts = self
+            .refresh_with(version, &request.account, refresh)
+            .await?;
         Ok(RefreshReply { facts })
     }
 
@@ -220,19 +256,22 @@ impl LocalCustody {
     /// The custody refusal.
     pub async fn operator_refresh(
         &self,
+        version: u16,
         account: &GatewayAccount,
     ) -> Result<facts::AccountFacts, GatewayRefusal> {
-        self.refresh_with(account, RefreshRequest::Operator).await
+        self.refresh_with(version, account, RefreshRequest::Operator)
+            .await
     }
 
     async fn refresh_with(
         &self,
+        version: u16,
         account: &GatewayAccount,
         request: RefreshRequest,
     ) -> Result<facts::AccountFacts, GatewayRefusal> {
         let (kind, slot) = self.kind(account)?;
         let current = kind
-            .custodian
+            .custodian(version)
             .refresh(&slot, request)
             .await
             .map_err(|error| self.refusal(&error))?;
@@ -245,18 +284,27 @@ impl LocalCustody {
     ///
     /// # Errors
     /// A malformed body is `envelope_invalid`; otherwise the call's refusal.
-    pub async fn call(&self, endpoint: Endpoint, body: &[u8]) -> Result<Vec<u8>, GatewayRefusal> {
+    pub async fn call(
+        &self,
+        version: u16,
+        endpoint: Endpoint,
+        body: &[u8],
+    ) -> Result<Vec<u8>, GatewayRefusal> {
         let invalid = |_| GatewayRefusal::EnvelopeInvalid {};
         let encoded = match endpoint {
-            Endpoint::Facts => {
-                call::encode(&self.facts(&call::decode(body).map_err(invalid)?).await?)
-            }
-            Endpoint::Refresh => {
-                call::encode(&self.refresh(&call::decode(body).map_err(invalid)?).await?)
-            }
+            Endpoint::Facts => call::encode(
+                &self
+                    .facts(version, &call::decode(body).map_err(invalid)?)
+                    .await?,
+            ),
+            Endpoint::Refresh => call::encode(
+                &self
+                    .refresh(version, &call::decode(body).map_err(invalid)?)
+                    .await?,
+            ),
             Endpoint::Admin => match call::decode::<AdminRequest>(body).map_err(invalid)? {
                 AdminRequest::Refresh { account } => call::encode(&AdminResponse::Refreshed {
-                    facts: Box::new(self.operator_refresh(&account).await?),
+                    facts: Box::new(self.operator_refresh(version, &account).await?),
                 }),
                 _ => return Err(GatewayRefusal::ScopeDenied {}),
             },
@@ -347,18 +395,20 @@ impl GatewayService for InProcessGateway {
     fn inject<'a>(
         &'a self,
         (): &'a (),
+        version: u16,
         envelope: &'a RelayEnvelope,
     ) -> ServiceFuture<'a, Injection> {
-        Box::pin(self.custody.inject(envelope))
+        Box::pin(self.custody.inject(version, envelope))
     }
 
     fn call<'a>(
         &'a self,
         (): &'a (),
+        version: u16,
         endpoint: Endpoint,
         body: &'a [u8],
     ) -> ServiceFuture<'a, Vec<u8>> {
-        Box::pin(self.custody.call(endpoint, body))
+        Box::pin(self.custody.call(version, endpoint, body))
     }
 }
 

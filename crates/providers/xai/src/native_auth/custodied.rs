@@ -354,6 +354,14 @@ impl ManagerCore {
     /// the custodian's, which it computed over its own.
     pub(super) fn authority_id(&self) -> Result<String, XaiNativeAuthError> {
         if let Some(store) = &self.store {
+            if self.gateway_v1_authority {
+                return Ok(super::credential_authority_id(
+                    store.path().as_os_str().as_encoded_bytes(),
+                    b"\0xai-route-credential-authority-v2\0",
+                    store.slot_id().as_str(),
+                    self.source_scope.as_deref(),
+                ));
+            }
             return Ok(route_credential_authority_id(
                 store.profile_id().as_str(),
                 store.slot_id().as_str(),

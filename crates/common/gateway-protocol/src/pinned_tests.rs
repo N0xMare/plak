@@ -30,13 +30,20 @@ use crate::header::{RequestHeader, WireHeader};
 use crate::refusal::{GatewayRefusal, RefusalBody};
 use crate::scope::{CallerId, ScopeSet, SourceNet};
 use crate::{
-    BoundedText, GatewayAccount, HexDigest, PROTOCOL_VERSION, SecretText, UuidText, VersionsReply,
+    BoundedText, GatewayAccount, HexDigest, PROTOCOL_VERSION, SUPPORTED_VERSIONS, SecretText,
+    UuidText, VersionsReply,
 };
 
 /// Each version's JSON bodies, `label<TAB>json` per line.
-const PINNED_JSON: &[(u16, &str)] = &[(1, include_str!("pinned/v1.jsonl"))];
+const PINNED_JSON: &[(u16, &str)] = &[
+    (1, include_str!("pinned/v1.jsonl")),
+    (2, include_str!("pinned/v2.jsonl")),
+];
 /// Each version's binary encodings, `label<TAB>hex` per line.
-const PINNED_BINARY: &[(u16, &str)] = &[(1, include_str!("pinned/v1-binary.txt"))];
+const PINNED_BINARY: &[(u16, &str)] = &[
+    (1, include_str!("pinned/v1-binary.txt")),
+    (2, include_str!("pinned/v1-binary.txt")), // v2 has the same binary encoding
+];
 
 const ATTEMPT: &str = "3f2e1d0c-9b8a-4766-a554-433221100fff";
 const INSTANCE: &str = "5c1d2e3f-4a5b-4c6d-8e7f-901234567890";
@@ -167,7 +174,9 @@ pub(crate) fn refusal_samples() -> Vec<GatewayRefusal> {
     vec![
         GatewayRefusal::Unauthenticated {},
         GatewayRefusal::ScopeDenied {},
-        GatewayRefusal::VersionUnsupported { supported: vec![1] },
+        GatewayRefusal::VersionUnsupported {
+            supported: SUPPORTED_VERSIONS.to_vec(),
+        },
         GatewayRefusal::GatewayDisabled {},
         GatewayRefusal::AccountDisabled {},
         GatewayRefusal::AccountUnknown {},
@@ -638,7 +647,7 @@ fn json_lines() -> String {
         &mut lines,
         "versions",
         &VersionsReply {
-            versions: vec![1],
+            versions: SUPPORTED_VERSIONS.to_vec(),
             instance: uuid(INSTANCE),
         },
     );

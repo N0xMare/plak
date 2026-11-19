@@ -85,6 +85,7 @@ pub(super) trait LoginCustody: Send + Sync {
 pub struct SubscriptionCustodian {
     subscriptions: NativeSubscriptions,
     provider: NativeProvider,
+    gateway_v1_authority: bool,
     /// One refresh at a time per account in this process; other processes
     /// serialize on the store's refresh claim.
     refreshing: Arc<
@@ -108,7 +109,17 @@ impl SubscriptionCustodian {
         Self {
             subscriptions,
             provider,
+            gateway_v1_authority: false,
             refreshing: Arc::default(),
+        }
+    }
+
+    /// The previous gateway protocol's view of the same store and refresh lock.
+    #[must_use]
+    pub fn for_gateway_v1(&self) -> Self {
+        Self {
+            gateway_v1_authority: true,
+            ..self.clone()
         }
     }
 
@@ -138,7 +149,7 @@ impl SubscriptionCustodian {
     ) -> Result<Arc<dyn LoginCustody>, CustodyError> {
         super::vertical::require_vertical(self.provider)
             .map_err(|_| CustodyError::UnknownAccount)?
-            .login_custody(subscriptions)
+            .login_custody(subscriptions, self.gateway_v1_authority)
             .await
             .map_err(|error| custody_error(&error))
     }

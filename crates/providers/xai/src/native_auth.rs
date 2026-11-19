@@ -391,6 +391,7 @@ struct ResolutionPause {
 
 struct ManagerCore {
     source_scope: Option<String>,
+    gateway_v1_authority: bool,
     catalog_retries: bool,
     /// The selected slot under local custody; `None` when a custodian holds
     /// the login.
@@ -778,10 +779,24 @@ fn route_credential_authority_id(
     slot_id: &str,
     source_scope: Option<&str>,
 ) -> String {
+    credential_authority_id(
+        profile_id.as_bytes(),
+        b"\0xai-route-credential-authority-v3\0",
+        slot_id,
+        source_scope,
+    )
+}
+
+fn credential_authority_id(
+    basis: &[u8],
+    domain: &[u8],
+    slot_id: &str,
+    source_scope: Option<&str>,
+) -> String {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(profile_id.as_bytes());
-    hasher.update(b"\0xai-route-credential-authority-v3\0");
+    hasher.update(basis);
+    hasher.update(domain);
     hasher.update(slot_id.as_bytes());
     if let Some(scope) = source_scope {
         hasher.update(b"\0plak.account-scope.v1\0");

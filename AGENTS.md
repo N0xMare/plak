@@ -202,7 +202,8 @@ in a change; amend the chapter that owns them.
   upgrade of either side keeps inference and account operations working. Its
   endpoints are fixed and path-versioned; it relays one upstream exchange per
   request, never retries, translates or fails over, and grants no session or
-  store authority. Any change to its endpoints or encodings bumps its version;
+  store authority. Any change to its endpoints, encodings or binding facts
+  bumps its version;
   the previous version's speaker is kept for one bump only.
 - Choose the simplest implementation that fully meets the current architecture.
   Avoid speculative abstractions, configuration, and indirection.

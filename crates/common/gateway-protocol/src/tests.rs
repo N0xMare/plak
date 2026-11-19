@@ -629,6 +629,7 @@ fn caller_keys_round_trip_and_never_print_their_secret() {
 
 #[test]
 fn versions_negotiate_to_the_highest_common_one() {
+    assert_eq!(negotiate(SUPPORTED_VERSIONS, &[1, 2]), Some(2));
     assert_eq!(negotiate(SUPPORTED_VERSIONS, &[1]), Some(1));
     assert_eq!(negotiate(&[3, 4], &[2, 3]), Some(3));
     assert_eq!(negotiate(&[3, 4], &[4, 5]), Some(4));
