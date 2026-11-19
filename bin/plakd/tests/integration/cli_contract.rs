@@ -1208,14 +1208,7 @@ fn session_mutations_require_confirmation_and_context_never_guesses() {
     let usage = run_plak(home, &["usage"]);
     assert!(!usage.status.success());
     assert!(stderr(&usage).contains("gateway_unavailable:"));
-    assert!(
-        usage_text.contains("Turn tokens and context capacity"),
-        "{usage_text}"
-    );
-    assert!(
-        !usage_text.contains("local context estimate"),
-        "{usage_text}"
-    );
+    assert!(stdout(&usage).is_empty());
 }
 
 #[test]
