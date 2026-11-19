@@ -697,6 +697,7 @@ fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
 /// by the reopen itself.
 mod account_continue_crash_cuts {
     use super::*;
+    use crate::runtime::test_support::wait_out_crashed_lease;
     use crate::runtime::{HostBoundary, HostWorkflow};
 
     struct Cut {
@@ -754,28 +755,15 @@ mod account_continue_crash_cuts {
         } else {
             b"codex/b"
         };
-        // A cut inside a turn leaves its branch lease held until it lapses.
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let (actions, events, worker, surface) = loop {
-            // The cut host took the first step, the failed prompt.
-            let (mut config, surface) =
-                continue_host_scripted(root.path(), None, account, &continue_steps(), 2);
-            config.store = Arc::clone(&store);
-            config.state_roots = state_roots.clone();
-            config.session = line_head(store.as_ref(), &tree);
-            match spawn_host_worker(config) {
-                Ok((actions, events, worker)) => break (actions, events, worker, surface),
-                Err(failure) if Instant::now() < deadline => {
-                    assert!(
-                        failure.message().contains("held by another plakd process"),
-                        "the line head reopens: {}",
-                        failure.message()
-                    );
-                    std::thread::sleep(Duration::from_secs(2));
-                }
-                Err(failure) => panic!("the line head reopens: {}", failure.message()),
-            }
-        };
+        wait_out_crashed_lease(&state_roots, head.plakous_locator.unwrap());
+        // The cut host took the first step, the failed prompt.
+        let (mut config, surface) =
+            continue_host_scripted(root.path(), None, account, &continue_steps(), 2);
+        config.store = Arc::clone(&store);
+        config.state_roots = state_roots;
+        config.session = head;
+        let (actions, events, worker) = spawn_host_worker(config)
+            .unwrap_or_else(|failure| panic!("the line head reopens: {}", failure.message()));
         let mut reopened = Vec::new();
         let settle = Instant::now() + Duration::from_secs(3);
         while Instant::now() < settle {

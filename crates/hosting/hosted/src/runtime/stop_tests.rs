@@ -1464,39 +1464,9 @@ fn assert_cut(
     }
 }
 
-/// Waits for a crashed actor's branch release or its existing lease to expire.
-///
-/// Even idle actor drop only requests the separate driver's shutdown. Panic
-/// unwinding can end its executor before graceful lease release finishes. The
-/// process is still alive, so an unreleased claim must expire normally.
 fn wait_out_crashed_lease(lost: &Lost) {
     let locator = lost.store.load(&lost.id).unwrap().plakous_locator.unwrap();
-    let connection = rusqlite::Connection::open_with_flags(
-        lost.state_roots.runtime_database(),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
-    let deadline = Instant::now()
-        + Duration::from_secs(
-            lost.state_roots
-                .runtime_sessions()
-                .unwrap()
-                .lease_period_seconds()
-                + 2,
-        );
-    while Instant::now() < deadline {
-        let held: bool = connection
-            .query_row(
-                "SELECT active_owner IS NOT NULL FROM branches WHERE session_id=?1 AND branch_id=?2",
-                rusqlite::params![locator.session_id().to_string(), locator.branch_id().to_string()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        if !held {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    crate::runtime::test_support::wait_out_crashed_lease(&lost.state_roots, locator);
 }
 
 fn load_tree(

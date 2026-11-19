@@ -161,6 +161,37 @@ pub(super) fn durable_authority_count(database: &std::path::Path, table: &str) -
         .unwrap()
 }
 
+/// Waits for a crashed actor's branch release or its existing lease to expire.
+///
+/// Even idle actor drop only requests the separate driver's shutdown. Panic
+/// unwinding can end its executor before graceful lease release finishes. The
+/// process is still alive, so an unreleased claim must expire normally.
+pub(super) fn wait_out_crashed_lease(
+    roots: &ProductStateRoots,
+    locator: plakous::sessions::SessionLocator,
+) {
+    let connection = rusqlite::Connection::open_with_flags(
+        roots.runtime_database(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let deadline = Instant::now()
+        + Duration::from_secs(roots.runtime_sessions().unwrap().lease_period_seconds() + 2);
+    while Instant::now() < deadline {
+        let held: bool = connection
+            .query_row(
+                "SELECT active_owner IS NOT NULL FROM branches WHERE session_id=?1 AND branch_id=?2",
+                rusqlite::params![locator.session_id().to_string(), locator.branch_id().to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !held {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 pub(super) fn fresh_injected_attached_host(
     root: &std::path::Path,
 ) -> (HostConfig, Arc<ScriptedRuntimeFactory>) {
