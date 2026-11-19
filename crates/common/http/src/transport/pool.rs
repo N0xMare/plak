@@ -7,6 +7,7 @@
 //! later checkout finds them.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -38,8 +39,27 @@ pub(crate) struct PoolScope {
     pub(crate) generation: u64,
 }
 
+/// Holds the configuration alive so its identity cannot be recycled while
+/// any key still refers to it.
+#[derive(Clone)]
+pub(super) struct TlsConfigKey(pub(super) Arc<rustls::ClientConfig>);
+
+impl PartialEq for TlsConfigKey {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for TlsConfigKey {}
+
+impl Hash for TlsConfigKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(Arc::as_ptr(&self.0), state);
+    }
+}
+
 /// Everything that decides whether one connection may carry another request.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub(super) struct PoolKey {
     pub(super) scope: Option<Arc<PoolScope>>,
     pub(super) host: String,
@@ -47,9 +67,7 @@ pub(super) struct PoolKey {
     /// A plain loopback connection never carries an HTTPS origin's request.
     pub(super) plain_loopback: bool,
     pub(super) address_policy: Option<AddressPolicy>,
-    /// Address of the shared Rustls configuration. Its owner (the pooled
-    /// client or relay server) holds the same `Arc` for the pool's lifetime.
-    pub(super) tls_config: usize,
+    pub(super) tls_config: TlsConfigKey,
     pub(super) policy: TransportPolicy,
     pub(super) settings: ConnectionSettings,
 }
@@ -156,7 +174,7 @@ impl Pool {
             {
                 let oldest = idle
                     .iter()
-                    .min_by_key(|(_, entries)| entries.last().map(|entry| entry.since))
+                    .min_by_key(|(_, entries)| entries.iter().map(|entry| entry.since).max())
                     .map(|(key, _)| key.clone());
                 oldest.and_then(|key| idle.remove(&key))
             } else {
@@ -192,7 +210,7 @@ impl Pool {
     }
 
     #[cfg(test)]
-    pub(super) fn idle_count(&self) -> usize {
+    pub(crate) fn idle_count(&self) -> usize {
         self.idle
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

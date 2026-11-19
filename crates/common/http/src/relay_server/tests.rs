@@ -141,6 +141,7 @@ fn ok_reply(content_type: &str, body: &[u8]) -> Vec<u8> {
 /// The test gateway's policy: one pinned origin and path prefix, one
 /// custodied `authorization`, and a fence whose generation a test can move.
 struct Service {
+    binding: Mutex<HexDigest>,
     generation: AtomicU64,
     moves_per_inject: AtomicU64,
     held: Arc<AtomicUsize>,
@@ -168,6 +169,7 @@ impl Drop for Hold {
 impl Service {
     fn new() -> Arc<Self> {
         Arc::new(Self {
+            binding: Mutex::new(binding()),
             generation: AtomicU64::new(7),
             moves_per_inject: AtomicU64::new(0),
             held: Arc::new(AtomicUsize::new(0)),
@@ -190,7 +192,7 @@ impl Service {
                 selection_epoch_digest: None,
             },
             identity: Some(plakous_gateway_protocol::facts::IdentityFacts {
-                account_binding: binding(),
+                account_binding: self.binding.lock().unwrap().clone(),
                 credential_authority: binding(),
                 email: None,
                 plan: None,
@@ -237,7 +239,7 @@ impl GatewayService for Service {
                 self.moves_per_inject.store(moves - 1, Ordering::SeqCst);
                 self.generation.fetch_add(1, Ordering::SeqCst);
             }
-            if envelope.expected.account_binding != binding() {
+            if envelope.expected.account_binding != *self.binding.lock().unwrap() {
                 return Err(GatewayRefusal::AccountChanged {});
             }
             if envelope.expected.generation != self.generation.load(Ordering::SeqCst) {

@@ -19,8 +19,11 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_rustls::server::TlsStream;
 
-use super::{IDLE_BOUND, MAX_IDLE_PER_KEY, Pool};
+use super::{
+    ConnectionSettings, IDLE_BOUND, IdleConnection, MAX_IDLE_PER_KEY, Pool, PoolKey, TlsConfigKey,
+};
 use crate::transport::test_tls::{Endpoint, endpoint_with_versions};
+use crate::transport::{ConnectionTask, ProgressSlot, RequestProgress};
 use crate::{
     Bytes, CancellationToken, Client, ConnectionUse, ErrorKind, ExchangeControl, Failure,
     HeaderMap, Limits, Method, Origin, Phase, Request, TlsCause, TransmissionFact, WireProtocol,
@@ -30,6 +33,71 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const H1: &[u8] = b"http/1.1";
 const H2: &[u8] = b"h2";
+
+#[test]
+fn a_tls_config_key_keeps_its_configuration_allocation_alive() -> TestResult {
+    let client = Client::new(Limits::default())?;
+    let config = &client.inner.tls_config;
+    let owner = Arc::downgrade(config);
+    let key = TlsConfigKey(Arc::clone(config));
+    let same = key.clone();
+    let other = TlsConfigKey(Arc::new((**config).clone()));
+    drop(client);
+    assert!(owner.upgrade().is_some());
+    assert!(key == same);
+    assert!(key != other);
+    drop((key, same));
+    assert!(owner.upgrade().is_none());
+    Ok(())
+}
+
+#[test]
+fn a_pool_of_64_keys_evicts_the_key_whose_newest_socket_is_oldest() -> TestResult {
+    let pool = Pool::new(Some(64));
+    let client = Client::new(Limits::default())?;
+    let key = |port| PoolKey {
+        scope: None,
+        host: "example.test".into(),
+        port,
+        plain_loopback: false,
+        address_policy: None,
+        tls_config: TlsConfigKey(Arc::clone(&client.inner.tls_config)),
+        policy: client.inner.policy,
+        settings: ConnectionSettings::new(client.limits()),
+    };
+    let start = Instant::now();
+    let park = |port, milliseconds| {
+        pool.checkin(
+            key(port),
+            IdleConnection {
+                connection: ConnectionTask::closed(),
+                slot: ProgressSlot::new(Arc::new(RequestProgress::new(true, false, 0))),
+                protocol: WireProtocol::Http1,
+                since: start + Duration::from_millis(milliseconds),
+            },
+        );
+    };
+    // A task that records its idle time first may acquire the pool lock last.
+    park(1, 100);
+    park(1, 0);
+    park(2, 1);
+    park(2, 2);
+    for port in 3..=65 {
+        park(port, u64::from(port));
+    }
+    let idle = pool.idle.lock().map_err(|_| "idle pool lock poisoned")?;
+    assert_eq!(idle.len(), 64);
+    assert!(
+        idle.contains_key(&key(1)),
+        "a much newer socket kept this key"
+    );
+    assert!(
+        !idle.contains_key(&key(2)),
+        "the whole oldest key was evicted"
+    );
+    assert!(idle.contains_key(&key(65)));
+    Ok(())
+}
 
 async fn endpoint(alpn: &[u8]) -> TestResult<Endpoint> {
     endpoint_with_versions(alpn, rustls::DEFAULT_VERSIONS).await
@@ -519,25 +587,23 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
             Ok(())
         });
         pool(&client)?.checkin(
-            super::PoolKey {
+            PoolKey {
                 scope: None,
                 host: address.ip().to_string(),
                 port: address.port(),
                 plain_loopback: false,
                 address_policy: None,
-                tls_config: Arc::as_ptr(&client.inner.tls_config) as usize,
+                tls_config: TlsConfigKey(Arc::clone(&client.inner.tls_config)),
                 policy: client.inner.policy,
-                settings: super::ConnectionSettings::new(client.limits()),
+                settings: ConnectionSettings::new(client.limits()),
             },
-            super::IdleConnection {
-                connection: crate::transport::ConnectionTask::new(driver, None),
-                slot: crate::transport::ProgressSlot::new(Arc::new(
-                    crate::transport::RequestProgress::new(
-                        true,
-                        protocol == WireProtocol::Http2,
-                        0,
-                    ),
-                )),
+            IdleConnection {
+                connection: ConnectionTask::new(driver, None),
+                slot: ProgressSlot::new(Arc::new(RequestProgress::new(
+                    true,
+                    protocol == WireProtocol::Http2,
+                    0,
+                ))),
                 protocol,
                 since: Instant::now(),
             },

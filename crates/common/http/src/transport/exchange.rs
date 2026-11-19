@@ -7,6 +7,7 @@ use http::Request as WireRequest;
 use rustls::pki_types::ServerName;
 use tokio_rustls::TlsConnector;
 
+use super::pool::TlsConfigKey;
 use crate::{
     ConnectionUse, ErrorKind, ExchangeControl, Failure, Origin, Phase, Request, TransmissionFact,
     WireProtocol,
@@ -171,7 +172,7 @@ impl Client {
             port: origin.port(),
             plain_loopback: origin.is_loopback_http(),
             address_policy: self.inner.address_policy,
-            tls_config: Arc::as_ptr(&self.inner.tls_config) as usize,
+            tls_config: TlsConfigKey(Arc::clone(&self.inner.tls_config)),
             policy: self.inner.policy,
             settings: ConnectionSettings::new(&self.inner.limits),
         }
@@ -291,9 +292,9 @@ impl Client {
 
     /// Sends the request on one negotiated connection and validates the head.
     ///
-    /// Only a reused connection fails [`Exchanged::Stale`]: one whose stream
-    /// failed before accepting a single byte of this request, so the peer
-    /// cannot have seen any of it.
+    /// Only a reused connection fails [`Exchanged::Stale`]: its stream
+    /// reports a protocol error before accepting any request plaintext.
+    /// The peer can have received at most an incomplete request prefix.
     async fn exchange(
         &self,
         live: Live,

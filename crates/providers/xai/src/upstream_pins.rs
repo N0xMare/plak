@@ -70,6 +70,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_responses_pins_are_pooled() {
+        for (pins, origin, path) in [
+            (
+                XAI_API_UPSTREAM_PINS,
+                XAI_PLATFORM_API_KEY_ORIGIN,
+                XAI_PLATFORM_RESPONSES_PATH,
+            ),
+            (
+                SUPERGROK_UPSTREAM_PINS,
+                SUPERGROK_RESPONSES_ORIGIN,
+                SUPERGROK_RESPONSES_PATH,
+            ),
+        ] {
+            assert_eq!(
+                pins.iter()
+                    .filter(|pin| pin.pool_inference)
+                    .collect::<Vec<_>>(),
+                [pinned(pins, "POST", origin, path).unwrap()],
+            );
+        }
+    }
+
+    #[test]
     fn the_send_sites_match_their_rows_and_nothing_else_does() {
         let billing = "/v1/billing?format=credits";
         assert!(

@@ -6425,8 +6425,11 @@ request and a fully drained, clean response may serve another request, and
 only for the same origin, transport settings, protocol version and exact
 credential fence. A socket idle for five seconds is not reused. The pool is
 in-memory and ends with the gateway process. There is still one upstream
-exchange per relay: only the transport's existing pre-write stale-socket
-replacement applies, never a resend after any request byte was accepted.
+exchange per relay. The transport may replace a reused socket once within
+that exchange on a protocol error before its TLS stream accepts any request
+plaintext; the peer can have received at most an incomplete request prefix.
+A failure after the TLS stream accepts any request plaintext is not
+replaced (chapter 01 §13.1).
 Non-inference relay rows remain one-shot.
 
 Other admin verbs stay on the account bridge. The

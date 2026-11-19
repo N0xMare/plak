@@ -89,6 +89,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_responses_pins_are_pooled() {
+        for (pins, origin, path) in [
+            (
+                OPENAI_API_UPSTREAM_PINS,
+                OPENAI_PLATFORM_ORIGIN,
+                "/v1/responses",
+            ),
+            (
+                CODEX_UPSTREAM_PINS,
+                OPENAI_CHATGPT_ORIGIN,
+                "/backend-api/codex/responses",
+            ),
+        ] {
+            assert_eq!(
+                pins.iter()
+                    .filter(|pin| pin.pool_inference)
+                    .collect::<Vec<_>>(),
+                [pinned(pins, "POST", origin.trim_end_matches('/'), path).unwrap()],
+            );
+        }
+    }
+
+    #[test]
     fn the_send_sites_match_their_rows_and_nothing_else_does() {
         let platform = OPENAI_PLATFORM_ORIGIN.trim_end_matches('/');
         let chatgpt = OPENAI_CHATGPT_ORIGIN.trim_end_matches('/');

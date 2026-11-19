@@ -62,6 +62,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_chat_messages_and_responses_pins_are_pooled() {
+        let pins = OPENROUTER_UPSTREAM_PINS;
+        let paths = [
+            "/api/v1/chat/completions",
+            "/api/v1/messages",
+            "/api/v1/responses",
+        ];
+        assert_eq!(
+            pins.iter()
+                .filter(|pin| pin.pool_inference)
+                .collect::<Vec<_>>(),
+            paths.map(|path| pinned(pins, "POST", OPENROUTER_PLATFORM_ORIGIN, path).unwrap()),
+        );
+    }
+
+    #[test]
     fn the_send_sites_match_their_rows_and_nothing_else_does() {
         let origin = OPENROUTER_PLATFORM_ORIGIN;
         for (method, path) in [

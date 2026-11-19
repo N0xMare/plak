@@ -201,7 +201,10 @@ in a change; amend the chapter that owns them.
   own version and of the immediately previous version, so that a planned
   upgrade of either side keeps inference and account operations working. Its
   endpoints are fixed and path-versioned; it relays one upstream exchange per
-  request, never retries, translates or fails over, and grants no session or
+  request, never retries, translates or fails over (a reused idle upstream
+  socket that fails with a protocol error before its TLS stream accepts any
+  request plaintext may be replaced once within that exchange, with the peer
+  receiving at most an incomplete request prefix), and grants no session or
   store authority. Any change to its endpoints, encodings or binding facts
   bumps its version;
   the previous version's speaker is kept for one bump only.

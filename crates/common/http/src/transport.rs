@@ -630,12 +630,13 @@ impl Client {
     ///
     /// The request goes out on one connection and is never redirected. An
     /// unpooled client opens a fresh connection for it. A [`Self::pooled`]
-    /// client first takes an idle connection it kept; if that connection fails
-    /// before accepting any byte of the request, the request is sent once more
-    /// on a fresh connection and reports [`ConnectionUse::ReplacedStale`]. No
-    /// other failure is retried. Dropping this future aborts any owned
-    /// connection task. Cancellation and timeouts abort and join owned work
-    /// before returning.
+    /// client first takes an idle connection it kept; if that connection
+    /// fails with a protocol error before the stream accepts any request
+    /// plaintext, the peer can have received at most an incomplete request
+    /// prefix. The connection is replaced once within the same exchange,
+    /// reporting [`ConnectionUse::ReplacedStale`]. No other failure is retried.
+    /// Dropping this future aborts any owned connection task. Cancellation
+    /// and timeouts abort and join owned work before returning.
     ///
     /// # Errors
     ///

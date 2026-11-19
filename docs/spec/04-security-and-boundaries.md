@@ -1890,8 +1890,11 @@ credentials remain per-request headers, not TLS client credentials or a
 connection login. The upstream peer may associate prior traffic with a live
 connection, so a different authority or credential generation never uses
 that socket. Only a fully sent request and cleanly drained response can return
-a socket. A stale checkout may be replaced once only on a protocol error before
-the socket accepts any byte of the request (chapter 01 §13.1).
+a socket. On a protocol error before the reused socket's TLS stream accepts
+any request plaintext, the gateway may replace the socket once within the
+same exchange. A failed write may have emitted ciphertext, but the peer can
+have received at most an incomplete request prefix. A failure after the TLS
+stream accepts any request plaintext is not replaced (chapter 01 §13.1).
 
 A custodied placeholder that reaches a direct exchange is refused unsent,
 so a route can never send one

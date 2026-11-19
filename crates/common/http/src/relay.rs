@@ -242,6 +242,21 @@ impl std::fmt::Debug for RelayClient {
     }
 }
 
+#[cfg(all(test, feature = "gateway-server", feature = "fault-injection"))]
+mod test_support {
+    use super::RelayClient;
+
+    impl RelayClient {
+        pub(crate) fn with_test_version(mut self, version: u16) -> Self {
+            *self
+                .version
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(version);
+            self
+        }
+    }
+}
+
 impl RelayClient {
     /// A client of the gateway at `endpoint`, presenting `key` (a caller key,
     /// `plakgw1.<id>.<secret>`) when one is given. A same-user Unix socket

@@ -59,6 +59,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_messages_pins_are_pooled() {
+        for (pins, path) in [
+            (ANTHROPIC_API_UPSTREAM_PINS, "/v1/messages"),
+            (CLAUDE_UPSTREAM_PINS, "/v1/messages?beta=true"),
+        ] {
+            assert_eq!(
+                pins.iter()
+                    .filter(|pin| pin.pool_inference)
+                    .collect::<Vec<_>>(),
+                [pinned(pins, "POST", ANTHROPIC_PLATFORM_ORIGIN, path).unwrap()],
+            );
+        }
+    }
+
+    #[test]
     fn the_send_sites_match_their_rows_and_nothing_else_does() {
         assert_eq!(
             format!("{ANTHROPIC_MESSAGES_PATH}?beta=true"),
