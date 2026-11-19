@@ -91,7 +91,6 @@ pub(crate) fn run_doctor(
     // rows come from the gateway's admin status, and a custody that does not
     // resolve fails those rows instead of reading local state.
     let custody = services.custody();
-    let openrouter_catalog = product_doctor::OpenRouterCatalogStatus::Gateway;
     // `config OK` means the effective config and all template files parsed. Say before launch
     // whether the template new sessions bind is actually attachable. Both
     // inputs are local — the persisted catalog and the offline credential
@@ -179,7 +178,6 @@ pub(crate) fn run_doctor(
         composition_host,
         python_containment_required: selected_composition.requires_python_worker(),
         runtime_directory: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
-        openrouter_catalog,
         root_template,
         spawn_templates,
         runner_ssh: product_doctor::runner_ssh::probe(

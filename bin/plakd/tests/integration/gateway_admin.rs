@@ -396,7 +396,7 @@ fn gateway_reads_allowance_and_allows_login_after_refresh_quarantines_a_grant() 
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.lines().any(|line| line == "claude: rate-limited"),
+        stdout.contains("rate-limited") && stdout.contains("Limits"),
         "{stdout}"
     );
 
@@ -725,7 +725,6 @@ fn gateway_cli_rosters_print_successful_and_refused_rows() {
             &["key", "status"][..],
             "openai: credential=signed-out source=missing",
         ),
-        (&["usage"][..], "claude: rate-limited"),
     ] {
         let output = command(gateway.root.path()).args(args).output().unwrap();
         assert!(output.status.success(), "{args:?}: {output:?}");
@@ -737,6 +736,16 @@ fn gateway_cli_rosters_print_successful_and_refused_rows() {
             "{rows}"
         );
     }
+    let usage = command(gateway.root.path())
+        .args(["usage"])
+        .output()
+        .unwrap();
+    assert!(usage.status.success(), "{usage:?}");
+    let limits = String::from_utf8(usage.stdout).unwrap();
+    assert!(
+        limits.contains("rate-limited") && limits.contains("scope_denied"),
+        "{limits}"
+    );
     let single = command(gateway.root.path())
         .args(["status", "codex"])
         .output()

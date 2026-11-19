@@ -6,7 +6,6 @@
 //! and two-GET inspection used by `plakd models` and `plakd doctor`. These
 //! product diagnostics are never part of a turn.
 
-use super::OpenRouterCatalogProbe;
 use std::sync::Arc;
 
 use plakous::openrouter::{
@@ -18,35 +17,17 @@ use crate::home::paths::PlakPaths;
 use plakous_hosted::openrouter::OpenRouterCredentials;
 use plakous_hosted::{CliFailure, CliResult};
 
-#[derive(Clone, Default)]
-pub(crate) struct UsageReceipt {
-    pub(crate) dispatched: Arc<std::sync::Mutex<Option<String>>>,
-}
-impl UsageReceipt {
-    pub(crate) fn generation(&self) -> Option<String> {
-        self.dispatched
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-}
-
 /// Plak's credentials: the product secret store under one product home.
 pub struct ProductOpenRouterCredentials {
     paths: PlakPaths,
     custody: crate::gateway::HostCustody,
-    usage_receipt: Option<UsageReceipt>,
 }
 
 impl ProductOpenRouterCredentials {
     /// The OpenRouter credentials of one product home under `custody`.
     #[must_use]
     pub(crate) const fn new(paths: PlakPaths, custody: crate::gateway::HostCustody) -> Self {
-        Self {
-            paths,
-            custody,
-            usage_receipt: None,
-        }
+        Self { paths, custody }
     }
 
     /// A handle for a [`plakous_hosted::openrouter::ProductOpenRouterSpec`].
@@ -59,53 +40,11 @@ impl ProductOpenRouterCredentials {
     }
 }
 
-pub(crate) fn usage_credentials(
-    paths: &PlakPaths,
-    custody: crate::gateway::HostCustody,
-) -> (Arc<dyn OpenRouterCredentials>, UsageReceipt) {
-    let receipt = UsageReceipt::default();
-    (
-        Arc::new(ProductOpenRouterCredentials {
-            paths: paths.clone(),
-            custody,
-            usage_receipt: Some(receipt.clone()),
-        }),
-        receipt,
-    )
-}
-
-pub(crate) fn key_usage_fence(
-    paths: &PlakPaths,
-    account: &plakous_hosted::account::AccountRef,
-) -> Result<Option<String>, String> {
-    if crate::home::secrets::key_status(paths, account.as_str())?.source
-        == crate::home::secrets::KeySource::Missing
-    {
-        return Ok(None);
-    }
-    ProductOpenRouterApiKeySource::new(paths.clone(), account.clone())
-        .map_err(|_| "key authority unavailable".to_owned())?
-        .generation()
-        .map(|generation| Some(generation.fingerprint().to_hex()))
-        .map_err(|_| "key generation unavailable".to_owned())
-}
-
 impl OpenRouterCredentials for ProductOpenRouterCredentials {
     fn custody(&self) -> plakous::custody::Custody {
         self.custody.route_custody()
     }
 
-    fn usage_read(
-        &self,
-        account: &plakous_hosted::account::AccountRef,
-    ) -> CliResult<plakous_hosted::openrouter::OpenRouterUsageRead> {
-        let (credentials, observer) = super::usage::capture(&self.paths, &self.custody, account);
-        Ok(plakous_hosted::openrouter::OpenRouterUsageRead {
-            source: credentials.source(account)?,
-            label: credentials.key_label(account)?,
-            observer: Some(observer),
-        })
-    }
     fn key_label(&self, account: &plakous_hosted::account::AccountRef) -> CliResult<String> {
         require_openrouter(account)?;
         if self.custody.gateway().is_some() {
@@ -147,8 +86,7 @@ impl OpenRouterCredentials for ProductOpenRouterCredentials {
                     .map_err(|error| CliFailure::new(error.to_string()))?,
             ));
         }
-        let mut source = ProductOpenRouterApiKeySource::new(self.paths.clone(), account.clone())?;
-        source.usage_receipt = self.usage_receipt.clone();
+        let source = ProductOpenRouterApiKeySource::new(self.paths.clone(), account.clone())?;
         Ok(Arc::new(source))
     }
 }
@@ -163,6 +101,26 @@ fn require_openrouter(account: &plakous_hosted::account::AccountRef) -> CliResul
         );
     }
     Ok(())
+}
+
+pub(crate) fn gateway_usage(
+    view: serde_json::Value,
+    observed_ms: u64,
+    account: &str,
+) -> CliResult<plakous_hosted::subscription_usage::VerticalObservation> {
+    let nanos = u32::try_from(observed_ms % 1000).unwrap_or(0) * 1_000_000;
+    let observed = plakous::model::Timestamp::new(observed_ms / 1000, nanos)
+        .map_err(|_| CliFailure::new("invalid gateway observation time"))?;
+    let body = serde_json::to_vec(&std::collections::BTreeMap::from([("data", view)]))
+        .map_err(|_| CliFailure::new("invalid gateway allowance view"))?;
+    let usage = plakous::openrouter::decode_openrouter_key_usage(&body, observed)
+        .map_err(|_| CliFailure::new("invalid gateway OpenRouter allowance"))?;
+    Ok(
+        plakous_hosted::subscription_usage::VerticalObservation::OpenRouterKey(
+            Box::new(usage),
+            account.to_owned(),
+        ),
+    )
 }
 
 fn key_usage_label(status: &crate::home::secrets::KeyStatus) -> CliResult<String> {
@@ -181,7 +139,6 @@ struct ProductOpenRouterApiKeySource {
     paths: PlakPaths,
     account: plakous_hosted::account::AccountRef,
     binding: OpenRouterCredentialBinding,
-    usage_receipt: Option<UsageReceipt>,
 }
 
 impl ProductOpenRouterApiKeySource {
@@ -195,7 +152,6 @@ impl ProductOpenRouterApiKeySource {
             paths,
             account,
             binding,
-            usage_receipt: None,
         })
     }
 
@@ -254,13 +210,6 @@ impl plakous::api_key::ApiKeySource<OpenRouterCredentialRequest<'_>, OpenRouterC
         {
             return Err(plakous::api_key::ApiKeyError::BindingMismatch);
         }
-        if let Some(receipt) = &self.usage_receipt {
-            *receipt
-                .dispatched
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(expected.fingerprint().to_hex());
-        }
         Ok(key)
     }
 }
@@ -273,7 +222,8 @@ pub(crate) async fn list_models(
 ) -> CliResult<Vec<String>> {
     let credentials = ProductOpenRouterCredentials::new(paths.clone(), custody);
     credentials.preflight(account)?;
-    let client = OpenRouterChatClient::connect_with_retention(
+    let client = OpenRouterChatClient::connect_with_retention_in(
+        &credentials.custody(),
         credentials.source(account)?,
         OpenRouterRetentionPolicy::gateway_default(),
     )
@@ -283,69 +233,6 @@ pub(crate) async fn list_models(
         .list_models()
         .await
         .map_err(|error| CliFailure::new(error.to_string()))
-}
-
-/// Two-GET OpenRouter catalog inspection. Never dispatches Chat/Responses/Messages.
-#[must_use]
-pub fn probe_openrouter_catalog_allowlist(
-    paths: &PlakPaths,
-    account: Option<&str>,
-    model: Option<&str>,
-) -> OpenRouterCatalogProbe {
-    let selected = match account
-        .unwrap_or("openrouter")
-        .parse::<plakous_hosted::account::AccountRef>()
-    {
-        Ok(selected) if selected.vertical() == plakous_hosted::account::Vertical::OpenRouter => {
-            selected
-        }
-        _ => return OpenRouterCatalogProbe::KeyPresentNoModel,
-    };
-    let key_present = crate::home::secrets::resolve_api_key(paths, selected.as_str())
-        .ok()
-        .flatten()
-        .is_some();
-    if !key_present {
-        return OpenRouterCatalogProbe::NotConfigured;
-    }
-    let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
-        return OpenRouterCatalogProbe::KeyPresentNoModel;
-    };
-    if account.is_none() {
-        return OpenRouterCatalogProbe::KeyPresentNoModel;
-    }
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => return OpenRouterCatalogProbe::Failed(error.to_string()),
-    };
-    let paths = paths.clone();
-    let model = model.to_owned();
-    runtime.block_on(async move {
-        let source = match ProductOpenRouterApiKeySource::new(paths, selected) {
-            Ok(source) => source,
-            Err(error) => return OpenRouterCatalogProbe::Failed(error.message().to_owned()),
-        };
-        let client = match OpenRouterChatClient::connect_with_retention(
-            Arc::new(source),
-            OpenRouterRetentionPolicy::gateway_default(),
-        )
-        .and_then(OpenRouterChatClient::with_plak_attribution)
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return OpenRouterCatalogProbe::Failed(format!(
-                    "OpenRouter connection is invalid: {error}"
-                ));
-            }
-        };
-        match client.discover_exact(&model).await {
-            Ok(_) => OpenRouterCatalogProbe::Ok,
-            Err(error) => OpenRouterCatalogProbe::Failed(error.to_string()),
-        }
-    })
 }
 
 #[cfg(test)]

@@ -286,11 +286,11 @@ mod tests {
     #[test]
     fn gateway_renders_both_platform_goldens() {
         let homes = [
-            ("HOME", "/home/u &<>%\"\\"),
-            ("PLAK_HOME", "/home/u &<>%\"\\/product"),
-            ("XDG_STATE_HOME", "/home/u &<>%\"\\/state"),
+            ("HOME", "/fixture/a &<>%\"\\"),
+            ("PLAK_HOME", "/fixture/a &<>%\"\\/product"),
+            ("XDG_STATE_HOME", "/fixture/a &<>%\"\\/state"),
         ];
-        let executable = "/home/u &<>%\"\\/.local/bin/plakd-gateway";
+        let executable = "/fixture/a &<>%\"\\/.local/bin/plakd-gateway";
         assert_eq!(
             systemd_unit(executable, &homes),
             include_str!("../../tests/goldens/plak-gateway.service")

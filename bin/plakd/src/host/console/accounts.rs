@@ -3,8 +3,6 @@
 use super::{diagnostic, unavailable, validation};
 use crate::account_choice::readiness;
 use crate::home::paths::PlakPaths;
-#[cfg(test)]
-use crate::home::secrets;
 use plakd_wire_types::console::{
     AccountCustody, AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus,
     NativeStatus, ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope, UnavailableCode,
@@ -119,7 +117,7 @@ pub(super) fn exact(value: &str) -> Result<AccountRef, ReadRefusal> {
 
 pub(super) async fn roster(
     application: &Reader,
-    paths: &PlakPaths,
+    _paths: &PlakPaths,
     selected: Option<&str>,
 ) -> Result<Roster, ReadRefusal> {
     if let Some(selected) = selected {
@@ -131,42 +129,12 @@ pub(super) async fn roster(
             truncated: false,
         });
     }
-    if application.custody.admin().is_some() {
-        let custody = application.custody.clone();
-        return tokio::task::spawn_blocking(move || custody.admin().map(gateway_roster))
-            .await
-            .ok()
-            .flatten()
-            .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::Storage));
-    }
-    #[cfg(not(test))]
-    {
-        let _ = paths;
-        Err(unavailable(ReadScope::Accounts, UnavailableCode::Storage))
-    }
-    #[cfg(test)]
-    local_roster(application, paths).await
-}
-
-#[cfg(test)]
-async fn local_roster(application: &Reader, paths: &PlakPaths) -> Result<Roster, ReadRefusal> {
-    let (accounts, unavailable, truncated) =
-        readiness::local_roster(&application.subscriptions, paths).await;
-    let diagnostics = unavailable
-        .into_iter()
-        .map(|vertical| {
-            diagnostic(
-                "enumeration_unavailable",
-                Some(vertical.as_str()),
-                "account names could not be read",
-            )
-        })
-        .collect();
-    Ok(Roster {
-        accounts,
-        diagnostics,
-        truncated,
-    })
+    let custody = application.custody.clone();
+    tokio::task::spawn_blocking(move || custody.admin().map(gateway_roster))
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
 }
 
 fn custody(host: &crate::gateway::HostCustody) -> AccountCustody {
@@ -179,30 +147,11 @@ fn custody(host: &crate::gateway::HostCustody) -> AccountCustody {
 
 fn key_status(
     application: &Reader,
-    paths: &PlakPaths,
+    _paths: &PlakPaths,
     account: &AccountRef,
 ) -> Result<KeyStatus, ()> {
-    if let Some(link) = application.custody.admin() {
-        return gateway_key(link, account).map(gateway_key_status);
-    }
-    #[cfg(not(test))]
-    {
-        let _ = paths;
-        Err(())
-    }
-    #[cfg(test)]
-    secrets::key_status(paths, account.as_str())
-        .map(|key| KeyStatus {
-            source: match key.source {
-                secrets::KeySource::Env => KeySource::Environment,
-                secrets::KeySource::File => KeySource::File,
-                secrets::KeySource::Missing => KeySource::Missing,
-            },
-            fingerprint: key.fingerprint,
-            environment_override: key.env_var.is_some(),
-            shadowed_file_fingerprint: key.shadowed_file_fingerprint,
-        })
-        .map_err(|_| ())
+    let link = application.custody.admin().ok_or(())?;
+    gateway_key(link, account).map(gateway_key_status)
 }
 
 pub(super) async fn status(

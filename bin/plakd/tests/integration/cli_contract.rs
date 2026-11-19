@@ -1209,6 +1209,19 @@ fn session_mutations_require_confirmation_and_context_never_guesses() {
     assert!(!usage.status.success());
     assert!(stderr(&usage).contains("gateway_unavailable:"));
     assert_eq!(stdout(&usage), "");
+    let _gateway = local_gateway(home);
+    let usage = run_plak(home, &["usage"]);
+    assert!(usage.status.success(), "{}", stderr(&usage));
+    let limits = stdout(&usage);
+    assert!(
+        limits.contains("Cost:") && limits.contains("not available"),
+        "{limits}"
+    );
+    assert!(!limits.contains("$0"), "{limits}");
+    assert!(
+        limits.contains("Turn tokens and context capacity"),
+        "{limits}"
+    );
 }
 
 #[test]

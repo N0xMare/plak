@@ -14,10 +14,7 @@ pub use plakous_hosted::runtime::HostLaunchNativeModelFact;
 use crate::cli_output;
 use crate::commands::support::native_subscription_failure;
 use crate::home::paths::{self, PlakPaths};
-use crate::home::secrets;
 use crate::product_config::ProductCompositionSelection;
-#[cfg(test)]
-use crate::shell::services::Services;
 use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliResult};
 
@@ -134,15 +131,6 @@ where
     first
 }
 
-/// Minimal backend for building host provider/model metadata.
-pub trait PresentationBackend {
-    /// Offline native-subscription status for one provider.
-    fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus>;
-
-    /// Authenticated native model catalog for one provider.
-    fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>>;
-}
-
 struct NativePresentationBackend {
     executor: ApplicationExecutor,
     subscriptions: NativeSubscriptions,
@@ -168,9 +156,6 @@ impl NativePresentationBackend {
             state_home,
         })
     }
-}
-
-impl PresentationBackend for NativePresentationBackend {
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
         self.executor
             .block_on(crate::commands::support::offline_subscription_status(
@@ -235,16 +220,21 @@ pub(crate) fn catalog_bundle_at(
     custody: &crate::gateway::HostCustody,
     state_home: Option<&std::path::Path>,
 ) -> CliResult<HostCatalogBundle> {
+    let Some(gateway) = custody.admin() else {
+        return Ok(HostCatalogBundle {
+            providers: Vec::new(),
+            sections: plakous_host_protocol::views::ReadyCatalog::default(),
+            native_models: Vec::new(),
+        });
+    };
     let mut backend = state_home
         .map(|state| NativePresentationBackend::new(paths, state.to_path_buf(), custody))
         .transpose()?;
     Ok(catalog_bundle_with_backend(
         paths,
-        backend
-            .as_mut()
-            .map(|backend| backend as &mut dyn PresentationBackend),
+        backend.as_mut(),
         ProductCompositionSelection::FollowCatalog,
-        custody.admin(),
+        gateway,
     ))
 }
 
@@ -259,35 +249,6 @@ pub(crate) fn catalog_values(
 )> {
     let bundle = catalog_bundle(paths, custody)?;
     Ok((bundle.providers, bundle.sections.accounts))
-}
-
-/// Build provider and model sections using an injected backend.
-pub fn catalog_values_with_backend(
-    paths: &PlakPaths,
-    backend: &mut impl PresentationBackend,
-) -> (
-    Vec<plakous_host_protocol::views::ProviderDef>,
-    Vec<plakous_host_protocol::views::ProviderSection>,
-) {
-    let bundle = catalog_bundle_with_backend_and_composition(
-        paths,
-        backend,
-        ProductCompositionSelection::FollowCatalog,
-    );
-    (bundle.providers, bundle.sections.accounts)
-}
-
-/// Build provider and model sections using an injected backend and composition.
-pub fn catalog_values_with_backend_and_composition(
-    paths: &PlakPaths,
-    backend: &mut impl PresentationBackend,
-    composition: ProductCompositionSelection,
-) -> (
-    Vec<plakous_host_protocol::views::ProviderDef>,
-    Vec<plakous_host_protocol::views::ProviderSection>,
-) {
-    let bundle = catalog_bundle_with_backend_and_composition(paths, backend, composition);
-    (bundle.providers, bundle.sections.accounts)
 }
 
 /// Pure catalog projection shared by the session picker and home console.
@@ -394,24 +355,15 @@ fn native_model_entry(
     })
 }
 
-/// Build host catalog rows and full-catalog native model facts using an injected backend.
-pub fn catalog_bundle_with_backend_and_composition(
-    paths: &PlakPaths,
-    backend: &mut impl PresentationBackend,
-    composition: ProductCompositionSelection,
-) -> HostCatalogBundle {
-    catalog_bundle_with_backend(paths, Some(backend), composition, None)
-}
-
 #[allow(
     clippy::too_many_lines,
     reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
 )]
 fn catalog_bundle_with_backend(
     paths: &PlakPaths,
-    mut backend: Option<&mut dyn PresentationBackend>,
+    mut backend: Option<&mut NativePresentationBackend>,
     composition: ProductCompositionSelection,
-    gateway: Option<&crate::gateway::AdminLink>,
+    gateway: &crate::gateway::AdminLink,
 ) -> HostCatalogBundle {
     let oauth = crate::capabilities::ROUTES
         .iter()
@@ -586,44 +538,7 @@ fn catalog_bundle_with_backend(
     {
         // The only account identity an API key supplies is its fingerprint,
         // or the environment variable that won. Neither is key material.
-        let (state, detail, account_label) = if let Some(gateway) = gateway {
-            gateway_key_presentation(gateway, account)
-        } else {
-            match secrets::key_status(paths, account) {
-                Ok(secrets::KeyStatus {
-                    source: secrets::KeySource::Env,
-                    env_var,
-                    fingerprint,
-                    ..
-                }) => (
-                    plakous_host_protocol::views::ProviderState::Ready,
-                    env_var.unwrap_or("environment").to_owned(),
-                    fingerprint,
-                ),
-                Ok(secrets::KeyStatus {
-                    source: secrets::KeySource::File,
-                    fingerprint,
-                    ..
-                }) => (
-                    plakous_host_protocol::views::ProviderState::Ready,
-                    "stored".to_owned(),
-                    fingerprint,
-                ),
-                Ok(secrets::KeyStatus {
-                    source: secrets::KeySource::Missing,
-                    ..
-                }) => (
-                    plakous_host_protocol::views::ProviderState::NoKey,
-                    String::new(),
-                    None,
-                ),
-                Err(_) => (
-                    plakous_host_protocol::views::ProviderState::Unavailable,
-                    "key store unreadable".to_owned(),
-                    None,
-                ),
-            }
-        };
+        let (state, detail, account_label) = gateway_key_presentation(gateway, account);
         if let Some(provider) = plakous_hosted::binding::PlatformProvider::for_account(account) {
             sections.push(plakous_host_protocol::views::ProviderSection {
                 account: account.to_owned(),
@@ -841,105 +756,4 @@ pub(crate) fn event_table_row(value: &serde_json::Value) -> [String; 4] {
         .filter(|details| !details.is_empty())
         .unwrap_or_else(|| "—".to_owned());
     [time, sequence, kind, details]
-}
-
-/// Where each kind of credential `plakd status` reports actually lives.
-///
-/// OAuth subscription records are XDG state, not product home, so emptying
-/// `PLAK_HOME` leaves every OAuth account Ready. API keys are the opposite:
-/// they are files under the product home. One line says both.
-#[cfg(test)]
-pub(crate) fn credential_locations_line(services: &Services) -> String {
-    let oauth = paths::application_state_home().map_or_else(
-        |_| "$XDG_STATE_HOME".to_owned(),
-        |root| root.join("plak/subscriptions").display().to_string(),
-    );
-    let keys = services.paths().map_or_else(
-        |_| "$PLAK_HOME/secrets".to_owned(),
-        |paths| paths.secrets_dir().display().to_string(),
-    );
-    credential_locations_text(&oauth, &keys)
-}
-
-/// The sentence alone, so a test pins it without a product home.
-#[cfg(test)]
-pub(crate) fn credential_locations_text(oauth: &str, keys: &str) -> String {
-    format!(
-        "OAuth credentials live in {oauth}, outside the product home, so emptying it does not log you out. API keys live in {keys}."
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use plakous::subscriptions::{NativeModelVisibility, NativeProvider, NativeToolMode};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    struct SnapshotBackend {
-        models: Vec<CliModelSummary>,
-        live_refreshes: Arc<AtomicUsize>,
-    }
-
-    impl PresentationBackend for SnapshotBackend {
-        fn offline_status(&mut self, _provider: NativeProvider) -> CliResult<CliStatus> {
-            Ok(CliStatus {
-                compatibility: CompatibilityState::Current,
-                credential: CredentialState::Ready,
-            })
-        }
-
-        fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-            self.live_refreshes.fetch_add(1, Ordering::SeqCst);
-            if provider != NativeProvider::Codex {
-                return Ok(Vec::new());
-            }
-            Ok(self.models.clone())
-        }
-    }
-
-    #[test]
-    fn first_paint_uses_injected_snapshot_without_live_refresh_api() {
-        let root = tempfile::tempdir().expect("temporary product home");
-        let paths = PlakPaths::explicit(root.path().join("plakd"));
-        let live_refreshes = Arc::new(AtomicUsize::new(0));
-        let mut backend = SnapshotBackend {
-            models: vec![CliModelSummary {
-                unavailable_reason: None,
-                exact_id: "gpt-5.6-sol".to_owned(),
-                visibility: NativeModelVisibility::List,
-                native_tool_mode: Some(NativeToolMode::CodeModeOnly),
-                streaming: true,
-                tools: true,
-                reasoning_efforts: vec![ReasoningEffort::Medium],
-                service_tiers: Vec::new(),
-                reported_context_length: None,
-            }],
-            live_refreshes: Arc::clone(&live_refreshes),
-        };
-        let bundle = catalog_bundle_with_backend_and_composition(
-            &paths,
-            &mut backend,
-            ProductCompositionSelection::FollowCatalog,
-        );
-        assert_eq!(live_refreshes.load(Ordering::SeqCst), 3);
-        assert_eq!(bundle.sections.accounts.len(), 6);
-        let codex = bundle
-            .sections
-            .accounts
-            .iter()
-            .find(|section| section.account == "codex")
-            .expect("codex section");
-        assert_eq!(codex.entries[0].id, "gpt-5.6-sol");
-        assert!(
-            bundle
-                .sections
-                .accounts
-                .iter()
-                .filter(|section| matches!(section.account.as_str(), "grok" | "claude"))
-                .all(|section| section.entries.is_empty())
-        );
-    }
 }

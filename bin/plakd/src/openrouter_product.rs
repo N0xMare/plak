@@ -11,18 +11,3 @@ pub(crate) mod usage;
 #[path = "openrouter_product/usage_unavailable.rs"]
 pub(crate) mod usage;
 pub(crate) use usage::legacy as legacy_key_usage;
-
-/// Discovery-only catalog allowlist probe. No inference.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum OpenRouterCatalogProbe {
-    /// No OpenRouter key in the product secret store.
-    NotConfigured,
-    /// Key is present but doctor has no OpenRouter default model to discover.
-    KeyPresentNoModel,
-    /// Authenticated models+endpoints documents validated.
-    Ok,
-    /// Named catalog/schema failure or transport/auth error (no secret material).
-    Failed(String),
-    /// A configured gateway holds the key; this process does not probe it.
-    Gateway,
-}

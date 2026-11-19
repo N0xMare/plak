@@ -60,7 +60,7 @@ fn successful(output: Output) -> String {
 }
 
 fn unavailable(output: Output) {
-    assert!(!output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty(), "{:?}", output.stdout);
     let error = String::from_utf8(output.stderr).unwrap();
     assert_eq!(error.lines().count(), 1, "{error}");
@@ -78,10 +78,21 @@ fn account_and_status_verbs_refuse_without_a_gateway() {
         &["key", "set", "openai"],
         &["gateway", "status"],
         &["gateway", "check"],
+        &[
+            "run",
+            "--account",
+            "openai",
+            "--model",
+            "gpt-6-luna",
+            "--effort",
+            "none",
+            "--",
+            "refuse",
+        ],
     ] {
         unavailable(home.cli(args));
     }
-    assert!(!home.path().join("home").exists());
+    assert!(!home.path().join("home/secrets").exists());
     assert!(!home.path().join(".local/state").exists());
 }
 

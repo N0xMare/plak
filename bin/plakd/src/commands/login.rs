@@ -1,440 +1,12 @@
-//! Subscription compatibility acceptance, login/refresh/logout and API-key
-//! credential workflows.
-//!
-//! Every terminal secret read on these paths is cooked-mode only: the TTY is
-//! never put into raw mode, and no secret is echoed back or logged.
-
-use std::io::{self, IsTerminal as _};
-
-#[cfg(test)]
-use crate::terminal_application::read_terminal_secret_line;
-#[cfg(test)]
-use plakous::subscriptions::NativeLoginMode;
-use plakous::subscriptions::NativeSubscriptions;
+//! Subscription compatibility acceptance and remote login presentation.
 
 use super::application::AccountOps;
-#[cfg(test)]
-use super::application::{Revocation, StoredCredential};
-#[cfg(test)]
-use super::support::{
-    compatibility_status_name, credential_status_name, require_locally_retired, require_revoked,
-};
 use super::support::{profile_date, profile_inactive_failure, require_ready};
-#[cfg(test)]
-use crate::home::paths as product_paths;
-#[cfg(test)]
-use crate::home::secrets as product_secrets;
 use crate::oauth_ui as product_oauth_ui;
-#[cfg(test)]
-use crate::presentation::MAX_REMOTE_AUTHORIZATION_INPUT_BYTES;
 use crate::presentation::{CompatibilityState, CredentialState};
-#[cfg(test)]
-use plakous_hosted::error::ProcessOutcome;
+use plakous::subscriptions::NativeSubscriptions;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
-
-/// Removes only an already signed-out named slot, or clears one named API key.
-#[cfg(test)]
-pub(crate) fn remove_account(
-    backend: &mut impl AccountOps,
-    account: &plakous_hosted::account::AccountRef,
-    confirmed: bool,
-    stdin: &mut dyn io::BufRead,
-    stdout: &mut dyn io::Write,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    if !account.is_named() {
-        return Err(
-            plakous_hosted::capabilities::AccountAdmissionError::DefaultAccountNotRemovable {
-                account: account.to_string(),
-            }
-            .into(),
-        );
-    }
-    if !confirmed {
-        let scope = if account.vertical().is_api() {
-            "this home's API key"
-        } else {
-            "already signed-out shared native slot; no remote revocation"
-        };
-        writeln!(stderr, "Remove {account} ({scope})? Referencing sessions or templates may refuse afterward. Type {account} to confirm:")
-            .map_err(|_| CliFailure::new("stderr failed"))?;
-        let mut answer = String::new();
-        stdin
-            .read_line(&mut answer)
-            .map_err(|_| CliFailure::new("stdin failed"))?;
-        if answer.trim() != account.as_str() {
-            return Err(CliFailure::new(
-                "account removal was not confirmed; nothing changed",
-            ));
-        }
-    }
-    backend.remove_account(account)?;
-    writeln!(stdout, "{account}: removed").map_err(|_| CliFailure::new("stdout failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd status <provider>`: offline credential and compatibility posture.
-#[cfg(test)]
-pub fn auth_status(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    paths: Option<&product_paths::PlakPaths>,
-    stdout: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    let status = backend.offline_status(provider)?;
-    let repair = super::application::CredentialVerdict::from_status(status)
-        .remedy(provider, super::application::AccountCommand::Status)
-        .map_or_else(String::new, |remedy| format!("; {remedy}"));
-    writeln!(
-        stdout,
-        "{}: compatibility={}, credential={}{repair}",
-        provider.as_str(),
-        compatibility_status_name(status.compatibility),
-        (!provider.is_named())
-            .then(|| super::support::oauth_refresh_status_detail(
-                paths,
-                super::application::native_provider(provider).ok()?,
-                status.credential
-            ))
-            .flatten()
-            .unwrap_or_else(|| credential_status_name(status.credential).to_owned())
-    )
-    .map_err(|_| CliFailure::new("stdout failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd login <provider>`: exact acceptance, then the provider login flow.
-#[cfg(test)]
-pub(crate) fn auth_login(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    mode: NativeLoginMode,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-    ui: &mut impl super::login_flow::LoginUi,
-) -> CliResult<ProcessOutcome> {
-    backend.prepare_login(provider)?;
-    let result = auth_login_prepared(backend, provider, mode, stdin, stderr, ui);
-    backend.end_login_attempt(provider);
-    result
-}
-
-#[cfg(test)]
-fn auth_login_prepared(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    mode: NativeLoginMode,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-    ui: &mut impl super::login_flow::LoginUi,
-) -> CliResult<ProcessOutcome> {
-    let mut status = backend.offline_status(provider)?;
-    if status.credential == CredentialState::WrittenByNewerBuild {
-        confirm_newer_build_replacement(
-            backend,
-            provider,
-            io::stdin().is_terminal(),
-            stdin,
-            stderr,
-        )?;
-        status = backend.offline_status(provider)?;
-    }
-    accept_compatibility_status(
-        backend,
-        provider,
-        Asker::Login,
-        status.compatibility,
-        stdin,
-        stderr,
-    )
-    .map_err(|failure| failure.or_kind(CliFailureKind::Auth))?;
-    let status = super::login_flow::perform_login(backend, provider, mode, stdin, stderr, ui)?;
-    require_ready(provider, status)?;
-    if let Some(sibling) = backend.same_upstream_account(provider) {
-        writeln!(stderr, "warning: {}: same upstream account as {sibling}; provider limits are shared, not additional allowance", provider.as_str())
-            .map_err(|_| CliFailure::new("stderr failed"))?;
-    }
-    if !backend.record_login_host(provider) {
-        let _ = writeln!(
-            stderr,
-            "warning: host login provenance unavailable; credential is ready, but Harbor trials require a login with host identity available"
-        );
-    }
-    writeln!(stderr)
-        .and_then(|()| {
-            writeln!(
-                stderr,
-                "{}: login succeeded — credential ready.",
-                provider.as_str()
-            )
-        })
-        .map_err(|_| CliFailure::new("stderr failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// Asks before replacing a login a newer build wrote, since that build must
-/// then log in again. Nothing is written unless the answer is yes; without a
-/// terminal it refuses without asking.
-#[cfg(test)]
-pub(crate) fn confirm_newer_build_replacement(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    interactive: bool,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-) -> CliResult<()> {
-    let account = provider.as_str();
-    let refusal = |detail: &str| {
-        CliFailure::classified(
-            CliFailureKind::Auth,
-            format!("the stored {account} login was written by a newer plakd build; {detail}"),
-        )
-    };
-    if !interactive {
-        return Err(refusal(
-            "replacing it needs a confirmation, so nothing was changed; confirm it from a terminal, or use the newer build",
-        ));
-    }
-    write!(
-        stderr,
-        "This login was written by a newer plakd build; replacing it means that build must log in again. Continue? [y/N] "
-    )
-    .and_then(|()| stderr.flush())
-    .map_err(|_| CliFailure::new("stderr failed"))?;
-    let mut response = String::new();
-    let read = stdin.read_line(&mut response);
-    if !response.ends_with('\n') {
-        writeln!(stderr).map_err(|_| CliFailure::new("stderr failed"))?;
-    }
-    let answer = response.trim_end_matches(['\n', '\r']);
-    if read.is_err() || !(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")) {
-        return Err(refusal(
-            "it was kept and nothing was changed; use the newer build",
-        ));
-    }
-    backend.replace_newer_build(provider)?;
-    Ok(())
-}
-
-/// `plakd refresh <provider>`.
-#[cfg(test)]
-pub fn auth_refresh(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    ensure_compatibility(backend, provider, stdin, stderr)?;
-    let (status, expires_at) = backend.refresh_now(provider)?;
-    require_ready(provider, status)?;
-    let until = i64::try_from(expires_at)
-        .ok()
-        .and_then(|seconds| jiff::Timestamp::from_second(seconds).ok())
-        .map_or_else(
-            || "unknown".to_owned(),
-            |at| {
-                at.to_zoned(crate::local_time_zone().clone())
-                    .strftime("%Y-%m-%d %H:%M %Z")
-                    .to_string()
-            },
-        );
-    writeln!(
-        stderr,
-        "{}: new refresh grant issued — access token valid until {until}.",
-        provider.as_str()
-    )
-    .map_err(|_| CliFailure::new("stderr failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd logout <provider> --local`: retire the local credential without
-/// contacting the provider.
-#[cfg(test)]
-pub fn auth_logout_local(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    let status = retire_local(backend, provider)?;
-    let outcome = match status {
-        CredentialState::SignedOut => "no local credential remains; recovery state cleared",
-        _ => "local credential revoked; recovery state cleared",
-    };
-    writeln!(
-        stderr,
-        "{}: {outcome}; remote credential may remain active",
-        provider.as_str()
-    )
-    .map_err(|_| CliFailure::new("stderr failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd logout <provider>`: revoke a usable credential at the provider;
-/// retire one this build cannot use locally, saying the remote grant may remain.
-#[cfg(test)]
-pub fn auth_logout(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    let name = provider.as_str();
-    let message = match backend.stored_credential(provider)? {
-        StoredCredential::Absent => {
-            retire_local(backend, provider)?;
-            format!("{name}: not logged in; nothing to log out")
-        }
-        StoredCredential::Unusable => retire_unusable(backend, provider)?,
-        StoredCredential::Usable(compatibility) => {
-            accept_compatibility_status(
-                backend,
-                provider,
-                Asker::Other,
-                compatibility,
-                stdin,
-                stderr,
-            )?;
-            match backend.revoke(provider)? {
-                Revocation::Revoked(status) => {
-                    require_revoked(
-                        status,
-                        "remote revocation did not reach a revoked credential state",
-                    )?;
-                    format!("{name}: remote credential revoked")
-                }
-                Revocation::Unusable => retire_unusable(backend, provider)?,
-            }
-        }
-    };
-    writeln!(stderr, "{message}").map_err(|_| CliFailure::new("stderr failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-#[cfg(test)]
-fn retire_unusable(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-) -> CliResult<String> {
-    retire_local(backend, provider)?;
-    Ok(format!(
-        "{}: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active",
-        provider.as_str()
-    ))
-}
-
-#[cfg(test)]
-fn retire_local(
-    backend: &mut impl AccountOps,
-    provider: &plakous_hosted::account::AccountRef,
-) -> CliResult<CredentialState> {
-    let status = backend.logout_local(provider)?;
-    require_locally_retired(
-        status,
-        "local logout did not reach a safely retired local credential state",
-    )?;
-    Ok(status)
-}
-
-/// `plakd key set <account>`: cooked-mode hidden read, then a stored key file.
-#[cfg(test)]
-pub fn key_set(
-    account: &str,
-    stdin: &mut dyn io::BufRead,
-    stderr: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
-    write!(stderr, "API key for {account} (input hidden): ")
-        .map_err(|_| CliFailure::new("stderr failed"))?;
-    stderr
-        .flush()
-        .map_err(|_| CliFailure::new("stderr failed"))?;
-    let key = read_terminal_secret_line(stdin, stderr, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES)
-        .map_err(|_| CliFailure::new("could not read API key"))?;
-    product_secrets::set_api_key(
-        &paths,
-        account,
-        zeroize::Zeroizing::new((key.as_str()).to_string()),
-    )
-    .map_err(|error| CliFailure::new(error.to_string()))?;
-    writeln!(
-        stderr,
-        "stored API key for {account} (fingerprint only on status)"
-    )
-    .map_err(|_| CliFailure::new("stderr failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd key clear <account>`.
-#[cfg(test)]
-pub fn key_clear(account: &str, stdout: &mut dyn io::Write) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
-    let removed = product_secrets::clear_api_key(&paths, account)
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    writeln!(
-        stdout,
-        "{}",
-        if removed {
-            "cleared"
-        } else {
-            "no key file present"
-        }
-    )
-    .map_err(|_| CliFailure::new("stdout failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// `plakd key status [account]`: fingerprints only, never key material.
-#[cfg(test)]
-pub fn key_status(
-    account: Option<String>,
-    stdout: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    let paths = product_paths::PlakPaths::home_from_env().map_err(CliFailure::from)?;
-    let accounts: Vec<String> = match account {
-        Some(a) => vec![a],
-        None => ["openai", "xai-api", "anthropic", "openrouter"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
-    };
-    let mut table = crate::cli_output::Table::new(["ACCOUNT", "SOURCE", "FINGERPRINT", "ENV"]);
-    for a in accounts {
-        let status = product_secrets::key_status(&paths, &a).map_err(CliFailure::from)?;
-        let src = match status.source {
-            product_secrets::KeySource::Env => "env",
-            product_secrets::KeySource::File => "file",
-            product_secrets::KeySource::Missing => "missing",
-        };
-        let mut environment = "-".to_owned();
-        if let Some(name) = status.env_var {
-            environment = format!("{name} (wins over file; Plak does not load .env)");
-            if let Some(shadowed) = status.shadowed_file_fingerprint {
-                environment.push_str(&format!(" shadowed_file={shadowed}"));
-            }
-        }
-        table
-            .push([
-                status.account,
-                src.to_owned(),
-                status.fingerprint.unwrap_or_else(|| "-".to_owned()),
-                environment,
-            ])
-            .map_err(CliFailure::new)?;
-    }
-    crate::presentation::cli_human_output()
-        .write_table(stdout, &table)
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-/// The command asking for the compatibility answer. `plakd login` is where a
-/// refusal elsewhere sends the operator, so its own refusal must not.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Asker {
-    #[cfg(test)]
-    Login,
-    Other,
-}
+use std::io::{self, IsTerminal as _};
 
 pub fn ensure_compatibility(
     backend: &mut impl AccountOps,
@@ -442,7 +14,7 @@ pub fn ensure_compatibility(
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<()> {
-    accept_compatibility(backend, provider, Asker::Other, stdin, stderr)
+    accept_compatibility(backend, provider, stdin, stderr)
 }
 
 pub(super) fn ensure_catalog_compatibility(
@@ -458,38 +30,24 @@ pub(super) fn ensure_catalog_compatibility(
     ) {
         require_ready(provider, status.credential)?;
     }
-    accept_compatibility_status(
-        backend,
-        provider,
-        Asker::Other,
-        status.compatibility,
-        stdin,
-        stderr,
-    )
+    accept_compatibility_status(backend, provider, status.compatibility, stdin, stderr)
 }
 
 fn accept_compatibility(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
-    asker: Asker,
+
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<()> {
     let status = backend.offline_status(provider)?;
-    accept_compatibility_status(
-        backend,
-        provider,
-        asker,
-        status.compatibility,
-        stdin,
-        stderr,
-    )
+    accept_compatibility_status(backend, provider, status.compatibility, stdin, stderr)
 }
 
 fn accept_compatibility_status(
     backend: &mut impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
-    asker: Asker,
+
     compatibility: CompatibilityState,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
@@ -510,7 +68,6 @@ fn accept_compatibility_status(
             let response = read_exact_compatibility_response(
                 backend,
                 provider,
-                asker,
                 io::stdin().is_terminal(),
                 stdin,
                 stderr,
@@ -527,7 +84,7 @@ fn accept_compatibility_status(
 fn read_exact_compatibility_response(
     backend: &impl AccountOps,
     provider: &plakous_hosted::account::AccountRef,
-    asker: Asker,
+
     echoed: bool,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
@@ -550,7 +107,7 @@ fn read_exact_compatibility_response(
     .and_then(|()| write!(stderr, "Continue? [y/N] "))
     .and_then(|()| stderr.flush())
     .map_err(|_| CliFailure::new("stderr failed"))?;
-    let response = read_notice_answer(account, asker, echoed, stdin, stderr)?;
+    let response = read_notice_answer(account, echoed, stdin, stderr)?;
     if response.eq_ignore_ascii_case("y")
         || response.eq_ignore_ascii_case("yes")
         || response == notice.notice_revision
@@ -570,7 +127,7 @@ fn read_exact_compatibility_response(
 /// `echoed` says whether stdin is a terminal that echoes the answer.
 fn read_notice_answer(
     account: &str,
-    asker: Asker,
+
     echoed: bool,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
@@ -587,15 +144,9 @@ fn read_notice_answer(
     if !(echoed && line_ended) {
         writeln!(stderr).map_err(|_| CliFailure::new("stderr failed"))?;
     }
-    let remedy = match asker {
-        #[cfg(test)]
-        Asker::Login => "answer `y` from a terminal, or pipe `y` on stdin".to_owned(),
-        Asker::Other => {
-            format!(
-                "accept it once with `plakd models {account}` from a terminal, or pipe `y` to this command"
-            )
-        }
-    };
+    let remedy = format!(
+        "accept it once with `plakd models {account}` from a terminal, or pipe `y` to this command"
+    );
     let refusal = match read {
         Ok(0) => format!(
             "the {account} compatibility notice needs an answer on stdin and none came; {remedy}"
@@ -688,35 +239,29 @@ pub fn print_compatibility_notice(
 mod tests {
     use super::*;
 
-    fn answer(input: &[u8], asker: Asker, echoed: bool) -> (CliResult<String>, String) {
+    fn answer(input: &[u8], echoed: bool) -> (CliResult<String>, String) {
         let mut stderr = Vec::new();
-        let result = read_notice_answer(
-            "codex",
-            asker,
-            echoed,
-            &mut io::Cursor::new(input),
-            &mut stderr,
-        );
+        let result = read_notice_answer("codex", echoed, &mut io::Cursor::new(input), &mut stderr);
         (result, String::from_utf8(stderr).unwrap())
     }
 
     #[test]
     fn a_piped_answer_ends_the_prompt_line_and_a_terminal_answer_does_not() {
-        let (piped, stderr) = answer(b"y\r\n", Asker::Other, false);
+        let (piped, stderr) = answer(b"y\r\n", false);
         assert_eq!(piped.unwrap(), "y");
         assert_eq!(stderr, "\n");
-        let (typed, stderr) = answer(b"y\n", Asker::Other, true);
+        let (typed, stderr) = answer(b"y\n", true);
         assert_eq!(typed.unwrap(), "y");
         assert_eq!(stderr, "");
         // Ctrl+D instead of Enter: the terminal echoed no line break.
-        let (eof, stderr) = answer(b"y", Asker::Other, true);
+        let (eof, stderr) = answer(b"y", true);
         assert_eq!(eof.unwrap(), "y");
         assert_eq!(stderr, "\n");
     }
 
     #[test]
     fn a_closed_stdin_and_an_unreadable_one_refuse_differently() {
-        let (closed, stderr) = answer(b"", Asker::Other, true);
+        let (closed, stderr) = answer(b"", true);
         assert_eq!(stderr, "\n");
         let closed = closed.unwrap_err();
         assert_eq!(closed.exit_code(), 3);
@@ -725,21 +270,13 @@ mod tests {
             "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plakd models codex` from a terminal, or pipe `y` to this command"
         );
 
-        let (unreadable, stderr) = answer(b"\xff\n", Asker::Other, false);
+        let (unreadable, stderr) = answer(b"\xff\n", false);
         assert_eq!(stderr, "\n");
         let unreadable = unreadable.unwrap_err();
         assert_eq!(unreadable.exit_code(), 3);
         assert_eq!(
             unreadable.message(),
             "the answer to the codex compatibility notice could not be read from stdin as text; accept it once with `plakd models codex` from a terminal, or pipe `y` to this command"
-        );
-
-        let (login, _) = answer(b"\xff\n", Asker::Login, false);
-        let login = login.unwrap_err();
-        assert!(
-            !login.message().contains("plakd login"),
-            "{}",
-            login.message()
         );
     }
 }

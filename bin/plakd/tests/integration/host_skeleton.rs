@@ -111,7 +111,7 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
     );
     let start_gateway = || {
         GatewayProcess::start(
-            &mut fixture
+            fixture
                 .base_command()
                 .env("PLAK_TEST_FAULTS", "fault=connect"),
             &socket,

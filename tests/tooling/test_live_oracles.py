@@ -37,6 +37,8 @@ class CompactionFoldTests(unittest.TestCase):
 
 class LiveOracleTests(unittest.TestCase):
     def setUp(self):
+        # These tests exercise capture and scoring over fake or mocked callers.
+        self.enterContext(patch.object(live.Env, "gateway_env", lambda _env, child: child))
         self.homes = set()
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -1551,7 +1553,7 @@ class AgentStartupFailureTests(unittest.TestCase):
             binary.chmod(0o755)
             home = live.scratch_home(base)
             self.addCleanup(shutil.rmtree, home)
-            env = live.Env(binary, home, base)
+            env = live.Env(binary, home, base, owns_gateway=False)
             with self.assertRaises(live.ScenarioFailure) as raised:
                 live.Agent(env, base, "startup", args=[])
             self.assertEqual(raised.exception.outcome, live.PROVIDER)

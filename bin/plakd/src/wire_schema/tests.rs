@@ -6,7 +6,7 @@ use super::*;
 fn protocol_twelve_schema_has_an_exact_build_independent_pin() {
     assert_eq!(
         pin().unwrap(),
-        "8b865947bed5fa08a8b4e2a9c5887a6a124e8288907728da3066651d0b8a9b4b"
+        "378712bb946ce471bb589fc05fa29f31764726c6e5581b87f89d5c1cb864b2ac"
     );
 }
 

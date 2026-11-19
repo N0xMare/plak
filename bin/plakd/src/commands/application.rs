@@ -22,9 +22,7 @@ use super::support::{
     native_subscription_failure, oauth_status_failure_cell, product_state_roots_from,
 };
 use crate::home::paths as product_paths;
-use crate::presentation::{
-    CliModelSummary, CliStatus, CompatibilityState, CredentialState, PresentationBackend,
-};
+use crate::presentation::{CliModelSummary, CliStatus, CompatibilityState, CredentialState};
 use plakous_hosted::account::{AccountRef, Vertical};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
@@ -1076,16 +1074,6 @@ fn login_challenge(
         completion,
         device_code,
         replaced_unusable,
-    }
-}
-
-impl PresentationBackend for PlakousApplication {
-    fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
-        AccountOps::offline_status(self, &super::support::cli_provider_name(provider).parse()?)
-    }
-
-    fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
-        Ok(AccountOps::models(self, &super::support::cli_provider_name(provider).parse()?)?.models)
     }
 }
 

@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::time::{self, Instant};
 
+use crate::CliResult;
 use crate::gateway::client;
 use crate::gateway::{GatewayAddress, GatewayUnavailable, HostCustody, verify_holder};
 
@@ -12,10 +13,10 @@ const STARTUP_WAIT: Duration = Duration::from_secs(3);
 const STARTUP_RETRY: Duration = Duration::from_millis(25);
 
 /// Require the configured listener before a host acquires any runtime authority.
-pub(super) async fn verify(custody: &HostCustody, state_home: &Path) -> Result<(), String> {
+pub(super) async fn verify(custody: &HostCustody, state_home: &Path) -> CliResult<()> {
     let admin = custody
         .admin()
-        .ok_or_else(|| GatewayUnavailable::MissingAddress.to_string())?;
+        .ok_or_else(|| GatewayUnavailable::MissingAddress.failure())?;
     let address = &admin.address;
     if let GatewayAddress::Unix(socket) = address {
         wait_for_listener(socket, || verify_holder(address, state_home)).await?;
@@ -34,7 +35,8 @@ pub(super) async fn verify(custody: &HostCustody, state_home: &Path) -> Result<(
     .await
     .ok()
     .and_then(Result::ok)
-    .ok_or_else(|| GatewayUnavailable::Unreachable(address).to_string())?;
+    .filter(|reply| !reply.is_empty())
+    .ok_or_else(|| GatewayUnavailable::Unreachable(address).failure())?;
     client::supported_version(&client::decode_call(client::parse_response(&reply)?)?)?;
     Ok(())
 }
@@ -52,7 +54,7 @@ async fn read_versions(
 async fn wait_for_listener(
     socket: &Path,
     prove_holder: impl Fn() -> Result<bool, String>,
-) -> Result<(), String> {
+) -> CliResult<()> {
     let deadline = Instant::now() + STARTUP_WAIT;
     loop {
         if prove_holder()? {
@@ -75,7 +77,7 @@ async fn wait_for_listener(
         }
         time::sleep_until((now + STARTUP_RETRY).min(deadline)).await;
     }
-    Err(GatewayUnavailable::Unreachable(&GatewayAddress::Unix(socket.to_path_buf())).to_string())
+    Err(GatewayUnavailable::Unreachable(&GatewayAddress::Unix(socket.to_path_buf())).failure())
 }
 
 #[cfg(test)]

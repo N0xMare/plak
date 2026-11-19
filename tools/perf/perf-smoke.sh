@@ -84,6 +84,41 @@ for binary in plakd plakous-js-host plakous-py-host; do
 done
 plak_bin="$root/plakd"
 
+# Start custody before measuring any caller. Keep its socket path short and
+# give it exactly the same isolated state root as the sampled processes.
+gateway_dir="$(mktemp -d /tmp/plak-perf-gw.XXXXXX)"
+gateway_socket="$gateway_dir/g.sock"
+gateway_pid=""
+stop_gateway() {
+  if [[ -n "$gateway_pid" ]]; then
+    kill -TERM "$gateway_pid" 2>/dev/null || true
+    wait "$gateway_pid" || true
+  fi
+  rm -f "$gateway_socket"
+  rmdir "$gateway_dir"
+}
+trap stop_gateway EXIT
+printf 'socket = "%s"\n' "$gateway_socket" >"$root/home/gateway.toml"
+printf '\n[gateway]\naddress = "unix:%s"\n' "$gateway_socket" >>"$root/home/config.toml"
+gateway_command() {
+  env -i PATH="$PATH" HOME="$root/fake-home" TMPDIR="$root/tmp" PLAK_HOME="$root/home" \
+    "$plak_bin" gateway "$@"
+}
+env -i PATH="$PATH" HOME="$root/fake-home" TMPDIR="$root/tmp" PLAK_HOME="$root/home" \
+  PLAK_TEST_FAULTS=fault=connect "$plak_bin" gateway serve >"$root/gateway.log" 2>&1 &
+gateway_pid=$!
+for ((attempt = 0; ; attempt++)); do
+  if gateway_command check >/dev/null 2>&1; then
+    break
+  fi
+  if (( attempt >= 150 )) || ! kill -0 "$gateway_pid" 2>/dev/null; then
+    cat "$root/gateway.log" >&2
+    echo "perf smoke: gateway did not become ready" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
 machine="$("$PY" - <<'PY'
 import hashlib, platform, subprocess
 parts = [platform.system(), platform.machine()]
@@ -212,9 +247,11 @@ env = {"PATH": os.environ["PATH"], "HOME": root + "/fake-home", "TMPDIR": root +
        "PLAK_TEST_SCRIPT": root + "/tools.json",
        "PLAK_TEST_EVIDENCE": root + "/evidence.jsonl"}
 began = time.monotonic()
-subprocess.run([plakd, "run", "--account", "codex", "--model", "offline-loopback-v1",
-                "--effort", "medium", "--", "go"], env=env, input="y\n",
-               capture_output=True, text=True, timeout=60)
+result = subprocess.run([plakd, "run", "--account", "codex", "--model", "offline-loopback-v1",
+                         "--effort", "medium", "--", "go"], env=env, input="y\n",
+                        capture_output=True, text=True, timeout=60, check=False)
+if result.returncode:
+    raise SystemExit(f"perf smoke: CLI turn failed ({result.returncode}): {result.stderr}")
 print(f"{(time.monotonic() - began) * 1000.0:.1f}")
 PY
 ) )"

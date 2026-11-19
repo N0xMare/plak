@@ -6,14 +6,7 @@ use crate::commands;
 use crate::commands::application::AccountOps;
 use crate::commands::session::{load_admitted_product_session, run_attached_action};
 use crate::commands::support::config_set_failure;
-#[cfg(test)]
-use crate::commands::support::{
-    api_key_status_failure_cell, api_provider_label, profile_acceptance_label,
-    status_credential_cell, subscription_provider_label,
-};
 use crate::commands::usage::{collect_usage_limits, usage_vertical_for_account};
-#[cfg(test)]
-use crate::presentation::{CompatibilityState, CredentialState, credential_locations_line};
 use crate::presentation::{
     cli_human_output, event_table_row, format_unix_seconds, product_account_label,
     session_preview_line,
@@ -26,8 +19,6 @@ use crate::{
     CliFailure, CliFailureKind, CliResult, ProcessOutcome, carry, cli_output, product_config,
     product_session_log, store, topology_product,
 };
-#[cfg(test)]
-use crate::{product_secrets, review_expiry};
 
 pub(super) fn execute_config_show(
     services: &Services,
@@ -123,186 +114,6 @@ pub(super) fn execute_config_set(
         ""
     };
     writeln!(stdout, "set {key}{scope_note}").map_err(|_| CliFailure::new("stdout failed"))?;
-    Ok(ProcessOutcome::Success)
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "The all-account status command collects OAuth and API credential facts before rendering one consistently ordered table."
-)]
-#[cfg(test)]
-pub(super) fn execute_status_all(
-    services: &Services,
-    backend: &mut impl AccountOps,
-    stdout: &mut dyn io::Write,
-) -> CliResult<ProcessOutcome> {
-    struct StatusRow {
-        ready: bool,
-        provider: String,
-        kind: &'static str,
-        profile: &'static str,
-        credential: String,
-    }
-
-    review_expiry::write_warnings(stdout, services.now_unix_seconds())
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    let mut rows = Vec::with_capacity(7);
-    let accounts = backend.accounts()?;
-    for account in accounts
-        .iter()
-        .filter(|account| !account.vertical().is_api() && account.vertical().capability().compiled)
-    {
-        let provider = commands::application::native_provider(account)?;
-        let label = if account.is_named() {
-            account.to_string()
-        } else {
-            subscription_provider_label(provider).to_owned()
-        };
-        // One account's unreadable credential is a Setup needed row.
-        // The other verticals, including API keys, still print.
-        match backend.offline_status_row(account) {
-            Ok(status) => rows.push(StatusRow {
-                ready: status.compatibility == CompatibilityState::Current
-                    && status.credential == CredentialState::Ready,
-                provider: label.clone(),
-                kind: "OAuth",
-                profile: profile_acceptance_label(status.compatibility),
-                credential: (!account.is_named())
-                    .then(|| {
-                        commands::support::oauth_refresh_status_detail(
-                            services.paths().ok(),
-                            provider,
-                            status.credential,
-                        )
-                    })
-                    .flatten()
-                    .unwrap_or_else(|| status_credential_cell(provider, status.credential)),
-            }),
-            Err(credential) => rows.push(StatusRow {
-                ready: false,
-                provider: label,
-                kind: "OAuth",
-                profile: "—",
-                credential,
-            }),
-        }
-    }
-    let api_accounts: Vec<_> = accounts
-        .iter()
-        .filter(|account| account.vertical().is_api() && account.vertical().capability().compiled)
-        .collect();
-    match services.paths() {
-        Ok(paths) => {
-            for account in api_accounts {
-                let a = account.as_str();
-                let label = if account.is_named() {
-                    account.to_string()
-                } else {
-                    api_provider_label(a).to_owned()
-                };
-                match product_secrets::key_status(paths, a) {
-                    Ok(status) => {
-                        let credential = match status.source {
-                            product_secrets::KeySource::Env => "Environment",
-                            product_secrets::KeySource::File => "Key file",
-                            product_secrets::KeySource::Missing => "Missing",
-                        };
-                        rows.push(StatusRow {
-                            ready: status.source != product_secrets::KeySource::Missing,
-                            provider: label.clone(),
-                            kind: "API key",
-                            profile: "—",
-                            credential: credential.to_owned(),
-                        });
-                    }
-                    Err(error) => rows.push(StatusRow {
-                        ready: false,
-                        provider: label,
-                        kind: "API key",
-                        profile: "—",
-                        credential: api_key_status_failure_cell(&error),
-                    }),
-                }
-            }
-        }
-        Err(error) => {
-            for account in api_accounts {
-                rows.push(StatusRow {
-                    ready: false,
-                    provider: if account.is_named() {
-                        account.to_string()
-                    } else {
-                        api_provider_label(account.as_str()).to_owned()
-                    },
-                    kind: "API key",
-                    profile: "—",
-                    credential: api_key_status_failure_cell(error.message()),
-                });
-            }
-        }
-    }
-    rows.sort_by_key(|row| row.provider.to_ascii_lowercase());
-
-    let output = cli_human_output();
-    for (heading, ready) in [("Ready", true), ("Setup needed", false)] {
-        if !rows.iter().any(|row| row.ready == ready) {
-            continue;
-        }
-        writeln!(stdout, "{heading}").map_err(|_| CliFailure::new("stdout failed"))?;
-        writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
-        let mut table = cli_output::Table::new(["PROVIDER", "KIND", "PROFILE", "CREDENTIAL"]);
-        for row in rows.iter().filter(|row| row.ready == ready) {
-            table
-                .push([
-                    row.provider.as_str(),
-                    row.kind,
-                    row.profile,
-                    row.credential.as_str(),
-                ])
-                .map_err(CliFailure::new)?;
-        }
-        output
-            .write_table(stdout, &table)
-            .map_err(|_| CliFailure::new("stdout failed"))?;
-        writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
-    }
-    writeln!(stdout, "Subscription compatibility profiles")
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    let mut deadlines = cli_output::Table::new(["PROVIDER", "REVIEW VALID UNTIL (UTC)"]);
-    for provider in plakous_hosted::capabilities::native_providers() {
-        let account = commands::support::cli_provider_name(provider).parse()?;
-        let deadline = format_unix_seconds(backend.notice(&account)?.expires_at);
-        deadlines
-            .push([subscription_provider_label(provider), deadline.as_str()])
-            .map_err(CliFailure::new)?;
-    }
-    output
-        .write_table(stdout, &deadlines)
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    writeln!(
-        stdout,
-        "An expired profile requires a newly reviewed build; logging in again does not renew it.\n"
-    )
-    .map_err(|_| CliFailure::new("stdout failed"))?;
-    // An emptied PLAK_HOME still reports OAuth accounts Ready, because
-    // the subscription store is XDG state and never lived in the home.
-    // Saying where each kind of credential actually is turns that from
-    // a surprise into a fact the reader can act on.
-    writeln!(stdout, "{}", credential_locations_line(services))
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    for group in carry::upgrade::receipt::abandoning(services.paths()?)? {
-        writeln!(
-            stdout,
-            "Host upgrade withheld: {}",
-            cli_output::safe_terminal_block(&group)
-        )
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    }
-    writeln!(
-        stdout,
-        "Local credential state only; no provider request was made."
-    )
-    .map_err(|_| CliFailure::new("stdout failed"))?;
     Ok(ProcessOutcome::Success)
 }
 

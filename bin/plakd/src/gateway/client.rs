@@ -10,6 +10,7 @@ use plakous::gateway::protocol::refusal::RefusalBody;
 use plakous::gateway::protocol::{Endpoint, KEY_HEADER, SUPPORTED_VERSIONS};
 
 use super::{GatewayAddress, GatewayUnavailable};
+use crate::CliResult;
 
 pub(crate) const VERSIONS_PATH: &str = plakous::gateway::protocol::VERSIONS_PATH;
 
@@ -25,7 +26,7 @@ pub(crate) fn exchange(
     method: &str,
     path: &str,
     body: &[u8],
-) -> Result<Call, String> {
+) -> CliResult<Call> {
     exchange_with_timeout(address, key, method, path, body, Duration::from_secs(30))
 }
 
@@ -36,21 +37,21 @@ fn exchange_with_timeout(
     path: &str,
     body: &[u8],
     timeout: Duration,
-) -> Result<Call, String> {
+) -> CliResult<Call> {
     match address {
         GatewayAddress::Unix(socket) => {
             let stream = UnixStream::connect(socket)
-                .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
+                .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
             let _ = stream.set_read_timeout(Some(timeout));
             let _ = stream.set_write_timeout(Some(timeout));
-            write_and_read(stream, key, method, path, body)
+            write_and_read(stream, key, method, path, body, address)
         }
         GatewayAddress::Tcp(addr) => {
             let stream = TcpStream::connect_timeout(addr, timeout.min(Duration::from_secs(10)))
-                .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
+                .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
             let _ = stream.set_read_timeout(Some(timeout));
             let _ = stream.set_write_timeout(Some(timeout));
-            write_and_read(stream, key, method, path, body)
+            write_and_read(stream, key, method, path, body, address)
         }
     }
 }
@@ -59,7 +60,7 @@ pub(crate) fn admin<T: serde::de::DeserializeOwned>(
     address: &GatewayAddress,
     key: Option<&str>,
     value: &impl serde::Serialize,
-) -> Result<T, String> {
+) -> CliResult<T> {
     request(address, key, Endpoint::Admin, value)
 }
 
@@ -68,11 +69,11 @@ pub(crate) fn request<T: serde::de::DeserializeOwned>(
     key: Option<&str>,
     endpoint: Endpoint,
     request: &impl serde::Serialize,
-) -> Result<T, String> {
+) -> CliResult<T> {
     let body = call::encode(request).map_err(|error| error.to_string())?;
     let version = supported_version(&versions(address, key)?)?;
     let call = exchange(address, key, "POST", &endpoint.path(version), &body)?;
-    decode_call(call)
+    Ok(decode_call(call)?)
 }
 
 pub(crate) fn supported_version(
@@ -86,18 +87,16 @@ pub(crate) fn supported_version(
 pub(crate) fn versions(
     address: &GatewayAddress,
     key: Option<&str>,
-) -> Result<plakous::gateway::protocol::VersionsReply, String> {
-    versions_with_timeout(address, key, Duration::from_secs(10))
-}
-
-fn versions_with_timeout(
-    address: &GatewayAddress,
-    key: Option<&str>,
-    timeout: Duration,
-) -> Result<plakous::gateway::protocol::VersionsReply, String> {
-    let call = exchange_with_timeout(address, key, "GET", VERSIONS_PATH, &[], timeout)
-        .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
-    decode_call(call)
+) -> CliResult<plakous::gateway::protocol::VersionsReply> {
+    let call = exchange_with_timeout(
+        address,
+        key,
+        "GET",
+        VERSIONS_PATH,
+        &[],
+        Duration::from_secs(10),
+    )?;
+    Ok(decode_call(call)?)
 }
 
 pub(crate) fn decode_call<T: serde::de::DeserializeOwned>(call: Call) -> Result<T, String> {
@@ -119,17 +118,21 @@ fn write_and_read<S: Read + Write>(
     method: &str,
     path: &str,
     body: &[u8],
-) -> Result<Call, String> {
+    address: &GatewayAddress,
+) -> CliResult<Call> {
     let head = request_head(key, method, path, body.len())?;
     stream
         .write_all(head.as_bytes())
         .and_then(|()| stream.write_all(body))
-        .map_err(|error| error.to_string())?;
+        .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
     let mut raw = Vec::new();
     stream
         .read_to_end(&mut raw)
-        .map_err(|error| error.to_string())?;
-    parse_response(&raw)
+        .map_err(|_| GatewayUnavailable::Unreachable(address).failure())?;
+    if raw.is_empty() {
+        return Err(GatewayUnavailable::Unreachable(address).failure());
+    }
+    Ok(parse_response(&raw)?)
 }
 
 pub(crate) fn request_head(

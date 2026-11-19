@@ -42,7 +42,7 @@ pub(crate) fn try_remote_account(
     let link = AdminLink::for_cli(services.paths()?).map_err(CliFailure::new)?;
     let address = &link.address;
     let key = link.key();
-    client::versions(address, key).map_err(CliFailure::new)?;
+    client::versions(address, key)?;
     writeln!(stdout, "via gateway {}", address.label())
         .map_err(|_| CliFailure::new("stdout failed"))?;
     dispatch(address, key, command, stdin, stdout, stderr).map(Some)
@@ -331,35 +331,121 @@ fn usage(
     account: Option<&AccountRef>,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    account_rows(
-        address,
-        key,
-        account.map(AccountRef::as_str),
+    let all = account.is_none();
+    let accounts = match account {
+        Some(account) => vec![account_of(account.as_str())?],
+        None => listed_accounts(address, key)?,
+    };
+    let mut limits = plakous_host_protocol::views::presentation::UsageLimitsView::default();
+    for account in accounts {
+        let vertical = crate::commands::usage::usage_vertical_for_account(account.as_str())
+            .unwrap_or_else(|| {
+                plakous_host_protocol::views::presentation::UsageVertical::new(
+                    account.as_str(),
+                    account.as_str(),
+                )
+            });
+        let row = match usage_row(address, key, &account, &vertical) {
+            Ok(row) => row,
+            Err(error) if all && error.code() != Some("gateway_unavailable") => usage_observation(
+                vertical,
+                plakous_hosted::subscription_usage::VerticalObservation::Unavailable(
+                    error.message().to_owned(),
+                ),
+            )?,
+            Err(error) => return Err(error),
+        };
+        limits.verticals.push(row);
+    }
+    crate::product_subscription_usage::write_limits(
+        &limits,
+        None,
+        crate::local_time_zone(),
         stdout,
-        usage_cell,
     )
+    .map_err(|_| CliFailure::new("stdout failed"))?;
+    writeln!(stdout, "\nTurn tokens and context capacity require `plakd usage --session <uuid>`; they are not subscription allowance.")
+        .map_err(|_| CliFailure::new("stdout failed"))?;
+    Ok(ProcessOutcome::Success)
 }
 
-fn usage_cell(
+fn usage_row(
     address: &GatewayAddress,
     key: Option<&str>,
     account: &GatewayAccount,
-) -> CliResult<String> {
-    match ask(
+    vertical: &plakous_host_protocol::views::presentation::UsageVertical,
+) -> CliResult<plakous_host_protocol::views::presentation::VerticalUsageView> {
+    use plakous_hosted::subscription_usage::VerticalObservation;
+    let response = ask(
         address,
         key,
         AdminRequest::Allowance {
             account: account.clone(),
         },
-    )? {
-        AdminResponse::Allowance {
-            unavailable, view, ..
-        } => Ok(unavailable
-            .map(|text| text.as_str().to_owned())
-            .or_else(|| view.map(|value| value.to_string()))
-            .unwrap_or_else(|| "unavailable".to_owned())),
-        other => unexpected(other),
+    )?;
+    let AdminResponse::Allowance {
+        account: returned,
+        unavailable,
+        view,
+        observed_at_unix_ms,
+    } = response
+    else {
+        return unexpected(response);
+    };
+    if returned != *account {
+        return Err(CliFailure::new(
+            "the gateway returned allowance for a different account",
+        ));
     }
+    if let Some(reason) = &unavailable
+        && !matches!(reason.as_str(), "not-connected" | "not-observed")
+    {
+        return usage_observation(
+            vertical.clone(),
+            VerticalObservation::Unavailable(reason.as_str().to_owned()),
+        );
+    }
+    if let Some(value) = view {
+        if account.kind() == "openrouter" {
+            let observed = observed_at_unix_ms
+                .ok_or_else(|| CliFailure::new("OpenRouter allowance has no observation time"))?;
+            let usage =
+                crate::openrouter_product::gateway_usage(value, observed, account.as_str())?;
+            return usage_observation(vertical.clone(), usage);
+        }
+        let row: plakous_host_protocol::views::presentation::VerticalUsageView =
+            serde_json::from_value(value)
+                .map_err(|_| CliFailure::new("invalid gateway allowance view"))?;
+        if row.vertical.account() != account.as_str() {
+            return Err(CliFailure::new(
+                "gateway allowance view names a different account",
+            ));
+        }
+        return Ok(row);
+    }
+    let reason = unavailable
+        .as_ref()
+        .map_or("unavailable", |reason| reason.as_str());
+    let observation = if matches!(reason, "not-connected" | "not-observed") {
+        VerticalObservation::NotConnected
+    } else {
+        VerticalObservation::Unavailable(reason.to_owned())
+    };
+    usage_observation(vertical.clone(), observation)
+}
+
+fn usage_observation(
+    vertical: plakous_host_protocol::views::presentation::UsageVertical,
+    observation: plakous_hosted::subscription_usage::VerticalObservation,
+) -> CliResult<plakous_host_protocol::views::presentation::VerticalUsageView> {
+    plakous_hosted::subscription_usage::project_limits(
+        [(vertical, observation)],
+        plakous_host_protocol::views::presentation::SessionLedgerView::default(),
+    )
+    .verticals
+    .into_iter()
+    .next()
+    .ok_or_else(|| CliFailure::new("gateway allowance did not project a row"))
 }
 
 fn account_rows(
@@ -377,7 +463,9 @@ fn account_rows(
     for account in accounts {
         let detail = match cell(address, key, &account) {
             Ok(detail) => detail,
-            Err(error) if all => format!("error={}", error.message()),
+            Err(error) if all && error.code() != Some("gateway_unavailable") => {
+                format!("error={}", error.message())
+            }
             Err(error) => return Err(error),
         };
         writeln!(stdout, "{account}: {detail}").map_err(|_| CliFailure::new("stdout failed"))?;
@@ -601,7 +689,7 @@ fn ask(
     key: Option<&str>,
     request: AdminRequest,
 ) -> CliResult<AdminResponse> {
-    client::admin(address, key, &request).map_err(CliFailure::new)
+    client::admin(address, key, &request)
 }
 
 fn account_of(account: &str) -> CliResult<GatewayAccount> {

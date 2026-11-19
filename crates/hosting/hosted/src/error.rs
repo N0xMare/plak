@@ -22,6 +22,8 @@ pub enum CliFailureKind {
     Usage,
     /// Authentication failure.
     Auth,
+    /// Credential gateway configuration is absent or the service does not answer.
+    GatewayUnavailable,
     /// Agent/runtime failure.
     Agent,
     /// Explicit operator recovery is required; no silent bootstrap.
@@ -42,7 +44,7 @@ impl CliFailureKind {
     #[must_use]
     pub const fn exit_code(self) -> u8 {
         match self {
-            Self::Internal => 1,
+            Self::Internal | Self::GatewayUnavailable => 1,
             Self::Usage | Self::ImportThroughRunningHost => 2,
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
@@ -642,6 +644,7 @@ impl CliFailure {
             CliFailureKind::LocalRunnerProcesses => Some("local_runner_processes"),
             CliFailureKind::LocalRunnerInspection => Some("local_runner_inspection"),
             CliFailureKind::ImportThroughRunningHost => Some("import_through_running_host"),
+            CliFailureKind::GatewayUnavailable => Some("gateway_unavailable"),
             _ => None,
         }
     }

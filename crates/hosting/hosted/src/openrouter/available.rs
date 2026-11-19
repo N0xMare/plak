@@ -748,7 +748,7 @@ pub fn probe_openrouter_key_usage(
         Ok(runtime) => runtime,
         Err(error) => return OpenRouterKeyUsageProbe::Failed(error.to_string()),
     };
-    runtime.block_on(read_key_usage(prepared))
+    runtime.block_on(read_key_usage(credentials.custody(), prepared))
 }
 
 /// One cancellable allowance GET, without inference, login or refresh. The
@@ -758,7 +758,7 @@ pub async fn read_openrouter_key_usage(
     account: &crate::account::AccountRef,
 ) -> OpenRouterKeyUsageProbe {
     match prepare_key_usage(credentials, account) {
-        Ok(prepared) => read_key_usage(prepared).await,
+        Ok(prepared) => read_key_usage(credentials.custody(), prepared).await,
         Err(reason) => reason,
     }
 }
@@ -777,8 +777,11 @@ fn prepare_key_usage(
         .map_err(|error| OpenRouterKeyUsageProbe::Failed(error.message().to_owned()))
 }
 
-async fn read_key_usage(prepared: OpenRouterUsageRead) -> OpenRouterKeyUsageProbe {
-    let observation = fetch_key_usage(prepared.source, prepared.label).await;
+async fn read_key_usage(
+    custody: plakous::custody::Custody,
+    prepared: OpenRouterUsageRead,
+) -> OpenRouterKeyUsageProbe {
+    let observation = fetch_key_usage(&custody, prepared.source, prepared.label).await;
     if let Some(observer) = prepared.observer {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             observer.completed(&observation);
@@ -788,10 +791,12 @@ async fn read_key_usage(prepared: OpenRouterUsageRead) -> OpenRouterKeyUsageProb
 }
 
 async fn fetch_key_usage(
+    custody: &plakous::custody::Custody,
     source: Arc<OpenRouterKeySource>,
     label: String,
 ) -> OpenRouterKeyUsageProbe {
-    let client = match OpenRouterChatClient::connect_with_retention(
+    let client = match OpenRouterChatClient::connect_with_retention_in(
+        custody,
         source,
         OpenRouterRetentionPolicy::gateway_default(),
     )

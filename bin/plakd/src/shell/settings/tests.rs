@@ -1323,21 +1323,26 @@ fn switch_now_names_the_profile_and_waits_for_an_empty_queue() {
 /// A fresh home's unattached session takes the profile's root and
 /// attaches on it, instead of refusing "fork now needs an idle attached
 /// session".
+#[cfg(all(feature = "codex", feature = "grok"))]
 #[test]
 fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
     let dir = tempfile::tempdir().unwrap();
     let paths = profile_paths(dir.path());
+    let gateway_state = dir.path().join("gateway-state");
+    let provider = plakous::subscriptions::NativeProvider::Codex;
+    let expiry = plakous::subscriptions::NativeSubscriptions::notice(provider)
+        .unwrap()
+        .expires_at();
+    crate::gateway::gateway_seed::seed(&gateway_state, provider, None, expiry);
+    let gateway = crate::gateway::test_service::GatewayFixture::start(&paths, &gateway_state);
     let session = SessionRecord::new(dir.path().to_path_buf());
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-        surface: Some(ProductSurface::boxed(
-            &paths,
-            crate::gateway::HostCustody::Local,
-        )),
+        surface: Some(ProductSurface::boxed(&paths, gateway.custody())),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: crate::shell::host::open_product_subscriptions(),
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
-            crate::gateway::HostCustody::Local,
+            gateway.custody(),
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -1355,6 +1360,7 @@ fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
         accounts: Vec::new(),
     }))
     .unwrap();
+    drop(tx);
     join.join().unwrap().unwrap();
     let observed = rx.try_iter().collect::<Vec<_>>();
     assert!(
@@ -1597,6 +1603,7 @@ fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
 }
 
 /// A loadable home default is never replaced by Use now.
+#[cfg(all(feature = "codex", feature = "grok"))]
 #[test]
 fn use_now_keeps_a_loadable_home_default() {
     let dir = tempfile::tempdir().unwrap();
@@ -1607,17 +1614,21 @@ fn use_now_keeps_a_loadable_home_default() {
     )
     .unwrap();
     std::fs::write(paths.config_file(), "[root]\nagent = \"kept-root\"\n").unwrap();
+    let gateway_state = dir.path().join("gateway-state");
+    let provider = plakous::subscriptions::NativeProvider::Codex;
+    let expiry = plakous::subscriptions::NativeSubscriptions::notice(provider)
+        .unwrap()
+        .expires_at();
+    crate::gateway::gateway_seed::seed(&gateway_state, provider, None, expiry);
+    let gateway = crate::gateway::test_service::GatewayFixture::start(&paths, &gateway_state);
     let session = SessionRecord::new(dir.path().to_path_buf());
     let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-        surface: Some(ProductSurface::boxed(
-            &paths,
-            crate::gateway::HostCustody::Local,
-        )),
+        surface: Some(ProductSurface::boxed(&paths, gateway.custody())),
         binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
         subscriptions: crate::shell::host::open_product_subscriptions(),
         openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
             &paths,
-            crate::gateway::HostCustody::Local,
+            gateway.custody(),
         ),
         product_home: paths.home().to_path_buf(),
         home: paths.session_home(),
@@ -1635,6 +1646,7 @@ fn use_now_keeps_a_loadable_home_default() {
         accounts: Vec::new(),
     }))
     .unwrap();
+    drop(tx);
     join.join().unwrap().unwrap();
     let observed = rx.try_iter().collect::<Vec<_>>();
     assert!(
@@ -1713,21 +1725,22 @@ fn use_now_binds_an_openrouter_or_api_root_from_its_template() {
             "root = \"api-root\"\nworking_set = [\"api-worker\"]\n",
         )
         .unwrap();
+        let gateway = crate::gateway::test_service::GatewayFixture::start(
+            &paths,
+            &dir.path().join("gateway-state"),
+        );
         let session = SessionRecord::new(dir.path().to_path_buf());
         let id = session.id.clone();
         let store = std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
             paths.clone(),
         ));
         let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
-            surface: Some(ProductSurface::boxed(
-                &paths,
-                crate::gateway::HostCustody::Local,
-            )),
+            surface: Some(ProductSurface::boxed(&paths, gateway.custody())),
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
             subscriptions: crate::shell::host::open_product_subscriptions(),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &paths,
-                crate::gateway::HostCustody::Local,
+                gateway.custody(),
             ),
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),

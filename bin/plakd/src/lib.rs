@@ -191,8 +191,6 @@ pub(crate) use crate::presentation::CompatibilityState;
 #[cfg(test)]
 pub(crate) use crate::presentation::CredentialState;
 #[cfg(test)]
-pub(crate) use crate::presentation::PresentationBackend;
-#[cfg(test)]
 use crate::store::sessions as product_sessions;
 pub(crate) use plakous_hosted::agent as product_agent;
 pub(crate) use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
@@ -220,18 +218,11 @@ use crate::commands::application::{AccountOps, PlakousApplication};
 use crate::commands::catalog::list_models;
 use crate::commands::doctor::run_doctor;
 use crate::commands::login::print_compatibility_notice;
-#[cfg(test)]
-use crate::commands::login::{
-    auth_login, auth_logout, auth_logout_local, auth_refresh, auth_status, key_clear, key_set,
-    key_status,
-};
 use crate::commands::session::{
     confirm_session_mutation, load_admitted_product_session, run_attached_action,
     show_child_recovery_status, show_recovery_status,
 };
 use crate::commands::support::edit_config_file;
-#[cfg(test)]
-use crate::commands::support::{api_key_status_failure_cell, status_credential_cell};
 use crate::commands::usage::{collect_usage_limits, usage_vertical_for_account};
 use crate::presentation::{
     format_unix_seconds, product_account_label, title_case_token, transcript_entry,
@@ -479,7 +470,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         return Ok(ProcessOutcome::Success);
     }
     if let Command::Gateway(command) = command {
-        gateway::execute(&services, command, &mut io::stdout().lock()).map_err(CliFailure::new)?;
+        gateway::execute(&services, command, &mut io::stdout().lock())?;
         return Ok(ProcessOutcome::Success);
     }
     if gateway::is_account_command(&command)
@@ -817,6 +808,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                 .map_err(|failure| failure.or_kind(failure_kind));
             }
             let read_only = command_is_read_only(&command);
+            let custody = services.custody()?;
+            if !test_hooks::offline_model_selected() {
+                custody.require_reachable()?;
+            }
             let mut backend = PlakousApplication::new(
                 services.home().state()?.to_path_buf(),
                 if read_only {
@@ -833,7 +828,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                         .cloned()
                         .zip(services.session_records().ok())
                 },
-                services.custody()?,
+                custody,
             )?
             .with_account_home(services.paths().ok().cloned())
             .with_process_jobs(services.process_jobs());
@@ -1015,40 +1010,6 @@ fn execute_command<Backend: AccountOps>(
     login_ui: &mut impl commands::login_flow::LoginUi,
 ) -> CliResult<ProcessOutcome> {
     match command {
-        #[cfg(test)]
-        Command::AuthStatus(provider) => {
-            review_expiry::write_warnings(stdout, services.now_unix_seconds())
-                .map_err(|_| CliFailure::new("stdout failed"))?;
-            auth_status(
-                application_backend(backend)?,
-                &provider,
-                services.paths().ok(),
-                stdout,
-            )
-        }
-        #[cfg(test)]
-        Command::AuthLogin { provider, mode } => auth_login(
-            application_backend(backend)?,
-            &provider,
-            mode,
-            stdin,
-            stderr,
-            login_ui,
-        ),
-        #[cfg(test)]
-        Command::AuthRefresh(provider) => {
-            auth_refresh(application_backend(backend)?, &provider, stdin, stderr)
-        }
-        #[cfg(test)]
-        Command::AuthLogout {
-            provider,
-            local_only: true,
-        } => auth_logout_local(application_backend(backend)?, &provider, stderr),
-        #[cfg(test)]
-        Command::AuthLogout {
-            provider,
-            local_only: false,
-        } => auth_logout(application_backend(backend)?, &provider, stdin, stderr),
         Command::Models(provider) => list_models(
             application_backend(backend)?,
             &provider,
@@ -1123,14 +1084,6 @@ fn execute_command<Backend: AccountOps>(
             .map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
-        #[cfg(test)]
-        Command::KeySet { account } => key_set(account.as_str(), stdin, stderr),
-        #[cfg(test)]
-        Command::KeyClear { account } => key_clear(account.as_str(), stdout),
-        #[cfg(test)]
-        Command::KeyStatus { account } => {
-            key_status(account.map(|account| account.to_string()), stdout)
-        }
         Command::SecretSet { shelf, name } => {
             commands::secret::secret_set(services.paths()?, shelf, &name, stdin, stderr)
         }
@@ -1144,26 +1097,6 @@ fn execute_command<Backend: AccountOps>(
             commands::mcp::run(services.paths()?, command, stdin, stdout, stderr, login_ui)
         }
         Command::Runner(_) => unreachable!("runner commands dispatch before the stdio locks"),
-        #[cfg(test)]
-        Command::StatusAll => {
-            dispatch::execute_status_all(services, application_backend(backend)?, stdout)
-        }
-        #[cfg(test)]
-        Command::AccountsList => {
-            for account in application_backend(backend)?.accounts()? {
-                writeln!(stdout, "{account}").map_err(|_| CliFailure::new("stdout failed"))?;
-            }
-            Ok(ProcessOutcome::Success)
-        }
-        #[cfg(test)]
-        Command::AccountsRemove { account, confirmed } => commands::login::remove_account(
-            application_backend(backend)?,
-            &account,
-            confirmed,
-            stdin,
-            stdout,
-            stderr,
-        ),
         Command::SessionList { include_archived } => {
             dispatch::execute_session_list(services, stdout, include_archived)
         }
@@ -1304,7 +1237,6 @@ fn execute_command<Backend: AccountOps>(
             account,
             session_id,
         ),
-        #[cfg(not(test))]
         Command::AuthStatus(_)
         | Command::AuthLogin { .. }
         | Command::AuthRefresh(_)

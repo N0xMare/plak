@@ -1439,14 +1439,6 @@ pub struct CredentialRefreshRow {
 }
 
 impl TelemetryStore {
-    /// Read-only latest refresh row per provider for `plakd doctor`.
-    pub fn latest_credential_refresh(
-        paths: &PlakPaths,
-        provider: &str,
-    ) -> Result<Option<CredentialRefreshRow>, TelemetryStoreOpenError> {
-        Self::read_credential_refresh(paths, provider, false, None)
-    }
-
     /// Latest settled failure; an in-flight Began does not hide it, and a
     /// completed refresh clears it. This read can never rebuild telemetry.
     pub(crate) fn latest_refresh_outcome(

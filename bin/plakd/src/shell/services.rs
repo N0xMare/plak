@@ -418,8 +418,7 @@ impl Services {
         if let Some(custody) = self.custody.get() {
             return Ok(custody.clone());
         }
-        let resolved =
-            crate::gateway::HostCustody::resolve(self.paths()?).map_err(crate::CliFailure::new)?;
+        let resolved = crate::gateway::HostCustody::resolve(self.paths()?)?;
         Ok(self.custody.get_or_init(|| resolved).clone())
     }
 

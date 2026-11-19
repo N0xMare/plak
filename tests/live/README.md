@@ -52,8 +52,15 @@ just live jobs grok
 just live jobs grok --only promotion_budget,steer_command
 python3 tests/live/jobs.py grok --only crash_jobs
 just live gateway            # offline plan and estimate line; no provider call
-just live gateway --paid     # every route in-process and through gateway serve; paid
+just live gateway --paid     # every route through a separate gateway; paid
 ```
+
+The live drivers start a separate test-hooks gateway and point their callers
+at its private Unix socket. It uses the same OAuth state as the account under
+test, but exclusively holds that store. If another gateway owns that state,
+the driver refuses rather than stopping it. Use a dedicated login state for
+live evidence, or settle and explicitly drain its existing gateway first.
+Upstream fault rules run in the test gateway; relay-hop rules run in the caller.
 
 Startup lookup fault proof (opt-in, real provider usage, fresh private home):
 `python3 tests/live/lookup_retry.py deepseek --fault connect`, or `--fault 503`.

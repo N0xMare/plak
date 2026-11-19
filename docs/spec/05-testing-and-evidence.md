@@ -4396,12 +4396,13 @@ that a discarded response's sealed reasoning never reaches the session. `check_f
 never enables the feature and that `test-hooks` does.
 
 A host plan may set `hop=gateway` or `hop=upstream`. An absent hop means
-`upstream`. `hop=upstream` applies to this process's provider client,
-including an in-process gateway's own upstream client.
+`upstream`. `hop=upstream` applies to the provider client; in a plakd deployment
+that client is in the separate gateway service. The live drivers put upstream
+rules on their fixture gateway and relay-hop rules on the caller.
 `FaultPlan::parse_for` with `FaultPlacement::ExternalGateway` refuses an
 upstream rule, so a plan that cannot reach a provider from this process is
 never silently fault-free. `PLAK_TEST_GATEWAY` selects that placement: unset
-or `in-process` is local, `external` refuses upstream rules, and any other
+or `in-process` is local (used by library fixtures), `external` refuses upstream rules, and any other
 value fails every exchange the way a mistyped plan does. `provider` is not a
 placement. A test-hooks `plakd gateway serve` reads
 `FaultPlan::parse_provider` through `Client::with_provider_faults_from_env`,
@@ -4510,11 +4511,9 @@ re-prepared onto it and carries the rotated token.
 
 `just live gateway` prints the plan and a `just live estimate` line, and
 calls no provider. `just live gateway --paid` drives the shared live route
-drivers through two host topologies. In the first, a host with no `[gateway]
-address` holds its copied keys and the machine's logins in-process. In the
-second, `plakd gateway serve` adopts that home and the machine's subscription
-store in place, and a keyless host sets `[gateway] address` to the service's
-Unix socket. Each topology runs one turn on each of seven routes (`codex`,
+drivers through a separate `plakd gateway serve` process holding copied keys
+and the machine's subscription store. A keyless caller sets `[gateway] address`
+to the service's Unix socket. The run drives one turn on each of seven routes (`codex`,
 `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`, `api-xai`,
 `or-nemotron-free`), restarts its gateway, reopens every session and forces a
 refresh of each OAuth kind (codex, claude, grok). The Unix-socket run checks

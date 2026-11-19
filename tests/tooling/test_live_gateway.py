@@ -71,6 +71,22 @@ exit 1
 
 
 class LiveGatewayPlan(unittest.TestCase):
+    def test_live_faults_go_only_to_the_hop_that_owns_them(self):
+        home = Path("/fixture/driver-home")
+        env = live.Env(Path("/fixture/plakd"), home, home)
+        source = {
+            "PLAK_HOME": str(home),
+            "PLAK_TEST_FAULTS": "host=example.test,fault=503;hop=gateway,fault=connect",
+            "PLAK_TEST_EXCHANGE_CAPTURE_DIR": "/fixture/capture",
+        }
+        with patch.object(live, "running_gateway") as start:
+            self.addCleanup(env.close_gateway)
+            caller = env.gateway_env(source)
+            self.assertEqual(caller["PLAK_TEST_FAULTS"], "hop=gateway,fault=connect")
+            self.assertEqual(caller["PLAK_TEST_GATEWAY"], "external")
+            self.assertEqual(start.call_args.kwargs["faults"], "host=example.test,fault=503")
+            self.assertNotIn("PLAK_TEST_EXCHANGE_CAPTURE_DIR", start.call_args.args[3])
+
     def test_plan_names_routes_topologies_and_the_estimate_line(self):
         completed = subprocess.run(
             [sys.executable, str(SCRIPT)],
@@ -82,14 +98,14 @@ class LiveGatewayPlan(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         for route in ROUTES:
             self.assertIn(route, completed.stdout)
-        self.assertIn("in-process", completed.stdout)
+        self.assertNotIn("in-process", completed.stdout)
         self.assertIn("unix-socket", completed.stdout)
         self.assertIn("reopen every session across a gateway restart", completed.stdout)
         self.assertIn("forced refresh of each OAuth kind", completed.stdout)
         self.assertIn("just live estimate --rate-card RATE_CARD --soak-row grok", completed.stdout)
-        # Four API-key routes, two topologies, a turn and a reopen each.
-        self.assertIn("gateway_api_turns 16 input 350592 output 8000", completed.stdout)
-        self.assertIn("(12 turns)", completed.stdout)
+        # Four API-key routes, a turn and a reopen each.
+        self.assertIn("gateway_api_turns 8 input 175296 output 4000", completed.stdout)
+        self.assertIn("(6 turns)", completed.stdout)
         self.assertIn("plakd gateway serve", completed.stdout)
         self.assertIn("[gateway] address", completed.stdout)
         self.assertIn("audit line count", completed.stdout)
@@ -149,7 +165,7 @@ class LiveGatewayPaid(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_both_topologies_turn_restart_reopen_and_refresh(self):
+    def test_separate_gateway_turn_restart_reopen_and_refresh(self):
         artifacts = self.root / "artifacts"
 
         def remove_homes():
@@ -166,14 +182,11 @@ class LiveGatewayPaid(unittest.TestCase):
         def subjects(topology, step):
             return [s["subject"] for s in steps if s["topology"] == topology and s["step"] == step]
 
-        for topology in (gateway.IN_PROCESS, gateway.UNIX_SOCKET):
-            self.assertEqual(subjects(topology, "turn"), list(ROUTES))
-            self.assertEqual(subjects(topology, "reopen"), list(ROUTES))
-            self.assertEqual(subjects(topology, "refresh"), list(gateway.OAUTH_KINDS))
+        self.assertEqual(subjects(gateway.UNIX_SOCKET, "turn"), list(ROUTES))
+        self.assertEqual(subjects(gateway.UNIX_SOCKET, "reopen"), list(ROUTES))
+        self.assertEqual(subjects(gateway.UNIX_SOCKET, "refresh"), list(gateway.OAUTH_KINDS))
         self.assertEqual(subjects(gateway.UNIX_SOCKET, "doctor"), ["oauth"])
         self.assertEqual(subjects(gateway.UNIX_SOCKET, "status"), list(gateway.OAUTH_KINDS))
-        self.assertEqual(subjects(gateway.IN_PROCESS, "doctor"), [])
-        self.assertEqual(subjects(gateway.IN_PROCESS, "status"), [])
         restart = next(
             s for s in steps if s["topology"] == gateway.UNIX_SOCKET and s["step"] == "restart"
         )
@@ -184,13 +197,11 @@ class LiveGatewayPaid(unittest.TestCase):
             if s["topology"] == gateway.UNIX_SOCKET and s["step"] in ("turn", "reopen")
         ]
         self.assertTrue(all(s["audit_lines"] == 1 for s in relayed), relayed)
-        local = [s for s in steps if s["topology"] == gateway.IN_PROCESS]
-        self.assertTrue(all(s["audit_lines"] is None for s in local), local)
 
         # The service adopts the keyed home in place; the relaying host has
         # no key and names the service's socket.
         homes = live.scratch_homes(artifacts)
-        keyed, keyless = Path(homes[gateway.IN_PROCESS]), Path(homes[gateway.UNIX_SOCKET])
+        keyed, keyless = Path(homes[gateway.SERVICE_HOME]), Path(homes[gateway.UNIX_SOCKET])
         socket = keyed / "gateway.sock"
         self.assertTrue((keyed / "secrets" / "openai.key").is_file())
         self.assertFalse((keyless / "secrets").exists())

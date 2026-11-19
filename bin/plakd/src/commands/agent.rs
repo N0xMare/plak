@@ -322,18 +322,28 @@ pub(crate) fn run_agent_after_admission(
         None => services.paths()?,
     };
     let cfg = super::support::admit_product_config(paths, &mut io::stderr().lock())?;
+    let resolve_custody = || -> CliResult<_> {
+        let custody = services.custody()?;
+        if context.is_none() && !crate::test_hooks::offline_model_selected() {
+            custody.require_reachable()?;
+        }
+        Ok(custody)
+    };
     let store = services.session_records()?;
     crate::home::state::ensure_usable_state(paths, &mut io::stderr().lock())
         .map_err(CliFailure::new)?;
     let cwd = paths.workspace().map_err(CliFailure::new)?.to_path_buf();
-    let record = match session {
-        AgentSession::Resume(session_id) => crate::carry::load_for_work(
-            services,
-            load_admitted_product_session(paths, store.as_ref(), &session_id)?,
-            &mut io::stderr().lock(),
-        )?,
+    let (record, custody) = match session {
+        AgentSession::Resume(session_id) => {
+            let admitted = load_admitted_product_session(paths, store.as_ref(), &session_id)?;
+            let custody = resolve_custody()?;
+            (
+                crate::carry::load_for_work(services, admitted, &mut io::stderr().lock())?,
+                custody,
+            )
+        }
         AgentSession::New => {
-            let custody = services.custody()?;
+            let custody = resolve_custody()?;
             let (account, platform, wire, choices) = fill_agent_accounts(
                 &cfg,
                 || crate::account_choice::ready_catalog(paths, &custody),
@@ -365,7 +375,7 @@ pub(crate) fn run_agent_after_admission(
             )?;
             crate::build_features::admit_session(&record)?;
             store.save(&mut record).map_err(CliFailure::new)?;
-            record
+            (record, custody)
         }
     };
     let state_roots = services.state_roots_on(
@@ -387,7 +397,6 @@ pub(crate) fn run_agent_after_admission(
             "plakd agent requires --model or a configured [root] agent template model",
         )
     })?;
-    let custody = services.custody()?;
     let selected: plakous_hosted::account::AccountRef = account.parse()?;
     let is_openrouter = selected.vertical() == plakous_hosted::account::Vertical::OpenRouter;
     let (resolved_effort, resolved_explicit) = if is_openrouter {

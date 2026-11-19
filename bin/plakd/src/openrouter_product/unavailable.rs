@@ -1,4 +1,3 @@
-use super::OpenRouterCatalogProbe;
 use crate::home::paths::PlakPaths;
 use plakous_hosted::{CliFailure, CliResult, openrouter::OpenRouterCredentials};
 use std::sync::Arc;
@@ -30,16 +29,16 @@ fn unavailable() -> CliFailure {
     }
     .into()
 }
+pub(crate) fn gateway_usage(
+    _: serde_json::Value,
+    _: u64,
+    _: &str,
+) -> CliResult<plakous_hosted::subscription_usage::VerticalObservation> {
+    Err(unavailable())
+}
 pub fn list_models(
     _: &PlakPaths,
     _: &plakous_hosted::account::AccountRef,
 ) -> std::future::Ready<CliResult<Vec<String>>> {
     std::future::ready(Err(unavailable()))
-}
-pub fn probe_openrouter_catalog_allowlist(
-    _: &PlakPaths,
-    _: Option<&str>,
-    _: Option<&str>,
-) -> OpenRouterCatalogProbe {
-    OpenRouterCatalogProbe::Failed(unavailable().to_string())
 }

@@ -333,9 +333,7 @@ async fn refuse_external_gateway(
             set.join(", ")
         )));
     }
-    gateway_startup::verify(custody, services.home().state()?)
-        .await
-        .map_err(CliFailure::new)
+    gateway_startup::verify(custody, services.home().state()?).await
 }
 
 fn startup_scan(

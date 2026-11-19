@@ -450,7 +450,17 @@ fn host_install_reloads_only_after_atomic_creation_and_is_idempotent() -> TestRe
         0o644
     );
     std::fs::remove_file(&fixture.log)?;
-    success(&fixture.install(false)?);
+    let reinstall = fixture.install(false)?;
+    success(&reinstall);
+    let lines = String::from_utf8(reinstall.stdout)?;
+    assert_eq!(
+        lines
+            .lines()
+            .filter(|line| line.starts_with("Already installed"))
+            .count(),
+        2,
+        "{lines}"
+    );
     assert!(
         !fixture.log.exists(),
         "identical install must not call the manager"

@@ -12,7 +12,11 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
 import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gate"))
+from gateway_fixture import running_gateway  # noqa: E402
 
 # Increment-4 live/parked-tree cases register (name, dormant, body) here later.
 INCREMENT4_CASES = ()
@@ -1209,7 +1213,10 @@ def rehearse(args, root, support):
                 dormant,
                 "interrupted" if name.startswith("d-") and name != "d-mixed" else "completed",
             )
-            entry.update(body(case), status="passed")
+            with running_gateway(
+                case.images["B"]["binary"], Path(case.env["PLAK_HOME"]), case.workspace, case.env
+            ):
+                entry.update(body(case), status="passed")
         except Exception as error:
             entry.update(status="failed", error=f"{type(error).__name__}: {error}")
             failed = True

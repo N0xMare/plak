@@ -99,7 +99,7 @@ pub(crate) fn status_text(
     home: &crate::home::paths::PlakPaths,
     address: &GatewayAddress,
     key: Option<&str>,
-) -> Result<String, String> {
+) -> crate::CliResult<String> {
     let versions = client::versions(address, key)?;
     let mut lines = vec![format!("instance {}", versions.instance.as_str())];
     if let Some(count) = audit::published_failures(
@@ -143,7 +143,7 @@ pub(crate) fn caller_add(
     admin: &[String],
     key_out: Option<&std::path::Path>,
     stdout: &mut dyn Write,
-) -> Result<(), String> {
+) -> crate::CliResult<()> {
     let caller = CallerId::new(id.to_owned()).map_err(|error| error.to_string())?;
     let mut scope_text = String::from("relay:*");
     for account in admin {
@@ -176,15 +176,24 @@ pub(crate) fn caller_add(
             }
             Ok(())
         }
-        AdminResponse::Refused { refusal } => Err(format!("caller add refused: {refusal:?}")),
-        _ => Err("caller add returned an unexpected response".to_owned()),
+        AdminResponse::Refused { refusal } => {
+            Err(format!("caller add refused: {refusal:?}").into())
+        }
+        _ => Err("caller add returned an unexpected response"
+            .to_owned()
+            .into()),
     }
 }
 
-pub(crate) fn caller_list(address: &GatewayAddress, stdout: &mut dyn Write) -> Result<(), String> {
+pub(crate) fn caller_list(
+    address: &GatewayAddress,
+    stdout: &mut dyn Write,
+) -> crate::CliResult<()> {
     let response = client::admin::<AdminResponse>(address, None, &AdminRequest::CallerList {})?;
     let AdminResponse::Callers { callers } = response else {
-        return Err("caller list returned an unexpected response".to_owned());
+        return Err("caller list returned an unexpected response"
+            .to_owned()
+            .into());
     };
     for caller in callers {
         let revoked = if caller.revoked_at_unix_ms.is_some() {
@@ -203,14 +212,16 @@ pub(crate) fn caller_list(address: &GatewayAddress, stdout: &mut dyn Write) -> R
     Ok(())
 }
 
-pub(crate) fn caller_remove(address: &GatewayAddress, id: &str) -> Result<(), String> {
+pub(crate) fn caller_remove(address: &GatewayAddress, id: &str) -> crate::CliResult<()> {
     let caller = CallerId::new(id.to_owned()).map_err(|error| error.to_string())?;
     let response =
         client::admin::<AdminResponse>(address, None, &AdminRequest::CallerRemove { caller })?;
     match response {
         AdminResponse::CallerRemoved { .. } => Ok(()),
-        AdminResponse::Refused { refusal } => Err(format!("caller rm refused: {refusal:?}")),
-        _ => Err("caller rm returned an unexpected response".to_owned()),
+        AdminResponse::Refused { refusal } => Err(format!("caller rm refused: {refusal:?}").into()),
+        _ => Err("caller rm returned an unexpected response"
+            .to_owned()
+            .into()),
     }
 }
 
@@ -218,16 +229,19 @@ pub(crate) fn caller_rotate(
     address: &GatewayAddress,
     id: &str,
     stdout: &mut dyn Write,
-) -> Result<(), String> {
+) -> crate::CliResult<()> {
     let caller = CallerId::new(id.to_owned()).map_err(|error| error.to_string())?;
     let response =
         client::admin::<AdminResponse>(address, None, &AdminRequest::CallerRotate { caller })?;
     match response {
-        AdminResponse::CallerKeyIssued { key, .. } => {
-            writeln!(stdout, "{}", key.expose()).map_err(|error| error.to_string())
+        AdminResponse::CallerKeyIssued { key, .. } => writeln!(stdout, "{}", key.expose())
+            .map_err(|error| crate::CliFailure::new(error.to_string())),
+        AdminResponse::Refused { refusal } => {
+            Err(format!("caller rotate refused: {refusal:?}").into())
         }
-        AdminResponse::Refused { refusal } => Err(format!("caller rotate refused: {refusal:?}")),
-        _ => Err("caller rotate returned an unexpected response".to_owned()),
+        _ => Err("caller rotate returned an unexpected response"
+            .to_owned()
+            .into()),
     }
 }
 
@@ -238,7 +252,7 @@ pub(crate) fn set_flag(
     caller: Option<&str>,
     cut: bool,
     enable: bool,
-) -> Result<(), String> {
+) -> crate::CliResult<()> {
     let target = flag_target(account, caller)?;
     let request = if enable {
         AdminRequest::Enable { target }
@@ -248,17 +262,21 @@ pub(crate) fn set_flag(
     let response = client::admin::<AdminResponse>(address, key, &request)?;
     match response {
         AdminResponse::Disabled {} | AdminResponse::Enabled {} => Ok(()),
-        AdminResponse::Refused { refusal } => Err(format!("gateway flag refused: {refusal:?}")),
-        _ => Err("gateway flag returned an unexpected response".to_owned()),
+        AdminResponse::Refused { refusal } => {
+            Err(format!("gateway flag refused: {refusal:?}").into())
+        }
+        _ => Err("gateway flag returned an unexpected response"
+            .to_owned()
+            .into()),
     }
 }
 
-pub(crate) fn drain(address: &GatewayAddress) -> Result<(), String> {
+pub(crate) fn drain(address: &GatewayAddress) -> crate::CliResult<()> {
     let response = client::admin::<AdminResponse>(address, None, &AdminRequest::Drain {})?;
     match response {
         AdminResponse::Draining {} => Ok(()),
-        AdminResponse::Refused { refusal } => Err(format!("drain refused: {refusal:?}")),
-        _ => Err("drain returned an unexpected response".to_owned()),
+        AdminResponse::Refused { refusal } => Err(format!("drain refused: {refusal:?}").into()),
+        _ => Err("drain returned an unexpected response".to_owned().into()),
     }
 }
 
@@ -266,7 +284,7 @@ pub(crate) fn check(
     address: &GatewayAddress,
     key: Option<&str>,
     stdout: &mut dyn Write,
-) -> Result<(), String> {
+) -> crate::CliResult<()> {
     let versions = client::versions(address, key)?;
     writeln!(
         stdout,
@@ -289,9 +307,11 @@ pub(crate) fn check(
             Ok(())
         }
         AdminResponse::Refused { refusal } => {
-            Err(format!("gateway account list refused: {refusal:?}"))
+            Err(format!("gateway account list refused: {refusal:?}").into())
         }
-        _ => Err("gateway account list returned an unexpected response".to_owned()),
+        _ => Err("gateway account list returned an unexpected response"
+            .to_owned()
+            .into()),
     }
 }
 
@@ -343,6 +363,8 @@ mod adoption_tests;
 #[cfg(all(test, feature = "codex", feature = "grok"))]
 #[path = "../../tests/integration/support/gateway_seed.rs"]
 pub(crate) mod gateway_seed;
+#[cfg(test)]
+pub(crate) mod test_service;
 #[cfg(test)]
 mod tests;
 

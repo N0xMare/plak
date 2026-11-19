@@ -3,6 +3,7 @@
 #![cfg(feature = "test-hooks")]
 
 use super::*;
+use crate::gateway::test_service::GatewayFixture;
 use plakd_wire_types::console::{Decimal, ReadAction, UsageWindow};
 use plakous::model::{SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp};
 use std::sync::atomic::AtomicUsize;
@@ -10,7 +11,8 @@ use std::time::Duration;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Error>> {
+fn fixture() -> Result<(tempfile::TempDir, GatewayFixture, Arc<Console>), Box<dyn std::error::Error>>
+{
     let root = tempfile::tempdir()?;
     let paths = PlakPaths::explicit(root.path().join("home"));
     let _store = crate::telemetry_store::TelemetryStore::open(&paths)?;
@@ -23,10 +25,14 @@ fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Er
     ] {
         connection.execute("INSERT INTO recorded_terminals VALUES(?1,'session','branch',?2,?3,'123','4','0','0','0','2','2','7')", rusqlite::params![id, clock::now_ms()-1_000, account])?;
     }
+    let gateway = GatewayFixture::start(
+        &PlakPaths::explicit(root.path().join("gateway")),
+        &root.path().join("gateway-state"),
+    );
     let console = Console::new(
         paths,
         root.path().join("state"),
-        crate::gateway::HostCustody::Local,
+        gateway.custody(),
         Some(tokio::runtime::Handle::current()),
         ConfiguredSwitches {
             web_accounts_read: false,
@@ -37,7 +43,7 @@ fn fixture() -> Result<(tempfile::TempDir, Arc<Console>), Box<dyn std::error::Er
             web_terminal: false,
         },
     );
-    Ok((root, console))
+    Ok((root, gateway, console))
 }
 
 fn context() -> HostRequestContext {
@@ -51,7 +57,7 @@ fn context() -> HostRequestContext {
 
 #[tokio::test]
 async fn review_exhausted_budget_keeps_recorded_rows_instead_of_refusing_all() -> TestResult {
-    let (_root, console) = fixture()?;
+    let (_root, _gateway, console) = fixture()?;
     let response = console
         .usage(
             Some("codex".into()),
@@ -80,7 +86,7 @@ async fn review_exhausted_budget_keeps_recorded_rows_instead_of_refusing_all() -
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn console_accounts_usage_is_one_native_get_without_refresh_and_keeps_recorded_subtotals()
 -> TestResult {
-    let (_root, console) = fixture()?;
+    let (_root, _gateway, console) = fixture()?;
     let gets = Arc::new(AtomicUsize::new(0));
     let refreshes = Arc::new(AtomicUsize::new(0));
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(&console.state)?;
@@ -143,7 +149,7 @@ async fn console_accounts_usage_is_one_native_get_without_refresh_and_keeps_reco
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stalled_native_providers_leave_time_for_host_paging_and_recorded_rows() -> TestResult {
-    let (_root, console) = fixture()?;
+    let (_root, _gateway, console) = fixture()?;
     let gets = Arc::new(AtomicUsize::new(0));
     let paths = plakous::subscriptions::SubscriptionPaths::from_xdg_state_home(&console.state)?;
     let subscriptions = plakous::subscriptions::NativeSubscriptions::new(paths)
@@ -193,7 +199,7 @@ async fn stalled_native_providers_leave_time_for_host_paging_and_recorded_rows()
 
 #[tokio::test]
 async fn telemetry_writes_do_not_change_usage_cursor_revision() -> TestResult {
-    let (_root, console) = fixture()?;
+    let (_root, _gateway, console) = fixture()?;
     let cancelled = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(10);
     let first = pages::source_revision(

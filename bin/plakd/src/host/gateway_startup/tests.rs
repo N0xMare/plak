@@ -6,7 +6,7 @@ use rustix::net::{AddressFamily, SocketAddrUnix, SocketType, bind, listen, socke
 
 use super::*;
 
-async fn still_waiting(mut proof: Pin<&mut impl Future<Output = Result<(), String>>>) {
+async fn still_waiting(mut proof: Pin<&mut impl Future<Output = CliResult<()>>>) {
     tokio::select! {
         biased;
         result = &mut proof => panic!("startup decided too early: {result:?}"),

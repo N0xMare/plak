@@ -4399,7 +4399,7 @@ Protocol 5 introduced explicit placement, bounded creation options, directory
 lifecycle and process-local draft identity.
 
 The protocol-12 schema pin is SHA-256
-`8b865947bed5fa08a8b4e2a9c5887a6a124e8288907728da3066651d0b8a9b4b`:
+`378712bb946ce471bb589fc05fa29f31764726c6e5581b87f89d5c1cb864b2ac`:
 serialize the schema document as compact JSON with sorted object keys and
 remove only its build-specific `binary_id` field. The offline schema contract
 checks this build-independent pin. The schema title is `plakd wire v2`;
@@ -6638,7 +6638,7 @@ state store and advertise exactly the configured socket. The host waits up to
 three seconds for the holder and listener to appear, and refuses a mismatched
 advertisement immediately. Unix and TCP startups require a reachable gateway
 with a supported protocol. A missing address or unreachable service reports
-`gateway_unavailable` and names installation or startup as the remedy; there is
+`gateway_unavailable` (exit 1) and names installation or startup as the remedy; there is
 no provider-credential fallback.
 
 `plakd run`, `continue` and `models` run in the CLI process with the gateway

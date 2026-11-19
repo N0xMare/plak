@@ -12,8 +12,8 @@ fn an_unset_address_refuses_with_the_install_remedy() {
     let directory = tempfile::tempdir().unwrap();
     let paths = home(&directory);
     let error = HostCustody::resolve(&paths).unwrap_err();
-    assert!(error.starts_with("gateway_unavailable: "));
-    assert!(error.contains("plakd gateway install"));
+    assert_eq!(error.code(), Some("gateway_unavailable"));
+    assert!(error.message().contains("plakd gateway install"));
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn a_unix_key_is_sent_only_from_an_explicit_owner_only_key_file() {
     )
     .unwrap();
     let refused = HostCustody::resolve(&paths).err().unwrap();
-    assert!(refused.contains("0600"), "{refused}");
+    assert!(refused.message().contains("0600"), "{refused}");
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
     let custody = HostCustody::resolve(&paths).unwrap();
     assert_eq!(

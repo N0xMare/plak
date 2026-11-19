@@ -643,31 +643,6 @@ fn unavailable_native_route(provider: NativeProvider) -> CliFailure {
     .into()
 }
 
-/// Display-only refresh evidence, without changing the credential state.
-#[cfg(test)]
-pub(crate) fn oauth_refresh_status_detail(
-    paths: Option<&product_paths::PlakPaths>,
-    provider: NativeProvider,
-    credential: CredentialState,
-) -> Option<String> {
-    if !matches!(
-        credential,
-        CredentialState::Ready | CredentialState::RefreshRequired | CredentialState::Quarantined
-    ) {
-        return None;
-    }
-    let failure = crate::product_doctor::last_failed_refresh(
-        paths?,
-        provider.as_str(),
-        crate::local_time_zone(),
-    )?;
-    Some(if credential == CredentialState::Ready {
-        format!("ready; {failure}")
-    } else {
-        failure
-    })
-}
-
 /// Credential cell when `plakd status` cannot read one account. The repair is
 /// the same classification as [`native_subscription_failure`]; the cell stays
 /// one column so the rest of the table still lines up.
@@ -719,12 +694,6 @@ fn unsafe_storage_status_cell(detail: &str, account: &str) -> String {
     } else {
         cell
     }
-}
-
-/// API-key failure cell. Same backtick-free column style as the OAuth cells.
-#[cfg(test)]
-pub(crate) fn api_key_status_failure_cell(detail: &str) -> String {
-    format!("Unreadable · {}", detail.replace('`', ""))
 }
 
 pub fn application_execution_failure<T>(_: T) -> CliFailure {

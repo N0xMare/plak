@@ -59,7 +59,10 @@ fn serve_and_dry_status_refuse_a_foreign_state_root_before_creating_it() {
         &mut stdout,
     )
     .unwrap_err();
-    assert!(dry.contains("is not the host state home"), "{dry}");
+    assert!(
+        dry.message().contains("is not the host state home"),
+        "{dry}"
+    );
     assert_eq!(stdout, Vec::<u8>::new());
     assert!(!foreign.exists());
 }

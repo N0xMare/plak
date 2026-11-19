@@ -739,19 +739,18 @@ fn refresh_readiness_republishes_both_projections_without_touching_credentials()
     let paths =
         PlakPaths::resolve(Some(OsStr::new(dir.path())), Some(OsStr::new("/home/u"))).unwrap();
     paths.ensure_layout().unwrap();
+    let gateway =
+        crate::gateway::test_service::GatewayFixture::start(&paths, &dir.path().join("state"));
     let mut session = SessionRecord::new(dir.path().to_path_buf());
     sessions::save_session(&paths, &mut session).unwrap();
     let (tx, rx, join) =
         crate::shell::host::spawn_shell_host(plakous_hosted::runtime::ShellHostConfig {
-            surface: Some(ProductSurface::boxed(
-                &paths,
-                crate::gateway::HostCustody::Local,
-            )),
+            surface: Some(ProductSurface::boxed(&paths, gateway.custody())),
             binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
             subscriptions: crate::shell::host::open_product_subscriptions(),
             openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
                 &paths,
-                crate::gateway::HostCustody::Local,
+                gateway.custody(),
             ),
             product_home: paths.home().to_path_buf(),
             home: paths.session_home(),

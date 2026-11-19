@@ -10,6 +10,7 @@ during a run writes the real store). API-key routes copy the key installed by
 
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import collections
 import functools
@@ -21,6 +22,7 @@ import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -28,6 +30,8 @@ from collections.abc import Collection
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/gate"))
+from gateway_fixture import configure_caller, running_gateway  # noqa: E402
 
 
 @functools.cache
@@ -2417,8 +2421,11 @@ def session_usage(home: Path) -> TokenUsage:
 class Env:
     """Where one run's binary, home and artifacts are."""
 
-    def __init__(self, binary: Path, home: Path, artifacts: Path):
+    def __init__(self, binary: Path, home: Path, artifacts: Path, *, owns_gateway=True):
         self.binary, self.home, self.artifacts = binary, home, artifacts
+        self.owns_gateway = owns_gateway
+        self._gateway = None
+        self._gateway_selection = None
         # The route under test, when the driver names it; timeout scoring reads
         # its dispatch deadline.
         self.route: Route | None = None
@@ -2491,6 +2498,49 @@ class Env:
             env["PLAK_TEST_FAULTS"] = faults
         return env
 
+    def close_gateway(self):
+        if self._gateway is not None:
+            self._gateway.__exit__(None, None, None)
+            self._gateway = None
+
+    def gateway_env(self, env: dict[str, str]) -> dict[str, str]:
+        """A separate process owns upstream faults; the caller owns relay faults."""
+        env = dict(env, PLAK_TEST_GATEWAY="external")
+        plan = env.pop("PLAK_TEST_FAULTS", "").split(";")
+        relay = [rule for rule in plan if "hop=gateway" in rule.split(",")]
+        upstream = ";".join(rule for rule in plan if rule and rule not in relay)
+        if not self.owns_gateway and upstream:
+            raise ScenarioFailure(HARNESS, "upstream faults require a driver-owned gateway")
+        if relay:
+            env["PLAK_TEST_FAULTS"] = ";".join(relay)
+        if not self.owns_gateway:
+            return env
+        home = Path(env["PLAK_HOME"])
+        socket = home / "gateway.sock"
+        selection = (home, upstream)
+        if self._gateway is not None and self._gateway_selection == selection:
+            configure_caller(home, socket)
+            return env
+        self.close_gateway()
+        gateway_env = {
+            name: value
+            for name, value in env.items()
+            if name not in ("PLAK_TEST_EXCHANGE_CAPTURE_DIR", "PLAK_TEST_GATEWAY")
+        }
+        gateway = running_gateway(
+            self.binary, home, home, gateway_env, socket_path=socket, faults=upstream
+        )
+        try:
+            gateway.__enter__()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            raise ScenarioFailure(
+                HARNESS, f"could not start a separate gateway: {error}"
+            ) from error
+        if self._gateway_selection is None:
+            atexit.register(self.close_gateway)
+        self._gateway, self._gateway_selection = gateway, selection
+        return env
+
 
 def run_cli(
     env: Env,
@@ -2510,7 +2560,7 @@ def run_cli(
     is returned as exit 0, so the scenario's oracle judges the printed answer;
     the log keeps the real status.
     """
-    child = env.environ(faults=faults, home=home)
+    child = env.gateway_env(env.environ(faults=faults, home=home))
     segment = env.capture_segments[-1]
     try:
         result = subprocess.run(
@@ -2633,7 +2683,7 @@ class Agent:
         observe: bool = False,
     ):
         self.lookup_faults = faults
-        child_env = env.environ(faults, capture_dir=capture_dir, home=home)
+        child_env = env.gateway_env(env.environ(faults, capture_dir=capture_dir, home=home))
         # A scenario that must pin `[turn]` uses a private home. Capture stays
         # on `env`, matching `run_cli`'s home override.
         self.home = home or env.home

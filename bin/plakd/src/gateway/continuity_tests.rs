@@ -14,8 +14,7 @@ use plakous_hosted::platform::{
     AnthropicCredentials as _, OpenAiCredentials as _, XaiCredentials as _,
 };
 
-use super::server_config::ServerConfig;
-use super::service::Gateway;
+use super::test_service::GatewayFixture;
 use crate::home::paths::PlakPaths;
 
 struct Selection {
@@ -107,70 +106,10 @@ async fn grants(paths: &PlakPaths, custody: super::HostCustody) -> Grants {
     }
 }
 
-/// Runs `plakd gateway serve` over `paths` with its store at
-/// `gateway_state`, exactly as the service runs, until an admin drain.
-pub(super) fn serve(
-    paths: &PlakPaths,
-    gateway_state: &std::path::Path,
-) -> (
-    std::path::PathBuf,
-    std::thread::JoinHandle<Result<(), String>>,
-) {
-    let socket = paths.home().join("gw.sock");
-    std::fs::create_dir_all(gateway_state).unwrap();
-    let text = format!(
-        "socket = \"{}\"\nstate_root = \"{}\"\n",
-        socket.display(),
-        gateway_state.display(),
-    );
-    let config = ServerConfig::parse(paths, &text).unwrap();
-    let instance =
-        plakous::gateway::protocol::UuidText::new(uuid::Uuid::new_v4().to_string()).unwrap();
-    let app = crate::commands::application::PlakousApplication::new(
-        gateway_state.to_path_buf(),
-        None,
-        None,
-        super::HostCustody::Local,
-    )
-    .unwrap()
-    .with_account_home(Some(paths.clone()));
-    let bridge = super::ops::OpsBridge::new(app, paths.clone(), instance);
-    let gateway = Gateway::open_with(paths, config, Box::new(bridge)).unwrap();
-    let served = std::thread::spawn(move || gateway.serve_foreground());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    // The path appears at bind, before the listener accepts.
-    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
-        assert!(
-            !served.is_finished(),
-            "gateway exited before accepting on its socket: {:?}",
-            served.join().unwrap()
-        );
-        assert!(
-            std::time::Instant::now() < deadline,
-            "gateway did not accept on its socket"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    (socket, served)
-}
-
-/// `plakd gateway drain`: the service stops accepting and exits cleanly.
-pub(super) fn drain(socket: &std::path::Path, served: std::thread::JoinHandle<Result<(), String>>) {
-    let address = super::GatewayAddress::Unix(socket.to_path_buf());
-    let response: AdminResponse =
-        super::client::admin(&address, None, &AdminRequest::Drain {}).unwrap();
-    assert!(
-        matches!(response, AdminResponse::Draining {}),
-        "{response:?}"
-    );
-    served.join().unwrap().unwrap();
-}
-
 /// Key status through the gateway's admin verbs names the key's source.
-fn assert_key_status(socket: &std::path::Path) {
-    let address = super::GatewayAddress::Unix(socket.to_path_buf());
+fn assert_key_status(address: &super::GatewayAddress) {
     let response: AdminResponse = super::client::admin(
-        &address,
+        address,
         None,
         &AdminRequest::Status {
             accounts: vec![GatewayAccount::new("openai").unwrap()],
@@ -245,10 +184,10 @@ fn a_gateway_host_admits_the_in_process_key_generations_and_opens_no_store() {
     // The build before the flip: no gateway, keys read in this process.
     let before = runtime.block_on(grants(&paths, super::HostCustody::Local));
 
-    let (socket, served) = serve(&paths, &directory.path().join("gateway-state"));
+    let gateway = GatewayFixture::start(&paths, &directory.path().join("gateway-state"));
     std::fs::write(
         paths.config_file(),
-        format!("[gateway]\naddress = \"unix:{}\"\n", socket.display()),
+        format!("[gateway]\naddress = \"{}\"\n", gateway.address().label()),
     )
     .unwrap();
 
@@ -266,8 +205,6 @@ fn a_gateway_host_admits_the_in_process_key_generations_and_opens_no_store() {
         audited.matches("\"verb\":\"facts\"").count() >= 4,
         "every key generation after the flip must come from the gateway's facts"
     );
-    assert_key_status(&socket);
+    assert_key_status(&gateway.address());
     assert_gateway_roots(&runtime, &paths, &directory.path().join("host-state"));
-
-    drain(&socket, served);
 }

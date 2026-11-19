@@ -45,7 +45,7 @@ impl AdminLink {
     pub(crate) fn for_cli(home: &PlakPaths) -> Result<Self, String> {
         let config = ProductConfig::load_home_file(home)?;
         match config.gateway_address {
-            Some(_) => configured_link(home, &config),
+            Some(_) => configured_link(home, &config).map_err(|failure| failure.to_string()),
             None => Self::local(home),
         }
     }
@@ -75,6 +75,7 @@ impl AdminLink {
         request: &impl serde::Serialize,
     ) -> Result<plakous::gateway::protocol::admin::AdminResponse, String> {
         super::client::admin(&self.address, self.key.as_deref(), request)
+            .map_err(|failure| failure.to_string())
     }
 
     pub(crate) fn key(&self) -> Option<&str> {
@@ -160,21 +161,23 @@ impl HostCustody {
         home: &PlakPaths,
         gateway_state: &Path,
     ) -> (Self, impl FnOnce() + use<>) {
-        let (socket, served) = super::continuity_tests::serve(home, gateway_state);
+        let fixture = super::test_service::GatewayFixture::start(home, gateway_state);
         let link = Self::Gateway(Arc::new(GatewayLink {
-            admin: AdminLink::local_service(GatewayAddress::Unix(socket.clone())),
+            admin: AdminLink::local_service(fixture.address()),
             custody,
         }));
-        (link, move || {
-            super::continuity_tests::drain(&socket, served);
-        })
+        (link, move || drop(fixture))
     }
 
     /// Reads `[gateway]` from `home`'s `config.toml`. A config that does not
     /// load, an address that does not parse and a key file that is unsafe
     /// are errors.
-    pub(crate) fn resolve(home: &PlakPaths) -> Result<Self, String> {
+    pub(crate) fn resolve(home: &PlakPaths) -> crate::CliResult<Self> {
         let admin = configured_link(home, &ProductConfig::load_home_file(home)?)?;
+        Self::from_admin(admin)
+    }
+
+    pub(super) fn from_admin(admin: AdminLink) -> crate::CliResult<Self> {
         let endpoint = match &admin.address {
             GatewayAddress::Unix(path) => GatewayEndpoint::Unix(path.clone()),
             GatewayAddress::Tcp(addr) => GatewayEndpoint::Tcp(*addr),
@@ -186,6 +189,15 @@ impl HostCustody {
         let custody = GatewayCustody::connect(endpoint, relay_key, credential_headers)
             .map_err(|error| format!("credential gateway: {error}"))?;
         Ok(Self::Gateway(Arc::new(GatewayLink { admin, custody })))
+    }
+
+    pub(crate) fn require_reachable(&self) -> crate::CliResult<()> {
+        let link = self
+            .admin()
+            .ok_or_else(|| GatewayUnavailable::MissingAddress.failure())?;
+        let reply = super::client::versions(&link.address, link.key())?;
+        super::client::supported_version(&reply)?;
+        Ok(())
     }
 
     /// The gateway's relay custody, when one is configured.
@@ -214,14 +226,14 @@ impl HostCustody {
             .custodian()
             .facts(&slot)
             .await
-            .map_err(|error| {
-                let message = match error {
-                    CustodyError::Unavailable => {
-                        GatewayUnavailable::Unreachable(&link.admin.address).to_string()
-                    }
-                    error => format!("gateway credential facts for {account}: {error}"),
-                };
-                CliFailure::classified(CliFailureKind::Auth, message)
+            .map_err(|error| match error {
+                CustodyError::Unavailable => {
+                    GatewayUnavailable::Unreachable(&link.admin.address).failure()
+                }
+                error => CliFailure::classified(
+                    CliFailureKind::Auth,
+                    format!("gateway credential facts for {account}: {error}"),
+                ),
             })?;
         if facts
             .key
@@ -285,11 +297,11 @@ impl HostCustody {
     }
 }
 
-fn configured_link(home: &PlakPaths, config: &ProductConfig) -> Result<AdminLink, String> {
+fn configured_link(home: &PlakPaths, config: &ProductConfig) -> crate::CliResult<AdminLink> {
     let text = config
         .gateway_address
         .as_deref()
-        .ok_or_else(|| GatewayUnavailable::MissingAddress.to_string())?;
+        .ok_or_else(|| GatewayUnavailable::MissingAddress.failure())?;
     let address = super::address::parse(text, config.gateway_allow_non_tailnet)
         .map_err(|error| format!("gateway.address: {error}"))?;
     let key = caller_key(home, &address, config.gateway_key_file.as_deref())?;
@@ -299,6 +311,12 @@ fn configured_link(home: &PlakPaths, config: &ProductConfig) -> Result<AdminLink
 pub(crate) enum GatewayUnavailable<'a> {
     MissingAddress,
     Unreachable(&'a GatewayAddress),
+}
+
+impl GatewayUnavailable<'_> {
+    pub(crate) fn failure(&self) -> crate::CliFailure {
+        crate::CliFailure::classified(crate::CliFailureKind::GatewayUnavailable, self.to_string())
+    }
 }
 
 impl std::fmt::Display for GatewayUnavailable<'_> {

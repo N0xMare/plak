@@ -1,19 +1,22 @@
 use super::*;
+use crate::gateway::test_service::GatewayFixture;
 use plakous::runner::{ConfiguredRunner, PlacementFailure, WorkspaceCatalog};
 use std::sync::Arc;
 
 #[cfg(feature = "openai")]
 #[test]
 fn picker_without_state_home_keeps_api_models_and_omits_native_models() {
-    let (_root, paths) = PlakPaths::isolated_test_home();
+    let (root, paths) = PlakPaths::isolated_test_home();
+    let gateway_home = PlakPaths::explicit(root.path().join("gateway"));
     paths.ensure_layout().unwrap();
     crate::home::secrets::set_api_key(
-        &paths,
+        &gateway_home,
         "openai",
         zeroize::Zeroizing::new("fixture-key".to_owned()),
     )
     .unwrap();
-    let choices = choices(&paths, &crate::gateway::HostCustody::Local, None);
+    let gateway = GatewayFixture::start(&gateway_home, &root.path().join("gateway-state"));
+    let choices = choices(&paths, &gateway.custody(), None);
     assert!(choices.models.accounts.iter().any(|section| {
         section.account == "openai" && section.ready && !section.entries.is_empty()
     }));
@@ -35,7 +38,9 @@ fn inadmissible_local_recents_are_omitted_without_losing_admitted_choices() {
     std::fs::create_dir(&valid).unwrap();
     let alias = root.path().join("alias");
     std::os::unix::fs::symlink(&valid, &alias).unwrap();
-    let services = crate::shell::services::Services::for_home(paths.clone());
+    let gateway = GatewayFixture::start(&paths, &root.path().join("gateway-state"));
+    let services = crate::shell::services::Services::for_home(paths.clone())
+        .with_test_custody(gateway.custody());
     for path in [
         &valid,
         paths.home(),
@@ -99,7 +104,9 @@ fn cached_picker_rows_finish_once_profiles_stay_ungated_and_workspace_checks_sta
     let workspace = root.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let workspace = std::fs::canonicalize(workspace).unwrap();
-    let services = crate::shell::services::Services::for_home(paths.clone());
+    let gateway = GatewayFixture::start(&paths, &root.path().join("gateway-state"));
+    let services = crate::shell::services::Services::for_home(paths.clone())
+        .with_test_custody(gateway.custody());
     let registry = services.runners();
     registry.configure(ConfiguredRunner {
         runner_id: "local".into(),
@@ -193,17 +200,13 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
     let claude = NativeProvider::Claude;
     let notice = NativeSubscriptions::notice(claude).unwrap();
     let clock = crate::commands::application::test_clock();
-    for via_gateway in [false, true] {
+    {
         let (root, paths) = PlakPaths::isolated_test_home();
         paths.ensure_layout().unwrap();
         let workspace = root.path().join("workspace");
         std::fs::create_dir(&workspace).unwrap();
         let host_state = root.path().join("host-state");
-        let credential_state = if via_gateway {
-            root.path().join("gateway-state")
-        } else {
-            host_state.clone()
-        };
+        let credential_state = root.path().join("gateway-state");
         crate::gateway::gateway_seed::seed(&credential_state, claude, None, notice.expires_at());
         let local = NativeSubscriptions::new(
             SubscriptionPaths::from_xdg_state_home(&credential_state).unwrap(),
@@ -211,7 +214,7 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
         .with_clock(clock.clone());
         // Claude enumerates enrolled models behind the authenticated catalog
         // gate without an upstream request, even with workspace test clocks.
-        let (custody, subscriptions, stop_gateway) = if via_gateway {
+        let (custody, subscriptions, stop_gateway) = {
             let service = LocalCustody::new(new_instance().unwrap()).with_kind(
                 "claude",
                 Arc::new(SubscriptionCustodian::new(local, claude)),
@@ -230,9 +233,7 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
             .with_gateway_catalog_cache(paths.home());
             let (custody, stop) =
                 HostCustody::in_process_for_test(gateway, &paths, &credential_state);
-            (custody, host, Some(stop))
-        } else {
-            (HostCustody::Local, local, None)
+            (custody, host, stop)
         };
         let live = runtime
             .block_on(subscriptions.model_catalog(claude))
@@ -243,10 +244,8 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
                 .any(|model| model.exact_id() == "claude-sonnet-5")
         );
         let services = Services::for_home_with_state(paths, host_state).with_test_custody(custody);
-        assert_native_picker(&runtime, &services, &workspace, via_gateway);
-        if let Some(stop) = stop_gateway {
-            stop();
-        }
+        assert_native_picker(&runtime, &services, &workspace);
+        stop_gateway();
     }
 }
 
@@ -265,7 +264,6 @@ fn assert_native_picker(
     runtime: &tokio::runtime::Runtime,
     services: &crate::shell::services::Services,
     workspace: &std::path::Path,
-    via_gateway: bool,
 ) {
     let prepared = crate::commands::runner::registry::prepare(services, None).unwrap();
     prepared
@@ -285,7 +283,7 @@ fn assert_native_picker(
         })
         .unwrap();
     let Some(wire::WorkspaceOptions::Valid { models, .. }) = options.workspace else {
-        panic!("workspace picker missing (via_gateway={via_gateway})");
+        panic!("workspace picker missing");
     };
     assert!(options.accounts.iter().any(|kind| {
         kind.kind == "claude"
@@ -295,17 +293,13 @@ fn assert_native_picker(
                 .any(|row| row.account == "claude" && row.ready)
     }));
     for catalog in [options.models, models] {
-        assert!(
-            catalog
-                .accounts
-                .iter()
-                .any(|section| section.account == "claude"
-                    && section.ready
-                    && section
-                        .entries
-                        .iter()
-                        .any(|entry| entry.id == "claude-sonnet-5")),
-            "via_gateway={via_gateway}"
-        );
+        assert!(catalog.accounts.iter().any(|section| {
+            section.account == "claude"
+                && section.ready
+                && section
+                    .entries
+                    .iter()
+                    .any(|entry| entry.id == "claude-sonnet-5")
+        }));
     }
 }

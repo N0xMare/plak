@@ -5,17 +5,12 @@
 not build and calls no provider.
 
 `just live gateway --paid` drives the shared live route drivers (`live.py`:
-routes, private homes, `plakd run`) through a host in two topologies:
+routes, private homes, `plakd run`) through a separate `plakd gateway serve`
+process and a keyless caller home pointing its `[gateway] address` to that
+service's Unix socket.
 
-1. in-process: a host home with no `[gateway] address` holds its copied API
-   keys and the machine's subscription logins itself;
-2. unix-socket: `plakd gateway serve` adopts that first home and the machine's
-   subscription store in place, and a second host home, holding no key, sets
-   `[gateway] address` to the service's socket.
-
-Each topology runs one turn per route, restarts its gateway (a new in-process
-holder, or a new service instance), reopens every session, and forces one
-refresh of each OAuth kind. The unix-socket topology verifies the refreshed
+It runs one turn per route, restarts the gateway, reopens every session,
+and forces one refresh of each OAuth kind. It verifies the refreshed
 logins through doctor and status, and records the gateway audit line count of
 each turn and reopen. A binary without `plakd gateway serve`
 fails as a harness error before any provider call. Artifacts land in
@@ -56,12 +51,9 @@ ROUTES = (
 )
 OAUTH_KINDS = ("codex", "claude", "grok")
 API_ROUTES = ("api-openai", "api-anthropic", "api-xai", "or-nemotron-free")
-IN_PROCESS = "in-process"
+SERVICE_HOME = "gateway"
 UNIX_SOCKET = "unix-socket"
-TOPOLOGIES = (
-    (IN_PROCESS, "in-process: a host with no [gateway] address holds the logins and keys"),
-    (UNIX_SOCKET, "unix-socket: plakd gateway serve on the same machine"),
-)
+TOPOLOGIES = ((UNIX_SOCKET, "unix-socket: plakd gateway serve on the same machine"),)
 PER_TOPOLOGY = (
     "one turn per route",
     "reopen every session across a gateway restart",
@@ -96,8 +88,8 @@ def plan_text() -> str:
         for step in PER_TOPOLOGY:
             lines.append(f"      {step}")
     lines.append(
-        "gateway: plakd gateway serve adopts the in-process home and the machine's "
-        "subscription store in place; the second host sets [gateway] address to its socket"
+        "gateway: plakd gateway serve owns the copied keys and the machine's "
+        "subscription store; the keyless caller sets [gateway] address to its socket"
     )
     lines.append("each unix-socket turn and reopen records the gateway audit line count")
     lines.append("unix-socket doctor and status must report every OAuth kind Ready")
@@ -378,19 +370,18 @@ class GatewayRun:
             self.attempt(
                 topology, "refresh", kind, lambda kind=kind: self.refresh(topology, home, kind)
             )
-        if topology == UNIX_SOCKET:
-            self.attempt(topology, "doctor", "oauth", lambda: self.doctor_oauth(home))
-            for kind in OAUTH_KINDS:
-                self.attempt(
-                    topology,
-                    "status",
-                    kind,
-                    lambda kind=kind: self.credential_status(home, kind),
-                )
+        self.attempt(topology, "doctor", "oauth", lambda: self.doctor_oauth(home))
+        for kind in OAUTH_KINDS:
+            self.attempt(
+                topology,
+                "status",
+                kind,
+                lambda kind=kind: self.credential_status(home, kind),
+            )
 
 
 def write_homes(artifacts: Path, keyed: Path, keyless: Path, socket: Path) -> None:
-    """The in-process home with every route's key, and the gateway host without one."""
+    """The gateway's keyed home and the caller's keyless home."""
     empty = artifacts / "no-keys"
     empty.mkdir(mode=0o700, exist_ok=True)
     for name in ROUTES:
@@ -409,13 +400,13 @@ def run_paid(binary: Path, artifacts: Path) -> int:
     if refusal:
         sys.stderr.write(f"{HARNESS}: {refusal}; no provider call was made\n")
         return 2
-    env = live.Env(binary, live.scratch_home(artifacts, IN_PROCESS), artifacts)
+    env = live.Env(
+        binary, live.scratch_home(artifacts, SERVICE_HOME), artifacts, owns_gateway=False
+    )
     host = live.scratch_home(artifacts, UNIX_SOCKET)
     write_homes(artifacts, env.home, host, env.home / "gateway.sock")
     binary_start = live.binary_sha256(binary)
     run = GatewayRun(env, artifacts)
-
-    run.topology(IN_PROCESS, env.home, lambda: "each plakd run is a new in-process holder", None)
 
     (artifacts / UNIX_SOCKET).mkdir(parents=True, exist_ok=True)
     serve = Serve(binary, env.home, host, artifacts / UNIX_SOCKET)

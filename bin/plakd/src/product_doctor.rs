@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::commands::application::{AccountCommand, CredentialVerdict};
 use crate::presentation::{CliStatus, CompatibilityState, CredentialState};
-use crate::{telemetry_sink::TelemetryHealth, telemetry_store::CredentialRefreshRow};
+use crate::telemetry_sink::TelemetryHealth;
 use plakous::subscriptions::NativeProvider;
 use serde::Deserialize;
 
@@ -209,17 +209,6 @@ pub enum CompositionHostStatus {
     Unavailable(String),
 }
 
-/// Owner-supplied catalog allowlist probe (discovery GETs only).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum OpenRouterCatalogStatus {
-    NotConfigured,
-    KeyPresentNoModel,
-    Ok,
-    Failed(String),
-    /// A configured gateway holds the key.
-    Gateway,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DoctorPaths {
     pub home: PathBuf,
@@ -286,7 +275,6 @@ pub struct DoctorInputs {
     pub composition_host: CompositionHostStatus,
     pub python_containment_required: bool,
     pub runtime_directory: Option<PathBuf>,
-    pub openrouter_catalog: OpenRouterCatalogStatus,
     pub root_template: RootTemplateStatus,
     pub spawn_templates: SpawnTemplatesStatus,
     /// One `ssh -G` row per `[runners.<name>]`, collected by the caller.
@@ -359,15 +347,6 @@ pub struct OauthCredentialProbe {
     /// read failure carries the status table's cell for it.
     pub credential: Result<CliStatus, String>,
     pub record: OauthRecordStatus,
-    pub last_refresh: OauthRefreshLookup,
-}
-
-/// Latest refresh telemetry, or why it could not be read.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum OauthRefreshLookup {
-    None,
-    Row(OauthRefreshTelemetry),
-    Unavailable(String),
 }
 
 /// Content-free credential.json metadata (status/generation/mtime only).
@@ -406,36 +385,6 @@ fn current_credential_generation(provider: &str) -> Option<u64> {
     }
 }
 
-/// Latest `v_credential_refreshes` row, already stripped of secrets.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OauthRefreshTelemetry {
-    pub phase: String,
-    pub failure_class: Option<String>,
-    pub transport_phase: Option<String>,
-    pub http_status_class: Option<String>,
-    pub age_secs: u64,
-    pub generation: u64,
-    pub at_ns: i64,
-    pub oauth_error_code: Option<String>,
-    pub oauth_error_description: Option<String>,
-}
-
-impl OauthRefreshTelemetry {
-    fn from_store_row(row: CredentialRefreshRow) -> Self {
-        Self {
-            phase: row.phase,
-            failure_class: row.failure_class,
-            transport_phase: row.transport_phase,
-            http_status_class: row.http_status_class,
-            age_secs: age_secs_from_unix_ns(row.at_ns),
-            generation: row.generation,
-            at_ns: row.at_ns,
-            oauth_error_code: row.oauth_error_code,
-            oauth_error_description: row.oauth_error_description,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 struct OauthRecordMeta {
     status: String,
@@ -470,29 +419,6 @@ pub fn inspect_oauth_record(path: &Path) -> OauthRecordStatus {
     }
 }
 
-/// Join one account's credential verdict and on-disk OAuth record with the
-/// latest telemetry row for doctor.
-pub fn probe_oauth_credential(
-    provider: &'static str,
-    credential: Result<CliStatus, String>,
-    record_path: &Path,
-    last_refresh: Result<Option<CredentialRefreshRow>, String>,
-) -> OauthCredentialProbe {
-    OauthCredentialProbe {
-        provider,
-        credential,
-        record: inspect_oauth_record(record_path),
-        last_refresh: match last_refresh {
-            _ if refresh::record_has_named_sibling(record_path, provider) => {
-                OauthRefreshLookup::None
-            }
-            Ok(Some(row)) => OauthRefreshLookup::Row(OauthRefreshTelemetry::from_store_row(row)),
-            Ok(None) => OauthRefreshLookup::None,
-            Err(detail) => OauthRefreshLookup::Unavailable(detail),
-        },
-    }
-}
-
 /// One account's credential verdict from a configured gateway, which holds
 /// the record and its refresh history.
 #[must_use]
@@ -504,7 +430,6 @@ pub fn probe_gateway_credential(
         provider,
         credential,
         record: OauthRecordStatus::Gateway,
-        last_refresh: OauthRefreshLookup::None,
     }
 }
 
@@ -958,7 +883,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
                 Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
             )
     }) {
-        checks.push(openrouter_catalog_check(input.openrouter_catalog));
+        checks.push(openrouter_catalog_check());
     }
     checks.push(root_template_check(input.root_template));
     checks.push(spawn_templates_check(input.spawn_templates));
@@ -1297,58 +1222,15 @@ fn terminal_check(kind: CheckKind, terminal: bool) -> DoctorCheck {
     )
 }
 
-fn openrouter_catalog_check(status: OpenRouterCatalogStatus) -> DoctorCheck {
-    match status {
-        OpenRouterCatalogStatus::NotConfigured => DoctorCheck::new(
-            CheckKind::OpenRouterCatalog,
-            "provider",
-            Severity::Ok,
-            "not configured",
-            "no OpenRouter key; catalog allowlist is checked at attach",
-            None,
-        ),
-        OpenRouterCatalogStatus::Gateway => DoctorCheck::new(
-            CheckKind::OpenRouterCatalog,
-            "provider",
-            Severity::Ok,
-            "gateway",
-            "the gateway holds the OpenRouter key; catalog allowlist is checked at attach",
-            None,
-        ),
-        OpenRouterCatalogStatus::KeyPresentNoModel => DoctorCheck::new(
-            CheckKind::OpenRouterCatalog,
-            "provider",
-            Severity::Warning,
-            "key present",
-            "point the root template at OpenRouter to probe catalog keys without inference",
-            Some(
-                "author ~/.plak/agents/<name>.toml with `account = \"openrouter\"` and `model = \"<id>\"`, then `plakd config set root.agent <name>`, or `plakd run --account openrouter --model <id>`",
-            ),
-        ),
-        OpenRouterCatalogStatus::Ok => DoctorCheck::new(
-            CheckKind::OpenRouterCatalog,
-            "provider",
-            Severity::Ok,
-            "catalog matches",
-            "authenticated models and endpoints documents validated",
-            None,
-        ),
-        OpenRouterCatalogStatus::Failed(detail) => {
-            let remediation = if detail.contains("missing catalog field") {
-                "required catalog field was absent; fail closed (no inference)"
-            } else {
-                "catalog discovery failed closed; named class is in the detail (no inference, no body dump)"
-            };
-            DoctorCheck::new(
-                CheckKind::OpenRouterCatalog,
-                "provider",
-                Severity::Error,
-                "catalog invalid",
-                detail,
-                Some(remediation),
-            )
-        }
-    }
+fn openrouter_catalog_check() -> DoctorCheck {
+    DoctorCheck::new(
+        CheckKind::OpenRouterCatalog,
+        "provider",
+        Severity::Ok,
+        "gateway",
+        "the gateway holds the OpenRouter key; catalog allowlist is checked at attach",
+        None,
+    )
 }
 
 fn spawn_templates_check(status: SpawnTemplatesStatus) -> DoctorCheck {
@@ -1451,29 +1333,6 @@ fn root_template_check(status: RootTemplateStatus) -> DoctorCheck {
 }
 
 fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
-    let refresh_detail = match &probe.last_refresh {
-        OauthRefreshLookup::Row(row) => {
-            let failure = row.failure_class.as_deref().unwrap_or("none");
-            let transport = row.transport_phase.as_deref().unwrap_or("-");
-            let status_class = row.http_status_class.as_deref().unwrap_or("-");
-            format!(
-                "last refresh {} {failure} {status_class} transport={transport} {} ago · generation {} · at {} · OAuth {}: {}",
-                row.phase,
-                format_age_secs(row.age_secs),
-                row.generation,
-                jiff::Timestamp::from_nanosecond(i128::from(row.at_ns))
-                    .map_or_else(|_| "unknown".to_owned(), |at| at.to_string()),
-                row.oauth_error_code.as_deref().unwrap_or("not recorded"),
-                row.oauth_error_description
-                    .as_deref()
-                    .unwrap_or("not recorded"),
-            )
-        }
-        OauthRefreshLookup::None => "no refresh telemetry".to_owned(),
-        OauthRefreshLookup::Unavailable(detail) => {
-            format!("refresh telemetry unavailable: {detail}")
-        }
-    };
     let record_detail = match &probe.record {
         OauthRecordStatus::Missing => "no record".to_owned(),
         OauthRecordStatus::Gateway => "record held by the gateway".to_owned(),
@@ -1495,7 +1354,7 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
                 "oauth",
                 Severity::Error,
                 "unreadable",
-                format!("{cell} · {record_detail} · {refresh_detail}"),
+                format!("{cell} · {record_detail}"),
                 None,
             );
         }
@@ -1538,14 +1397,7 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
             .ok()
             .and_then(|account| verdict.remedy(&account, AccountCommand::Status)),
     };
-    let mut check = DoctorCheck::new(
-        kind,
-        "oauth",
-        severity,
-        result,
-        format!("{record_detail} · {refresh_detail}"),
-        None,
-    );
+    let mut check = DoctorCheck::new(kind, "oauth", severity, result, record_detail, None);
     check.remediation = remediation;
     check
 }

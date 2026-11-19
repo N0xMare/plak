@@ -53,9 +53,9 @@ pub fn ready_catalog(
 }
 
 pub(crate) fn ready_catalog_at(
-    paths: &PlakPaths,
+    _paths: &PlakPaths,
     custody: &crate::gateway::HostCustody,
-    state: Option<&Path>,
+    _state: Option<&Path>,
 ) -> Result<Vec<ReadyAccount>, String> {
     if let Some(accounts) = crate::test_hooks::ready_accounts() {
         return Ok(accounts
@@ -67,16 +67,9 @@ pub(crate) fn ready_catalog_at(
             })
             .collect());
     }
-    let resolved_state;
-    let state = if let Some(state) = state {
-        state
-    } else {
-        resolved_state = crate::home::paths::application_state_home()?;
-        &resolved_state
-    };
     std::thread::scope(|scope| {
         scope
-            .spawn(|| readiness::ready_accounts(state, paths, custody))
+            .spawn(|| readiness::ready_accounts(custody))
             .join()
             .unwrap_or_else(|_| Err("the account readiness read failed".to_owned()))
     })

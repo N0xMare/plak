@@ -12,8 +12,7 @@ use plakd::presentation::{CliStatus, CompatibilityState, CredentialState};
 use plakd::product_doctor;
 use plakd::product_doctor::{
     CheckKind, CompositionHostStatus, ConfigStatus, DatabaseStatus, DoctorInputs, DoctorPaths,
-    DoctorReport, OauthCredentialProbe, OauthCredentialProbes, OauthRecordStatus,
-    OauthRefreshLookup, OauthRefreshTelemetry, OpenRouterCatalogStatus, Requirement,
+    DoctorReport, OauthCredentialProbe, OauthCredentialProbes, OauthRecordStatus, Requirement,
     RootTemplateStatus, RuntimeStoreStatus, Severity, SpawnTemplatesStatus, TerminalFacts,
     diagnose, inspect_config, inspect_oauth_record, inspect_runtime_database,
     inspect_runtime_store,
@@ -72,7 +71,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
         },
         python_containment_required: false,
         runtime_directory: Some(temp.path().to_path_buf()),
-        openrouter_catalog: OpenRouterCatalogStatus::NotConfigured,
+
         root_template: RootTemplateStatus::Unset,
         spawn_templates: SpawnTemplatesStatus::None,
         runner_ssh: Vec::new(),
@@ -81,19 +80,16 @@ fn input(temp: &TempDir) -> DoctorInputs {
                 provider: "codex",
                 credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
-                last_refresh: OauthRefreshLookup::None,
             },
             xai: OauthCredentialProbe {
                 provider: "xai",
                 credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
-                last_refresh: OauthRefreshLookup::None,
             },
             claude: OauthCredentialProbe {
                 provider: "claude",
                 credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
-                last_refresh: OauthRefreshLookup::None,
             },
         },
     }
@@ -262,80 +258,6 @@ fn non_terminal_streams_are_facts_not_health_failures() {
 }
 
 #[test]
-fn openrouter_catalog_not_configured_is_ok() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    values.openrouter_catalog = OpenRouterCatalogStatus::NotConfigured;
-    let report = diagnose(values);
-    let catalog = check(&report, CheckKind::OpenRouterCatalog);
-    assert_eq!(catalog.severity, Severity::Ok);
-    assert_eq!(catalog.result, "not configured");
-}
-
-#[test]
-fn openrouter_catalog_key_present_no_model_is_warning() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    values.openrouter_catalog = OpenRouterCatalogStatus::KeyPresentNoModel;
-    let report = diagnose(values);
-    let catalog = check(&report, CheckKind::OpenRouterCatalog);
-    assert_eq!(catalog.severity, Severity::Warning);
-    assert_eq!(catalog.result, "key present");
-    let remediation = catalog.remediation.as_deref().unwrap();
-    assert!(
-        remediation.contains("plakd config set root.agent"),
-        "remediation must name a current config key: {remediation}"
-    );
-    assert!(
-        !remediation.contains("default.account"),
-        "remediation must not name the removed default.* keys: {remediation}"
-    );
-}
-
-#[test]
-fn openrouter_catalog_ok_reports_catalog_matches() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    values.openrouter_catalog = OpenRouterCatalogStatus::Ok;
-    let report = diagnose(values);
-    let catalog = check(&report, CheckKind::OpenRouterCatalog);
-    assert_eq!(catalog.severity, Severity::Ok);
-    assert_eq!(catalog.result, "catalog matches");
-}
-
-#[test]
-fn openrouter_catalog_failed_missing_field_is_error_with_remediation() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    let path = "endpoints.data.endpoints[].tag";
-    values.openrouter_catalog =
-        OpenRouterCatalogStatus::Failed(format!("missing catalog field at {path}"));
-    let report = diagnose(values);
-    let catalog = check(&report, CheckKind::OpenRouterCatalog);
-    assert_eq!(catalog.severity, Severity::Error);
-    assert_eq!(catalog.result, "catalog invalid");
-    assert!(catalog.detail.contains(path));
-    let fix = catalog.remediation.as_deref().unwrap();
-    assert!(fix.contains("fail closed"));
-}
-
-#[test]
-fn openrouter_catalog_failed_json_class_names_transport_not_pin() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    values.openrouter_catalog = OpenRouterCatalogStatus::Failed(
-        "OpenRouter Chat discovery response is invalid: catalog JSON".into(),
-    );
-    let report = diagnose(values);
-    let catalog = check(&report, CheckKind::OpenRouterCatalog);
-    assert_eq!(catalog.severity, Severity::Error);
-    assert!(catalog.detail.contains("catalog JSON"));
-    let fix = catalog.remediation.as_deref().unwrap();
-    assert!(fix.contains("named class"));
-    assert!(!fix.contains("missing"));
-}
-
-#[test]
 fn telemetry_doctor_reports_ok_with_row_count() {
     let temp = TempDir::new().unwrap();
     let mut values = input(&temp);
@@ -374,86 +296,6 @@ fn summary_counts_are_stable() {
         remediation: None,
     }]);
     assert_eq!(healthy.summary.ok, 1);
-}
-
-#[test]
-fn oauth_doctor_prints_record_metadata_and_last_refresh_without_payload() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    let record = temp.path().join("credential.json");
-    fs::write(
-        &record,
-        r#"{"format_version":2,"profile_id":"fixture","slot_id":"xai","account_binding":"fixture","generation":40,"status":"refresh_outcome_unknown","payload":"Zml4dHVyZQ=="}"#,
-    )
-    .unwrap();
-    let inspected = inspect_oauth_record(&record);
-    match &inspected {
-        OauthRecordStatus::Present {
-            status, generation, ..
-        } => {
-            assert_eq!(status, "refresh_outcome_unknown");
-            assert_eq!(*generation, 40);
-        }
-        other => panic!("expected present record, got {other:?}"),
-    }
-    values.oauth.xai = OauthCredentialProbe {
-        provider: "xai",
-        credential: Ok(CliStatus {
-            compatibility: CompatibilityState::Current,
-            credential: CredentialState::Quarantined,
-        }),
-        record: inspected,
-        last_refresh: OauthRefreshLookup::Row(OauthRefreshTelemetry {
-            phase: "outcome_unknown".to_owned(),
-            failure_class: Some("timeout".to_owned()),
-            transport_phase: Some("resolution".to_owned()),
-            http_status_class: Some("5xx".to_owned()),
-            age_secs: 120,
-            generation: 40,
-            at_ns: 1_720_000_100_000_000_000,
-            oauth_error_code: Some("invalid_grant".to_owned()),
-            oauth_error_description: Some("The grant was revoked".to_owned()),
-        }),
-    };
-    let report = diagnose(values);
-    let grok = check(&report, CheckKind::OauthXai);
-    assert_eq!(grok.severity, Severity::Warning);
-    assert_eq!(grok.result, "refresh_outcome_unknown");
-    assert!(grok.detail.contains("generation 40"));
-    assert!(
-        grok.detail
-            .contains("last refresh outcome_unknown timeout 5xx")
-    );
-    assert!(grok.detail.contains("2m ago"));
-    assert!(grok.detail.contains("transport=resolution"));
-    assert!(grok.detail.contains("invalid_grant: The grant was revoked"));
-    assert_eq!(
-        grok.remediation.as_deref(),
-        Some("run plakd refresh grok; run plakd login grok if that fails")
-    );
-    assert!(!grok.detail.contains("payload"));
-    assert!(!grok.detail.contains("Zml4dHVyZQ"));
-    assert!(!grok.result.contains("Zml4dHVyZQ"));
-    assert_eq!(check(&report, CheckKind::OauthCodex).result, "signed_out");
-    assert_eq!(CheckKind::OauthXai.key(), "oauth_xai");
-}
-
-#[test]
-fn oauth_doctor_surfaces_refresh_telemetry_unavailable() {
-    let temp = TempDir::new().unwrap();
-    let mut values = input(&temp);
-    values.oauth.codex.last_refresh = OauthRefreshLookup::Unavailable(
-        "telemetry store schema version 6 is stale; the file will be rebuilt on the next session (expected 7)"
-            .to_owned(),
-    );
-    let report = diagnose(values);
-    let codex = check(&report, CheckKind::OauthCodex);
-    assert_eq!(codex.result, "signed_out");
-    assert!(
-        codex
-            .detail
-            .contains("refresh telemetry unavailable: telemetry store schema version 6")
-    );
 }
 
 #[test]
@@ -569,7 +411,6 @@ fn oauth_doctor_reports_the_same_verdict_as_status() {
                 credential,
             }),
             record: inspect_oauth_record(&record),
-            last_refresh: OauthRefreshLookup::None,
         };
         let report = diagnose(values);
         let grok = check(&report, CheckKind::OauthXai);

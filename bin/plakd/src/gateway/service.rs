@@ -17,7 +17,9 @@ use super::bridge::{AccountBridge, AccountThread, AccountWorker};
 use super::callers::Callers;
 use super::dispatch::GatewayState;
 use super::flags::Flags;
-use super::holder::{self, HolderLock, HolderMode};
+#[cfg(test)]
+use super::holder::HolderMode;
+use super::holder::{self, HolderLock};
 use super::io_file::ensure_private_dir;
 use super::product::ProductGateway;
 use super::server_config::{self, ServerConfig};

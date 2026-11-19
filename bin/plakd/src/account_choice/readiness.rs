@@ -1,23 +1,14 @@
 //! Credential roster and readiness shared by CLI admission and the host console.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 use plakous::gateway::protocol::GatewayAccount;
 use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
 use plakous::gateway::protocol::facts::CredentialStatus;
-#[cfg(test)]
-use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 use plakous_hosted::account::{AccountRef, Vertical};
 
 use super::ReadyAccount;
 use crate::gateway::{AdminLink, HostCustody};
-use crate::home::paths::PlakPaths;
-#[cfg(test)]
-use crate::home::secrets;
-
-#[cfg(test)]
-const SCAN_ENTRIES: usize = 512;
 
 pub(crate) fn parse_exact(value: &str) -> Option<AccountRef> {
     value
@@ -38,112 +29,12 @@ pub(crate) fn with_default_accounts(
         .collect()
 }
 
-/// Returns the accounts, verticals whose enumeration failed, and truncation.
-#[cfg(test)]
-pub(crate) async fn local_roster(
-    subscriptions: &NativeSubscriptions,
-    paths: &PlakPaths,
-) -> (Vec<AccountRef>, Vec<Vertical>, bool) {
-    let mut accounts = Vec::new();
-    let mut unavailable = Vec::new();
-    let mut remaining = SCAN_ENTRIES;
-    let mut truncated = false;
-    for vertical in Vertical::ALL {
-        let names = if let Some(provider) = vertical.capability().native_provider() {
-            if !vertical.capability().compiled {
-                continue;
-            }
-            subscriptions
-                .named_accounts_bounded(provider, remaining)
-                .await
-                .ok()
-        } else {
-            secrets::list_shelf_secrets_bounded(
-                paths,
-                crate::home::paths::SecretShelf::Api(vertical),
-                remaining,
-            )
-            .ok()
-        };
-        match names {
-            Some((names, scanned, cut)) => {
-                remaining = remaining.saturating_sub(scanned);
-                truncated |= cut;
-                accounts.extend(
-                    names
-                        .iter()
-                        .filter_map(|name| parse_exact(&format!("{}/{name}", vertical.as_str()))),
-                );
-            }
-            None => unavailable.push(vertical),
-        }
-    }
-    (with_default_accounts(accounts), unavailable, truncated)
-}
-
-/// The actual custodian answers roster and readiness, without a local read
-/// when a configured or local service gateway holds the credentials.
-pub(super) fn ready_accounts(
-    state: &Path,
-    paths: &PlakPaths,
-    custody: &HostCustody,
-) -> Result<Vec<ReadyAccount>, String> {
-    if let Some(link) = custody.admin() {
-        return gateway_ready_accounts(link);
-    }
-    #[cfg(test)]
-    return tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|_| "the account readiness read could not start".to_owned())?
-        .block_on(local_ready_accounts(state, paths));
-    #[cfg(not(test))]
-    {
-        let _ = (state, paths);
-        Err(crate::gateway::GatewayUnavailable::MissingAddress.to_string())
-    }
-}
-
-#[cfg(test)]
-async fn local_ready_accounts(
-    state: &Path,
-    paths: &PlakPaths,
-) -> Result<Vec<ReadyAccount>, String> {
-    let subscriptions = NativeSubscriptions::new(
-        SubscriptionPaths::from_xdg_state_home(state)
-            .map_err(|_| "the account roster could not be read".to_owned())?,
-    );
-    let (accounts, _, _) = local_roster(&subscriptions, paths).await;
-    let mut rows = Vec::with_capacity(accounts.len());
-    for account in accounts {
-        let vertical = account.vertical();
-        let ready = if !vertical.capability().compiled {
-            false
-        } else if vertical.is_api() {
-            secrets::key_status(paths, account.as_str())
-                .is_ok_and(|key| key.source != secrets::KeySource::Missing)
-        } else if let Some(provider) = vertical.capability().native_provider()
-            && let Ok(selected) = account.name().map_or_else(
-                || Ok(subscriptions.clone()),
-                |name| subscriptions.for_named_account(provider, name.as_str()),
-            )
-        {
-            crate::commands::support::offline_subscription_status(&selected, provider)
-                .await
-                .is_ok_and(|status| {
-                    status.compatibility == crate::presentation::CompatibilityState::Current
-                        && status.credential == crate::presentation::CredentialState::Ready
-                })
-        } else {
-            false
-        };
-        rows.push(ReadyAccount {
-            account: account.to_string(),
-            ready,
-            label: None,
-        });
-    }
-    Ok(rows)
+pub(super) fn ready_accounts(custody: &HostCustody) -> Result<Vec<ReadyAccount>, String> {
+    gateway_ready_accounts(
+        custody
+            .admin()
+            .ok_or_else(|| crate::gateway::GatewayUnavailable::MissingAddress.to_string())?,
+    )
 }
 
 fn gateway_ready_accounts(link: &AdminLink) -> Result<Vec<ReadyAccount>, String> {

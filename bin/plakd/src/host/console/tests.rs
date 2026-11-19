@@ -114,9 +114,20 @@ async fn welcome_and_dispatch_share_independent_startup_switches_without_session
 async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
-    let paths = PlakPaths::explicit(root.path().join("home"));
-    let state = root.path().join("state");
-    let console = local_console(paths.clone(), state.clone(), DISABLED_SWITCHES);
+    let host_home = PlakPaths::explicit(root.path().join("host"));
+    let host_state = root.path().join("host-state");
+    let gateway_home = PlakPaths::explicit(root.path().join("gateway"));
+    let gateway = crate::gateway::test_service::GatewayFixture::start(
+        &gateway_home,
+        &root.path().join("gateway-state"),
+    );
+    let console = Console::new(
+        host_home.clone(),
+        host_state.clone(),
+        gateway.custody(),
+        Some(tokio::runtime::Handle::current()),
+        DISABLED_SWITCHES,
+    );
     let socket = context(HostPrincipal::Socket(7));
     let web = context(HostPrincipal::Web("operator".into()));
     assert!(matches!(
@@ -125,7 +136,7 @@ async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
             capability: ConsoleCapability::AccountsRead
         })
     ));
-    assert!(!paths.home().exists());
+    assert!(!host_home.home().exists());
     let HostResponse::AccountsStatus { rows, page, .. } = console
         .request(socket, status(None, None))
         .await
@@ -136,11 +147,11 @@ async fn socket_reads_are_attachment_free_and_web_is_gated_before_work()
     assert_eq!(rows.len(), 7, "every default, including compiled-out lanes");
     assert_eq!(page.next, None);
     assert!(
-        !paths.home().exists(),
+        !host_home.home().exists(),
         "no runtime, product, tree or telemetry opened"
     );
     assert!(
-        !state.exists(),
+        !host_state.exists(),
         "status never creates a credential namespace"
     );
     Ok(())
