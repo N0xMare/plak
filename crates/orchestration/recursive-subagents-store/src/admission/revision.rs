@@ -1,5 +1,5 @@
-use std::fs::{self, File, OpenOptions};
-use std::os::unix::fs::OpenOptionsExt as _;
+use std::fs::{self, DirBuilder, File, Permissions};
+use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::Path;
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -68,12 +68,21 @@ impl Schema {
             .parent()
             .ok_or_else(|| self.unavailable("backup directory is missing"))?;
         let backup = parent.join(format!("{}.pre-revision-{source}.sqlite3", self.stem));
-        let pending = parent.join(format!(".{}-backup-{}", self.stem, uuid::Uuid::new_v4()));
-        self.copy(conn, &pending)?;
-        if fs::rename(&pending, &backup).is_err() {
-            let _ = fs::remove_file(&pending);
-            return Err(self.unavailable("pre-upgrade copy could not be published"));
-        }
+        let staging = parent.join(format!(".{}-backup-{}", self.stem, uuid::Uuid::new_v4()));
+        DirBuilder::new()
+            .mode(0o700)
+            .create(&staging)
+            .map_err(|_| self.unavailable("pre-upgrade staging directory could not be created"))?;
+        // SQLite creates the file itself; newer versions refuse even an
+        // existing zero-byte file. Keep it private before publishing it.
+        let pending = staging.join("copy.sqlite3");
+        let result = self.copy(conn, &pending).and_then(|()| {
+            fs::rename(&pending, &backup)
+                .map_err(|_| self.unavailable("pre-upgrade copy could not be published"))
+        });
+        let _ = fs::remove_file(&pending);
+        let _ = fs::remove_dir(&staging);
+        result?;
         File::open(parent)
             .and_then(|file| file.sync_all())
             .map_err(|_| self.unavailable("pre-upgrade copy directory could not be synced"))?;
@@ -84,18 +93,19 @@ impl Schema {
         let name = path
             .to_str()
             .ok_or_else(|| self.unavailable("copy path is not UTF-8"))?;
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|_| self.unavailable("copy file could not be created"))?;
+        if !matches!(path.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Err(self.unavailable("copy path is not available"));
+        }
         let result = conn
             .execute("VACUUM INTO ?1", [name])
             .map_err(|error| self.sql_error(&error, "consistent copy could not be made"))
             .and_then(|_| {
-                file.sync_all()
-                    .map_err(|_| self.unavailable("copy file could not be synced"))
+                let file = File::open(path)
+                    .map_err(|_| self.unavailable("copy file could not be opened"))?;
+                file.set_permissions(Permissions::from_mode(0o600))
+                    .and_then(|()| file.sync_all())
+                    .map_err(|_| self.unavailable("copy file could not be protected and synced"))
             });
         if result.is_err() {
             let _ = fs::remove_file(path);
