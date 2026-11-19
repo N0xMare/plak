@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::iter::{Enumerate, Peekable, from_fn, once};
 
 use plakous_model::{
-    Actor, CallId, CapabilityRequirement, ContentBlock, DataClassification, Digest, DigestDomain,
-    EffectiveProviderConfigurationId, ModelDiagnostic, ModelId, OpaqueFallback, ReasoningEffort,
-    ReasoningPolicy, ReasoningVisibility, ReplayEnvelope, ReplayScope,
-    SelectedProviderConfigurationId, SemanticJsonV1, ToolCallBlock, ToolCallerDisposition,
-    ToolCallerLineage, ToolChoice, ToolExecutionOwner, ToolResultKind, ToolResultPart,
-    ToolResultUpdateBlock,
+    Actor, CallId, CapabilityRequirement, ContentBlock, ConversationItem, DataClassification,
+    Digest, DigestDomain, EffectiveProviderConfigurationId, ModelDiagnostic, ModelId,
+    OpaqueFallback, ReasoningEffort, ReasoningPolicy, ReasoningVisibility, ReplayEnvelope,
+    ReplayScope, SelectedProviderConfigurationId, SemanticJsonV1, ToolCallBlock,
+    ToolCallerDisposition, ToolCallerLineage, ToolChoice, ToolExecutionOwner, ToolResultKind,
+    ToolResultPart, ToolResultUpdateBlock,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
@@ -30,9 +31,6 @@ pub(super) fn translate_history(
     include_native_thinking: bool,
     replay_diagnostics: &mut Vec<String>,
 ) -> Result<TranslatedHistory, MessagesRequestError> {
-    let mut messages: Vec<MessageParam> = Vec::new();
-    let mut historical_projection_diagnostics = Vec::new();
-    let items = input.items();
     let completed_items = match policy.completed_history_prefix {
         Some(prefix)
             if input.semantic_prefix_identity(prefix.item_count()).ok() == Some(prefix) =>
@@ -46,12 +44,33 @@ pub(super) fn translate_history(
         }
         None => 0,
     };
-    let mut index = 0;
+    translate_history_items(
+        input.items().iter(),
+        completed_items,
+        policy,
+        ownership,
+        programmatic,
+        include_native_thinking,
+        replay_diagnostics,
+    )
+}
+
+fn translate_history_items<'a>(
+    items: impl Iterator<Item = &'a ConversationItem>,
+    completed_items: usize,
+    policy: &MessagesRequestPolicy,
+    ownership: &ToolOwnership,
+    programmatic: bool,
+    include_native_thinking: bool,
+    replay_diagnostics: &mut Vec<String>,
+) -> Result<TranslatedHistory, MessagesRequestError> {
+    let mut messages: Vec<MessageParam> = Vec::new();
+    let mut historical_projection_diagnostics = Vec::new();
+    let mut items = items.enumerate().peekable();
     let mut pending = Vec::<PendingTool>::new();
     let mut container = None;
     let mut server_lineage = crate::artifact::MessagesArtifactLineage::default();
-    while index < items.len() {
-        let item = &items[index];
+    while let Some((index, item)) = items.next() {
         match item.actor() {
             Actor::Assistant => {
                 let extending = !pending.is_empty();
@@ -103,10 +122,9 @@ pub(super) fn translate_history(
                     }
                     pending = calls;
                 }
-                index += 1;
             }
             Actor::Tool => {
-                let result_blocks = translate_tool_messages(items, &mut index, &mut pending)?;
+                let result_blocks = translate_tool_messages(item, &mut items, &mut pending)?;
                 push_message(&mut messages, MessageRole::User, result_blocks);
             }
             Actor::User => {
@@ -118,7 +136,6 @@ pub(super) fn translate_history(
                     MessageRole::User,
                     translate_user(item.blocks())?,
                 );
-                index += 1;
             }
             Actor::System | Actor::Developer | Actor::Harness => {
                 return Err(unsupported(
@@ -138,9 +155,9 @@ pub(super) fn translate_history(
     Ok((messages, container, historical_projection_diagnostics))
 }
 
-fn translate_tool_messages(
-    items: plakous_model::ConversationItems<'_>,
-    index: &mut usize,
+fn translate_tool_messages<'a>(
+    first: &'a ConversationItem,
+    items: &mut Peekable<Enumerate<impl Iterator<Item = &'a ConversationItem>>>,
     pending: &mut Vec<PendingTool>,
 ) -> Result<Vec<MessageBlock>, MessagesRequestError> {
     if pending.is_empty() {
@@ -149,8 +166,13 @@ fn translate_tool_messages(
     let mut result_blocks = Vec::new();
     let mut updates = BTreeMap::<CallId, Vec<&ToolResultUpdateBlock>>::new();
     let mut terminated = BTreeSet::<CallId>::new();
-    while *index < items.len() && matches!(items[*index].actor(), Actor::Tool) {
-        for block in items[*index].blocks() {
+    let tool_items = once(first).chain(from_fn(|| {
+        items
+            .next_if(|(_, item)| item.actor() == Actor::Tool)
+            .map(|(_, item)| item)
+    }));
+    for item in tool_items {
+        for block in item.blocks() {
             match block {
                 ContentBlock::ToolResultUpdate(update) => {
                     if !pending.iter().any(|tool| tool.call_id == update.call_id()) {
@@ -179,7 +201,6 @@ fn translate_tool_messages(
                 }
             }
         }
-        *index += 1;
     }
     if !updates.is_empty() {
         return Err(invalid("tool-result update has no terminal result"));
@@ -189,7 +210,7 @@ fn translate_tool_messages(
             "all parallel tool results must be returned together",
         ));
     }
-    if *index < items.len() && matches!(items[*index].actor(), Actor::User) {
+    if let Some((_, item)) = items.next_if(|(_, item)| item.actor() == Actor::User) {
         if pending
             .iter()
             .any(|tool| !matches!(tool.correlation.caller_lineage(), ToolCallerLineage::Direct))
@@ -198,8 +219,7 @@ fn translate_tool_messages(
                 "programmatic continuation user message must contain only tool results",
             ));
         }
-        result_blocks.extend(translate_user(items[*index].blocks())?);
-        *index += 1;
+        result_blocks.extend(translate_user(item.blocks())?);
     }
     pending.clear();
     Ok(result_blocks)

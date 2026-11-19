@@ -1,15 +1,17 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use plakous_model::EntryId as TestEntryId;
 use plakous_model::TextBlock as TestTextBlock;
 use plakous_model::{
-    AttemptId, BranchId, Capability, CapabilityConstraints, CapabilitySet, ConfiguredTool,
-    ConversationItem, ConversationView, DataClassification, FactProvenance, FactSource,
-    FeatureSupport, ModelAdapterProfileId, ModelCacheAffinity, ModelFamilyId, ModelRequest,
-    Provenance, ReplayKindId, RequestMetadata, ResolvedModelDescriptor, RouteId, RunId, SessionId,
-    Support, Timestamp, ToolCallerDisposition, ToolConcurrency, ToolDefinition, ToolEffect,
-    ToolExecutionDisposition, ToolInputContract, ToolName, ToolOutputContract, TurnId,
-    ValidatedRequestPlan, ValidationMode,
+    AttemptId, BranchId, CanonicalHistory, Capability, CapabilityConstraints, CapabilitySet,
+    ConfiguredTool, ConversationItem, ConversationView, DataClassification, FactProvenance,
+    FactSource, FeatureSupport, HistorySegment, HistorySegmentKind, ModelAdapterProfileId,
+    ModelCacheAffinity, ModelFamilyId, ModelRequest, Provenance, ReplayKindId, RequestMetadata,
+    ResolvedModelDescriptor, RouteId, RunId, SessionId, Support, Timestamp, ToolCallerDisposition,
+    ToolConcurrency, ToolDefinition, ToolEffect, ToolExecutionDisposition, ToolInputContract,
+    ToolName, ToolOutputContract, TurnId, ValidatedRequestPlan, ValidationMode, WorkingProjection,
+    WorkingProjectionLimits,
 };
 use uuid::Uuid as TestUuid;
 
@@ -2397,8 +2399,9 @@ fn update_after_terminal_result_is_rejected_without_reordering() -> TestResult {
         owner: ToolExecutionOwner::Local,
         correlation,
     }];
-    let mut index = 0;
-    let Err(error) = translate_tool_messages(history.items(), &mut index, &mut pending) else {
+    let mut items = history.items().iter().enumerate().peekable();
+    let (_, first) = items.next().ok_or("missing tool result")?;
+    let Err(error) = translate_tool_messages(first, &mut items, &mut pending) else {
         return Err("post-terminal update was reordered instead of rejected".into());
     };
     assert_eq!(error.kind(), MessagesRequestErrorKind::InvalidRequest);
@@ -2581,6 +2584,75 @@ fn lower(items: Vec<ConversationItem>) -> Result<Vec<MessageParam>, MessagesRequ
         &mut Vec::new(),
     )
     .map(|(messages, _, _)| messages)
+}
+
+#[test]
+fn tool_lookahead_visits_each_history_segment_once() -> TestResult {
+    let user_segment = |id| -> TestResult<HistorySegment> {
+        Ok(HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![ConversationItem::new(
+                TestEntryId::try_from(TestUuid::from_u128(id))?,
+                Actor::User,
+                vec![ContentBlock::Text(TestTextBlock::new("continue", None)?)],
+                Provenance::UserInput,
+            )?],
+        )?)
+    };
+    let policy = policy()?;
+    let ownership = ToolOwnership::default();
+    for groups in [32_usize, 256] {
+        let mut segments = Vec::new();
+        for group in 0..groups as u128 {
+            let id = 1 + 4 * group;
+            segments.push(user_segment(id)?);
+            segments.push(HistorySegment::new(
+                HistorySegmentKind::ToolExchange,
+                vec![
+                    batch_item(
+                        id + 1,
+                        Actor::Assistant,
+                        vec![batch_call(id)?, batch_call(id + 1)?],
+                    )?,
+                    batch_item(id + 2, Actor::Tool, vec![batch_result(id)?])?,
+                    batch_item(id + 3, Actor::Tool, vec![batch_result(id + 1)?])?,
+                ],
+            )?);
+        }
+        let view = ConversationView::from_shared(
+            CanonicalHistory::new(segments)?,
+            WorkingProjection::new(
+                vec![user_segment(1 + 4 * groups as u128)?],
+                WorkingProjectionLimits::default(),
+            )?,
+        );
+        let visits = Cell::new(0);
+        let items = view
+            .history()
+            .segments()
+            .iter()
+            .chain(view.working().segments())
+            .inspect(|_| visits.set(visits.get() + 1))
+            .flat_map(HistorySegment::items);
+        let (messages, _, _) =
+            translate_history_items(items, 0, &policy, &ownership, false, true, &mut Vec::new())?;
+        assert_eq!(visits.get(), 2 * groups + 1);
+        let (actual, _, _) =
+            translate_history(&view, &policy, &ownership, false, true, &mut Vec::new())?;
+        assert_eq!(serde_json::to_vec(&messages)?, serde_json::to_vec(&actual)?);
+        assert_eq!(messages.len(), 2 * groups + 1);
+        let last = serde_json::to_value(messages.last())?;
+        assert_eq!(
+            last["content"][0]["tool_use_id"],
+            format!("call_{}", 4 * groups - 3)
+        );
+        assert_eq!(
+            last["content"][1]["tool_use_id"],
+            format!("call_{}", 4 * groups - 2)
+        );
+        assert_eq!(last["content"][2]["text"], "continue");
+    }
+    Ok(())
 }
 
 #[test]
