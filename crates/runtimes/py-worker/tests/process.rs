@@ -212,12 +212,20 @@ async fn tool_failure_points_to_the_cell_and_keeps_the_class_and_message() {
 }
 
 #[tokio::test]
-#[ignore = "micro-monty 0.0.2 cannot hide separately compiled host bootstrap frames"]
 async fn tool_failure_does_not_show_bootstrap_frames() {
     let message = tool_failure_report().await;
     assert!(
         !message.contains("prelude") && !message.contains("bootstrap"),
         "{message}"
+    );
+    assert_eq!(
+        message,
+        concat!(
+            "Traceback (most recent call last):\n",
+            "  File \"<cell 1>\", line 2, in <module>\n",
+            "    await fetch(value=x)\n",
+            "ToolError: fixture tool denied\n",
+        )
     );
 }
 

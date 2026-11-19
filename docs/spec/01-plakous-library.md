@@ -10348,10 +10348,11 @@ notes, repeated-line folding and suggestions. The worker gives each evaluation
 a path-free `<cell N>` name, numbered from one in its interpreter generation.
 Resetting the SDK globals does not restart the warm worker's counter. The
 report has a separate 32 KiB budget with a head-and-tail cut; successful
-expression completions retain the 1 MiB result budget. The worker does not
-rewrite the exception or any suggestion. With micro-monty 0.0.2 a nested tool
-failure includes the cell's await line and the generated wrapper frame; the
-engine has no public setting to hide separately compiled bootstrap frames.
+expression completions retain the 1 MiB result budget. A nested tool
+failure points to the cell's await line. Until the engine provides lazy
+async host functions, the worker removes only the frame blocks for its
+generated `plak-python-prelude.py`; the rest of the engine report and its
+suggestions are unchanged.
 An engine panic is a worker loss. A lost generation is
 stopped, joined and reset under its typed reset reason before the next cell,
 which starts a fresh generation and never re-evaluates source. Every other

@@ -27,6 +27,7 @@ const RESULT_NOTICE: &str = "\n[Python result truncated at 1 MiB]";
 const EXCEPTION_REPORT_BYTES: usize = 32 * 1024;
 const MAX_OUTSTANDING_NESTED: usize = 16;
 const PATH_SCAN: &str = "Path.scan";
+const PRELUDE_FILE: &str = "plak-python-prelude.py";
 
 struct Lost {
     class: LossClass,
@@ -336,10 +337,7 @@ impl Worker {
             .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
         let code = self
             .session
-            .compile(
-                &format!("import asyncio\n{source}"),
-                "plak-python-prelude.py",
-            )
+            .compile(&format!("import asyncio\n{source}"), PRELUDE_FILE)
             .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
         match self.session.start(&code) {
             Progress::Complete(_) => {
@@ -354,7 +352,7 @@ impl Worker {
             }
             Progress::Error(error) => Err(format!(
                 "Python tool bootstrap failed: {}",
-                bounded_report(error.traceback)
+                model_traceback(error.traceback)
             )),
             _ => Err("Python tool bootstrap unexpectedly suspended".into()),
         }
@@ -405,7 +403,9 @@ impl Worker {
                         stored: HashMap::new(),
                     });
                 }
-                Progress::Error(error) => return self.fail(bounded_report(error.traceback), false),
+                Progress::Error(error) => {
+                    return self.fail(model_traceback(error.traceback), false);
+                }
                 _ => return Err(Lost::engine("unexpected interpreter pause")),
             };
         }
@@ -568,3 +568,55 @@ fn bounded_report(report: String) -> String {
         head_tail(&report, EXCEPTION_REPORT_BYTES as u64).0
     }
 }
+
+fn model_traceback(report: String) -> String {
+    if report.contains(PRELUDE_FILE) {
+        bounded_report(without_prelude_frames(&report))
+    } else {
+        bounded_report(report)
+    }
+}
+
+fn without_prelude_frames(report: &str) -> String {
+    // Temporary until the engine can register lazy async host functions.
+    let mut visible = String::with_capacity(report.len());
+    let mut in_frames = false;
+    let mut omit_details = false;
+    for line in report.split_inclusive('\n') {
+        // Exception-group reports wrap the same traceback in a margin.
+        let indented = line.trim_start_matches(' ');
+        let body = indented
+            .strip_prefix("| ")
+            .or_else(|| indented.strip_prefix("+ "))
+            .unwrap_or(line);
+        if matches!(
+            body,
+            "Traceback (most recent call last):\n"
+                | "Exception Group Traceback (most recent call last):\n"
+        ) {
+            in_frames = true;
+            omit_details = false;
+        } else if in_frames {
+            if let Some(file) = body.strip_prefix("  File \"") {
+                omit_details = file
+                    .strip_prefix(PRELUDE_FILE)
+                    .is_some_and(|s| s.starts_with("\", line "));
+                if omit_details {
+                    continue;
+                }
+            } else if body.starts_with("    ") {
+                if omit_details {
+                    continue;
+                }
+            } else {
+                omit_details = false;
+                in_frames = body.starts_with("  [Previous line repeated ");
+            }
+        }
+        visible.push_str(line);
+    }
+    visible
+}
+
+#[cfg(test)]
+mod tests;
