@@ -66,7 +66,7 @@ fn prior_terminal_refresh_does_not_clear_a_queued_turns_capacity_recovery() {
         else {
             panic!("first prompt");
         };
-        crate::sessions::queue::enqueue(
+        queue::enqueue(
             &mut host.role.config.session.pending_queue,
             "queued follow-up",
         )
