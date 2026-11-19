@@ -85,6 +85,11 @@ for one version bump, without native protocol compatibility.
 
 ### plakd
 
+- Restore subscription model picking and Codex root prompts under gateway
+  custody. Host startup and `plakd models` populate a host-owned catalog
+  without opening the gateway's subscription store. No gateway or state-key
+  upgrade is required.
+
 - Fork, profile rebind, Switch now and `/new` no longer refuse an idle root
   with "source does not match the exact durable product binding" after a
   turn whose terminal projector pass ran past its 400 ms bound. The host's

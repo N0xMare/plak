@@ -64,6 +64,8 @@ impl NativeSubscriptions {
                 facts
                     .generation
                     .map(plakous_auth::CredentialGeneration::get),
+                facts.account_binding.map(|binding| *binding.as_bytes()),
+                facts.selection_epoch_digest.map(|epoch| *epoch.as_bytes()),
             ))
             .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
             return Ok(Some(plakous_model::sha256_bytes(&[

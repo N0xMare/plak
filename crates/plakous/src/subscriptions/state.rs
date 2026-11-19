@@ -731,17 +731,7 @@ impl SubscriptionState {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
-        let bytes = match read_private_bounded_with_hook_and_limit(
-            &self.paths.catalog_snapshot_path(provider),
-            catalog::MAX_PERSISTED_CATALOG_BYTES,
-            || {},
-        ) {
-            Err(NativeSubscriptionError::AcceptanceRequired) => {
-                return Err(NativeSubscriptionError::ModelUnavailable);
-            }
-            other => other?,
-        };
-        catalog::decode_persisted_catalog(&bytes, provider)
+        read_catalog_snapshot(&self.paths.catalog_snapshot_path(provider), provider)
     }
     pub(super) fn persist_catalog_snapshot(
         &self,
@@ -752,6 +742,44 @@ impl SubscriptionState {
         self.paths.prepare()?;
         write_private_atomic(&self.paths.catalog_snapshot_path(provider), &bytes)
     }
+}
+
+pub(super) fn read_catalog_snapshot(
+    path: &Path,
+    provider: NativeProvider,
+) -> Result<NativeModelCatalog, NativeSubscriptionError> {
+    let bytes = match read_private_bounded_with_hook_and_limit(
+        path,
+        catalog::MAX_PERSISTED_CATALOG_BYTES,
+        || {},
+    ) {
+        Err(NativeSubscriptionError::AcceptanceRequired) => {
+            return Err(NativeSubscriptionError::ModelUnavailable);
+        }
+        other => other?,
+    };
+    catalog::decode_persisted_catalog(&bytes, provider)
+}
+
+pub(super) fn write_gateway_catalog_snapshot(
+    path: &Path,
+    catalog: &NativeModelCatalog,
+) -> Result<(), NativeSubscriptionError> {
+    let write = || {
+        let directory = path
+            .parent()
+            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+        let parent = directory
+            .parent()
+            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+        let name = directory
+            .file_name()
+            .ok_or(NativeSubscriptionError::UnsafeStorage)?;
+        open_or_create_private_child(&ensure_state_root(parent)?, name)?;
+        let bytes = catalog::encode_catalog_snapshot(catalog.provider(), catalog.models())?;
+        write_private_atomic(path, &bytes)
+    };
+    write().map_err(|_| NativeSubscriptionError::CatalogSnapshotWrite)
 }
 
 #[cfg(all(unix, test))]

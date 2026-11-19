@@ -199,6 +199,12 @@ pub fn native_processing_tier(
 pub const CODEX_CATALOG_SNAPSHOT_MISSING: &str =
     "Codex catalog snapshot is missing; run `plakd models codex`";
 
+pub(crate) fn gateway_catalog_remedy(account: &str) -> String {
+    format!(
+        "the host has no usable gateway catalog snapshot for `{account}`; run `plakd models {account}` with the same Plak home and gateway as the host"
+    )
+}
+
 pub fn persist_miss_native_tool_mode(
     account: &str,
 ) -> Result<(Option<NativeToolMode>, bool), String> {
@@ -594,6 +600,9 @@ pub fn native_subscription_failure(
         E::GatewayCustody => auth(format!(
             "the {name} login is held by the credential gateway; login, logout, consent and account changes go through its admin verbs"
         )),
+        E::CatalogSnapshotWrite => CliFailure::new(
+            "could not write the Plak home's cache/subscription-catalogs directory; check its permissions and retry",
+        ),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)

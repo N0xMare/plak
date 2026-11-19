@@ -149,12 +149,18 @@ struct NativePresentationBackend {
 }
 
 impl NativePresentationBackend {
-    fn new(state_home: PathBuf, custody: &crate::gateway::HostCustody) -> CliResult<Self> {
+    fn new(
+        home: &PlakPaths,
+        state_home: PathBuf,
+        custody: &crate::gateway::HostCustody,
+    ) -> CliResult<Self> {
         let paths = SubscriptionPaths::from_xdg_state_home(state_home.clone())
             .map_err(|error| native_subscription_failure(error, None, &state_home))?;
         let executor = ApplicationExecutor::new()
             .map_err(|_| CliFailure::new("application executor construction failed"))?;
-        let subscriptions = custody.subscriptions(NativeSubscriptions::new(paths));
+        let subscriptions = custody
+            .subscriptions(NativeSubscriptions::new(paths))
+            .with_gateway_catalog_cache(home.home());
         Ok(Self {
             executor,
             subscriptions,
@@ -220,11 +226,12 @@ pub(crate) fn catalog_bundle(
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
-    let mut backend = NativePresentationBackend::new(state_home, custody)?;
-    Ok(catalog_bundle_with_backend_and_composition(
+    let mut backend = NativePresentationBackend::new(paths, state_home, custody)?;
+    Ok(catalog_bundle_with_backend(
         paths,
         &mut backend,
         ProductCompositionSelection::FollowCatalog,
+        custody.admin(),
     ))
 }
 
@@ -375,14 +382,23 @@ fn native_model_entry(
 }
 
 /// Build host catalog rows and full-catalog native model facts using an injected backend.
-#[allow(
-    clippy::too_many_lines,
-    reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
-)]
 pub fn catalog_bundle_with_backend_and_composition(
     paths: &PlakPaths,
     backend: &mut impl PresentationBackend,
     composition: ProductCompositionSelection,
+) -> HostCatalogBundle {
+    catalog_bundle_with_backend(paths, backend, composition, None)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "Presentation joins native and API model facts, credentials, compatibility, and composition choices into one ordered picker bundle."
+)]
+fn catalog_bundle_with_backend(
+    paths: &PlakPaths,
+    backend: &mut impl PresentationBackend,
+    composition: ProductCompositionSelection,
+    gateway: Option<&crate::gateway::AdminLink>,
 ) -> HostCatalogBundle {
     let oauth = crate::capabilities::ROUTES
         .iter()
@@ -554,39 +570,43 @@ pub fn catalog_bundle_with_backend_and_composition(
     {
         // The only account identity an API key supplies is its fingerprint,
         // or the environment variable that won. Neither is key material.
-        let (state, detail, account_label) = match secrets::key_status(paths, account) {
-            Ok(secrets::KeyStatus {
-                source: secrets::KeySource::Env,
-                env_var,
-                fingerprint,
-                ..
-            }) => (
-                plakous_host_protocol::views::ProviderState::Ready,
-                env_var.unwrap_or("environment").to_owned(),
-                fingerprint,
-            ),
-            Ok(secrets::KeyStatus {
-                source: secrets::KeySource::File,
-                fingerprint,
-                ..
-            }) => (
-                plakous_host_protocol::views::ProviderState::Ready,
-                "stored".to_owned(),
-                fingerprint,
-            ),
-            Ok(secrets::KeyStatus {
-                source: secrets::KeySource::Missing,
-                ..
-            }) => (
-                plakous_host_protocol::views::ProviderState::NoKey,
-                String::new(),
-                None,
-            ),
-            Err(_) => (
-                plakous_host_protocol::views::ProviderState::Unavailable,
-                "key store unreadable".to_owned(),
-                None,
-            ),
+        let (state, detail, account_label) = if let Some(gateway) = gateway {
+            gateway_key_presentation(gateway, account)
+        } else {
+            match secrets::key_status(paths, account) {
+                Ok(secrets::KeyStatus {
+                    source: secrets::KeySource::Env,
+                    env_var,
+                    fingerprint,
+                    ..
+                }) => (
+                    plakous_host_protocol::views::ProviderState::Ready,
+                    env_var.unwrap_or("environment").to_owned(),
+                    fingerprint,
+                ),
+                Ok(secrets::KeyStatus {
+                    source: secrets::KeySource::File,
+                    fingerprint,
+                    ..
+                }) => (
+                    plakous_host_protocol::views::ProviderState::Ready,
+                    "stored".to_owned(),
+                    fingerprint,
+                ),
+                Ok(secrets::KeyStatus {
+                    source: secrets::KeySource::Missing,
+                    ..
+                }) => (
+                    plakous_host_protocol::views::ProviderState::NoKey,
+                    String::new(),
+                    None,
+                ),
+                Err(_) => (
+                    plakous_host_protocol::views::ProviderState::Unavailable,
+                    "key store unreadable".to_owned(),
+                    None,
+                ),
+            }
         };
         if let Some(provider) = plakous_hosted::binding::PlatformProvider::for_account(account) {
             sections.push(plakous_host_protocol::views::ProviderSection {
@@ -613,6 +633,35 @@ pub fn catalog_bundle_with_backend_and_composition(
         providers,
         sections: plakous_host_protocol::views::ReadyCatalog::new(sections),
         native_models,
+    }
+}
+
+fn gateway_key_presentation(
+    gateway: &crate::gateway::AdminLink,
+    account: &str,
+) -> (
+    plakous_host_protocol::views::ProviderState,
+    String,
+    Option<String>,
+) {
+    use plakous::gateway::protocol::facts::KeySource;
+    use plakous_host_protocol::views::ProviderState;
+    match gateway.status(account) {
+        Ok(facts) => match facts.and_then(|facts| facts.key) {
+            Some(key) if key.source != KeySource::Missing => (
+                ProviderState::Ready,
+                key.env_var
+                    .map_or_else(|| "stored".to_owned(), |name| name.as_str().to_owned()),
+                key.fingerprint
+                    .map(|fingerprint| fingerprint.as_str().to_owned()),
+            ),
+            _ => (ProviderState::NoKey, String::new(), None),
+        },
+        Err(_) => (
+            ProviderState::Unavailable,
+            "gateway key status unavailable".to_owned(),
+            None,
+        ),
     }
 }
 

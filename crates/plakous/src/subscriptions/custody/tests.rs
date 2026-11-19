@@ -445,6 +445,50 @@ async fn a_gateway_host_never_creates_the_subscription_store() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_gateway_catalog_round_trips_through_only_the_host_cache() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let gateway_paths = SubscriptionPaths::from_xdg_state_home(root.path().join("gateway"))?;
+    seed(&gateway_paths, super::super::unix_now()?)?;
+    let upstream = upstream().await?;
+    let custody = gateway_custody(&gateway_paths, &upstream)?;
+    let host_state = root.path().join("host-state");
+    let host_home = root.path().join("host");
+    let host = NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&host_state)?)
+        .with_custody(&custody)
+        .with_gateway_catalog_cache(&host_home);
+    let codex = NativeProvider::Codex;
+
+    assert_eq!(
+        host.model_catalog_persisted(codex).await.err(),
+        Some(NativeSubscriptionError::ModelUnavailable)
+    );
+    assert!(!host_home.exists());
+    assert!(upstream.take().is_empty());
+
+    let live = host.model_catalog(codex).await?;
+    let requests = upstream.take();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with(b"GET /backend-api/codex/models?"));
+    let cached = host.model_catalog_persisted(codex).await?;
+    assert_eq!(cached.models(), live.models());
+    assert!(
+        cached
+            .models()
+            .iter()
+            .any(|model| model.exact_id() == MODEL)
+    );
+    assert!(upstream.take().is_empty());
+    assert!(!host_state.exists());
+    assert!(
+        !root
+            .path()
+            .join("gateway/plak/subscriptions/catalog/codex.json")
+            .exists()
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_dispatch_and_a_rejection_during_a_claimed_refresh_answer_the_settled_login() -> TestResult
 {
     use plakous_auth::custody::{

@@ -62,6 +62,7 @@ fn spawn(
         };
         let subscriptions = custody
             .subscriptions(NativeSubscriptions::new(sub_paths))
+            .with_gateway_catalog_cache(paths.home())
             .without_model_lookup_retries();
         let Ok(executor) = ApplicationExecutor::new() else {
             return;

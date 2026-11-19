@@ -175,7 +175,8 @@ pub(crate) fn build_host_config(
     } else {
         state_roots.native_subscriptions_for(&selected_account)
     }
-    .map_err(|e| format!("native subscriptions: {}", e.message()))?;
+    .map_err(|e| format!("native subscriptions: {}", e.message()))?
+    .with_gateway_catalog_cache(paths.home());
     let route = session
         .target_selection
         .route(account)
@@ -294,6 +295,22 @@ pub(crate) fn build_host_config(
                         .iter()
                         .any(|tier| tier.id() == "priority"),
                 )
+            }
+            Ok(Err(plakous::subscriptions::NativeSubscriptionError::ModelUnavailable))
+                if custody.gateway().is_some()
+                    && provider == plakous::subscriptions::NativeProvider::Codex =>
+            {
+                return Err(super::support::gateway_catalog_remedy(account).into());
+            }
+            Ok(Err(error))
+                if custody.gateway().is_some()
+                    && provider == plakous::subscriptions::NativeProvider::Codex =>
+            {
+                return Err(super::support::native_subscription_failure(
+                    error,
+                    Some(provider),
+                    paths.home(),
+                ));
             }
             _ => persist_miss_native_tool_mode(account)?,
         }

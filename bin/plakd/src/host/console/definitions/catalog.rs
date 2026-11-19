@@ -31,7 +31,9 @@ pub(super) async fn page(
         page.rows = crate::platform_catalog::entries(provider, composition);
     } else if let Some(provider) = capability.native_provider() {
         let reader = accounts::reader_at(&console.state, &console.custody)?;
-        let subscriptions = reader.subscriptions_for(&account)?;
+        let subscriptions = reader
+            .subscriptions_for(&account)?
+            .with_gateway_catalog_cache(console.paths.home());
         let before = subscriptions.account_observation_revision(provider).await;
         // Missing namespaces stay missing: the persisted-catalog lease is
         // requested only after an offline Ready observation of this account.

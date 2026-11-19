@@ -383,7 +383,7 @@ pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
 mod adoption_tests;
 #[cfg(all(test, feature = "codex", feature = "grok"))]
 #[path = "../../tests/integration/support/gateway_seed.rs"]
-mod gateway_seed;
+pub(crate) mod gateway_seed;
 #[cfg(test)]
 mod tests;
 

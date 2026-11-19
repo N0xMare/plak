@@ -850,6 +850,17 @@ and `gpt-5.6-luna`. Each is `code_mode_only`. A live catalog row that is not
 on that list, including retired `gpt-5.3-codex-spark`, is observational only
 and is not executable.
 
+**Native model snapshots.** Attach presentation and model pickers read the
+last authenticated snapshot; they do not refresh it on demand. With gateway
+custody, the host reads its own cache and checks the exact account, Ready
+status and current compatibility consent through the gateway (§4.7). A new
+or reopened Codex root with no usable snapshot can attach to its stored
+view, but Prompt refuses with a remedy to run `plakd models <account>` with
+the same Plak home and gateway. This is a local snapshot read, not an offline
+runtime open: attaching a dormant root still performs its existing live
+provider resolution, credential and model admission, including gateway status
+reads. Those checks do not populate or refresh the host's snapshot.
+
 **API model catalogs.** The direct API routes share one catalog seam
 (`plakous_hosted::platform`). A route's catalog is the provider's own live
 model list, fetched with the same API key from the exact origin (Anthropic
@@ -6263,6 +6274,18 @@ fingerprint as the in-process command does. `plakd run`, `continue` and
 `models` run in the CLI process, whose routes relay through the gateway the
 same way. Unset, the host keeps direct in-process credential access and takes
 the holder lock shared.
+
+Under gateway custody, startup refresh and `plakd models <native-account>`
+obtain the catalog under the gateway's account and consent checks (relaying
+provider catalog requests where needed) and atomically save the existing
+snapshot encoding under
+`<home>/cache/subscription-catalogs/`. The private filename includes the
+exact slot (with `/` written as `~`) and the gateway's account binding digest.
+The cache contains model metadata, not credential material, and is separate
+from the gateway's XDG subscription tree and its locks. Attach presentation,
+session options and console model pages use this cache, without a provider
+fetch on a cache read or a fallback to the subscription store. API-key
+picker status comes from the gateway's status verb, not from local keys.
 
 ## 5. External client boundary
 

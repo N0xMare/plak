@@ -1,5 +1,9 @@
 //! Gated model catalog reads and their persisted snapshots.
 
+use std::path::{Path, PathBuf};
+
+use plakous_auth::custody::AccountFacts;
+
 use super::{
     Arc, CompatibilityStatus, Future, InMemorySubscriptionRequestGate, MODEL_CATALOG_DEADLINE,
     NativeAuthStatus, NativeModelCatalog, NativeModelSummary, NativeProvider,
@@ -119,6 +123,16 @@ fn validate_model_catalog_snapshot(
 }
 
 impl NativeSubscriptions {
+    /// Use the product home's cache for gateway-custodied catalogs only.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_gateway_catalog_cache(mut self, home: &Path) -> Self {
+        if let Some(gateway) = &mut self.gateway {
+            gateway.catalog_cache = Some(home.join("cache/subscription-catalogs"));
+        }
+        self
+    }
+
     /// Discovers the current authenticated account-scoped model catalog.
     ///
     /// Compatibility acceptance is validated before constructing an online
@@ -151,7 +165,8 @@ impl NativeSubscriptions {
         gate: Arc<InMemorySubscriptionRequestGate>,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
         if let Some(gateway) = &self.gateway {
-            let status = self.gateway_status(gateway, provider).await?;
+            let before = self.gateway_facts(gateway, provider).await?;
+            let status = Self::gateway_status_of(provider, &before)?;
             let models =
                 run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
                     super::vertical::require_vertical(provider)?
@@ -162,7 +177,24 @@ impl NativeSubscriptions {
             if models.is_empty() {
                 return Err(NativeSubscriptionError::ModelUnavailable);
             }
-            return Ok(NativeModelCatalog { provider, models });
+            let catalog = NativeModelCatalog { provider, models };
+            if let Some(directory) = &gateway.catalog_cache {
+                let after = self.gateway_facts(gateway, provider).await?;
+                require_ready(Self::gateway_status_of(provider, &after)?)?;
+                if before.expected_fence() != after.expected_fence()
+                    || before.selection_epoch_digest != after.selection_epoch_digest
+                {
+                    return Err(NativeSubscriptionError::AuthenticationAccountChanged);
+                }
+                let path = gateway_snapshot_path(directory, &after)?;
+                let catalog = run_blocking(move || {
+                    super::state::write_gateway_catalog_snapshot(&path, &catalog)?;
+                    Ok(catalog)
+                })
+                .await??;
+                return Ok(catalog);
+            }
+            return Ok(catalog);
         }
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.status_unlocked(provider).await?;
@@ -184,10 +216,12 @@ impl NativeSubscriptions {
         Ok(catalog)
     }
 
-    /// Hydrates the last persisted authenticated catalog without network I/O.
+    /// Hydrates the last persisted authenticated catalog without upstream discovery.
     ///
     /// Used for local-first TUI attach. A missing snapshot fails closed; stale
-    /// snapshots remain displayable until a background refresh succeeds.
+    /// snapshots remain displayable until a background refresh succeeds. Under
+    /// gateway custody, the gateway supplies current account and consent facts;
+    /// only the host-owned snapshot for that exact account is read.
     ///
     /// # Errors
     ///
@@ -197,21 +231,48 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
+        if let Some(gateway) = &self.gateway {
+            let directory = gateway
+                .catalog_cache
+                .as_deref()
+                .ok_or(NativeSubscriptionError::GatewayCustody)?;
+            let facts = self.gateway_facts(gateway, provider).await?;
+            require_ready(Self::gateway_status_of(provider, &facts)?)?;
+            let path = gateway_snapshot_path(directory, &facts)?;
+            return run_blocking(move || {
+                super::state::read_catalog_snapshot(&path, provider)
+                    .map_err(|_| NativeSubscriptionError::ModelUnavailable)
+            })
+            .await?;
+        }
         let lock = self.acquire_compatibility_lock(provider).await?;
-        let status = self.status_unlocked(provider).await?;
-        match status.compatibility() {
-            CompatibilityStatus::Current => {}
-            CompatibilityStatus::Inactive => return Err(NativeSubscriptionError::ProfileInactive),
-            CompatibilityStatus::Required => {
-                return Err(NativeSubscriptionError::AcceptanceRequired);
-            }
-        }
-        if status.credential() != NativeAuthStatus::Ready {
-            return Err(NativeSubscriptionError::CredentialUnavailable);
-        }
+        require_ready(self.status_unlocked(provider).await?)?;
         let paths = self.state.clone();
         let catalog = run_blocking(move || paths.load_persisted_catalog(provider)).await??;
         lock.verify()?;
         Ok(catalog)
     }
+}
+
+fn require_ready(status: NativeSubscriptionStatus) -> Result<(), NativeSubscriptionError> {
+    match status.compatibility() {
+        CompatibilityStatus::Current => {}
+        CompatibilityStatus::Inactive => return Err(NativeSubscriptionError::ProfileInactive),
+        CompatibilityStatus::Required => return Err(NativeSubscriptionError::AcceptanceRequired),
+    }
+    if status.credential() != NativeAuthStatus::Ready {
+        return Err(NativeSubscriptionError::CredentialUnavailable);
+    }
+    Ok(())
+}
+
+fn gateway_snapshot_path(
+    directory: &Path,
+    facts: &AccountFacts,
+) -> Result<PathBuf, NativeSubscriptionError> {
+    let binding = facts
+        .account_binding
+        .ok_or(NativeSubscriptionError::AuthenticationBinding)?;
+    let account = facts.slot.as_str().replace('/', "~");
+    Ok(directory.join(format!("{account}-{}.json", binding.to_hex())))
 }

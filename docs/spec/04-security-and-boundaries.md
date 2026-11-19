@@ -1407,6 +1407,12 @@ store. Callers do not receive them. The gateway process's environment, not the
 caller's, wins over the key file. The service is the only writer of its caller
 registry and kill-switch file.
 
+The host's gateway-custodied native model snapshots (chapter 02 §4.7) are
+owner-only, non-secret catalog data. A snapshot is selected by the gateway's
+exact slot and account binding after its Ready and consent checks. No
+subscription store path or compatibility lock is used for that cache, and
+the cached rows grant neither credential access nor dispatch authority.
+
 Subscription (OAuth) credentials live in a private per-provider store under XDG
 state:
 

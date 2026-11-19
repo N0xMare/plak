@@ -11,6 +11,14 @@ use plakous_hosted::host_service::wire::HostPrincipal;
 
 use super::*;
 
+#[cfg(all(
+    feature = "codex",
+    feature = "grok",
+    feature = "claude",
+    feature = "test-hooks"
+))]
+mod catalog_gateway;
+
 #[tokio::test(start_paused = true)]
 async fn slow_link_stop_preempts_a_progressing_host_send() {
     let (write, mut read) = tokio::io::duplex(8192);

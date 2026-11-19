@@ -139,6 +139,19 @@ impl Services {
         }
     }
 
+    #[cfg(all(
+        test,
+        feature = "codex",
+        feature = "grok",
+        feature = "claude",
+        feature = "test-hooks",
+        feature = "web"
+    ))]
+    pub(crate) fn with_test_custody(mut self, custody: crate::gateway::HostCustody) -> Self {
+        self.custody = Arc::new(OnceLock::from(custody));
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn product_store_opens(&self) -> usize {
         self.session_records

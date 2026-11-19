@@ -65,15 +65,9 @@ fn gateway_names(
     let Some(link) = custody.admin() else {
         return Ok(None);
     };
-    match link.call(&plakous::gateway::protocol::admin::AdminRequest::List {}) {
-        Ok(plakous::gateway::protocol::admin::AdminResponse::Accounts { accounts }) => Ok(Some(
-            accounts
-                .into_iter()
-                .map(|account| account.as_str().to_owned())
-                .collect(),
-        )),
-        _ => Err(unavailable(ReadScope::Accounts, UnavailableCode::Storage)),
-    }
+    link.accounts()
+        .map(Some)
+        .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
 }
 
 /// One API-key account's key facts from the gateway's admin status.

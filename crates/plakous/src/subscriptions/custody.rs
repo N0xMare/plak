@@ -335,6 +335,7 @@ mod gateway {
     pub(in crate::subscriptions) struct SubscriptionGateway {
         pub(in crate::subscriptions) custodian: Arc<dyn CredentialCustodian>,
         pub(in crate::subscriptions) transport: RouteTransport,
+        pub(in crate::subscriptions) catalog_cache: Option<std::path::PathBuf>,
     }
 
     /// The account kind a gateway names `provider`'s logins by.
@@ -393,6 +394,7 @@ mod gateway {
             self.gateway = custody.custodian().map(|custodian| SubscriptionGateway {
                 custodian: Arc::clone(custodian),
                 transport: custody.transport(),
+                catalog_cache: None,
             });
             self
         }

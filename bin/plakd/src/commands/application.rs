@@ -691,6 +691,14 @@ impl AccountOps for PlakousApplication {
         Ok(())
     }
     fn accounts(&mut self) -> CliResult<Vec<AccountRef>> {
+        if let Some(link) = self.custody.admin() {
+            return link
+                .accounts()
+                .map_err(CliFailure::new)?
+                .into_iter()
+                .map(|account| account.parse().map_err(CliFailure::from))
+                .collect();
+        }
         let mut accounts = Vec::new();
         for route in plakous_hosted::capabilities::ROUTES {
             let vertical = route.account.parse::<AccountRef>()?.vertical();
@@ -1035,7 +1043,10 @@ impl AccountOps for PlakousApplication {
 
     fn models(&mut self, account: &AccountRef) -> CliResult<Vec<CliModelSummary>> {
         let provider = native_provider(account)?;
-        let subscriptions = self.subscriptions_for(account)?;
+        let mut subscriptions = self.subscriptions_for(account)?;
+        if let Some(paths) = &self.product {
+            subscriptions = subscriptions.with_gateway_catalog_cache(paths.home());
+        }
         let catalog = self
             .executor
             .block_on(subscriptions.model_catalog(provider))

@@ -252,6 +252,12 @@ impl NativeSubscriptions {
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
         Err(NativeSubscriptionError::NotCompiled(provider))
     }
+    /// No catalog cache is needed when native routes are omitted.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_gateway_catalog_cache(self, _home: &std::path::Path) -> Self {
+        self
+    }
     /// Refuses an exact native operation without a compiled vertical.
     ///
     /// # Errors

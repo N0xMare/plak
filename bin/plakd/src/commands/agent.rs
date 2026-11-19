@@ -316,7 +316,8 @@ pub(crate) fn run_agent_after_admission(
     })?;
     // A missing API key is an authentication failure (exit 3) the client can
     // act on, not a host that fails to attach after the stream opened.
-    if crate::home::secrets::is_api_key_account(&account) {
+    let custody = services.custody()?;
+    if custody.gateway().is_none() && crate::home::secrets::is_api_key_account(&account) {
         crate::home::secrets::require_api_key(paths, &account)?;
     }
     let selected: plakous_hosted::account::AccountRef = account.parse()?;
@@ -345,7 +346,6 @@ pub(crate) fn run_agent_after_admission(
         ));
     }
     let presentation_started = Instant::now();
-    let custody = services.custody()?;
     let presentation = super::host_config::binding_presentation(paths, &custody, &selected)?;
     let presentation_ms =
         u64::try_from(presentation_started.elapsed().as_millis()).unwrap_or(u64::MAX);

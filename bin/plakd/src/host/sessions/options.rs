@@ -22,8 +22,18 @@ struct Choices {
 }
 
 fn choices(paths: &PlakPaths, custody: &crate::gateway::HostCustody) -> Choices {
-    let models = crate::presentation::catalog_bundle(paths, custody)
-        .map_or_default(|bundle| bundle.sections);
+    // Socket and web requests run inside the host runtime. The synchronous
+    // catalog facade owns an application executor and cannot nest there.
+    let models = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .spawn_scoped(scope, || {
+                crate::presentation::catalog_bundle(paths, custody)
+            })
+            .ok()
+            .and_then(|worker| worker.join().ok())
+            .and_then(Result::ok)
+    })
+    .map_or_default(|bundle| bundle.sections);
     let profiles = match crate::product_config::ProductConfig::load(paths) {
         Ok(config) => crate::profiles::list(&config, paths.home()),
         Err(error) => ProfilesView {
