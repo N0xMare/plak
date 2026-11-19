@@ -6,7 +6,7 @@ use std::path::Path;
 use plakous_recursive_subagents_store::admission::LockedUpgrade;
 
 use crate::home::paths::PlakPaths;
-use crate::store::revisions::{databases, failure, pending};
+use crate::store::revisions::host::{databases, failure, pending};
 use crate::{CliFailure, CliResult};
 
 pub(super) fn upgrade_stopped(

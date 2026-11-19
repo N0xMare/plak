@@ -44,8 +44,8 @@ def socket_layout() -> tuple[str, int, int]:
     state = "r{}.e{}.p{}.t{}".format(
         version("crates/store/src/sqlite.rs", "SQLITE_SCHEMA_VERSION"),
         version("crates/core/agent/src/checkpoint_bundle.rs", "RUNTIME_FORMAT_EPOCH"),
-        version("bin/plakd/src/store/mod.rs", "SCHEMA_VERSION"),
-        version("crates/orchestration/recursive-subagents-store/src/database.rs", "SCHEMA_VERSION"),
+        version("bin/plakd/src/store/mod.rs", "GENERATION"),
+        version("crates/orchestration/recursive-subagents-store/src/database.rs", "GENERATION"),
     )
     protocol = version("crates/common/runner-protocol/src/lib.rs", "PROTOCOL_VERSION")
     retention = version("crates/common/runner-protocol/src/retention.rs", "VERSION")

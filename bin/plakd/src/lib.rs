@@ -560,15 +560,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             .paths()?
             .ensure_private_state_home()
             .map_err(CliFailure::new)?;
-        let admission = carry::upgrade::admission(services.paths()?, false)?;
-        if !matches!(command, Command::StatePruneLegacy { .. })
-            && store::revisions::pending(services.paths()?)?
-        {
-            return Err(CliFailure::new(
-                "store upgrade pending: start this build's host with the old host stopped",
-            ));
-        }
-        Some(admission)
+        Some(carry::upgrade::admission(services.paths()?, false)?)
     } else {
         None
     };
