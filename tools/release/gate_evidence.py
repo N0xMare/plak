@@ -114,6 +114,10 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"README.md"}),
         "writes a scratch README",
     ),
+    "tools/release/pin_installer.py": (
+        frozenset({"README.md", "docs/user-guide/getting-started.md"}),
+        "manual release preparation only; its tooling test uses a disposable fixture tree",
+    ),
     "tests/fixtures/facade-consumer/src/inventory.rs": (frozenset({'"spec"'}), "an expect message"),
     "tests/live/features.py": (frozenset({"README.md"}), "a scenario repository file; docstring"),
     "tests/live/jobs.py": (frozenset({"README.md"}), "a scenario repository file"),
