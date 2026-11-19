@@ -2377,7 +2377,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'WorkspaceRefusal',
         },
     },
-    ('plakd', 'src/lib.rs'): {
+    ('plakd', 'src/test_hooks/disabled.rs'): {
         'runner': {
             'RunnerServices',
             'RunnerLeaseClock',
