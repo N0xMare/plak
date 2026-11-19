@@ -8,10 +8,9 @@ use plakous::gateway::GatewayCustody;
 use plakous::gateway::pins::anthropic::{CLAUDE_CREDENTIAL_HEADERS, CLAUDE_UPSTREAM_PINS};
 use plakous::gateway::pins::openai::{CODEX_CREDENTIAL_HEADERS, CODEX_UPSTREAM_PINS};
 use plakous::gateway::pins::xai::{SUPERGROK_CREDENTIAL_HEADERS, SUPERGROK_UPSTREAM_PINS};
-use plakous::gateway::server::{
-    InProcessGateway, LocalCustody, TestDialOrigin, http1_upstream, new_instance,
-};
+use plakous::gateway::server::{InProcessGateway, LocalCustody, http1_upstream, new_instance};
 use plakous::subscriptions::custody::SubscriptionCustodian;
+use plakous::subscriptions::test_support::TestDialOrigin;
 use plakous::subscriptions::{NativeProvider, NativeSubscriptions, SubscriptionPaths};
 use plakous_host_protocol::wire::{
     Answer, ClientFrame, CreationModel, Hello, HostFrame, NodeAddress, Op, Outcome, RequestRefusal,

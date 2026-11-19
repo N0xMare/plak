@@ -532,15 +532,7 @@ pub fn native_subscription_failure(
         #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
         E::CompatibilityDrift { .. } => auth(error.to_string()),
         E::NotCompiled(provider) => unavailable_native_route(provider),
-        E::UnsafeStorage => auth(
-            super::subscription_storage::find_violation(state_home, account).map_or_else(
-                || format!(
-                    "the subscription store refused {}; check that it and its parents are directories you own and can write",
-                    state_home.display()
-                ),
-                |violation| format!("native subscription storage is unsafe: {violation}"),
-            ),
-        ),
+        E::UnsafeStorage => auth(subscription_storage_detail(state_home, account)),
         E::UnsupportedPlatform => auth(
             "native subscription storage is unsupported on this platform; use an API-key account with `plakd key set <account>`".to_owned(),
         ),
@@ -625,6 +617,16 @@ pub fn native_subscription_failure(
             "{error}; retry, and run `plakd doctor` if it persists"
         )),
     }
+}
+
+fn subscription_storage_detail(state_home: &Path, account: Option<NativeProvider>) -> String {
+    super::subscription_storage::find_violation(state_home, account).map_or_else(
+        || format!(
+            "the subscription store refused {}; check that it and its parents are directories you own and can write",
+            state_home.display()
+        ),
+        |violation| format!("native subscription storage is unsafe: {violation}"),
+    )
 }
 
 fn unavailable_native_route(provider: NativeProvider) -> CliFailure {

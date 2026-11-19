@@ -32,10 +32,6 @@ pub use plakous_http::relay_server::{
 
 use super::{GatewayEndpoint, InMemoryGateway};
 
-#[cfg(feature = "test-hooks")]
-#[doc(hidden)]
-pub use plakous_http::Origin as TestDialOrigin;
-
 struct Kind {
     name: String,
     custodian: Arc<dyn CredentialCustodian>,

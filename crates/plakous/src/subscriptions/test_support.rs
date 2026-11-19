@@ -2,6 +2,7 @@
 
 use super::NativeToolMode;
 use super::resolution::{ResolvedNativeModel, ResolvedProvider, SubscriptionResolutionEvidence};
+pub use plakous_http::Origin as TestDialOrigin;
 use plakous_model::{ConfiguredLanguageModel, Timestamp};
 
 /// Supplies native construction evidence without credentials or inference.

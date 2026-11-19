@@ -463,7 +463,7 @@ async fn a_gateway_catalog_round_trips_through_only_the_host_cache() -> TestResu
         Some(NativeSubscriptionError::ModelUnavailable)
     );
     assert!(!host_home.exists());
-    assert!(upstream.take().is_empty());
+    assert_eq!(upstream.take().len(), 0);
 
     let live = host.model_catalog(codex).await?;
     let requests = upstream.take();
@@ -477,7 +477,7 @@ async fn a_gateway_catalog_round_trips_through_only_the_host_cache() -> TestResu
             .iter()
             .any(|model| model.exact_id() == MODEL)
     );
-    assert!(upstream.take().is_empty());
+    assert_eq!(upstream.take().len(), 0);
     assert!(!host_state.exists());
     assert!(
         !root
