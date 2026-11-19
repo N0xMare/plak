@@ -2026,6 +2026,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             'daemon',
             'machine_id',
             'protocol',
+            'protocol::retention',
         },
         'tools': {
             'ExecutionEnvironment',

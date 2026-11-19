@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plakous::runner::daemon;
-use plakous::runner::protocol::{Bind, LineStatus, Refusal};
+use plakous::runner::protocol::{Bind, LineStatus, Refusal, retention};
 use plakous::runner::{
     ClientWindows, FileOwnerFloors, RunnerClient, RunnerIdentity, RunnerLimits, RunnerOptions,
     RunnerService,
@@ -41,6 +41,12 @@ use crate::home::paths::{PlakPaths, SecretShelf};
 use dial::ssh_command;
 pub(crate) use dial::{STRICT_SSH_OPTIONS, version};
 use home::{LocalRunnerHome, RunnerHome};
+
+pub(crate) fn retention_versions() -> Vec<u32> {
+    (1..=retention::VERSION)
+        .filter(|version| retention::admits(*version))
+        .collect()
+}
 
 /// This process's bind as the home's `host_id`. Its `host_instance` is the
 /// process instance tree custody names, the same for the process's life, so
