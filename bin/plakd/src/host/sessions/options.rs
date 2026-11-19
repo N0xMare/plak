@@ -21,13 +21,17 @@ struct Choices {
     templates: Vec<TemplateRow>,
 }
 
-fn choices(paths: &PlakPaths, custody: &crate::gateway::HostCustody) -> Choices {
+fn choices(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    state_home: &std::path::Path,
+) -> Choices {
     // Socket and web requests run inside the host runtime. The synchronous
     // catalog facade owns an application executor and cannot nest there.
     let models = std::thread::scope(|scope| {
         std::thread::Builder::new()
             .spawn_scoped(scope, || {
-                crate::presentation::catalog_bundle(paths, custody)
+                crate::presentation::catalog_bundle_at(paths, custody, state_home)
             })
             .ok()
             .and_then(|worker| worker.join().ok())
@@ -171,7 +175,12 @@ impl ProductSessions {
             .services
             .custody()
             .map_err(|error| unavailable(error.message()))?;
-        let shared = choices(&home, &custody);
+        let state_home = self
+            .services
+            .home()
+            .state()
+            .map_err(|error| unavailable(error.message()))?;
+        let shared = choices(&home, &custody, state_home);
         let workspace = workspace
             .map(|probe| {
                 match runtime.block_on(registry.validate_workspace(
@@ -185,7 +194,7 @@ impl ProductSessions {
                         } else {
                             home.for_remote_workspace(std::path::Path::new(&canonical_path))
                         };
-                        let selected = choices(&context, &custody);
+                        let selected = choices(&context, &custody, state_home);
                         Ok(wire::WorkspaceOptions::Valid {
                             canonical_path,
                             profiles: selected.profiles,

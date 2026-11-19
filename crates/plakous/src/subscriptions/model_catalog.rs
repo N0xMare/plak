@@ -1,5 +1,6 @@
 //! Gated model catalog reads and their persisted snapshots.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use plakous_auth::custody::AccountFacts;
@@ -179,20 +180,33 @@ impl NativeSubscriptions {
             }
             let catalog = NativeModelCatalog { provider, models };
             if let Some(directory) = &gateway.catalog_cache {
-                let after = self.gateway_facts(gateway, provider).await?;
-                require_ready(Self::gateway_status_of(provider, &after)?)?;
-                if before.expected_fence() != after.expected_fence()
+                let Ok(after) = self.gateway_facts(gateway, provider).await else {
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "warning: the gateway could not confirm the login after model discovery; host catalog snapshot not updated"
+                    );
+                    return Ok(catalog);
+                };
+                if before.account_binding != after.account_binding
                     || before.selection_epoch_digest != after.selection_epoch_digest
                 {
-                    return Err(NativeSubscriptionError::AuthenticationAccountChanged);
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "warning: the gateway login changed during model discovery; host catalog snapshot not updated"
+                    );
+                    return Ok(catalog);
                 }
-                let path = gateway_snapshot_path(directory, &after)?;
-                let catalog = run_blocking(move || {
-                    super::state::write_gateway_catalog_snapshot(&path, &catalog)?;
-                    Ok(catalog)
-                })
-                .await??;
-                return Ok(catalog);
+                // Live listings can succeed with posture that is not
+                // admissible for cached reads (for example, Grok quarantine).
+                if require_ready(Self::gateway_status_of(provider, &after)?).is_ok()
+                    && let Ok(path) = gateway_snapshot_path(directory, &after)
+                {
+                    return run_blocking(move || {
+                        super::state::write_gateway_catalog_snapshot(&path, &catalog)?;
+                        Ok(catalog)
+                    })
+                    .await?;
+                }
             }
             return Ok(catalog);
         }

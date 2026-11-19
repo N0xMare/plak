@@ -315,6 +315,7 @@ async fn revalidate(provider: &ResolvedProvider) -> TestResult {
 
 #[cfg(feature = "anthropic")]
 mod anthropic_api;
+mod catalog_cache;
 #[cfg(feature = "claude")]
 mod claude;
 #[cfg(feature = "claude")]

@@ -328,6 +328,7 @@ another session's jobs.
   secrets/runner/<name>.secret this machine's runner secrets, read for MCP servers placed on its runner
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
+  cache/subscription-catalogs/<slot>-<binding>.json  gateway-custodied native model snapshots (§4.7), disposable
   state/
     r28.e38.p38.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
@@ -6281,6 +6282,8 @@ provider catalog requests where needed) and atomically save the existing
 snapshot encoding under
 `<home>/cache/subscription-catalogs/`. The private filename includes the
 exact slot (with `/` written as `~`) and the gateway's account binding digest.
+Only a still-Ready account with current consent and an unchanged binding and
+login selection can publish; an ordinary token refresh does not prevent it.
 The cache contains model metadata, not credential material, and is separate
 from the gateway's XDG subscription tree and its locks. Attach presentation,
 session options and console model pages use this cache, without a provider

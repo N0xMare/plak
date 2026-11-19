@@ -691,14 +691,6 @@ impl AccountOps for PlakousApplication {
         Ok(())
     }
     fn accounts(&mut self) -> CliResult<Vec<AccountRef>> {
-        if let Some(link) = self.custody.admin() {
-            return link
-                .accounts()
-                .map_err(CliFailure::new)?
-                .into_iter()
-                .map(|account| account.parse().map_err(CliFailure::from))
-                .collect();
-        }
         let mut accounts = Vec::new();
         for route in plakous_hosted::capabilities::ROUTES {
             let vertical = route.account.parse::<AccountRef>()?.vertical();

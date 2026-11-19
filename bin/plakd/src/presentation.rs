@@ -226,7 +226,15 @@ pub(crate) fn catalog_bundle(
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<HostCatalogBundle> {
     let state_home = paths::application_state_home().map_err(CliFailure::new)?;
-    let mut backend = NativePresentationBackend::new(paths, state_home, custody)?;
+    catalog_bundle_at(paths, custody, &state_home)
+}
+
+pub(crate) fn catalog_bundle_at(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    state_home: &std::path::Path,
+) -> CliResult<HostCatalogBundle> {
+    let mut backend = NativePresentationBackend::new(paths, state_home.to_path_buf(), custody)?;
     Ok(catalog_bundle_with_backend(
         paths,
         &mut backend,

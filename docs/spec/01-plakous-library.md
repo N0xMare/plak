@@ -6317,9 +6317,15 @@ re-dispatches stays the route's existing rule. The usage read relays the
 pinned usage GET (Claude's profile read is never relayed, so a custodied
 Claude allowance carries no e-mail) and, after an `Unauthorized` reply,
 asks `AfterRejection` once and reads again. Store operations (login,
-logout, revoke, consent, named-account listing and removal, the upstream
-account fingerprint and the persisted catalog snapshot) refuse
-`NativeSubscriptionError::GatewayCustody`; they belong to the gateway.
+logout, revoke, consent, named-account listing and removal, and the upstream
+account fingerprint) refuse `NativeSubscriptionError::GatewayCustody`;
+they belong to the gateway. A caller with an explicit host-owned catalog cache
+can read and publish non-secret snapshots for the exact slot and account
+binding; it never opens the gateway's subscription store for them (chapter 02
+§4.7). A cached read requires Ready and current consent. A successful live
+listing can return models without publishing if those checks do not hold
+after discovery or the account binding or login selection moved. A routine
+credential generation change does not invalidate publication.
 
 ## 8. Tools and effects
 
