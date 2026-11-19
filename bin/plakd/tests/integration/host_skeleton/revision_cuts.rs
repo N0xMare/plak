@@ -31,17 +31,8 @@ fn crash(cut: &str, expected: [i64; 2]) {
         .canonicalize()
         .unwrap();
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
-    let mut old = start(&fixture);
-    let mut client = Client::connect(&old);
-    let Outcome::Ok(Answer::Created { session, node, .. }) =
-        client.request(1, new_session(&fixture.workspace()))
-    else {
-        panic!("source did not create a session");
-    };
-    let attachment = client.attach(2, &node);
-    client.prompt(3, attachment, "keep this row", ANSWER);
-    drop(client);
-    stop(&mut old);
+    let session = super::upgrade::seed(&fixture, 1);
+    stop(&mut start(&fixture));
     assert_eq!(versions(&paths), BASE);
 
     let (child, lines) = spawn_env(

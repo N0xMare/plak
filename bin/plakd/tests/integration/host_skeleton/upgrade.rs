@@ -54,7 +54,7 @@ fn binary(fixture: &Fixture) -> String {
         .to_owned()
 }
 
-fn seed(fixture: &Fixture, ordinal: usize) -> String {
+pub(super) fn seed(fixture: &Fixture, ordinal: usize) -> String {
     seed_in(fixture, ordinal, &fixture.workspace())
 }
 
