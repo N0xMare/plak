@@ -34,7 +34,9 @@ If plan returns `bootstrap_required`, use the manual same-key procedure
 for the first upgrade onto an S2 build. Follow the existing settlement and
 binding checks, stage with `install.sh --no-link`, invoke the destination
 snapshot's `plakd host upgrade --expect-binary ID --drain DURATION`, and
-only after Ready run `install.sh link SNAPSHOT_ID`. Do not use an ordinary
+only after Ready run `install.sh link SNAPSHOT_ID`. Use this build's installer
+to stage the destination: its link command cannot relink snapshots published
+by pre-port builds. Do not use an ordinary
 one-shot run as a bounded canary. If you have a pinned ExecStart drop-in,
 first verify that the stable `~/.local/bin/plakd` link resolves to the
 running snapshot; move the drop-in aside and run `systemctl --user
@@ -53,7 +55,8 @@ handoff; use the manual same-key procedure if the template differs.
 A green staging transition writes the JSON receipt at the configured path.
 An unchanged, verified re-apply is a no-op and never refreshes that receipt.
 For production use the exact staging manifest digests, route coverage and an
-unexpired green staging receipt. Keep the evidence and receipt in an
+unexpired green staging receipt. Resuming a recorded production handoff
+does not re-check the receipt that already qualified it. Keep the evidence and receipt in an
 operator-owned directory.
 
 On failure use the command in the JSON `retry` field. For

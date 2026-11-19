@@ -10,9 +10,16 @@ use crate::operator_process;
 use crate::shipping_artifact::{self as shipping, FileFacts, check, fail, io};
 
 use super::inventory::{Node, Stage};
-use super::protocol::{Call, Reply, Request};
+use super::protocol::{Call, Reply, Request, VERSION};
 
-const RUN: &str = "sh -c 'IFS= read -r binary && exec \"$binary\" deploy-target'";
+const RUN: &str = r#"sh -c '
+set -eu
+IFS= read -r binary
+IFS= read -r digest
+actual=$(sha256sum <"$binary")
+test "${actual%% *}" = "$digest"
+exec "$binary" deploy-target
+'"#;
 // This loader has only one effect: a private bootstrap file. It verifies the
 // operator-pinned digest before executing the temporary image with stdin intact.
 const BOOT: &str = r#"sh -c '
@@ -30,7 +37,7 @@ chmod 0500 "$work/plakd"
 '"#;
 
 pub(super) enum Image<'a> {
-    Installed(&'a Path),
+    Installed(&'a Path, &'a FileFacts),
     Transfer(&'a Path, &'a FileFacts),
 }
 
@@ -67,8 +74,8 @@ impl Ssh {
     ) -> CliResult<T> {
         let mut input = tempfile::tempfile().map_err(io)?;
         let command = match image {
-            Image::Installed(path) => {
-                writeln!(input, "{}", path.display()).map_err(io)?;
+            Image::Installed(path, expected) => {
+                writeln!(input, "{}\n{}", path.display(), expected.sha256).map_err(io)?;
                 RUN
             }
             Image::Transfer(path, expected) => {
@@ -78,6 +85,7 @@ impl Ssh {
             }
         };
         let request = Request {
+            deploy_protocol: VERSION,
             operator_machine: self.operator_machine.clone(),
             stage: self.stage,
             call,
@@ -98,6 +106,9 @@ impl Ssh {
             Reply::Ok(value) => serde_json::from_value(value)
                 .map_err(|_| fail("SSH target returned unexpected facts")),
             Reply::Error(reason) => Err(fail(&reason)),
+            Reply::ProtocolMismatch { supported, remedy } => Err(fail(&format!(
+                "deploy protocol mismatch: operator v{VERSION}, target v{supported}; {remedy}"
+            ))),
         }
     }
 

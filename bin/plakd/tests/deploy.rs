@@ -230,6 +230,7 @@ uid = 1000
     }
 
     fn deploy(&self, verb: &str, stage: &str, result: &str, reason: &str) -> Value {
+        fs::write(self.path("invocation"), b"planning").unwrap();
         let mut search = vec![self.temp.path().to_path_buf()];
         search.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
         let output = Command::new(env!("CARGO_BIN_EXE_plakd"))
@@ -312,23 +313,22 @@ fn deploy_fake_fleet_refuses_without_mutation() {
         f.staging("plan", "blocked", error);
     }
     f.reset();
-    f.change(|d| d["host"]["canary"] = Value::Null);
+    f.change(|d| {
+        d["host"]["canary"] = Value::Null;
+        d["host"]["facts"]["source"] = json!("legacy facts");
+    });
     for verb in ["plan", "apply"] {
-        f.staging(
+        let plan = f.staging(
             verb,
             "bootstrap_required",
             "existing manual same-key procedure",
         );
+        assert_eq!(plan["legacy_facts"]["source"], "legacy facts");
+        assert_eq!(plan["legacy_facts"]["state_key"], KEY);
     }
     f.reset();
-    f.change(|d| d["legacy"] = json!(true));
-    let plan = f.staging(
-        "plan",
-        "bootstrap_required",
-        "existing manual same-key procedure",
-    );
-    assert_eq!(plan["legacy_facts"]["source"], "legacy facts");
-    assert_eq!(plan["legacy_facts"]["state_key"], KEY);
+    f.change(|d| d["transport_loss"] = json!(true));
+    f.staging("plan", "blocked", "SSH returned no bounded verdict");
     assert_eq!(f.events(), NO_EVENTS);
     f.reset();
     let plan = f.staging("plan", "ready", "");
@@ -456,10 +456,24 @@ fn production(f: &Fleet, green: &Value) {
     }
     assert_eq!(f.events(), NO_EVENTS);
     write(&receipt, green);
-    f.deploy("apply", "production", "green", "");
+    f.change(|d| d["lose_reply"] = json!("upgrade"));
+    f.deploy(
+        "apply",
+        "production",
+        "needs_reconcile",
+        "host upgrade outcome",
+    );
     let mut expired = green.clone();
     expired["completed_at"] = json!(1);
     write(&receipt, &expired);
+    f.deploy("apply", "production", "green", "");
+    assert_eq!(
+        f.events()
+            .iter()
+            .filter(|event| *event == "mark_production")
+            .count(),
+        1
+    );
     assert_eq!(
         f.deploy("apply", "production", "no_op", "")["plan"],
         json!(["verify_read_only"])
@@ -601,24 +615,6 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         .join("\n");
     let path = root.join("fleet.json");
     let mut data = read(&path);
-    if script.contains("--host-upgrade-probe") {
-        assert_eq!(data["legacy"], true);
-        assert_eq!(next(input), "/srv/example");
-        assert_eq!(next(input), "1000");
-        assert_eq!(next(input), "/srv/example/.plak");
-        assert_eq!(next(input), "example");
-        let mut probes = encoded(&json!({
-            "protocol":8,"receipt_version":5,"binary_id":"111111111111","state_key":KEY,
-            "export_versions":[7,8],"host_available":true,"runner_protocol":9,
-            "runner_version":{"protocol":9,"source_revision":"b".repeat(40),"flavor":"release"},
-            "config_error":null
-        }));
-        probes.extend_from_slice(format!("{KEY}\n8\n").as_bytes());
-        probes.extend_from_slice(&encoded(
-            &json!({"wire_version":39,"binary_id":"111111111111"}),
-        ));
-        return (probes, 0);
-    }
     if script.contains("test -L") {
         let current = data["client"] == "current";
         let digest = if current {
@@ -638,25 +634,22 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         return (format!("{digest}\n{resolved}\n").into_bytes(), 0);
     }
     let transferred = script.contains("sha256sum -c");
-    if transferred {
-        let mut binary = vec![0; next(input).parse().unwrap()];
-        let pin = next(input);
-        input.read_exact(&mut binary).unwrap();
-        assert_eq!(hash(binary), pin);
-    } else {
-        assert!(next(input).ends_with("/plakd"));
-    }
+    assert_candidate_bytes(root, input, transferred);
     let call: Value = serde_json::from_str(&next(input)).unwrap();
+    assert_eq!(call["deploy_protocol"], 1);
     let op = &call["call"]["request"]["op"];
     let mut name = op["op"].as_str().unwrap().to_owned();
     let mut remaining = Vec::new();
     input.read_to_end(&mut remaining).unwrap();
     if call["call"]["role"] == "client" {
+        assert!(transferred);
         name = format!("client_{name}");
+    } else {
+        assert_host_loader(root, &data, &name, transferred);
     }
     if name == "observe" {
-        if data["legacy"] == true {
-            return (Vec::new(), 2);
+        if data["transport_loss"] == true {
+            return (Vec::new(), 255);
         }
         if let Some(reason) = data["refusal"].as_str() {
             return (encoded(&json!({"error":reason})), 0);
@@ -672,6 +665,47 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
     let lost = data["lose_reply"] == name || name == "upgrade" && data["lose_reply"] == "old";
     write(&path, &data);
     (encoded(&response), if lost { 255 } else { 0 })
+}
+
+fn assert_candidate_bytes(root: &Path, input: &mut impl BufRead, transferred: bool) {
+    let pin = hash(b"plakd");
+    if transferred {
+        let mut binary = vec![0; next(input).parse().unwrap()];
+        assert_eq!(next(input), pin);
+        input.read_exact(&mut binary).unwrap();
+        assert_eq!(binary, b"plakd");
+    } else {
+        let manifest = read(&root.join("host/manifest.json"));
+        let snapshot = manifest["snapshot_id"].as_str().unwrap();
+        assert_eq!(
+            next(input),
+            format!("/srv/example/.local/lib/plak/release/{snapshot}/plakd")
+        );
+        assert_eq!(next(input), pin);
+    }
+}
+
+fn assert_host_loader(root: &Path, data: &Value, op: &str, transferred: bool) {
+    let progress = root.join("invocation");
+    let phase = fs::read_to_string(&progress).unwrap();
+    let already_serving_candidate = data["host"]["sha256"] == hash(b"plakd");
+    let want_transfer = match (phase.as_str(), op) {
+        ("planning", "observe") => {
+            fs::write(&progress, b"planned").unwrap();
+            true
+        }
+        ("planned", "stage_host") => {
+            fs::write(&progress, b"installed").unwrap();
+            true
+        }
+        ("planned", _) => !already_serving_candidate,
+        ("installed", _) => false,
+        _ => panic!("unexpected call order: {phase}/{op}"),
+    };
+    assert_eq!(
+        transferred, want_transfer,
+        "wrong candidate loader: {phase}/{op}"
+    );
 }
 
 fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) -> Value {

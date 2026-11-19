@@ -19,6 +19,7 @@ mod protocol;
 mod receipt;
 mod ssh;
 mod target;
+mod timing;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {

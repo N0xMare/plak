@@ -11,7 +11,7 @@ const BOUND: Duration = Duration::from_secs(120);
 
 pub(super) fn extract(source: &Path, manifest: &Manifest) -> CliResult<tempfile::TempDir> {
     shipping::open(source)?;
-    let mut list = operator_process::command("/usr/bin/tar".as_ref());
+    let mut list = operator_process::command("tar".as_ref());
     list.arg("-tf").arg(source);
     let result = operator_process::capture(list, None, BOUND, shipping::LIMIT)?;
     check(result.status.success(), "cannot list artifact archive")?;
@@ -38,7 +38,7 @@ pub(super) fn extract(source: &Path, manifest: &Manifest) -> CliResult<tempfile:
         let path = files.path().join(name);
         let output = File::create(&path).map_err(io)?;
         let expected = &manifest.files[name];
-        let mut extract = operator_process::command("/usr/bin/tar".as_ref());
+        let mut extract = operator_process::command("tar".as_ref());
         let status = operator_process::run(
             extract
                 .arg("-xOf")

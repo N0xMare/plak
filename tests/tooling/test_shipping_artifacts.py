@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.tooling.test_release import Server, release_tarball
 from tests.tooling.shipping_fixture import (
     LINUX,
     REVISION,
@@ -36,7 +37,7 @@ class ShippingArtifacts(unittest.TestCase):
         self.manifest = self.artifacts / "manifest.json"
         self.manifest.write_bytes(manifests.canonical(self.data))
 
-    def install(self, *args):
+    def install(self, *args, **overrides):
         return subprocess.run(
             ["sh", ROOT / "install.sh", *args],
             env={
@@ -44,6 +45,7 @@ class ShippingArtifacts(unittest.TestCase):
                 "HOME": str(self.home),
                 "CARGO_HOME": str(self.home / ".cargo"),
                 "PLAK_TEST_SNAPSHOT_FIXTURE": "1",
+                **overrides,
             },
             check=False,
             capture_output=True,
@@ -202,6 +204,50 @@ class ShippingArtifacts(unittest.TestCase):
             self.data["files"]["plakd"]["display_id"],
         )
         self.assertFalse((self.root / "outside-the-install").exists())
+
+    def test_local_bootstrap_digest_must_match_before_either_path_executes(self):
+        binary = self.artifacts / "plakd"
+        binary.write_text('#!/bin/sh\ntouch "$HOME/ran"\n')
+        binary.chmod(0o700)
+        archive = self.root / "bundle.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(self.artifacts, arcname="release")
+        for source in (self.artifacts, archive):
+            with self.subTest(source=source.name):
+                result = self.install("--from", source, "--manifest", self.manifest)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("plakd digest mismatch; installer image was not run", result.stderr)
+                self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_release_tarball_runs_the_native_installer_without_touching_cargo(self):
+        self.native_artifact()
+        version = self.data["product_version"]
+        stem = f"plakd-{version}-{self.data['platform']}"
+        site = self.root / "site"
+        downloads = site / f"releases/download/v{version}"
+        downloads.mkdir(parents=True)
+        archive = downloads / f"{stem}.tar.gz"
+        with tarfile.open(archive, "w:gz", compresslevel=1) as tar:
+            tar.add(self.artifacts, arcname=stem)
+        release_tarball.write_sums(downloads)
+        server = Server(site)
+        self.addCleanup(server.close)
+        cargo = self.home / ".cargo/bin"
+        cargo.mkdir(parents=True)
+        foreign = cargo / "plakd"
+        foreign.write_text("foreign")
+        result = self.install(
+            PLAK_RELEASE_BASE=server.url, PLAK_VERSION=version, PLAK_SKIP_ATTESTATION="1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("attestation check skipped", result.stderr)
+        snapshot = self.home / ".local/lib/plak/release" / self.data["snapshot_id"]
+        self.assertEqual((self.home / ".local/bin/plakd").readlink(), snapshot / "plakd")
+        self.assertEqual(
+            (snapshot / "state-key").read_text().strip(), self.data["build_info"]["state_key"]
+        )
+        self.assertEqual(list(cargo.iterdir()), [foreign])
+        self.assertEqual(foreign.read_text(), "foreign")
 
     def test_snapshot_shares_workers_preserves_old_images_and_refuses_unsafe_layout(self):
         self.native_artifact()

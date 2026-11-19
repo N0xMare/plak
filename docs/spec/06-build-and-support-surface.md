@@ -1195,15 +1195,18 @@ New owned installation ancestors, cache roots and engine directories use mode
 checked for ownership and group/world writability, including through linked
 homes; unsafe entries are refused, never silently repaired. Root-owned system
 ancestors must be non-writable or sticky temporary roots; other owners are refused.
-Concurrent identical installs retain one
-artifact. The installer canonicalizes
-the existing home before composing snapshot paths, so
-linked home ancestors preserve canonical executable paths. A
+Concurrent identical installs retain one artifact. The installer canonicalizes
+the longest existing prefix of each installation root, so linked home or
+`.local` ancestors preserve canonical executable paths. Writable or foreign
+physical ancestors still refuse; symlinked snapshot and worker digest
+directories are not followed. A
 rebuild that changes only a sidecar is a new snapshot (staged then renamed into
 place; a concurrent build of the same bytes keeps one copy). The
 `~/.local/bin/plakd` symlink points at the snapshot, while
 `~/.local/bin/plakous-js-host` and `~/.local/bin/plakous-py-host` point at the worker artifacts;
-corresponding existing paths under `~/.cargo/bin` are repaired. An existing
+corresponding existing paths under `${CARGO_HOME:-~/.cargo}/bin` are repaired
+without creating new Cargo links. A safe root-owned Cargo directory is allowed.
+An existing
 link is replaced only when it already resolves under the maintainer or release
 snapshot root, the shared sidecar cache, or the Cargo target directory; any
 other file or link is refused. A rebuild never
@@ -1729,6 +1732,13 @@ It checks both outputs for either checkout's physical path.
 The comparison is report-only,
 not a gate or a guarantee across toolchains or SDKs.
 
+When preparing the next stable release, run
+`python3 tools/release/pin_installer.py <version>` on the release candidate
+tree before its final checks. This updates the tagged installer URL and
+matching `PLAK_VERSION` in the README and getting-started guide. Include the
+README change in that tree's `just steps package` evidence (§6.5); a
+prerelease does not point users at a different installer tag.
+
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
 `v*` tag runs `package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
 and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball and schema with
@@ -1751,11 +1761,12 @@ target directories, including relative targets and symlinked home components.
 `--dry-run` lists the links and roots it would remove without deleting anything.
 Unrelated links and files are retained. It never
 removes the product home or credentials and offers no home-deletion flag.
-Installation:
+The installer is versioned with its release. Use the matching tag and version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
-PLAK_VERSION=0.0.4 sh install.sh   # a specific release instead of the latest
+version=0.0.4
+curl -fsSL "https://raw.githubusercontent.com/N0xMare/plak/v$version/install.sh" |
+  PLAK_VERSION="$version" sh
 ```
 
 It supports exactly `aarch64-apple-darwin` (including an x86_64 shell under
@@ -1768,7 +1779,12 @@ anything under `~/.local`. When `gh` is installed and signed in it also runs
 otherwise it reports that only the checksum was verified
 (`PLAK_SKIP_ATTESTATION=1` skips the step). `PLAK_RELEASE_BASE` replaces
 `https://github.com/N0xMare/plak` for mirrors and tests and lifts the HTTPS-only
-restriction. The install is exactly the §6.1 layout: the snapshot
+restriction. The native-installer release format starts at v0.0.5. If the
+archive lacks `manifest.json`, the newer checkout's installer refuses and
+names the matching tagged installer to use. For a native-installer release,
+the shell extracts only the shipping files into a private directory using
+`tar` from PATH after its checksum and attestation checks, then delegates
+to the extracted binary. The install is exactly the §6.1 layout: the snapshot
 `~/.local/lib/plak/release/<id>/` with the same `<id>`, its install-time
 `binary-id`, `state-key` and `export-version` manifests, the shared mode-0555 workers under
 `~/.local/lib/plak/sidecars/`, the same ownership and writability refusals for
@@ -1790,6 +1806,8 @@ sh install.sh link SNAPSHOT_ID
 
 A directory supplies `manifest.json` by default. Supply a trusted manifest
 with the archive; local verification does not authenticate its provenance.
+Before executing the local artifact's bootstrap image, the shell hashes a
+private copy and compares it with the manifest's `files.plakd.sha256`.
 Both shell entry points delegate the layout to the authenticated artifact's
 hidden `plakd snapshot install --from` and `plakd snapshot link`; the release
 path keeps the shell download, checksum, and attestation checks. No Python
@@ -1805,7 +1823,9 @@ publication. The explicit `link` step takes an already staged release snapshot
 ID and validates the snapshot before linking; it creates the three commands
 under `~/.local/bin`, replaces only links already pointing into plakd's
 snapshot or sidecar roots, and updates existing owned Cargo links without
-creating new Cargo entries. Neither local step starts or changes a service.
+creating new Cargo entries. Use this installer to stage the image first:
+its link command cannot relink pre-port snapshots. Neither local step
+starts or changes a service.
 
 The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
 product surface and does not change either publishing or installation policy.
@@ -1822,7 +1842,8 @@ boundaries. Production requires a green staging transition less than 24 hours
 old for identical host and client manifest digests, source wire, coordinator,
 runner protocol and gateway versions, and equivalent canary model and effort
 coverage, including account counts. An already converged read-only check
-neither needs nor renews the receipt.
+neither needs nor renews the receipt. Resuming a recorded production
+intent relies on its passed baseline and does not re-check receipt expiry.
 A rehearsal of different bytes, including a fresh rebuild with different
 digests, is not promotion evidence.
 

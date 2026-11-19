@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install a Plak release from GitHub Releases into ~/.local without sudo:
-#   curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
-# PLAK_VERSION=0.0.4 selects a release (default: latest). The layout is the one
+# Use the script from the release tag, not from main, for released versions.
+# PLAK_VERSION selects a release (default: latest). The layout is the one
 # `just install release` writes: an immutable snapshot under ~/.local/lib/plak/release,
 # content-addressed workers under ~/.local/lib/plak/sidecars, and links in
 # ~/.local/bin. PLAK_RELEASE_BASE replaces https://github.com/<repo> (mirrors,
@@ -12,6 +12,7 @@ umask 022
 repo=N0xMare/plak
 base="${PLAK_RELEASE_BASE:-https://github.com/$repo}"
 source_doc="https://github.com/$repo/blob/main/docs/user-guide/getting-started.md"
+minimum_manifest_release=0.0.5
 
 die() { echo "plakd install: $*" >&2; exit 1; }
 say() { echo "plakd install: $*" >&2; }
@@ -148,9 +149,44 @@ fetch() {
 }
 
 sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then checksum="$(sha256sum "$1")" || return 1
-  else checksum="$(shasum -a 256 "$1")" || return 1; fi
+  if command -v sha256sum >/dev/null 2>&1; then checksum="$(sha256sum <"$1")" || return 1
+  else checksum="$(shasum -a 256 <"$1")" || return 1; fi
   printf '%s\n' "${checksum%% *}"
+}
+
+# Bootstrap only: read the plakd pin from the emitter's canonical schema-1
+# layout. The verified Rust image checks the complete document and files.
+manifest_plakd_sha() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  LC_ALL=C awk '
+    function root_field(text, key,   i, c, depth, quoted, pos) {
+      for (i=1; i<=length(text); i++) {
+        c=substr(text, i, 1)
+        if (quoted && c=="\\") { i++; continue }
+        if (c=="\"") { quoted=!quoted; continue }
+        if (quoted) continue
+        if (c=="{" || c=="[") depth++
+        if (c=="}" || c=="]") depth--
+        if (depth==1 && c=="," && substr(text, i, length(key))==key) {
+          if (pos) return 0
+          pos=i
+        }
+      }
+      return depth==0 && !quoted ? pos : 0
+    }
+    NR == 1 {
+      key = ",\"files\":"
+      prefix = key "{\"plakd\":{"
+      at = root_field($0, key)
+      if (!at || substr($0, at, length(prefix)) != prefix) next
+      row = substr($0, at + length(prefix))
+      if (!match(row, /^\"display_id\":\"[0-9a-f]+\",\"length\":[0-9]+,\"sha256\":\"[0-9a-f]+\"\},\"plakous-js-host\":\{/)) next
+      pin = substr(row, 1, RLENGTH)
+      sub(/^.*\"sha256\":\"/, "", pin)
+      sub(/\".*$/, "", pin)
+    }
+    END { if (NR != 1 || length(pin) != 64) exit 1; print pin }
+  ' "$1"
 }
 
 if [ "$mode" = remote ]; then
@@ -186,15 +222,14 @@ elif command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
 else
   say "attestation not checked (needs a signed-in gh); checksum verified"
 fi
-# Extract only the bootstrap image and its pinned manifest, without creating
-# any archive paths. The Rust installer reads and checks the three members.
-tar -xOf "$work/$stem.tar.gz" -- "$stem/plakd" >"$work/plakd" \
-  || die "release lacks the installer image"
-tar -xOf "$work/$stem.tar.gz" -- "$stem/manifest.json" >"$work/manifest.json" \
-  || die "release lacks the shipping manifest"
-chmod 0500 "$work/plakd"
-snapshot="$("$work/plakd" snapshot install --release-download \
-  --from "$work/$stem.tar.gz" --manifest "$work/manifest.json")"
+if ! tar -tf "$work/$stem.tar.gz" | awk -v name="$stem/manifest.json" '$0 == name { found=1 } END { exit !found }'; then
+  die "release lacks manifest.json; this installer requires v$minimum_manifest_release or newer. Use https://raw.githubusercontent.com/$repo/v$version/install.sh for this release"
+fi
+tar -xf "$work/$stem.tar.gz" -C "$work" -- \
+  "$stem/plakd" "$stem/plakous-js-host" "$stem/plakous-py-host" "$stem/manifest.json" \
+  || die "cannot extract release installer and shipping files"
+[ -x "$work/$stem/plakd" ] && [ ! -L "$work/$stem/plakd" ] || die "release lacks the installer image"
+snapshot="$("$work/$stem/plakd" snapshot install --release-download --from "$work/$stem")"
 say "installed plakd $version: $HOME/.local/bin/plakd -> $snapshot/plakd"
 case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*) ;;
@@ -212,26 +247,28 @@ if [ "$mode" = link ]; then
   exec "$bin" snapshot link "$snapshot_id"
 fi
 
+work="$(mktemp -d "${TMPDIR:-/tmp}/plakd-install.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' HUP INT TERM
 if [ -d "$local_source" ]; then
-  bin="$local_source/plakd"
+  manifest="${manifest:-$local_source/manifest.json}"
+  [ -x "$local_source/plakd" ] && [ -f "$local_source/plakd" ] && [ ! -L "$local_source/plakd" ] \
+    || die "artifact has no regular executable plakd installer"
+  cp "$local_source/plakd" "$work/plakd" || die "cannot copy installer image"
 else
   [ -n "$manifest" ] || die "a local tarball requires --manifest FILE"
   # Make the pathname unambiguous to tar even when the caller used a dash.
   case "$local_source" in /*) ;; *) local_source="$PWD/$local_source" ;; esac
-  work="$(mktemp -d "${TMPDIR:-/tmp}/plakd-install.XXXXXX")"
-  trap 'rm -rf "$work"' EXIT
-  trap 'exit 1' HUP INT TERM
   member="$(tar -tf "$local_source" | awk '
     { path = $0; sub(/^\.\//, "", path); n = split(path, parts, "/") }
     (n == 1 && path == "plakd") || (n == 2 && parts[1] != "" && parts[1] != "." && parts[1] != ".." && parts[2] == "plakd") { print }
   ')"
   [ -n "$member" ] || die "artifact archive lacks the installer image"
   tar -xOf "$local_source" -- "$member" >"$work/plakd" || die "cannot extract installer image"
-  bin="$work/plakd"
-  chmod 0500 "$bin"
 fi
-[ -x "$bin" ] && [ ! -L "$bin" ] || die "artifact has no executable plakd installer"
-set -- snapshot install --from "$local_source"
-if [ -n "$manifest" ]; then set -- "$@" --manifest "$manifest"; fi
+pin="$(manifest_plakd_sha "$manifest")" || die "cannot read the plakd SHA-256 pin from the trusted manifest"
+[ "$(sha256_of "$work/plakd")" = "$pin" ] || die "artifact plakd digest mismatch; installer image was not run"
+chmod 0500 "$work/plakd"
+set -- snapshot install --from "$local_source" --manifest "$manifest"
 if [ -n "$no_link" ]; then set -- "$@" --no-link; fi
-"$bin" "$@"
+"$work/plakd" "$@"

@@ -6428,6 +6428,9 @@ and never dispatch a model request. OpenSSH uses a minimal configuration,
 strict host keys, batch mode and no shared connections or agent forwarding.
 Fixed remote loaders read request data on stdin; native target operations
 use closed JSON requests and replies and verified payload lengths and hashes.
+The operator starts those operations with a verified transfer of the candidate
+image and uses the verified installed candidate after staging. The target
+refuses an operator whose deploy protocol number differs.
 Neither deployment endpoint needs Python. A pinned ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
@@ -6440,10 +6443,14 @@ for Codex and Grok). A state-key change requires the manual settled upgrade
 runbook, a paired placement or gateway image change requires later deployment
 tooling, and a custody change is a separate manual leg. Legacy versions use
 the existing host upgrade, state-key, export-version and wire-schema probes;
-missing facts do not become defaults. An incumbent without the bounded
-canary yields `bootstrap_required`: upgrade the pre-S2 incumbent using the
+missing facts do not become defaults. Only absence of the incumbent's
+`deploy-canary --capabilities` reply identifies a pre-S2 bootstrap;
+transport or malformed replies do not. `bootstrap_required` means upgrade
+the pre-S2 incumbent using the
 existing manual same-key procedure, wait for Ready before linking, and
-re-plan with an S2 incumbent. Ordinary `run --max-turns 1` is not a substitute.
+re-plan with an S2 incumbent. Stage with the candidate's installer before
+using its link command, which cannot relink pre-port snapshots.
+Ordinary `run --max-turns 1` is not a substitute.
 
 Plan refuses any in-use account missing from inventory, and reports signed-out
 accounts as `not_enrolled`. Named logins of the same kind remain distinct.

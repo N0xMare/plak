@@ -14,8 +14,13 @@ use super::inventory::{self, Node, Route, Stage};
 use super::probe::{self, Target, UNIT_DRIFT};
 use super::protocol::{
     Call, Canary, Candidate, ClientOp, ClientSpec, Connection, Health, HostOp, Observed, Reply,
-    Request, StageIdentity,
+    Request, StageIdentity, VERSION,
 };
+use super::timing;
+
+#[cfg(test)]
+#[path = "target_tests.rs"]
+mod tests;
 
 pub(crate) fn serve(input: &mut dyn Read, output: &mut dyn Write) -> CliResult<ProcessOutcome> {
     let mut input = BufReader::new(input);
@@ -24,14 +29,10 @@ pub(crate) fn serve(input: &mut dyn Read, output: &mut dyn Write) -> CliResult<P
         .take(shipping::LIMIT + 1)
         .read_until(b'\n', &mut header)
         .map_err(io)?;
-    let result = if header.len() as u64 > shipping::LIMIT || !header.ends_with(b"\n") {
-        Err(fail("SSH request exceeds its size bound"))
+    let reply = if header.len() as u64 > shipping::LIMIT || !header.ends_with(b"\n") {
+        Reply::Error("SSH request exceeds its size bound".into())
     } else {
-        probe::decode(&header).and_then(|request| execute(request, &mut input))
-    };
-    let reply = match result {
-        Ok(reply) => Reply::Ok(reply),
-        Err(error) => Reply::Error(error.message().to_owned()),
+        respond(&header, &mut input)
     };
     output
         .write_all(&shipping::canonical(&reply)?)
@@ -39,16 +40,32 @@ pub(crate) fn serve(input: &mut dyn Read, output: &mut dyn Write) -> CliResult<P
     Ok(ProcessOutcome::Success)
 }
 
+fn respond(header: &[u8], input: &mut dyn Read) -> Reply {
+    #[derive(Deserialize)]
+    struct Version {
+        deploy_protocol: Option<u32>,
+    }
+    let result = match probe::decode::<Version>(header) {
+        Ok(version) if version.deploy_protocol != Some(VERSION) => {
+            return Reply::ProtocolMismatch {
+                supported: VERSION,
+                remedy: "use the plakd from the same shipping artifact as the target".into(),
+            };
+        }
+        Ok(_) => probe::decode(header).and_then(|request| execute(request, input)),
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(reply) => Reply::Ok(reply),
+        Err(error) => Reply::Error(error.message().to_owned()),
+    }
+}
+
 fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value> {
     match request.call {
         Call::Host { host, op } => {
             let target = Target::new(&host, request.operator_machine.as_deref())?;
-            check(
-                request.stage != Stage::Staging
-                    || matches!(op, HostOp::Observe)
-                    || !target.production_history(),
-                "target has production history; use an isolated staging host",
-            )?;
+            guard_stage(&target, request.stage, &op)?;
             if !matches!(op, HostOp::StageHost { .. }) {
                 eof(body)?;
             }
@@ -65,7 +82,14 @@ fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value
     }
 }
 
-fn execute_host(
+pub(super) fn guard_stage(target: &Target<'_>, stage: Stage, op: &HostOp) -> CliResult<()> {
+    check(
+        stage != Stage::Staging || matches!(op, HostOp::Observe) || !target.production_history(),
+        "target has production history; use an isolated staging host",
+    )
+}
+
+pub(super) fn execute_host(
     target: &Target<'_>,
     op: HostOp,
     body: &mut dyn Read,
@@ -83,11 +107,11 @@ fn execute_host(
             manifest_sha256,
         } => data(&stage_host(manifest.as_bytes(), &manifest_sha256, body)?),
         HostOp::DestinationUnit { candidate } => {
-            check_unit(target, &staged(&candidate)?)?;
+            check_unit(target, &staged(target, &candidate)?)?;
             data(&())
         }
         HostOp::DestinationCanaryPreflight { candidate, route } => {
-            qualify(target, &staged(&candidate)?, &route)?;
+            qualify(target, &staged(target, &candidate)?, &route)?;
             data(&())
         }
         HostOp::Upgrade {
@@ -102,13 +126,13 @@ fn execute_host(
             candidate,
             instance,
         } => {
-            staged(&candidate)?;
+            staged(target, &candidate)?;
             let (_, observed) = target.observe()?;
             check(
                 observed.sha256 == candidate.sha256 && observed.instance == instance,
                 "replacement is no longer Ready",
             )?;
-            snapshot_install::link_snapshot(&candidate.snapshot)?;
+            snapshot_install::link_snapshot_in(&target.host.node.home, &candidate.snapshot)?;
             data(&())
         }
         HostOp::MarkProduction { expected } => {
@@ -122,8 +146,13 @@ fn data(result: &impl Serialize) -> CliResult<serde_json::Value> {
     serde_json::to_value(result).map_err(|_| fail("cannot encode target response"))
 }
 
-fn staged(candidate: &Candidate) -> CliResult<PathBuf> {
-    let binary = snapshot_install::verified_snapshot(&candidate.snapshot)?.join("plakd");
+fn staged(target: &Target<'_>, candidate: &Candidate) -> CliResult<PathBuf> {
+    let binary =
+        snapshot_install::verified_snapshot_in(&target.host.node.home, &candidate.snapshot)
+            .map_err(|_| {
+                fail("candidate snapshot is missing or unverified; restage the exact artifact")
+            })?
+            .join("plakd");
     check(
         FileFacts::read(&binary)?.sha256 == candidate.sha256,
         "staged binary digest differs",
@@ -144,7 +173,7 @@ pub(super) fn check_unit(target: &Target<'_>, binary: &Path) -> CliResult<()> {
     )
 }
 
-fn upgrade(
+pub(super) fn upgrade(
     target: &Target<'_>,
     candidate: &Candidate,
     previous: &Observed,
@@ -155,7 +184,7 @@ fn upgrade(
         &target.observe()?.1 == previous,
         "serving facts changed before handoff",
     )?;
-    let binary = staged(candidate)?;
+    let binary = staged(target, candidate)?;
     check_handoff_image(target, &binary, &previous.facts.state_key)?;
     let expected = candidate
         .sha256
@@ -171,14 +200,14 @@ fn upgrade(
             "--drain",
             &format!("{drain}s"),
         ],
-        720 + u64::from(drain),
+        timing::UPGRADE + u64::from(drain),
     )?;
     Ok(())
 }
 
 pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str) -> CliResult<()> {
     check_unit(target, binary)?;
-    let found = target.product(binary, ["version", "--state-key"], 30)?;
+    let found = target.product(binary, ["version", "--state-key"], timing::PROBE)?;
     check(
         probe::line(&found)? == key,
         "cross-key: staged binary does not match the serving state key; use the settled host upgrade runbook",
@@ -186,14 +215,24 @@ pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str)
 }
 
 fn stage_host(raw: &[u8], pin: &str, body: &mut dyn Read) -> CliResult<PathBuf> {
+    let bootstrap = crate::build_identity::running_executable()
+        .ok_or_else(|| fail("cannot identify staged installer image"))?;
+    let work = receive_host(bootstrap, raw, pin, body)?;
+    snapshot_install::install_dir(work.path(), true)
+}
+
+fn receive_host(
+    bootstrap: &Path,
+    raw: &[u8],
+    pin: &str,
+    body: &mut dyn Read,
+) -> CliResult<tempfile::TempDir> {
     check(
         shipping::digest(raw) == pin,
         "transferred manifest digest differs",
     )?;
     let manifest = Manifest::parse(raw)?;
     let work = tempfile::tempdir().map_err(io)?;
-    let bootstrap = crate::build_identity::running_executable()
-        .ok_or_else(|| fail("cannot identify staged installer image"))?;
     let dest = work.path().join("plakd");
     let mut output = OpenOptions::new()
         .create_new(true)
@@ -208,7 +247,7 @@ fn stage_host(raw: &[u8], pin: &str, body: &mut dyn Read) -> CliResult<PathBuf> 
     }
     eof(body)?;
     fs::write(work.path().join("manifest.json"), raw).map_err(io)?;
-    snapshot_install::install_dir(work.path(), true)
+    Ok(work)
 }
 
 fn receive(body: &mut dyn Read, path: &Path, facts: &FileFacts) -> CliResult<()> {
@@ -282,7 +321,7 @@ pub(super) fn health(target: &Target<'_>, expected: &str, routes: &[Route]) -> C
         actual == routes.iter().map(|route| route.account.as_str()).collect(),
         "in-use gateway accounts changed; replan",
     )?;
-    let doctor = target.product(&binary, ["doctor"], 45)?;
+    let doctor = target.product(&binary, ["doctor"], timing::DOCTOR)?;
     let doctor = probe::text(&doctor)?;
     check(
         !doctor.trim().is_empty()
@@ -294,7 +333,7 @@ pub(super) fn health(target: &Target<'_>, expected: &str, routes: &[Route]) -> C
     let report = target.product(
         &binary,
         ["session", "check-binding", "--all", "--summary"],
-        75,
+        timing::BINDINGS,
     )?;
     let bindings: Bindings = probe::decode(&report)?;
     check(
@@ -317,7 +356,7 @@ pub(super) fn health(target: &Target<'_>, expected: &str, routes: &[Route]) -> C
 
 fn generation(target: &Target<'_>, binary: &Path, route: &Route) -> CliResult<Option<u64>> {
     inventory::account(&route.account)?;
-    let status = target.product(binary, ["status", &route.account], 30)?;
+    let status = target.product(binary, ["status", &route.account], timing::PROBE)?;
     let account = format!("{}: ", route.account);
     let ready = probe::text(&status)?
         .lines()
@@ -331,7 +370,11 @@ fn generation(target: &Target<'_>, binary: &Path, route: &Route) -> CliResult<Op
     if !matches!(route.kind(), "codex" | "claude" | "grok") {
         return Ok(None);
     }
-    let raw = target.product(binary, ["deploy-credential-generation", &route.account], 30)?;
+    let raw = target.product(
+        binary,
+        ["deploy-credential-generation", &route.account],
+        timing::PROBE,
+    )?;
     let value = probe::line(&raw)?
         .parse()
         .map_err(|_| fail("unavailable OAuth credential generation"))?;
@@ -356,11 +399,11 @@ fn canary_args(route: &Route, preflight: bool) -> Vec<String> {
 fn qualify(target: &Target<'_>, binary: &Path, route: &Route) -> CliResult<()> {
     check(
         target
-            .canary_routes(binary)
+            .canary_routes(binary)?
             .is_some_and(|kinds| kinds.iter().any(|kind| kind == route.kind())),
         "route has no bounded canary adapter",
     )?;
-    target.product(binary, canary_args(route, true), 30)?;
+    target.product(binary, canary_args(route, true), timing::PROBE)?;
     Ok(())
 }
 
@@ -368,7 +411,7 @@ fn run_canary(target: &Target<'_>, expected: &str, route: &Route) -> CliResult<C
     let binary = current(target, expected)?;
     qualify(target, &binary, route)?;
     let before = generation(target, &binary, route)?;
-    let result = target.product(&binary, canary_args(route, false), 105)?;
+    let result = target.product(&binary, canary_args(route, false), timing::CANARY)?;
     check(
         result == b"plakd-deploy-canary-pass\n",
         "invalid canary terminal/cleanup verdict",
@@ -475,7 +518,7 @@ impl<'a> ClientTarget<'a> {
             &self.node.home.join(".plak"),
         );
         command.arg("--check-connection");
-        let raw = probe::capture(command, 30)?;
+        let raw = probe::capture(command, timing::PROBE)?;
         let reply: Verdict = probe::decode(&raw)?;
         check(
             reply.connected

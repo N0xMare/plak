@@ -194,6 +194,7 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
         proc_root,
     };
     assert_health(&target);
+    assert_target_guards(&target, &source);
     assert!(
         target::check_unit(&target, &drifting)
             .unwrap_err()
@@ -237,4 +238,55 @@ fn assert_health(target: &Target<'_>) {
     .unwrap();
     assert_eq!(health.binding_count, 200_000);
     assert_eq!(health.generations["claude/work"], Some(18));
+}
+
+fn assert_target_guards(target: &Target<'_>, source: &Path) {
+    use crate::deploy::{
+        inventory::Stage,
+        protocol::{Candidate, HostOp},
+    };
+    let serving = target.observe().unwrap().1;
+    let (_, snapshot) = crate::snapshot_install::tests::publish_fixture(
+        &target.host.node.home,
+        &fs::read(source).unwrap(),
+    );
+    let candidate = Candidate {
+        snapshot,
+        sha256: serving.sha256.clone(),
+    };
+    let mut unexpected = serving.clone();
+    unexpected.instance = "100-0000000000000002".into();
+    let error = target::upgrade(target, &candidate, &unexpected, 10).unwrap_err();
+    assert!(error.message().contains("serving facts changed"));
+    let absent = Candidate {
+        snapshot: "f".repeat(64),
+        sha256: candidate.sha256.clone(),
+    };
+    let error = target::upgrade(target, &absent, &serving, 10).unwrap_err();
+    assert!(error.message().contains("candidate snapshot is missing"));
+    assert!(!target.host.product_home.join("surrendered").exists());
+    let wrong_instance = HostOp::HostLink {
+        candidate,
+        instance: unexpected.instance,
+    };
+    let error = target::execute_host(target, wrong_instance, &mut io::empty()).unwrap_err();
+    assert!(error.message().contains("no longer Ready"));
+    assert_eq!(
+        fs::read_link(target.host.node.home.join(".local/bin/plakd")).unwrap(),
+        source
+    );
+    let marker = target.production_marker();
+    fs::write(&marker, b"production history").unwrap();
+    let guarded = HostOp::MarkProduction {
+        expected: target.stage_identity(),
+    };
+    assert!(
+        target::guard_stage(target, Stage::Staging, &guarded)
+            .unwrap_err()
+            .message()
+            .contains("production history")
+    );
+    target::guard_stage(target, Stage::Staging, &HostOp::Observe).unwrap();
+    target::guard_stage(target, Stage::Production, &guarded).unwrap();
+    fs::remove_file(marker).unwrap();
 }

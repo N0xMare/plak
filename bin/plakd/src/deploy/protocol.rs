@@ -7,9 +7,12 @@ use crate::shipping_artifact::{Upgrade, Wire};
 
 use super::inventory::{Host, Node, Route, Stage};
 
+pub(super) const VERSION: u32 = 1;
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
+    pub(super) deploy_protocol: u32,
     pub(super) stage: Stage,
     pub(super) operator_machine: Option<String>,
     pub(super) call: Call,
@@ -225,4 +228,5 @@ pub(super) struct ClientSpec {
 pub(super) enum Reply {
     Ok(serde_json::Value),
     Error(String),
+    ProtocolMismatch { supported: u32, remedy: String },
 }

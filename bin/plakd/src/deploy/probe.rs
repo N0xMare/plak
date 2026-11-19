@@ -18,6 +18,7 @@ use crate::shipping_artifact::{
 use super::inventory::{self, Host, Node};
 use super::protocol::{Export, Facts, Observed, RunnerTriple, StageIdentity};
 use super::ssh;
+use super::timing;
 
 const UNIT: &str = "plakd-host.service";
 pub(super) const NORMALIZE: &str = "host unit is not the generated stable-link unit: verify ~/.local/bin/plakd resolves to the running snapshot, move the pinned ExecStart drop-in aside, then run systemctl --user daemon-reload; do not restart";
@@ -77,7 +78,7 @@ pub(super) fn validate_node(node: &Node) -> CliResult<()> {
         Path::new(&inherited) == node.home
             && node.home.canonicalize().map_err(io)? == node.home
             && fs::metadata(&node.home).map_err(io)?.uid() == uid
-            && line(&capture(login, 5)?)? == node.login,
+            && line(&capture(login, timing::LOGIN)?)? == node.login,
         "unexpected SSH login or home",
     )
 }
@@ -139,7 +140,7 @@ impl<'a> Target<'a> {
                 "--ui".as_ref(),
                 self.host.ui.as_os_str(),
             ],
-            30,
+            timing::PROBE,
         )
     }
 
@@ -205,7 +206,7 @@ impl<'a> Target<'a> {
         let gateway = self.gateway(&binary)?;
         let accounts = self.accounts(&binary, &gateway.accounts)?;
         let paired = self.paired()?;
-        let canary = self.canary_routes(&binary);
+        let canary = self.canary_routes(&binary)?;
         check(
             self.identity()? == identity
                 && process.canonicalize().map_err(io)? == binary
@@ -237,21 +238,24 @@ impl<'a> Target<'a> {
     fn snapshot_binary(&self, path: &Path) -> bool {
         path.file_name() == Some("plakd".as_ref())
             && path.parent().and_then(Path::parent).is_some_and(|root| {
-                ["release", "maintainer"]
-                    .into_iter()
-                    .any(|kind| root == self.host.node.home.join(".local/lib/plak").join(kind))
+                crate::snapshot_install::physical_path(&self.host.node.home.join(".local/lib/plak"))
+                    .is_ok_and(|installed| {
+                        ["release", "maintainer"]
+                            .into_iter()
+                            .any(|kind| root == installed.join(kind))
+                    })
             })
     }
 
     pub(super) fn facts(&self, binary: &Path) -> CliResult<Facts> {
-        let raw = self.product(binary, ["version", "--host-upgrade-probe"], 30)?;
+        let raw = self.product(binary, ["version", "--host-upgrade-probe"], timing::PROBE)?;
         let probe: Probe = decode(&raw)?;
-        let key = self.product(binary, ["version", "--state-key"], 30)?;
-        let export = self.product(binary, ["version", "--export-version"], 30)?;
-        let wire = self.product(binary, ["wire", "schema"], 30)?;
+        let key = self.product(binary, ["version", "--state-key"], timing::PROBE)?;
+        let export = self.product(binary, ["version", "--export-version"], timing::PROBE)?;
+        let wire = self.product(binary, ["wire", "schema"], timing::PROBE)?;
         let mut facts =
             facts_from_probes(probe, line(&key)?, line(&export)?, &wire, "legacy facts")?;
-        if let Ok(raw) = self.product(binary, ["version", "--build-info"], 30) {
+        if let Ok(raw) = self.product(binary, ["version", "--build-info"], timing::PROBE) {
             let info: BuildInfo = decode(&raw)?;
             check(
                 info.state_key == facts.state_key
@@ -269,12 +273,24 @@ impl<'a> Target<'a> {
         Ok(facts)
     }
 
-    pub(super) fn canary_routes(&self, binary: &Path) -> Option<Vec<String>> {
-        let raw = self
-            .product(binary, ["deploy-canary", "--capabilities"], 30)
-            .ok()?;
-        let mut lines = std::str::from_utf8(&raw).ok()?.lines();
-        (lines.next()? == "plakd-deploy-canary-v1").then(|| lines.map(str::to_owned).collect())
+    pub(super) fn canary_routes(&self, binary: &Path) -> CliResult<Option<Vec<String>>> {
+        let mut cmd = command(binary.as_os_str(), &self.host.node, &self.host.product_home);
+        cmd.args(["deploy-canary", "--capabilities"]);
+        let reply = operator_process::capture(
+            cmd,
+            None,
+            Duration::from_secs(timing::PROBE),
+            shipping::LIMIT,
+        )?;
+        if reply.stdout.is_empty() && reply.status.code() == Some(2) {
+            return Ok(None);
+        }
+        let mut lines = text(&reply.stdout)?.lines();
+        check(
+            reply.status.success() && lines.next() == Some("plakd-deploy-canary-v1"),
+            "invalid deploy-canary --capabilities reply; use a matching deploy build",
+        )?;
+        Ok(Some(lines.map(str::to_owned).collect()))
     }
 
     fn paired(&self) -> CliResult<bool> {
@@ -300,7 +316,7 @@ impl<'a> Target<'a> {
         );
         cmd.args(["--user", "show", unit])
             .args(names.iter().map(|name| format!("--property={name}")));
-        let result = capture(cmd, 30)?;
+        let result = capture(cmd, timing::PROBE)?;
         text(&result)?
             .lines()
             .map(|line| {
@@ -315,7 +331,7 @@ impl<'a> Target<'a> {
     fn gateway(&self, binary: &Path) -> CliResult<Gateway> {
         let expected = format!("via gateway unix:{}", self.host.gateway_socket.display());
         let status = self
-            .product(binary, ["gateway", "status"], 30)
+            .product(binary, ["gateway", "status"], timing::PROBE)
             .map_err(|_| fail(CUSTODY))?;
         let status = text(&status)?;
         check(status.lines().any(|line| line == expected), CUSTODY)?;
@@ -324,7 +340,7 @@ impl<'a> Target<'a> {
             .find_map(|line| line.strip_prefix("instance "))
             .filter(|instance| uuid::Uuid::parse_str(instance).is_ok())
             .ok_or_else(|| fail("gateway instance is unavailable"))?;
-        let raw = self.product(binary, ["gateway", "check"], 30)?;
+        let raw = self.product(binary, ["gateway", "check"], timing::PROBE)?;
         let (versions, accounts) = gateway_reply(text(&raw)?, &expected, instance)?;
         let props = self.properties(
             &self.host.gateway_unit,
@@ -379,7 +395,7 @@ impl<'a> Target<'a> {
     }
 
     fn accounts(&self, binary: &Path, listed: &[String]) -> CliResult<BTreeMap<String, String>> {
-        let output = self.product(binary, ["status"], 30)?;
+        let output = self.product(binary, ["status"], timing::PROBE)?;
         let custody = format!("via gateway unix:{}", self.host.gateway_socket.display());
         let contents = text(&output)?;
         check(contents.lines().any(|line| line == custody), CUSTODY)?;
@@ -485,29 +501,6 @@ fn facts_from_probes(
             write: release,
         },
     })
-}
-
-pub(super) fn legacy(bytes: &[u8]) -> CliResult<Facts> {
-    let mut rows = text(bytes)?.splitn(4, '\n');
-    let probe = rows
-        .next()
-        .ok_or_else(|| fail("legacy facts unavailable"))?;
-    let key = rows
-        .next()
-        .ok_or_else(|| fail("legacy state key unavailable"))?;
-    let export = rows
-        .next()
-        .ok_or_else(|| fail("legacy export version unavailable"))?;
-    let wire = rows
-        .next()
-        .ok_or_else(|| fail("legacy wire schema unavailable"))?;
-    facts_from_probes(
-        decode(probe.as_bytes())?,
-        key,
-        export,
-        wire.as_bytes(),
-        "legacy facts",
-    )
 }
 
 fn account_rows(status: &str, listed: &[String]) -> CliResult<BTreeMap<String, String>> {
@@ -620,10 +613,10 @@ fn link_sidecars(link: &Path) -> CliResult<BTreeMap<String, String>> {
 fn connect(path: &Path) -> CliResult<UnixStream> {
     let stream = UnixStream::connect(path).map_err(io)?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(timing::SOCKET)))
         .map_err(io)?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(5)))
+        .set_write_timeout(Some(Duration::from_secs(timing::SOCKET)))
         .map_err(io)?;
     Ok(stream)
 }

@@ -16,6 +16,8 @@ use crate::shipping_artifact::{
 use crate::{CliResult, ProcessOutcome};
 
 mod archive;
+#[cfg(test)]
+pub(crate) mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {
@@ -178,28 +180,31 @@ fn admit_build(manifest: &Manifest, source_build: bool) -> CliResult<()> {
 }
 
 pub(crate) fn link_snapshot(id: &str) -> CliResult<()> {
-    let snapshot = verified_snapshot(id)?;
-    Layout::resolve(Flavor::Release)?.link(&snapshot, None, true)
+    Layout::resolve(Flavor::Release)?.link_verified(id)
 }
 
-pub(crate) fn verified_snapshot(id: &str) -> CliResult<PathBuf> {
-    check(shipping::hex(id, 64), "invalid snapshot id")?;
-    let layout = Layout::resolve(Flavor::Release)?;
-    let snapshot = layout.snapshot(id);
-    layout.verify_snapshot(&snapshot, id)?;
-    Ok(snapshot)
+pub(crate) fn link_snapshot_in(home: &Path, id: &str) -> CliResult<()> {
+    Layout::from_home(home, Flavor::Release)?.link_verified(id)
+}
+
+pub(crate) fn verified_snapshot_in(home: &Path, id: &str) -> CliResult<PathBuf> {
+    Layout::from_home(home, Flavor::Release)?.verified(id)
 }
 
 struct Layout {
-    home: PathBuf,
     root: PathBuf,
+    bin: PathBuf,
+    cargo_bin: PathBuf,
     flavor: Flavor,
 }
 
 impl Layout {
     fn resolve(flavor: Flavor) -> CliResult<Self> {
         let home = crate::environment::inherited_home().ok_or_else(|| fail("HOME is required"))?;
-        let home = PathBuf::from(home);
+        Self::from_home(Path::new(&home), flavor)
+    }
+
+    fn from_home(home: &Path, flavor: Flavor) -> CliResult<Self> {
         check(
             home.is_absolute() && home != Path::new("/"),
             "HOME must be absolute and not root",
@@ -207,14 +212,28 @@ impl Layout {
         let home = home.canonicalize().map_err(io)?;
         safe_ancestors(&home)?;
         Ok(Self {
-            root: home.join(".local/lib/plak"),
-            home,
+            root: physical_path(&home.join(".local/lib/plak"))?,
+            bin: physical_path(&home.join(".local/bin"))?,
+            cargo_bin: crate::environment::cargo_home()
+                .map_or_else(|| home.join(".cargo"), PathBuf::from)
+                .join("bin"),
             flavor,
         })
     }
 
     fn snapshot(&self, id: &str) -> PathBuf {
         self.root.join(self.flavor.name()).join(id)
+    }
+
+    fn verified(&self, id: &str) -> CliResult<PathBuf> {
+        check(shipping::hex(id, 64), "invalid snapshot id")?;
+        let snapshot = self.snapshot(id);
+        self.verify_snapshot(&snapshot, id)?;
+        Ok(snapshot)
+    }
+
+    fn link_verified(&self, id: &str) -> CliResult<()> {
+        self.link(&self.verified(id)?, None, true)
     }
 
     fn sidecar(&self, name: &str, digest: &str) -> PathBuf {
@@ -320,11 +339,8 @@ impl Layout {
     }
 
     fn link(&self, snapshot: &Path, build: Option<&Path>, cargo: bool) -> CliResult<()> {
-        let bin = self.home.join(".local/bin");
-        ensure(&bin)?;
-        let cargo_bin = crate::environment::cargo_home()
-            .map_or_else(|| self.home.join(".cargo"), PathBuf::from)
-            .join("bin");
+        ensure(&self.bin)?;
+        let build = build.map(Path::canonicalize).transpose().map_err(io)?;
         let mut links = Vec::new();
         for name in NAMES {
             let source = if name == "plakd" {
@@ -332,18 +348,19 @@ impl Layout {
             } else {
                 fs::read_link(snapshot.join(name)).map_err(io)?
             };
-            let path = bin.join(name);
-            self.check_link(&path, build)?;
+            let path = self.bin.join(name);
+            self.check_link(&path, build.as_deref())?;
             links.push((path, source.clone()));
-            let path = cargo_bin.join(name);
+            let path = self.cargo_bin.join(name);
             if cargo && fs::symlink_metadata(&path).is_ok() {
-                owned(&cargo_bin)?;
-                self.check_link(&path, build)?;
+                let path = physical_path(&self.cargo_bin)?.join(name);
+                safe_ancestors(parent(&path)?)?;
+                self.check_link(&path, build.as_deref())?;
                 links.push((path, source));
             }
         }
         if !cargo || build.is_some() {
-            self.remove_obsolete(&bin)?;
+            self.remove_obsolete(&self.bin)?;
         }
         for (dest, source) in links {
             atomic_link(&dest, &source)?;
@@ -354,7 +371,7 @@ impl Layout {
     fn remove_obsolete(&self, bin: &Path) -> CliResult<()> {
         let old = bin.join("monty");
         if let Ok(destination) = fs::read_link(&old)
-            && destination.is_absolute()
+            && let Ok(destination) = physical_path(&bin.join(destination))
             && ["release", "maintainer", "sidecars"]
                 .into_iter()
                 .any(|root| destination.starts_with(self.root.join(root)))
@@ -447,6 +464,21 @@ pub(crate) fn ensure(path: &Path) -> CliResult<()> {
         }
     }
     safe_ancestors(path)
+}
+
+pub(crate) fn physical_path(path: &Path) -> CliResult<PathBuf> {
+    let path = shipping::absolute(path)?;
+    match fs::symlink_metadata(&path) {
+        Ok(_) => path.canonicalize().map_err(io),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = physical_path(parent(&path)?)?;
+            let name = path
+                .file_name()
+                .ok_or_else(|| fail("invalid installation path"))?;
+            Ok(parent.join(name))
+        }
+        Err(error) => Err(io(error)),
+    }
 }
 
 fn safe_ancestors(path: &Path) -> CliResult<()> {

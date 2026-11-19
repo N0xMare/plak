@@ -29,6 +29,7 @@ from tests.tooling.shipping_fixture import REVISION, copy_emitter, executable
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/release"))
+import pin_installer  # noqa: E402
 import release_tarball  # noqa: E402
 
 VERSION = "0.0.2"
@@ -45,8 +46,8 @@ def executable_bytes(name: str, tag: str = "one") -> bytes:
     return (
         f"#!/bin/sh\n# {name} {tag}\n"
         'test "$1 $2 $3" = "snapshot install --release-download" || exit 2\n'
-        'test "$4" = "--from" && test -f "$5" || exit 2\n'
-        'test "$6" = "--manifest" && test -f "$7" || exit 2\n'
+        'test "$4" = "--from" && test -f "$5/manifest.json" || exit 2\n'
+        'test "$#" -eq 5 || exit 2\n'
         'printf "%s\\n" "$@" >"$FAKE_INSTALL_LOG"\n'
         'printf "%s\\n" "$HOME/delegated-snapshot"\n'
     ).encode()
@@ -511,13 +512,24 @@ class InstallScriptTests(unittest.TestCase):
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("attestation not checked", result.stderr)
-        verb, mode, release, source_flag, archive, manifest_flag, manifest = (
-            self.install_log.read_text().splitlines()
-        )
+        verb, mode, release, source_flag, directory = self.install_log.read_text().splitlines()
         self.assertEqual((verb, mode, release), ("snapshot", "install", "--release-download"))
-        self.assertEqual((source_flag, manifest_flag), ("--from", "--manifest"))
-        self.assertTrue(archive.endswith(f"plakd-{VERSION}-{LINUX}.tar.gz"))
-        self.assertTrue(manifest.endswith("/manifest.json"))
+        self.assertEqual(source_flag, "--from")
+        self.assertTrue(directory.endswith(f"plakd-{VERSION}-{LINUX}"))
+
+    def test_older_archive_names_the_matching_tagged_installer(self) -> None:
+        stem = f"plakd-{VERSION}-{LINUX}"
+        bundle = self.release / f"{stem}.tar.gz"
+        with tarfile.open(bundle, "w:gz") as archive:
+            for name in EXECUTABLES:
+                archive.add(self.base / f"artifacts-{LINUX}-one" / name, arcname=f"{stem}/{name}")
+        release_tarball.write_sums(self.release)
+        result = self.install()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("requires v0.0.5 or newer", result.stderr)
+        self.assertIn(f"/v{VERSION}/install.sh", result.stderr)
+        self.assertFalse(self.install_log.exists())
+        self.assertFalse((self.home / ".local").exists())
 
     def test_signed_in_gh_verifies_the_attestation(self) -> None:
         result = self.install(FAKE_GH="1", FAKE_GH_VERIFY="1")
@@ -554,7 +566,27 @@ class InstallScriptTests(unittest.TestCase):
         self.stub("sysctl", "echo 1")  # an x86_64 shell under Rosetta
         result = self.install(FAKE_OS="Darwin", FAKE_ARCH="x86_64")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"plakd-{VERSION}-{DARWIN}.tar.gz", self.install_log.read_text())
+        self.assertTrue(self.install_log.read_text().endswith(f"plakd-{VERSION}-{DARWIN}\n"))
+
+
+class PinInstallerTests(unittest.TestCase):
+    def test_updates_both_commands_and_refuses_a_partial_edit(self) -> None:
+        sample = f"curl -fsSL {pin_installer.BASE}/v0.0.4/install.sh | PLAK_VERSION=0.0.4 sh\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            first, second = [root / name for name in pin_installer.GUIDES]
+            second.parent.mkdir(parents=True)
+            first.write_text(sample)
+            second.write_text(sample.replace("PLAK_VERSION=0.0.4", "PLAK_VERSION=wrong"))
+            with self.assertRaisesRegex(ValueError, "exactly one tagged installer"):
+                pin_installer.update(root, "0.0.5")
+            self.assertEqual(first.read_text(), sample)
+            second.write_text(sample)
+            with self.assertRaisesRegex(ValueError, "stable release"):
+                pin_installer.update(root, "0.0.5-rc.1")
+            pin_installer.update(root, "0.0.5")
+            for path in (first, second):
+                self.assertEqual(path.read_text(), sample.replace("0.0.4", "0.0.5"))
 
 
 class PackageReleaseTests(unittest.TestCase):

@@ -8,11 +8,12 @@ There is no `plakd update`: updating means installing again.
 The installer supports `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/v0.0.4/install.sh | PLAK_VERSION=0.0.4 sh
 ```
 
-It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
-(set `PLAK_VERSION` to pick a release), refuses a checksum mismatch, and checks
+Use the installer from the same tag as the release you want. The command
+above downloads that release's tarball and `SHA256SUMS` from GitHub Releases,
+refuses a checksum mismatch, and checks
 the build attestation when `gh` is installed and signed in. It installs `plakd`,
 `plakous-js-host` and `plakous-py-host` into the same snapshot layout as `just install release`
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform

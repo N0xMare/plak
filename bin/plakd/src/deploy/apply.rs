@@ -37,10 +37,13 @@ impl<F: Fleet> Deploy<'_, F> {
                     error.message()
                 )));
             }
-            Err(error) => return self.observe_failure(error, report),
+            Err(error) => return Err(error.into()),
         };
         report.put("observed", &observed)?;
         report.put("stage_identity", &observed.stage_identity)?;
+        if observed.canary.is_none() && observed.facts.source == "legacy facts" {
+            report.put("legacy_facts", &observed.facts)?;
+        }
         let routes = plan::qualify(&observed, self.config, self.artifacts, self.stage)?;
         let resume = self.resolve_pending(&observed, prior, log, report)?;
         let mut clients = BTreeSet::new();
@@ -54,22 +57,6 @@ impl<F: Fleet> Deploy<'_, F> {
         report.put("source_transition", &plan.source_transition)?;
         report.put("canary_models", &super::receipt::models(&plan.routes))?;
         Ok(plan)
-    }
-
-    fn observe_failure(&self, error: crate::CliFailure, report: &mut Report) -> Result<Plan> {
-        // A missing hidden target command on a legacy binary exits without a
-        // typed reply. Expose only facts read with legacy incumbent verbs.
-        if error.message().contains("(remote_command_or_transport)")
-            && let Ok(facts) = self.fleet.legacy()
-        {
-            report.put("legacy_facts", &facts)?;
-            check(
-                facts.state_key == self.artifacts.manifest.build_info.state_key,
-                "cross-key: use the settled host upgrade runbook",
-            )?;
-            return Err(Halt::bootstrap());
-        }
-        Err(error.into())
     }
 
     fn resolve_pending(
@@ -119,6 +106,9 @@ impl<F: Fleet> Deploy<'_, F> {
         }
         self.production_gate(&mut plan)?;
         let baseline = self.baseline(&plan, report)?;
+        if plan.resume.is_some() || !plan.has(Step::StageHost) {
+            self.fleet.use_installed_candidate();
+        }
         self.stage(&plan, log, report)?;
         let instance = if plan.has(Step::HostUpgrade) {
             self.upgrade(&plan, baseline.as_ref(), log, report)?
@@ -130,7 +120,10 @@ impl<F: Fleet> Deploy<'_, F> {
     }
 
     fn production_gate(&self, plan: &mut Plan) -> CliResult<()> {
-        if self.stage != Stage::Production || plan.has(Step::VerifyReadOnly) {
+        if self.stage != Stage::Production
+            || plan.has(Step::VerifyReadOnly)
+            || plan.resume.is_some()
+        {
             return Ok(());
         }
         super::receipt::verify(

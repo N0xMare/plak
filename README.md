@@ -28,7 +28,7 @@ installer installs the product and matching JavaScript/Python workers under
 `~/.local/lib/plak`, with links in `~/.local/bin`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/v0.0.4/install.sh | PLAK_VERSION=0.0.4 sh
 ```
 
 For a source checkout with Rust 1.100.0 and the documented build prerequisites,
