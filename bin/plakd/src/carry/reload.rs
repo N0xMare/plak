@@ -99,6 +99,7 @@ pub(crate) fn reopen_probe(
         let paths = services
             .paths()
             .map_err(|error| error.message().to_owned())?;
+        crate::store::revisions::refuse_incompatible(paths)?;
         let record = services
             .session_records()
             .map_err(|error| error.message().to_owned())?

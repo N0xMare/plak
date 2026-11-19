@@ -114,6 +114,7 @@ pub(crate) fn resolve_read_only_session_id(
     let workspace = paths.workspace().map_err(CliFailure::new)?;
     resolve_session_id(requested, workspace, |cwd| {
         crate::store::ProductStore::session_ids_for_workspace_read_only(paths, cwd)
+            .map_err(Into::into)
     })
     .map_err(|error| {
         if session_absent(error.message()) {

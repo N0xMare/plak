@@ -64,6 +64,9 @@ pub(super) fn execute_config_set(
         )));
     }
     cfg.set_key(&key, &value).map_err(config_set_failure)?;
+    if crate::config_key_changes_orchestration(&key) {
+        store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
+    }
     if scope == product_config::ConfigWriteScope::Project
         && let Some(field) = field
     {

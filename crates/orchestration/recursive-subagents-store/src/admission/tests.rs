@@ -96,8 +96,14 @@ fn fresh_and_upgraded_shapes_match_and_old_rows_get_the_old_behavior() {
 fn read_only_and_ordinary_writer_refuse_pending_and_foreign_files_unchanged() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("sample.sqlite3");
-    seed(&path);
+    let writer = BASE.open_writer(&path, |_| Ok(())).unwrap();
+    writer
+        .execute("INSERT INTO notes VALUES (1,'retained')", [])
+        .unwrap();
     let before = std::fs::read(&path).unwrap();
+    let wal = path.with_extension("sqlite3-wal");
+    let before_wal = std::fs::read(&wal).unwrap();
+    assert_ne!(before_wal, [] as [u8; 0]);
     {
         let reader = CURRENT.open_reader(&path).unwrap().unwrap();
         assert!(matches!(
@@ -110,6 +116,8 @@ fn read_only_and_ordinary_writer_refuse_pending_and_foreign_files_unchanged() {
         Err(AdmissionError::UpgradePending(_))
     ));
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(&wal).unwrap(), before_wal);
+    drop(writer);
 
     for foreign in [10_i64, 14] {
         let writer = Connection::open(&path).unwrap();
@@ -173,4 +181,32 @@ fn admission_resolves_parent_aliases_but_never_follows_a_linked_database() {
         BASE.inspect(&linked),
         Err(AdmissionError::Unavailable(_))
     ));
+}
+
+#[test]
+fn real_tree_registry_and_each_synthetic_revision_converge() {
+    for schema in [crate::database::schema(), CURRENT] {
+        let directory = tempfile::tempdir().unwrap();
+        test_registry::check_revision_paths(&schema, directory.path()).unwrap();
+    }
+}
+
+#[test]
+fn revision_lock_retries_a_transient_wal_reader() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("sample.sqlite3");
+    seed(&path);
+    let reader = BASE.open_reader(&path).unwrap().unwrap();
+    reader.execute_batch("BEGIN; SELECT * FROM notes;").unwrap();
+    assert!(matches!(
+        CURRENT.try_lock_upgrade(&path),
+        Err(AdmissionError::Busy(_))
+    ));
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(reader);
+    });
+    let locked = CURRENT.lock_upgrade(&path).unwrap().unwrap();
+    release.join().unwrap();
+    locked.backup().unwrap().commit(|_, _| {}).unwrap();
 }

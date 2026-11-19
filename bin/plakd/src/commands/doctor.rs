@@ -316,6 +316,11 @@ pub(crate) fn run_doctor(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let legacy_warnings = home::state::report_legacy_state(paths, stdout)
         .map_err(|_| CliFailure::new("stdout failed"))?;
+    let revision_copies = store::revisions::backup_count(paths);
+    if revision_copies != 0 {
+        writeln!(stdout, "Store revision copies: {revision_copies} retained in the current state directory for manual disaster recovery.")
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+    }
     let expiry_warnings = crate::review_expiry::write_warnings(stdout, services.now_unix_seconds())
         .map_err(|_| CliFailure::new("stdout failed"))?;
     // A gateway that does not answer, or that holds some other store, is a

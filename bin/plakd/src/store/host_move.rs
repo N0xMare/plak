@@ -47,7 +47,10 @@ impl ProductStore {
         paths: &crate::home::paths::PlakPaths,
         session: plakous::model::SessionId,
         branch: plakous::model::BranchId,
-    ) -> Result<Option<(plakous_hosted::sessions::SessionRecord, String)>, String> {
+    ) -> Result<
+        Option<(plakous_hosted::sessions::SessionRecord, String)>,
+        super::ProductStoreOpenError,
+    > {
         Self::read_only_snapshot(paths, |snapshot| {
             let prefix = format!("{session}/{branch}/%");
             let ids = snapshot
@@ -80,7 +83,7 @@ impl ProductStore {
         paths: &crate::home::paths::PlakPaths,
         id: &str,
         floor: plakous::sessions::feed::FeedSeq,
-    ) -> Result<DormantSession, String> {
+    ) -> Result<DormantSession, super::ProductStoreOpenError> {
         Self::read_only_snapshot(paths, |snapshot| {
             let mut verified = views::VerifiedSubmissions::default();
             let record = super::load_record(snapshot, &mut verified, id)?;

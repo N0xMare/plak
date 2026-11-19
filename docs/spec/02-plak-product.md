@@ -1123,15 +1123,22 @@ validates the exact destination shape and fingerprint.
 Ordinary read-only opens and inspections never upgrade: they refuse an older
 revision in range with `upgrade pending`. A revision below the generation or
 above the build's current revision is incompatible and refused without
-writing. Host startup checks both stores before writing either or opening
-session authority, so an older host also refuses a mixed-revision directory
-without writing to any store there.
+writing. Host startup, standalone commands, and embedded agent admission
+check both revisions before opening a writable product, tree or runtime store
+or writing a runtime holder claim. Standalone admission checks only the range:
+pending revisions and corruption keep the ordinary per-open refusals, and an
+embedded refusal retains the face's error and terminal record. A
+framework-capable older build therefore refuses a mixed-revision directory
+without writing to any store there. The first real revision may ship only
+once no pre-framework build can run against that state key: those builds can
+open writers and the runtime store before checking both revisions.
 
 Only the destination host, after the source drains and releases ownership,
 may revise live stores. It holds the state lock and exclusive standalone
 admission. It verifies each source revision and fingerprint read-only, then
 uses a dedicated exclusive SQLite connection for the copy and revision
-transaction. Busy admission refuses before a step commits. Before changing a
+transaction. A short bounded retry tolerates transient readers; if a pending
+store stays busy, admission refuses before any step commits. Before changing a
 store it makes a consistent, synced `VACUUM INTO` copy beside it:
 `product.pre-revision-<source>.sqlite3` or
 `subagents.pre-revision-<source>.sqlite3`. A failed copy refuses without
@@ -1147,7 +1154,10 @@ restart, point the host service's stable executable link or pinned executable
 at that build. The copy is for manual disaster recovery only: stop all users
 of the store, restore the pre-upgrade copy, then run the older build. Writes
 after the copy are lost; restoring just one store does not roll back changes
-in the other stores. No host restores a copy automatically.
+in the other stores. No host restores a copy automatically. On startup the
+host removes abandoned copy staging and abandoned qualification copies; it
+skips scratch still held by a probe and never removes published copies.
+`plakd doctor` reports retained copies in the current state directory.
 
 Commands that cannot carry a foreign session automatically, including
 `run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely

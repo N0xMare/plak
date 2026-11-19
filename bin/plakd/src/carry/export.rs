@@ -131,7 +131,7 @@ fn current_projection(
 
     let (_, recorded, intents, views) =
         crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)
-            .map_err(ExportRefusal::Runtime)?;
+            .map_err(|error| ExportRefusal::Runtime(error.into()))?;
     let (Some(recorded), Some(views)) = (recorded, views) else {
         return Ok(None);
     };

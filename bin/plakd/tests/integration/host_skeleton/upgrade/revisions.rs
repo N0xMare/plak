@@ -17,7 +17,6 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     );
     // Check the destination's actual probe while the live source owns the home.
     let scratch = tempfile::tempdir_in(fixture.home()).unwrap();
-    write_private(&scratch.path().join("scratch-request"), "");
     let service = scratch.path().join("service.json");
     write_private(
         &service,
@@ -28,12 +27,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
         command.env("PLAK_TEST_STORE_REVISION_IMAGE", &image);
         command
     };
-    let staged = command()
-        .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
-        .arg(service)
-        .output()
-        .unwrap();
-    assert!(staged.status.success(), "{staged:?}");
+    let staged = check_legacy_and_stage(&command, scratch.path(), &service);
     let stores = scratch.path().join("stores");
     assert_pending_read_refusal(&mut command());
     for (file, fixture_index) in [
@@ -103,6 +97,33 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut source);
     assert_fresh_fingerprints(&paths);
+}
+
+fn check_legacy_and_stage(
+    command: &impl Fn() -> std::process::Command,
+    scratch: &std::path::Path,
+    service: &std::path::Path,
+) -> std::process::Output {
+    let probe = || {
+        command()
+            .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
+            .arg(service)
+            .output()
+            .unwrap()
+    };
+    let legacy = probe();
+    assert!(!legacy.status.success(), "{legacy:?}");
+    assert!(
+        String::from_utf8_lossy(&legacy.stderr)
+            .contains("the source cannot qualify store revisions"),
+        "{legacy:?}"
+    );
+    assert!(!scratch.join("stores").exists());
+
+    write_private(&scratch.join("scratch-request"), "");
+    let staged = probe();
+    assert!(staged.status.success(), "{staged:?}");
+    staged
 }
 
 fn assert_pending_read_refusal(command: &mut std::process::Command) {

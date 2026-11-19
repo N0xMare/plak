@@ -148,11 +148,13 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // through `services`; `[gateway]` changes need a host restart.
     let custody = services.custody()?;
     runtime.block_on(refuse_external_gateway(services, &custody))?;
-    let holder = hold_host_store(services, &custody)?;
+    paths.ensure_private_state_home().map_err(CliFailure::new)?;
+    crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
     let stores_pending = crate::store::revisions::host::pending(paths)?;
+    let holder = hold_host_store(services, &custody)?;
     if let Some(replacement) = upgrade::startup_replacement(services)? {
         drop(holder);
         drop(lock);

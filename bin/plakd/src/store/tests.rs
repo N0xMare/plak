@@ -464,8 +464,11 @@ fn append_settled_submission(
 #[test]
 fn exact_schema_wal_and_cas() {
     assert_eq!(
-        SCHEMA.fingerprint(),
-        "9c64f5a3da9370dfab12e9acd4cd6568bbf2ac4814e165141ef1dc930173fe50"
+        (GENERATION, SCHEMA.base_fingerprint),
+        (
+            39,
+            "9c64f5a3da9370dfab12e9acd4cd6568bbf2ac4814e165141ef1dc930173fe50"
+        )
     );
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
@@ -828,8 +831,9 @@ fn prompt_history_append_and_front_prune_touch_constant_rows() {
 /// refusals keep their exact text and its fingerprint keeps its algorithm.
 #[test]
 fn product_admission_refusals_and_fingerprint_are_exact() {
+    let base = SCHEMA.base_fingerprint;
     assert_eq!(
-        SCHEMA.fingerprint(),
+        base,
         digest_parts(
             &SCHEMA_OBJECTS
                 .iter()
@@ -867,21 +871,27 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
         refusal("shape"),
         (
             ProductStoreOpenErrorKind::Unavailable,
-            "product store schema shape does not match its exact revision; current-schema product state is not authoritative".to_owned()
+            format!(
+                "product store schema shape does not match its exact revision (expected fingerprint {base}); current-schema product state is not authoritative"
+            )
         )
     );
     assert_eq!(
         refusal("fingerprint"),
         (
             ProductStoreOpenErrorKind::Unavailable,
-            "product store schema fingerprint does not match its exact revision; current-schema product state is not authoritative".to_owned()
+            format!(
+                "product store schema fingerprint does not match its exact revision (expected fingerprint {base}); current-schema product state is not authoritative"
+            )
         )
     );
     assert_eq!(
         refusal("missing"),
         (
             ProductStoreOpenErrorKind::Unavailable,
-            "product store schema fingerprint is missing; current-schema product state is not authoritative".to_owned()
+            format!(
+                "product store schema fingerprint is missing (expected fingerprint {base}); current-schema product state is not authoritative"
+            )
         )
     );
     assert_eq!(
@@ -893,6 +903,17 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
             )
         )
     );
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn real_product_registry_revisions_converge() {
+    let directory = tempdir().unwrap();
+    plakous_recursive_subagents_store::test_support::check_revision_paths(
+        &schema::schema(),
+        directory.path(),
+    )
+    .unwrap();
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use std::{collections::BTreeMap, path::Path};
 
 use super::*;
 
@@ -92,6 +93,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
         std::fs::copy(product_backup, paths.product_database()).unwrap();
         assert_eq!(versions(&paths), [39, 12]);
         older_refuses_unchanged(&fixture, &paths, "subagents schema 12");
+        embedded_commands_refuse_unchanged(&fixture, &paths, &session);
     }
 }
 
@@ -110,7 +112,7 @@ fn exit(mut child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, Strin
     }
 }
 
-fn version(path: &std::path::Path) -> i64 {
+fn version(path: &Path) -> i64 {
     rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .unwrap()
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -125,28 +127,101 @@ fn versions(paths: &plakd::home::paths::PlakPaths) -> [i64; 2] {
 }
 
 fn older_refuses_unchanged(fixture: &Fixture, paths: &plakd::home::paths::PlakPaths, reason: &str) {
-    let stores = [
-        paths.runtime_database(),
-        paths.product_database(),
-        paths.subagents_database(),
-    ];
-    let before = stores.each_ref().map(|path| store_bytes(path));
+    let before = state_snapshot(&paths.state_dir());
     let (code, stderr) = {
         let (child, lines) = spawn(fixture);
         exit(child, &lines)
     };
     assert_ne!(code, Some(0), "{stderr}");
+    assert_incompatible(&stderr, reason);
+    assert_snapshot_unchanged(&before, &paths.state_dir());
+}
+
+fn embedded_commands_refuse_unchanged(
+    fixture: &Fixture,
+    paths: &plakd::home::paths::PlakPaths,
+    session: &str,
+) {
+    assert!(paths.state_dir().join("runtime.sqlite3-holders").is_dir());
+    let state = paths.state_dir();
+    let before = state_snapshot(&state);
+    let deleted = fixture
+        .command()
+        .args(["session", "delete", session, "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!deleted.status.success(), "{deleted:?}");
+    assert_incompatible(
+        &String::from_utf8_lossy(&deleted.stderr),
+        "subagents schema 12",
+    );
+    assert_snapshot_unchanged(&before, &state);
+
+    let embedded = fixture
+        .command()
+        .args(["agent", "--session", session])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!embedded.status.success(), "{embedded:?}");
+    let stdout = String::from_utf8(embedded.stdout).unwrap();
+    assert_incompatible(&stdout, "subagents schema 12");
+    assert_eq!(
+        stdout
+            .lines()
+            .filter(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["kind"] == "bye"
+            })
+            .count(),
+        1,
+        "{stdout}"
+    );
+    assert_snapshot_unchanged(&before, &state);
+}
+
+fn assert_incompatible(stderr: &str, reason: &str) {
     assert!(
         stderr.contains(reason) && stderr.contains("incompatible plakd build"),
         "{stderr}"
     );
-    assert_eq!(stores.each_ref().map(|path| store_bytes(path)), before);
 }
 
-fn store_bytes(path: &std::path::Path) -> (Vec<u8>, Vec<u8>) {
-    let wal = path.with_extension("sqlite3-wal");
-    (
-        std::fs::read(path).unwrap(),
-        std::fs::read(wal).unwrap_or_default(),
-    )
+fn state_snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn read(root: &Path, directory: &Path, entries: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name();
+            if name == "host.lock" || name.to_string_lossy().ends_with("-shm") {
+                continue;
+            }
+            let path = entry.path();
+            let relative = path.strip_prefix(root).unwrap().to_owned();
+            if entry.file_type().unwrap().is_dir() {
+                entries.insert(relative, None);
+                read(root, &path, entries);
+            } else {
+                assert!(entry.file_type().unwrap().is_file(), "{}", path.display());
+                entries.insert(relative, Some(std::fs::read(path).unwrap()));
+            }
+        }
+    }
+    let mut entries = BTreeMap::new();
+    read(root, root, &mut entries);
+    entries
+}
+
+fn assert_snapshot_unchanged(before: &BTreeMap<PathBuf, Option<Vec<u8>>>, root: &Path) {
+    let after = state_snapshot(root);
+    assert_eq!(
+        before.keys().collect::<Vec<_>>(),
+        after.keys().collect::<Vec<_>>()
+    );
+    for (path, bytes) in before {
+        assert!(
+            &after[path] == bytes,
+            "state entry changed: {}",
+            path.display()
+        );
+    }
 }

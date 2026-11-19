@@ -166,7 +166,8 @@ the destination; it finishes any remaining steps.
 The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
 named `product.pre-revision-<source>.sqlite3` and
 `subagents.pre-revision-<source>.sqlite3`. They are for manual disaster
-recovery, not automatic rollback. To go back, stop the host and other store
+recovery, not automatic rollback. `plakd doctor` reports how many are retained
+in the current state directory. To go back, stop the host and other store
 users, move each revised database and its SQLite WAL/SHM files aside, restore
 its pre-upgrade copy under the original name, and run the older build. This
 loses writes made since the copies; it does not undo writes to other stores.

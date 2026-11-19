@@ -3716,7 +3716,8 @@ shape that differs from the descriptors is refused as
 `tree store schema shape does not match its exact revision`, a recorded
 fingerprint that differs as
 `tree store schema fingerprint does not match its exact revision`, and a
-missing one as `tree store schema fingerprint is missing`, each followed by
+missing one as `tree store schema fingerprint is missing`. Each names the
+expected fingerprint and ends with
 `; current-schema tree state is not authoritative`. Ordinary opens refuse
 an older in-generation revision as upgrade pending. Revisions outside the
 supported range are incompatible (`subagents schema <n>, expected <current>: ...`).

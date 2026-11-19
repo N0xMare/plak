@@ -148,6 +148,18 @@ impl std::fmt::Display for ProductStoreOpenError {
 
 impl std::error::Error for ProductStoreOpenError {}
 
+impl From<ProductStoreOpenError> for String {
+    fn from(error: ProductStoreOpenError) -> Self {
+        error.message
+    }
+}
+
+impl From<ProductStoreOpenError> for plakous_hosted::error::CliFailure {
+    fn from(error: ProductStoreOpenError) -> Self {
+        Self::new(error)
+    }
+}
+
 impl From<AdmissionError> for ProductStoreOpenError {
     fn from(error: AdmissionError) -> Self {
         use ProductStoreOpenErrorKind as Kind;
@@ -211,19 +223,27 @@ impl ProductStore {
     /// Inspects one existing session record under a read-only SQLite snapshot.
     /// This does not create the home, open a writable store, or change product
     /// schema or session authority.
-    pub fn inspect_session_read_only(paths: &PlakPaths, id: &str) -> Result<SessionRecord, String> {
-        sessions::canonical_product_session_id(id)?;
+    pub fn inspect_session_read_only(
+        paths: &PlakPaths,
+        id: &str,
+    ) -> Result<SessionRecord, ProductStoreOpenError> {
+        sessions::canonical_product_session_id(id).map_err(ProductStoreOpenError::unavailable)?;
         if matches!(std::fs::symlink_metadata(paths.product_database()), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
         {
-            return Err(crate::home::state::incompatible_session_refusal(paths, id)
-                .unwrap_or_else(|| "session not found".to_owned()));
+            return Err(ProductStoreOpenError::unavailable(
+                crate::home::state::incompatible_session_refusal(paths, id)
+                    .unwrap_or_else(|| "session not found".to_owned()),
+            ));
         }
         Self::read_only_snapshot(paths, |snapshot| {
             load_record(snapshot, &mut views::VerifiedSubmissions::default(), id)
         })
         .map_err(|error| {
-            if error == "session not found" {
-                crate::home::state::incompatible_session_refusal(paths, id).unwrap_or(error)
+            if error.kind() == ProductStoreOpenErrorKind::Unavailable
+                && error.message == "session not found"
+            {
+                crate::home::state::incompatible_session_refusal(paths, id)
+                    .map_or(error, ProductStoreOpenError::unavailable)
             } else {
                 error
             }
@@ -231,11 +251,13 @@ impl ProductStore {
     }
 
     #[cfg(feature = "web")]
-    pub(crate) fn inspect_upgrade_roots(paths: &PlakPaths) -> Result<Vec<SessionRecord>, String> {
+    pub(crate) fn inspect_upgrade_roots(
+        paths: &PlakPaths,
+    ) -> Result<Vec<SessionRecord>, ProductStoreOpenError> {
         if !paths
             .product_database()
             .try_exists()
-            .map_err(|error| error.to_string())?
+            .map_err(|error| ProductStoreOpenError::unavailable(error.to_string()))?
         {
             return Ok(Vec::new());
         }
@@ -281,10 +303,14 @@ impl ProductStore {
     pub fn session_ids_for_workspace_read_only(
         paths: &PlakPaths,
         workspace: &Path,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<Vec<String>, ProductStoreOpenError> {
         match std::fs::symlink_metadata(paths.product_database()) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(format!("could not inspect product store: {error}")),
+            Err(error) => {
+                return Err(ProductStoreOpenError::unavailable(format!(
+                    "could not inspect product store: {error}"
+                )));
+            }
             Ok(_) => {}
         }
         let identity = sessions::workspace_identity(workspace)
@@ -304,24 +330,28 @@ impl ProductStore {
     fn read_only_snapshot<T>(
         paths: &PlakPaths,
         read: impl FnOnce(&Transaction<'_>) -> Result<T, String>,
-    ) -> Result<T, String> {
-        let database = product_sqlite_path(paths).map_err(|error| error.to_string())?;
+    ) -> Result<T, ProductStoreOpenError> {
+        let database = product_sqlite_path(paths)?;
         let connection = Connection::open_with_flags(
             database,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
-        .map_err(|_| "could not open product store for inspection".to_owned())?;
-        connection
-            .busy_timeout(BUSY_TIMEOUT)
-            .map_err(|_| "could not configure product store read timeout".to_owned())?;
+        .map_err(|_| {
+            ProductStoreOpenError::unavailable("could not open product store for inspection")
+        })?;
+        connection.busy_timeout(BUSY_TIMEOUT).map_err(|_| {
+            ProductStoreOpenError::unavailable("could not configure product store read timeout")
+        })?;
         connection
             .execute_batch("PRAGMA foreign_keys=ON;")
-            .map_err(|_| "could not configure product store inspection".to_owned())?;
-        let snapshot = connection
-            .unchecked_transaction()
-            .map_err(|_| "could not start product store inspection".to_owned())?;
-        Self::admit_read_only(&snapshot).map_err(|error| error.to_string())?;
-        read(&snapshot)
+            .map_err(|_| {
+                ProductStoreOpenError::unavailable("could not configure product store inspection")
+            })?;
+        let snapshot = connection.unchecked_transaction().map_err(|_| {
+            ProductStoreOpenError::unavailable("could not start product store inspection")
+        })?;
+        Self::admit_read_only(&snapshot)?;
+        read(&snapshot).map_err(ProductStoreOpenError::unavailable)
     }
 
     fn admit_read_only(snapshot: &Connection) -> Result<(), ProductStoreOpenError> {

@@ -1,14 +1,16 @@
 //! Read-only binding liveness metadata without runtime ownership.
-use super::{BindingRecordDisposition, PlakPaths, ProductStore, SessionLocator};
+use super::{
+    BindingRecordDisposition, PlakPaths, ProductStore, ProductStoreOpenError, SessionLocator,
+};
 
 impl ProductStore {
     pub(crate) fn inspect_binding_dispositions(
         paths: &PlakPaths,
-    ) -> Result<Vec<BindingRecordDisposition>, String> {
+    ) -> Result<Vec<BindingRecordDisposition>, ProductStoreOpenError> {
         if !paths
             .product_database()
             .try_exists()
-            .map_err(|error| error.to_string())?
+            .map_err(|error| ProductStoreOpenError::unavailable(error.to_string()))?
         {
             return Ok(Vec::new());
         }

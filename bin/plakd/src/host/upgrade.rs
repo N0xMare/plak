@@ -454,6 +454,7 @@ fn finish_request(
                         &crate::home::state::state_key(),
                         expected,
                         Some(prior_instance),
+                        "start the destination build",
                     )?;
                 }
                 return Ok(ProcessOutcome::Success);
@@ -544,6 +545,7 @@ fn wait_host(
     key: &str,
     binary: &str,
     prior_instance: Option<&str>,
+    remedy: &'static str,
 ) -> CliResult<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
@@ -559,9 +561,9 @@ fn wait_host(
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    Err(CliFailure::new(
-        "host_upgrade_outcome_unknown: replacement has not acknowledged readiness; if the host stopped, start the destination build",
-    ))
+    Err(CliFailure::new(format!(
+        "host_upgrade_outcome_unknown: expected host has not acknowledged readiness; if it stopped, {remedy}"
+    )))
 }
 
 fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
@@ -577,7 +579,7 @@ fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
             "host upgrade recovery belongs to another destination; use the receipt's exact executable",
         ));
     }
-    let _admission = crate::carry::upgrade::admission(paths, true)?;
+    let admission = crate::carry::upgrade::admission(paths, true)?;
     let home_lock =
         super::lock::HostLock::take(&crate::wire_transport::hosts::home_lock(paths), expected)?;
     if !crate::wire_transport::hosts::live(paths)?.is_empty() {
@@ -606,6 +608,9 @@ fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
         .mode(0o600)
         .open(receipt.path(paths).with_file_name("recovery.log"))
         .map_err(io_failure)?;
+    // The home guard still excludes competing hosts until spawn. The
+    // replacement needs to acquire standalone exclusion itself to revise.
+    drop(admission);
     let mut child = process::command(executable, paths.home(), key)
         .args(&receipt.host_argv)
         .process_group(0)
@@ -618,7 +623,12 @@ fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
         let _ = child.wait();
     });
     drop(home_lock);
-    wait_host(paths, key, binary, None)?;
+    let remedy = if restore_source {
+        "start the recorded source build"
+    } else {
+        "start the destination build"
+    };
+    wait_host(paths, key, binary, None, remedy)?;
     if restore_source {
         Err(CliFailure::new(
             "host_upgrade_aborted: the interrupted preparation was withdrawn and the old host is usable; retry the upgrade",
@@ -999,9 +1009,9 @@ fn qualify_destination(
     probe_command
         .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
         .arg(service_file);
-    if request.source_key == request.destination_key {
-        super::store_revisions::request_rehearsal(probe_directory.path())?;
-    }
+    let _scratch_request = (request.source_key == request.destination_key)
+        .then(|| super::store_revisions::request_rehearsal(probe_directory.path()))
+        .transpose()?;
     let probe: DestinationProbe = serde_json::from_slice(
         &process::run(probe_command, PROBE_BOUND)?.stdout,
     )

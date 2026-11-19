@@ -1,6 +1,7 @@
 use std::fs::{self, DirBuilder, File, Permissions};
 use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
@@ -32,9 +33,26 @@ impl Schema {
         if !matches!(self.inspect(path)?, Status::Pending(_)) {
             return Ok(None);
         }
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match self.try_lock_upgrade(path) {
+                // WAL lock promotions can return BUSY without calling SQLite's
+                // busy handler. Retry on a new connection before any writes.
+                Err(AdmissionError::Busy(_)) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                result => return result,
+            }
+        }
+    }
+
+    pub(super) fn try_lock_upgrade<'a>(
+        &'a self,
+        path: &'a Path,
+    ) -> Result<Option<LockedUpgrade<'a>>, AdmissionError> {
         let mut connection = self.writer(path, false)?;
         connection
-            .busy_timeout(std::time::Duration::ZERO)
+            .busy_timeout(Duration::ZERO)
             .map_err(|_| self.unavailable("upgrade timeout could not be configured"))?;
         self.configure_durability(&connection)?;
         let mode: String = connection

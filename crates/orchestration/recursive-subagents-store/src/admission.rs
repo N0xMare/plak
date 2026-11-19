@@ -3,6 +3,8 @@
 mod revision;
 pub use revision::{BackedUpUpgrade, LockedUpgrade};
 
+#[cfg(any(test, feature = "commit-trace"))]
+pub(crate) mod test_registry;
 #[cfg(test)]
 mod tests;
 
@@ -117,6 +119,15 @@ impl Schema {
         self.classify(&snapshot)
     }
 
+    /// Check only the revision, without creating the file or inspecting its shape.
+    /// Callers that only fence incompatible builds leave other errors to open.
+    pub fn check_revision(&self, path: &Path) -> Result<(), AdmissionError> {
+        if let Some(connection) = self.open_reader(path)? {
+            self.require_supported(self.read_version(&connection)?)?;
+        }
+        Ok(())
+    }
+
     fn open_reader(&self, path: &Path) -> Result<Option<Connection>, AdmissionError> {
         match path.symlink_metadata() {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -223,9 +234,8 @@ impl Schema {
     }
 
     fn classify(&self, connection: &Connection) -> Result<Status, AdmissionError> {
-        let version: i64 = connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(|error| self.sql_error(&error, "schema revision could not be inspected"))?;
+        let version = self.read_version(connection)?;
+        self.require_supported(version)?;
         if version == 0 {
             let has_schema: bool = connection
                 .query_row(
@@ -242,13 +252,6 @@ impl Schema {
             }
             return Ok(Status::Fresh);
         }
-        let expected = self.version();
-        if !(self.generation..=expected).contains(&version) {
-            return Err(AdmissionError::Unsupported(format!(
-                "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plakd build; move it aside to start fresh",
-                stem = self.stem
-            )));
-        }
         self.validate_revision(connection, version)
             .map_err(|error| {
                 AdmissionError::Unavailable(format!(
@@ -256,11 +259,28 @@ impl Schema {
                     self.noun
                 ))
             })?;
-        Ok(if version == expected {
+        Ok(if version == self.version() {
             Status::Current
         } else {
             Status::Pending(version)
         })
+    }
+
+    fn read_version(&self, connection: &Connection) -> Result<i64, AdmissionError> {
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|error| self.sql_error(&error, "schema revision could not be inspected"))
+    }
+
+    fn require_supported(&self, version: i64) -> Result<(), AdmissionError> {
+        let expected = self.version();
+        if version == 0 || (self.generation..=expected).contains(&version) {
+            return Ok(());
+        }
+        Err(AdmissionError::Unsupported(format!(
+            "{stem} schema {version}, expected {expected}: this {stem}.sqlite3 was created by an incompatible plakd build; move it aside to start fresh",
+            stem = self.stem
+        )))
     }
 
     fn initialize(&self, transaction: &Transaction<'_>) -> Result<(), AdmissionError> {
@@ -299,7 +319,9 @@ impl Schema {
             }
             pin = step.fingerprint;
         }
-        let actual = self.read_shape(connection)?;
+        let actual = self
+            .read_shape(connection)
+            .map_err(|error| format!("{error} (expected fingerprint {pin})"))?;
         let fingerprint = fingerprint(&expected);
         expected.sort_unstable_by_key(|(name, _)| *name);
         if actual
@@ -308,11 +330,24 @@ impl Schema {
             .ne(expected)
         {
             return Err(format!(
-                "{} store schema shape does not match its exact revision",
+                "{} store schema shape does not match its exact revision (expected fingerprint {pin})",
                 self.noun
             ));
         }
-        let stored: String = connection
+        let stored = self
+            .recorded_fingerprint(connection)
+            .map_err(|error| format!("{error} (expected fingerprint {pin})"))?;
+        if stored != pin || fingerprint != pin {
+            return Err(format!(
+                "{} store schema fingerprint does not match its exact revision (expected fingerprint {pin})",
+                self.noun
+            ));
+        }
+        Ok(())
+    }
+
+    fn recorded_fingerprint(&self, connection: &Connection) -> Result<String, String> {
+        connection
             .query_row(
                 &format!(
                     "SELECT fingerprint FROM {}_schema WHERE singleton=1",
@@ -321,14 +356,7 @@ impl Schema {
                 [],
                 |row| row.get(0),
             )
-            .map_err(|_| format!("{} store schema fingerprint is missing", self.noun))?;
-        if stored != pin || fingerprint != pin {
-            return Err(format!(
-                "{} store schema fingerprint does not match its exact revision",
-                self.noun
-            ));
-        }
-        Ok(())
+            .map_err(|_| format!("{} store schema fingerprint is missing", self.noun))
     }
 
     fn read_shape(&self, connection: &Connection) -> Result<Vec<(String, String)>, String> {

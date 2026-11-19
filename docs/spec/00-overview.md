@@ -323,8 +323,10 @@ The fourth exception is in-place product and tree store revisions. A build
 can advance an older revision of its own generation after exclusive owner
 admission, a consistent copy, and exact schema validation. Neither store
 reads the other; each moves in a single transaction, and older builds refuse
-newer revisions without writing. Generation changes discard the revision
-steps and continue to use settled carry (chapter 02 §2.5).
+newer revisions without writing. The first real revision can ship only when
+no build that predates revision admission can run against that key; those
+builds may write before their version checks. Generation changes discard the
+revision steps and continue to use settled carry (chapter 02 §2.5).
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

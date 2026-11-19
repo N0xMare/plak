@@ -1,12 +1,18 @@
 //! Revision work runs on scratch during qualification and on stopped stores
 //! after handoff, never on a live source.
 
+mod cleanup;
+
+use std::fs::File;
 use std::path::Path;
 
 use plakous_recursive_subagents_store::admission::LockedUpgrade;
 
 use crate::home::paths::PlakPaths;
-use crate::store::revisions::host::{databases, failure, pending};
+use crate::store::revisions::{
+    databases,
+    host::{failure, pending},
+};
 use crate::{CliFailure, CliResult};
 
 pub(super) fn upgrade_stopped(
@@ -14,6 +20,7 @@ pub(super) fn upgrade_stopped(
     needs_upgrade: bool,
     _state_lock: &super::lock::HostLock,
 ) -> CliResult<()> {
+    cleanup::stale_copies(paths);
     if !needs_upgrade {
         return Ok(());
     }
@@ -41,14 +48,20 @@ pub(super) fn upgrade_stopped(
 
 const REQUEST: &str = "scratch-request";
 
-pub(super) fn request_rehearsal(directory: &Path) -> CliResult<()> {
-    std::fs::File::create_new(directory.join(REQUEST))
-        .map(drop)
-        .map_err(|error| CliFailure::new(error.to_string()))
+pub(super) fn request_rehearsal(directory: &Path) -> CliResult<File> {
+    let marker = File::create_new(directory.join(REQUEST))
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    marker
+        .lock_shared()
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    Ok(marker)
 }
 
 pub(super) fn rehearse_for_service(paths: &PlakPaths, service: &Path) -> CliResult<()> {
-    if service.with_file_name(REQUEST).is_file() {
+    let marker = service.with_file_name(REQUEST);
+    if marker.is_file() {
+        let _probe = cleanup::lock_marker(&marker, false)
+            .ok_or_else(|| CliFailure::new("store qualification scratch request is unavailable"))?;
         return rehearse(paths, &service.with_file_name("stores"));
     }
     // Older coordinators can't route their later probes to the copies.

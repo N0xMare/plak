@@ -20,7 +20,8 @@ impl ProductSessions {
             .services
             .paths()
             .map_err(|failure| unavailable(failure.message().to_owned()))?;
-        let record = ProductStore::inspect_session_read_only(paths, id).map_err(unavailable)?;
+        let record = ProductStore::inspect_session_read_only(paths, id)
+            .map_err(|error| unavailable(error.into()))?;
         if !record.archived && !include_unarchived {
             return Ok(None);
         }

@@ -811,6 +811,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                     "plakd tree release releases another process's custody without it; pass --force to confirm",
                 ));
             }
+            store::revisions::refuse_incompatible(services.paths()?).map_err(CliFailure::new)?;
             commands::tree::release(services.paths()?, &tree_id, &mut stdout, &mut stderr)?;
             Ok(ProcessOutcome::Success)
         }

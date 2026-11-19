@@ -1,12 +1,15 @@
-use super::{SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabase, expected_schema_fingerprint};
+use super::{GENERATION, SCHEMA, SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabase};
 
 /// Identity golden for the semantic-move cohort's durable format.
 #[test]
 fn the_tree_schema_fingerprint_is_pinned() {
     assert_eq!(SCHEMA_VERSION, 11);
     assert_eq!(
-        expected_schema_fingerprint(),
-        "f853d767e6fb5d05a546fd1c32dbb7b160d85b35ae5caeb7fde2efade76ca23a"
+        (GENERATION, SCHEMA.base_fingerprint),
+        (
+            11,
+            "f853d767e6fb5d05a546fd1c32dbb7b160d85b35ae5caeb7fde2efade76ca23a"
+        )
     );
 }
 
@@ -41,6 +44,7 @@ fn a_fresh_tree_database_is_versioned_and_reopens() {
 /// refusals keep their exact text.
 #[test]
 fn tree_admission_refusals_are_exact() {
+    let base = SCHEMA.base_fingerprint;
     let refusal = |damage: &str| {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("subagents.sqlite3");
@@ -73,21 +77,27 @@ fn tree_admission_refusals_are_exact() {
         refusal("shape"),
         (
             unavailable,
-            "tree store schema shape does not match its exact revision; current-schema tree state is not authoritative".to_owned()
+            format!(
+                "tree store schema shape does not match its exact revision (expected fingerprint {base}); current-schema tree state is not authoritative"
+            )
         )
     );
     assert_eq!(
         refusal("fingerprint"),
         (
             unavailable,
-            "tree store schema fingerprint does not match its exact revision; current-schema tree state is not authoritative".to_owned()
+            format!(
+                "tree store schema fingerprint does not match its exact revision (expected fingerprint {base}); current-schema tree state is not authoritative"
+            )
         )
     );
     assert_eq!(
         refusal("missing"),
         (
             unavailable,
-            "tree store schema fingerprint is missing; current-schema tree state is not authoritative".to_owned()
+            format!(
+                "tree store schema fingerprint is missing (expected fingerprint {base}); current-schema tree state is not authoritative"
+            )
         )
     );
     assert_eq!(

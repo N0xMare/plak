@@ -58,7 +58,7 @@ impl ProductStore {
     pub(crate) fn inspect_tree_source_read_only(
         paths: &crate::home::paths::PlakPaths,
         session_id: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, super::ProductStoreOpenError> {
         Self::read_only_snapshot(paths, |snapshot| {
             let (source, operation): (Option<String>, Option<String>) = snapshot
                 .query_row(
@@ -91,7 +91,7 @@ impl ProductStore {
             ProductIntents,
             Option<SessionViews>,
         ),
-        String,
+        super::ProductStoreOpenError,
     > {
         Self::read_only_snapshot(paths, |snapshot| {
             let (workspace, recorded): (String, Option<String>) = snapshot

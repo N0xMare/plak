@@ -54,6 +54,7 @@ fn ensure_usable_state_with_notice(
     reported: &Once,
 ) -> Result<(), String> {
     paths.ensure_private_state_home()?;
+    crate::store::revisions::refuse_incompatible(paths)?;
     paths.ensure_layout()?;
     report_other_state_once(paths, notice, reported);
     if let Err(error) = SessionBackend::classify_sqlite(paths.runtime_database())

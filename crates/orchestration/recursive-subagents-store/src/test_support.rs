@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+pub use crate::admission::test_registry::check_revision_paths;
 use crate::admission::{Revision, Schema};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);

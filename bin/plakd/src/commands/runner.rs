@@ -99,6 +99,12 @@ pub(crate) fn run(
     command: RunnerCommand,
     stdout: &mut dyn std::io::Write,
 ) -> CliResult<ProcessOutcome> {
+    if matches!(
+        command,
+        RunnerCommand::Pair { .. } | RunnerCommand::Unpair { .. }
+    ) {
+        crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("plak-runner")
