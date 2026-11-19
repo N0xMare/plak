@@ -246,8 +246,12 @@ loss without killing the old shell. Runner-clock tests pin once-per-idle-period
 warnings and output-capacity behavior without advancing wall time. A renewal regression polls a real runner refresh to Pending,
 then proves controller input is acknowledged before refresh completion. A small-chunk
 PTY test stalls the reader beyond sixteen frames, then proves input still works,
-Exit remains deliverable and ended command admission refuses without effect. Mutant
-checks distinguish same-principal wrong-connection input, correct-next-offset input
+Exit remains deliverable and ended command admission refuses without effect.
+Before disconnecting to verify offline release, it waits for runner cleanup
+proof: stream exit alone can report unknown termination and leave a pin. The
+takeover/loss fixture likewise joins old-runner cleanup after testing that
+acknowledged loss did not kill the shell. Mutant checks distinguish
+same-principal wrong-connection input, correct-next-offset input
 before acknowledgment, and unreachable non-acknowledged close retaining its pin.
 Host tests collect over 1,024 completed receipts, import live runner inventory even
 with 4,096 exhausted receipt fences without creating an agent line, enforce quotas across runners,
@@ -2405,6 +2409,10 @@ full-tier retirement soaks in both profiles still run alone.
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
 | Runner link faults and line ownership | `runner_killed_mid_job_restarts_with_its_owner_floor`, `host_killed_mid_call_is_recovered_and_readopted_by_its_host_id`, `host_crash_with_a_sibling_connected_orphans_only_its_lines` (a sibling process of the home stays bound while a holder is killed: it cannot stop the line's job with the owner it can read, and the line is orphaned at the dead holder's lease), `runner_restart_sibling_races_floor_owner` (a sibling binding first after a runner restart cannot take the floor owner; the floor's holder can), `crash_after_takeover_before_transfer` (a successor's durable newer owner never reached the runner; the next successor's newer owner takes the line and nothing wedges) — a runner daemon and a host in separate processes, each killed in turn (chapter 01 §8.4) |
 | Cross-runner fork stages | `cross_runner_fork_stages` — over two loopback runners, the process ends once each mint and seal-back stage (chapter 03 §14) is published and again once each has run before its answer is recorded; the reopened tree settles without a fault and the rerun converges. It is in process rather than a crash-sweep shape because the sweep drives one product process, whose port reaches only its selected runner |
+
+In the runner link host-kill cases, the effect itself marks that it has
+started on the runner and waits for release after the host is reaped. A
+host-side journal entry alone witnesses intent, not dispatch.
 
 `durability::` stays in the serial lane, as that lane's table says.
 Every product and tree revision step ships with before- and after-commit crash

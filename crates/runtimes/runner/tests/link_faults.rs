@@ -36,8 +36,8 @@ use std::time::{Duration, Instant};
 
 use plakous_model::{AttemptId, BranchId, CallId, CancellationToken, LineId, RunId};
 use plakous_runner::{
-    ClientWindows, FileCallJournal, FileOwnerFloors, RunnerClient, RunnerIdentity, RunnerLimits,
-    RunnerOptions, RunnerService, daemon,
+    CallJournal, ClientWindows, FileCallJournal, FileOwnerFloors, RunnerClient, RunnerIdentity,
+    RunnerLimits, RunnerOptions, RunnerService, daemon,
 };
 use plakous_runner_protocol::{Bind, VersionTriple};
 use plakous_tools::internal::runner::{
@@ -54,6 +54,8 @@ const CHILD: &str = "PLAKOUS_RUNNER_LINK_FAULT_CHILD";
 const DIRECTORY: &str = "PLAKOUS_RUNNER_LINK_FAULT_DIRECTORY";
 const LEASE_MS: &str = "PLAKOUS_RUNNER_LINK_FAULT_LEASE_MS";
 const WAIT: Duration = Duration::from_secs(20);
+const EFFECT_STARTED: &str = "effect-started";
+const EFFECT_RELEASE: &str = "effect-release";
 
 fn scope() -> ExecutionEnvironmentScope {
     ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000051").unwrap())
@@ -126,7 +128,7 @@ fn kill(mut child: Child) {
 }
 
 /// The child process: a daemon on the directory's socket, or a host that
-/// starts a job and a slow effect call, says so, and waits to be killed.
+/// starts a job and a gated effect call, then waits to be killed.
 #[test]
 fn link_fault_child() {
     let Ok(role) = std::env::var(CHILD) else {
@@ -182,35 +184,23 @@ async fn run_host(directory: &Path) {
         .await
         .unwrap();
     sessions.promote(id).await.unwrap();
-    // A slow effect call the host dies inside: it runs on, once.
-    let slow = tokio::spawn({
-        let environment = environment.clone();
-        async move {
-            let _ = environment
-                .execute_literal_process(
-                    LiteralProcessRequest::new(
-                        "/bin/sh",
-                        [
-                            "-c".to_owned(),
-                            "sleep 1; echo ran >> effect.log".to_owned(),
-                        ],
-                        ".",
-                        Vec::new(),
-                        LiteralProcessIntent::default(),
-                    )
-                    .unwrap(),
-                    effect(owner(1, 1), 2),
-                )
-                .await;
-        }
-    });
-    // Ready once the call is journaled and on the wire.
-    let journal = directory.join("journal");
-    while std::fs::read_dir(&journal).unwrap().count() == 0 {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    std::fs::write(directory.join("host-ready"), b"").unwrap();
-    slow.await.unwrap();
+    let command = format!(
+        ": > {EFFECT_STARTED}; n=0; while [ ! -f {EFFECT_RELEASE} ]; do \
+         [ \"$n\" -lt 3000 ] || exit 1; n=$((n+1)); sleep 0.01; done; echo ran >> effect.log"
+    );
+    let _ = environment
+        .execute_literal_process(
+            LiteralProcessRequest::new(
+                "/bin/sh",
+                ["-c".to_owned(), command],
+                ".",
+                Vec::new(),
+                LiteralProcessIntent::default(),
+            )
+            .unwrap(),
+            effect(owner(1, 1), 2),
+        )
+        .await;
     drop(client);
     std::future::pending::<()>().await;
 }
@@ -287,6 +277,19 @@ async fn wait_for(path: &Path) {
     }
 }
 
+async fn wait_for_host_effect(directory: &Path) {
+    // The journal is written before send; only the runner's shell can mark
+    // the start. It cannot finish and settle the journal before the cut.
+    wait_for(&workspace(directory).join(EFFECT_STARTED)).await;
+    let journal = FileCallJournal::open(directory.join("journal")).unwrap();
+    assert_eq!(journal.pending().unwrap().len(), 1);
+}
+
+fn kill_host_and_release_effect(host: Child, directory: &Path) {
+    kill(host);
+    std::fs::write(workspace(directory).join(EFFECT_RELEASE), b"").unwrap();
+}
+
 /// The line's one job once it ended, read through `sessions`.
 async fn ended(sessions: &RunnerSessions) -> plakous_tools::JobView {
     let deadline = Instant::now() + WAIT;
@@ -343,8 +346,8 @@ async fn host_killed_mid_call_is_recovered_and_readopted_by_its_host_id() {
     std::fs::create_dir(workspace(directory.path())).unwrap();
     let runner = spawn("daemon", directory.path(), Duration::from_millis(300));
     let host = spawn("host", directory.path(), Duration::ZERO);
-    wait_for(&directory.path().join("host-ready")).await;
-    kill(host);
+    wait_for_host_effect(directory.path()).await;
+    kill_host_and_release_effect(host, directory.path());
 
     // Past the owner lease, with no connection, the line is orphaned. An
     // inspector sees its own host's lines only, with jobs redacted.
@@ -429,10 +432,10 @@ async fn host_crash_with_a_sibling_connected_orphans_only_its_lines() {
     std::fs::create_dir(workspace(directory.path())).unwrap();
     let runner = spawn("daemon", directory.path(), Duration::from_millis(300));
     let host = spawn("host", directory.path(), Duration::ZERO);
-    wait_for(&directory.path().join("host-ready")).await;
+    wait_for_host_effect(directory.path()).await;
     // A sibling process of the same home, bound throughout.
     let (sibling, environment, backend) = connect(directory.path(), "instance-2", false).await;
-    kill(host);
+    kill_host_and_release_effect(host, directory.path());
 
     // The owner is readable from the shared store, but it authorizes nothing:
     // the sibling is not the line's holder.
@@ -502,8 +505,8 @@ async fn crash_after_takeover_before_transfer() {
     std::fs::create_dir(workspace(directory.path())).unwrap();
     let runner = spawn("daemon", directory.path(), Duration::from_secs(300));
     let host = spawn("host", directory.path(), Duration::ZERO);
-    wait_for(&directory.path().join("host-ready")).await;
-    kill(host);
+    wait_for_host_effect(directory.path()).await;
+    kill_host_and_release_effect(host, directory.path());
     // A successor took the line's lease in its store, minting owner (1, 2),
     // and crashed before its transfer: the runner never saw that owner. The
     // next successor's lease mints (1, 3), newer than anything the runner

@@ -313,6 +313,9 @@ async fn operator_console_pty_wire_small_chunk_stall_keeps_stream_live_and_close
         HostResponse::Terminal { .. }
     ));
     closed_admission(&linked, stream).await;
+    // An Exit with unknown termination ends input admission, but the runner
+    // can still hold the workspace pin until it proves absence.
+    wait_for_terminal_cleanup(&service).await;
     linked.registry.reconcile("local", &client).await.unwrap();
     client.disconnect();
     serving.await.unwrap();
@@ -368,6 +371,17 @@ async fn closed_admission(linked: &Linked, stream: u64) {
             reason: dto::ReadRefusal::TerminalLost {}
         }
     ));
+}
+
+async fn wait_for_terminal_cleanup(service: &RunnerService) {
+    let terminals = service.operator_terminals().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while terminals.has_live_terminals() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("runner still has an operator terminal pin or stream lease after close");
 }
 
 async fn executed(linked: &Linked, terminal: &dto::TerminalView, first: u64) -> HostRequestContext {
@@ -506,11 +520,7 @@ async fn operator_console_pty_wire_consent_takeover_disconnect_and_loss() {
             .has_live_terminals()
     );
     service.operator_terminals().unwrap().close_all();
-    let deadline = Instant::now() + std::time::Duration::from_secs(5);
-    while service.operator_terminals().unwrap().has_live_terminals() {
-        assert!(Instant::now() < deadline);
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    wait_for_terminal_cleanup(&service).await;
     replacement_client.disconnect();
     replacement_serving.await.unwrap();
 }
