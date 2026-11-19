@@ -8644,6 +8644,6 @@ settle, but no live measurement of cancel latency on a running cell exists.
 tested revision, account, model, effort and scenario. A pass there never
 promotes a neighboring model, route, workflow, or later revision.
 
-**A build with another state format starts fresh.** Sessions an older or
+**A build with another state key starts fresh.** Sessions an older or
 newer build wrote stay in that build's state directory, named once by a notice
-(§2.5); this build cannot resume them. There is no migration.
+(§2.5); this build cannot resume them without a carry.

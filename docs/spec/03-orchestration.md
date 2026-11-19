@@ -3161,8 +3161,8 @@ a counter.
 The per-cell agent budget is fixed at 8 and is not a config key. Like
 every other bound in this section it is frozen on the tree's epoch snapshot at
 install, so a tree persisted before the field existed reopens at the ceiling
-until its next epoch rather than at whatever the live config says — there are
-no migrations, and a running tree's ceiling never moves under it. What is
+until its next epoch rather than at whatever the live config says. The
+snapshot is not rewritten, and a running tree's ceiling never moves under it. What is
 charged is only work that creates a new agent: `spawn_agent`, and
 `send_agent_message` with `purpose=followup`. Ordinary mail, `wait_agent`,
 `list_agents`, `close_agent`, `interrupt_agent`,
@@ -3707,17 +3707,19 @@ released record; another process's attach is refused with the typed
 `tree_hosted_elsewhere` refusal. After a takeover the reopen law and the
 custody take's `recover_node` runs apply unchanged (§14.1).
 
-**There is no migration.** A schema change moves the product's state directory
-(chapter 02 §2.5); an older store stays in its own directory and is never read. The store fails closed on a **DDL
-fingerprint**, not the version integer alone, so a store written by an earlier
-build of the same version number is refused too. At the current version, a
+**Tree store admission.** A generation change moves the product's state
+directory and uses settled carry. Only the stopped-store owner may apply an
+additive in-place revision within the current generation (chapter 02 §2.5).
+The store fails closed on a **DDL fingerprint**, not the revision integer
+alone. At the current revision, a
 shape that differs from the descriptors is refused as
 `tree store schema shape does not match its exact revision`, a recorded
 fingerprint that differs as
 `tree store schema fingerprint does not match its exact revision`, and a
 missing one as `tree store schema fingerprint is missing`, each followed by
-`; current-schema tree state is not authoritative`. Another version is refused
-as unsupported persistence (`subagents schema <n>, expected <current>: ...`).
+`; current-schema tree state is not authoritative`. Ordinary opens refuse
+an older in-generation revision as upgrade pending. Revisions outside the
+supported range are incompatible (`subagents schema <n>, expected <current>: ...`).
 
 Ordinary tree-store open validates version, exact shape and DDL
 fingerprint, without scanning page integrity or foreign keys. `plakd doctor` owns
@@ -3725,7 +3727,7 @@ the read-only integrity and foreign-key diagnostics (chapter 02 §7.3); writes
 still enforce foreign keys. The tree and product stores run the same writer
 configuration and admission steps from `plakous-recursive-subagents-store`'s
 `admission` module, each over its own descriptors (noun, file stem, archive
-hint, version and objects); the refusal templates are shared. The product store
+hint, generation, frozen base and revision steps); the refusal templates are shared. The product store
 already depends on that crate.
 
 The SQLite store's read-only handoff candidate query selects interrupted child
