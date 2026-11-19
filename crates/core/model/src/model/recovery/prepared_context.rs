@@ -2,6 +2,30 @@ use super::PreparedCallRecord;
 use crate::{
     ContextContractError, ContextStatus, ResolvedModelDescriptor, Timestamp, ValidatedRequestPlan,
 };
+use std::sync::Arc;
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct LivePreparedContext(Option<Arc<(Timestamp, ContextStatus)>>);
+
+impl LivePreparedContext {
+    pub(super) fn new(prepared_at: Timestamp, status: ContextStatus) -> Self {
+        Self(Some(Arc::new((prepared_at, status))))
+    }
+
+    fn status_at(&self, now: Timestamp) -> Option<&ContextStatus> {
+        let (prepared_at, status) = self.0.as_deref()?;
+        (*prepared_at == now).then_some(status)
+    }
+}
+
+// The transient observation does not enter an inert record's equality or codec.
+impl PartialEq for LivePreparedContext {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for LivePreparedContext {}
 
 impl PreparedCallRecord {
     /// Reports fit for this exact projection. The live record can reuse the
@@ -17,8 +41,7 @@ impl PreparedCallRecord {
         plan: &ValidatedRequestPlan,
         now: Timestamp,
     ) -> Result<ContextStatus, ContextContractError> {
-        if let Some((prepared_at, status)) = self.live_context.as_deref()
-            && *prepared_at == now
+        if let Some(status) = self.live_context.status_at(now)
             && self.projection.validate_for_plan(descriptor, plan).is_ok()
         {
             return Ok(status.clone());
@@ -26,18 +49,3 @@ impl PreparedCallRecord {
         descriptor.context_status(plan, &self.projection, now)
     }
 }
-
-impl PartialEq for PreparedCallRecord {
-    fn eq(&self, other: &Self) -> bool {
-        // The live status is not part of the inert record.
-        self.semantic_revision == other.semantic_revision
-            && self.projection == other.projection
-            && self.authority_evidence == other.authority_evidence
-            && self.context_admission == other.context_admission
-            && self.context_status == other.context_status
-            && self.recovery_locator == other.recovery_locator
-            && self.identity == other.identity
-    }
-}
-
-impl Eq for PreparedCallRecord {}

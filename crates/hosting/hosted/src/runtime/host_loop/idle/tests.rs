@@ -12,6 +12,15 @@ use std::sync::Arc;
 
 #[test]
 fn immediate_send_replaces_terminal_context_refresh_then_idle_converges() {
+    terminal_context_refresh_converges(false);
+}
+
+#[test]
+fn pending_send_skips_context_refresh_but_idle_read_traffic_does_not_starve_it() {
+    terminal_context_refresh_converges(true);
+}
+
+fn terminal_context_refresh_converges(with_traffic: bool) {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
@@ -25,8 +34,26 @@ fn immediate_send_replaces_terminal_context_refresh_then_idle_converges() {
     .unwrap();
     for _ in events.try_iter() {}
 
-    for prompt in ["first prompt", "immediate follow-up"] {
+    for (index, prompt) in ["first prompt", "immediate follow-up"]
+        .into_iter()
+        .enumerate()
+    {
+        let intercept = with_traffic && index == 1;
+        if intercept {
+            actions.send(UserAction::Background).unwrap();
+        }
         actions.send(UserAction::Prompt(prompt.into())).unwrap();
+        if intercept {
+            let due = host.role.pending_context_refresh;
+            assert!(due.is_some());
+            assert!(matches!(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+                HostStep::Continue
+            ));
+            assert!(action_rx.has_priority_work(|action| matches!(action, UserAction::Prompt(_))));
+            assert_eq!(host.role.pending_context_refresh, due);
+        }
         let HostStep::Prompt {
             text,
             queued_delivery,
@@ -58,11 +85,22 @@ fn immediate_send_replaces_terminal_context_refresh_then_idle_converges() {
         );
     }
 
+    if with_traffic {
+        actions.send(UserAction::RefreshTemplates).unwrap();
+        actions.send(UserAction::RefreshTemplates).unwrap();
+    }
     assert!(matches!(
         host.block(async |host| host.next_prompt(None).await)
             .unwrap(),
         HostStep::Continue
     ));
+    if with_traffic {
+        assert!(
+            action_rx.has_priority_work(|_| true)
+                || host.role.interrupt_state.borrow().has_deferred(),
+            "a second read must still be pending when the meter converges"
+        );
+    }
     let measured = events
         .try_iter()
         .find_map(|event| match event {

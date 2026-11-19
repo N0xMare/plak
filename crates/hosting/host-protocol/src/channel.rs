@@ -815,6 +815,18 @@ impl<P: ProtocolExtension> IntentReceiver<P> {
             || !self.0.queue.lock().is_ok_and(|queue| queue.is_empty())
     }
 
+    /// Checks for urgent work, an unavailable mailbox, or a queued intent
+    /// matching `preempts`, without dequeuing or reordering anything.
+    /// The predicate runs under the queue lock and must not call the mailbox.
+    #[must_use]
+    pub fn has_priority_work(&self, mut preempts: impl FnMut(&SessionIntent<P>) -> bool) -> bool {
+        self.0.queue.lock().map_or(true, |queue| {
+            queue.iter().any(|intent| preempts(&intent.action))
+                || self.0.urgent.load(Ordering::Acquire) != 0
+                || self.0.shutting_down()
+        })
+    }
+
     /// Pop one action without waiting.
     ///
     /// # Errors

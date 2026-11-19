@@ -96,6 +96,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
+    pub(super) async fn next_prompt(
+        &mut self,
+        one_shot: Option<&mut super::super::oneshot::OneShotState>,
+    ) -> CliResult<HostStep> {
+        let step = self.select_idle_step(one_shot).await?;
+        if matches!(step, HostStep::Continue) {
+            self.refresh_context_if_idle().await;
+        }
+        Ok(step)
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "The idle owner arbitrates operator intents, queued work, child wakes, transient retries, and shutdown without a second dispatcher."
@@ -104,7 +115,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         clippy::match_same_arms,
         reason = "the unreachable promptable mailbox flag is distinct from an accepted idle background control"
     )]
-    pub(super) async fn next_prompt(
+    async fn select_idle_step(
         &mut self,
         mut one_shot: Option<&mut super::super::oneshot::OneShotState>,
     ) -> CliResult<HostStep> {
@@ -1161,7 +1172,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     if one_shot.is_none() && self.idle_release_due(residency_seen).await {
                         return Ok(self.release_idle());
                     }
-                    self.refresh_context_if_idle().await;
                     return Ok(HostStep::Continue);
                 }
                 Err(RecvTimeoutError::Disconnected) => {
@@ -1199,12 +1209,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let Some(due) = self.role.pending_context_refresh else {
             return;
         };
-        // The timeout (and any intervening idle work) can race with a send.
-        // Give the mailbox the last word before asking the single driver.
-        tokio::select! {
-            biased;
-            () = self.role.actions.ready() => return,
-            () = std::future::ready(()) => {}
+        if self.role.pending_start.is_some()
+            || self
+                .role
+                .interrupt_state
+                .borrow()
+                .has_deferred_matching(preempts_context_refresh)
+            || self
+                .role
+                .actions
+                .has_priority_work(preempts_context_refresh)
+        {
+            return;
         }
         self.role.pending_context_refresh = None;
         let current = self.opened.locator();
@@ -1247,6 +1263,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
         Ok(None)
     }
+}
+
+fn preempts_context_refresh<P: plakous_host_protocol::ProtocolExtension>(
+    action: &UserAction<P>,
+) -> bool {
+    matches!(
+        action,
+        UserAction::Prompt(_)
+            | UserAction::FollowUp(_)
+            | UserAction::Steer(_)
+            | UserAction::SendQueuedNow { .. }
+            | UserAction::ResumeQueueDrain
+            | UserAction::ResumeLossContinuation { .. }
+            | UserAction::Interrupt
+            | UserAction::Quit
+            | UserAction::StopSession { .. }
+            | UserAction::ReleaseForReopen { .. }
+    )
 }
 
 #[cfg(test)]

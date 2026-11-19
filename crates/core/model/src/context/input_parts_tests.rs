@@ -1,7 +1,7 @@
 use super::ContextInputParts;
 
 #[test]
-fn combined_analysis_preserves_the_part_and_item_measurements() {
+fn measuring_parts_does_not_change_wire_item_accounting() {
     use super::{ContextContractError, ContextWireInput};
 
     for body in [
@@ -15,9 +15,8 @@ fn combined_analysis_preserves_the_part_and_item_measurements() {
         r#"{"system":[],"tools":{"schema":"object"},"messages":[],"input":null}"#,
     ] {
         let body = body.as_bytes();
-        let (input, parts) =
+        let (input, _) =
             ContextWireInput::measure_wire_and_parts(body, Some(100)).expect("combined");
-        assert_eq!(parts, ContextInputParts::measure_wire(body).expect("parts"));
         assert_eq!(
             input,
             ContextWireInput::measure_wire(body, Some(100)).expect("items")

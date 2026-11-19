@@ -161,46 +161,9 @@ impl ContextInputParts {
     /// rather than as a zero split.
     #[must_use]
     pub fn measure_wire(body: &[u8]) -> Option<Self> {
-        let mut value: serde_json::Value = serde_json::from_slice(body).ok()?;
-        let before = json_bytes(&value);
-        let object = value.as_object_mut()?;
-        for key in ["input", "messages"] {
-            if let Some(field) = object.get_mut(key) {
-                remove_image_payloads(field, Some(1)).ok()?;
-            }
-        }
-        let image_transport_bytes = before.saturating_sub(json_bytes(&value));
-        let object = value.as_object()?;
-        let mut parts = Self::empty(body.len());
-        parts.image_transport_bytes = image_transport_bytes;
-        // Responses `instructions` and Messages `system` are the whole system
-        // prompt in one field.
-        for key in ["instructions", "system"] {
-            if let Some(field) = object.get(key) {
-                parts.system_bytes = parts.system_bytes.saturating_add(json_bytes(field));
-            }
-        }
-        (parts.tool_definition_bytes, parts.tool_definition_count) = match object.get("tools") {
-            Some(serde_json::Value::Array(tools)) => (
-                json_bytes(object.get("tools")?),
-                u32::try_from(tools.len()).unwrap_or(u32::MAX),
-            ),
-            Some(other) => (json_bytes(other), 0),
-            None => (0, 0),
-        };
-        // Responses `input` items, or Messages/Chat `messages`.
-        for key in ["input", "messages"] {
-            let Some(serde_json::Value::Array(items)) = object.get(key) else {
-                if let Some(other) = object.get(key) {
-                    parts.message_bytes = parts.message_bytes.saturating_add(json_bytes(other));
-                }
-                continue;
-            };
-            for item in items {
-                parts.add_conversation_item(item, json_bytes(item));
-            }
-        }
-        Some(parts)
+        ContextWireInput::measure_wire_and_parts(body, Some(1))
+            .ok()
+            .map(|(_, parts)| parts)
     }
 
     fn empty(body_len: usize) -> Self {

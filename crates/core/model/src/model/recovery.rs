@@ -15,12 +15,13 @@ use super::preparation::{
 use super::prepared_call::PreparedCallError;
 use super::{ModelError, ModelErrorKind, ModelRetryability};
 use crate::{
-    ContextAdmission, ContextAdmissionError, ContextStatus, Digest, DigestDomain, ModelId,
-    ModelOperationRoot, ModelRequest, ModelResponse, ProtocolId, ResolvedModelDescriptor, RouteId,
-    Timestamp, Usage, ValidatedRequestPlan, ValidationMode,
+    ContextAdmission, ContextAdmissionError, Digest, DigestDomain, ModelId, ModelOperationRoot,
+    ModelRequest, ModelResponse, ProtocolId, ResolvedModelDescriptor, RouteId, Timestamp, Usage,
+    ValidatedRequestPlan, ValidationMode,
 };
 
 mod prepared_context;
+use prepared_context::LivePreparedContext;
 
 /// Maximum serialized non-secret preparation record retained for recovery.
 pub const MAX_PREPARED_CALL_RECORD_BYTES: usize = 4 * 1024 * 1024;
@@ -487,7 +488,7 @@ pub(super) const fn exceeds_record_bound(bytes: usize) -> bool {
 }
 
 /// Bounded serializable recovery record for one exact prepared call.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PreparedCallRecord {
     semantic_revision: u32,
     pub(super) projection: PreparedModelProjection,
@@ -497,7 +498,7 @@ pub struct PreparedCallRecord {
     recovery_locator: Option<ProviderCallRecoveryLocator>,
     identity: Digest,
     #[serde(skip)]
-    live_context: Option<Arc<(Timestamp, ContextStatus)>>,
+    live_context: LivePreparedContext,
 }
 
 #[derive(Deserialize)]
@@ -611,7 +612,7 @@ impl PreparedCallRecord {
             admission.status().identity(),
             recovery_locator,
         )?;
-        record.live_context = Some(Arc::new((prepared_at, admission.into_status())));
+        record.live_context = LivePreparedContext::new(prepared_at, admission.into_status());
         Ok(record)
     }
 
@@ -671,7 +672,7 @@ impl PreparedCallRecord {
             context_status,
             recovery_locator,
             identity,
-            live_context: None,
+            live_context: LivePreparedContext::default(),
         })
     }
 

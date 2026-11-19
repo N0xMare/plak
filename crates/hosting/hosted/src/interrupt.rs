@@ -39,7 +39,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::intent_dispatch::{DispatchPhase, Disposition, IntentClass};
-use crate::surface_protocol::{UserActionDelivery, UserActionReceiver};
+use crate::surface_protocol::{UserAction, UserActionDelivery, UserActionReceiver};
 use plakous::agent::{ControlError, ControlErrorKind};
 
 /// Mailbox observations owned by the host loop for the life of one attach.
@@ -101,9 +101,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
 
     /// Work that must be dispatched before admitting a background wake.
     pub(crate) fn has_wake_preemptor(&self) -> bool {
-        self.deferred
-            .iter()
-            .any(|delivery| !crate::intent_dispatch::is_idle_read(delivery))
+        self.has_deferred_matching(|action| !crate::intent_dispatch::is_idle_read(action))
+    }
+
+    pub(crate) fn has_deferred_matching(
+        &self,
+        mut matches: impl FnMut(&UserAction<P>) -> bool,
+    ) -> bool {
+        self.deferred.iter().any(|delivery| matches(delivery))
     }
 
     /// Whether a stop a running turn took is still to be finished.
