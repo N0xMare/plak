@@ -99,10 +99,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         } else {
             // A confirmed quit starts the root stop itself. The driver's
             // joined cleanup waits for its result before recording terminals.
-            let root_owner = self.quit_started_at.and(self.opened.agent()).map(|agent| {
-                agent.begin_job_stop();
-                agent.id().to_string()
-            });
+            let root_owner = self
+                .quit_started_at
+                .filter(|_| !handoff && !self.role.config.attached_one_shot)
+                .and(self.opened.agent())
+                .map(|agent| {
+                    agent.begin_job_stop();
+                    agent.id().to_string()
+                });
             async {
                 tokio::time::timeout(
                     std::time::Duration::from_secs(5),

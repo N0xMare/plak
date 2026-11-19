@@ -934,7 +934,10 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
         |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("waiting")),
     );
     send_attached_action(&actions, UserAction::Quit);
-    worker.join().unwrap().unwrap();
+    assert_eq!(
+        worker.join().unwrap().unwrap(),
+        super::HostQuitOutcome::Escalated
+    );
     assert!(!super::turn_drive::quit_trace::steps(&session_id).contains(&"root job stop started"));
     assert!(
         topology.is_closed(),
@@ -996,7 +999,10 @@ fn escalated_quit_keeps_a_running_job_only_when_the_runtime_retains_it() {
         |event| matches!(event, HostEvent::AssistantDelta(text) if text.contains("waiting")),
     );
     send_attached_action(&actions, UserAction::Quit);
-    worker.join().unwrap().unwrap();
+    assert_eq!(
+        worker.join().unwrap().unwrap(),
+        super::HostQuitOutcome::Escalated
+    );
     assert!(
         super::turn_drive::quit_trace::steps(&session_id)
             .starts_with(&["root job stop started", "requested"]),

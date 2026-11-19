@@ -344,7 +344,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     // A planned handoff bounds the same settlement by the
                     // host's cancel bound instead of quit's 300 ms.
                     let handoff = self.host.actions.planned_handoff();
-                    if !handoff && !self.host.job_agent.retains_background_jobs() {
+                    if !handoff
+                        && !self.host.attached_one_shot
+                        && !self.host.job_agent.retains_background_jobs()
+                    {
                         // Group verification can run while the turn settles;
                         // neither a keeper nor a planned handoff starts this stop.
                         self.host.job_agent.begin_job_stop();
