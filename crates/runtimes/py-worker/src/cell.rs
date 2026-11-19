@@ -1,51 +1,33 @@
-//! The worker loop: cell protocol frames in, one upstream Monty `Child` driven
-//! in process, cell protocol frames out.
-//!
-//! Each `Child::handle` call runs the interpreter to its next suspension.
-//! Prints stream out as `Output` while it runs; the turn-ending event is then
-//! answered here: a bound tool call becomes a `NestedCall` and resumes as a
-//! future, OS calls and unknown names are refused, and a wait on futures
-//! becomes `Waiting` until the host has delivered every result of the batch,
-//! which resumes the interpreter with all of them and accepts each one.
-
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    fmt::Write as _,
     io,
     process::ExitCode,
+    sync::{Arc, Mutex, MutexGuard},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use monty_proto::{
-    FrameError, WireFunctionCall, ext_result_to_proto, future_results_from_proto,
-    future_results_to_proto, os_call_from_proto, pb,
-    worker::{Child, EventSink, HandleOutcome},
-};
-use monty_types::{
-    AssertMessageAnnotations, DateTimeSource, ExcType, ExtFunctionResult, MontyException,
-    MontyObject, NameLookupResult, OsPolicy, RandomStart, ResourceLimits, SleepMode,
-    TypeCheckingConfig, memory_limit_with_headroom,
+use micro_monty::{
+    Engine, HostArgs, HostError, HostErrorKind, HostException, HostModule, HostSignature,
+    HostValue, Limits, Progress, Resume, Session,
 };
 use plakous_cell::{
-    BindingInput, CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict,
-    EngineConfig, HostFrame, LossClass, MAX_CELL_VALUE_DEPTH, MAX_FRAME_BYTES, MONTY_WORKER,
-    MontyBootstrap, OutputItem, WorkerFrame, json_depth, read_frame_blocking, sample_self_rusage,
+    CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
+    HostFrame, LossClass, MAX_CELL_VALUE_DEPTH, MAX_FRAME_BYTES, MONTY_WORKER, MontyBinding,
+    MontyBootstrap, OutputItem, WorkerFrame, read_frame_blocking, sample_self_rusage,
     write_frame_blocking,
 };
 
-use crate::codec::{call_to_json, format_monty, nested_outcome_to_result, sdk_call_to_json};
-use crate::prompts::{
-    PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_PREFIX, PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_SUFFIX,
-    PLAKOUS_PY_PTC_ERROR_UNDECODABLE_TRACEBACK_PREFIX,
-};
-use crate::test_hooks::boundary;
+use crate::{codec, test_hooks::boundary};
 
-// Leave room for the longest status/header (including a u64 cell id), so a
-// cumulative-cap notice survives the facade's status-inclusive 1 MiB bound.
+// Leave room for the host's status/header and a truncation notice.
 const MAX_PRINT_BYTES: usize = 1_048_576 - 64;
 const PRINT_NOTICE: &str = "\n[Python output truncated at 1 MiB]\n";
+const RESULT_NOTICE: &str = "\n[Python result truncated at 1 MiB]";
 const MAX_OUTSTANDING_NESTED: usize = 16;
 const SCRIPT_NAME: &str = "plak-py-ptc.py";
+const PATH_SCAN: &str = "Path.scan";
 
-/// A loss ends the worker: the frame it sends and the reason.
 struct Lost {
     class: LossClass,
     message: String,
@@ -71,27 +53,30 @@ fn write(frame: &WorkerFrame) -> Result<(), Lost> {
     write_frame_blocking(&mut io::stdout(), frame).map_err(Lost::engine)
 }
 
-/// The worker's entry point on its large-stack thread.
+fn engine_version() -> String {
+    let mut version = format!("{}+", micro_monty::VERSION);
+    for byte in micro_monty::build_id() {
+        let _ = write!(version, "{byte:02x}");
+    }
+    version
+}
+
 pub(crate) fn serve() -> ExitCode {
+    let version = engine_version();
+    if version != MONTY_WORKER.version {
+        eprintln!("plakous-py-host: unexpected micro-monty build: {version}");
+        return ExitCode::from(3);
+    }
     let hello = WorkerFrame::Hello {
         revision: CELL_PROTOCOL_REVISION.to_owned(),
-        engine: MONTY_WORKER.engine.to_owned(),
+        engine: micro_monty::ENGINE.to_owned(),
         adapter: MONTY_WORKER.adapter.to_owned(),
     };
     if write(&hello).is_err() {
         return ExitCode::from(3);
     }
     let mut stdin = io::stdin().lock();
-    let result = configure(&mut stdin).and_then(|(child, configuration)| {
-        let mut worker = Worker {
-            child,
-            configuration,
-            bindings: None,
-            running: None,
-        };
-        worker.serve(&mut stdin)
-    });
-    match result {
+    match Worker::configure(&mut stdin).and_then(|mut worker| worker.serve(&mut stdin)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(lost) => {
             eprintln!("plakous-py-host: {}", lost.message);
@@ -104,556 +89,386 @@ pub(crate) fn serve() -> ExitCode {
     }
 }
 
-/// Reads `Configure`, checks this protocol and these limits, and configures
-/// the interpreter session.
-fn configure(stdin: &mut impl io::Read) -> Result<(Child, pb::Configure), Lost> {
-    let frame = read_frame_blocking(stdin, MAX_FRAME_BYTES)
+fn read(stdin: &mut impl io::Read) -> Result<Option<HostFrame>, Lost> {
+    read_frame_blocking(stdin, MAX_FRAME_BYTES)
         .map_err(Lost::protocol)?
-        .ok_or_else(|| Lost::protocol("parent closed before configure"))?;
-    let stubs = match serde_json::from_slice::<HostFrame>(&frame) {
-        Ok(HostFrame::Configure {
-            revision,
-            engine,
-            sdk_stubs,
-        }) if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::MONTY => sdk_stubs,
-        Ok(HostFrame::Configure { .. }) => {
-            return Err(Lost::protocol("configure names another revision or limits"));
-        }
-        _ => return Err(Lost::protocol("first parent frame is not configure")),
-    };
-    let mut child = Child::default();
-    let mut sink = TurnSink::default();
-    let configuration = pb::Configure {
-        type_check: stubs.is_some(),
-        type_check_stubs: stubs,
-        ..session_config()
-    };
-    child
-        .handle(
-            request(pb::parent_request::Kind::Configure(configuration.clone())),
-            &mut sink,
-        )
-        .map_err(|error| Lost::engine(error.to_string()))?;
-    apply_memory_limit(&child);
-    match sink.turn_end.and_then(|event| event.kind) {
-        Some(pb::child_event::Kind::Ok(_)) => Ok((child, configuration)),
-        _ => Err(Lost::engine(
-            "the interpreter refused its session configuration",
-        )),
-    }
-}
-
-/// The interpreter session: a 256 MiB soft memory limit, no suspension cap
-/// (it would count across every cell of the session's life; outstanding
-/// nested calls are bounded instead), clock and `random` answered inside the
-/// interpreter, and sleeps surfaced as OS calls, which are refused.
-fn session_config() -> pb::Configure {
-    let EngineConfig::Monty { memory_bytes } = EngineConfig::MONTY else {
-        unreachable!("the Monty engine configuration names Monty limits")
-    };
-    let limits = ResourceLimits {
-        max_memory: usize::try_from(memory_bytes).ok(),
-        max_suspensions: usize::MAX,
-        ..ResourceLimits::default()
-    };
-    let os_policy = OsPolicy {
-        datetime: DateTimeSource::System,
-        random_start: RandomStart::System,
-        sleep: SleepMode::CallHost,
-        ..OsPolicy::default()
-    };
-    let type_check = TypeCheckingConfig::default();
-    pb::Configure {
-        script_name: SCRIPT_NAME.to_owned(),
-        limits: Some((&limits).into()),
-        type_check: false,
-        type_check_stubs: None,
-        type_check_format: pb::TypeCheckFormat::from(type_check.format).into(),
-        type_check_color: type_check.color,
-        assert_message_annotations: Some(AssertMessageAnnotations::default().max_bytes()),
-        protocol_version: monty_proto::PROTOCOL_VERSION,
-        monty_version: monty_types::MONTY_VERSION.to_owned(),
-        print_flush_interval_ms: None,
-        os_policy: Some((&os_policy).into()),
-        persistence: pb::Persistence::Unspecified.into(),
-        profile: None,
-    }
-}
-
-fn request(kind: pb::parent_request::Kind) -> pb::ParentRequest {
-    pb::ParentRequest {
-        kind: Some(kind),
-        ..pb::ParentRequest::default()
-    }
-}
-
-/// Applies the hard memory limit of the session the child holds: the
-/// interpreter's soft limit plus upstream's headroom.
-fn apply_memory_limit(child: &Child) {
-    let budget = child.session_budget();
-    let hard_memory_limit = memory_limit_with_headroom(budget.max_memory, budget.type_check);
-    if let Err(error) = monty_alloc::set_hard_limit(hard_memory_limit) {
-        panic!("Monty worker must install LimitedAllocator globally: {error}");
-    }
-}
-
-/// One private host function the bootstrap defined.
-struct Binding {
-    tool: String,
-    input: BindingInput,
+        .map(|frame| {
+            serde_json::from_slice(&frame).map_err(|_| Lost::protocol("malformed host frame"))
+        })
+        .transpose()
 }
 
 struct Worker {
-    child: Child,
-    configuration: pb::Configure,
-    bindings: Option<HashMap<String, Binding>>,
+    session: Session,
+    bindings: Option<HashMap<u32, MontyBinding>>,
     running: Option<Running>,
+    output: Arc<Mutex<Output>>,
 }
 
-/// The running cell: its print budget, the futures it holds, the results the
-/// host delivered for them, and the batch it waits on.
 #[derive(Default)]
 struct Running {
     cell: u64,
-    printed: Printed,
-    futures: BTreeSet<u32>,
-    results: BTreeMap<u32, Result<CellValue, String>>,
-    waiting: Option<Vec<u32>>,
-    accepted: Vec<u32>,
+    futures: BTreeSet<u64>,
+    results: BTreeMap<u64, Result<CellValue, String>>,
+    waiting: Vec<u64>,
 }
 
 #[derive(Default)]
-struct Printed {
+struct Output {
+    cell: Option<u64>,
     bytes: usize,
     truncated: bool,
+    accepted: Vec<u64>,
+    error: Option<Lost>,
 }
 
-impl Printed {
-    /// The part of `text` the cell's 1 MiB print budget admits, with the
-    /// truncation notice the first time the budget runs out.
-    fn admit(&mut self, text: &str) -> Option<String> {
-        if self.truncated {
-            return None;
+impl Output {
+    fn accept(&mut self) -> Result<(), Lost> {
+        if self.accepted.is_empty() {
+            return Ok(());
         }
+        let cell = self
+            .cell
+            .ok_or_else(|| Lost::protocol("acceptance without an active cell"))?;
+        for call in self.accepted.drain(..) {
+            write(&WorkerFrame::Delivery {
+                cell,
+                call,
+                verdict: DeliveryVerdict::Accepted,
+            })?;
+        }
+        boundary("after_accepted");
+        Ok(())
+    }
+
+    fn print(&mut self, text: &str) -> Result<(), Lost> {
+        // The engine has applied a resume batch before running any output.
+        self.accept()?;
+        let Some(cell) = self.cell.filter(|_| !self.truncated) else {
+            return Ok(());
+        };
         let room = (MAX_PRINT_BYTES - PRINT_NOTICE.len()).saturating_sub(self.bytes);
-        let mut end = text.len().min(room);
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        let mut admitted = text[..end].to_owned();
+        let end = text.floor_char_boundary(text.len().min(room));
+        self.bytes += end;
+        let mut text_out = text[..end].to_owned();
         if end < text.len() {
-            admitted.push_str(PRINT_NOTICE);
+            text_out.push_str(PRINT_NOTICE);
             self.truncated = true;
         }
-        self.bytes += end;
-        (!admitted.is_empty()).then_some(admitted)
-    }
-}
-
-/// Streams prints of the running cell as `Output` and keeps the turn-ending
-/// event for the loop.
-#[derive(Default)]
-struct TurnSink<'a> {
-    cell: Option<(u64, Option<&'a mut Printed>)>,
-    turn_end: Option<pb::ChildEvent>,
-    accepted: Vec<u32>,
-}
-
-impl EventSink for TurnSink<'_> {
-    fn send(&mut self, event: &pb::ChildEvent) -> Result<(), FrameError> {
-        // A print or a normal suspension/terminal proves ResumeFutures ran.
-        // Configuration/protocol failures prove no such handoff.
-        if !self.accepted.is_empty()
-            && !matches!(event.kind, Some(pb::child_event::Kind::FatalError(_)))
-            && let Some((cell, _)) = &self.cell
-        {
-            for call in self.accepted.drain(..) {
-                write_frame_blocking(
-                    &mut io::stdout(),
-                    &WorkerFrame::Delivery {
-                        cell: *cell,
-                        call: u64::from(call),
-                        verdict: DeliveryVerdict::Accepted,
-                    },
-                )
-                .map_err(|error| FrameError::Io(io::Error::other(error)))?;
-            }
-            boundary("after_accepted");
-        }
-        let Some(pb::child_event::Kind::Print(print)) = &event.kind else {
-            self.turn_end = Some(event.clone());
-            return Ok(());
-        };
-        let Some((cell, Some(printed))) = &mut self.cell else {
-            return Ok(());
-        };
-        for segment in &print.segments {
-            if let Some(text) = printed.admit(&segment.text) {
-                let frame = WorkerFrame::Output {
-                    cell: *cell,
-                    item: OutputItem::Text { text },
-                };
-                write_frame_blocking(&mut io::stdout(), &frame)
-                    .map_err(|error| FrameError::Io(io::Error::other(error)))?;
-            }
+        if !text_out.is_empty() {
+            write(&WorkerFrame::Output {
+                cell,
+                item: OutputItem::Text { text: text_out },
+            })?;
         }
         Ok(())
     }
 }
 
+fn output(sink: &Mutex<Output>) -> MutexGuard<'_, Output> {
+    sink.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl Worker {
+    fn configure(stdin: &mut impl io::Read) -> Result<Self, Lost> {
+        let memory = match read(stdin)? {
+            Some(HostFrame::Configure {
+                revision, engine, ..
+            }) if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::MONTY => {
+                let EngineConfig::Monty { memory_bytes } = engine else {
+                    unreachable!()
+                };
+                memory_bytes
+            }
+            Some(HostFrame::Configure { .. }) => {
+                return Err(Lost::protocol("configure names another revision or limits"));
+            }
+            _ => return Err(Lost::protocol("first parent frame is not configure")),
+        };
+        let engine = Engine::new(micro_monty::EngineConfig::default()).with_limits(
+            Limits::default()
+                .with_memory(memory)
+                .with_recursion_depth(1000),
+        );
+        let mut session = Session::new(&engine).map_err(|error| Lost::engine(error.to_string()))?;
+        session.set_host_args(HostArgs {
+            max_bytes: codec::MAX_ARGUMENT_BYTES as u64,
+            max_depth: u32::try_from(MAX_CELL_VALUE_DEPTH)
+                .map_err(|error| Lost::engine(error.to_string()))?,
+            lenient: true,
+        });
+        session.set_text_limit((MAX_PRINT_BYTES - RESULT_NOTICE.len()) as u64);
+        session.set_int_bits_text(true);
+        session.set_wall_clock(Some(Box::new(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0.0, |duration| duration.as_secs_f64())
+        })));
+        let sink = Arc::new(Mutex::new(Output::default()));
+        let callback_output = Arc::clone(&sink);
+        session.set_output(Box::new(move |text| {
+            let mut sink = output(&callback_output);
+            if sink.error.is_none() {
+                sink.error = sink.print(text).err();
+            }
+        }));
+        Ok(Self {
+            session,
+            bindings: None,
+            running: None,
+            output: sink,
+        })
+    }
+
     fn serve(&mut self, stdin: &mut impl io::Read) -> Result<(), Lost> {
-        loop {
-            let Some(frame) =
-                read_frame_blocking(stdin, MAX_FRAME_BYTES).map_err(Lost::protocol)?
-            else {
-                return Ok(());
-            };
-            let frame = serde_json::from_slice::<HostFrame>(&frame)
-                .map_err(|_| Lost::protocol("malformed host frame"))?;
+        while let Some(frame) = read(stdin)? {
             match frame {
-                HostFrame::Reset => {
-                    if self.running.is_some() {
-                        return Err(Lost::protocol("reset while a cell runs"));
-                    }
-                    let event = self.handle(
-                        request(pb::parent_request::Kind::Reset(pb::Reset {})),
-                        false,
-                    )?;
-                    if !matches!(event.kind, Some(pb::child_event::Kind::Ok(_))) {
-                        return Err(Lost::engine("interpreter reset refused"));
-                    }
+                HostFrame::Reset if self.running.is_none() => {
+                    self.session
+                        .reset()
+                        .map_err(|error| Lost::engine(error.to_string()))?;
                     self.bindings = None;
-                    let configured = self.handle(
-                        request(pb::parent_request::Kind::Configure(
-                            self.configuration.clone(),
-                        )),
-                        false,
-                    )?;
-                    if !matches!(configured.kind, Some(pb::child_event::Kind::Ok(_))) {
-                        return Err(Lost::engine("reset interpreter configuration refused"));
-                    }
                 }
+                HostFrame::Reset => return Err(Lost::protocol("reset while a cell runs")),
                 HostFrame::StartCell {
                     cell,
                     source,
-                    prelude,
+                    prelude: CellPrelude::Monty { bootstrap },
                     window: None,
-                } => self.start(cell, &source, prelude)?,
+                } => {
+                    self.start(cell, &source, bootstrap)?;
+                }
                 HostFrame::NestedResult {
                     cell,
                     call,
                     outcome,
                 } => self.nested_result(cell, call, outcome)?,
-                // A cell has no cooperative interrupt; the host stops a
-                // running cell by ending the worker.
+                // Host cancellation ends/reaps the worker, including in-flight
+                // compute. Receipt of this advisory does not settle the cell.
                 HostFrame::Cancel { .. } => {}
                 HostFrame::Shutdown => {
+                    self.session.cancel();
                     write(&WorkerFrame::ResourceReport {
                         usage: sample_self_rusage(),
                     })?;
                     return Ok(());
                 }
-                HostFrame::StartCell { .. } => {
-                    return Err(Lost::protocol("a Monty cell has no engine-parked window"));
-                }
-                HostFrame::Resume { .. } => {
-                    return Err(Lost::protocol("a Monty cell cannot be resumed"));
+                HostFrame::StartCell { .. } | HostFrame::Resume { .. } => {
+                    return Err(Lost::protocol(
+                        "invalid Python cell prelude or parked window",
+                    ));
                 }
                 HostFrame::Configure { .. } => return Err(Lost::protocol("repeated configure")),
             }
         }
+        Ok(())
     }
 
-    fn start(&mut self, cell: u64, source: &str, prelude: CellPrelude) -> Result<(), Lost> {
+    fn start(
+        &mut self,
+        cell: u64,
+        source: &str,
+        bootstrap: Option<MontyBootstrap>,
+    ) -> Result<(), Lost> {
         if self.running.is_some() {
             return Err(Lost::protocol("a cell started while another runs"));
         }
-        let CellPrelude::Monty { bootstrap } = prelude else {
-            return Err(Lost::protocol("a Monty cell needs a Monty prelude"));
-        };
         self.running = Some(Running {
             cell,
             ..Running::default()
         });
-        if let Some(bootstrap) = bootstrap
-            && let Err(failure) = self.bootstrap(bootstrap)
-        {
-            return self.done(CellOutcome::Failed {
-                message: failure,
-                stored: HashMap::new(),
-                generation_lost: true,
-            });
+        if let Err(message) = self.prepare(bootstrap) {
+            return self.fail(message, true);
         }
-        let feed = pb::Feed {
-            code: source.to_owned(),
-            inputs: Vec::new().into(),
-            values: None,
-            skip_type_check: false,
-            cwd: "/".to_owned(),
+        *output(&self.output) = Output {
+            cell: Some(cell),
+            ..Output::default()
         };
-        self.run(request(pb::parent_request::Kind::Feed(feed)))
+        let code = match self.session.compile(source, SCRIPT_NAME) {
+            Ok(code) => code,
+            Err(error) => return self.fail(error.to_string(), false),
+        };
+        let step = self.session.start(&code);
+        self.drive(step)
     }
 
-    /// Defines the session's tool wrappers before its first cell. A failure
-    /// costs the interpreter: its names may be half defined.
-    fn bootstrap(&mut self, bootstrap: MontyBootstrap) -> Result<(), String> {
+    fn prepare(&mut self, bootstrap: Option<MontyBootstrap>) -> Result<(), String> {
         if self.bindings.is_some() {
-            return Err("Python tool bootstrap repeated".into());
+            return if bootstrap.is_none() {
+                Ok(())
+            } else {
+                Err("Python tool bootstrap repeated".into())
+            };
         }
-        let bindings = bootstrap
-            .bindings
-            .into_iter()
-            .map(|binding| {
-                (
-                    binding.function,
-                    Binding {
-                        tool: binding.tool,
-                        input: binding.input,
-                    },
-                )
-            })
+        let MontyBootstrap { source, bindings } = bootstrap.unwrap_or_else(|| MontyBootstrap {
+            source: String::new(),
+            bindings: Vec::new(),
+        });
+        if bindings.len() > 64 || source.len() > 65_536 {
+            return Err("Python tool bootstrap exceeds its bound".into());
+        }
+        let mut functions: Vec<_> = bindings
+            .iter()
+            .map(|binding| HostSignature::any(&binding.function))
             .collect();
-        self.bindings = Some(bindings);
-        if bootstrap.source.is_empty() {
-            return Ok(());
-        }
-        let feed = pb::Feed {
-            code: bootstrap.source,
-            inputs: Vec::new().into(),
-            values: None,
-            skip_type_check: true,
-            cwd: "/".to_owned(),
+        functions.push(HostSignature::any(PATH_SCAN));
+        let module = HostModule {
+            functions,
+            exceptions: vec![HostException {
+                name: "ToolError".into(),
+                base: HostErrorKind::RuntimeError,
+                doc: "A nested tool failed.".into(),
+            }],
+            ..HostModule::default()
         };
-        let event = self
-            .handle(request(pb::parent_request::Kind::Feed(feed)), false)
-            .map_err(|lost| format!("Python tool bootstrap failed: {}", lost.message))?;
-        match event.kind {
-            Some(pb::child_event::Kind::Complete(_)) => Ok(()),
-            Some(pb::child_event::Kind::Error(error)) => Err(format!(
-                "Python tool bootstrap failed: {}",
-                error
-                    .exception
-                    .and_then(|exception| MontyException::try_from(exception).ok())
-                    .map_or_else(|| "undecodable exception".to_owned(), |exc| exc.to_string())
-            )),
+        let functions = self
+            .session
+            .define(&module)
+            .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
+        let code = self
+            .session
+            .compile(
+                &format!("import asyncio\n{source}"),
+                "plak-python-prelude.py",
+            )
+            .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
+        match self.session.start(&code) {
+            Progress::Complete(_) => {
+                self.bindings = Some(
+                    functions
+                        .iter()
+                        .zip(bindings)
+                        .map(|(function, binding)| (function.id, binding))
+                        .collect(),
+                );
+                Ok(())
+            }
+            Progress::Error(error) => Err(format!("Python tool bootstrap failed: {error}")),
             _ => Err("Python tool bootstrap unexpectedly suspended".into()),
         }
     }
 
-    /// Hands one request to the interpreter and returns its turn-ending event.
-    fn handle(
-        &mut self,
-        request: pb::ParentRequest,
-        stream_prints: bool,
-    ) -> Result<pb::ChildEvent, Lost> {
-        let accepted = if matches!(
-            request.kind,
-            Some(pb::parent_request::Kind::ResumeFutures(_))
-        ) {
-            self.running
-                .as_mut()
-                .map_or_else(Vec::new, |running| std::mem::take(&mut running.accepted))
-        } else {
-            Vec::new()
-        };
-        let mut sink = TurnSink {
-            cell: self
-                .running
-                .as_mut()
-                .map(|running| (running.cell, stream_prints.then_some(&mut running.printed))),
-            turn_end: None,
-            accepted,
-        };
-        let outcome = self.child.handle(request, &mut sink);
-        let turn_end = sink.turn_end.take();
-        apply_memory_limit(&self.child);
-        match outcome {
-            Ok(HandleOutcome::Continue | HandleOutcome::Fatal) => {}
-            Ok(HandleOutcome::Shutdown) => return Err(Lost::protocol("the interpreter shut down")),
-            Err(error) => return Err(Lost::engine(format!("interpreter output failed: {error}"))),
-        }
-        match turn_end {
-            Some(pb::ChildEvent {
-                kind: Some(pb::child_event::Kind::FatalError(fatal)),
-                ..
-            }) => Err(Lost::engine(fatal.message)),
-            Some(event) => Ok(event),
-            None => Err(Lost::engine(
-                "the interpreter ended its turn without an event",
-            )),
-        }
+    fn resume(&mut self, input: Resume) -> Result<Progress, Lost> {
+        self.session
+            .resume(input)
+            .map_err(|error| Lost::engine(format!("micro-monty resume refused: {error}")))
     }
 
-    /// Runs the cell from `request` until it waits on futures or ends.
-    fn run(&mut self, mut request: pb::ParentRequest) -> Result<(), Lost> {
+    fn drive(&mut self, mut step: Progress) -> Result<(), Lost> {
         loop {
-            let event = self.handle(request, true)?;
-            request = match event.kind {
-                Some(pb::child_event::Kind::FunctionCall(call)) => self.function_call(call)?,
-                Some(pb::child_event::Kind::OsCall(call)) => {
-                    let (call_id, function) = os_call_from_proto(call).map_err(|error| {
-                        Lost::protocol(format!("invalid OS call payload: {error}"))
-                    })?;
-                    os_call_refusal(call_id, function.name())
+            {
+                let mut sink = output(&self.output);
+                if let Some(error) = sink.error.take() {
+                    return Err(error);
                 }
-                Some(pb::child_event::Kind::NameLookup(_)) => resume_name_undefined(),
-                Some(pb::child_event::Kind::ResolveFutures(futures)) => {
-                    let pending = futures.pending_call_ids.into_inner();
-                    return self.wait_on(pending);
+                if self.session.is_poisoned() {
+                    return Err(Lost::engine("micro-monty session is poisoned"));
                 }
-                Some(pb::child_event::Kind::Complete(complete)) => {
-                    let value = MontyObject::try_from(complete).map_err(|error| {
-                        Lost::protocol(format!("invalid result payload: {error}"))
-                    })?;
-                    self.done(CellOutcome::Completed {
-                        value: Some(format_monty(&value, MAX_PRINT_BYTES)),
+                sink.accept()?;
+            }
+            step = match step {
+                Progress::HostCall {
+                    call,
+                    function,
+                    name,
+                    args,
+                    kwargs,
+                } => {
+                    let answer = self.function_call(call, function, &name, args, kwargs)?;
+                    self.resume(answer)?
+                }
+                Progress::Waiting { calls } => return self.wait_on(calls),
+                Progress::Complete(value) => {
+                    let value = value.map_or_else(
+                        || "None".into(),
+                        |mut completion| {
+                            if completion.str_truncated {
+                                completion.str.push_str(RESULT_NOTICE);
+                            }
+                            completion.str
+                        },
+                    );
+                    return self.done(CellOutcome::Completed {
+                        value: Some(value),
                         stored: HashMap::new(),
-                    })?;
-                    return Ok(());
-                }
-                Some(pb::child_event::Kind::Error(error)) => {
-                    let exception = error
-                        .exception
-                        .ok_or_else(|| Lost::protocol("error event with no exception"))?;
-                    return self.done(exception_outcome(exception));
-                }
-                Some(pb::child_event::Kind::TypingError(error)) => {
-                    return self.done(CellOutcome::Failed {
-                        message: format!("type errors; nothing ran\n{}", error.diagnostics),
-                        stored: HashMap::new(),
-                        generation_lost: false,
                     });
                 }
-                _ => return Err(Lost::protocol("unexpected interpreter event")),
+                Progress::Error(error) => return self.fail(error.to_string(), false),
+                _ => return Err(Lost::engine("unexpected interpreter pause")),
             };
         }
     }
 
-    fn done(&mut self, outcome: CellOutcome) -> Result<(), Lost> {
-        self.finish(outcome, write)
-    }
-
-    fn finish(
+    fn function_call(
         &mut self,
-        outcome: CellOutcome,
-        mut send: impl FnMut(&WorkerFrame) -> Result<(), Lost>,
-    ) -> Result<(), Lost> {
-        let running = self
-            .running
-            .take()
-            .ok_or_else(|| Lost::protocol("a terminal without a running cell"))?;
-        for call in running.results.keys() {
-            send(&WorkerFrame::Delivery {
-                cell: running.cell,
-                call: u64::from(*call),
-                verdict: DeliveryVerdict::NotObserved(
-                    "the cell ended before the interpreter observed the result".into(),
-                ),
-            })?;
+        call: u64,
+        function: u32,
+        name: &str,
+        args: Vec<HostValue>,
+        kwargs: Vec<(String, HostValue)>,
+    ) -> Result<Resume, Lost> {
+        if name == PATH_SCAN {
+            return Ok(Resume::Error(HostError::new(
+                HostErrorKind::RuntimeError,
+                "filesystem access is not available in cells; use the nested tools",
+            )));
         }
-        send(&WorkerFrame::CellDone {
-            cell: running.cell,
-            outcome,
-        })
-    }
-
-    /// Answers one tool call of the cell: a bound tool with a valid argument
-    /// becomes a nested call and a future; anything else raises in Python.
-    fn function_call(&mut self, call: WireFunctionCall) -> Result<pb::ParentRequest, Lost> {
-        let call_id = call.call_id;
-        let function_name = call.function_name.clone();
-        let args = call
-            .into_call_args()
-            .map_err(|error| Lost::protocol(format!("invalid call payload: {error}")))?;
         let Some(binding) = self
             .bindings
             .as_ref()
-            .and_then(|bindings| bindings.get(&function_name))
+            .and_then(|bindings| bindings.get(&function))
         else {
-            return Ok(resume_call(
-                call_id,
-                ExtFunctionResult::NotFound(function_name),
-            ));
-        };
-        let raise = |exc_type, message: String| {
-            ExtFunctionResult::Error(MontyException::new(exc_type, Some(message)))
-        };
-        let argument = args.arg(0).filter(|argument| {
-            args.args().len() == 1
-                && args.kwargs().len() == 0
-                && match binding.input {
-                    BindingInput::Dictionary => matches!(
-                        monty_types::unstable::node(*argument),
-                        monty_types::unstable::MontyNode::Dict(_)
-                    ),
-                    BindingInput::String => argument.as_str().is_some(),
-                }
-        });
-        let Some(argument) = argument else {
-            let expected = match binding.input {
-                BindingInput::Dictionary => "dictionary",
-                BindingInput::String => "string",
-            };
-            let message = format!("Python tool requires exactly one {expected} argument");
-            return Ok(resume_call(call_id, raise(ExcType::TypeError, message)));
+            return Ok(Resume::Error(HostError::new(
+                HostErrorKind::NameError,
+                "unknown Python host function",
+            )));
         };
         let running = self
             .running
             .as_mut()
             .ok_or_else(|| Lost::protocol("a tool call without a running cell"))?;
         if running.futures.len() >= MAX_OUTSTANDING_NESTED {
-            let message = format!(
-                "{PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_PREFIX}{MAX_OUTSTANDING_NESTED}{PLAKOUS_PY_PTC_ERROR_OUTSTANDING_NESTED_SUFFIX}"
-            );
-            return Ok(resume_call(call_id, raise(ExcType::RuntimeError, message)));
+            return Ok(Resume::Error(HostError::new(
+                HostErrorKind::RuntimeError,
+                format!(
+                    "local composition exceeds its profile-bound limit of {MAX_OUTSTANDING_NESTED} outstanding nested calls"
+                ),
+            )));
         }
-        let input = match if self.configuration.type_check {
-            sdk_call_to_json(argument)
-        } else {
-            call_to_json(argument)
-        } {
-            Ok(input) if json_depth(&input) > MAX_CELL_VALUE_DEPTH => {
-                let reason =
-                    format!("Python tool argument nests deeper than {MAX_CELL_VALUE_DEPTH} levels");
-                return Ok(resume_call(call_id, raise(ExcType::ValueError, reason)));
-            }
+        let input = match codec::arguments(binding.input, args, kwargs) {
             Ok(input) => input,
-            Err(reason) => return Ok(resume_call(call_id, raise(ExcType::ValueError, reason))),
+            Err(error) => return Ok(Resume::Error(error)),
         };
         write(&WorkerFrame::NestedCall {
             cell: running.cell,
-            call: u64::from(call_id),
+            call,
             name: binding.tool.clone(),
-            input: CellValue::from(input),
+            input,
         })?;
-        running.futures.insert(call_id);
-        Ok(resume_call(call_id, ExtFunctionResult::Future(call_id)))
+        running.futures.insert(call);
+        Ok(Resume::Future)
     }
 
-    /// The interpreter waits on `pending`: tell the host, then resume at once
-    /// if every result is already here.
-    fn wait_on(&mut self, pending: Vec<u32>) -> Result<(), Lost> {
+    fn wait_on(&mut self, calls: Vec<u64>) -> Result<(), Lost> {
         let running = self
             .running
             .as_mut()
             .ok_or_else(|| Lost::protocol("a wait without a running cell"))?;
-        if let Some(unknown) = pending.iter().find(|id| !running.futures.contains(id)) {
-            return Err(Lost::protocol(format!(
-                "monty requested unknown nested call id {unknown}"
-            )));
+        if calls.iter().any(|call| !running.futures.contains(call)) {
+            return Err(Lost::engine("micro-monty requested an unknown nested call"));
         }
         write(&WorkerFrame::Waiting {
             cell: running.cell,
-            calls: pending.iter().copied().map(u64::from).collect(),
+            calls: calls.clone(),
         })?;
-        running.waiting = Some(pending);
-        self.resume_if_complete()
+        running.waiting = calls;
+        Ok(())
     }
 
     #[allow(
         clippy::similar_names,
-        reason = "cell and call are the protocol's own field names"
+        reason = "cell and call are the protocol field names"
     )]
     fn nested_result(
         &mut self,
@@ -671,145 +486,64 @@ impl Worker {
                 "the cell had already ended when its result was delivered".into(),
             )));
         };
-        if running.cell != cell {
-            return write(&verdict(DeliveryVerdict::Refused(
-                "the result names another cell".into(),
-            )));
-        }
-        let Some(id) = u32::try_from(call)
-            .ok()
-            .filter(|id| running.futures.contains(id) && !running.results.contains_key(id))
-        else {
+        if running.cell != cell
+            || !running.futures.contains(&call)
+            || running.results.contains_key(&call)
+        {
             return write(&verdict(DeliveryVerdict::Refused(
                 "the result names no pending call of the cell".into(),
             )));
-        };
-        running.results.insert(id, outcome);
-        self.resume_if_complete()
-    }
-
-    /// Resumes the interpreter once the host delivered every result of the
-    /// batch it waits on, accepting each result as it is handed over.
-    fn resume_if_complete(&mut self) -> Result<(), Lost> {
-        let Some(running) = self.running.as_mut() else {
-            return Err(Lost::protocol("a wait without a running cell"));
-        };
-        let Some(pending) = running.waiting.as_ref() else {
-            return Ok(());
-        };
-        if !pending.iter().all(|id| running.results.contains_key(id)) {
+        }
+        running.results.insert(call, outcome);
+        if !running
+            .waiting
+            .iter()
+            .all(|id| running.results.contains_key(id))
+        {
             return Ok(());
         }
-        let pending = running.waiting.take().unwrap_or_default();
+        let pending = std::mem::take(&mut running.waiting);
         let mut batch = Vec::with_capacity(pending.len());
         for id in &pending {
-            let Some(result) = running.results.remove(id) else {
-                return Err(Lost::protocol(format!(
-                    "monty nested reply missing for call {id}"
-                )));
-            };
+            let result = running
+                .results
+                .remove(id)
+                .ok_or_else(|| Lost::protocol("incomplete Python result batch"))?;
             running.futures.remove(id);
-            match nested_outcome_to_result(result) {
-                Ok(result) => batch.push((*id, result)),
-                Err(reason) => {
-                    // Nothing of the batch reaches the interpreter: every
-                    // result the host delivered is definitely unobserved.
-                    let cell = running.cell;
-                    let unobserved = pending
-                        .iter()
-                        .chain(running.results.keys())
-                        .copied()
-                        .collect::<BTreeSet<_>>();
-                    for call in unobserved {
-                        write(&WorkerFrame::Delivery {
-                            cell,
-                            call: u64::from(call),
-                            verdict: DeliveryVerdict::NotObserved(
-                                "the batch carrying the result never reached the interpreter"
-                                    .into(),
-                            ),
-                        })?;
-                    }
-                    return Err(Lost::protocol(format!(
-                        "monty nested reply for call {id}: {reason}"
-                    )));
-                }
-            }
+            batch.push((*id, codec::outcome(result)));
         }
-        let resume = future_results_to_proto(batch);
-        if future_results_from_proto(resume.results.clone(), resume.values.clone()).is_err() {
-            return Err(Lost::protocol("monty nested result failed wire validation"));
-        }
-        running.accepted = pending;
+        output(&self.output).accepted = pending;
         boundary("before_delivery");
-        self.run(request(pb::parent_request::Kind::ResumeFutures(resume)))
+        let step = self.resume(Resume::Batch(batch))?;
+        self.drive(step)
     }
-}
 
-fn exception_outcome(exception: pb::RaisedException) -> CellOutcome {
-    match MontyException::try_from(exception) {
-        Ok(exc) => CellOutcome::Failed {
-            message: exc.to_string(),
+    fn fail(&mut self, message: String, generation_lost: bool) -> Result<(), Lost> {
+        self.done(CellOutcome::Failed {
+            message,
             stored: HashMap::new(),
-            generation_lost: false,
-        },
-        // The typed Error event proves the cell raised even if its diagnostics
-        // cannot be decoded. Do not infer this from transport error text.
-        Err(error) => CellOutcome::Failed {
-            message: format!(
-                "{PLAKOUS_PY_PTC_ERROR_UNDECODABLE_TRACEBACK_PREFIX}invalid exception payload: {error}"
-            ),
-            stored: HashMap::new(),
-            generation_lost: true,
-        },
+            generation_lost,
+        })
+    }
+
+    fn done(&mut self, outcome: CellOutcome) -> Result<(), Lost> {
+        *output(&self.output) = Output::default();
+        let running = self
+            .running
+            .take()
+            .ok_or_else(|| Lost::protocol("a terminal without a running cell"))?;
+        for call in running.results.into_keys() {
+            write(&WorkerFrame::Delivery {
+                cell: running.cell,
+                call,
+                verdict: DeliveryVerdict::NotObserved(
+                    "the cell ended before the interpreter observed the result".into(),
+                ),
+            })?;
+        }
+        write(&WorkerFrame::CellDone {
+            cell: running.cell,
+            outcome,
+        })
     }
 }
-
-fn resume_call(call_id: u32, result: ExtFunctionResult) -> pb::ParentRequest {
-    let (result, values) = ext_result_to_proto(result);
-    resume_call_with(call_id, result, values)
-}
-
-fn resume_call_with(
-    call_id: u32,
-    result: pb::ExtFunctionResult,
-    values: Option<monty_proto::WireArena>,
-) -> pb::ParentRequest {
-    request(pb::parent_request::Kind::ResumeCall(pb::ResumeCall {
-        call_id,
-        result: Some(result),
-        values,
-    }))
-}
-
-fn resume_name_undefined() -> pb::ParentRequest {
-    request(pb::parent_request::Kind::ResumeNameLookup(
-        NameLookupResult::Undefined.into(),
-    ))
-}
-
-/// Every OS call is refused. Monty absorbs `OSError` during glob and walk,
-/// so a refused scan raises `RuntimeError` instead and cannot be mistaken for
-/// an empty directory; everything else is not handled.
-fn os_call_refusal(call_id: u32, function_name: &str) -> pb::ParentRequest {
-    if function_name == "Path.scan" {
-        return resume_call(
-            call_id,
-            ExtFunctionResult::Error(MontyException::new(
-                ExcType::RuntimeError,
-                Some("filesystem access is not available in cells; use the nested tools".into()),
-            )),
-        );
-    }
-    resume_call_with(
-        call_id,
-        pb::ExtFunctionResult {
-            kind: Some(pb::ext_function_result::Kind::NotHandled(pb::Unit {})),
-        },
-        None,
-    )
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, reason = "worker unit regressions")]
-mod tests;

@@ -1658,7 +1658,7 @@ cancellation/deadline controls are revalidated before the permit's final
 synchronous store-time check and start observation. Refused executor admission
 emits no tool start. Evaluators carry the same admission control through
 session preparation to the last source-start boundary: after QuickJS locks and
-joins before `start_cell`, and after the Monty worker's spawn before its `StartCell`.
+joins before `start_cell`, and after the Python worker's spawn before its `StartCell`.
 Result delivery, wait, termination and shutdown continue joining already-owned
 work; they do not require a fresh source-start grant.
 
@@ -10057,8 +10057,8 @@ The SDK is an explicit embedding presentation and the root-only `py-sdk` product
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
-| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` in the cell worker `plakous-py-host`, one worker per agent incarnation |
-| `py-sdk` / embedding SDK | Product / consumer | `run_py`, JSON field `code`; no wait tool | Same Monty worker; fresh globals per cell, named session state |
+| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | micro-monty exactly `0.0.2` in `plakous-py-host`, one worker per agent incarnation |
+| `py-sdk` / embedding SDK | Product / consumer | `run_py`, JSON field `code`; no wait tool | Same micro-monty worker; fresh globals per cell, named session state |
 | `direct` | — | none | — |
 
 The host identity carries the deployment — `rquickjs-host/<digest>` or
@@ -10066,7 +10066,8 @@ The host identity carries the deployment — `rquickjs-host/<digest>` or
 Python cell-worker identities (engine contract, artifact, host and containment
 bindings) are part of the frozen binding; a session recorded under another
 worker contract is not reopened in place. Carry it through export/import of an
-importable document version.
+importable document version. The `monty-host` framing label and the
+`monty_worker_v1` artifact constructor name are not engine identities.
 The JavaScript engine contract is the five-part recipe
 `sha256(ExecutionEnvironment, 1, ["plakous.cell-engine-contract.v1", engine,
 engine version, cell protocol revision, adapter revision])`, today
@@ -10256,9 +10257,12 @@ explicit truncation notice.
 persistent state, one active cell, and bounded correlated child concurrency.
 Public tools are genuine Python coroutine functions: calling one creates a
 coroutine without admitting or dispatching a tool. `await` drives that coroutine;
-`asyncio.gather` drives several concurrently. Each function accepts one
-`arguments` parameter and returns the tool's string result: structured tools
-take a dictionary, while freeform tools take a string. An unused coroutine has
+the pre-imported `asyncio.gather` drives several concurrently. Call tools with
+keywords named by their input schema or pass one dictionary of those arguments.
+For freeform input the keyword is `arguments`. `help(tool)` prints the
+schema-derived typed signature. Structured tool results are Python dictionaries,
+lists or scalars; text stays `str` even if it looks like JSON. `ToolError`
+is a `RuntimeError` subclass carrying the tool's error message. An unused coroutine has
 no tool effect and consumes no admitted nested-call slot. Ordinary Python values,
 functions and aliases persist across cells; creating a coroutine is not durable
 tool admission.
@@ -10269,30 +10273,34 @@ runs. Export names must be non-keyword ASCII Python identifiers outside the
 reserved `_plakous_host_` prefix, checked at attachment. Bootstrap is bounded to
 64 bindings and 64 KiB; a bootstrap that fails is a failed first cell that
 costs the interpreter its generation.
-Invalid arguments are rejected before publishing a nested call. Monty values
-reach the worker adapter as a shared-node arena, so the worker charges every
-byte of the argument's compact JSON encoding before building it and stops at
-1 MiB; nesting is bounded at the cell protocol's 40 containers. `dict` keys
-must be `str`, and an `int` past CPython's 4300-digit string-conversion limit
-is refused rather than converted. An argument past any of these bounds raises
-`ValueError` in the cell and publishes nothing.
+Invalid boundary arguments are rejected before publishing a nested call. The
+engine bounds expanded host arguments before materializing them; the adapter
+then counts the exact compact JSON encoding without a second encoded buffer.
+Arguments are bounded at 1 MiB and 40 containers and dictionary keys must be
+strings. Arguments that cannot be represented at the boundary raise a Python
+exception without publishing a nested call; the driver remains authoritative
+for the tool schema.
 A nested result nesting deeper than 40 containers reaches the cell as a raised
 `RuntimeError` instead of its value. Private naming
 is not an authority boundary: every callback still passes the same tool
 allowlist and core admission. There is no separate Python effect scheduler.
 
 Once a coroutine reaches its host callback, the existing nested-call and delivery
-contract applies. The pinned Monty scheduler requests all pending external
+contract applies. The micro-monty scheduler requests pending external
 futures when it needs host results. Acceptance proves correlated interpreter
 delivery, not that Python explicitly awaited or used each result. A terminal
 that abandons held results emits `Delivery{NotObserved}` before `CellDone`
 for every result never handed to the interpreter. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
-replay. The engine contract is the cell recipe over `monty`, `1.2.0`,
-`plakous-cell-protocol.v2` and `plakous.monty-python-adapter.v9`. Exact reopen requires the current engine,
+replay. The engine contract is the cell recipe over `micro-monty`,
+`0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d`
+(the release and build id), `plakous-cell-protocol.v2`, and
+`plakous.micro-monty-python-adapter.v1`. Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
 uses export/carry; there is no migration. The library's incompatible evaluator
-refusal is product-neutral. Plak renders the recovery commands with the actual
+refusal is `IncompatibleSession`: “recorded evaluator path, bytes or contract
+is unavailable or inconsistent; no inference was dispatched”. Plak renders
+the recovery commands with the actual
 session id: `plakd session export <id>` then `plakd session import <file>`.
 
 Each nested result carries a per-call acceptance receipt from the worker. The
@@ -10301,9 +10309,8 @@ collects their results, validates the complete batch with the pinned
 converters and hands it to the interpreter in one resume; its first print,
 suspension or terminal event proves that resume ran, and only then does the
 worker send `Delivery{Accepted}` for each result, before forwarding that event.
-A batch it cannot convert is never
-handed over: every result it holds is `NotObserved` and the worker reports
-`HostLost{ProtocolViolation}`. A result for a cell that already ended, or whose
+An invalid nested value that exceeds the protocol depth bound is delivered as
+a typed tool error rather than as a value. A result for a cell that already ended, or whose
 worker was stopped, is `NotObserved`; one naming no pending call is `Refused`.
 Worker loss with a result handed over leaves acceptance unknown. The driver commits each canonical child
 outcome before sending its result and polls delivery receipts alongside the
@@ -10321,9 +10328,9 @@ exit within two seconds of `Shutdown` is killed: that stop is joined with a
 killed by the request bound, returns Lost on every later shutdown and never
 certifies Joined. Repeated stops retain the original child receipt, including
 its forced-kill escalation; a later wait cannot relabel it as voluntary.
-Monty `execute` starts a cell and returns a terminal result or a yield within
+Python `execute` starts a cell and returns a terminal result or a yield within
 the requested observation window (§9.5). A completed result surfaces printed
-stdout when Monty's last expression is
+stdout when the last expression is
 `None`, an expression result when stdout is empty, and both when a cell prints
 and returns a value. The expression result is the value's Python `str()` —
 text as is, every other value (including `complex`) its `repr()` — rendered
@@ -10331,16 +10338,12 @@ under the 1 MiB cap with an explicit truncation notice, because a shared
 sub-object renders once per reference. An `int` past 4300 digits renders as
 `<int with N bits>`: decimal conversion is quadratic, so every host-side
 rendering stays bounded in CPU time. Standard output and `sys.stderr` are
-one ordered stream: the worker flushes batched print output before every
-suspension and turn end. The single-frame V1 profile caps both the final result and
+one ordered stream sent by the engine's output callback. The single-frame V1 profile caps both the final result and
 each nested result at 1 MiB so their worst-case JSON encoding fits one frame,
 with an aggregate nested-result quota of 16 MiB.
 
-A raised exception whose payload the upstream converters cannot decode is a
-**definite cell failure, never a host loss**: the error event itself proves the
-cell raised, so the worker reports a failed cell carrying whatever the cell
-printed and a statement that the traceback frame spans were undecodable, with
-the converter's own detail, and marks the generation lost. That generation is
+An uncaught Python exception is a definite cell failure with a bounded
+traceback. An engine panic is a worker loss. A lost generation is
 stopped, joined and reset under its typed reset reason before the next cell,
 which starts a fresh generation and never re-evaluates source. Every other
 protocol violation leaves the cell's outcome unknown and remains a host loss.
@@ -10351,10 +10354,9 @@ session runs with a restricted inherited environment, a bounded framed protocol,
 bounded queues and bounded output, and a 256 MiB memory bound applied inside
 the engine, not across a process tree: past it the interpreter raises an
 ordinary, catchable `MemoryError` and the session survives, and an allocation
-past the allocator's hard ceiling (that limit plus Monty's 4 MiB headroom) ends
-the worker, which is host loss. Upstream's per-session suspension cap is set
-to its maximum, because the interpreter counts suspensions across its whole
-session and any finite value would be a cumulative lifetime expiry. Each
+past the allocator's hard ceiling (that limit plus 4 MiB) may end
+the worker, which is host loss. The engine caps Python recursion at 1000
+frames and additionally limits the size of individual objects. Each
 uninterrupted stretch of computation — from a start, a nested call or submission
 of the complete pending result batch to the next nested call, wait or terminal — is bounded at 90
 seconds by the host session, which kills the worker at the bound; that is a
@@ -10613,7 +10615,7 @@ An explicit SDK `expect` does not replace the attachment's text-read observation
 
 `PythonHarnessSdkV1::compile` uses the same cell compiler and v3 identity
 recipe as the other presentations. Its exhaustive `CellDescriptor` variant
-is `PythonHarnessSdkV1`; `LocalCompositionProfile::cell` selects the Monty
+is `PythonHarnessSdkV1`; `LocalCompositionProfile::cell` selects the Python
 worker contract. The SDK has one ordinary structured outer tool, `run_py`,
 with exactly one `code` string (nonempty, at most 256 KiB UTF-8). It has no
 wait tool, no result channel and no topology tools. Its runtime contract has
@@ -10625,8 +10627,8 @@ cannot select this surface. The library has no root/child or topology tiers;
 an embedder may attach it to any isolated single agent whose registry and
 authority satisfy the fixed SDK catalog.
 
-The descriptor's `HostApi` is the sole SDK catalog. It generates the typing
-module, runtime wrappers, plain-data record definitions and host argument
+The descriptor's `HostApi` is the sole SDK catalog. It generates the model-visible
+typed declarations, runtime wrappers, plain-data record definitions and host argument
 validators. The namespaces are `ctx.read/list/grep`, `fs.apply` and its pure
 `Patch/Replace/Write/Delete/Move` dictionary constructors,
 `proc.run/shell/start/poll/stdin/cancel/join`, `state.get/put/list/drop` and
@@ -10650,15 +10652,15 @@ moved into `CellValue` records, not cloned into delivery or replay caches.
 Replay and duplicate delivery retain text only. Arguments must be finite
 JSON values; arbitrary Python objects are not coerced through `repr()`.
 
-The warm worker is configured with SDK stubs and type checking enabled.
-Before each SDK cell the host sends `Reset`, the worker reinstalls its exact
-configuration, and the host-generated bootstrap installs fresh namespaces.
-Type diagnostics end the cell with `type errors; nothing ran` before any
-host call. Python PTC keeps its original persistent globals and type checking
-disabled. Only successful, presented SDK terminals publish named-state writes
+Before each SDK cell the host sends `Reset` and the host-generated bootstrap
+installs fresh namespaces. The SDK accepts keyword arguments or one positional
+dictionary; `help(tool)` prints the typed declaration. Neither Python
+presentation runs a pre-run type checker. A later error does not roll back an
+earlier tool effect. Python PTC instead keeps its globals. Only successful,
+presented SDK terminals publish named-state writes
 (§9.8); failed, stopped or abandoned cells publish none. Invalid keys,
 non-JSON/inexact values raise `ValueError`; state and encoded-value capacity
-refusals raise `OverflowError`; driver/lifecycle failures raise `RuntimeError`.
+refusals raise `OverflowError`; nested tool failures raise `ToolError`.
 Exception classes come from typed host refusals, not diagnostic-string parsing.
 
 The SDK foreground budget is 300 seconds across computation and host waits,
@@ -12795,10 +12797,10 @@ interpreter-neutral bootstrap data and links no worker client or interpreter.
 local composition attachment seam, the Code Mode presentation, and the cell client. It links
 `plakous-cell` and no other optional Plakous crate,
 so it reaches neither `plakous-auth` nor `plakous-http`, and it links neither
-rquickjs nor any Monty crate. Python PTC and Python SDK profiles additionally
+rquickjs nor micro-monty. Python PTC and Python SDK profiles additionally
 require `composition-python`, which implies `composition`; without it profile
 construction refuses with an invalid-input error naming the omitted feature.
-They share the same attach path and cell client; the Monty interpreter lives
+They share the same attach path and cell client; micro-monty lives
 only in `plakous-py-host`.
 All presentations select profiles through `LocalCompositionProfile::cell`
 using the compiled `plakous::tools::CellDescriptor`; language-specific profile
@@ -12908,8 +12910,8 @@ records merely because it cannot execute that route.
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/gate/check_features.py` pins this over the
 complete closure Cargo reports: a `composition` selection reaches no
-`htmd`, `monty-proto`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
-`rquickjs`, and no facade selection reaches `monty-proto`.
+`htmd`, `micro-monty`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
+`rquickjs`, and no facade selection reaches `micro-monty`.
 
 Every feature combination preserves the facade boundary: a consumer never needs
 a component crate to complete a workflow.

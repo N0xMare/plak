@@ -43,7 +43,6 @@ fn exchange(frames: &[HostFrame]) -> (Vec<WorkerFrame>, bool) {
 
 fn configure(engine: EngineConfig) -> HostFrame {
     HostFrame::Configure {
-        sdk_stubs: None,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine,
     }

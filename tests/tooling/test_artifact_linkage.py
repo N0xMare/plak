@@ -54,7 +54,7 @@ CLIENT_ONLY_SYMBOLS = """\
 0000000100009abc T _main
 """
 PYTHON_WORKER_SYMBOLS = """\
-0000000100001234 T __ZN5monty4pool6WorkerE
+0000000100001234 T __ZN9mm_engine6interp7executeE
 0000000100005678 T _main
 """
 
@@ -68,13 +68,13 @@ DISTINCT_DIGESTS = {
 class ArtifactLinkageFindings(unittest.TestCase):
     """The linkage rules, applied to listings that need no release build."""
 
-    def test_monty_runtime_leaks_are_refused_on_both_platforms(self) -> None:
+    def test_python_runtime_leaks_are_refused_on_both_platforms(self) -> None:
         for marker in (
-            "_ZN5monty8bytecode2vmE",
-            "__ZN19monty_type_checking5checkE",
-            "_RNvCsabc_11monty_alloc4Heap",
-            "_RNvCsabc_19monty_type_checking5check",
-            "_RNvNtCsabc_11monty_proto6worker4main",
+            "_ZN9mm_engine8bytecode2vmE",
+            "__ZN11micro_monty5startE",
+            "_RNvCsabc_7mm_core4Heap",
+            "_RNvCsabc_8mm_parse5parse",
+            "_RNvNtCsabc_10mm_compile6module4main",
         ):
             with self.subTest(marker=marker):
                 findings = workspace_policy.artifact_linkage_findings(
@@ -86,9 +86,9 @@ class ArtifactLinkageFindings(unittest.TestCase):
                     DISTINCT_DIGESTS,
                 )
                 self.assertEqual(len(findings), 1, findings)
-                self.assertIn("plakd links the Monty runtime", findings[0])
+                self.assertIn("plakd links micro-monty", findings[0])
 
-    def test_monty_worker_is_the_positive_control(self) -> None:
+    def test_python_worker_is_the_positive_control(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
             {
                 "plakd": CLIENT_ONLY_SYMBOLS,
@@ -98,12 +98,12 @@ class ArtifactLinkageFindings(unittest.TestCase):
             DISTINCT_DIGESTS,
         )
         self.assertEqual(len(findings), 1, findings)
-        self.assertIn("plakous-py-host does not link the Monty runtime", findings[0])
+        self.assertIn("plakous-py-host does not link micro-monty", findings[0])
 
-    def test_monty_adapter_names_do_not_count_as_runtime(self) -> None:
+    def test_python_adapter_names_do_not_count_as_runtime(self) -> None:
         findings = workspace_policy.artifact_linkage_findings(
             {
-                "plakd": "__ZN13json_to_monty5applyE\n__ZN11monty_proto6client4sendE",
+                "plakd": "__ZN14json_to_python5applyE\n__ZN12plakous_cell6client4sendE",
                 "plakous-js-host": MACH_O_WORKER_SYMBOLS,
                 "plakous-py-host": PYTHON_WORKER_SYMBOLS,
             },
@@ -245,13 +245,13 @@ class MandatoryArtifactLinkage(unittest.TestCase):
             nm = tools / "nm"
             for parent, status, success in (
                 ("_main", 0, True),
-                ("__ZN19monty_type_checking5checkE", 0, False),
+                ("__ZN11micro_monty5startE", 0, False),
                 ("", 2, False),
             ):
                 nm.write_text(
                     '#!/bin/sh\ncase "$1" in\n'
                     f' */plakd) echo "{parent}"; exit {status} ;;\n'
-                    ' */plakous-py-host) echo "__ZN5monty2vmE" ;;\n'
+                    ' */plakous-py-host) echo "__ZN9mm_engine2vmE" ;;\n'
                     ' */plakous-js-host) echo "_JS_NewRuntime" ;;\nesac\n'
                 )
                 nm.chmod(0o700)

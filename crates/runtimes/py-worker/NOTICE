@@ -1,0 +1,9 @@
+The Plak Python worker embeds micro-monty (MIT AND PSF-2.0 AND Unicode-3.0).
+The release archive includes the upstream LICENSE and THIRD_PARTY.md under
+licenses/micro-monty-<version>/, alongside LICENSE-PSF-2.0 and LICENSE-Unicode-3.0.
+
+micro-monty ports CPython 3.14 algorithms and adapts standard-library code for
+its Python-subset VM. It bundles tables generated from the Unicode Character
+Database. Its upstream notices identify the adapted code and data; Plak does
+not modify those sources. The offline code-mode tests independently adapt
+scenarios from micro-monty's MIT conformance suite without its recorded traces.

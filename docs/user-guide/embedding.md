@@ -120,7 +120,7 @@ let profile = plakous::agent::LocalCompositionProfile::cell(&descriptor)?;
 ```
 
 The descriptor selects the exact worker contract; supply a verified QuickJS or
-Monty worker artifact accordingly. Product JavaScript and Python require
+Python worker artifact accordingly. Product JavaScript and Python require
 `ProductExtensionEvidence::cell` and the coding presentation kind. Native
 Codex profiles forbid product extension evidence. Python has no separate
 component identities: its receipt binds the complete descriptor and its exact
@@ -208,10 +208,11 @@ await state.put("last_files", [file.path for file in files])
 print(await state.get("last_files"))
 ```
 
-Cells are type-checked before I/O. Named state survives exact reopen and
+Use keyword arguments or one argument dictionary. `help(tool)` prints the
+typed signature; there is no pre-run type checker. Named state survives exact reopen and
 publishes only with a successful presented terminal; globals do not survive.
 Invalid state keys/values raise `ValueError`, capacity refusals raise
-`OverflowError`, and host failures raise `RuntimeError`. Values are bounded
+`OverflowError`, and nested tool failures raise `ToolError`. Values are bounded
 by their encoded representation (1 MiB per result, 16 MiB per cell); the
 foreground budget is 300 seconds. There is no wait tool: use `proc.start` for
 long jobs. Processes have the user's full authority and are not sandboxed.

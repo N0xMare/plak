@@ -22,7 +22,6 @@ enum Step {
 
 fn configure() -> HostFrame {
     HostFrame::Configure {
-        sdk_stubs: None,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine: EngineConfig::QUICKJS,
     }
@@ -412,7 +411,6 @@ async fn every_interleaving_has_one_terminal_and_no_unproven_acceptance() {
 
 fn monty_configure() -> HostFrame {
     HostFrame::Configure {
-        sdk_stubs: None,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine: EngineConfig::MONTY,
     }

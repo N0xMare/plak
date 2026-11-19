@@ -71,9 +71,6 @@ impl Presentation for SdkPresentation {
     fn consumes_values(&self) -> bool {
         true
     }
-    fn python_sdk_stubs(&self) -> Option<String> {
-        self.api.python_sdk_stubs()
-    }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract {
         LocalCompositionRuntimeContract::FOREGROUND
     }
@@ -318,8 +315,12 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let path = std::env::var_os("PLAK_PY_HOST").ok_or("Python worker prerequisite missing")?;
         let client = Arc::new(
-            plakous_cell::CellClient::spawn_python_sdk(std::path::Path::new(&path), String::new())
-                .await?,
+            plakous_cell::CellClient::spawn(
+                std::path::Path::new(&path),
+                plakous_cell::MONTY_WORKER,
+                plakous_cell::EngineConfig::MONTY,
+            )
+            .await?,
         );
         let (session, _events) = plakous_cell::CellSession::new(
             client,

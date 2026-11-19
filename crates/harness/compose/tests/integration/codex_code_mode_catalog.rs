@@ -146,11 +146,11 @@ fn cell_descriptor_v3_identities_pin_every_presentation() -> Result<(), TestErro
             ),
             (
                 "python-structured",
-                "bb27cf006083ce78e2eb2a76f50ffb2cea9e9afe8a6dd1fb61170e904db8b01f".to_owned()
+                "2d1880214f54cc10f27ec202a245cb2200b51cc564ad7cd04cde5b48dae652a8".to_owned()
             ),
             (
                 "python-custom",
-                "ad49879784c9be4c3d7f163a0de126764bb840a94ebacba7da45c231f0b6c514".to_owned()
+                "22ef09bae5825413fa54322a1b0db12b7960b6996a199742905d4dc97ecda18f".to_owned()
             ),
         ]
     );

@@ -6,6 +6,8 @@
 
 use std::path::PathBuf;
 
+const PYTHON_ENGINE_VERSION: &str = "micro-monty-0.0.2";
+
 /// The JavaScript evaluator worker's install layout.
 #[cfg(feature = "js")]
 pub mod js_host;

@@ -63,7 +63,7 @@ if args[:1] == ["info"]:
     refreshed.write_text(args[-1])
     sys.exit(0)
 if os.environ.get("FAKE_STALE_INDEX") == args[0] and offline and not refreshed.exists():
-    print('error: failed to select a version for the requirement `monty-typeshed = "^1.2.0"`\n'
+    print('error: failed to select a version for the requirement `micro-monty = "=0.0.2"`\n'
           'candidate versions found which didn\'t match: 1.1.0', file=sys.stderr)
     sys.exit(101)
 if args[:1] == ["package"] and "--no-verify" in args:
@@ -456,7 +456,7 @@ class PublishScriptTests(unittest.TestCase):
                 info = [call for call in self.prefetch_calls if call["args"][0] == "info"]
                 # Offline, refresh the one named crate online, offline again: no
                 # online run of the step itself.
-                self.assertEqual([call["args"][-1] for call in info], ["monty-typeshed"])
+                self.assertEqual([call["args"][-1] for call in info], ["micro-monty"])
                 self.assertIsNone(info[0]["offline"])
                 self.assertFalse(info[0]["cwd"].startswith(str(self.repo)))
                 self.assertNotIn("plakd-publish", info[0]["cwd"])
@@ -468,7 +468,7 @@ class PublishScriptTests(unittest.TestCase):
                         if call["args"][0] != "info"
                     )
                 )
-                self.assertIn("refreshing monty-typeshed", result.stderr)
+                self.assertIn("refreshing micro-monty", result.stderr)
                 self.assertIn("offline retry succeeded after the index refresh", result.stderr)
                 self.assertEqual(calls[0]["offline"], "true")
 

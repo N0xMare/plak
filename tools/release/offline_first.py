@@ -11,8 +11,8 @@ run of the whole step for a stale entry. Any other failure, or a retry that
 still fails, runs the command online once.
 
 The refresh runs in an empty directory outside every Cargo workspace: inside
-the staged tree, `cargo info` answers a crate the workspace patches (such as
-`monty-typeshed`) from its local path and never reads the registry entry. It
+the staged tree, `cargo info` answers a crate the workspace patches from its
+local path and never reads the registry entry. It
 runs on the caller's pinned toolchain (the channel in the nearest
 `rust-toolchain.toml`), which a rustup proxy would not find from that
 directory; an explicit RUSTUP_TOOLCHAIN is left as it is.

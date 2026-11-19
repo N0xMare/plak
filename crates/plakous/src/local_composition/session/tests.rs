@@ -7,7 +7,6 @@ use std::{os::unix::fs::PermissionsExt, time::Duration};
 /// Bytes of the one `Configure` frame the client sends after `Hello`.
 fn configure_len() -> usize {
     encode_frame(&HostFrame::Configure {
-        sdk_stubs: None,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine: EngineConfig::QUICKJS,
     })

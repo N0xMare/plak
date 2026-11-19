@@ -21,7 +21,7 @@ offline_first = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(offline_first)
 
 MISMATCH = (
-    'error: failed to select a version for the requirement `monty-typeshed = "^1.2.0"`\n'
+    'error: failed to select a version for the requirement `micro-monty = "=0.0.2"`\n'
     "candidate versions found which didn't match: 1.1.0\n"
 )
 CONFLICT = (
@@ -67,7 +67,7 @@ class OfflineFirstTests(unittest.TestCase):
     def test_names_come_from_both_mismatch_spellings(self) -> None:
         self.assertEqual(
             offline_first.stale_index_names(MISMATCH + CONFLICT + MISMATCH),
-            ["monty-typeshed", "ruff_python_ast"],
+            ["micro-monty", "ruff_python_ast"],
         )
         self.assertEqual(offline_first.stale_index_names("error: no matching package named"), [])
 
@@ -83,7 +83,7 @@ class OfflineFirstTests(unittest.TestCase):
             cargo.calls,
             [
                 ["cargo", "fetch", "--offline"],
-                ["cargo", "info", "--quiet", "--", "monty-typeshed"],
+                ["cargo", "info", "--quiet", "--", "micro-monty"],
                 ["cargo", "fetch", "--offline"],
             ],
         )
@@ -142,7 +142,7 @@ class OfflineFirstTests(unittest.TestCase):
             cargo.calls,
             [
                 ["cargo", "fetch", "--offline"],
-                ["cargo", "info", "--quiet", "--", "monty-typeshed"],
+                ["cargo", "info", "--quiet", "--", "micro-monty"],
                 ["cargo", "fetch"],
             ],
         )

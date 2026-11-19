@@ -170,11 +170,11 @@ fn configure(stdin: &mut impl io::Read) -> Result<(), String> {
     let frame = read_frame_blocking(stdin, MAX_FRAME_BYTES)?
         .ok_or_else(|| "parent closed before configure".to_owned())?;
     match serde_json::from_slice::<HostFrame>(&frame) {
-        Ok(HostFrame::Configure {
-            revision,
-            engine,
-            sdk_stubs: None,
-        }) if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::QUICKJS => Ok(()),
+        Ok(HostFrame::Configure { revision, engine })
+            if revision == CELL_PROTOCOL_REVISION && engine == EngineConfig::QUICKJS =>
+        {
+            Ok(())
+        }
         Ok(HostFrame::Configure { .. }) => Err("configure names another revision or limits".into()),
         _ => Err("first parent frame is not configure".into()),
     }

@@ -1,4 +1,4 @@
-use super::host_api::HostApi;
+use super::host_api::{ApiFunction, HostApi};
 use crate::text::{PLAKOUS_PY_PTC_RUN_CATALOG_PREAMBLE, PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -103,22 +103,7 @@ pub(super) fn render_pyi(api: &HostApi) -> String {
     let catalog = tools
         .iter()
         .map(|tool| {
-            let result_type = if tool.returns_object() { "dict" } else { "str" };
-            let signature = if tool.string_input() {
-                format!(
-                    "async def {}(arguments: str) -> {result_type}",
-                    tool.python_name
-                )
-            } else {
-                let arguments = tool.input_schema().map_or_else(
-                    || "dict".to_owned(),
-                    |nested_schema| render_python_type(nested_schema.document().value()),
-                );
-                format!(
-                    "async def {}(arguments: {arguments}) -> {result_type}",
-                    tool.python_name
-                )
-            };
+            let signature = tool_signature(tool);
             format!(
                 "- `{}`: {}\n  `{signature}`",
                 tool.exposed_name, tool.description,
@@ -127,6 +112,70 @@ pub(super) fn render_pyi(api: &HostApi) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("{PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY}{PLAKOUS_PY_PTC_RUN_CATALOG_PREAMBLE}{catalog}")
+}
+
+fn tool_signature(tool: &ApiFunction) -> String {
+    let result = if tool.returns_object() {
+        "dict | list | str | int | float | bool | None"
+    } else {
+        "str"
+    };
+    let parameters = if tool.string_input() {
+        "*, arguments: str".to_owned()
+    } else {
+        let schema = tool
+            .input_schema()
+            .map(|schema| schema.document().value().as_ref());
+        let required = schema
+            .and_then(|schema| schema.get("required"))
+            .and_then(Value::as_array);
+        let properties = schema
+            .and_then(|schema| schema.get("properties"))
+            .and_then(Value::as_object);
+        let fields = properties
+            .into_iter()
+            .flatten()
+            .map(|(name, property)| {
+                let suffix = if required
+                    .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(name)))
+                {
+                    ""
+                } else {
+                    " = ..."
+                };
+                format!("{name}: {}{suffix}", render_python_type(property))
+            })
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            String::new()
+        } else {
+            format!("*, {}", fields.join(", "))
+        }
+    };
+    format!("async def {}({parameters}) -> {result}", tool.python_name)
+}
+
+const HELP_PRELUDE: &str = "\
+_plakous_host_builtin_help = help\n\
+_plakous_host_help_entries = []\n\
+def help(obj):\n    for tool, signature in _plakous_host_help_entries:\n        if obj is tool:\n            print(signature)\n            return\n    return _plakous_host_builtin_help(obj)\n";
+
+pub(super) fn add_help(source: &mut String, entries: &[(String, String)]) -> Result<(), String> {
+    use std::fmt::Write as _;
+    source.push_str(HELP_PRELUDE);
+    for (name, signature) in entries {
+        // Only signature text becomes a string literal; tool names are checked
+        // identifiers (or fixed names in the SDK catalog).
+        let literal = serde_json::to_string(signature).map_err(|error| error.to_string())?;
+        let _ = writeln!(
+            source,
+            "_plakous_host_help_entries.append(({name}, {literal}))"
+        );
+        if source.len() > MAX_BOOTSTRAP_BYTES {
+            return Err("Python tool bootstrap exceeds 64 KiB".into());
+        }
+    }
+    Ok(())
 }
 const HOST_PREFIX: &str = "_plakous_host_";
 const MAX_BINDINGS: usize = 64;
@@ -170,6 +219,7 @@ pub struct PythonBootstrap {
 pub(super) struct BootstrapTool {
     pub tool_name: String,
     pub input_kind: PythonInput,
+    pub signature: String,
 }
 
 /// The bootstrap that defines one coroutine per tool, or `None` for an empty
@@ -182,6 +232,7 @@ fn bootstrap_bindings(
     }
     let mut source = String::new();
     let mut host = Vec::new();
+    let mut help = Vec::new();
     for (index, (name, tool)) in bindings.into_iter().enumerate() {
         let mut bytes = name.bytes();
         let valid_start = bytes
@@ -190,6 +241,7 @@ fn bootstrap_bindings(
         if !valid_start
             || !bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
             || KEYWORDS.contains(&name.as_str())
+            || matches!(name.as_str(), "asyncio" | "help" | "ToolError")
             || name.starts_with(HOST_PREFIX)
         {
             return Err("Python tool name must be a non-reserved ASCII identifier".into());
@@ -200,17 +252,22 @@ fn bootstrap_bindings(
             return Err("Python tool bootstrap exceeds 64 KiB".into());
         }
         let private_name = format!("{HOST_PREFIX}{index}");
-        let definition =
-            format!("async def {name}(arguments):\n    return await {private_name}(arguments)\n");
+        let definition = format!(
+            "async def {name}(*args, **kwargs):\n    return await {private_name}(*args, **kwargs)\n"
+        );
         if source.len().saturating_add(definition.len()) > MAX_BOOTSTRAP_BYTES {
             return Err("Python tool bootstrap exceeds 64 KiB".into());
         }
         source.push_str(&definition);
+        help.push((name, tool.signature));
         host.push(PythonBootstrapBinding {
             function: private_name,
             tool: tool.tool_name,
             input: tool.input_kind,
         });
+    }
+    if !help.is_empty() {
+        add_help(&mut source, &help)?;
     }
     Ok((!host.is_empty()).then_some(PythonBootstrap {
         source,
@@ -218,13 +275,13 @@ fn bootstrap_bindings(
     }))
 }
 
-/// Generates the bounded Monty coroutine bootstrap from the host API.
+/// Generates the bounded Python coroutine bootstrap from the host API.
 ///
 /// # Errors
 /// Rejects reserved/invalid Python exports and catalog or source bounds.
 pub fn python_bootstrap(api: &HostApi) -> Result<Option<PythonBootstrap>, String> {
     if let Some(sdk) = &api.sdk {
-        return Ok(Some(sdk.bootstrap()));
+        return sdk.bootstrap().map(Some);
     }
     bootstrap_bindings(
         api.namespaces
@@ -240,6 +297,7 @@ pub fn python_bootstrap(api: &HostApi) -> Result<Option<PythonBootstrap>, String
                         } else {
                             PythonInput::Dictionary
                         },
+                        signature: tool_signature(tool),
                     },
                 )
             })
@@ -255,6 +313,7 @@ mod tests {
         BootstrapTool {
             tool_name: "tool".into(),
             input_kind: PythonInput::Dictionary,
+            signature: "async def tool() -> str".into(),
         }
     }
 

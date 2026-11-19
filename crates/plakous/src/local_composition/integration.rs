@@ -33,9 +33,6 @@ pub(super) trait Presentation: Send + Sync {
     fn consumes_values(&self) -> bool {
         false
     }
-    fn python_sdk_stubs(&self) -> Option<String> {
-        None
-    }
     fn runtime_contract(&self) -> LocalCompositionRuntimeContract;
     fn lifecycle(&self) -> LocalCompositionLifecycle;
     fn result_projection(&self) -> LocalCompositionResultProjection;
@@ -132,12 +129,9 @@ impl LocalCompositionIntegration for CellIntegration {
             self.presentation
                 .verify_worker(&self.worker, &self.identity)?;
             let (expected, config) = self.presentation.worker();
-            let client = if let Some(stubs) = self.presentation.python_sdk_stubs() {
-                CellClient::spawn_python_sdk(&self.worker, stubs).await
-            } else {
-                CellClient::spawn(&self.worker, expected, config).await
-            }
-            .map_err(LocalCompositionError::from_source)?;
+            let client = CellClient::spawn(&self.worker, expected, config)
+                .await
+                .map_err(LocalCompositionError::from_source)?;
             Ok(session_bundle(
                 Arc::new(client),
                 self.presentation.session_engine(),

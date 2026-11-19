@@ -164,7 +164,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | `crates/orchestration/` | workspace, recursive subagents and their store | host |
 | `bin/plakd/` | Host server, operator CLI and JSONL product | bin |
 | `tests/` | repository support, fixtures and harnesses | test |
-| `vendor/` | the reviewed Code Mode protocol snapshot (`vendor/monty-typeshed` is a `[patch]` source, not a member) | vendor |
+| `vendor/` | the reviewed Code Mode protocol snapshot | vendor |
 | `eval/` | Opt-in, paid Harbor / Terminal-Bench harness bakeoff; linux/amd64 or linux/arm64 GNU agent packaging selected by `HARBOR_ARCH`, not musl qualification; ARM cells are rebuilt from task definitions rather than the published amd64 images; an eval lane is not product support; paid runs are not in the daily gate | (none) |
 
 The `harness` layer sits under the facade and depends on `core`, `common`,
@@ -588,7 +588,7 @@ returns typed `CapabilityUnavailable` (exit 2) without changing store bytes.
 These harness builds are not shipped variants. Complete external-closure pins
 exclude terminal/clipboard libraries from the product and JWT from API; minimal
 also excludes MCP, Python, evaluator clients, image decoding, HTML conversion
-and JWT. Default minus Python excludes Monty and WebSockets. The default,
+and JWT. Default minus Python excludes Python composition admission; the product binary never embeds micro-monty. The default,
 facade-full and native-auth closures exclude aws-lc and rsa. The workspace
 checker pins forwarding, dependency optionality and defaults.
 
@@ -628,7 +628,7 @@ closure witnesses; they are not each a compile profile.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
-`monty-proto`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
+`micro-monty`, `plakous-auth`, `plakous-http`, `plakous-py-worker`, or
 `rquickjs`. Both language presentations use this closure. That is
 what makes the decoupling provable rather than asserted.
 
@@ -645,7 +645,7 @@ the minimal evaluator manifest would never be compiled.
 not only in the manifests. It lists the symbols of the `plakd`,
 `plakous-js-host`, and `plakous-py-host` executables and requires that only the
 JavaScript worker contains QuickJS engine symbols, only the Python worker
-contains Monty interpreter or type-checking symbols, and that the three are
+contains micro-monty interpreter symbols, and that the three are
 separate files by digest.
 A successful run records that success line in
 `${CARGO_TARGET_DIR:-$ROOT/target}/workspace-check-cache.json`. The receipt
@@ -927,10 +927,9 @@ to shipping builds, not ordinary builds or maintainer installation.
 refuses linked worktrees before building or relinking.
 
 The workspace default member is only `plakd`. The parent and evaluator workers
-MUST be built in separate Cargo invocations: Cargo's stable resolver unifies
-`monty-proto/worker` features when the Python worker is selected alongside the
-parent, linking interpreter/type-checking code into `plakd`. Per-package feature
-unification remains an unstable Cargo option on the pinned toolchain. The two
+are built in separate Cargo invocations to keep product features off the
+sidecars. The interpreter is not a product dependency, even under
+workspace-wide feature unification. The two
 commands produce `plakd`, `plakous-js-host`, and `plakous-py-host` in the same directory.
 Apply the same profile, target selection and target-directory settings to both
 invocations; apply product features only to the parent. Bare `cargo build`
@@ -1057,13 +1056,10 @@ with the result; the image name alone is not evidence for the current tree.
 `plakous-cell` contains only the cell protocol, worker client and session.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
 package alongside plakd cannot enable an in-process runtime feature in plakd.
-The Python worker `plakous-py-host` speaks the cell protocol and drives
-`monty-proto`'s upstream `Child` (interpreter and type checker) in process,
-pinned at `1.2.0` together with `monty-types` and `monty-alloc`; no pool
-library or WebSocket transport is linked. Its shell keeps upstream
-`monty-runtime` 1.2.0's 16 MiB worker thread stack, the allocator's hard
-ceiling at the interpreter's soft memory limit plus upstream headroom, and a
-best-effort loss frame on panic. It takes no arguments.
+The Python worker `plakous-py-host` speaks the cell protocol and embeds the
+exact `micro-monty` dependency. It preserves the interpreter heap limit, the
+hard allocator ceiling at that limit plus 4 MiB, and a best-effort loss
+frame on panic. It does not ship the upstream `mm-cell-worker` binary.
 
 For maintainer installation:
 
@@ -1257,7 +1253,7 @@ and `@openai/codex` are not fetched and are not evaluators.
 
 The maintainer installer and reload-rehearsal staging require Python 3.11+ and
 `tools/build/check-artifact-linkage.py` over the produced artifacts before use.
-It matches QuickJS entry points and length-prefixed Monty runtime crate names
+It matches QuickJS entry points and length-prefixed micro-monty runtime crate names
 in raw ELF or Mach-O symbols, so Apple's `nm` needs no demangling support.
 Both worker positive controls and distinct artifact digests are mandatory;
 missing artifacts, a missing symbol lister or an unreadable listing fail closed.
@@ -1288,12 +1284,7 @@ option.
 
 #### Which patch tables a consumer needs
 
-Cargo does not inherit `[patch]` tables from a path dependency, so a downstream
-source consumer repeats in its own root manifest whatever its selection needs.
-No facade selection needs one, including those that reach the Python
-evaluator. Only building the Python worker package itself selects the reviewed
-`monty-typeshed` snapshot (§7.3), and a consumer that omits it builds the
-upstream crate, whose type-checker archive is not byte-reproducible.
+No selection requires a patch table, including the Python worker.
 
 There is no Codex patch table. `plakous-compose` owns the Code Mode parse/DTO
 and description helpers in `cell::codex_exec` and depends on the
@@ -1352,21 +1343,6 @@ Retain a downstream lockfile and fetch its dependency closure before using
 complete example, including utility dependencies. No registry publication or
 independent binary distribution is established by these examples.
 
-The root `[patch.crates-io]` selects the reviewed `vendor/monty-typeshed`
-1.2.0 dependency snapshot. Only its build script and ZIP dependency change:
-ZIP timestamps are fixed to 1980-01-01, entries are sorted by name, and the
-archive is written and read with `zip` 9 instead of the advisory-affected
-`zip` 0.6. The Python stubs and interpreter remain unchanged. The snapshot's
-provenance is recorded in `vendor/monty-typeshed/PLAK-PATCH.md`; it is
-excluded from workspace membership
-and compiled by Cargo as a dependency. This eliminates per-build archive
-extraction and patch application while preserving deterministic type-checker
-assets. The shared lock
-pins `salsa`, `salsa-macros` and `salsa-macro-rules` at 0.28.2 and the Ruff/ty
-crates at 0.0.14, the versions upstream Monty 1.2.0 locks: `salsa` 0.28.5 does
-not compile with `ruff_python_ast` 0.0.14. `just dev-tools deny` audits the unified
-workspace and worker dependency graph.
-
 Three profiles beyond the Cargo defaults exist. `release` uses
 `codegen-units = 1`, speed-focused `opt-level = 3`, fat LTO, and
 `strip = "symbols"`. Panic unwinding remains enabled: stripping retains unwind
@@ -1395,7 +1371,6 @@ all symbols stripped. The tarball includes all three executables and licenses.
 | --- | ---: | ---: | ---: | ---: |
 | `plakd` | 81,903,112 | 67,232,472 | 71,031,984 | 61,277,272 |
 | `plakous-js-host` | 2,500,000 | 2,080,016 | 2,298,784 | 1,988,720 |
-| `plakous-py-host` (measured as `monty`, before the cell protocol) | 35,642,912 | 28,802,632 | 32,455,792 | 27,440,648 |
 | GNU rehearsal `.tar.gz` | - | 41,632,982 | - | 40,392,040 |
 
 | Wall time | Thin | Fat |
@@ -1546,10 +1521,7 @@ verification artifacts, preserving third-party dependency builds. A remaining
 fingerprint path or marker naming a cohort crate in an unrecognized layout
 refuses verification with a diagnostic rather than reusing stale artifacts.
 
-A packaged crate resolves its registry dependencies without the root
-`[patch]` table, so verifying `plakous-py-worker` needs the upstream
-`monty-typeshed` (§6.1), which `Cargo.lock` does not name and `cargo fetch`
-does not download. The `package` group therefore prepares the archives with
+The `package` group prepares the archives with
 `cargo package --locked --no-verify`, offline first and online only if cache
 inputs are missing. It extracts precisely those archives into disposable
 scratch directories and fetches each archive's dependency graph with the same
@@ -1563,7 +1535,7 @@ and the offline step is retried once. That avoids an online run of the
 whole step for a stale entry; any other failure, or a retry that still fails,
 runs that step online (`tools/release/offline_first.py`). Only the cohort siblings are substituted with their
 extracted archives during fetch, so unpublished siblings resolve without
-restoring the workspace's third-party patches. Fetch may update the disposable
+restoring third-party patch tables. Fetch may update the disposable
 locks for those local substitutions; verification uses the original archives
 and their locks. The final `cargo package --locked` builds and verifies strictly
 offline. An explicit `CARGO_NET_OFFLINE=true` remains authoritative during
@@ -1978,30 +1950,18 @@ Run it when dependencies change:
 just dev-tools deny   # cargo deny check --config .config/deny.toml advisories bans licenses sources
 ```
 
-The maintenance advisory RUSTSEC-2023-0089 is excepted only for
-`atomic-polyfill` 1.0.3 in the all-target lock graph. `monty` 1.2.0 enables
-Postcard's default `heapless-cas` feature; `heapless` 0.7.17 selects
-`atomic-polyfill` only for AVR, RISC-V 32-bit bare-metal, Thumbv6m, and Xtensa
-bare-metal targets. Neither supported product target reaches that dependency.
-The workspace checker verifies both supported targets' normal/build dependency
-graphs with all features and fails if the dependency becomes reachable or the
-check cannot complete. This is not a vulnerability waiver for a shipped
-component. Reevaluate the exception when these dependencies or supported
-targets change.
-
-The `zip` extraction advisories RUSTSEC-2026-0367, -0368, -0369 and -0429 are
-excepted only for `zip` 8.6.0, which `ruff_db` 0.0.14 (the Ruff/ty version
-Monty 1.2.0 locks) uses to read the bundled typeshed archive from memory; it
-never calls the affected extraction APIs. `monty-typeshed` itself uses the
-patched `zip` 9 (§7.3). Reevaluate the exception when `ruff_db` moves to
-`zip` 9 or starts extracting archives.
-
 ### 7.2 Licenses
 
 The workspace is `MIT`; vendored sources and the Codex and pi excerpts named in
 the README keep their upstream licenses. `.config/deny.toml` allows Apache-2.0,
-BSD-3-Clause, CDLA-Permissive-2.0, ISC, MIT, MIT-0, MPL-2.0, Unicode-3.0, and
-Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
+BSD-3-Clause, CDLA-Permissive-2.0, ISC, MIT, MIT-0, MPL-2.0, PSF-2.0, Unicode-3.0, and
+Zlib at a 0.8 confidence threshold. micro-monty and its engine crates are
+`MIT AND PSF-2.0 AND Unicode-3.0`. PSF-2.0 covers adapted CPython source and
+algorithms; Unicode-3.0 covers generated character tables. The release
+`THIRD-PARTY` inventory and per-package notices include the upstream
+attributions and the full supplemental license texts.
+
+The other reviewed transitive allowances are:
 
 - **Unicode-3.0** covers Unicode standard tables bundled by otherwise approved
   crates; it does not broaden plakd's own source license.
@@ -2010,23 +1970,12 @@ Zlib at a 0.8 confidence threshold. The reviewed transitive allowances are:
   `foldhash` through `hashbrown`.
 - **MPL-2.0** is an allowance with no current consumer in the lock graph.
 
-`ar_archive_writer` 0.5.3 has a package-and-version-specific allowance for
-`Apache-2.0 WITH LLVM-exception`, matching its bundled license: it is the build-time archive
-writer of `psm`, reached through Ruff's parser `stacker`. `minicbor` 2.3.0 and
-`minicbor-serde` 0.7.1 have package-and-version-specific allowances for the
-permissive `BlueOak-1.0.0`: Monty 1.x serializes session dumps through them,
-although this adapter never dumps a session.
-
 An exception approves those crates, not additional license kinds or unknown
 sources.
 
 ### 7.3 Dependency overrides and the Code Mode protocol
 
-One `[patch.crates-io]` redirect steers a dependency to the reviewed set:
-`monty-typeshed` → the reviewed local fix: a reproducible typeshed archive
-(fixed timestamps, sorted entries) built with `zip` 9. The same change is
-prepared for upstream Monty; remove the override once a reviewed upstream
-release carries it. No dependency resolves from a Git source.
+No dependency uses a workspace patch or a Git source.
 
 Code Mode uses the reviewed `vendor/codex-code-mode-protocol` snapshot and the
 local `plakous-js-runtime` rquickjs evaluator, which runs only in the
@@ -2065,8 +2014,7 @@ client or official native host binary is part of this execution path.
 Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
 `serde_json_canonicalizer`, `tracing`, `vt100`, the OpenTelemetry family, and
-the external `monty-proto` / `monty-types` / `monty-alloc` at
-`=1.2.0`.
+micro-monty at `=0.0.2`.
 
 ### 7.5 Portable crates
 

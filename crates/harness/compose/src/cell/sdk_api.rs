@@ -4,7 +4,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::fmt::Write as _;
 
-use super::render_py::{PythonBootstrap, PythonBootstrapBinding, PythonInput};
+use super::render_py::{PythonBootstrap, PythonBootstrapBinding, PythonInput, add_help};
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct SdkApi {
@@ -425,10 +425,8 @@ impl SdkApi {
         Ok(())
     }
 
-    pub(super) fn stubs(&self) -> String {
-        let mut text =
-            "import asyncio as asyncio\nfrom typing import Any, NamedTuple\nimport builtins\n\n"
-                .to_owned();
+    pub(super) fn declarations(&self) -> String {
+        let mut text = "import asyncio\nfrom typing import Any, NamedTuple\n\n".to_owned();
         for record in &self.records {
             let _ = writeln!(text, "class {}(NamedTuple):", record.name);
             for (name, ty, default) in &record.fields {
@@ -458,35 +456,20 @@ impl SdkApi {
                 Self::stub_function(&mut text, function);
             }
         }
-        text.replace("list[", "builtins.list[")
+        text
     }
 
     fn stub_function(text: &mut String, function: &Function) {
-        // These are unbound namespace functions, matching the bootstrap. The
-        // sandbox's typeshed has no staticmethod type; that decorator would
-        // erase the signature to Any instead of checking SDK calls.
-        let parameters = function
-            .parameters
-            .iter()
-            .map(|p| {
-                format!(
-                    "{}: {}{}",
-                    p.name,
-                    p.annotation,
-                    p.default.map_or_else(String::new, |v| format!(" = {v}"))
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
         let _ = writeln!(
             text,
-            "    async def {}({parameters}) -> {}:\n        \"\"\"{}\"\"\"\n        ...",
-            function.name, function.returns, function.description
+            "    {}:\n        \"\"\"{}\"\"\"\n        ...",
+            function_signature(function),
+            function.description
         );
     }
 
-    pub(super) fn bootstrap(&self) -> PythonBootstrap {
-        let mut source = "from collections import namedtuple\nimport asyncio\n".to_owned();
+    pub(super) fn bootstrap(&self) -> Result<PythonBootstrap, String> {
+        let mut source = "from collections import namedtuple\n".to_owned();
         for record in &self.records {
             let fields = record
                 .fields
@@ -534,7 +517,20 @@ impl SdkApi {
             }
             self.bootstrap_functions(namespace, &mut source, &mut bindings);
         }
-        PythonBootstrap { source, bindings }
+        add_help(
+            &mut source,
+            &self
+                .functions
+                .iter()
+                .map(|function| {
+                    (
+                        format!("{}.{}", function.namespace, function.name),
+                        function_signature(function),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(PythonBootstrap { source, bindings })
     }
 
     fn bootstrap_functions(
@@ -568,7 +564,8 @@ impl SdkApi {
             let indent = "        ";
             let _ = writeln!(
                 source,
-                "{prefix} {name}({parameters}):\n{indent}return _sdk_unwrap(await {private}({{{arguments}}}))"
+                "{prefix} _sdk_{name}({parameters}):\n{indent}return _sdk_unwrap(await {private}({{{arguments}}}))\n\
+                 {prefix} {name}(*args, **kwargs):\n{indent}if len(args) == 1 and isinstance(args[0], dict) and not kwargs:\n{indent}    kwargs = args[0]\n{indent}    args = ()\n{indent}return await {namespace}._sdk_{name}(*args, **kwargs)"
             );
             bindings.push(PythonBootstrapBinding {
                 function: private,
@@ -577,6 +574,15 @@ impl SdkApi {
             });
         }
     }
+}
+
+fn function_signature(function: &Function) -> String {
+    format!(
+        "async def {}({}) -> {}",
+        function.name,
+        signature(&function.parameters, true),
+        function.returns
+    )
 }
 
 fn signature(parameters: &[Parameter], typed: bool) -> String {
@@ -605,7 +611,7 @@ def _sdk_unwrap(value):
             raise ValueError(value.message)
         if value.kind == 'quota':
             raise OverflowError(value.message)
-        raise RuntimeError(value.message)
+        raise ToolError(value.message)
     return value
 ";
 
@@ -625,10 +631,10 @@ mod tests {
         }
     }
     #[test]
-    fn every_sdk_stub_and_wrapper_uses_the_validator_keyword_set() {
+    fn every_sdk_declaration_and_wrapper_uses_the_validator_keyword_set() -> Result<(), String> {
         let api = SdkApi::core();
-        let bootstrap = api.bootstrap();
-        let stubs = api.stubs();
+        let bootstrap = api.bootstrap()?;
+        let declarations = api.declarations();
         assert_eq!(bootstrap.bindings.len(), api.functions.len());
         for function in &api.functions {
             let name = format!("{}.{}", function.namespace, function.name);
@@ -656,7 +662,7 @@ mod tests {
                     parameter.name
                 );
             }
-            assert!(stubs.contains(&format!("async def {}(", function.name)));
+            assert!(declarations.contains(&format!("async def {}(", function.name)));
             let binding = bootstrap
                 .bindings
                 .iter()
@@ -675,6 +681,7 @@ mod tests {
             )
             .is_err()
         );
+        Ok(())
     }
     #[test]
     fn sdk_generated_text_goldens() -> Result<(), Box<dyn std::error::Error>> {
@@ -688,10 +695,13 @@ mod tests {
             .map(|d| d.to_string())
         };
         assert_eq!(
-            vec![digest(&api.stubs())?, digest(&api.bootstrap().source)?],
             vec![
-                "3f6ddd3f3620a7c8372237ad98127453d32d9193a1f3ecb8d1241aaa9cc820c1",
-                "d22b0f6b2b3bf1976338492a9dce756e3a4df3630be7ecbab9987789fdc40e5c"
+                digest(&api.declarations())?,
+                digest(&api.bootstrap()?.source)?
+            ],
+            vec![
+                "19da2c166051c4d9a44a58305be77da9c41887ef4f7b428de239fa2a11826fae",
+                "966da75e45960cc44c4160fe6a5ad71e9bbd6bc445bbd1bfd49f8d0772dadd4b"
             ]
         );
         Ok(())

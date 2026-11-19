@@ -43,7 +43,7 @@ class WorkspaceExclusionTests(unittest.TestCase):
         )
 
     def test_operator_state_and_reviewed_packages_are_allowed(self):
-        manifest = {'exclude': ['.plak', 'vendor/monty-typeshed', 'tests/fixtures/example']}
+        manifest = {'exclude': ['.plak', 'tests/fixtures/example']}
         self.assertEqual(
             workspace_policy.validate_workspace_excludes(manifest, {'tests/fixtures/example'}), []
         )
@@ -1274,7 +1274,7 @@ class LayerPolicyTests(unittest.TestCase):
 class CargoTreeDiagnosticsTests(unittest.TestCase):
     def test_rquickjs_checks_report_cargo_failures_not_missing_linkage(self):
         failed = subprocess.CompletedProcess(
-            [], 101, '', 'error: monty-pool =1.1.0 unavailable offline\n'
+            [], 101, '', 'error: micro-monty =0.0.2 unavailable offline\n'
         )
         with patch.object(workspace_policy.subprocess, 'run', return_value=failed):
             errors = workspace_policy.rquickjs_linkage_errors(ROOT)
@@ -1282,7 +1282,7 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
         for error in errors:
             self.assertIn('cargo tree --offline', error)
             self.assertIn('exit 101', error)
-            self.assertIn('monty-pool =1.1.0 unavailable offline', error)
+            self.assertIn('micro-monty =0.0.2 unavailable offline', error)
             self.assertNotIn('must link', error)
 
     def test_rquickjs_success_uses_stdout_not_diagnostics(self):
@@ -1331,7 +1331,7 @@ class CargoTreeDiagnosticsTests(unittest.TestCase):
 
 class RepositoryPolicyTests(unittest.TestCase):
     def test_atomic_polyfill_exception_is_checked_for_both_supported_targets(self):
-        clean = subprocess.CompletedProcess([], 0, "monty v1.1.0\nheapless v0.7.17\n", "")
+        clean = subprocess.CompletedProcess([], 0, "some-engine v1.1.0\nheapless v0.7.17\n", "")
         with patch.object(workspace_policy.subprocess, "run", return_value=clean) as run:
             self.assertEqual(workspace_policy.supported_target_atomic_polyfill_errors(), [])
         self.assertEqual(run.call_count, 2)
@@ -1347,7 +1347,7 @@ class RepositoryPolicyTests(unittest.TestCase):
     def test_atomic_polyfill_exception_fails_closed_for_reachability_or_tool_failure(self):
         reachable = subprocess.CompletedProcess([], 0, "atomic-polyfill v1.0.3\n", "")
         failed = subprocess.CompletedProcess(
-            [], 101, "", "error: monty-pool =1.1.0 unavailable offline"
+            [], 101, "", "error: micro-monty =0.0.2 unavailable offline"
         )
         with patch.object(workspace_policy.subprocess, "run", side_effect=[reachable, failed]):
             errors = workspace_policy.supported_target_atomic_polyfill_errors()
@@ -1355,7 +1355,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         self.assertIn("reachable", errors[0])
         self.assertIn("--target aarch64-apple-darwin", errors[1])
         self.assertIn("exit 101", errors[1])
-        self.assertIn("monty-pool =1.1.0 unavailable offline", errors[1])
+        self.assertIn("micro-monty =0.0.2 unavailable offline", errors[1])
 
     """The policy as it stands on the committed tree."""
 

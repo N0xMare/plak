@@ -97,7 +97,7 @@ fn python_harness_sdk_identity_golden() -> Result<(), TestError> {
     )?;
     assert_eq!(
         descriptor.identity().to_string(),
-        "3d607d677131a57c307ac6c0597d62932de9deacb53dfbafc656aa2d6366557a"
+        "d59a13ed9a57dffcd903a3d79630e3e2b6755f83264f411d15b22cbc96d44625"
     );
     Ok(())
 }

@@ -47,7 +47,10 @@ RELEASE_RESOLUTIONS = (
     ("plakd",),
     ("plakous-js-runtime", "plakous-py-worker"),
 )
-LICENSE_FILE = re.compile(r"(^|[-_.])(LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|UNLICENSE)", re.I)
+LICENSE_FILE = re.compile(
+    r"(^|[-_.])(LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|UNLICENSE|THIRD[-_]PARTY)", re.I
+)
+PYTHON_NOTICE_DIR = ROOT / "crates/runtimes/py-worker"
 
 
 class ReleaseError(Exception):
@@ -263,6 +266,13 @@ def pack(
                 path.read_bytes(),
                 0o644,
             )
+        if package["name"] == "micro-monty":
+            for name in ("NOTICE", "LICENSE-PSF-2.0", "LICENSE-Unicode-3.0"):
+                path = PYTHON_NOTICE_DIR / name
+                files[f"licenses/micro-monty-{package['version']}/{name}"] = (
+                    path.read_bytes(),
+                    0o644,
+                )
     directories = {stem} | {
         f"{stem}/{parent}"
         for name in files

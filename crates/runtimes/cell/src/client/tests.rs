@@ -47,8 +47,7 @@ async fn refusal(opening: &[u8], bound: Duration) -> String {
     let program = worker(directory.path(), opening);
     let started = tokio::time::Instant::now();
     let Err(error) =
-        CellClient::spawn_within(&program, QUICKJS_WORKER, EngineConfig::QUICKJS, bound, None)
-            .await
+        CellClient::spawn_within(&program, QUICKJS_WORKER, EngineConfig::QUICKJS, bound).await
     else {
         panic!("the worker must be refused before it is configured");
     };
@@ -152,7 +151,6 @@ async fn a_delayed_hello_uses_the_supplied_startup_bound() {
         QUICKJS_WORKER,
         EngineConfig::QUICKJS,
         Duration::from_secs(5),
-        None,
     )
     .await
     .expect("a slow worker inside the bound is usable");
@@ -201,7 +199,6 @@ async fn a_worker_that_exits_on_its_own_is_never_signalled() {
     let program = worker(directory.path(), &opening);
     let source = std::fs::read_to_string(&program).expect("program");
     let configure = encode_frame(&HostFrame::Configure {
-        sdk_stubs: None,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine: EngineConfig::QUICKJS,
     })

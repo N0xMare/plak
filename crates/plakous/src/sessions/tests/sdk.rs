@@ -13,11 +13,11 @@ struct SdkModel {
 }
 const CELLS: &[(&str, &str)] = &[
     (
-        "files = await asyncio.gather(ctx.read('ref_seed'), ctx.read('seed'), ctx.read('seed'), ctx.read('seed'))\nawait fs.apply([fs.Write('result', files[0].text, expect='absent')])\nawait state.put('answer', {'n': 42})\nprint('saved', len(files))",
+        "files = await asyncio.gather(ctx.read(target='ref_seed'), ctx.read({'target': 'seed'}), ctx.read(target='seed'), ctx.read(target='seed'))\nawait fs.apply([fs.Write('result', files[0].text, expect='absent')])\nawait state.put('answer', {'n': 42})\nprint('saved', len(files))",
         "saved 4",
     ),
     (
-        "print((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('float_large', [1e16] * 35000)\nexcept ValueError:\n    print('inexact float refused')\nprint(await state.get('float_large', 'float not stored'))\nawait state.put('float_near', [1e15] * 26000)\nassert len(await state.get('float_near')) == 26000\nawait state.drop('float_near')\nprint('canonical round trip')\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
+        "assert 'files' not in globals()\nprint((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('float_large', [1e16] * 35000)\nexcept ValueError:\n    print('inexact float refused')\nprint(await state.get('float_large', 'float not stored'))\nawait state.put('float_near', [1e15] * 26000)\nassert len(await state.get('float_near')) == 26000\nawait state.drop('float_near')\nprint('canonical round trip')\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
         "quota refused",
     ),
     (
@@ -25,8 +25,8 @@ const CELLS: &[(&str, &str)] = &[
         "MemoryError",
     ),
     (
-        "await fs.apply([fs.Write('not-run', 'bad')])\nawait fs.apply(42)",
-        "type errors; nothing ran",
+        "await fs.apply([fs.Write('ran-before-error', 'committed')])\nawait fs.apply(42)",
+        "invalid arguments for fs.apply",
     ),
     (
         "print((await state.get('answer'))['n'])\nprint((await proc.run(['/bin/echo', 'literal ; argv'])).output)\nprint((await proc.run(['/bin/cat'], stdin='stdin round trip')).output)\njob = await proc.start(['/bin/echo', 'fast job'])\nprint((await proc.join(job, timeout_s=2)).status)",
@@ -376,8 +376,11 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
             std::fs::read_to_string(directory.path().join("result"))?,
             "hello SDK\n"
         );
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("ran-before-error"))?,
+            "committed"
+        );
     }
-    assert!(!directory.path().join("not-run").exists());
     assert_eq!(model.calls.load(Ordering::Acquire), model.cells.len() + 1);
     let locator = session.locator();
     session.release().await?;

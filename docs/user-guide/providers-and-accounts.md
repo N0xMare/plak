@@ -351,11 +351,16 @@ per-cell cap has an explicit truncation notice.
 Steers yield observation without killing the cell, and nested agent/process
 awaits are allowed.
 
-This build runs Monty 1.2.0 in `plakous-py-host` on the cell protocol under
-adapter `plakous.monty-python-adapter.v9`. It refuses to reopen py-ptc roots
-and children recorded under any other engine contract, profile or presentation;
-there is no migration. Carry such a session with `plakd session export` /
-`plakd session import` when its export version is importable (13 or 12).
+Call tools using schema-named keywords or a dictionary. `asyncio` is
+pre-imported, `help(tool)` prints its typed signature, and tool failures raise
+`ToolError`. Structured results do not need `json.loads`; text stays text.
+
+This build runs micro-monty in `plakous-py-host`. An exact reopen of a
+Monty-recorded py-ptc or py-sdk session refuses before inference with
+“recorded evaluator path, bytes or contract is unavailable or inconsistent;
+no inference was dispatched”. Use the writing build's `plakd session export
+<id>`, then this build's `plakd session import <file>` (importable versions
+are 13 and 12). The carry does not restore the former Python globals.
 
 `js-ptc` and `py-ptc` are one plakd-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit
@@ -365,7 +370,7 @@ and an unsupported tuple fails before inference.
 Both `native-ptc` and `js-ptc` need the `plakous-js-host` sidecar — `PLAK_JS_HOST`
 or a `plakous-js-host` beside the `plakd` binary, which the separate worker build
 produces beside `plakd`. `py-ptc` and `py-sdk` need `PLAK_PY_HOST` or a sibling `plakous-py-host`. The normal build
-produces both workers, including the pinned upstream Monty runtime. A missing
+produces both workers, including the pinned micro-monty interpreter. A missing
 sidecar fails closed.
 
 Grok, Claude, OpenRouter and the Anthropic and xAI APIs have no native PTC

@@ -25,6 +25,13 @@ also keep compatibility with their immediately preceding version.
 
 ### Plakous
 
+- Use micro-monty in the isolated Python worker for py-ptc and py-sdk. Call
+  tools with keyword arguments or a dictionary, inspect signatures with
+  `help(tool)`, and consume structured results directly. Tool failures raise
+  `ToolError`; the SDK no longer type-checks before running. Earlier tool
+  effects are not rolled back by a later error. Old Monty sessions cannot
+  reopen exactly; carry them with a compatible export and import.
+
 - Bind Codex and SuperGrok credential authority to the profile id, slot id
   and, for SuperGrok, the account scope. The store path is not an input, so
   the same login served from two paths binds the same session. Claude stays

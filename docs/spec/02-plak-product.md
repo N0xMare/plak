@@ -7445,10 +7445,12 @@ core catalog.
   `source` string, the source is an async module with no top-level return,
   output is emitted with `text(...)`, and nested tools are called as
   `await tools.name({...})`.
-- **`py-ptc`** -- the plakd-owned Python harness on the Monty worker.
+- **`py-ptc`** -- the plakd-owned Python harness on the micro-monty worker.
   Provider-visible set is `exec_py` and `wait_py`; `exec_py` takes a `code`
   string and optional `yield_time_ms` (default and maximum 10,000 ms), nested
-  tools are injected async functions called as `await name({...})`, and both
+  tools are injected async functions called as `await name(key=value)` or
+  `await name({...})`. Results are structured Python values or text;
+  `help(name)` prints the typed signature. Both
   printed lines and the last expression are visible in the result. A running
   cell returns its id; `wait_py {cell_id, yield_time_ms?, terminate?}` observes
   it with a 10-second default and 600-second clamp. Its optional
@@ -7456,9 +7458,9 @@ core catalog.
   yields the observation without killing the cell. Agent/process awaits
   may be called inside Python cells, just as in JavaScript.
 
-- **`py-sdk`** — root-only typed Python on the same Monty worker, with just
-  `run_py`. Cells are type-checked before I/O, start with fresh globals, and
-  preserve only session-owned `state` values. The base instruction replaces
+- **`py-sdk`** — root-only typed Python on the same worker, with just
+  `run_py`. Cells start with fresh globals and preserve only session-owned
+  `state` values. No Python cell runs a pre-run type checker. The base instruction replaces
   the family base, names the typed namespaces, requires awaited I/O, directs
   long work to `proc.start`, and states processes have full user authority.
   Core tools only: this root does not open a topology even when subagents are

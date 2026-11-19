@@ -1,14 +1,12 @@
-//! `plakous-py-host`: the Monty cell worker. It speaks the cell protocol on
-//! stdin and stdout and drives the pinned upstream `monty_proto` child state
-//! machine in process. Diagnostics go to stderr; stdout carries only frames.
+//! `plakous-py-host`: the micro-monty worker on the Plak cell protocol.
+//! Diagnostics go to stderr; stdout carries only frames.
 
-use std::{io, panic, process::ExitCode, thread};
+use std::{alloc::System, io, panic, process::ExitCode};
 
-use plakous_cell::{LossClass, WorkerFrame, write_frame_blocking};
+use plakous_cell::{EngineConfig, LossClass, WorkerFrame, write_frame_blocking};
 
 mod cell;
 mod codec;
-mod prompts;
 #[cfg(all(feature = "test-hooks", debug_assertions))]
 mod test_hooks;
 #[cfg(not(all(feature = "test-hooks", debug_assertions)))]
@@ -20,30 +18,22 @@ mod test_hooks {
 }
 
 #[global_allocator]
-static ALLOC: monty_alloc::LimitedAllocator = monty_alloc::LimitedAllocator;
+static ALLOC: cap::Cap<System> = cap::Cap::new(System, HARD_MEMORY_BYTES);
 
-/// Native stack for the worker thread. The interpreter's container `repr` and
-/// `==` and the value exporter recurse once per nesting level, up to the
-/// 1000-frame recursion limit. The memory is reserved, not committed.
-const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+const HARD_MEMORY_BYTES: usize = 260 * 1024 * 1024;
+
+const _: () = assert!(matches!(
+    EngineConfig::MONTY,
+    EngineConfig::Monty { memory_bytes } if memory_bytes + 4 * 1024 * 1024 == HARD_MEMORY_BYTES as u64
+));
 
 fn main() -> ExitCode {
     if test_hooks::probe() {
         return ExitCode::SUCCESS;
     }
     install_panic_hook();
-    match thread::Builder::new()
-        .name("plakous-py-host".to_owned())
-        .stack_size(WORKER_STACK_SIZE)
-        .spawn(cell::serve)
-    {
-        // A panic has already written its loss frame in the hook.
-        Ok(worker) => worker.join().unwrap_or(ExitCode::from(101)),
-        Err(error) => {
-            eprintln!("plakous-py-host: failed to spawn the worker thread: {error}");
-            ExitCode::FAILURE
-        }
-    }
+    // The interpreter and global capped allocator run on one thread.
+    panic::catch_unwind(cell::serve).unwrap_or(ExitCode::from(101))
 }
 
 /// Writes a best-effort `HostLost` frame before the default unwind, so the

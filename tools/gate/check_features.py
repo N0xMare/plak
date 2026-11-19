@@ -707,7 +707,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
     "plakous-runner-dial": "c09c036c17a063b8cab99b89d81a7172d85026b1eddb4c81e852bd79ac4afc79",
-    "plakous-py-worker": "1c7107be21d5a7c5aa653e21f3dded3fb74043df734e4d9edfe5a9bf5948a012",
+    "plakous-py-worker": "a57aa21aae27cf1d29ffd768d8c12c1436b38855423c4621e1c1048dc5f52ec6",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
     "plakous": "0dc929754774cac56e3cbf49ef90ee92ac5f9212986e8fa3bf596e893b7f7e88",
     "plakous-agent": "c0493a5d9f2387a4342ab95f9a02d0e87a5020ea2b7fd57423a77202ad2a5a86",
@@ -756,6 +756,7 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ),
     ("plakd", ("git-cli", "python", "mcp")): ("image",),
     ("plakd", ("default",)): (
+        "micro-monty",
         "jj-lib",
         "gix",
         "pollster",
@@ -768,14 +769,14 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "arboard",
         "pulldown-cmark",
     ),
-    ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
+    ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "micro-monty", "rsa"),
     ("plakous", ("codex",)): (
         "aws-lc-rs",
         "aws-lc-sys",
         "rsa",
         "plakous-xai",
         "plakous-anthropic",
-        "monty-pool",
+        "micro-monty",
         "htmd",
     ),
     ("plakous", ("grok",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
@@ -785,7 +786,7 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ("plakd", ("git-cli",)): ("jj-lib", "gix", "pollster"),
     ("plakous", ("composition",)): (
         "htmd",
-        "monty-proto",
+        "micro-monty",
         "plakous-auth",
         "plakous-http",
         "plakous-js-runtime",
@@ -795,7 +796,7 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ("plakous", ("composition", "sessions-sqlite")): (
         "plakous-auth",
         "plakous-http",
-        "monty-proto",
+        "micro-monty",
     ),
     # Credential-store, MCP and Claude closures never acquire JWT crypto.
     ("plakous", ("auth",)): ("jsonwebtoken", "plakous-openai", "plakous-xai"),
@@ -823,7 +824,7 @@ NAMED_VARIANT_EXCLUSIONS = {
     "api": ("jsonwebtoken",),
     "minimal": (
         "rmcp",
-        "monty-pool",
+        "micro-monty",
         "tungstenite",
         "image",
         "htmd",
@@ -944,7 +945,7 @@ def validate_excluded_closures() -> list[str]:
         if name in NAMED_VARIANT_EXCLUSIONS:
             pins[("plakd", selected)] = NAMED_VARIANT_EXCLUSIONS[name]
     without_python = tuple(sorted(set(manifest["features"]["default"]) - {"python"}))
-    pins[("plakd", without_python)] = ("monty-pool",)
+    pins[("plakd", without_python)] = ("micro-monty",)
     without_web = tuple(sorted(set(manifest["features"]["default"]) - {"web"}))
     pins[("plakd", without_web)] = ("tungstenite", "tokio-tungstenite")
     for (package, selected), excluded in sorted(pins.items()):

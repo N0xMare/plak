@@ -158,10 +158,6 @@ REVIEWED_REFERENCES: dict[str, tuple[frozenset[str], str]] = {
         frozenset({"README.md"}),
         "an expected manifest readme value",
     ),
-    "vendor/monty-typeshed/src/lib.rs": (
-        frozenset({"README.md"}),
-        "the vendored crate's own README",
-    ),
 }
 # Gate readers of an excluded path: the exact path each one reads.
 EXCLUDED_READERS = {

@@ -746,7 +746,7 @@ async fn failing_nested_call_is_catchable_in_python() {
                 items.iter().any(|item| matches!(
                     item,
                     LocalCompositionContentItem::Text(text)
-                        if text.contains("RuntimeError") && text.contains("denied by host")
+                        if text.contains("ToolError") && text.contains("denied by host")
                 )),
                 "{items:?}"
             );
@@ -1097,7 +1097,7 @@ async fn a_stuck_worker_request_after_nested_reply_is_killed() {
 }
 
 #[tokio::test]
-async fn allocator_exit_after_nested_result_is_not_acceptance() {
+async fn oversized_object_fails_before_a_nested_call() {
     let Some(worker) = py_host() else { return };
     let bundle = python_session(
         &worker,
@@ -1105,41 +1105,25 @@ async fn allocator_exit_after_nested_result_is_not_acceptance() {
     )
     .await
     .expect("session");
-    let mut events = bundle.events;
     let session = bundle.session;
-    // The value fits the interpreter's soft budget. Exporting it after the
-    // reply needs a second copy and crosses the allocator's hard ceiling.
+    // micro-monty caps an individual string before the aggregate heap limit.
     let started = session
         .execute(blocking_cell(
-            "hard-ceiling",
-            "x = 'a' * (240 * 1024 * 1024)\nawait fetch({})\nx",
+            "object-limit",
+            "x = 'a' * (65 * 1024 * 1024)\nawait fetch({})\nx",
         ))
         .await
         .expect("start");
-    let LocalCompositionEvent::NestedCall { responder, .. } =
-        tokio::time::timeout(Duration::from_secs(15), events.receive())
-            .await
-            .expect("call bound")
-            .expect("events")
-            .expect("call")
-    else {
-        panic!("nested call");
-    };
-    assert_eq!(
-        tokio::time::timeout(
-            Duration::from_secs(15),
-            responder.resolve(serde_json::json!(7))
-        )
-        .await
-        .expect("delivery bound")
-        .expect("outcome"),
-        LocalCompositionNestedDelivery::HostLost
-    );
     assert!(matches!(
-        started.initial_response.await,
-        Err(LocalCompositionSessionLoss::HostLost(_))
+        started.initial_response.await.expect("definite terminal"),
+        LocalCompositionResponse::Result { error: Some(ref message), .. }
+            if message.contains("MemoryError")
     ));
-    let _ = session.shutdown().await;
+    assert!(!session.generation_lost());
+    assert!(matches!(
+        session.shutdown().await,
+        LocalCompositionShutdownResult::Joined { .. }
+    ));
 }
 
 #[tokio::test]
@@ -1300,9 +1284,9 @@ async fn assert_real_worker_future_receipts(
 #[tokio::test]
 async fn unawaited_bound_tool_never_dispatches() {
     assert_real_worker_future_receipts(
-        "print(fetch({}))\nprint('cell finished without awaiting')",
+        "help(fetch)\nprint(fetch({}))\nprint('cell finished without awaiting')",
         &[],
-        "cell finished without awaiting",
+        "async def fetch(",
     )
     .await;
 }
@@ -1328,7 +1312,7 @@ async fn mixed_unused_and_awaited_bound_tools_dispatch_only_the_awaited_call() {
 }
 
 #[tokio::test]
-async fn undecodable_nested_result_never_acknowledges_delivery() {
+async fn nested_json_u64_is_delivered_without_rounding() {
     let Some(worker) = py_host() else {
         return;
     };
@@ -1361,20 +1345,15 @@ async fn undecodable_nested_result_never_acknowledges_delivery() {
     let LocalCompositionEvent::NestedCall { responder, .. } = event else {
         panic!("expected nested call");
     };
-    // Above i64::MAX: the host cannot encode it, so the batch is never sent.
-    let value = serde_json::json!(u64::MAX);
-    assert!(
-        matches!(
-            responder.resolve(value).await.expect("delivery outcome"),
-            LocalCompositionNestedDelivery::NotObserved(_)
-        ),
-        "a batch this host refused to send never reached the cell, which is \
-         definite non-delivery rather than an unknown acceptance"
+    assert_eq!(
+        responder
+            .resolve(serde_json::json!(u64::MAX))
+            .await
+            .expect("delivery outcome"),
+        LocalCompositionNestedDelivery::Accepted
     );
-    assert!(matches!(
-        started.initial_response.await,
-        Err(LocalCompositionSessionLoss::ProtocolViolation(_))
-    ));
+    let outcome = started.initial_response.await.expect("result");
+    assert_eq!(cell_outcome(&outcome), (u64::MAX.to_string(), None));
     assert!(matches!(
         session.shutdown().await,
         LocalCompositionShutdownResult::Joined { .. }
@@ -1421,7 +1400,7 @@ async fn uncaught_nested_rejection_is_accepted_and_preserves_python_exception() 
         .expect("definite Python cell failure");
     assert!(
         matches!(response, LocalCompositionResponse::Result { error: Some(ref message), .. }
-        if message.contains("RuntimeError") && message.contains("exact nested failure"))
+        if message.contains("ToolError") && message.contains("exact nested failure"))
     );
     assert!(matches!(
         session.shutdown().await,
@@ -1582,7 +1561,7 @@ async fn cancellation_joins_all_unfinished_awaited_tool_calls() {
 #[tokio::test]
 async fn lazy_tool_invalid_arguments_are_catchable_without_dispatch() {
     assert_real_worker_future_receipts(
-        "errors = 0\nfor value in [None, [], 1, 'bad']:\n    try:\n        await fetch(value)\n    except TypeError:\n        errors += 1\ntry:\n    await fetch({}, {})\nexcept TypeError:\n    errors += 1\nassert errors == 5\nprint(await fetch(arguments={}))",
+        "errors = 0\nfor value in [None, [], 1, 'bad']:\n    try:\n        await fetch(value)\n    except TypeError:\n        errors += 1\ntry:\n    await fetch({}, {})\nexcept TypeError:\n    errors += 1\nassert errors == 5\nprint(await fetch())",
         &[serde_json::json!({})],
         "consumed reply",
     )
@@ -1874,12 +1853,12 @@ probe('cwd', lambda: os.getcwd())
     assert_eq!(
         text,
         "open: PermissionError\npath: PermissionError\ngetenv: RuntimeError\n\
-         environ: RuntimeError\nurandom: RuntimeError\nsleep: RuntimeError\n\
+         environ: RuntimeError\nurandom: ok\nsleep: ok\n\
          isfile: PermissionError\nexists: PermissionError\nisdir: PermissionError\n\
          islink: PermissionError\nlexists: PermissionError\ngetsize: PermissionError\n\
          realpath: PermissionError\nexpanduser: RuntimeError\nexpandvars: RuntimeError\n\
          glob: RuntimeError\nrglob: RuntimeError\nos.walk: RuntimeError\n\
-         Path.walk: RuntimeError\nscan: RuntimeError\nasync_sleep: RuntimeError\n\
+         Path.walk: RuntimeError\nscan: RuntimeError\nasync_sleep: ok\n\
          host_import: ModuleNotFoundError\nnow: ok\ntoday: ok\ntime: ok\nrandom: ok\ncwd: ok"
     );
 }
@@ -1942,7 +1921,8 @@ async fn shared_values_cannot_expand_past_the_host_bounds() {
         &[
             &format!("{shared}a"),
             &format!(
-                "{shared}try:\n    await fetch({{'x': a}})\nexcept ValueError as error:\n    print(error)\n"
+                "{}try:\n    await fetch({{'x': a}})\nexcept ValueError as error:\n    print(error)\n",
+                shared.replace("range(40)", "range(25)")
             ),
         ],
     )

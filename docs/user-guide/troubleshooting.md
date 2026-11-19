@@ -839,7 +839,7 @@ The usual cause is running a `plakd` from somewhere else -- a copy, or a stale
 `~/.cargo/bin/plakd`. Rebuild and install, or point `PLAK_JS_HOST` at the sidecar.
 Build the parent with `cargo build --release --locked -p plakd`, then both workers
 with `cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker`.
-Separate invocations keep Monty runtime features out of `plakd`.
+The Python interpreter is linked only into `plakous-py-host`.
 Rebuild the complete product, or set `PLAK_PY_HOST` to that `plakous-py-host` binary.
 
 ## A Python cell raises `PermissionError` or `RuntimeError` for host access

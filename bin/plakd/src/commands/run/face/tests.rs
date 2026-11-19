@@ -192,7 +192,7 @@ fn python_composition_lines_name_the_observable_selection() {
         ),
         (
             "py-sdk",
-            "the model uses the typed Python SDK in fresh, type-checked cells",
+            "the model uses the typed Python SDK in cells with fresh globals",
         ),
     ] {
         let info = SessionInfoView {

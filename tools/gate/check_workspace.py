@@ -5452,10 +5452,10 @@ RQUICKJS_ENGINE_SYMBOL_MARKERS = (
 # The three executables Plak's Cargo-native build produces.
 PRODUCT_EXECUTABLES = ("plakd", "plakous-js-host", "plakous-py-host")
 
-# Length-prefixed crate identifiers in legacy and v0 Rust symbols. Adapter
-# names (json_to_monty, monty_proto's client) are not interpreter code.
-MONTY_RUNTIME_SYMBOLS = re.compile(
-    r"(?<![0-9])(?:5monty|11monty_alloc|19monty_type_checking|11monty_proto6worker)(?=[0-9A-Z_]|$)"
+# Length-prefixed crate identifiers in legacy and v0 Rust symbols.
+PYTHON_RUNTIME_SYMBOLS = re.compile(
+    r"(?<![0-9])(?:11micro_monty|10mm_compile|7mm_core|9mm_engine|8mm_parse|9mm_stdlib)"
+    r"(?=[0-9A-Z_]|$)"
 )
 
 
@@ -5515,13 +5515,11 @@ def artifact_linkage_findings(
             errors.append(f"{name}: could not list symbols with {tool_name}")
             continue
         found = engine_symbol_markers(output)
-        monty_runtime = MONTY_RUNTIME_SYMBOLS.search(output) is not None
-        if name != "plakous-py-host" and monty_runtime:
-            errors.append(f"{name} links the Monty runtime; interpreter must remain in the worker")
-        if name == "plakous-py-host" and not monty_runtime:
-            errors.append(
-                "plakous-py-host does not link the Monty runtime; cannot verify isolation"
-            )
+        python_runtime = PYTHON_RUNTIME_SYMBOLS.search(output) is not None
+        if name != "plakous-py-host" and python_runtime:
+            errors.append(f"{name} links micro-monty; interpreter must remain in the worker")
+        if name == "plakous-py-host" and not python_runtime:
+            errors.append("plakous-py-host does not link micro-monty; cannot verify isolation")
         if name == "plakd" and found:
             errors.append(
                 f"plakd links the QuickJS engine ({sorted(found)!r}); the product "
@@ -6139,8 +6137,7 @@ def validate_workspace_excludes(
     errors: list[str] = []
     if ".plak" not in excludes:
         errors.append("workspace must exclude .plak operator state and fork worktrees")
-    reviewed_vendor_packages = {"vendor/monty-typeshed"}
-    unknown_excludes = excludes - supported_fixture_paths - reviewed_vendor_packages - {".plak"}
+    unknown_excludes = excludes - supported_fixture_paths - {".plak"}
     if unknown_excludes:
         errors.append(
             f"workspace excludes unsupported nested packages: {sorted(unknown_excludes)!r}"

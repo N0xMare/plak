@@ -2861,48 +2861,26 @@ shutdown on a synchronous write. Failed or interrupted reaping never counts as
 successful joined cleanup.
 
 The Python evaluator remains a worker process, `plakous-py-host`, driven by
-plakd's cell client over the cell protocol. It runs the pinned upstream
-interpreter, allocator and child state machine in process; no pool library is
-linked. The interpreter
-and allocator are not linked into plakd. Cargo verifies registry dependencies
-against the shared workspace lock. The reviewed local interpreter and typeshed
-snapshots are part of the repository source closure.
+plakd's cell client over the cell protocol. It embeds the exactly pinned
+micro-monty interpreter. Neither the interpreter nor the capped allocator
+links into plakd. Cargo verifies registry dependencies against the shared lock.
 
-The worker holds no host authority. There is no remote transport, and no
-mounts are configured (`os.getcwd()` reports the virtual `/`). Every OS call
-the interpreter raises is refused inside the worker, which never forwards one
-to the host; nested tool calls are the only requests that leave it, and the
-host checks each against the allowlist and core admission. Both workers'
-path and SHA-256 are re-checked immediately before spawn. Host `import`
-raises `ModuleNotFoundError`. Python PTC cells run with type checking disabled
-(`type_check: false`). Python SDK cells run with type checking enabled against
-the host-generated SDK stubs; diagnostics end the cell with `type errors;
-nothing ran` before any nested host call (chapter 01 §9.9). A module stub
-request (`import_stubs`), if any, receives no host stubs. `Path.scan`
-(including `os.scandir`) raises `RuntimeError` explaining
-that filesystem
-access is not available in cells and nested tools must be used. This non-`OSError`
-refusal also makes `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` raise
-rather than silently returning no entries. Other filesystem paths, `open`,
-and `os.path` predicates raise `PermissionError`. `os.getenv`, `os.environ`,
-`os.path.expanduser` and `os.path.expandvars` (via `getenv`), `os.urandom`,
-and `time.sleep` and `asyncio.sleep` (configured to suspend to the host)
-raise `RuntimeError`. No host data reaches the cell through these routes.
-The interpreter answers clock reads (`datetime.now`,
-`date.today`, `time.time` and the other `time` clocks, in UTC) and seeds
-`random` from its own process entropy without suspending; neither reaches
-host state. Name reads of undefined names stay undefined (`NameError`).
+The worker holds no tool, store or credential authority. There is no remote
+transport, no configured filesystem and no host environment available to
+Python. The only calls forwarded to the host are the catalog's nested tool
+calls, subject to the existing allowlist and core admission. Both workers'
+path and SHA-256 are re-checked immediately before spawn. Host imports are
+unavailable. `Path.scan` raises a `RuntimeError` telling the model to use
+nested tools, so `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` do not
+silently appear empty. The bundled `os` and `pathlib` do not read the real
+filesystem or host environment, and `os.getcwd()` reports a virtual path.
+Python may read the clock; its sleep and random facilities are internal to
+the interpreter. No entropy, file or environment capability is installed.
+Neither Python presentation runs a pre-run type checker.
 
-One dependency override is pinned in the workspace manifest's
-`[patch.crates-io]` table, and no dependency resolves from a Git source. The
-pinned Code Mode grammar is not an override:
-`plakous-compose` (`cell::codex_exec`) consumes the reviewed `vendor/codex-code-mode-protocol`
-snapshot by path, with its license and per-file provenance, so no consumer needs
-a Codex patch table.
-
-| Override | Replacement | Why |
-| --- | --- | --- |
-| `monty-typeshed` from crates.io | the reviewed local 1.2.0 snapshot | deterministic ZIP timestamps and entry ordering for bundled type-checker assets, written with `zip` 9 instead of the advisory-affected `zip` 0.6 |
+No dependency resolves from a Git source. The pinned Code Mode grammar is
+not an override: `plakous-compose` consumes a reviewed vendor snapshot by
+path, with its license and per-file provenance.
 
 The vendored snapshot (package `plakous-codex-code-mode-protocol`, upstream
 `codex-code-mode-protocol`) is upstream version 0.153.3
@@ -2910,13 +2888,6 @@ at an exact Git revision. Plakous uses its protocol and presentation types;
 there is no vendored remote-session client or upstream evaluator host. Code Mode
 execution uses the `plakous-cell` protocol/client and `plakous-js-runtime`
 worker or optional embedded runtime.
-
-The local interpreter override retains upstream provenance and license; its
-only change is the one-line toolchain fix. The local typeshed override retains
-upstream provenance and licenses. Only its build script changes: fixed ZIP timestamps and sorted entries. Interpreter
-and Python stub content are unchanged. No runtime archive preparation,
-generated manifest, separate worker lock or per-build source patching is used;
-the override is covered by the attested source closure (chapter 06).
 
 Dependencies are locked, and source, license, and advisory policy is enforced
 by `cargo deny`. Fixtures are sanitized: no copied credentials and no live

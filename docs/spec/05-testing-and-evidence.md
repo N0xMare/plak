@@ -994,7 +994,7 @@ musl qualification container's wasm check, chapter 06 §7.5) names each skip as
 `== skipped: <check> ==` in its final summary and writes neither file.
 Chapter 06 §6.5 says which later trees that evidence still covers. `--steps` runs exactly its named groups, in canonical order,
 rejects unknown or empty groups, and implies no other group; test groups still
-prepare their real Monty-worker prerequisite. Independent runners must use
+prepare their real Python worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a
 `== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
 Two groups build only in directories of their own and assert nothing about
@@ -1032,7 +1032,7 @@ an ancestor repository or fall back to an empty set. A source export uses a
 walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
 repository or explicit packages. A root Cargo input (manifest, lockfile, toolchain,
 lint, format or nextest config, `.cargo/`), or any path under `vendor/`
-(vendored members and the patched `monty-typeshed` source), selects every
+(vendored members), selects every
 package. A file outside every package that a package's tests read selects that
 package: chapter 07, `docs/reference-config/` and
 `tests/fixtures/config-scenarios/` select `plakd`. Its parallel
@@ -1220,7 +1220,7 @@ intermediate test-executable layout. The product's artifact path is passed as
 `PLAK_MCP_SERVER` and `PLAK_TEST_BINARY` overrides instead select existing
 executables (all four are required to skip the test build); missing, empty,
 directory, or non-executable paths fail the gate. All nextest lanes receive
-their absolute paths, so real Monty tests
+their absolute paths, so real Python tests
 cannot silently take their missing-worker early return. A worker that cannot
 run or speak the protocol fails those tests. Manually invoked Rust tests
 without a worker retain their existing limited, potentially skipped coverage.
@@ -1235,16 +1235,15 @@ and replace any inherited fixture paths before running or listing tests. A
 missing or unusable artifact refuses the run instead of using stale siblings.
 
 Python regressions distinguish queue handoff from correlated worker
-acceptance, lost receipts from successful delivery, and bounded value conversion
-refusal from a delivered Python exception. The worker validates the complete
-upstream futures batch in process before handing it to the interpreter.
-Real worker cases exercise out-of-order `asyncio.gather` results, uncaught nested
-rejection, typed record/byte results, print ordering, persistent globals, soft
-memory errors, allocator-hard-ceiling loss before acceptance, and the compute
-watchdog. Shared-client tests preserve voluntary and forced reaping receipts,
-failed-wait loss, and cleanup after a definite failed cell costs its generation.
-Worker unit tests preserve the
-undecodable-traceback definite-failure distinction and the type-checker stubs.
+acceptance, lost receipts from successful delivery, and rejected values
+from a delivered Python exception. Offline conformance adapts micro-monty's
+parallel weather, retry/permanent-error and stop-early pagination tasks to
+the real worker and cell protocol. It holds replies until the whole gather
+batch is admitted, exercises typed errors and a retry, and verifies
+structured values and unparsed text. Additional real worker cases exercise
+typed record/byte results, ordered and capped print output, persistent versus
+fresh globals, SDK named state, catchable memory errors, the compute watchdog,
+and termination with joined process cleanup.
 The durability profile's `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
 kills both real workers at test-only boundaries before result handoff and
 after their acceptance receipts but before terminal publication. The first leaves
@@ -6210,7 +6209,7 @@ lease gate, then observes zero actual executor entries after expiry. Cancellatio
 and mutable policy revision variants exercise the final gate; policy rejection
 remains an ordinary zero-start tool result. The evaluator source-wait test uses
 a fake session with a heap-entry counter after its preparation barrier; it proves
-the runtime callback contract. Built-in QuickJS/Monty callback placement is
+the runtime callback contract. Built-in QuickJS/Python callback placement is
 source-audited; existing evaluator integration tests exercise normal execution.
 
 `public_cancellation_during_scheduled_compaction_joins_pending_start_and_stream`
@@ -6526,7 +6525,7 @@ runtime head the recovery predicate cannot close (refused).
 Inspector fixtures compare the independent abandoned-turn flag with the runtime
 predicate and distinguish saved-terminal closure. The facade fixtures exercise working-head
 abandonment and saved-terminal inspection without store mutation and recorded
-JS/Monty evaluator identity checks, including changed/missing historical
+JS/Python evaluator identity checks, including changed/missing historical
 artifacts. Evidence qualifies pure decoded-head predicates and presentation
 limits only: it does not establish authenticated provider construction,
 harness reconstruction, staged tool descriptor/presentation equivalence,

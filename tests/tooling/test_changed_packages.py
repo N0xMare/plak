@@ -136,7 +136,7 @@ class TouchedPackagesTests(unittest.TestCase):
                 self.assertEqual(self.touched("bin/plakd/src/lib.rs", path), ["--workspace"])
 
     def test_vendored_patch_sources_select_the_whole_workspace(self):
-        self.assertEqual(self.touched("vendor/monty-typeshed/src/lib.rs"), ["--workspace"])
+        self.assertEqual(self.touched("vendor/unclassified/src/lib.rs"), ["--workspace"])
 
     def test_the_real_workspace_maps_every_manifest_to_its_package(self):
         dirs = CHANGED.package_dirs()

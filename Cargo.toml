@@ -2,7 +2,6 @@
 default-members = ["bin/plakd"]
 exclude = [
     ".plak",
-    "vendor/monty-typeshed",
     "tests/fixtures/agent-consumer",
     "tests/fixtures/facade-consumer",
 ]
@@ -357,9 +356,6 @@ plakous-hosted = [
 plakd = ["gateway", "sessions-sqlite"]
 plakous-recursive-subagents = ["store"]
 plakous-hosted = ["sessions-sqlite"]
-
-[patch.crates-io]
-monty-typeshed = { path = "vendor/monty-typeshed" }
 
 [workspace.lints.rust]
 missing_docs = "deny"

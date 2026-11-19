@@ -103,8 +103,7 @@ SQLite is statically embedded (3.54.0) with the reviewed compile options.
 ## Crate map
 
 Every workspace member declares its architectural `layer` and support class in
-`[package.metadata.plakous]`. The fuzz crate and `vendor/monty-typeshed` are
-not workspace members and carry no such table. Libraries are grouped by
+`[package.metadata.plakous]`. The fuzz crate is not a workspace member and carries no such table. Libraries are grouped by
 responsibility under `crates/`; the complete-workflow crate is
 `crates/plakous`, and the product is `bin/plakd`. Directory groups do not
 authorize dependency edges. Chapter 06 §3 owns the legal dependencies, support
@@ -124,7 +123,7 @@ classes and directory policy.
 | `plakous-image` | `crates/common/image` | `common` | The one image sniffer (re-exported by `plakous-tools`), the attachment count and per-message byte budget, and, under `normalize`, the one attachment and tool-result normalizer and image-file reader: decode, bound, downscale and re-encode, clipboard RGBA, the 64 MiB unread refusal; no runtime, and it reads only a caller-named file |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
-| `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned upstream Monty interpreter and its child state machine driven in process on the cell protocol, the JSON/Monty value codec, nested-call batching and acceptance, worker-side refusal strings |
+| `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | The `plakous-py-host` cell worker: the pinned micro-monty interpreter on the cell protocol, the host-value codec, nested-call batching and acceptance, worker-side refusal strings |
 | `plakous-runner` | `crates/runtimes/runner` | `engine` | The runner protocol's host end (a runner link) and runner end (owner and op tables over an execution environment), joined in process as a loopback for conformance; reached through the facade's hidden `plakous::runner` |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family wire grammar, stream lifecycle, projection and shared dialect hosts |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
@@ -155,13 +154,9 @@ classes and directory policy.
 `plakous-js-host` is not a package:
 it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Code Mode and js-ptc.
 
-The Monty interpreter and protocol remain external dependencies pinned at
-`=1.2.0`; only their `monty-typeshed` dependency resolves to a reviewed
-vendor snapshot (chapter 06 §7.3).
-`plakous-py-worker` builds the `plakous-py-host` worker, which drives the
-upstream child state machine in process and speaks the cell protocol; the host
-side is the same `plakous-cell` client and session as for JavaScript, and no
-pool library or WebSocket transport is linked.
+`plakous-py-worker` builds the `plakous-py-host` worker, embedding the exact
+micro-monty release. The host side is the same engine-free `plakous-cell`
+client and session as for JavaScript.
 
 `plakous-compose::cell::codex_exec` consumes the reviewed vendor snapshot at
 `vendor/codex-code-mode-protocol`, packaged as
@@ -194,9 +189,7 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` �
 
 Evaluator capability and subscription authentication are separate choices. A
 Custom-model embedder that wants JavaScript or Python selects `composition` and links
-neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade
-consumer needs a `[patch]` table; chapter 06 states the one that building the
-Monty worker package needs.
+neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade or worker consumer needs a `[patch]` table.
 
 ## Persisted versions
 

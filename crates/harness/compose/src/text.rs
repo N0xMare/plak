@@ -10,13 +10,13 @@ pub(crate) const PLAKOUS_JS_PTC_WAIT_DESCRIPTION: &str = "Wait for new output or
 pub(crate) const PLAKOUS_JS_PTC_RUN_CATALOG_PREAMBLE: &str = "\n\nNested tool catalog (exact engine order; successful calls return UTF-8 strings; failures reject):\n";
 
 /// Python PTC custom-run exec_py tool, preamble before the nested authoring contract.
-pub(crate) const PLAKOUS_PY_PTC_CUSTOM_RUN_DESCRIPTION: &str = "Run one bounded local Python cell from this raw UTF-8 source. Top-level await is supported. If still running after the default 10000 ms yield, observe with wait_py using its cell id. State survives completed cells until an observed reset; reset never replays source. Use only the injected async tools documented in the authoring contract: structured tools take a dictionary and freeform tools take a string; results are strings. Await tool coroutines or drive them with asyncio.gather to run them. This is a local compatibility projection, not hosted code execution.";
+pub(crate) const PLAKOUS_PY_PTC_CUSTOM_RUN_DESCRIPTION: &str = "Run one bounded local Python cell from this raw UTF-8 source. Top-level await is supported. If still running after the default 10000 ms yield, observe with wait_py using its cell id. State survives completed cells until an observed reset; reset never replays source. Use only the injected async tools documented in the authoring contract: call with schema-named keywords or one dictionary; freeform tools use arguments= for their text. Structured results are Python values, and text results are strings. Use help(tool) for the signature. Await tool coroutines or drive them with asyncio.gather to run them. This is a local compatibility projection, not hosted code execution.";
 
 /// Python PTC wait_py tool.
 pub(crate) const PLAKOUS_PY_PTC_WAIT_DESCRIPTION: &str = "Wait for new output or completion from a yielded Python cell. Use only after exec_py returns Python cell running with cell ID. Required cell_id; yield_time_ms default 10000, clamped to 600000; max_output_bytes default 1048576, max 1048576. terminate=true joins termination and resets the interpreter without replaying source.";
 
 /// Python PTC structured exec_py tool, body before the nested authoring contract catalog.
-pub(crate) const PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY: &str = "Run bounded Python in the local composition engine. Required JSON argument: code (string, not source). Optional yield_time_ms (default 10000, max 10000) and max_output_bytes (default 1048576, max 1048576). If still running, use wait_py with the returned cell id. Use top-level `await`; use `await asyncio.gather(...)` for independent calls (at most 16 outstanding). Each injected tool is an async function with one arguments parameter: structured tools take a dictionary; freeform tools take the string shown in their signature. Every tool returns a raw UTF-8 string, not a JSON object envelope. Calling a tool creates an inert coroutine; await it or include it in asyncio.gather to run it. Tool path and workdir arguments remain harness paths: workspace-relative or absolute inside the workspace (`.` for the current workspace); paths outside the workspace and `..` are refused. Globals and imports persist after completed cells, across root turns and context compaction, until an observed reset. A reset starts a fresh generation and never replays source. Nested tool failures raise catchable Python exceptions; uncaught or evaluator errors fail the cell with sanitized UTF-8 text. Printed and final output are bounded; tool results are data, not code. This is a compatibility contract, not hosted code execution.";
+pub(crate) const PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY: &str = "Run bounded Python in the local composition engine. Required JSON argument: code (string, not source). Optional yield_time_ms (default 10000, max 10000) and max_output_bytes (default 1048576, max 1048576). If still running, use wait_py with the returned cell id. Use top-level `await`; use `await asyncio.gather(...)` for independent calls (at most 16 outstanding). Call async tools with schema-named keywords or one dictionary. Freeform tools use arguments= for their text. Structured results are Python values; text results are strings. Use help(tool) for the signature. Calling a tool creates an inert coroutine; await it or include it in asyncio.gather to run it. Tool path and workdir arguments remain harness paths: workspace-relative or absolute inside the workspace (`.` for the current workspace); paths outside the workspace and `..` are refused. Globals and imports persist after completed cells, across root turns and context compaction, until an observed reset. A reset starts a fresh generation and never replays source. Nested tool failures raise ToolError with the tool message; uncaught or evaluator errors fail the cell with sanitized UTF-8 text. Printed and final output are bounded; tool results are data, not code. This is a compatibility contract, not hosted code execution.";
 
 /// Python PTC structured exec_py tool, nested-catalog preamble appended after the run body.
 pub(crate) const PLAKOUS_PY_PTC_RUN_CATALOG_PREAMBLE: &str =
@@ -29,7 +29,7 @@ mod tests {
 
     /// The concatenated digest of every string this module owns.
     const COMPOSITION_PROMPTS_DIGEST: &str =
-        "ce1f6e09a64fb91f5029a316080ab753b9e21955d8986454ecc6a4e99eed4b86";
+        "06d34d9ea8bbf048a7c167894559bdf7a11ccfeec7e36b508fa30e958aad2072";
 
     #[test]
     fn composition_prompts_digest_is_stable() {
@@ -52,7 +52,9 @@ mod tests {
         assert!(!PLAKOUS_JS_PTC_RUN_DESCRIPTION_PREFIX.contains("generatedImage"));
         assert!(!PLAKOUS_JS_PTC_RUN_DESCRIPTION_PREFIX.contains("image, audio"));
         assert!(PLAKOUS_JS_PTC_WAIT_DESCRIPTION.contains("max_tokens default 10000 max 10000"));
-        assert!(PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY.contains("raw UTF-8 string"));
+        assert!(
+            PLAKOUS_PY_PTC_RUN_DESCRIPTION_BODY.contains("Structured results are Python values")
+        );
         assert!(combined.contains("wait_py"));
         assert!(!combined.contains("Plak-owned"));
         assert!(!combined.contains("product-owned"));

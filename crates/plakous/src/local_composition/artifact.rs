@@ -484,25 +484,9 @@ mod quickjs_upgrade_tests {
 mod monty_upgrade_tests {
     use super::*;
 
-    /// The engine contract the previous build recorded: Monty 1.2.0 through
-    /// monty-pool under adapter revision v7, before the cell protocol.
+    /// The engine contract recorded by the previous Python worker.
     fn previous_monty_contract() -> Result<Digest, AgentError> {
         Digest::sha256(
-            DigestDomain::ExecutionEnvironment,
-            1,
-            &[
-                b"plakous.monty-python-engine-contract.v2",
-                b"monty-pool",
-                b"1.2.0",
-                b"plakous.monty-python-adapter.v7",
-            ],
-        )
-        .map_err(identity_error)
-    }
-
-    #[test]
-    fn the_contract_names_monty_1_2_0_the_cell_protocol_and_adapter_v8() -> Result<(), AgentError> {
-        let expected = Digest::sha256(
             DigestDomain::ExecutionEnvironment,
             1,
             &[
@@ -511,6 +495,23 @@ mod monty_upgrade_tests {
                 b"1.2.0",
                 b"plakous-cell-protocol.v2",
                 b"plakous.monty-python-adapter.v9",
+            ],
+        )
+        .map_err(identity_error)
+    }
+
+    #[test]
+    fn the_contract_names_the_micro_monty_release_build_protocol_and_adapter()
+    -> Result<(), AgentError> {
+        let expected = Digest::sha256(
+            DigestDomain::ExecutionEnvironment,
+            1,
+            &[
+                b"plakous.cell-engine-contract.v1",
+                b"micro-monty",
+                b"0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d",
+                b"plakous-cell-protocol.v2",
+                b"plakous.micro-monty-python-adapter.v1",
             ],
         )
         .map_err(identity_error)?;

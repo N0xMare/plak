@@ -74,12 +74,6 @@ impl ApiFunction {
 }
 
 impl HostApi {
-    /// Generates the SDK typing module, when this is an SDK host catalog.
-    #[must_use]
-    pub fn python_sdk_stubs(&self) -> Option<String> {
-        self.sdk.as_ref().map(super::sdk_api::SdkApi::stubs)
-    }
-
     /// Validates a typed SDK call against this exact host catalog.
     ///
     /// # Errors

@@ -107,6 +107,7 @@ def run_cell(child, engine, cell):
 def measure(worker, engine):
     cold, warm = [], []
     config = {"engine": engine}
+    hello_engine = "micro-monty" if engine == "monty" else engine
     config.update(
         {"heap_bytes": 64 * 1024 * 1024, "stack_bytes": 512 * 1024}
         if engine == "quickjs"
@@ -123,7 +124,7 @@ def measure(worker, engine):
         )
         try:
             hello = read_frame(child)
-            if hello.get("revision") != REVISION or hello.get("engine") != engine:
+            if hello.get("revision") != REVISION or hello.get("engine") != hello_engine:
                 raise RuntimeError(f"wrong worker: {hello}")
             write_frame(child, {"frame": "configure", "revision": REVISION, "engine": config})
             run_cell(child, engine, 1)

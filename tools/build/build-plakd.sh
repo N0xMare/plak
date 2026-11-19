@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Native Linux/macOS build and install of plakd and its rquickjs and pinned
-# upstream Monty sidecars.
+# micro-monty sidecars.
 #
 # Build modes check linkage and stop. They do not write a snapshot or change PATH,
 # and a linked worktree is allowed:
@@ -112,7 +112,7 @@ if [[ "$profile" != debug ]]; then
   profile_flag=(--profile "$profile")
 fi
 
-# Separate resolutions keep monty-proto/worker features out of the parent.
+# Build the host and its out-of-process evaluators separately.
 if [[ "$profile" == release ]]; then
   # Linkage proof needs raw symbols; strip only the staged shipping copies.
   export CARGO_PROFILE_RELEASE_STRIP=debuginfo

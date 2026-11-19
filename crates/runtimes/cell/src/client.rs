@@ -223,22 +223,7 @@ impl CellClient {
         expected: WorkerIdentity,
         engine: EngineConfig,
     ) -> Result<Self, CellStartupError> {
-        Self::spawn_within(program, expected, engine, hello_timeout(), None).await
-    }
-
-    /// Starts the Python worker with SDK type checking enabled.
-    ///
-    /// # Errors
-    /// Returns the ordinary bounded worker-startup refusal.
-    pub async fn spawn_python_sdk(program: &Path, stubs: String) -> Result<Self, CellStartupError> {
-        Self::spawn_within(
-            program,
-            crate::MONTY_WORKER,
-            EngineConfig::MONTY,
-            hello_timeout(),
-            Some(stubs),
-        )
-        .await
+        Self::spawn_within(program, expected, engine, hello_timeout()).await
     }
 
     async fn spawn_within(
@@ -246,7 +231,6 @@ impl CellClient {
         expected: WorkerIdentity,
         engine: EngineConfig,
         hello_bound: Duration,
-        sdk_stubs: Option<String>,
     ) -> Result<Self, CellStartupError> {
         let failure = |cause| CellStartupError::new(expected, cause);
         // Check the task owner before creating a process; construction never
@@ -272,15 +256,7 @@ impl CellClient {
             .stdout
             .take()
             .ok_or_else(|| failure("cell worker stdout missing".into()))?;
-        if let Err(error) = handshake(
-            &mut stdin,
-            &mut stdout,
-            expected,
-            engine,
-            hello_bound,
-            sdk_stubs,
-        )
-        .await
+        if let Err(error) = handshake(&mut stdin, &mut stdout, expected, engine, hello_bound).await
         {
             return Err(refuse(&mut child, error).await);
         }
@@ -612,7 +588,6 @@ async fn handshake(
     expected: WorkerIdentity,
     engine: EngineConfig,
     bound: Duration,
-    sdk_stubs: Option<String>,
 ) -> Result<(), CellStartupError> {
     let failure = |cause| CellStartupError::new(expected, cause);
     let deadline = tokio::time::Instant::now() + bound;
@@ -630,7 +605,6 @@ async fn handshake(
     }?;
     check_hello(&frame, expected).map_err(failure)?;
     let configure = encode_frame(&HostFrame::Configure {
-        sdk_stubs,
         revision: CELL_PROTOCOL_REVISION.to_owned(),
         engine,
     })

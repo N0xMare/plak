@@ -432,7 +432,12 @@ class ReleaseClosureTests(unittest.TestCase):
                 self.assertEqual(
                     {(package["name"], package["version"]) for package in listed}, expected
                 )
-                self.assertIn("monty-typeshed", names)
+                self.assertIn("micro-monty", names)
+                worker = next(package for package in listed if package["name"] == "micro-monty")
+                self.assertEqual(worker["license"], "MIT AND PSF-2.0 AND Unicode-3.0")
+                self.assertIn(
+                    "THIRD_PARTY.md", {path.name for path in release_tarball.license_files(worker)}
+                )
 
 
 class InstallScriptTests(unittest.TestCase):

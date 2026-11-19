@@ -97,9 +97,9 @@ pub(super) fn compile_cell(
     validate_catalog(&api, presentation)?;
     let execute_text = if let Some(sdk) = &api.sdk {
         format!(
-            "Run a type-checked Python SDK cell. Supply code; await I/O. Fresh globals each cell; only state survives. No wait or background cells. Foreground limit {} seconds. Processes are not sandboxed.\n\n{}",
+            "Run a Python SDK cell. Supply code; await I/O. Use keyword arguments or one dict, help(tool) for signatures, and the pre-imported asyncio.gather for independent calls. Tool failures raise ToolError. Fresh globals each cell; only state survives. No wait or background cells. Foreground limit {} seconds. Processes are not sandboxed.\n\n{}",
             super::PythonHarnessSdkDescriptorV1::FOREGROUND_MS / 1000,
-            sdk.stubs()
+            sdk.declarations()
         )
     } else if presentation.catalog == CatalogStyle::Python {
         render_pyi(&api)

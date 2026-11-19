@@ -9,5 +9,5 @@ pub fn locate() -> Result<std::path::PathBuf, String> {
 
 #[must_use]
 pub fn python_host_hello_status() -> (String, &'static str) {
-    ("not in this build".to_owned(), "monty-1.2.0")
+    ("not in this build".to_owned(), super::PYTHON_ENGINE_VERSION)
 }

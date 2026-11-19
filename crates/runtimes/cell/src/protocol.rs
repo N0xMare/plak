@@ -37,12 +37,13 @@ pub const QUICKJS_WORKER: WorkerIdentity = WorkerIdentity {
     adapter: "plakous-js-host-bootstrap.v7",
 };
 
-/// The Monty worker, `plakous-py-host`.
+/// The micro-monty worker, `plakous-py-host`.
 pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
     binary: "plakous-py-host",
-    engine: "monty",
-    version: "1.2.0",
-    adapter: "plakous.monty-python-adapter.v9",
+    engine: "micro-monty",
+    // The worker verifies this version and build ID against the linked engine.
+    version: "0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d",
+    adapter: "plakous.micro-monty-python-adapter.v1",
 };
 
 /// Parent to worker.
@@ -55,9 +56,6 @@ pub enum HostFrame {
         revision: String,
         /// Engine identity and resource limits.
         engine: EngineConfig,
-        /// Generated Python SDK declarations, when selected.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sdk_stubs: Option<String>,
     },
     /// Clears Python globals before an SDK cell, retaining the warm worker.
     Reset,

@@ -454,7 +454,7 @@ fn tool_policy_explanation(policy: &str) -> &'static str {
     if lower.contains("direct") {
         "the model calls plakd's tools directly"
     } else if lower == "py-sdk" {
-        "the model uses the typed Python SDK in fresh, type-checked cells"
+        "the model uses the typed Python SDK in cells with fresh globals"
     } else if lower.contains("js") {
         "the model calls plakd's tools from JavaScript inside a Code Mode cell"
     } else if lower.contains("py") {

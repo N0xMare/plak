@@ -235,7 +235,7 @@ class BuildPlakTests(unittest.TestCase):
                 if layout != "primary":
                     self.assertIn("linked worktree", result.stderr)
 
-    def test_product_build_keeps_monty_features_out_of_parent(self) -> None:
+    def test_product_build_builds_evaluators_separately(self) -> None:
         import tomllib
 
         manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
@@ -253,7 +253,7 @@ class BuildPlakTests(unittest.TestCase):
         gate = (ROOT / "tools/gate/dev-check.sh").read_text()
         self.assertIn('check-artifact-linkage.py "$output_dir"', installer)
         self.assertIn('check-artifact-linkage.py', gate)
-        self.assertNotIn('Monty linkage not verified', installer)
+        self.assertNotIn('micro-monty linkage not verified', installer)
 
     def test_product_build_profile_arguments_work_with_system_bash(self) -> None:
         source = (ROOT / "tools/build/build-plakd.sh").read_text()

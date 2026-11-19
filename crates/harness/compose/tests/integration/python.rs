@@ -166,12 +166,12 @@ fn structured_projection_is_exact_ordered_and_backend_independent() -> Result<()
     assert!(
         descriptor
             .authoring_contract()
-            .contains("structured tools take a dictionary; freeform tools take the string")
+            .contains("schema-named keywords or one dictionary")
     );
     assert!(
         descriptor
             .authoring_contract()
-            .contains("returns a raw UTF-8 string")
+            .contains("Structured results are Python values")
     );
     assert!(descriptor.authoring_contract().contains("persist"));
     assert!(descriptor.authoring_contract().contains("observed reset"));
@@ -183,7 +183,7 @@ fn structured_projection_is_exact_ordered_and_backend_independent() -> Result<()
     assert!(
         descriptor
             .authoring_contract()
-            .contains("catchable Python exceptions")
+            .contains("ToolError with the tool message")
     );
     assert!(
         descriptor
@@ -377,12 +377,16 @@ fn python_host_api_generates_the_exact_sorted_worker_bootstrap() -> Result<(), T
         [ToolName::new("read-file")?, ToolName::new("helper")?],
     )?;
     let bootstrap = python_bootstrap(descriptor.host_api())?.ok_or("missing bootstrap")?;
-    assert_eq!(
-        bootstrap.source,
-        concat!(
-            "async def helper(arguments):\n    return await _plakous_host_0(arguments)\n",
-            "async def read_file(arguments):\n    return await _plakous_host_1(arguments)\n",
-        )
+    assert!(
+        bootstrap.source.starts_with(concat!(
+            "async def helper(*args, **kwargs):\n    return await _plakous_host_0(*args, **kwargs)\n",
+            "async def read_file(*args, **kwargs):\n    return await _plakous_host_1(*args, **kwargs)\n",
+        ))
+    );
+    assert!(
+        bootstrap
+            .source
+            .contains("async def read_file(*, value: str) -> str")
     );
     let bindings = bootstrap
         .bindings
@@ -601,12 +605,12 @@ fn python_signatures_preserve_freeform_and_structured_input_kinds() -> Result<()
     assert!(
         descriptor
             .authoring_contract()
-            .contains("async def apply_patch(arguments: str) -> str")
+            .contains("async def apply_patch(*, arguments: str) -> str")
     );
     assert!(
         descriptor
             .authoring_contract()
-            .contains("async def exec_command(arguments: ")
+            .contains("async def exec_command(*, ")
     );
     assert!(descriptor.authoring_contract().contains(") -> dict"));
     Ok(())

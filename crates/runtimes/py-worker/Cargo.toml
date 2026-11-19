@@ -1,6 +1,6 @@
 [package]
 name = "plakous-py-worker"
-description = "Plak Python cell worker: the pinned upstream Monty interpreter on the cell protocol"
+description = "Plak Python cell worker: the micro-monty interpreter on the cell protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -24,14 +24,12 @@ path = "src/main.rs"
 test-hooks = []
 
 [dependencies]
-monty-proto = { version = "=1.2.0", features = ["worker"] }
-monty-alloc = { version = "=1.2.0", features = ["exit-code"] }
-monty-types = "=1.2.0"
+cap = "0.1.2"
+micro-monty = "=0.0.2"
 plakous-cell.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-num-bigint = "0.4"
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 

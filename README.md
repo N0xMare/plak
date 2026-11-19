@@ -135,10 +135,12 @@ plakd and Plakous are licensed under the [MIT License](LICENSE).
 
 Third-party material keeps its upstream license:
 
-- `vendor/` holds patched or vendored upstream sources, each with its own
-  `LICENSE` (and `NOTICE` or `PROVENANCE.md` where upstream has one): Pydantic's
-  `monty-typeshed` crate (MIT; the bundled typeshed stubs are Apache-2.0) and OpenAI Codex
-  prompt and code-mode protocol material (Apache-2.0).
+- OpenAI Codex prompt and code-mode protocol material (Apache-2.0) carries
+  its upstream license and attribution.
+- The Python worker embeds micro-monty (`MIT AND PSF-2.0 AND Unicode-3.0`).
+  The release `THIRD-PARTY` inventory records that expression; its license
+  directory includes the upstream notices and the supplemental license texts
+  from `crates/runtimes/py-worker/`.
 - Excerpts reproduced from the OpenAI Codex CLI (Apache-2.0, Copyright 2025
   OpenAI; license and notice in `crates/harness/prompts/vendor/codex-prompt/`): the `apply_patch`
   grammar and description (`crates/harness/tool-files/src/codex_patch.rs`,

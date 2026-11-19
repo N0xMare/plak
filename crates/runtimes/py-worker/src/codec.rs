@@ -1,369 +1,174 @@
-//! JSON and Monty value conversion for nested calls, and final-value rendering.
+use std::io::{self, Write};
 
-use std::{
-    collections::HashSet,
-    fmt::{self, Write as _},
-    io,
-};
+use micro_monty::{HostError, HostErrorKind, HostValue, Unconverted};
+use plakous_cell::{BindingInput, CellValue, MAX_CELL_VALUE_DEPTH, json_depth};
+use serde_json::Value;
 
-use monty_types::{
-    ExcType, ExtFunctionResult, MontyException, MontyObject, ObjectRef,
-    unstable::{self, MontyNode, NodeId},
-};
-use plakous_cell::CellValue;
-use serde_json::{Map, Value};
-
-/// Bound on the compact JSON encoding of a nested-call argument, matching the
-/// per-call argument limit. Monty values arrive as a shared-node arena, so a
-/// small message can describe an exponentially larger tree; the conversion
-/// charges every byte it would emit before building it and stops at this
-/// budget instead of materializing the tree.
-const MAX_ARGUMENT_BYTES: usize = 1_048_576;
+pub(super) const MAX_ARGUMENT_BYTES: usize = 1024 * 1024;
 const ARGUMENT_TOO_LARGE: &str = "Python tool argument exceeds 1 MiB";
-/// Bound on value nesting in either direction. The arena wire has no depth
-/// limit of its own, and both conversions recurse on the host's stack.
-const MAX_VALUE_DEPTH: usize = 128;
-/// The `CPython` default `sys.int_max_str_digits`. Decimal conversion of an `int`
-/// is quadratic in its length, so the host never converts one past this:
-/// `10**4300 < 2**14285`, so a value of at most this many bits has at most
-/// 4300 digits.
-const MAX_INT_DIGITS: u64 = 4300;
-const MAX_INT_BITS: u64 = 14_284;
 
-/// Converts the single positional argument of a Python tool call to JSON.
-///
-/// `list` and `tuple` become arrays, `dict` (whose keys must be `str`) an
-/// object, an `int` beyond 64 bits its decimal string, and every other
-/// non-JSON value its Python `repr()` string. The compact encoding of the
-/// result is at most 1 MiB; an `int` past 4300 digits is refused, as `CPython`
-/// refuses to convert it.
-pub(crate) fn call_to_json(argument: ObjectRef<'_>) -> Result<Value, String> {
-    let mut budget = MAX_ARGUMENT_BYTES;
-    monty_to_json(argument, 0, &mut budget)
-}
-
-/// SDK host arguments are JSON, never a repr-based coercion of arbitrary objects.
-pub(crate) fn sdk_call_to_json(argument: ObjectRef<'_>) -> Result<Value, String> {
-    let owned = argument.to_owned();
-    let (graph, _) = unstable::graph_parts(&owned);
-    for node in graph.nodes() {
-        match node {
-            MontyNode::None|MontyNode::Bool(_)|MontyNode::Int(_)|MontyNode::String(_)|MontyNode::List(_)|MontyNode::Tuple(_)|MontyNode::Dict(_)=>{},
-            MontyNode::Float(value) if value.is_finite()=>{},
-            _=>return Err("SDK arguments must be finite JSON values; objects and oversized integers are refused".into()),
+pub(super) fn arguments(
+    input: BindingInput,
+    mut args: Vec<HostValue>,
+    kwargs: Vec<(String, HostValue)>,
+) -> Result<CellValue, HostError> {
+    let argument = if args.is_empty() {
+        HostValue::Dict(kwargs)
+    } else if args.len() == 1 && kwargs.is_empty() {
+        args.pop().unwrap_or(HostValue::None)
+    } else {
+        return Err(argument_shape());
+    };
+    let value = match argument {
+        HostValue::Dict(items) if input == BindingInput::String => {
+            let one: Option<[(String, HostValue); 1]> = items.try_into().ok();
+            match one {
+                Some([(key, HostValue::Str(value))]) if key == "arguments" => Value::String(value),
+                _ => return Err(argument_shape()),
+            }
         }
+        HostValue::Dict(items) => argument_json(HostValue::Dict(items))?,
+        // The private freeform callback also accepts the raw string generated
+        // by the wrapper; the public tool takes `arguments=` or a dict.
+        HostValue::Str(value) if input == BindingInput::String => Value::String(value),
+        HostValue::Unconverted(reason) => return Err(argument_error(&reason)),
+        _ => return Err(argument_shape()),
+    };
+    if json_depth(&value) > MAX_CELL_VALUE_DEPTH {
+        return Err(argument_error(&Unconverted::TooDeep));
     }
-    call_to_json(argument)
+    let mut count = Budget(MAX_ARGUMENT_BYTES);
+    if serde_json::to_writer(&mut count, &value).is_err() {
+        return Err(HostError::new(
+            HostErrorKind::ValueError,
+            ARGUMENT_TOO_LARGE,
+        ));
+    }
+    Ok(CellValue::from(value))
 }
 
-fn charge(budget: &mut usize, cost: usize) -> Result<(), String> {
-    *budget = budget
-        .checked_sub(cost)
-        .ok_or_else(|| ARGUMENT_TOO_LARGE.to_owned())?;
-    Ok(())
-}
+struct Budget(usize);
 
-/// Counts the bytes `serde_json` writes without storing them.
-struct EncodedLength(usize);
-
-impl io::Write for EncodedLength {
+impl Write for Budget {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0 += bytes.len();
+        self.0 = self
+            .0
+            .checked_sub(bytes.len())
+            .ok_or_else(|| io::Error::other(ARGUMENT_TOO_LARGE))?;
         Ok(bytes.len())
     }
+
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
 
-// Writing into a counter cannot fail, and these values always serialize.
-fn encoded_len(value: &Value) -> usize {
-    let mut length = EncodedLength(0);
-    let _ = serde_json::to_writer(&mut length, value);
-    length.0
-}
-
-fn encoded_str_len(text: &str) -> usize {
-    let mut length = EncodedLength(0);
-    let _ = serde_json::to_writer(&mut length, text);
-    length.0
-}
-
-fn charged_leaf(budget: &mut usize, json: Value) -> Result<Value, String> {
-    charge(budget, encoded_len(&json))?;
-    Ok(json)
-}
-
-fn int_limit_error() -> String {
-    format!(
-        "Python tool argument int exceeds the limit ({MAX_INT_DIGITS} digits) for integer string conversion"
+fn argument_shape() -> HostError {
+    HostError::new(
+        HostErrorKind::TypeError,
+        "pass tool arguments as keywords or one dictionary",
     )
 }
 
-fn monty_to_json(value: ObjectRef<'_>, depth: usize, budget: &mut usize) -> Result<Value, String> {
-    if depth > MAX_VALUE_DEPTH {
-        return Err(format!(
-            "Python tool argument nests deeper than {MAX_VALUE_DEPTH} levels"
-        ));
-    }
-    match unstable::node(value) {
-        MontyNode::None => charged_leaf(budget, Value::Null),
-        MontyNode::Bool(flag) => charged_leaf(budget, Value::Bool(*flag)),
-        MontyNode::Int(int) => charged_leaf(budget, Value::from(*int)),
-        MontyNode::Float(float) => charged_leaf(budget, Value::from(*float)),
-        MontyNode::BigInt(int) => {
-            if int.bits() > MAX_INT_BITS {
-                return Err(int_limit_error());
-            }
-            charged_leaf(budget, Value::String(int.to_string()))
+fn argument_error(reason: &Unconverted) -> HostError {
+    let message = match reason {
+        Unconverted::TooLarge { .. } => ARGUMENT_TOO_LARGE.to_owned(),
+        Unconverted::TooDeep => {
+            format!("Python tool argument nests deeper than {MAX_CELL_VALUE_DEPTH} levels")
         }
-        MontyNode::String(text) => {
-            charge(budget, encoded_str_len(text))?;
-            Ok(Value::String(text.clone()))
-        }
-        MontyNode::List(ids) | MontyNode::Tuple(ids) => {
-            charge(budget, 2 + ids.len().saturating_sub(1))?;
-            ids.iter()
-                .map(|id| monty_to_json(unstable::child(value, *id), depth + 1, budget))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::Array)
-        }
-        MontyNode::Dict(pairs) => {
-            charge(budget, 2 + pairs.len().saturating_sub(1))?;
-            let mut map = Map::new();
-            for (key, item) in pairs {
-                let MontyNode::String(name) = unstable::node(unstable::child(value, *key)) else {
-                    return Err("Python tool argument dict keys must be str".to_owned());
-                };
-                // The key, its quotes and the separating colon.
-                charge(budget, encoded_str_len(name) + 1)?;
-                let item = monty_to_json(unstable::child(value, *item), depth + 1, budget)?;
-                map.insert(name.clone(), item);
-            }
-            Ok(Value::Object(map))
-        }
-        _ => {
-            if oversized_int_bits(value).is_some() {
-                return Err(int_limit_error());
-            }
-            // Not a `str` here, so `str()` is the value's `repr()`.
-            let mut repr = Capped::new(*budget);
-            if write!(repr, "{value}").is_err() {
-                return Err(ARGUMENT_TOO_LARGE.to_owned());
-            }
-            charged_leaf(budget, Value::String(repr.text))
-        }
-    }
-}
-
-/// Bit length of the first `int` past [`MAX_INT_BITS`] reachable from `value`,
-/// visiting each shared node once.
-fn oversized_int_bits(value: ObjectRef<'_>) -> Option<u64> {
-    let mut seen = HashSet::new();
-    let mut pending = vec![value];
-    while let Some(next) = pending.pop() {
-        let node = unstable::node(next);
-        if let MontyNode::BigInt(int) = node
-            && int.bits() > MAX_INT_BITS
-        {
-            return Some(int.bits());
-        }
-        node.for_each_child(|id: NodeId| {
-            if seen.insert(id) {
-                pending.push(unstable::child(next, id));
-            }
-        });
-    }
-    None
-}
-
-pub(crate) fn json_to_monty(value: &Value) -> Result<MontyObject, String> {
-    json_to_monty_within(value, 0)
-}
-
-fn json_to_monty_within(value: &Value, depth: usize) -> Result<MontyObject, String> {
-    if depth > MAX_VALUE_DEPTH {
-        return Err(format!(
-            "JSON result nests deeper than {MAX_VALUE_DEPTH} levels"
-        ));
-    }
-    match value {
-        Value::Null => Ok(MontyObject::none()),
-        Value::Bool(flag) => Ok(MontyObject::bool(*flag)),
-        Value::Number(number) => {
-            if let Some(int) = number.as_i64() {
-                Ok(MontyObject::int(int))
-            } else if let Some(uint) = number.as_u64() {
-                Err(format!("unsupported JSON integer magnitude: {uint}"))
-            } else if let Some(float) = number.as_f64() {
-                if float.is_finite() {
-                    Ok(MontyObject::float(float))
-                } else {
-                    Err(format!("unsupported JSON number: {number}"))
-                }
-            } else {
-                Err(format!("unsupported JSON number: {number}"))
-            }
-        }
-        Value::String(text) => Ok(MontyObject::string(text.clone())),
-        Value::Array(items) => Ok(MontyObject::list(
-            items
-                .iter()
-                .map(|item| json_to_monty_within(item, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?,
-        )),
-        Value::Object(map) => Ok(MontyObject::dict(
-            map.iter()
-                .map(|(key, value)| -> Result<_, String> {
-                    Ok((
-                        MontyObject::string(key.clone()),
-                        json_to_monty_within(value, depth + 1)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        )),
-    }
-}
-
-/// The value or failure a nested call resumes the cell with. A failure raises
-/// `RuntimeError` with the host's diagnostic, bounded to 16 KiB.
-pub(crate) fn nested_outcome_to_result(
-    outcome: Result<CellValue, String>,
-) -> Result<ExtFunctionResult, String> {
-    match outcome {
-        Ok(value) => Ok(ExtFunctionResult::Return(cell_to_monty(value, 0)?)),
-        Err(reason) => Ok(ExtFunctionResult::Error(MontyException::new(
-            ExcType::RuntimeError,
-            Some(sanitize_nested_error(&reason)),
-        ))),
-    }
-}
-
-fn cell_to_monty(value: CellValue, depth: usize) -> Result<MontyObject, String> {
-    if depth > MAX_VALUE_DEPTH {
-        return Err(format!(
-            "cell result nests deeper than {MAX_VALUE_DEPTH} levels"
-        ));
-    }
-    match value {
-        CellValue::Bytes(bytes) => Ok(MontyObject::bytes(bytes)),
-        CellValue::Record { name, fields } => {
-            let (names, values): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
-            let values = values
-                .into_iter()
-                .map(|value| cell_to_monty(value, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(MontyObject::named_tuple(name, names, values))
-        }
-        CellValue::List(values) => Ok(MontyObject::list(
-            values
-                .into_iter()
-                .map(|value| cell_to_monty(value, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?,
-        )),
-        CellValue::Dict(fields) => Ok(MontyObject::dict(
-            fields
-                .into_iter()
-                .map(|(key, value)| {
-                    Ok((MontyObject::string(key), cell_to_monty(value, depth + 1)?))
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-        )),
-        scalar => json_to_monty(&Value::try_from(scalar)?),
-    }
-}
-
-fn sanitize_nested_error(message: &str) -> String {
-    if message.len() <= 16 * 1024 {
-        return message.to_owned();
-    }
-    let mut end = 16 * 1024;
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n[diagnostic truncated]", &message[..end])
-}
-
-/// Renders a cell's final value as Python `str()` does: text as is, every
-/// other value (including `complex`) its `repr()`. Shared sub-objects render
-/// once per reference, so the rendering stops at `limit` bytes and says so.
-/// An `int` past 4300 digits, whose decimal conversion is quadratic, renders
-/// as `<int with N bits>` instead.
-pub(crate) fn format_monty(value: &MontyObject, limit: usize) -> String {
-    const NOTICE: &str = "\n[Python result truncated at 1 MiB]";
-    let mut rendered = Capped::new(limit.saturating_sub(NOTICE.len()));
-    match bounded_ints(value) {
-        Some(Ok(bounded)) => {
-            let _ = write!(rendered, "{bounded}");
-        }
-        Some(Err(())) => return "<value with an oversized int>".to_owned(),
-        None => {
-            let _ = write!(rendered, "{value}");
-        }
-    }
-    if rendered.truncated {
-        rendered.text.push_str(NOTICE);
-    }
-    rendered.text
-}
-
-/// A copy of `value` whose oversized `int` nodes are replaced by verbatim
-/// `<int with N bits>` text, or `None` when it holds none. The scan and copy
-/// are linear in the arena, never in the expanded value.
-fn bounded_ints(value: &MontyObject) -> Option<Result<MontyObject, ()>> {
-    let oversized = |node: &MontyNode| match node {
-        MontyNode::BigInt(int) if int.bits() > MAX_INT_BITS => Some(int.bits()),
-        _ => None,
+        Unconverted::KeyNotStr => "Python tool argument dict keys must be str".into(),
+        _ => "Python tool argument has no JSON form".into(),
     };
-    let (graph, root) = unstable::graph_parts(value);
-    if !graph.nodes().iter().any(|node| oversized(node).is_some()) {
-        return None;
-    }
-    let mut graph = graph.clone();
-    for node in graph.nodes_mut() {
-        if let Some(bits) = oversized(node) {
-            // A `Cycle` leaf renders its text verbatim in `str()` and `repr()`.
-            *node = MontyNode::Cycle(format!("<int with {bits} bits>"));
-        }
-    }
-    Some(unstable::object_from_graph(graph, root).map_err(|_| ()))
+    HostError::new(HostErrorKind::ValueError, message)
 }
 
-/// A `fmt::Write` sink that keeps at most `limit` bytes and then fails, which
-/// aborts the upstream renderer instead of letting it expand a shared graph.
-struct Capped {
-    text: String,
-    limit: usize,
-    truncated: bool,
+fn argument_json(value: HostValue) -> Result<Value, HostError> {
+    Ok(match value {
+        HostValue::None => Value::Null,
+        HostValue::Bool(value) => Value::Bool(value),
+        HostValue::Int(value) => Value::from(value),
+        HostValue::BigInt(value) => Value::from(value.parse::<u64>().map_err(|_| {
+            HostError::new(
+                HostErrorKind::ValueError,
+                "Python tool argument integer is outside the JSON integer range",
+            )
+        })?),
+        HostValue::Float(value) if value.is_finite() => Value::from(value),
+        HostValue::Str(value) => Value::String(value),
+        HostValue::List(items) | HostValue::Tuple(items) => Value::Array(
+            items
+                .into_iter()
+                .map(argument_json)
+                .collect::<Result<_, _>>()?,
+        ),
+        HostValue::Dict(items) => Value::Object(
+            items
+                .into_iter()
+                .map(|(key, item)| Ok((key, argument_json(item)?)))
+                .collect::<Result<_, HostError>>()?,
+        ),
+        HostValue::Unconverted(reason) => return Err(argument_error(&reason)),
+        _ => {
+            return Err(HostError::new(
+                HostErrorKind::ValueError,
+                "Python tool argument has no JSON form",
+            ));
+        }
+    })
 }
 
-impl Capped {
-    fn new(limit: usize) -> Self {
-        Self {
-            text: String::new(),
-            limit,
-            truncated: false,
-        }
-    }
-}
-
-impl fmt::Write for Capped {
-    fn write_str(&mut self, piece: &str) -> fmt::Result {
-        let room = self.limit - self.text.len();
-        if piece.len() <= room {
-            self.text.push_str(piece);
-            return Ok(());
-        }
-        let mut end = room;
-        while !piece.is_char_boundary(end) {
-            end -= 1;
-        }
-        self.text.push_str(&piece[..end]);
-        self.truncated = true;
-        Err(fmt::Error)
+pub(super) fn outcome(value: Result<CellValue, String>) -> Result<HostValue, HostError> {
+    match value {
+        Ok(value) => result_value(value, 0),
+        Err(message) => Err(tool_error(message)),
     }
 }
 
-#[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic, reason = "codec bound regressions")]
-mod tests;
+pub(super) fn tool_error(message: String) -> HostError {
+    HostError {
+        class: Some("ToolError".into()),
+        ..HostError::new(HostErrorKind::RuntimeError, message)
+    }
+}
+
+fn result_value(value: CellValue, depth: usize) -> Result<HostValue, HostError> {
+    if depth >= MAX_CELL_VALUE_DEPTH
+        && matches!(
+            value,
+            CellValue::List(_) | CellValue::Dict(_) | CellValue::Record { .. }
+        )
+    {
+        return Err(tool_error(format!(
+            "nested result nests deeper than {MAX_CELL_VALUE_DEPTH} levels"
+        )));
+    }
+    let fields = |entries: Vec<(String, CellValue)>| {
+        entries
+            .into_iter()
+            .map(|(key, item)| Ok((key, result_value(item, depth + 1)?)))
+            .collect::<Result<_, HostError>>()
+    };
+    Ok(match value {
+        CellValue::Null => HostValue::None,
+        CellValue::Bool(value) => HostValue::Bool(value),
+        CellValue::Int(value) => HostValue::Int(value),
+        CellValue::BigInt(value) => HostValue::BigInt(value),
+        CellValue::Float(value) => HostValue::Float(value),
+        CellValue::Str(value) => HostValue::Str(value),
+        CellValue::Bytes(value) => HostValue::Bytes(value),
+        CellValue::List(items) => HostValue::List(
+            items
+                .into_iter()
+                .map(|item| result_value(item, depth + 1))
+                .collect::<Result<_, _>>()?,
+        ),
+        CellValue::Dict(items) => HostValue::Dict(fields(items)?),
+        CellValue::Record {
+            name,
+            fields: items,
+        } => HostValue::Record {
+            name,
+            fields: fields(items)?,
+        },
+    })
+}
