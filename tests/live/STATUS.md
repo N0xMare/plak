@@ -77,6 +77,15 @@ address` on its Unix socket. A binary without `plakd gateway serve` fails as a
 harness error before any provider call. Tailnet TCP from a second machine,
 remote login, the kill switch and `hop=gateway` faults are not driven.
 
+`just live gateway --paid` passed at `53562def3` on Linux x86_64 (glibc)
+with a `plakd/test-hooks` release build (binary ID `c1487bbb9a09`, unchanged
+across the run). All 41 steps passed on the first attempt: both topologies
+completed all seven turns and reopens and all three forced OAuth refreshes.
+Every Unix-socket turn and reopen added gateway audit lines. With the
+service holding the real logins and the host holding no keys, `plakd doctor`
+reported `OK` and `ready · record held by the gateway` for Codex, Claude and
+Grok, and `plakd status <account>` reported `credential=ready` for each.
+
 `just live gateway --paid` passed at `bb356f99` on Linux x86_64 (glibc), a
 `plakd/test-hooks` release build (`plakd` SHA-256 `c0bbfd4e…`, unchanged
 across the run): all 37 steps on the first attempt, with no rerun.
