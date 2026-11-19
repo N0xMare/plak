@@ -65,7 +65,7 @@ fn translate_history_items<'a>(
     replay_diagnostics: &mut Vec<String>,
 ) -> Result<TranslatedHistory, MessagesRequestError> {
     let mut messages: Vec<MessageParam> = Vec::new();
-    let mut historical_projection_diagnostics = Vec::new();
+    let mut historical_projection_diagnostics = HistoricalProjections::default();
     let mut items = items.enumerate().peekable();
     let mut pending = Vec::<PendingTool>::new();
     let mut container = None;
@@ -152,7 +152,11 @@ fn translate_history_items<'a>(
     if !pending.is_empty() {
         return Err(invalid("history ends before required tool results"));
     }
-    Ok((messages, container, historical_projection_diagnostics))
+    Ok((
+        messages,
+        container,
+        historical_projection_diagnostics.diagnostics,
+    ))
 }
 
 fn translate_tool_messages<'a>(
@@ -426,7 +430,7 @@ pub(crate) fn translate_assistant_bound(
             completed_turn: false,
         },
         replay,
-        &mut Vec::new(),
+        &mut HistoricalProjections::default(),
     )
 }
 
@@ -443,7 +447,7 @@ fn translate_assistant_with_history(
     ownership: &ToolOwnership,
     projection: AssistantProjection,
     replay: AssistantReplayState<'_>,
-    historical_projection_diagnostics: &mut Vec<ModelDiagnostic>,
+    historical_projection_diagnostics: &mut HistoricalProjections,
 ) -> Result<(Vec<MessageBlock>, Vec<PendingTool>), MessagesRequestError> {
     let AssistantProjection {
         programmatic,
@@ -575,7 +579,7 @@ fn project_completed_thinking(
     policy: &MessagesRequestPolicy,
     completed_turn: bool,
     include_native_thinking: bool,
-    diagnostics: &mut Vec<ModelDiagnostic>,
+    projections: &mut HistoricalProjections,
 ) -> Result<bool, MessagesRequestError> {
     if !policy.strict_thinking_replay {
         return Ok(false);
@@ -584,12 +588,12 @@ fn project_completed_thinking(
         if !include_native_thinking {
             return Ok(false);
         }
-        if completed_turn {
-            record_historical_projection(
+        if completed_turn && !projections.unsigned_recorded {
+            projections.record(
                 unsigned_historical_projection_identity(policy)?,
                 "Completed historical thinking without replay was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
-                diagnostics,
             );
+            projections.unsigned_recorded = true;
         }
         return Ok(completed_turn);
     };
@@ -600,10 +604,9 @@ fn project_completed_thinking(
     };
     if completed_turn && projectable_historical_thinking(replay, policy, kind) {
         if include_native_thinking {
-            record_historical_projection(
+            projections.record(
                 historical_projection_identity(replay, policy)?,
                 "Configuration transition: completed historical thinking was omitted; conversation content was retained. No private thinking or signatures were sent as text.",
-                diagnostics,
             );
         }
         return Ok(true);
@@ -902,18 +905,24 @@ fn projectable_historical_thinking(
                 .is_some_and(|expected| expected != source_model))
 }
 
-fn record_historical_projection(
-    identity: Digest,
-    message: &str,
-    diagnostics: &mut Vec<ModelDiagnostic>,
-) {
-    if diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.history_projection_identity() == Some(identity))
-    {
-        return;
+#[derive(Default)]
+struct HistoricalProjections {
+    diagnostics: Vec<ModelDiagnostic>,
+    unsigned_recorded: bool,
+}
+
+impl HistoricalProjections {
+    fn record(&mut self, identity: Digest, message: &str) {
+        if self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.history_projection_identity() == Some(identity))
+        {
+            return;
+        }
+        self.diagnostics
+            .push(ModelDiagnostic::historical_projection(identity, message));
     }
-    diagnostics.push(ModelDiagnostic::historical_projection(identity, message));
 }
 
 // Only compatibility facts identify the transition. In particular, signatures,
