@@ -35,15 +35,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
         .unwrap();
     assert!(staged.status.success(), "{staged:?}");
     let stores = scratch.path().join("stores");
-    let unsupported = command()
-        .args(["session", "check-binding", "--all"])
-        .output()
-        .unwrap();
-    assert!(!unsupported.status.success(), "{unsupported:?}");
-    assert!(
-        String::from_utf8_lossy(&unsupported.stderr).contains("product store upgrade pending"),
-        "{unsupported:?}"
-    );
+    assert_pending_read_refusal(&mut command());
     for (file, fixture_index) in [
         ("product.sqlite3", "product_revision_fixture"),
         ("subagents.sqlite3", "subagents_revision_fixture"),
@@ -111,6 +103,18 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut source);
     assert_fresh_fingerprints(&paths);
+}
+
+fn assert_pending_read_refusal(command: &mut std::process::Command) {
+    let refused = command
+        .args(["session", "check-binding", "--all"])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("product store upgrade pending"),
+        "{refused:?}"
+    );
 }
 
 fn assert_fresh_fingerprints(upgraded: &plakd::home::paths::PlakPaths) {

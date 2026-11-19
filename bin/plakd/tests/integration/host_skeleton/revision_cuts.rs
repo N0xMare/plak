@@ -55,7 +55,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
             ("PLAK_TEST_HOST_UPGRADE_CUT", cut.to_owned()),
         ],
     );
-    let (code, stderr) = exit(child, lines);
+    let (code, stderr) = exit(child, &lines);
     assert_eq!(code, Some(86), "{cut}: {stderr}");
     assert_eq!(versions(&paths), expected);
     let product_backup = paths.state_dir().join("product.pre-revision-39.sqlite3");
@@ -104,7 +104,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
     }
 }
 
-fn exit(mut child: Child, lines: mpsc::Receiver<String>) -> (Option<i32>, String) {
+fn exit(mut child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, String) {
     let deadline = Instant::now() + WAIT;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -139,18 +139,23 @@ fn older_refuses_unchanged(fixture: &Fixture, paths: &plakd::home::paths::PlakPa
         paths.product_database(),
         paths.subagents_database(),
     ];
-    let before = stores.each_ref().map(|path| std::fs::read(path).unwrap());
+    let before = stores.each_ref().map(|path| store_bytes(path));
     let (code, stderr) = {
         let (child, lines) = spawn(fixture);
-        exit(child, lines)
+        exit(child, &lines)
     };
     assert_ne!(code, Some(0), "{stderr}");
     assert!(
         stderr.contains(reason) && stderr.contains("incompatible plakd build"),
         "{stderr}"
     );
-    assert_eq!(
-        stores.each_ref().map(|path| std::fs::read(path).unwrap()),
-        before
-    );
+    assert_eq!(stores.each_ref().map(|path| store_bytes(path)), before);
+}
+
+fn store_bytes(path: &std::path::Path) -> (Vec<u8>, Vec<u8>) {
+    let wal = path.with_extension("sqlite3-wal");
+    (
+        std::fs::read(path).unwrap(),
+        std::fs::read(wal).unwrap_or_default(),
+    )
 }
