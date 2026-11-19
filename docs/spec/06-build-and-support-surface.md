@@ -1844,7 +1844,8 @@ boundaries. Production requires a green staging transition less than 24 hours
 old for identical platform, serving-host and client manifest digests, source
 wire, coordinator, local runner protocol and gateway versions. It also
 requires an equivalent paired-runner transition multiset by platform
-(`unchanged`, `same_triple`, `changed_triple`), independent of runner
+(`unchanged`, `same_triple`, `changed_triple`), measured from each runner
+link's own image build info against its native destination, independent of runner
 names, and equivalent canary model and effort coverage, including account
 counts. Staging and production receipts must identify disjoint target
 logins; a shared physical machine is allowed only on macOS under different

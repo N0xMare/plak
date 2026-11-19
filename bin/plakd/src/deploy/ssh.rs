@@ -198,20 +198,48 @@ pub(super) fn machine_id(platform: Platform) -> CliResult<String> {
 }
 
 fn mac_machine_id(output: &str) -> CliResult<String> {
-    let id = output
+    let mut ids = output
         .lines()
-        .filter_map(|line| line.trim().strip_prefix("\"IOPlatformUUID\" = \""))
-        .filter_map(|line| line.strip_suffix('"'))
-        .map(uuid::Uuid::parse_str)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| fail("invalid macOS machine identity"))?;
-    let [id] = id.as_slice() else {
-        return Err(fail("cannot establish macOS machine identity"));
-    };
+        .filter_map(|line| line.trim().strip_prefix("\"IOPlatformUUID\" = "));
+    let invalid = || fail("invalid macOS machine identity");
+    let id = ids
+        .next()
+        .ok_or_else(|| fail("cannot establish macOS machine identity"))?;
+    check(ids.next().is_none(), "duplicate macOS machine identity")?;
+    let id = id
+        .strip_prefix('"')
+        .and_then(|id| id.strip_suffix('"'))
+        .ok_or_else(invalid)?;
+    let id = uuid::Uuid::parse_str(id).map_err(|_| invalid())?;
     check(!id.is_nil(), "invalid macOS machine identity")?;
     Ok(shipping::digest(id.as_bytes()))
 }
 
 pub(super) fn stable(node: &Node) -> PathBuf {
     node.home.join(".local/bin/plakd")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deploy_mac_machine_id_uses_one_non_nil_platform_uuid() {
+        let uuid = "9BA92390-447E-4368-976C-7FAE72AB0021";
+        let row = format!("    \"IOPlatformUUID\" = \"{uuid}\"");
+        let result = mac_machine_id(&format!("+-o IOPlatformExpertDevice\n{{\n{row}\n}}")).unwrap();
+        assert_eq!(
+            result,
+            shipping::digest(uuid::Uuid::parse_str(uuid).unwrap().as_bytes())
+        );
+        for invalid in [
+            String::new(),
+            format!("{row}\n{row}"),
+            format!("{row}\n\"IOPlatformUUID\" = \"incomplete"),
+            row.replace(uuid, "not-a-uuid"),
+            row.replace(uuid, "00000000-0000-0000-0000-000000000000"),
+        ] {
+            assert!(mac_machine_id(&invalid).is_err());
+        }
+    }
 }

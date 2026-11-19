@@ -6441,6 +6441,13 @@ Linux x86_64 targets use systemd user services; Apple Silicon macOS targets
 use LaunchAgents in the enrolled user's GUI domain. Stage data and evidence
 are disjoint except for the staging receipt. Only on macOS may staging and
 production use the same machine, with distinct logins, UIDs and homes.
+Matching SSH host strings across stages are an early inventory check, not
+proof of physical separation. Before staging effects, deploy compares the
+observed digests of all staging Linux machines against local production
+evidence and any production receipt at the enrolled operator paths; an
+alias does not bypass the comparison. Production records all role account
+identities before its first target mutation. This check does not contact
+production.
 Plan and status are JSON and never dispatch a model request. Plan is
 observational; status may finish withdrawal of a recorded pre-surrender
 attempt. OpenSSH uses a minimal configuration,
@@ -6449,12 +6456,12 @@ Fixed remote loaders read request data on stdin; native target operations
 use closed JSON requests and replies and verified payload lengths and hashes.
 The operator starts those operations with a verified transfer of the candidate
 image and uses the verified installed candidate after staging. The target
-refuses an operator whose deploy protocol number differs (currently v2).
+refuses an operator whose deploy protocol number differs (currently v3).
 Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
-On macOS the loaded LaunchAgent path and arguments must agree with the plist
-on disk and the service PID must prove its executable vnode. The host
+On macOS the loaded LaunchAgent path, arguments and exposed service settings
+must agree with the plist on disk, and the service PID must prove its executable vnode. The host
 plist must match the product renderer. Unloaded, edited or stale services
 need manual enrollment; deploy does not bootstrap or kickstart them.
 
@@ -6479,12 +6486,19 @@ Ordinary `run --max-turns 1` is not a substitute.
 
 When replacing a host with paired placements, plan asks its exact source
 coordinator to inspect incumbent runner connections and refuses live or
-unknown job state. This same-user request has no admission or connection
-lifetime effects. If inspection is unavailable, use the source-compatible
-link to attach a settled root read-only and **keep that attachment open**
-on the source through handoff; a picker Ready row is not enough.
-Apply checks again before the runner links move. The source upgrade's
-ordinary changed-triple gates still check before drain and before surrender.
+unknown job state. An `outcome_unknown` job blocks deploy and names the
+runner, line and job number and the `jobs.ack` or `jobs.disown` remedy.
+Ordinary manual host upgrade retains its existing process checks.
+The same-user preflight has no admission or connection lifetime effects.
+Apply checks before runner links move. The requester proves inspection
+support on the exact source instance before sending the enrolled runner
+IDs; the source checks those placements again before drain and just before
+surrender, whether the runner triple changes or not. Requests without
+enrolled runner IDs keep the ordinary host-upgrade encoding. A read-only
+attachment on a settled root using the source-compatible link can restore
+missing inspection; a picker Ready row is not enough. If the attachment
+disappears and inspection becomes unavailable, the source refuses rather
+than relying on the earlier proof.
 A source without this inspection request must be upgraded by the manual
 procedure first. Runner links must be dedicated links to owned, immutable
 snapshots. Install does not move them.
@@ -6525,10 +6539,15 @@ Apply appends an intent before each mutating cohort (runner links → host →
 client links), halts on error, and emits the exact status command. A missing
 acknowledgement is reconciled by observing exact links and service/process
 identity, not by reissuing surrender or repeating a completed link change.
-An unknown outcome leaves the runner links in place. If the exact predecessor's
-serialized coordinator proves idle with no pending receipt, apply or status
-fences the withdrawn target request and restores the recorded runner links
-before closing the intent. Target-local, per-operation cancellation
+An error before recording and sending the host request, or a pending
+runner-only cohort on re-entry, withdraws the runner cohort if the recorded
+source image and stable link are still serving, even if that source
+restarted. Sync the withdrawal intent before restoring links. It never
+continues to handoff in the same invocation. Once a host request can have
+been sent, an unknown outcome leaves the runner links in place. If the exact
+predecessor's serialized coordinator proves idle with no pending receipt,
+apply or status fences the withdrawn host request before recording runner
+withdrawal and restoring links. Target-local, per-operation cancellation
 fences under the login's installation root prevent a delayed request from
 undoing withdrawal. The host requester inherits its target wrapper's fence
 until it exits. There is no service rollback after surrender, unit
@@ -6538,7 +6557,7 @@ image under a new instance with unchanged non-transitioning dependencies.
 Evidence and receipts identify accounts by platform, machine digest, UID
 and home, and record the host product home. A production history marker in
 each mutated target login's installation root fences staging.
-The green schema-3 staging JSON
+The green schema-4 staging JSON
 report is a receipt for production apply, not a store or custody authority.
 
 ### 4.7 `plakd gateway`

@@ -624,6 +624,15 @@ enum HostAction {
         /// Same-key boundary drain: default 60s; 0, integer ms/s/m/h, or idle.
         #[arg(long, conflicts_with = "wait")]
         drain: Option<crate::command::HostDrain>,
+        #[arg(
+            long,
+            hide = true,
+            requires = "inspect_source",
+            conflicts_with = "abandon"
+        )]
+        inspect_runner: Vec<String>,
+        #[arg(long, hide = true, requires = "inspect_runner")]
+        inspect_source: Option<String>,
     },
     /// Relay wire bytes to this home's host without consuming its handshake.
     Connect {

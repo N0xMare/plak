@@ -21,7 +21,7 @@ pub(super) fn host(op: &HostOp) -> u64 {
     LOGIN
         + MARGIN
         + match op {
-            HostOp::Observe | HostOp::HostLink { .. } => OBSERVE,
+            HostOp::Observe | HostOp::HostLink { .. } | HostOp::RunnerWithdrawalProof => OBSERVE,
             HostOp::RunnerPreflight { .. } => OBSERVE + RUNNER_INSPECTION,
             HostOp::Health { routes, .. } => {
                 OBSERVE + DOCTOR + BINDINGS + GENERATION * routes.len() as u64
@@ -31,7 +31,19 @@ pub(super) fn host(op: &HostOp) -> u64 {
             HostOp::StageHost { .. } => TRANSFER,
             HostOp::DestinationUnit { .. } => PROBE,
             HostOp::DestinationCanaryPreflight { .. } => PREFLIGHT,
-            HostOp::Upgrade { drain, .. } => OBSERVE + 2 * PROBE + UPGRADE + u64::from(*drain),
+            HostOp::Upgrade {
+                drain, previous, ..
+            } => {
+                OBSERVE
+                    + 2 * PROBE
+                    + UPGRADE
+                    + u64::from(*drain)
+                    + if previous.paired.is_empty() {
+                        0
+                    } else {
+                        3 * RUNNER_INSPECTION
+                    }
+            }
             HostOp::WithdrawUpgrade { .. } => OBSERVE,
             HostOp::MarkProduction { .. } => 0,
         }

@@ -144,8 +144,12 @@ pub(super) fn observed(fleet: &impl Fleet) -> CliResult<Observed> {
     evidence_decode(fleet.host(HostOp::Observe)?)
 }
 
-pub(super) fn runner(fleet: &impl Fleet, runner: &Runner) -> CliResult<RunnerObserved> {
-    evidence_decode(fleet.runner(runner, RunnerOp::Observe)?)
+pub(super) fn runner(
+    fleet: &impl Fleet,
+    runner: &Runner,
+    expected: super::protocol::Candidate,
+) -> CliResult<RunnerObserved> {
+    evidence_decode(fleet.runner(runner, RunnerOp::Observe { expected })?)
 }
 
 pub(super) fn client(fleet: &impl Fleet, client: &Client) -> CliResult<ClientObserved> {

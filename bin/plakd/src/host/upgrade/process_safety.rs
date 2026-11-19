@@ -1,8 +1,24 @@
 //! Remove this admission gate once host upgrade carries jobs across runner triples.
 
 use super::{CliFailure, CliResult, Duration, Services};
+use crate::deploy::{DeployRunnerInspection, DeployRunnerVerdict, RUNNER_INSPECTION_REFUSAL};
 use plakous::runner::protocol::{LineStatus, VersionTriple};
 use std::collections::BTreeMap;
+
+impl super::Request {
+    pub(super) fn check_processes(
+        &self,
+        services: &Services,
+        destination: &VersionTriple,
+        runtime: &tokio::runtime::Handle,
+    ) -> CliResult<()> {
+        if self.inspect_runners.is_empty() {
+            check(services, destination, runtime)
+        } else {
+            inspect_deploy(services, &self.inspect_runners, runtime)
+        }
+    }
+}
 
 pub(super) fn check(
     services: &Services,
@@ -20,15 +36,68 @@ pub(super) fn inspect_deploy(
     runners: &[String],
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
+    validate_ids(runners)?;
+    inspect(services, runners, runtime).map_err(|error| {
+        if error.message().starts_with(RUNNER_INSPECTION_REFUSAL) {
+            error
+        } else {
+            deploy_refusal(error.message())
+        }
+    })
+}
+
+fn validate_ids(runners: &[String]) -> CliResult<()> {
     if runners.is_empty()
         || runners.len() > 8
         || runners
             .iter()
             .any(|id| crate::product_config::validate_runner_name(id).is_err())
+        || runners
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != runners.len()
     {
-        return Err(CliFailure::new("invalid deploy runner inspection"));
+        return Err(deploy_refusal("invalid deploy runner inspection ids"));
     }
-    inspect(services, runners, runtime)
+    Ok(())
+}
+
+pub(super) fn deploy_refusal(detail: &str) -> CliFailure {
+    CliFailure::new(format!("{RUNNER_INSPECTION_REFUSAL} {detail}"))
+}
+
+pub(super) fn deploy_verdict(
+    request: &DeployRunnerInspection,
+    instance: &str,
+    idle: bool,
+    inspect: impl FnOnce(&[String]) -> CliResult<()>,
+) -> DeployRunnerVerdict {
+    let result = if request.source_instance != instance {
+        Err(deploy_refusal(
+            "source coordinator instance changed; replan",
+        ))
+    } else if !idle {
+        Err(deploy_refusal("source coordinator is not idle; replan"))
+    } else {
+        inspect(&request.deploy_inspect_runners)
+    };
+    match result {
+        Ok(()) => DeployRunnerVerdict::Settled,
+        Err(error) => DeployRunnerVerdict::Blocked {
+            detail: error.message().to_owned(),
+        },
+    }
+}
+
+fn enrolled_clients<T>(
+    runners: &[String],
+    client: impl Fn(&str) -> Option<T>,
+) -> CliResult<BTreeMap<String, T>> {
+    runners
+        .iter()
+        .map(|id| Ok((id.clone(), client(id).ok_or_else(|| unavailable(id))?)))
+        .collect()
 }
 
 fn inspect(
@@ -36,16 +105,9 @@ fn inspect(
     runners: &[String],
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
-    let mut clients = BTreeMap::new();
+    let mut clients = enrolled_clients(runners, |id| services.runners().client(id))?;
     if let Some(client) = services.local_runner_client() {
         clients.insert("local".to_owned(), client);
-    }
-    for id in runners {
-        let client = services
-            .runners()
-            .client(id)
-            .ok_or_else(|| unavailable(id))?;
-        clients.insert(id.clone(), client);
     }
     for record in crate::store::ProductStore::inspect_upgrade_roots(services.paths()?)
         .map_err(CliFailure::new)?
@@ -89,10 +151,31 @@ fn inspect(
         for line in lines.iter().filter(|line| {
             line.host_id == plakous_recursive_subagents::tree::custody_host().host_id
         }) {
+            if !runners.is_empty() {
+                check_unknown_jobs(&id, line)?;
+            }
             if live(line)? {
                 return Err(refused());
             }
         }
+    }
+    Ok(())
+}
+
+fn check_unknown_jobs(runner: &str, line: &LineStatus) -> CliResult<()> {
+    let jobs = line.jobs["jobs"].as_array().ok_or_else(refused)?;
+    if let Some(unknown) = jobs
+        .iter()
+        .find(|job| job["status"]["status"] == "outcome_unknown")
+    {
+        let number = unknown["number"]
+            .as_u64()
+            .filter(|n| u32::try_from(*n).is_ok())
+            .ok_or_else(refused)?;
+        return Err(deploy_refusal(&format!(
+            "runner {runner} job {number} on line {} is outcome_unknown; use jobs.ack or jobs.disown on the old build before retrying; no source surrendered",
+            line.line
+        )));
     }
     Ok(())
 }
@@ -144,6 +227,61 @@ fn inspection_incomplete(runner: &str) -> CliFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deploy_inspection_rejects_wrong_instance_busy_source_and_unavailable_placements() {
+        let (_temp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let services = Services::for_home(paths);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut request = DeployRunnerInspection {
+            source_instance: "100-0000000000000001".into(),
+            deploy_inspect_runners: vec!["desk".into()],
+        };
+        let check = |ids: &[String]| inspect_deploy(&services, ids, runtime.handle());
+        for (instance, idle, expected) in [
+            ("101-0000000000000002", true, "coordinator instance changed"),
+            ("100-0000000000000001", false, "coordinator is not idle"),
+            (
+                "100-0000000000000001",
+                true,
+                "native process inspection is unavailable for runner desk",
+            ),
+        ] {
+            let DeployRunnerVerdict::Blocked { detail } =
+                deploy_verdict(&request, instance, idle, check)
+            else {
+                panic!("inspection must refuse")
+            };
+            assert!(detail.contains(expected), "{detail}");
+        }
+        request.deploy_inspect_runners[0] = "local".into();
+        let DeployRunnerVerdict::Blocked { detail } =
+            deploy_verdict(&request, &request.source_instance, true, check)
+        else {
+            panic!("invalid runner ID must refuse")
+        };
+        assert!(detail.contains("invalid deploy runner inspection ids"));
+    }
+
+    #[test]
+    fn deploy_inspection_blocks_an_unknown_job_without_changing_manual_gate() {
+        let line = LineStatus {
+            host_id: "host".into(),
+            line: "line".into(),
+            owner: None,
+            adopted: true,
+            jobs: serde_json::json!({"jobs":[{"number":17,"status":{"status":"outcome_unknown"}}]}),
+            foreground: false,
+        };
+        let refusal = check_unknown_jobs("desk", &line).unwrap_err();
+        for expected in ["runner desk job 17", "jobs.ack", "jobs.disown"] {
+            assert!(refusal.message().contains(expected));
+        }
+        assert!(!live(&line).unwrap());
+    }
 
     #[test]
     fn host_upgrade_process_inspection_local_and_timeout_remedies_are_distinct() {

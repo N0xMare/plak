@@ -17,7 +17,8 @@ use crate::shipping_artifact::{
 
 use super::inventory::{self, Host, Node, Platform};
 use super::protocol::{
-    AccountIdentity, Export, Facts, Observed, RunnerPlacement, RunnerTriple, StageIdentity,
+    AccountIdentity, Export, Facts, HostImages, Observed, RunnerPlacement, RunnerTriple,
+    StageIdentity,
 };
 use super::ssh;
 use super::timing;
@@ -218,13 +219,8 @@ impl<'a> Target<'a> {
 
     pub(super) fn observe(&self) -> CliResult<(PathBuf, Observed)> {
         let pid = self.host_pid()?;
-        let binary = self.process_image(&pid)?;
+        let (binary, linked) = self.image_paths(&pid)?;
         let link = ssh::stable(&self.host.node);
-        let linked = link.canonicalize().map_err(io)?;
-        check(
-            self.snapshot_binary(&binary) && link.is_symlink() && self.snapshot_binary(&linked),
-            NORMALIZE,
-        )?;
         let image = FileFacts::read(&binary)?;
         let unit = shipping::read(&self.unit_path(), shipping::LIMIT)?;
         check(self.render_unit(&binary)? == unit, NORMALIZE)?;
@@ -272,6 +268,43 @@ impl<'a> Target<'a> {
                 production_history: self.production_history(),
             },
         ))
+    }
+
+    pub(super) fn host_images(&self) -> CliResult<HostImages> {
+        let pid = self.running_host_pid()?;
+        let (binary, linked) = self.image_paths(&pid)?;
+        let image = FileFacts::read(&binary)?;
+        let link = FileFacts::read(&linked)?;
+        check(
+            self.running_host_pid()? == pid && self.image_paths(&pid)? == (binary, linked),
+            "host changed during runner withdrawal observation",
+        )?;
+        Ok(HostImages {
+            sha256: image.sha256,
+            link_sha256: link.sha256,
+            stage_identity: self.stage_identity(),
+            production_history: self.production_history(),
+        })
+    }
+
+    fn running_host_pid(&self) -> CliResult<String> {
+        match self.host.node.platform {
+            Platform::Mac => super::launchd::running_pid(self, HOST_AGENT),
+            Platform::Linux => {
+                Ok(active_pid(&self.properties(UNIT, &["ActiveState", "MainPID"])?)?.to_owned())
+            }
+        }
+    }
+
+    fn image_paths(&self, pid: &str) -> CliResult<(PathBuf, PathBuf)> {
+        let binary = self.process_image(pid)?;
+        let link = ssh::stable(&self.host.node);
+        let linked = link.canonicalize().map_err(io)?;
+        check(
+            self.snapshot_binary(&binary) && link.is_symlink() && self.snapshot_binary(&linked),
+            NORMALIZE,
+        )?;
+        Ok((binary, linked))
     }
 
     fn snapshot_binary(&self, path: &Path) -> bool {
@@ -446,7 +479,7 @@ impl<'a> Target<'a> {
             props
                 .get("NeedDaemonReload")
                 .is_some_and(|value| value == "no"),
-            "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway or use S3",
+            "gateway service has pending unit changes; reconcile its loaded unit without restarting the gateway",
         )?;
         Ok((active_pid(&props)?.to_owned(), start.into()))
     }
@@ -765,16 +798,8 @@ pub(super) fn command(binary: &OsStr, node: &Node, product_home: &Path) -> std::
 }
 
 pub(super) fn capture(cmd: std::process::Command, seconds: u64) -> CliResult<Vec<u8>> {
-    capture_input(cmd, seconds, None)
-}
-
-pub(super) fn capture_input(
-    cmd: std::process::Command,
-    seconds: u64,
-    input: Option<fs::File>,
-) -> CliResult<Vec<u8>> {
     let reply =
-        operator_process::capture(cmd, input, Duration::from_secs(seconds), shipping::LIMIT)?;
+        operator_process::capture(cmd, None, Duration::from_secs(seconds), shipping::LIMIT)?;
     check(
         reply.status.success(),
         "target command failed; inspect the documented command on the target",

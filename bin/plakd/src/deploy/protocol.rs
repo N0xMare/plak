@@ -7,9 +7,10 @@ use crate::shipping_artifact::{Upgrade, Wire};
 
 use super::inventory::{Host, Node, Platform, Route, Runner, Stage};
 
-pub(super) const VERSION: u32 = 2;
+pub(super) const VERSION: u32 = 3;
+pub(crate) const RUNNER_INSPECTION_REFUSAL: &str = "deploy_runner_inspection:";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DeployRunnerInspection {
     pub(crate) source_instance: String,
@@ -59,6 +60,7 @@ pub(super) enum Call {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum HostOp {
     Observe,
+    RunnerWithdrawalProof,
     RunnerPreflight {
         expected: String,
         placements: BTreeMap<String, RunnerPlacement>,
@@ -118,7 +120,9 @@ pub(super) enum ClientOp {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum RunnerOp {
-    Observe,
+    Observe {
+        expected: Candidate,
+    },
     Stage {
         manifest: String,
         manifest_sha256: String,
@@ -150,6 +154,15 @@ pub(super) struct StageIdentity {
     pub(super) uid: u32,
     pub(super) home: PathBuf,
     pub(super) product_home: PathBuf,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HostImages {
+    pub(super) sha256: String,
+    pub(super) link_sha256: String,
+    pub(super) stage_identity: StageIdentity,
+    pub(super) production_history: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -202,6 +215,7 @@ pub(super) struct RunnerObserved {
     pub(super) account: AccountIdentity,
     pub(super) production_history: bool,
     pub(super) link: RunnerLink,
+    pub(super) runner_triple: RunnerTriple,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -15,7 +15,81 @@ use super::protocol::{
 };
 use super::{Halt, Result};
 
-pub(super) const SCHEMA: u32 = 3;
+pub(super) const SCHEMA: u32 = 4;
+
+pub(super) fn isolate_staging(
+    targets: &BTreeSet<AccountIdentity>,
+    production_log: Option<&Path>,
+    receipt: &Path,
+) -> Result<()> {
+    let linux: BTreeSet<_> = targets
+        .iter()
+        .filter(|node| node.platform == super::inventory::Platform::Linux)
+        .map(|node| node.machine_sha256.as_str())
+        .collect();
+    if linux.is_empty() {
+        return Ok(());
+    }
+    let matches = |row: &serde_json::Value| {
+        let digest = |account: &serde_json::Value| {
+            account["machine_sha256"]
+                .as_str()
+                .is_some_and(|sha| linux.contains(sha))
+        };
+        digest(&row["stage_identity"])
+            || ["target_accounts", "accounts"].iter().any(|field| {
+                row[field]
+                    .as_array()
+                    .is_some_and(|accounts| accounts.iter().any(digest))
+            })
+    };
+    let log = production_log
+        .map(|path| history(path, 32 * shipping::LIMIT))
+        .transpose()?
+        .unwrap_or_default();
+    if !log.is_empty() && !log.ends_with('\n') {
+        return Err(Halt::reconcile(
+            "local production evidence is incomplete; reconcile before staging",
+        ));
+    }
+    for line in log.split_terminator('\n') {
+        let row: serde_json::Value = serde_json::from_str(line).map_err(|_| {
+            Halt::reconcile("cannot read local production evidence for staging isolation")
+        })?;
+        if matches(&row) {
+            return Err(Halt::blocked(
+                "staging Linux machine matches local production evidence",
+            ));
+        }
+    }
+    let raw = history(receipt, shipping::LIMIT)?;
+    if !raw.is_empty() {
+        let row: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|_| Halt::reconcile("cannot read local receipt for staging isolation"))?;
+        if row["stage"] == "production" && matches(&row) {
+            return Err(Halt::blocked(
+                "staging Linux machine matches a local production receipt",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn history(path: &Path, bound: u64) -> Result<String> {
+    if fs::symlink_metadata(path).is_err_and(|err| err.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(String::new());
+    }
+    let file = shipping::open(path)?;
+    private(&file)?;
+    let mut raw = String::new();
+    file.take(bound + 1).read_to_string(&mut raw).map_err(io)?;
+    if raw.len() as u64 > bound {
+        return Err(Halt::reconcile(
+            "operator production history exceeds its read bound",
+        ));
+    }
+    Ok(raw)
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

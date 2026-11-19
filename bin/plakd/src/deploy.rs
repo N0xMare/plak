@@ -23,7 +23,7 @@ mod runner;
 mod ssh;
 mod target;
 mod timing;
-pub(crate) use protocol::{DeployRunnerInspection, DeployRunnerVerdict};
+pub(crate) use protocol::{DeployRunnerInspection, DeployRunnerVerdict, RUNNER_INSPECTION_REFUSAL};
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {
@@ -174,6 +174,10 @@ fn execute(verb: Verb, options: &Options, report: &mut Report) -> Result<()> {
         fleet,
         stage: options.stage,
         intent,
+        production_evidence: inventory
+            .select(inventory::Stage::Production)
+            .ok()
+            .map(|prod| prod.evidence),
     };
     work(&deployment, verb, configuration.evidence, report)
 }
@@ -212,7 +216,7 @@ fn work(
         }
         if evidence::pending(&rows)?.is_some() {
             let mut log = evidence::Log::open(path, false)?;
-            deployment.plan(&log.rows.clone(), Some(&mut log), false, report)?;
+            deployment.plan(&log.rows.clone(), Some(&mut log), report)?;
             if let Some(last) = log.rows.last() {
                 report.put("last_evidence", last)?;
             }
@@ -220,7 +224,7 @@ fn work(
             return Ok(());
         }
     }
-    deployment.plan(&rows, None, false, report)?;
+    deployment.plan(&rows, None, report)?;
     report.put("result", &"ready")?;
     Ok(())
 }

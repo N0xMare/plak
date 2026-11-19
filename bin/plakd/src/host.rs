@@ -87,6 +87,7 @@ pub(crate) fn upgrade(
     wait: Duration,
     drain: crate::command::HostDrain,
     abandon: Option<&str>,
+    inspection: Option<crate::deploy::DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
     if let Some(target) = abandon {
         return upgrade::abandon(services, target);
@@ -96,6 +97,7 @@ pub(crate) fn upgrade(
         expect_binary.ok_or_else(|| CliFailure::new("expected binary is required"))?,
         wait,
         drain,
+        inspection,
     )
 }
 

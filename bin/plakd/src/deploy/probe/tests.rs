@@ -273,6 +273,7 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
     };
     let error = target::execute_host(target, wrong_instance, &mut io::empty()).unwrap_err();
     assert!(error.message().contains("no longer Ready"));
+    assert_host_fence(target, &serving, &absent);
     assert_eq!(
         fs::read_link(target.host.node.home.join(".local/bin/plakd")).unwrap(),
         source
@@ -291,4 +292,48 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
     target::guard_stage(target, Stage::Staging, &HostOp::Observe).unwrap();
     target::guard_stage(target, Stage::Production, &guarded).unwrap();
     fs::remove_file(marker).unwrap();
+}
+
+fn assert_host_fence(
+    target: &Target<'_>,
+    serving: &super::Observed,
+    candidate: &crate::deploy::protocol::Candidate,
+) {
+    use crate::deploy::{fence::Fence, protocol::HostOp};
+    let ticket = uuid::Uuid::new_v4();
+    let fence = Fence::lock(&target.host.node, "upgrade", ticket).unwrap();
+    let inherited = fence.requester_input().unwrap();
+    drop(fence);
+    let withdraw = || {
+        target::execute_host(
+            target,
+            HostOp::WithdrawUpgrade {
+                ticket,
+                instance: serving.instance.clone(),
+                source_sha256: serving.sha256.clone(),
+            },
+            &mut io::empty(),
+        )
+    };
+    assert!(
+        withdraw()
+            .unwrap_err()
+            .message()
+            .contains("still holds the deploy fence")
+    );
+    drop(inherited);
+    withdraw().unwrap();
+    let late = HostOp::Upgrade {
+        ticket,
+        candidate: candidate.clone(),
+        drain: 0,
+        previous: Box::new(serving.clone()),
+    };
+    assert!(
+        target::execute_host(target, late, &mut io::empty())
+            .unwrap_err()
+            .message()
+            .contains("was withdrawn")
+    );
+    assert!(!target.host.product_home.join("surrendered").exists());
 }

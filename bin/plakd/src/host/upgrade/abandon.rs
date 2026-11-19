@@ -49,6 +49,7 @@ pub(in crate::host) fn request(services: &Services, target: &str) -> CliResult<P
             wait_seconds: 0,
             drain: crate::command::HostDrain::default(),
             abandon: Some(target.to_owned()),
+            inspect_runners: Vec::new(),
         },
     )?;
     match read::<Answer>(&stream)? {

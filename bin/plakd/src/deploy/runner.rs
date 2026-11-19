@@ -4,13 +4,13 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
 use crate::CliResult;
-use crate::shipping_artifact::{FileFacts, check, io};
+use crate::shipping_artifact::{self as shipping, BuildInfo, FileFacts, check, io};
 use crate::snapshot_install;
 
 use super::fence::Fence;
 use super::inventory::{Node, Runner, Stage};
 use super::probe;
-use super::protocol::{Candidate, RunnerLink, RunnerObserved, RunnerOp};
+use super::protocol::{Candidate, RunnerLink, RunnerObserved, RunnerOp, RunnerTriple};
 use super::target;
 
 pub(super) fn execute(
@@ -25,11 +25,22 @@ pub(super) fn execute(
     if !matches!(op, RunnerOp::Stage { .. }) {
         target::eof(body)?;
     }
-    if matches!(op, RunnerOp::Observe) {
+    if let RunnerOp::Observe { expected } = &op {
+        let link = observe(runner)?;
+        check(
+            link.sha256 == runner.source_sha256 || link == candidate_link(&runner.node, expected)?,
+            "unknown runner command image; inspect and re-enroll",
+        )?;
+        let runner_triple = build_info(&runner.node, &link)?;
+        check(
+            observe(runner)? == link,
+            "runner link changed during observation",
+        )?;
         return target::data(&RunnerObserved {
             account,
             production_history: probe::production_history(&runner.node),
-            link: observe(runner)?,
+            link,
+            runner_triple,
         });
     }
     target::guard_account(&runner.node, stage)?;
@@ -65,8 +76,25 @@ pub(super) fn execute(
             switch(runner, &candidate, &source, true)?;
             target::data(&())
         }
-        RunnerOp::Observe => unreachable!(),
+        RunnerOp::Observe { .. } => unreachable!(),
     }
+}
+
+fn build_info(node: &Node, link: &RunnerLink) -> CliResult<RunnerTriple> {
+    let mut command = probe::command(link.path.as_os_str(), node, &node.home.join(".plak"));
+    command.args(["version", "--build-info"]);
+    let info: BuildInfo = probe::decode(&probe::capture(command, super::timing::PROBE)?)?;
+    check(
+        shipping::revision(&info.revision)
+            && info.runner.protocol > 0
+            && matches!(info.flavor.as_str(), "release" | "maintainer"),
+        "invalid runner build-info triple",
+    )?;
+    Ok(RunnerTriple {
+        protocol: info.runner.protocol,
+        source_revision: info.revision,
+        flavor: info.flavor,
+    })
 }
 
 fn snapshot_image(node: &Node, path: &Path) -> CliResult<FileFacts> {
@@ -102,17 +130,30 @@ fn switch(
     source: &RunnerLink,
     restore: bool,
 ) -> CliResult<()> {
-    let path = target::staged_in(&runner.node, candidate)?;
-    let desired = RunnerLink {
-        path,
-        sha256: candidate.sha256.clone(),
-    };
+    let mut desired = candidate_link(&runner.node, candidate)?;
+    if !restore {
+        desired.path = target::staged_in(&runner.node, candidate)?;
+    }
     check(
         source.sha256 == runner.source_sha256
             && snapshot_image(&runner.node, &source.path)?.sha256 == source.sha256,
         "recorded source runner image differs; restore the pinned immutable snapshot before retrying",
     )?;
-    let found = observe(runner)?;
+    let found = if restore {
+        snapshot_install::require_owned(snapshot_install::parent(&runner.link)?)?;
+        let path = fs::read_link(&runner.link).map_err(io)?;
+        if path == desired.path
+            && fs::symlink_metadata(&path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            desired.clone()
+        } else {
+            let sha256 = snapshot_image(&runner.node, &path)?.sha256;
+            RunnerLink { path, sha256 }
+        }
+    } else {
+        observe(runner)?
+    };
     check(
         &found == source || found == desired,
         "unexpected dedicated runner link; inspect and re-enroll",
@@ -128,6 +169,21 @@ fn switch(
         observe(runner)? == *expected,
         "dedicated runner link did not converge",
     )
+}
+
+fn candidate_link(node: &Node, candidate: &Candidate) -> CliResult<RunnerLink> {
+    check(
+        shipping::hex(&candidate.snapshot, 64) && shipping::hex(&candidate.sha256, 64),
+        "invalid runner candidate pin",
+    )?;
+    Ok(RunnerLink {
+        path: node
+            .home
+            .join(".local/lib/plak/release")
+            .join(&candidate.snapshot)
+            .join("plakd"),
+        sha256: candidate.sha256.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -192,5 +248,11 @@ mod tests {
             fs::read_link(home.join(".local/bin/plakd")).unwrap(),
             new.join("plakd")
         );
+        // A staged image may disappear between advance and withdrawal. The
+        // exact dangling candidate link is still safe to restore.
+        snapshot_install::atomic_link(&runner.link, &new.join("plakd")).unwrap();
+        fs::remove_file(new.join("plakd")).unwrap();
+        switch(&runner, &candidate, &source, true).unwrap();
+        assert_eq!(observe(&runner).unwrap(), source);
     }
 }

@@ -31,6 +31,9 @@ product home under the production UID. Give each user their own HOME,
 product home, service/runner pairing, links and credentials. Linux stage
 targets must be on separate machines. The operator machine is separate from
 both. Use distinct evidence paths, and give both stages the same receipt path.
+The SSH strings catch obvious overlap; before staging, deploy checks the
+actual Linux machine digests against local production evidence and receipts,
+including roles reached through a different SSH name.
 
 A client's manifest has exactly `schema: 1`, `platform` matching its node,
 `wire: {"number": N, "schema_pin": "…"}`,
@@ -46,11 +49,17 @@ For each paired runner, the enrolled ID, literal `login@host` SSH destination
 and dedicated link must match the source host's `[runners.<id>]` table.
 Do not remap that destination in the host's SSH config. The link must point
 directly to an owned immutable snapshot, and must not be one of the ordinary
-PATH commands that `install.sh link` moves. Settle live jobs using the old
-build. If plan cannot inspect a runner, use its source-compatible command
-link, attach a settled source root read-only on that runner, and keep the
-attachment open through upgrade. Do not advance the link manually once
-deploy owns its intent. A picker Ready row alone does not hold the connection.
+PATH commands that `install.sh link` moves. The runner image must report
+its own `version --build-info`; deploy uses it to classify the transition.
+Settle live jobs on the old build. For a job reported as `outcome_unknown`,
+use the reported job number and the `jobs.ack` or `jobs.disown` operation.
+If plan cannot inspect a runner, use its source-compatible command link
+and attach a settled source root read-only on that runner. A picker Ready row
+alone is not enough. The source reinspects the enrolled runners before drain
+and before surrender, even if their build triple did not change. If it loses
+inspection, it refuses the handoff and deploy restores its advanced links
+when the source is proven safe. Do not advance the link manually once
+deploy owns its intent.
 If the incumbent predates the source-side inspection, use the manual paired
 upgrade once before enrolling it.
 
@@ -89,10 +98,12 @@ operator-owned directory.
 On failure use the command in the JSON `retry` field. For
 `needs_reconcile`, inspect the actual service and upgrade outcome before
 continuing. If the replacement is already Ready, the same apply can finish
-the remaining links and verification without surrender again. If the
-incumbent proves it is idle with no pending receipt, status or apply
-withdraws the intent and restores any runner links it advanced. It does not
-issue a new upgrade in that invocation. If the outcome is still uncertain,
+the remaining links and verification without surrender again. If the runner
+cohort stopped before any host request, status or apply restores the links
+once it observes the recorded source image and stable link. If the host
+request might have been sent, it must also prove the exact source is idle
+with no pending receipt and cancel the request before restoring. Neither
+case issues a new upgrade in that invocation. If the outcome is still uncertain,
 leave the runner links in place while inspecting the host. Do not discard the
 evidence log or race a manual handoff against an open intent. There is no
 automatic host rollback after surrender.

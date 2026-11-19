@@ -11,7 +11,8 @@ use super::fleet::{self, Fleet};
 use super::inventory::{Runner, Selected, Stage};
 use super::plan::{self, Plan, Step, Targets};
 use super::protocol::{
-    Canary, ClientOp, Connection, Health, HostOp, Observed, RunnerLink, RunnerOp,
+    Canary, ClientOp, Connection, Health, HostImages, HostOp, Observed, RunnerLink, RunnerOp,
+    StageIdentity,
 };
 use super::{Halt, Report, Result};
 
@@ -21,6 +22,7 @@ pub(super) struct Deploy<'a, F> {
     pub(super) fleet: F,
     pub(super) stage: Stage,
     pub(super) intent: String,
+    pub(super) production_evidence: Option<&'a std::path::Path>,
 }
 
 impl<F: Fleet> Deploy<'_, F> {
@@ -28,10 +30,26 @@ impl<F: Fleet> Deploy<'_, F> {
         &self,
         rows: &[Row],
         log: Option<&mut Log>,
-        applying: bool,
         report: &mut Report,
-    ) -> Result<Plan> {
-        let prior = evidence::pending(rows)?.map(|(intent, prior)| (intent.to_owned(), prior));
+    ) -> Result<Option<Plan>> {
+        let prior = evidence::pending(rows)?;
+        let mut log = log;
+        if let Some((intent, prior)) = &prior {
+            if *intent != self.intent {
+                return Err(Halt::reconcile(
+                    "a different recorded deployment intent still needs reconciliation",
+                ));
+            }
+            if matches!(prior.cohort, Cohort::Runner | Cohort::RunnerWithdrawal) {
+                let Some(log) = log else {
+                    return Err(Halt::reconcile(
+                        "withdraw the recorded runner cohort with deploy status before another handoff",
+                    ));
+                };
+                self.withdraw_runner(&mut prior.clone(), log, report)?;
+                return Ok(None);
+            }
+        }
         let observed = match fleet::observed(&self.fleet) {
             Ok(observed) => observed,
             Err(error) if prior.is_some() => {
@@ -44,6 +62,18 @@ impl<F: Fleet> Deploy<'_, F> {
         };
         report.put("observed", &observed)?;
         report.put("stage_identity", &observed.stage_identity)?;
+        if let Some(log) = &mut log {
+            log.stage_identity = Some(observed.stage_identity.clone());
+        }
+        if let Some((_, pending)) = &prior
+            && pending.cohort == Cohort::Host
+            && pending.host_upgrade
+            && plan::can_withdraw(&observed, pending)
+            && let Some(log) = &mut log
+        {
+            self.withdraw_host(&observed, &mut pending.clone(), log, report)?;
+            return Ok(None);
+        }
         if observed.canary.is_none() && observed.facts.source == "legacy facts" {
             report.put("legacy_facts", &observed.facts)?;
         }
@@ -63,7 +93,7 @@ impl<F: Fleet> Deploy<'_, F> {
             }
         }
         for runner in self.config.runners {
-            let found = fleet::runner(&self.fleet, runner)?;
+            let found = self.observe_runner(runner)?;
             self.stage_allowed(found.production_history)?;
             targets.accounts.insert(found.account.clone());
             if found.link != self.runner_destination(runner) {
@@ -77,7 +107,9 @@ impl<F: Fleet> Deploy<'_, F> {
         }
         report.put("target_accounts", &targets.accounts)?;
         report.put("runner_links", &targets.runners)?;
-        let resume = self.resolve_pending(&observed, &targets, prior, log, report)?;
+        self.stage_isolation(&targets.accounts)?;
+        let resume =
+            self.resolve_pending(&observed, &targets, prior.map(|(_, pending)| pending))?;
         let plan = Plan::new(
             observed,
             targets,
@@ -87,38 +119,27 @@ impl<F: Fleet> Deploy<'_, F> {
             routes,
             resume,
         );
-        if !withdrawn(report) {
-            check(
-                plan.has(Step::HostUpgrade) || plan.runner_changes.is_empty(),
-                "runner link differs after host handoff; inspect and fix forward",
-            )?;
-            if plan.has(Step::HostUpgrade)
-                && !self.config.runners.is_empty()
-                && !(applying && plan.resume.is_some())
-            {
-                self.runner_preflight(&plan.observed)?;
-            }
+        check(
+            plan.has(Step::HostUpgrade) || plan.runner_changes.is_empty(),
+            "runner link differs after host handoff; inspect and fix forward",
+        )?;
+        if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
+            self.runner_preflight(&plan.observed)?;
         }
         report.put("plan", &plan.steps)?;
         report.put("source_transition", &plan.source_transition)?;
         report.put("canary_models", &super::receipt::models(&plan.routes))?;
-        Ok(plan)
+        Ok(Some(plan))
     }
 
     fn resolve_pending(
         &self,
         observed: &Observed,
         targets: &Targets,
-        prior: Option<(String, Pending)>,
-        log: Option<&mut Log>,
-        report: &mut Report,
+        prior: Option<Pending>,
     ) -> Result<Option<Pending>> {
-        let mut log = log;
-        if let Some(log) = &mut log {
-            log.stage_identity = Some(observed.stage_identity.clone());
-        }
         match prior {
-            Some((intent, mut prior)) if intent == self.intent => {
+            Some(prior) => {
                 if targets.accounts != prior.accounts
                     || self.config.runners.iter().any(|runner| {
                         let found = &targets.runners[&runner.id];
@@ -133,25 +154,6 @@ impl<F: Fleet> Deploy<'_, F> {
                         "recorded target account or runner link differs; inspect before continuing",
                     ));
                 }
-                if prior.cohort == Cohort::Host
-                    && prior.host_upgrade
-                    && plan::can_withdraw(observed, &prior)
-                    && let Some(log) = &mut log
-                {
-                    self.withdraw_host(&mut prior, log, report)?;
-                    return Ok(None);
-                }
-                if prior.cohort == Cohort::RunnerWithdrawal {
-                    if let Some(log) = &mut log
-                        && plan::can_withdraw(observed, &prior)
-                    {
-                        self.restore_and_record(&prior, log, report)?;
-                        return Ok(None);
-                    }
-                    return Err(Halt::reconcile(
-                        "runner withdrawal needs the unchanged idle source; use deploy status",
-                    ));
-                }
                 plan::verify_resume(observed, &prior, &self.artifacts.candidate().sha256)?;
                 if prior.cohort == Cohort::Clients
                     && (observed.link_sha256 != observed.sha256
@@ -163,9 +165,6 @@ impl<F: Fleet> Deploy<'_, F> {
                 }
                 Ok(Some(prior))
             }
-            Some(_) => Err(Halt::reconcile(
-                "a different recorded upgrade intent still needs reconciliation",
-            )),
             None if observed.sha256 != observed.link_sha256 => Err(Halt::reconcile(
                 "serving image and stable link differ; reconcile before applying",
             )),
@@ -175,12 +174,11 @@ impl<F: Fleet> Deploy<'_, F> {
 
     pub(super) fn apply(&self, log: &mut Log, report: &mut Report) -> Result<()> {
         let rows = log.rows.clone();
-        let mut plan = self.plan(&rows, Some(log), true, report)?;
-        if withdrawn(report) {
+        let Some(mut plan) = self.plan(&rows, Some(log), report)? else {
             report.put("result", &"withdrawn")?;
             return Ok(());
-        }
-        self.production_gate(&mut plan)?;
+        };
+        self.production_gate(&mut plan, log)?;
         let baseline = self.baseline(&plan, report)?;
         if plan.resume.is_some() || !plan.has(Step::StageHost) {
             self.fleet.use_installed_candidate();
@@ -206,7 +204,7 @@ impl<F: Fleet> Deploy<'_, F> {
         self.verify(&plan, &ready, baseline.as_ref(), log, report)
     }
 
-    fn production_gate(&self, plan: &mut Plan) -> CliResult<()> {
+    fn production_gate(&self, plan: &mut Plan, log: &mut Log) -> CliResult<()> {
         if self.stage != Stage::Production
             || plan.has(Step::VerifyReadOnly)
             || plan.resume.is_some()
@@ -219,6 +217,13 @@ impl<F: Fleet> Deploy<'_, F> {
             &plan.accounts,
             &plan.source_transition,
             &super::receipt::models(&plan.routes),
+        )?;
+        log.record(
+            &self.intent,
+            "production_targets",
+            &ProductionTargets {
+                target_accounts: &plan.accounts,
+            },
         )?;
         self.fleet.host(HostOp::MarkProduction {
             expected: plan.observed.stage_identity.clone(),
@@ -335,7 +340,8 @@ impl<F: Fleet> Deploy<'_, F> {
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
-        let preparation = (|| {
+        let mut runner_started = false;
+        let preparation: Result<()> = (|| {
             self.preflight_destination(plan, report)?;
             check(
                 self.observe(report)? == plan.observed,
@@ -344,28 +350,24 @@ impl<F: Fleet> Deploy<'_, F> {
             if !self.config.runners.is_empty() {
                 self.runner_preflight(&plan.observed)?;
             }
+            if plan.has(Step::RunnerLinks) {
+                self.cohort(log, pending, Cohort::Runner)?;
+                runner_started = true;
+                self.advance_runners(plan, pending, report)?;
+            }
+            // A gateway cohort belongs here, after runner links and before host intent.
+            self.verify_runners(plan)?;
+            report.put("step", &"host_upgrade")?;
+            self.cohort(log, pending, Cohort::Host)?;
             Ok(())
         })();
         if let Err(error) = preparation {
-            if plan.resume.is_some() {
-                let observed = self.observe(report).map_err(link_lost)?;
-                if !plan::can_withdraw(&observed, pending) {
-                    return Err(Halt::reconcile(
-                        "cannot restore runner links without the unchanged idle source",
-                    ));
-                }
-                self.begin_runner_withdrawal(pending, log, report)?;
+            if runner_started {
+                self.withdraw_runner(pending, log, report)?;
+                return Err(Halt::blocked(&error.message));
             }
             return Err(error);
         }
-        if plan.has(Step::RunnerLinks) {
-            if plan.resume.is_none() {
-                self.cohort(log, pending, Cohort::Runner)?;
-            }
-            self.advance_runners(plan, pending, report)?;
-        }
-        // A gateway cohort belongs here, after runner links and before host intent.
-        self.verify_runners(plan)?;
         Ok(())
     }
 
@@ -375,6 +377,14 @@ impl<F: Fleet> Deploy<'_, F> {
             path: fleet::deployed(&runner.node, artifact),
             sha256: artifact.candidate().sha256,
         }
+    }
+
+    fn observe_runner(&self, runner: &Runner) -> CliResult<super::protocol::RunnerObserved> {
+        fleet::runner(
+            &self.fleet,
+            runner,
+            self.artifacts.image(runner.node.platform).candidate(),
+        )
     }
 
     fn runner_preflight(&self, observed: &Observed) -> CliResult<()> {
@@ -393,23 +403,21 @@ impl<F: Fleet> Deploy<'_, F> {
             .filter(|runner| plan.runner_changes.contains(&runner.id))
         {
             report.put("step", &format!("runner_link_{}", runner.id))?;
-            self.fleet
-                .runner(
-                    runner,
-                    RunnerOp::Advance {
-                        ticket: pending.ticket,
-                        candidate: self.artifacts.image(runner.node.platform).candidate(),
-                        source: pending.runners[&runner.id].link.clone(),
-                    },
-                )
-                .map_err(link_lost)?;
+            self.fleet.runner(
+                runner,
+                RunnerOp::Advance {
+                    ticket: pending.ticket,
+                    candidate: self.artifacts.image(runner.node.platform).candidate(),
+                    source: pending.runners[&runner.id].link.clone(),
+                },
+            )?;
         }
         Ok(())
     }
 
     fn verify_runners(&self, plan: &Plan) -> Result<()> {
         for runner in self.config.runners {
-            let found = fleet::runner(&self.fleet, runner).map_err(link_lost)?;
+            let found = self.observe_runner(runner).map_err(link_lost)?;
             self.stage_allowed(found.production_history)?;
             if found.link != self.runner_destination(runner)
                 || found.account != plan.runners[&runner.id].account
@@ -429,12 +437,56 @@ impl<F: Fleet> Deploy<'_, F> {
         )
     }
 
-    fn withdraw_host(
+    fn stage_isolation(&self, accounts: &BTreeSet<super::protocol::AccountIdentity>) -> Result<()> {
+        if self.stage == Stage::Staging {
+            evidence::isolate_staging(accounts, self.production_evidence, self.config.receipt)?;
+        }
+        Ok(())
+    }
+
+    fn withdraw_runner(
         &self,
         pending: &mut Pending,
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
+        let observed: HostImages =
+            fleet::evidence_decode(self.fleet.host(HostOp::RunnerWithdrawalProof).map_err(
+                |_| {
+                    Halt::reconcile(
+                        "cannot observe the source image and link for runner withdrawal",
+                    )
+                },
+            )?)
+            .map_err(link_lost)?;
+        report.put("source_images", &observed)?;
+        log.stage_identity = Some(observed.stage_identity.clone());
+        if observed.sha256 != pending.source_sha256 || observed.link_sha256 != pending.source_sha256
+        {
+            return Err(Halt::reconcile(
+                "cannot restore runner links without the recorded source image and stable link",
+            ));
+        }
+        self.stage_allowed_to_withdraw(
+            &observed.stage_identity,
+            observed.production_history,
+            pending,
+        )?;
+        if pending.cohort == Cohort::RunnerWithdrawal {
+            self.restore_and_record(pending, log, report)
+        } else {
+            self.begin_runner_withdrawal(pending, log, report)
+        }
+    }
+
+    fn withdraw_host(
+        &self,
+        source: &Observed,
+        pending: &mut Pending,
+        log: &mut Log,
+        report: &mut Report,
+    ) -> Result<()> {
+        self.stage_allowed_to_withdraw(&source.stage_identity, source.production_history, pending)?;
         let detached = || {
             Halt::reconcile(
                 "host outcome is unresolved; runner links are unchanged by recovery until the idle source is proven",
@@ -456,6 +508,18 @@ impl<F: Fleet> Deploy<'_, F> {
         self.begin_runner_withdrawal(pending, log, report)
     }
 
+    fn stage_allowed_to_withdraw(
+        &self,
+        identity: &StageIdentity,
+        production_history: bool,
+        pending: &Pending,
+    ) -> Result<()> {
+        self.stage_allowed(production_history)?;
+        let mut accounts = pending.accounts.clone();
+        accounts.insert(identity.account());
+        self.stage_isolation(&accounts)
+    }
+
     fn begin_runner_withdrawal(
         &self,
         pending: &mut Pending,
@@ -472,26 +536,17 @@ impl<F: Fleet> Deploy<'_, F> {
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
+        let mut refusal = None;
         for runner in self.config.runners {
             let old = &pending.runners[&runner.id].link;
-            if *old != self.runner_destination(runner) {
-                report.put("step", &format!("restore_runner_link_{}", runner.id))?;
-                self.fleet
-                    .runner(
-                        runner,
-                        RunnerOp::Restore {
-                            ticket: pending.ticket,
-                            candidate: self.artifacts.image(runner.node.platform).candidate(),
-                            source: old.clone(),
-                        },
-                    )
-                    .map_err(link_lost)?;
-                if fleet::runner(&self.fleet, runner).map_err(link_lost)?.link != *old {
-                    return Err(Halt::reconcile(
-                        "restored runner link did not match the recorded source",
-                    ));
-                }
+            if *old != self.runner_destination(runner)
+                && let Err(error) = self.restore_runner(runner, old, pending.ticket, report)
+            {
+                refusal.get_or_insert(error);
             }
+        }
+        if let Some(error) = refusal {
+            return Err(error);
         }
         log.record(
             &self.intent,
@@ -504,6 +559,32 @@ impl<F: Fleet> Deploy<'_, F> {
         Ok(())
     }
 
+    fn restore_runner(
+        &self,
+        runner: &Runner,
+        old: &RunnerLink,
+        ticket: uuid::Uuid,
+        report: &mut Report,
+    ) -> Result<()> {
+        report.put("step", &format!("restore_runner_link_{}", runner.id))?;
+        self.fleet
+            .runner(
+                runner,
+                RunnerOp::Restore {
+                    ticket,
+                    candidate: self.artifacts.image(runner.node.platform).candidate(),
+                    source: old.clone(),
+                },
+            )
+            .map_err(link_lost)?;
+        if self.observe_runner(runner).map_err(link_lost)?.link != *old {
+            return Err(Halt::reconcile(
+                "restored runner link did not match the recorded source",
+            ));
+        }
+        Ok(())
+    }
+
     fn upgrade(
         &self,
         plan: &Plan,
@@ -513,8 +594,6 @@ impl<F: Fleet> Deploy<'_, F> {
     ) -> Result<String> {
         let candidate = self.artifacts.candidate();
         let old = &plan.observed;
-        report.put("step", &"host_upgrade")?;
-        self.cohort(log, pending, Cohort::Host)?;
         let detached = || {
             Halt::reconcile(
                 "host upgrade outcome is unresolved; use deploy status before any new handoff",
@@ -526,11 +605,10 @@ impl<F: Fleet> Deploy<'_, F> {
             previous: Box::new(old.clone()),
             ticket: pending.ticket,
         }) {
-            if self
-                .observe(report)
-                .is_ok_and(|observed| plan::can_withdraw(&observed, pending))
+            if let Ok(observed) = self.observe(report)
+                && plan::can_withdraw(&observed, pending)
             {
-                self.withdraw_host(pending, log, report)?;
+                self.withdraw_host(&observed, pending, log, report)?;
                 return Err(error.into());
             }
             return Err(detached());
@@ -712,10 +790,10 @@ fn link_lost(_: crate::CliFailure) -> Halt {
     Halt::reconcile("link outcome is unresolved; use deploy status before continuing")
 }
 
-fn withdrawn(report: &Report) -> bool {
-    report.get("withdrawn").and_then(serde_json::Value::as_bool) == Some(true)
+#[derive(Serialize)]
+struct ProductionTargets<'a> {
+    target_accounts: &'a BTreeSet<super::protocol::AccountIdentity>,
 }
-
 fn monotonic(before: Option<u64>, after: Option<u64>) -> CliResult<()> {
     check(
         before.is_none_or(|before| after.is_some_and(|after| after >= before)),

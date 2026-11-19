@@ -465,9 +465,9 @@ pub(super) fn dedicated_link(node: &Node, link: &Path) -> CliResult<()> {
     absolute(link)?;
     check(
         link.parent() == Some(node.home.join(".local/bin").as_path())
-            && link
-                .file_name()
-                .is_some_and(|name| !shipping::NAMES.iter().any(|product| *product == name)),
+            && link.file_name().is_some_and(|name| {
+                name != "monty" && !shipping::NAMES.iter().any(|product| *product == name)
+            }),
         "expected a dedicated command link under ~/.local/bin",
     )
 }

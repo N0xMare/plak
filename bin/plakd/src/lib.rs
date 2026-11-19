@@ -597,6 +597,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             abandon,
             wait,
             drain,
+            inspection,
         } => {
             return host::upgrade(
                 &services,
@@ -604,6 +605,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
                 wait,
                 drain.unwrap_or_default(),
                 abandon.as_deref(),
+                inspection,
             );
         }
         // The runner bridge owns raw stdin and stdout, so it runs before the

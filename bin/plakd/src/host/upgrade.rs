@@ -42,18 +42,7 @@ struct Identity {
     deploy_idle: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    source_instance: String,
-    source_key: String,
-    destination: PathBuf,
-    destination_key: String,
-    expected_binary: String,
-    wait_seconds: u64,
-    drain: crate::command::HostDrain,
-    abandon: Option<String>,
-}
+use requester::Request;
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -357,6 +346,7 @@ pub(super) fn request(
     expected: &str,
     wait: Duration,
     drain: crate::command::HostDrain,
+    inspection: Option<DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
     if !crate::carry::upgrade::binary_id_valid(expected)
         || expected != crate::build_identity::binary_id()
@@ -367,7 +357,7 @@ pub(super) fn request(
     }
     let paths = services.paths()?;
     let live = crate::wire_transport::hosts::live(paths)?;
-    if live.is_empty() {
+    if live.is_empty() && inspection.is_none() {
         return recover(paths, expected);
     }
     let [source] = live.as_slice() else {
@@ -375,6 +365,9 @@ pub(super) fn request(
             "host_upgrade_source_unavailable: exactly one running source host is required; no host was stopped",
         ));
     };
+    if let Some(inspection) = &inspection {
+        requester::prove_deploy_source(paths, inspection)?;
+    }
     let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
         .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
     stream
@@ -396,6 +389,9 @@ pub(super) fn request(
     if identity.key != source.key
         || !crate::carry::upgrade::binary_id_valid(&identity.binary)
         || plakous_recursive_subagents::tree::HostInstance::parse(&identity.instance).is_err()
+        || inspection
+            .as_ref()
+            .is_some_and(|inspection| inspection.source_instance != identity.instance)
     {
         return Err(CliFailure::new(
             "host upgrade source identity changed during discovery",
@@ -430,6 +426,8 @@ pub(super) fn request(
             wait_seconds: wait.as_secs(),
             drain,
             abandon: None,
+            inspect_runners: inspection
+                .map_or_else(Vec::new, |inspection| inspection.deploy_inspect_runners),
         },
     )?;
     finish_request(paths, expected, &prior_instance, &stream)
@@ -740,24 +738,12 @@ fn next_upgrade(
     match read(stream)? {
         Incoming::Upgrade(request) => Ok(Some(request)),
         Incoming::DeployInspection(request) => {
-            let verdict = if request.source_instance != identity.instance.to_string()
-                || deploy_idle(services, pending)? != Some(true)
-            {
-                DeployRunnerVerdict::Blocked {
-                    detail: "source coordinator changed or is not idle; replan".into(),
-                }
-            } else {
-                match process_safety::inspect_deploy(
-                    services,
-                    &request.deploy_inspect_runners,
-                    runtime,
-                ) {
-                    Ok(()) => DeployRunnerVerdict::Settled,
-                    Err(error) => DeployRunnerVerdict::Blocked {
-                        detail: error.message().to_owned(),
-                    },
-                }
-            };
+            let verdict = process_safety::deploy_verdict(
+                &request,
+                &identity.instance.to_string(),
+                deploy_idle(services, pending)? == Some(true),
+                |runners| process_safety::inspect_deploy(services, runners, runtime),
+            );
             write(stream, &verdict)?;
             Ok(None)
         }
@@ -942,12 +928,17 @@ fn prepare(
     }
     let destination_version = qualify_destination(services, &request, arguments)?;
     let cross_key = request.source_key != request.destination_key;
+    if cross_key && !request.inspect_runners.is_empty() {
+        return Err(process_safety::deploy_refusal(
+            "deploy runner inspection requires a same-key upgrade",
+        ));
+    }
     if cross_key && crate::carry::host_move::live_protocol().is_some() {
         return moves::prepare(
             host, services, request, cancelled, arguments, runtime, progress,
         );
     }
-    process_safety::check(services, &destination_version, runtime)?;
+    request.check_processes(services, &destination_version, runtime)?;
     if cross_key && crate::carry::host_move::install_protocol().is_some() {
         return moves::prepare(
             host, services, request, cancelled, arguments, runtime, progress,
@@ -1001,7 +992,7 @@ fn prepare(
             runtime,
             progress,
         )?);
-        process_safety::check(services, &destination_version, runtime)?;
+        request.check_processes(services, &destination_version, runtime)?;
         ready.pause.commit()?;
         return Ok((ready, None));
     }

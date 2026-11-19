@@ -407,6 +407,7 @@ fn prepare_group(
         wait_seconds: 0,
         drain: crate::command::HostDrain::default(),
         abandon: None,
+        inspect_runners: Vec::new(),
     };
     probe(services, &request, &capsule, &directory)?;
     crate::carry::upgrade::crash_cut("move-after-group-export");

@@ -59,6 +59,7 @@ pub(crate) fn upgrade(
     _wait: std::time::Duration,
     _drain: crate::command::HostDrain,
     _abandon: Option<&str>,
+    _inspection: Option<crate::deploy::DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
     run_host_command(services, &crate::command::HostCommand::default())
 }

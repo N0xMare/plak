@@ -102,7 +102,9 @@ fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value
 
 pub(super) fn guard_stage(target: &Target<'_>, stage: Stage, op: &HostOp) -> CliResult<()> {
     check(
-        stage != Stage::Staging || matches!(op, HostOp::Observe) || !target.production_history(),
+        stage != Stage::Staging
+            || matches!(op, HostOp::Observe | HostOp::RunnerWithdrawalProof)
+            || !target.production_history(),
         "target has production history; use an isolated staging login",
     )
 }
@@ -121,6 +123,7 @@ pub(super) fn execute_host(
 ) -> CliResult<serde_json::Value> {
     match op {
         HostOp::Observe => data(&target.observe()?.1),
+        HostOp::RunnerWithdrawalProof => data(&target.host_images()?),
         HostOp::RunnerPreflight {
             expected,
             placements,
@@ -274,12 +277,34 @@ pub(super) fn upgrade(
         "--drain",
         &format!("{drain}s"),
     ]);
-    probe::capture_input(
+    let inspection = if previous.paired.is_empty() {
+        0
+    } else {
+        command.args(["--inspect-source", &previous.instance]);
+        for runner in previous.paired.keys() {
+            command.args(["--inspect-runner", runner]);
+        }
+        3 * timing::RUNNER_INSPECTION
+    };
+    let reply = crate::operator_process::capture(
         command,
-        timing::UPGRADE + u64::from(drain),
         Some(requester_input),
+        std::time::Duration::from_secs(timing::UPGRADE + u64::from(drain) + inspection),
+        shipping::LIMIT,
     )?;
-    Ok(())
+    if reply.status.success() {
+        return Ok(());
+    }
+    let refusal = super::RUNNER_INSPECTION_REFUSAL;
+    let detail = std::str::from_utf8(&reply.stderr).ok().and_then(|stderr| {
+        stderr
+            .lines()
+            .map(|line| line.strip_prefix("plakd: ").unwrap_or(line))
+            .find(|line| line.starts_with(refusal))
+    });
+    Err(fail(detail.unwrap_or(
+        "target host upgrade failed; inspect the requester on the target",
+    )))
 }
 
 pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str) -> CliResult<()> {

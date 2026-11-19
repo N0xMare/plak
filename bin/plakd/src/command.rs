@@ -420,6 +420,7 @@ pub(crate) enum Command {
         abandon: Option<String>,
         wait: std::time::Duration,
         drain: Option<HostDrain>,
+        inspection: Option<crate::deploy::DeployRunnerInspection>,
     },
     /// A byte-transparent bridge to the home's existing host.
     HostConnect {

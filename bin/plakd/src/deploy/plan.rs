@@ -7,10 +7,11 @@ use crate::shipping_artifact::{NAMES, check};
 
 use super::Halt;
 use super::artifacts::Artifacts;
-use super::evidence::{Cohort, Pending};
+use super::evidence::Pending;
 use super::inventory::{Route, Selected, Stage};
 use super::protocol::{
-    AccountIdentity, Observed, RunnerObserved, RunnerPlacement, RunnerTransition, SourceTransition,
+    AccountIdentity, Observed, RunnerObserved, RunnerPlacement, RunnerTransition, RunnerTriple,
+    SourceTransition,
 };
 
 pub(super) const BOOTSTRAP: &str = "bootstrap_required: upgrade the pre-S2 incumbent using the existing manual same-key procedure (stage with install.sh --no-link, run the destination's host upgrade --expect-binary <id> --drain <duration>, then run install.sh link <snapshot-id> after Ready); re-run deploy plan with an S2 incumbent";
@@ -96,13 +97,16 @@ impl Plan {
                     .runners
                     .iter()
                     .map(|runner| {
+                        let own = &targets.runners[&runner.id].runner_triple;
+                        let image = &artifacts.image(runner.node.platform).manifest.build_info;
+                        let destination = RunnerTriple {
+                            protocol: image.runner.protocol,
+                            source_revision: image.revision.clone(),
+                            flavor: image.flavor.clone(),
+                        };
                         let class = if !targets.runner_changes.contains(&runner.id) {
                             RunnerTransition::Unchanged
-                        } else if observed.facts.runner_triple.source_revision
-                            == artifacts.host().manifest.revision
-                            && observed.facts.runner_triple.flavor
-                                == artifacts.host().manifest.build_info.flavor
-                        {
+                        } else if *own == destination {
                             RunnerTransition::SameTriple
                         } else {
                             RunnerTransition::ChangedTriple
@@ -270,7 +274,7 @@ fn routes(observed: &Observed, configuration: &Selected<'_>) -> CliResult<Vec<Ro
 pub(super) fn can_withdraw(observed: &Observed, prior: &Pending) -> bool {
     observed.instance == prior.instance
         && observed.sha256 == prior.source_sha256
-        && observed.sha256 == observed.link_sha256
+        && observed.link_sha256 == prior.source_sha256
         && observed.upgrade_idle
         && observed.dependencies() == prior.dependencies
 }
@@ -280,12 +284,10 @@ pub(super) fn verify_resume(
     prior: &Pending,
     candidate: &str,
 ) -> super::Result<()> {
-    let identity = if prior.cohort == Cohort::Runner {
-        can_withdraw(observed, prior)
-    } else if !prior.host_upgrade {
-        observed.instance == prior.instance && observed.sha256 == prior.source_sha256
-    } else {
+    let identity = if prior.host_upgrade {
         observed.instance != prior.instance && observed.sha256 == candidate
+    } else {
+        observed.instance == prior.instance && observed.sha256 == prior.source_sha256
     };
     if identity && observed.dependencies() == prior.dependencies {
         Ok(())

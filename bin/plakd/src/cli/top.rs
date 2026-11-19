@@ -441,6 +441,8 @@ impl TopCommand {
                         wait,
                         abandon,
                         drain,
+                        inspect_runner,
+                        inspect_source,
                     }),
                 ..
             } => Ok(Command::HostUpgrade {
@@ -448,6 +450,12 @@ impl TopCommand {
                 abandon,
                 wait: std::time::Duration::from_secs(wait),
                 drain,
+                inspection: inspect_source.map(|source_instance| {
+                    crate::deploy::DeployRunnerInspection {
+                        source_instance,
+                        deploy_inspect_runners: inspect_runner,
+                    }
+                }),
             }),
             Self::Host {
                 action: None,
