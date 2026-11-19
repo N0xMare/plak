@@ -221,6 +221,10 @@ for one version bump, without native protocol compatibility.
   Failed turns carry `usage_limit` with that kind's Ready alternatives,
   `AccountChoices` is published on attach and after each change, and
   account status reports gateway custody.
+- Resolve alias cards by provider kind and commit each child's resolved account
+  with its spawn receipt. Admit named profile targets against their own
+  catalogs. Read account readiness from the credential holder without blocking
+  the attached host loop, and refuse admission on an incomplete gateway read.
 
 ## 0.0.4
 

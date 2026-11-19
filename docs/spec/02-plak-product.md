@@ -5256,12 +5256,13 @@ cards name, before the root's route, wire and probe resolve:
    applied.
 
 An invalid explicit choice is `account_choice_invalid {kind, account,
-reason}`. Ready is the account roster and readiness the console reports
-(the configured or local service gateway's when one holds the credentials): a subscription
-whose credential is Ready under current compatibility, or an API account with
-a key. Default slots absent from the gateway roster are listed as not Ready.
-A gateway that refuses status or omits status for an account it listed fails
-the read. A `new_session` replay also compares its explicit accounts with the
+reason}`. A subscription is Ready when its credential is Ready under current
+compatibility; an API account is Ready when it has a key. Readiness comes from
+the gateway when a configured or local service gateway holds the credentials.
+It asks for implicit default slots even when the gateway does not list them;
+a default slot with no status row is not Ready. A refused listing or status
+read, or a missing status row for a listed account, fails admission. A
+`new_session` replay also compares its explicit accounts with the
 stored choice. Interactive clients show the picker when a used kind has more
 than one Ready account; `SessionOptions.accounts` lists every account per
 kind with readiness, and allowance is the existing accounts-usage read.
@@ -6443,7 +6444,8 @@ fingerprint as the in-process command does. Without an account selection,
 then query one row per account. A failed row shows its own error without
 hiding other rows; a failed list still fails the command. The host console
 shows an empty roster with a diagnostic when the gateway cannot list
-accounts instead of refusing the whole read. `plakd run`, `continue` and
+accounts instead of refusing the whole read. That display does not authorize
+session account choices (§4.4.1). `plakd run`, `continue` and
 `models` run in the CLI process, whose routes relay through the gateway the
 same way. Unset, the host keeps direct in-process credential access and takes
 the holder lock shared.
