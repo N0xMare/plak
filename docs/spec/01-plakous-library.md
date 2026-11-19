@@ -8419,7 +8419,7 @@ JavaScript, Python and native Code Mode catalogs, states the actual bound
 foreground budget in seconds and milliseconds and hard runtime cap in hours.
 The job-lifetime sentence — a still-running command continues in the background
 with its id, completion is reported automatically, and the job survives the
-turn. A local daemon or paired runner keeps it across quit, including an escalated quit, and across upgrade; otherwise it stops on session release. It also stops on explicit stop, attempt end, or the hard cap. The sentence appears
+turn. A local daemon or paired runner keeps it across quit, including an escalated quit, and across a same-build restart or upgrade; otherwise it stops on session release. It also stops on explicit stop, attempt end, or the hard cap. The sentence appears
 once per family, on the process-starting tool (`exec_command`,
 `run_terminal_command`, `Bash`, `bash`). Read, await, stop and `write_stdin`
 do not repeat it. The shell tool also names that route's read, wait and stop
