@@ -850,19 +850,22 @@ RuntimeError: 'os.getenv' is not supported in this environment
 RuntimeError: filesystem access is not available in cells; use the nested tools
 ```
 
-The `py-ptc` interpreter has no host access: opening files, scanning directories,
-globbing or walking paths, reading the environment, `os.urandom`, the network
-and `time.sleep` / `asyncio.sleep` are
-refused by design. Use the nested tools for workspace effects. Clock reads
-(`datetime.now()`, `time.time()`, in UTC) and `random` work inside the cell.
+The Python cell has no host filesystem, environment or network access.
+`time.sleep` and `asyncio.sleep` raise instead of waiting. OS entropy is also
+unavailable: `os.urandom`, unseeded `random` and `uuid4` are refused. Clock
+reads (`datetime.now()`, `time.time()`, in UTC) and explicit seeding such as
+`random.Random(42)` work. Use the nested tools for workspace effects.
 
-A `MemoryError` past the interpreter's 256 MiB limit fails only that cell; the
-interpreter and its globals survive.
+The interpreter charges at most 256 MiB of heap. Going over that limit raises
+a catchable `MemoryError` and does not reset the interpreter. A separate
+656 MiB worker allocator backstop leaves room for transient native allocations;
+exceeding it is worker loss. It is not a process-tree or RSS limit.
 
 ## Python tool result delivery was not acknowledged
 
-With `py-ptc`, tools are async Python functions. `await tool({...})` runs a
-tool and receives its string result; `await asyncio.gather(...)` runs several
+With `py-ptc`, use `await tool(key=value)` or pass one argument dictionary.
+Structured results are Python values, text results are strings, and a rejected
+tool raises `ToolError`. `await asyncio.gather(...)` runs independent calls
 concurrently. Calling a tool without awaiting or scheduling its coroutine does
 not run it. Use `print(...)` to expose selected results to the model.
 

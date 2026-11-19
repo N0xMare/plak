@@ -15,7 +15,8 @@ use std::{
 use plakous_cell::{
     BindingInput, CELL_PROTOCOL_REVISION, CellClient, CellEvent, CellOutcome, CellPrelude,
     EngineConfig, HostFrame, LossClass, MAX_FRAME_BYTES, MONTY_WORKER, MontyBinding,
-    MontyBootstrap, NestedDeliveryOutcome, WorkerFrame, encode_frame, read_frame_blocking,
+    MontyBootstrap, NestedDeliveryOutcome, OutputItem, WorkerFrame, encode_frame,
+    read_frame_blocking,
 };
 
 /// Writes `frames`, closes stdin, and returns every frame the worker wrote
@@ -106,12 +107,6 @@ fn the_worker_refuses_other_limits_and_a_repeated_configure() {
 
 #[test]
 fn exception_reports_keep_cell_ordinals_and_the_tail_of_mutual_recursion() {
-    let start = |cell, source: &str| HostFrame::StartCell {
-        cell,
-        source: source.into(),
-        prelude: CellPrelude::Monty { bootstrap: None },
-        window: None,
-    };
     let (frames, success) = exchange(&[
         configure(EngineConfig::MONTY),
         start(
@@ -162,6 +157,104 @@ fn exception_reports_keep_cell_ordinals_and_the_tail_of_mutual_recursion() {
         WorkerFrame::CellDone { cell: 19, outcome: CellOutcome::Completed { value: Some(text), .. } }
             if text.len() == 40_000
     )));
+}
+
+fn start(cell: u64, source: &str) -> HostFrame {
+    HostFrame::StartCell {
+        cell,
+        source: source.into(),
+        prelude: CellPrelude::Monty { bootstrap: None },
+        window: None,
+    }
+}
+
+#[test]
+fn charged_heap_can_reach_the_soft_limit_with_the_worker_alive() {
+    let source = r"s = 'a' * (60 << 20)
+b = 'b' * (60 << 20)
+c = 'c' * (60 << 20)
+d = 'd' * (20 << 20)
+try:
+    s.upper()
+except MemoryError:
+    print('caught at the charged limit')
+else:
+    raise AssertionError('transient copy exceeded the heap limit')";
+    let (frames, success) = exchange(&[
+        configure(EngineConfig::MONTY),
+        start(1, source),
+        start(2, "(len(s) + len(b) + len(c) + len(d)) >> 20"),
+        HostFrame::Shutdown,
+    ]);
+    assert!(success, "{frames:?}");
+    assert!(frames.iter().any(|f| matches!(f, WorkerFrame::Output { cell: 1, item: OutputItem::Text { text } } if text == "caught at the charged limit\n")));
+    assert!(frames.iter().any(|f| matches!(f, WorkerFrame::CellDone { cell: 2, outcome: CellOutcome::Completed { value: Some(value), .. } } if value == "200")));
+}
+
+#[test]
+fn print_cap_is_cumulative_and_preserves_utf8_boundary_and_notice() {
+    let notice = "\n[Python output truncated at 1 MiB]\n";
+    let prefix_bytes = 1_048_576 - 64 - notice.len() - 1;
+    let source =
+        format!("print('a' * {prefix_bytes}, end='')\nprint('é', end='')\nprint('dropped')");
+    let (frames, success) = exchange(&[configure(EngineConfig::MONTY), start(1, &source)]);
+    assert!(success);
+    let mut text = String::new();
+    for frame in frames {
+        if let WorkerFrame::Output {
+            cell: 1,
+            item: OutputItem::Text { text: chunk },
+        } = frame
+        {
+            text.push_str(&chunk);
+        }
+    }
+    assert_eq!(text.len(), prefix_bytes + notice.len());
+    assert!(text[..prefix_bytes].bytes().all(|byte| byte == b'a'));
+    assert_eq!(&text[prefix_bytes..], notice);
+}
+
+#[test]
+fn sleep_and_unseeded_entropy_are_refused_without_nested_effects() {
+    let source = r"
+import os, random, time
+
+def refused(thunk, message):
+    try:
+        thunk()
+    except RuntimeError as error:
+        assert message in str(error), str(error)
+    else:
+        raise AssertionError(message)
+
+refused(lambda: time.sleep(0), 'time.sleep is not available')
+try:
+    await asyncio.sleep(0)
+except RuntimeError as error:
+    assert 'asyncio.sleep is not available' in str(error)
+else:
+    raise AssertionError('asyncio.sleep ran')
+refused(lambda: os.urandom(8), 'os.urandom is not available')
+refused(lambda: random.Random(), 'pass an explicit seed')
+refused(lambda: random.random(), 'call random.seed first')
+refused(lambda: random.SystemRandom().random(), 'no source of randomness')
+try:
+    import uuid
+except ModuleNotFoundError:
+    pass
+else:
+    refused(uuid.uuid4, 'os.urandom is not available')
+expected = random.Random(42).random()
+random.seed(42)
+assert random.random() == expected
+'refused ambient operations'
+";
+    let (frames, success) = exchange(&[configure(EngineConfig::MONTY), start(1, source)]);
+    assert!(success);
+    assert!(
+        matches!(frames.as_slice(), [WorkerFrame::Hello { .. }, WorkerFrame::CellDone { outcome: CellOutcome::Completed { value: Some(value), .. }, .. }] if value == "refused ambient operations"),
+        "{frames:?}"
+    );
 }
 
 async fn client() -> CellClient {

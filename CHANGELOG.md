@@ -32,6 +32,8 @@ also keep compatibility with their immediately preceding version.
   effects are not rolled back by a later error. Old Monty sessions cannot
   reopen exactly; carry them with a compatible export and import.
   Python failures show bounded tracebacks with deterministic `<cell N>` frames.
+  Sleep and unseeded entropy are refused; explicitly seeded randomness works.
+  The worker's 656 MiB allocator backstop leaves room for a 256 MiB charged heap.
 
 - Bind Codex and SuperGrok credential authority to the profile id, slot id
   and, for SuperGrok, the account scope. The store path is not an input, so

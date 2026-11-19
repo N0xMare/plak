@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -67,6 +68,16 @@ DISTINCT_DIGESTS = {
 
 class ArtifactLinkageFindings(unittest.TestCase):
     """The linkage rules, applied to listings that need no release build."""
+
+    def test_product_python_target_matches_worker_release(self) -> None:
+        protocol = (ROOT / "crates/runtimes/cell/src/protocol.rs").read_text()
+        worker = protocol.split("pub const MONTY_WORKER:", 1)[1].split("};", 1)[0]
+        engine = re.findall(r'\bengine: "([^"]+)"', worker)
+        release = re.findall(r'\bversion: "([^"+]+)\+[0-9a-f]{64}"', worker)
+        product = (ROOT / "bin/plakd/src/sidecars.rs").read_text()
+        target = re.findall(r'\bPYTHON_ENGINE_VERSION: &str = "([^"]+)"', product)
+        self.assertEqual((len(engine), len(release)), (1, 1))
+        self.assertEqual(target, [f"{engine[0]}-{release[0]}"])
 
     def test_python_runtime_leaks_are_refused_on_both_platforms(self) -> None:
         for marker in (

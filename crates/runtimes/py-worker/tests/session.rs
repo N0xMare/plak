@@ -31,7 +31,7 @@ async fn nested_responder_depth_guard_rejects_only_the_call_and_preserves_the_se
             request_bound: Duration::from_secs(30),
         },
     );
-    let source = "try:\n    value = await fetch({})\n    depth = 0\n    while value is not None:\n        depth += 1\n        value = value['next']\n    print(f'depth:{depth}')\nexcept RuntimeError as error:\n    print(f'rejected:{error}')";
+    let source = "try:\n    value = await fetch({})\n    depth = 0\n    while value is not None:\n        depth += 1\n        value = value['next']\n    print(f'depth:{depth}')\nexcept ToolError as error:\n    print(f'rejected:{error}')";
     for depth in [40, 41, 50] {
         let bootstrap = (depth == 40).then(|| MontyBootstrap {
             source: String::new(),

@@ -564,7 +564,7 @@ impl SdkApi {
             let indent = "        ";
             let _ = writeln!(
                 source,
-                "{prefix} _sdk_{name}({parameters}):\n{indent}return _sdk_unwrap(await {private}({{{arguments}}}))\n\
+                "{prefix} {name}({parameters}):\n{indent}return _sdk_unwrap(await {private}({{{arguments}}}))\n    _sdk_{name} = {name}\n\
                  {prefix} {name}(*args, **kwargs):\n{indent}if len(args) == 1 and isinstance(args[0], dict) and not kwargs:\n{indent}    kwargs = args[0]\n{indent}    args = ()\n{indent}return await {namespace}._sdk_{name}(*args, **kwargs)"
             );
             bindings.push(PythonBootstrapBinding {
@@ -701,7 +701,7 @@ mod tests {
             ],
             vec![
                 "19da2c166051c4d9a44a58305be77da9c41887ef4f7b428de239fa2a11826fae",
-                "966da75e45960cc44c4160fe6a5ad71e9bbd6bc445bbd1bfd49f8d0772dadd4b"
+                "2f862a94c5368f3983d175b9320c078bc5ea1625419c9d85289048242082c9ba"
             ]
         );
         Ok(())

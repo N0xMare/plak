@@ -11,6 +11,9 @@ fn only_exact_prelude_frame_blocks_are_removed() {
     let tail = concat!(
         "  File \"test-plak-python-prelude.py\", line 4, in ordinary\n",
         "    fail()\n",
+        "  File \"plak-python-prelude.py.bak\", line 5, in another\n",
+        "    fail_again()\n",
+        "  [Previous line repeated 6 more times]\n",
         "ToolError: unchanged. Did you mean: something else?\n",
         "  File \"plak-python-prelude.py\", line 5, in note\n",
         "    not part of a traceback\n",
@@ -23,6 +26,7 @@ fn only_exact_prelude_frame_blocks_are_removed() {
         "  File \"plak-python-prelude.py\", line 3, in run\n",
         "    return await _run()\n",
         "           ^^^^^^^^^^^\n",
+        "  [Previous line repeated 17 more times]\n",
     );
     let group_prelude = concat!(
         "  |   File \"plak-python-prelude.py\", line 8, in grouped\n",

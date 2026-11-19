@@ -2874,8 +2874,12 @@ unavailable. `Path.scan` raises a `RuntimeError` telling the model to use
 nested tools, so `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` do not
 silently appear empty. The bundled `os` and `pathlib` do not read the real
 filesystem or host environment, and `os.getcwd()` reports a virtual path.
-Python may read the clock; its sleep and random facilities are internal to
-the interpreter. No entropy, file or environment capability is installed.
+Python may read the clock. `time.sleep` and `asyncio.sleep` raise
+`RuntimeError`; neither wall sleep nor virtual sleep is available. The worker
+installs no OS entropy source: `os.urandom`, `SystemRandom` draws and
+unseeded public `random` operations refuse; no `uuid4` is available.
+`random.Random(seed)` and explicitly seeded module-level `random` work.
+No file or environment capability is installed.
 Neither Python presentation runs a pre-run type checker.
 
 No dependency resolves from a Git source. The pinned Code Mode grammar is

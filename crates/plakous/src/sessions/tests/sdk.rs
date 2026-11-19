@@ -13,7 +13,7 @@ struct SdkModel {
 }
 const CELLS: &[(&str, &str)] = &[
     (
-        "files = await asyncio.gather(ctx.read(target='ref_seed'), ctx.read({'target': 'seed'}), ctx.read(target='seed'), ctx.read(target='seed'))\nawait fs.apply([fs.Write('result', files[0].text, expect='absent')])\nawait state.put('answer', {'n': 42})\nprint('saved', len(files))",
+        "try:\n    await ctx.read(typo='seed')\nexcept TypeError as error:\n    assert 'read' in str(error) and 'typo' in str(error) and '_sdk_' not in str(error), str(error)\nelse:\n    raise AssertionError('unexpected keyword was accepted')\nfiles = await asyncio.gather(ctx.read(target='ref_seed'), ctx.read({'target': 'seed'}), ctx.read(target='seed'), ctx.read(target='seed'))\nawait fs.apply([fs.Write('result', files[0].text, expect='absent')])\nawait state.put('answer', {'n': 42})\nprint('saved', len(files))",
         "saved 4",
     ),
     (

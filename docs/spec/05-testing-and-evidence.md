@@ -1243,7 +1243,12 @@ batch is admitted, exercises typed errors and a retry, and verifies
 structured values and unparsed text. Additional real worker cases exercise
 typed record/byte results, ordered and capped print output, persistent versus
 fresh globals, SDK named state, catchable memory errors, the compute watchdog,
-and termination with joined process cleanup. Real-worker exception cases
+and termination with joined process cleanup. The worker tests also hold a
+result until its future is awaited or the terminal declines it, cross the
+cumulative print cap at a UTF-8 boundary, and keep 200 MiB live while a
+native copy hits the charged heap limit. A debug-only allocator crash cut
+forces a hard-cap refusal before handing a nested reply to the engine.
+Real-worker exception cases
 check deterministic cell ordinals, chained causes and notes, the size and
 tail of a mutual-recursion report, and the source line, class and message of
 a rejected tool. The worker must omit the exact generated prelude frame

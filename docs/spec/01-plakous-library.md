@@ -10262,7 +10262,9 @@ keywords named by their input schema or pass one dictionary of those arguments.
 For freeform input the keyword is `arguments`. `help(tool)` prints the
 schema-derived typed signature. Structured tool results are Python dictionaries,
 lists or scalars; text stays `str` even if it looks like JSON. `ToolError`
-is a `RuntimeError` subclass carrying the tool's error message. An unused coroutine has
+is a `RuntimeError` subclass carrying the tool's error message. At the
+worker boundary, nested host diagnostics longer than 16 KiB are cut at a
+UTF-8 boundary and marked truncated before raising. An unused coroutine has
 no tool effect and consumes no admitted nested-call slot. Ordinary Python values,
 functions and aliases persist across cells; creating a coroutine is not durable
 tool admission.
@@ -10281,14 +10283,17 @@ strings. Arguments that cannot be represented at the boundary raise a Python
 exception without publishing a nested call; the driver remains authoritative
 for the tool schema.
 A nested result nesting deeper than 40 containers reaches the cell as a raised
-`RuntimeError` instead of its value. Private naming
+`ToolError` instead of its value. Private naming
 is not an authority boundary: every callback still passes the same tool
 allowlist and core admission. There is no separate Python effect scheduler.
 
 Once a coroutine reaches its host callback, the existing nested-call and delivery
 contract applies. The micro-monty scheduler requests pending external
 futures when it needs host results. Acceptance proves correlated interpreter
-delivery, not that Python explicitly awaited or used each result. A terminal
+delivery, not that Python explicitly awaited or used each result. A cancelled
+call still counts against the 16 outstanding slots until its result reaches
+the interpreter or the cell ends; the worker does not reuse that capacity on
+a guest cancellation alone. A terminal
 that abandons held results emits `Delivery{NotObserved}` before `CellDone`
 for every result never handed to the interpreter. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
@@ -10361,11 +10366,13 @@ protocol violation leaves the cell's outcome unknown and remains a host loss.
 The Python evaluator is a bounded worker, not an operating-system sandbox, and
 the host makes no OS-sandbox claim for it. One dedicated `plakous-py-host` subprocess per
 session runs with a restricted inherited environment, a bounded framed protocol,
-bounded queues and bounded output, and a 256 MiB memory bound applied inside
-the engine, not across a process tree: past it the interpreter raises an
-ordinary, catchable `MemoryError` and the session survives, and an allocation
-past the allocator's hard ceiling (that limit plus 4 MiB) may end
-the worker, which is host loss. The engine caps Python recursion at 1000
+bounded queues and bounded output. The engine limits its charged heap to
+256 MiB. Exceeding that limit raises a catchable `MemoryError`; the worker
+and globals survive. The Rust allocator has a separate 656 MiB ceiling
+(micro-monty's documented 2.5 times the charged limit plus 16 MiB).
+It leaves room for transient native copies and fails closed on allocations
+past that backstop. A worker abort is host loss, not a Python exception or an
+OS/process-tree memory limit. The engine caps Python recursion at 1000
 frames and additionally limits the size of individual objects. Each
 uninterrupted stretch of computation — from a start, a nested call or submission
 of the complete pending result batch to the next nested call, wait or terminal — is bounded at 90

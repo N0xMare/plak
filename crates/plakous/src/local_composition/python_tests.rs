@@ -1853,13 +1853,13 @@ probe('cwd', lambda: os.getcwd())
     assert_eq!(
         text,
         "open: PermissionError\npath: PermissionError\ngetenv: RuntimeError\n\
-         environ: RuntimeError\nurandom: ok\nsleep: ok\n\
+         environ: RuntimeError\nurandom: RuntimeError\nsleep: RuntimeError\n\
          isfile: PermissionError\nexists: PermissionError\nisdir: PermissionError\n\
          islink: PermissionError\nlexists: PermissionError\ngetsize: PermissionError\n\
          realpath: PermissionError\nexpanduser: RuntimeError\nexpandvars: RuntimeError\n\
          glob: RuntimeError\nrglob: RuntimeError\nos.walk: RuntimeError\n\
-         Path.walk: RuntimeError\nscan: RuntimeError\nasync_sleep: ok\n\
-         host_import: ModuleNotFoundError\nnow: ok\ntoday: ok\ntime: ok\nrandom: ok\ncwd: ok"
+         Path.walk: RuntimeError\nscan: RuntimeError\nasync_sleep: RuntimeError\n\
+         host_import: ModuleNotFoundError\nnow: ok\ntoday: ok\ntime: ok\nrandom: RuntimeError\ncwd: ok"
     );
 }
 

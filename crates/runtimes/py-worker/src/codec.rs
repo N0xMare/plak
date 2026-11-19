@@ -125,6 +125,13 @@ pub(super) fn outcome(value: Result<CellValue, String>) -> Result<HostValue, Hos
 }
 
 pub(super) fn tool_error(message: String) -> HostError {
+    const MAX_DIAGNOSTIC_BYTES: usize = 16 * 1024;
+    let message = if message.len() > MAX_DIAGNOSTIC_BYTES {
+        let end = message.floor_char_boundary(MAX_DIAGNOSTIC_BYTES);
+        format!("{}\n[diagnostic truncated]", &message[..end])
+    } else {
+        message
+    };
     HostError {
         class: Some("ToolError".into()),
         ..HostError::new(HostErrorKind::RuntimeError, message)
@@ -172,3 +179,6 @@ fn result_value(value: CellValue, depth: usize) -> Result<HostValue, HostError> 
         },
     })
 }
+
+#[cfg(test)]
+mod tests;

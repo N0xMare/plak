@@ -1057,8 +1057,8 @@ with the result; the image name alone is not evidence for the current tree.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
 package alongside plakd cannot enable an in-process runtime feature in plakd.
 The Python worker `plakous-py-host` speaks the cell protocol and embeds the
-exact `micro-monty` dependency. It preserves the interpreter heap limit, the
-hard allocator ceiling at that limit plus 4 MiB, and a best-effort loss
+exact `micro-monty` dependency. It preserves the 256 MiB charged interpreter heap limit, the
+656 MiB hard allocator ceiling (2.5 times the charged limit plus 16 MiB), and a best-effort loss
 frame on panic. It does not ship the upstream `mm-cell-worker` binary.
 
 For maintainer installation:

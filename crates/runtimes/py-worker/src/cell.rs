@@ -26,8 +26,17 @@ const PRINT_NOTICE: &str = "\n[Python output truncated at 1 MiB]\n";
 const RESULT_NOTICE: &str = "\n[Python result truncated at 1 MiB]";
 const EXCEPTION_REPORT_BYTES: usize = 32 * 1024;
 const MAX_OUTSTANDING_NESTED: usize = 16;
-const PATH_SCAN: &str = "Path.scan";
+const REFUSED_HOST_CALLS: &[(&str, &str)] = &[
+    (
+        "Path.scan",
+        "filesystem access is not available in cells; use the nested tools",
+    ),
+    ("os.urandom", "os.urandom is not available in cells"),
+    ("time.sleep", "time.sleep is not available in cells"),
+    ("asyncio.sleep", "asyncio.sleep is not available in cells"),
+];
 const PRELUDE_FILE: &str = "plak-python-prelude.py";
+const PRELUDE: &str = include_str!("prelude.py");
 
 struct Lost {
     class: LossClass,
@@ -112,7 +121,7 @@ struct Running {
     cell: u64,
     futures: BTreeSet<u64>,
     results: BTreeMap<u64, Result<CellValue, String>>,
-    waiting: Vec<u64>,
+    waiting: Option<Vec<u64>>,
 }
 
 #[derive(Default)]
@@ -203,6 +212,7 @@ impl Worker {
         session.set_text_limit((MAX_PRINT_BYTES - RESULT_NOTICE.len()) as u64);
         session.set_text_cut(TextCut::HeadTail);
         session.set_int_bits_text(true);
+        session.set_entropy(None);
         session.set_wall_clock(Some(Box::new(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -321,7 +331,11 @@ impl Worker {
             .iter()
             .map(|binding| HostSignature::any(&binding.function))
             .collect();
-        functions.push(HostSignature::any(PATH_SCAN));
+        functions.extend(
+            REFUSED_HOST_CALLS
+                .iter()
+                .map(|&(name, _)| HostSignature::any(name)),
+        );
         let module = HostModule {
             functions,
             exceptions: vec![HostException {
@@ -337,7 +351,7 @@ impl Worker {
             .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
         let code = self
             .session
-            .compile(&format!("import asyncio\n{source}"), PRELUDE_FILE)
+            .compile(&format!("{PRELUDE}\n{source}"), PRELUDE_FILE)
             .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
         match self.session.start(&code) {
             Progress::Complete(_) => {
@@ -387,7 +401,10 @@ impl Worker {
                     let answer = self.function_call(call, function, &name, args, kwargs)?;
                     self.resume(answer)?
                 }
-                Progress::Waiting { calls } => return self.wait_on(calls),
+                Progress::Waiting { calls } => match self.wait_on(calls)? {
+                    Some(answer) => self.resume(answer)?,
+                    None => return Ok(()),
+                },
                 Progress::Complete(value) => {
                     let value = value.map_or_else(
                         || "None".into(),
@@ -419,10 +436,10 @@ impl Worker {
         args: Vec<HostValue>,
         kwargs: Vec<(String, HostValue)>,
     ) -> Result<Resume, Lost> {
-        if name == PATH_SCAN {
+        if let Some((_, message)) = REFUSED_HOST_CALLS.iter().find(|(op, _)| *op == name) {
             return Ok(Resume::Error(HostError::new(
                 HostErrorKind::RuntimeError,
-                "filesystem access is not available in cells; use the nested tools",
+                *message,
             )));
         }
         let Some(binding) = self
@@ -461,7 +478,7 @@ impl Worker {
         Ok(Resume::Future)
     }
 
-    fn wait_on(&mut self, calls: Vec<u64>) -> Result<(), Lost> {
+    fn wait_on(&mut self, calls: Vec<u64>) -> Result<Option<Resume>, Lost> {
         let running = self
             .running
             .as_mut()
@@ -473,8 +490,8 @@ impl Worker {
             cell: running.cell,
             calls: calls.clone(),
         })?;
-        running.waiting = calls;
-        Ok(())
+        running.waiting = Some(calls);
+        self.complete_batch()
     }
 
     #[allow(
@@ -506,14 +523,25 @@ impl Worker {
             )));
         }
         running.results.insert(call, outcome);
-        if !running
-            .waiting
-            .iter()
-            .all(|id| running.results.contains_key(id))
-        {
-            return Ok(());
+        if let Some(answer) = self.complete_batch()? {
+            let step = self.resume(answer)?;
+            self.drive(step)?;
         }
-        let pending = std::mem::take(&mut running.waiting);
+        Ok(())
+    }
+
+    fn complete_batch(&mut self) -> Result<Option<Resume>, Lost> {
+        let running = self
+            .running
+            .as_mut()
+            .ok_or_else(|| Lost::protocol("a batch without a running cell"))?;
+        let Some(calls) = &running.waiting else {
+            return Ok(None);
+        };
+        if !calls.iter().all(|id| running.results.contains_key(id)) {
+            return Ok(None);
+        }
+        let pending = running.waiting.take().unwrap_or_default();
         let mut batch = Vec::with_capacity(pending.len());
         for id in &pending {
             let result = running
@@ -525,8 +553,7 @@ impl Worker {
         }
         output(&self.output).accepted = pending;
         boundary("before_delivery");
-        let step = self.resume(Resume::Batch(batch))?;
-        self.drive(step)
+        Ok(Some(Resume::Batch(batch)))
     }
 
     fn fail(&mut self, message: String, generation_lost: bool) -> Result<(), Lost> {
@@ -609,8 +636,11 @@ fn without_prelude_frames(report: &str) -> String {
                     continue;
                 }
             } else {
-                omit_details = false;
                 in_frames = body.starts_with("  [Previous line repeated ");
+                if in_frames && omit_details {
+                    continue;
+                }
+                omit_details = false;
             }
         }
         visible.push_str(line);

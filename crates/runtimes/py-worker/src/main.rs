@@ -20,11 +20,11 @@ mod test_hooks {
 #[global_allocator]
 static ALLOC: cap::Cap<System> = cap::Cap::new(System, HARD_MEMORY_BYTES);
 
-const HARD_MEMORY_BYTES: usize = 260 * 1024 * 1024;
+const HARD_MEMORY_BYTES: usize = 656 * 1024 * 1024;
 
 const _: () = assert!(matches!(
     EngineConfig::MONTY,
-    EngineConfig::Monty { memory_bytes } if memory_bytes + 4 * 1024 * 1024 == HARD_MEMORY_BYTES as u64
+    EngineConfig::Monty { memory_bytes } if memory_bytes * 5 / 2 + 16 * 1024 * 1024 == HARD_MEMORY_BYTES as u64
 ));
 
 fn main() -> ExitCode {
