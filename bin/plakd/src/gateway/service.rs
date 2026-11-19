@@ -97,6 +97,10 @@ impl Gateway {
             .enable_all()
             .build()
             .map_err(|error| error.to_string())?;
+        self.serve_on(runtime)
+    }
+
+    pub(super) fn serve_on(self, runtime: tokio::runtime::Runtime) -> Result<(), String> {
         let Self {
             state,
             server,

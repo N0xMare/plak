@@ -439,12 +439,12 @@ fn usage_observation(
     observation: plakous_hosted::subscription_usage::VerticalObservation,
 ) -> CliResult<plakous_host_protocol::views::presentation::VerticalUsageView> {
     plakous_hosted::subscription_usage::project_limits(
-        [(vertical, observation)],
+        [(vertical.clone(), observation)],
         plakous_host_protocol::views::presentation::SessionLedgerView::default(),
     )
     .verticals
     .into_iter()
-    .next()
+    .find(|row| row.vertical == vertical)
     .ok_or_else(|| CliFailure::new("gateway allowance did not project a row"))
 }
 

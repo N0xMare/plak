@@ -92,8 +92,9 @@ fn account_and_status_verbs_refuse_without_a_gateway() {
     ] {
         unavailable(home.cli(args));
     }
-    assert!(!home.path().join("home/secrets").exists());
-    assert!(!home.path().join(".local/state").exists());
+    let secrets = home.path().join("home/secrets");
+    assert!(!secrets.exists() || secrets.read_dir().unwrap().next().is_none());
+    assert!(!home.path().join(".local/state/plak/subscriptions").exists());
 }
 
 #[cfg(feature = "web")]

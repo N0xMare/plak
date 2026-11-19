@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, reason = "isolated offline gateway fixture")]
 
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -24,7 +25,10 @@ impl GatewayFixture {
         } else {
             std::env::temp_dir()
         };
-        let socket = tempfile::tempdir_in(base).unwrap();
+        let socket = tempfile::Builder::new()
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir_in(base)
+            .unwrap();
         let listener = socket.path().join("g");
         std::fs::create_dir_all(state).unwrap();
         let config = ServerConfig::parse(
@@ -36,21 +40,32 @@ impl GatewayFixture {
             ),
         )
         .unwrap();
-        let app = crate::commands::application::PlakousApplication::new(
-            state.to_path_buf(),
-            None,
-            None,
-            HostCustody::Local,
-        )
-        .unwrap()
-        .with_account_home(Some(paths.clone()));
-        let instance = plakous::gateway::server::new_instance().unwrap();
-        let bridge = super::ops::OpsBridge::new(app, paths.clone(), instance);
-        let gateway = super::service::Gateway::open_with(paths, config, Box::new(bridge)).unwrap();
-        let served = std::thread::spawn(move || gateway.serve_foreground());
+        let paths = paths.clone();
+        let served = std::thread::spawn(move || {
+            let app = crate::commands::application::PlakousApplication::new(
+                config.state_root.clone(),
+                None,
+                None,
+                HostCustody::Local,
+            )
+            .map_err(|failure| failure.to_string())?
+            .with_account_home(Some(paths.clone()));
+            let instance = plakous::gateway::server::new_instance().unwrap();
+            let bridge = super::ops::OpsBridge::new(app, paths.clone(), instance);
+            let gateway = super::service::Gateway::open_with(&paths, config, Box::new(bridge))?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            gateway.serve_on(runtime)
+        });
         let deadline = Instant::now() + Duration::from_secs(10);
         while std::os::unix::net::UnixStream::connect(&listener).is_err() {
-            assert!(!served.is_finished(), "gateway exited before accepting");
+            assert!(
+                !served.is_finished(),
+                "gateway exited before accepting: {:?}",
+                served.join().unwrap()
+            );
             assert!(Instant::now() < deadline, "gateway did not accept");
             std::thread::sleep(Duration::from_millis(10));
         }
