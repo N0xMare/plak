@@ -445,9 +445,7 @@ async fn a_path_bound_codex_binding_revalidates_through_gateway_v1() -> TestResu
     );
     let server = InProcessGateway::server(custody, upstream.client.clone())
         .with_dial_override("https://chatgpt.com", upstream.origin.clone());
-    let relay = Arc::new(
-        RelayClient::new(InProcessGateway::endpoint_for(&server), None)?.with_test_versions(&[1]),
-    );
+    let relay = Arc::new(RelayClient::new(previous_gateway_endpoint(server)?, None)?);
     assert_eq!(relay.version(&RelayClient::call_control()).await?, 1);
     let remote = Arc::new(GatewayCustodian::new(Arc::clone(&relay), |kind| {
         (kind == "codex").then_some(CODEX_CREDENTIAL_HEADERS)
@@ -481,6 +479,56 @@ async fn a_path_bound_codex_binding_revalidates_through_gateway_v1() -> TestResu
         .await?;
     assert_eq!(fresh.credential_authority_binding(), recorded);
     Ok(())
+}
+
+/// An old caller negotiates only v1. Give the test client that same
+/// negotiation result, then send its v1 calls to the real dual server.
+fn previous_gateway_endpoint(
+    server: crate::gateway::server::RelayServer<InProcessGateway>,
+) -> TestResult<crate::gateway::GatewayEndpoint> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use plakous_gateway_protocol::{VersionsReply, call};
+    use tokio::io::AsyncBufReadExt as _;
+
+    use crate::gateway::server::Peer;
+    use crate::gateway::{GatewayEndpoint, InMemoryGateway};
+
+    let body = call::encode(&VersionsReply {
+        versions: vec![1],
+        instance: server.instance().clone(),
+    })?;
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len(),
+    )
+    .into_bytes();
+    reply.extend(body);
+    let first = AtomicBool::new(true);
+    Ok(GatewayEndpoint::InMemory(InMemoryGateway::new(
+        move |mut io| {
+            if first.swap(false, Ordering::Relaxed) {
+                let reply = reply.clone();
+                tokio::spawn(async move {
+                    let mut reader = tokio::io::BufReader::new(&mut io);
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await.expect("versions request");
+                    assert_eq!(line, "GET /versions HTTP/1.1\r\n");
+                    while line != "\r\n" {
+                        line.clear();
+                        assert_ne!(reader.read_line(&mut line).await.expect("header"), 0);
+                    }
+                    io.write_all(&reply).await.expect("versions reply");
+                    io.shutdown().await.expect("close versions connection");
+                });
+            } else {
+                let server = server.clone();
+                tokio::spawn(async move {
+                    let _ = server.serve(io, Peer::InProcess).await;
+                });
+            }
+        },
+    )))
 }
 
 #[tokio::test]
