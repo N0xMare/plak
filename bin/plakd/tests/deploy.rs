@@ -1,5 +1,7 @@
 //! The compiled operator and its stdin protocol, against a local SSH substitute.
+#![allow(clippy::unwrap_used, reason = "local disposable integration fixtures")]
 
+use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
@@ -12,12 +14,14 @@ use sha2::{Digest as _, Sha256};
 const NAMES: [&str; 3] = ["plakd", "plakous-js-host", "plakous-py-host"];
 const PLATFORM: &str = "x86_64-unknown-linux-musl";
 const KEY: &str = "r28.e39.p39.t11";
+const NO_EVENTS: [String; 0] = [];
 
 fn hash(data: impl AsRef<[u8]>) -> String {
-    Sha256::digest(data)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let mut hex = String::with_capacity(64);
+    for byte in Sha256::digest(data) {
+        write!(hex, "{byte:02x}").unwrap();
+    }
+    hex
 }
 
 fn encoded(data: &Value) -> Vec<u8> {
@@ -57,7 +61,7 @@ fn artifacts(root: &Path) {
     for name in NAMES {
         fs::write(root.join(name), name).unwrap();
         let file = file_facts(name.as_bytes());
-        facts.push_str(&format!("{name} {}\n", file["sha256"].as_str().unwrap()));
+        writeln!(facts, "{name} {}", file["sha256"].as_str().unwrap()).unwrap();
         files.insert(name.into(), file);
     }
     let revision = "a".repeat(40);
@@ -143,7 +147,8 @@ manifest_sha256 = "{host_pin}"
 "#
         );
         for stage in ["staging", "production"] {
-            text.push_str(&format!(
+            write!(
+                text,
                 r#"
 [{stage}]
 drain_seconds = 60
@@ -175,11 +180,14 @@ login = "example"
 home = "/srv/example"
 uid = 1000
 "#
-            ));
+            )
+            .unwrap();
             for account in accounts {
-                text.push_str(&format!(
+                write!(
+                    text,
                     "\n[[{stage}.routes]]\naccount = {account:?}\nmodel = \"example-model\"\neffort = \"low\"\n"
-                ));
+                )
+                .unwrap();
             }
         }
         fs::write(self.path("inventory.toml"), text).unwrap();
@@ -293,7 +301,7 @@ fn deploy_fake_fleet_refuses_without_mutation() {
         f.change(|d| *d.pointer_mut(pointer).unwrap() = value);
         f.staging("plan", "blocked", reason);
         assert!(!f.path("staging.jsonl").exists());
-        assert!(f.events().is_empty());
+        assert_eq!(f.events(), NO_EVENTS);
     }
     for error in [
         "gateway image change: use S3",
@@ -321,7 +329,7 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     );
     assert_eq!(plan["legacy_facts"]["source"], "legacy facts");
     assert_eq!(plan["legacy_facts"]["state_key"], KEY);
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), NO_EVENTS);
     f.reset();
     let plan = f.staging("plan", "ready", "");
     assert_eq!(plan["observed"]["accounts"]["openai"], "not_enrolled");
@@ -337,7 +345,7 @@ fn deploy_fake_fleet_refuses_without_mutation() {
             "verify"
         ])
     );
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), NO_EVENTS);
     fs::write(f.path("host/plakd"), b"PLAKD").unwrap();
     f.staging("plan", "blocked", "artifact digest mismatch");
     fs::write(f.path("host/plakd"), b"plakd").unwrap();
@@ -347,7 +355,7 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     write(&client_path, &client);
     f.configure(&"a".repeat(40), &["grok"]);
     f.staging("plan", "blocked", "client wire/schema pin differs");
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), NO_EVENTS);
 }
 
 #[test]
@@ -446,7 +454,7 @@ fn production(f: &Fleet, green: &Value) {
             "fresh green staging receipt",
         );
     }
-    assert!(f.events().is_empty());
+    assert_eq!(f.events(), NO_EVENTS);
     write(&receipt, green);
     f.deploy("apply", "production", "green", "");
     let mut expired = green.clone();
@@ -463,7 +471,7 @@ fn deploy_canaries_are_keyed_by_exact_account() {
     let f = Fleet::new();
     f.change(|d| {
         d["host"]["accounts"] =
-            json!({"claude/work":"ready","claude/other":"ready","grok":"not_enrolled"})
+            json!({"claude/work":"ready","claude/other":"ready","grok":"not_enrolled"});
     });
     f.configure(&"a".repeat(40), &["claude/work", "claude/other"]);
     let report = f.staging("apply", "green", "");
@@ -540,8 +548,8 @@ fn deploy_fixture_process() {
         return;
     };
     let root = PathBuf::from(std::env::var_os("DEPLOY_FIXTURE_DIR").unwrap());
-    let argv = fs::read_to_string(root.join("argv")).unwrap();
-    let args: Vec<_> = argv.lines().collect();
+    let raw = fs::read_to_string(root.join("argv")).unwrap();
+    let args: Vec<_> = raw.lines().collect();
     let (reply, code) = if role == "git" {
         fake_git(&args)
     } else {
