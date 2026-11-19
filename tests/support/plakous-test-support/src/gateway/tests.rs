@@ -6,7 +6,7 @@ use plakous_gateway_protocol::facts::{
 };
 use plakous_gateway_protocol::header::WireHeader;
 use plakous_gateway_protocol::refusal::{GatewayRefusal, RefusalBody};
-use plakous_gateway_protocol::{Endpoint, PROTOCOL_VERSION, VersionsReply};
+use plakous_gateway_protocol::{Endpoint, SUPPORTED_VERSIONS, VersionsReply};
 use plakous_http::relay::custodied_placeholder;
 use plakous_http::{
     Bytes, Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Limits, Method, Origin,
@@ -27,7 +27,7 @@ async fn versions_follow_the_instance_across_restart() -> TestResult {
     let (bytes, report) = exchange(&gateway, b"GET /versions HTTP/1.1\r\nhost: g\r\n\r\n").await?;
     assert!(!report.dialed);
     let reply: VersionsReply = call::decode(&body(&bytes)?)?;
-    assert_eq!(reply.versions, vec![PROTOCOL_VERSION]);
+    assert_eq!(reply.versions, SUPPORTED_VERSIONS);
     assert_eq!(reply.instance, gateway.instance());
     let restarted = gateway.restart()?;
     assert_ne!(restarted, reply.instance);
@@ -223,7 +223,7 @@ async fn fence_moved_on_the_nth_relay_does_not_dial() -> TestResult {
 #[tokio::test]
 async fn an_unserved_version_is_refused_without_a_dial() -> TestResult {
     let gateway = gateway()?;
-    let (bytes, report) = exchange(&gateway, &http_post("/v2/relay", &relay_body()?)).await?;
+    let (bytes, report) = exchange(&gateway, &http_post("/v99/relay", &relay_body()?)).await?;
     assert!(!report.dialed);
     assert_eq!(gateway.dials(), 0);
     let refusal: RefusalBody = call::decode(&body(&bytes)?)?;

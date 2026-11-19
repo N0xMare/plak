@@ -877,7 +877,7 @@ async fn calls_and_versions_are_path_versioned() {
         reply.contains("plak-gateway-error: version_unsupported"),
         "{reply}"
     );
-    assert!(reply.contains("\"supported\":[1]"), "{reply}");
+    assert!(reply.contains("\"supported\":[1,2]"), "{reply}");
 }
 
 #[tokio::test]
