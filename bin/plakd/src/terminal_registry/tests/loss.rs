@@ -229,17 +229,16 @@ async fn cleanup(
     client: RunnerClient,
     second: Option<tokio::task::JoinHandle<()>>,
 ) {
-    killed.service.operator_terminals().unwrap().close_all();
-    let until = Instant::now() + Duration::from_secs(5);
-    while killed
-        .service
-        .operator_terminals()
-        .unwrap()
-        .has_live_terminals()
-    {
-        assert!(Instant::now() < until);
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let old_runner = killed.service.operator_terminals().unwrap();
+    old_runner.close_all();
+    // A replacement cannot supply evidence about the old runner's shell.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while old_runner.has_live_terminals() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the old runner did not prove terminal cleanup");
     client.disconnect();
     killed.serving.abort();
     if let Some(second) = second {

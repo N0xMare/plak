@@ -228,6 +228,8 @@ requires the read deadline to expire even while that gate is closed.
 Runner-loss durability tests kill a real PTY-owning process,
 including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.
+The host-only loss fixture waits for cleanup proof from the old runner itself,
+including when the replacement runner reports no terminals.
 These platform-sensitive tests require both supported operating systems; Linux
 evidence alone is not macOS process-supervision qualification. The product client
 terminal scheduler and browser transport-loss evidence belong to their later
