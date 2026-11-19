@@ -20,14 +20,11 @@ impl ResumeAfterLoss {
     }
 }
 
-/// Which forward-only sections a parsed file spelled, whatever they held,
-/// and the forward keys of a project file its overlay ignored.
+/// Which home-scoped sections a parsed file spelled, even when empty.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ForwardPresence {
     /// `host`, `runners` and `web`, when the file has the table at all.
     pub(super) sections: std::collections::BTreeSet<&'static str>,
-    /// The project file's home-scoped forward keys, with its path.
-    pub(super) project: Vec<String>,
 }
 
 impl ForwardPresence {
@@ -40,32 +37,13 @@ impl ForwardPresence {
                 sections.insert(*name);
             }
         }
-        Self {
-            sections,
-            project: Vec::new(),
-        }
+        Self { sections }
     }
 }
 
 impl ProductConfig {
-    /// The keys this config's files carry that a 0.0.3 build refuses as
-    /// unknown, in the words `plakd doctor` names them: a set key, or a
-    /// forward-only table that is present even when empty, in the home file
-    /// or a trusted project file.
-    #[must_use]
-    pub fn forward_only_keys(&self) -> Vec<String> {
-        let mut keys = self.forward_home_keys();
-        for (id, server) in &self.tool_sections.mcp_servers {
-            if server.placement.is_some() {
-                keys.push(format!("[mcp_servers.{id}] placement"));
-            }
-        }
-        keys.extend(self.forward.project.iter().cloned());
-        keys
-    }
-
-    /// Warns once per home-scoped forward key the project file at `path`
-    /// carries, and records it for doctor; the overlay ignores them.
+    /// Warns once per home-scoped key the project file at `path` carries;
+    /// the overlay ignores them.
     pub(super) fn warn_forward_home_scoped(
         &mut self,
         overlay: &Self,
@@ -78,9 +56,6 @@ impl ProductConfig {
                 path.display(),
                 paths.config_file().display(),
             ));
-            self.forward
-                .project
-                .push(format!("{key} in {}", path.display()));
         }
     }
 

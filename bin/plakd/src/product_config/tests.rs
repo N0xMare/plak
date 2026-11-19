@@ -293,16 +293,6 @@ fn trusted_project_cannot_override_home_orchestration() {
     // A repository can never grant web access.
     assert!(displayed.contains("[web] allow is home-scoped and ignored here"));
     assert_eq!(config.web_allow, ["home@example.com"]);
-    // Doctor still names them: a 0.0.3 build refuses the project file too.
-    let keys = config.forward_only_keys();
-    assert!(
-        keys.iter()
-            .any(|key| key.starts_with("[host] resume_after_loss in "))
-            && keys
-                .iter()
-                .any(|key| key.starts_with("[runners.buildbox] in ")),
-        "{keys:?}"
-    );
     assert!(config.runners.is_empty());
     assert!(displayed.contains("[mcp] client_id_metadata_url is home-scoped and ignored here"));
     assert!(displayed.contains("origin.orchestration.subagents = user"));

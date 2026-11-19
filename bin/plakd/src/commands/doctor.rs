@@ -38,7 +38,6 @@ pub(crate) fn run_doctor(
         (_, config) => config,
     };
     let selected = loaded.unwrap_or_else(|_| product_config::ProductConfig::default_product());
-    let forward_config_keys = selected.forward_only_keys();
     let product_database =
         product_doctor::inspect_state_database(&paths.product_database(), store::SCHEMA_VERSION);
     let subagents_database = product_doctor::inspect_state_database(
@@ -206,7 +205,6 @@ pub(crate) fn run_doctor(
         ),
         paths: doctor_paths,
         config,
-        forward_config_keys,
         product_database,
         subagents_database,
         runtime_database,

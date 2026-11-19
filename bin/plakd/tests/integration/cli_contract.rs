@@ -1105,6 +1105,21 @@ fn doctor_and_session_list_and_key_status() {
 }
 
 #[test]
+fn doctor_accepts_current_config_without_a_hypothetical_downgrade_warning() {
+    let home = isolated_home_dir();
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[host]\nresume_after_loss = \"continue\"\n[runners]\n[web]\n",
+    )
+    .unwrap();
+    let out = run_plak(home.path(), &["doctor"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains("Config compat"), "{text}");
+    assert!(!text.contains("0.0.4-only keys"), "{text}");
+}
+
+#[test]
 fn key_clear_fails_closed_when_process_env_still_wins() {
     let dir = isolated_home_dir();
     let home = dir.path();

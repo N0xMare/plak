@@ -9,7 +9,7 @@ use plakous_hosted::frozen_tools::McpPlacement;
 const SERVER: &str = "[mcp_servers.notes]\ntransport = \"stdio\"\ncommand = \"notes-mcp\"\n";
 
 #[test]
-fn the_forward_keys_parse_and_are_named_for_doctor() {
+fn the_forward_keys_parse() {
     let config = ProductConfig::parse(&format!(
         "[host]\nresume_after_loss = \"continue\"\n\n{SERVER}placement = \"runner\"\n\n\
          [runners.buildbox]\nssh = \"me@buildbox\"\ncommand = \"/opt/bin/plakd\"\n"
@@ -27,18 +27,9 @@ fn the_forward_keys_parse_and_are_named_for_doctor() {
             command: "/opt/bin/plakd".to_owned()
         }
     );
-    assert_eq!(
-        config.forward_only_keys(),
-        [
-            "[host] resume_after_loss",
-            "[runners.buildbox]",
-            "[mcp_servers.notes] placement"
-        ]
-    );
     let plain = ProductConfig::parse(SERVER).unwrap();
     assert_eq!(plain.resume_after_loss, None);
     assert_eq!(plain.tool_sections.mcp_servers["notes"].placement, None);
-    assert_eq!(plain.forward_only_keys(), [] as [String; 0]);
 }
 
 #[test]
@@ -129,7 +120,6 @@ fn forward_keys_are_written_only_when_set_explicitly() {
     assert!(saved.contains("resume_after_loss = \"hold\""), "{saved}");
     let loaded = ProductConfig::load(&paths).unwrap();
     assert_eq!(loaded.resume_after_loss, Some(ResumeAfterLoss::Hold));
-    assert_eq!(loaded.forward_only_keys(), ["[host] resume_after_loss"]);
 
     // Clearing recovery policy must not resurrect it on the next load.
     let mut config = loaded;
@@ -142,10 +132,7 @@ fn forward_keys_are_written_only_when_set_explicitly() {
             .any(|line| line.starts_with("resume_after_loss")),
         "{saved}"
     );
-    assert_eq!(
-        ProductConfig::load(&paths).unwrap().forward_only_keys(),
-        [] as [String; 0]
-    );
+    assert_eq!(ProductConfig::load(&paths).unwrap().resume_after_loss, None);
 
     let fresh = PlakPaths::isolated_test_home();
     ProductConfig::update_user(&fresh.1, |config| {
@@ -188,10 +175,10 @@ fn a_project_file_names_its_home_scoped_forward_keys() {
 #[test]
 fn an_empty_forward_only_table_is_still_named() {
     let config = ProductConfig::parse("[host]\n\n[runners]\n").unwrap();
-    assert_eq!(config.forward_only_keys(), ["[host]", "[runners]"]);
+    assert_eq!(config.forward_home_keys(), ["[host]", "[runners]"]);
     let config = ProductConfig::parse(
         "[runners.buildbox]\nssh = \"buildbox\"\ncommand = \"/opt/bin/plakd\"\n",
     )
     .unwrap();
-    assert_eq!(config.forward_only_keys(), ["[runners.buildbox]"]);
+    assert_eq!(config.forward_home_keys(), ["[runners.buildbox]"]);
 }

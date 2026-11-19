@@ -8037,16 +8037,10 @@ OpenRouter catalog; the root template; the spawnable templates
 (`spawn_templates`: a warning naming each template the working set reaches,
 directly or through `spawns`, whose account or model is not ready, with the
 remedy `plakd login <account>`; the config still loads and only that role's
-spawn is refused); and the three OAuth verticals. One more row,
-`config_compat`, follows the config file only when the home file or a trusted
-project file carries something a 0.0.3 build refuses as unknown (`[host]
-resume_after_loss`, `[mcp_servers.<id>] placement`, `[runners.<name>]`,
-`[web] allow`, `[web] origin`, or a `[host]`, `[runners]` or `[web]` table
-present even empty, chapter 07 §3): a warning
-`config uses 0.0.4-only keys` naming each (a project file's with its path),
-with the remedy to remove them before running a 0.0.3 build on the home; a
-`[gateway]` key also names builds without the gateway, which refuse it too. `plakd` itself writes those keys only
-when the operator sets them. The `runner_ssh` rows follow the spawnable
+spawn is refused); and the three OAuth verticals. Doctor validates the config
+against the running build, including its feature set. It does not probe other
+binaries or warn that a hypothetical older build might reject a valid config.
+The `runner_ssh` rows follow the spawnable
 templates, one per configured runner, in name order.
 
 Each row prints a check name, a severity of `OK`, `WARNING`, or `ERROR`, a
