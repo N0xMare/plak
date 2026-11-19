@@ -22,7 +22,7 @@ pub(super) struct Roster {
 }
 
 pub(super) struct Reader {
-    pub subscriptions: plakous::subscriptions::NativeSubscriptions,
+    pub subscriptions: NativeSubscriptions,
     custody: crate::gateway::HostCustody,
 }
 
@@ -44,7 +44,7 @@ impl Reader {
     pub fn subscriptions_for(
         &self,
         account: &AccountRef,
-    ) -> Result<plakous::subscriptions::NativeSubscriptions, ReadRefusal> {
+    ) -> Result<NativeSubscriptions, ReadRefusal> {
         let Some(name) = account.name() else {
             return Ok(self.subscriptions.clone());
         };
@@ -247,7 +247,7 @@ pub(super) async fn status(
             crate::commands::support::offline_subscription_status(&subscriptions, provider).await
     {
         let mut native = native_status(status);
-        native.profile = plakous::subscriptions::NativeSubscriptions::notice(provider)
+        native.profile = NativeSubscriptions::notice(provider)
             .ok()
             .map(|notice| ProfileNotice {
                 id: notice.profile_id().to_owned(),

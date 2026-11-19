@@ -644,6 +644,7 @@ fn unavailable_native_route(provider: NativeProvider) -> CliFailure {
 }
 
 /// Display-only refresh evidence, without changing the credential state.
+#[cfg(test)]
 pub(crate) fn oauth_refresh_status_detail(
     paths: Option<&product_paths::PlakPaths>,
     provider: NativeProvider,

@@ -1426,6 +1426,10 @@ pub(crate) fn requested() -> bool {
     selector().is_some()
 }
 
+pub(crate) fn offline_model_selected() -> bool {
+    selected().is_some()
+}
+
 pub(crate) fn selected() -> Option<Result<OfflineSelection, String>> {
     Some(resolve(&selector()?))
 }

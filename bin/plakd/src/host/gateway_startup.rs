@@ -2,36 +2,51 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::time::{self, Instant};
 
+use crate::gateway::client;
 use crate::gateway::{GatewayAddress, GatewayUnavailable, HostCustody, verify_holder};
-use plakous::gateway::{RelayCallError, RelayClient};
 
 const STARTUP_WAIT: Duration = Duration::from_secs(3);
 const STARTUP_RETRY: Duration = Duration::from_millis(25);
 
 /// Require the configured listener before a host acquires any runtime authority.
 pub(super) async fn verify(custody: &HostCustody, state_home: &Path) -> Result<(), String> {
-    let address = custody
-        .address()
+    let admin = custody
+        .admin()
         .ok_or_else(|| GatewayUnavailable::MissingAddress.to_string())?;
+    let address = &admin.address;
     if let GatewayAddress::Unix(socket) = address {
         wait_for_listener(socket, || verify_holder(address, state_home)).await?;
     }
-    let relay = custody
-        .gateway()
-        .ok_or_else(|| GatewayUnavailable::MissingAddress.to_string())?
-        .custodian()
-        .relay();
-    let control = RelayClient::call_control();
-    match time::timeout(STARTUP_WAIT, relay.version(&control)).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(RelayCallError::VersionMismatch { supported })) => Err(format!(
-            "credential gateway protocol mismatch: serves {supported:?}"
-        )),
-        Ok(Err(error @ RelayCallError::Refused(_))) => Err(error.to_string()),
-        _ => Err(GatewayUnavailable::Unreachable(address).to_string()),
-    }
+    let request = client::request_head(admin.key(), "GET", client::VERSIONS_PATH, 0)?;
+    let reply = time::timeout(STARTUP_WAIT, async {
+        match address {
+            GatewayAddress::Unix(socket) => {
+                read_versions(tokio::net::UnixStream::connect(socket).await?, &request).await
+            }
+            GatewayAddress::Tcp(socket) => {
+                read_versions(tokio::net::TcpStream::connect(socket).await?, &request).await
+            }
+        }
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .ok_or_else(|| GatewayUnavailable::Unreachable(address).to_string())?;
+    client::supported_version(&client::decode_call(client::parse_response(&reply)?)?)?;
+    Ok(())
+}
+
+async fn read_versions(
+    mut stream: impl AsyncRead + AsyncWrite + Unpin,
+    request: &str,
+) -> io::Result<Vec<u8>> {
+    stream.write_all(request.as_bytes()).await?;
+    let mut response = Vec::new();
+    stream.take(8192).read_to_end(&mut response).await?;
+    Ok(response)
 }
 
 async fn wait_for_listener(

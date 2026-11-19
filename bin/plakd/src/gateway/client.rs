@@ -11,6 +11,8 @@ use plakous::gateway::protocol::{Endpoint, KEY_HEADER, SUPPORTED_VERSIONS};
 
 use super::{GatewayAddress, GatewayUnavailable};
 
+pub(crate) const VERSIONS_PATH: &str = plakous::gateway::protocol::VERSIONS_PATH;
+
 pub(crate) struct Call {
     pub status: u16,
     pub error: Option<String>,
@@ -68,11 +70,17 @@ pub(crate) fn request<T: serde::de::DeserializeOwned>(
     request: &impl serde::Serialize,
 ) -> Result<T, String> {
     let body = call::encode(request).map_err(|error| error.to_string())?;
-    let served = versions(address, key)?.versions;
-    let version = plakous::gateway::protocol::negotiate(SUPPORTED_VERSIONS, &served)
-        .ok_or_else(|| format!("credential gateway protocol mismatch: serves {served:?}"))?;
+    let version = supported_version(&versions(address, key)?)?;
     let call = exchange(address, key, "POST", &endpoint.path(version), &body)?;
     decode_call(call)
+}
+
+pub(crate) fn supported_version(
+    reply: &plakous::gateway::protocol::VersionsReply,
+) -> Result<u16, String> {
+    let served = &reply.versions;
+    plakous::gateway::protocol::negotiate(SUPPORTED_VERSIONS, served)
+        .ok_or_else(|| format!("credential gateway protocol mismatch: serves {served:?}"))
 }
 
 pub(crate) fn versions(
@@ -82,24 +90,17 @@ pub(crate) fn versions(
     versions_with_timeout(address, key, Duration::from_secs(10))
 }
 
-pub(super) fn versions_with_timeout(
+fn versions_with_timeout(
     address: &GatewayAddress,
     key: Option<&str>,
     timeout: Duration,
 ) -> Result<plakous::gateway::protocol::VersionsReply, String> {
-    let call = exchange_with_timeout(
-        address,
-        key,
-        "GET",
-        plakous::gateway::protocol::VERSIONS_PATH,
-        &[],
-        timeout,
-    )
-    .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
+    let call = exchange_with_timeout(address, key, "GET", VERSIONS_PATH, &[], timeout)
+        .map_err(|_| GatewayUnavailable::Unreachable(address).to_string())?;
     decode_call(call)
 }
 
-fn decode_call<T: serde::de::DeserializeOwned>(call: Call) -> Result<T, String> {
+pub(crate) fn decode_call<T: serde::de::DeserializeOwned>(call: Call) -> Result<T, String> {
     if let Some(code) = call.error.as_deref() {
         let detail = serde_json::from_slice::<RefusalBody>(&call.body)
             .map(|body| body.gateway_error.code().to_owned())
@@ -119,20 +120,7 @@ fn write_and_read<S: Read + Write>(
     path: &str,
     body: &[u8],
 ) -> Result<Call, String> {
-    let mut head = format!(
-        "{method} {path} HTTP/1.1\r\nhost: plak-gateway\r\ncontent-length: {}\r\nconnection: close\r\n",
-        body.len()
-    );
-    if let Some(key) = key {
-        if key.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
-            return Err("caller key is not a header value".to_owned());
-        }
-        head.push_str(KEY_HEADER);
-        head.push_str(": ");
-        head.push_str(key);
-        head.push_str("\r\n");
-    }
-    head.push_str("\r\n");
+    let head = request_head(key, method, path, body.len())?;
     stream
         .write_all(head.as_bytes())
         .and_then(|()| stream.write_all(body))
@@ -144,7 +132,29 @@ fn write_and_read<S: Read + Write>(
     parse_response(&raw)
 }
 
-fn parse_response(raw: &[u8]) -> Result<Call, String> {
+pub(crate) fn request_head(
+    key: Option<&str>,
+    method: &str,
+    path: &str,
+    length: usize,
+) -> Result<String, String> {
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nhost: plak-gateway\r\ncontent-length: {length}\r\nconnection: close\r\n",
+    );
+    if let Some(key) = key {
+        if key.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
+            return Err("caller key is not a header value".to_owned());
+        }
+        head.push_str(KEY_HEADER);
+        head.push_str(": ");
+        head.push_str(key);
+        head.push_str("\r\n");
+    }
+    head.push_str("\r\n");
+    Ok(head)
+}
+
+pub(crate) fn parse_response(raw: &[u8]) -> Result<Call, String> {
     let split = raw
         .windows(4)
         .position(|mark| mark == b"\r\n\r\n")

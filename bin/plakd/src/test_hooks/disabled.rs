@@ -1,3 +1,7 @@
+pub(crate) const fn offline_model_selected() -> bool {
+    false
+}
+
 pub(crate) const fn snapshot_fixture() -> bool {
     false
 }

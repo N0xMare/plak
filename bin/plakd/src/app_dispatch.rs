@@ -36,11 +36,7 @@ pub(super) fn execute_application_command(
             accounts,
         } => {
             let config = admit(stderr)?;
-            #[cfg(feature = "test-hooks")]
-            let injected = crate::test_hooks::selected().is_some();
-            #[cfg(not(feature = "test-hooks"))]
-            let injected = false;
-            if !injected {
+            if !crate::test_hooks::offline_model_selected() {
                 let status = AccountOps::offline_status(backend, &provider)?;
                 if status.credential != CredentialState::RefreshRequired {
                     commands::support::require_ready(&provider, status.credential)?;

@@ -188,6 +188,7 @@ pub(crate) use crate::home::paths as product_paths;
 pub(crate) use crate::home::secrets as product_secrets;
 #[cfg(test)]
 pub(crate) use crate::presentation::CompatibilityState;
+#[cfg(test)]
 pub(crate) use crate::presentation::CredentialState;
 #[cfg(test)]
 pub(crate) use crate::presentation::PresentationBackend;

@@ -5,9 +5,6 @@ use super::{
     StoredCredential,
 };
 
-#[cfg(feature = "web")]
-pub(crate) mod login;
-
 #[derive(Debug)]
 pub(crate) enum HostAccountError {
     Refused(CliFailure),

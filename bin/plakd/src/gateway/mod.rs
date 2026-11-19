@@ -11,7 +11,7 @@ mod bridge;
 mod callers;
 mod cli_cmd;
 pub(crate) use cli_cmd::deployment_generation;
-mod client;
+pub(crate) mod client;
 mod custody;
 mod dispatch;
 mod flags;
