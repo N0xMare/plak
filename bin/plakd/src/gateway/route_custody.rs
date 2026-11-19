@@ -8,12 +8,19 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(any(feature = "web", test))]
+use std::time::Duration;
 
 use plakous::gateway::{GatewayCustody, GatewayEndpoint, SensitiveBytes};
 
 use super::address::GatewayAddress;
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
+
+#[cfg(any(feature = "web", test))]
+const STARTUP_WAIT: Duration = Duration::from_secs(3);
+#[cfg(any(feature = "web", test))]
+const STARTUP_RETRY: Duration = Duration::from_millis(25);
 
 /// This process's credential custody.
 #[derive(Clone)]
@@ -242,25 +249,89 @@ impl HostCustody {
         let Some(GatewayAddress::Unix(socket)) = self.address() else {
             return Ok(());
         };
+        match prove_holder(&super::holder::lock_path(state_home), socket)? {
+            HolderProof::Ready => Ok(()),
+            HolderProof::Waiting(message) => Err(message),
+        }
+    }
+
+    /// Service-manager ordering does not imply readiness. Prove the holder
+    /// and reach its Unix listener within one startup budget, sending no call.
+    #[cfg(any(feature = "web", test))]
+    pub(crate) async fn verify_startup(&self, state_home: &Path) -> Result<(), String> {
+        let Some(GatewayAddress::Unix(socket)) = self.address() else {
+            return Ok(());
+        };
         let lock = super::holder::lock_path(state_home);
-        let advertised = super::holder::advertised_socket(&lock).map_err(|error| {
-            format!(
+        let deadline = tokio::time::Instant::now() + STARTUP_WAIT;
+        loop {
+            let message = match prove_holder(&lock, socket)? {
+                HolderProof::Waiting(message) => message,
+                HolderProof::Ready => {
+                    match tokio::time::timeout_at(deadline, tokio::net::UnixStream::connect(socket))
+                        .await
+                    {
+                        Ok(Ok(_stream)) => return Ok(()),
+                        Ok(Err(error)) => {
+                            let message = format!(
+                                "cannot connect to gateway socket {}: {error}",
+                                socket.display()
+                            );
+                            if !matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound
+                                    | std::io::ErrorKind::ConnectionRefused
+                            ) {
+                                return Err(message);
+                            }
+                            message
+                        }
+                        Err(_) => {
+                            return Err(format!(
+                                "timed out connecting to gateway socket {}",
+                                socket.display()
+                            ));
+                        }
+                    }
+                }
+            };
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                return Err(message);
+            }
+            tokio::time::sleep_until((now + STARTUP_RETRY).min(deadline)).await;
+        }
+    }
+}
+
+enum HolderProof {
+    Ready,
+    Waiting(String),
+}
+
+fn prove_holder(lock: &Path, socket: &Path) -> Result<HolderProof, String> {
+    match super::holder::advertised_socket(lock) {
+        Ok(Some(found)) if found == socket => Ok(HolderProof::Ready),
+        Ok(Some(found)) => Err(format!(
+            "the gateway holding {} serves {}, not the configured {}; point [gateway] address at that socket or set gateway.toml socket and state_root for this home",
+            lock.display(),
+            found.display(),
+            socket.display()
+        )),
+        Ok(None) => Ok(HolderProof::Waiting(format!(
+            "no plakd gateway serve holds {}; start the gateway for this state home (gateway.toml state_root) before this host",
+            lock.display()
+        ))),
+        Err(error) => {
+            let message = format!(
                 "cannot read the credential holder at {}: {error}",
                 lock.display()
-            )
-        })?;
-        match advertised {
-            Some(found) if found == *socket => Ok(()),
-            Some(found) => Err(format!(
-                "the gateway holding {} serves {}, not the configured {}; point [gateway] address at that socket or set gateway.toml socket and state_root for this home",
-                lock.display(),
-                found.display(),
-                socket.display()
-            )),
-            None => Err(format!(
-                "no plakd gateway serve holds {}; start the gateway for this state home (gateway.toml state_root) before this host",
-                lock.display()
-            )),
+            );
+            if super::holder::is_busy(&error) || error.kind() == std::io::ErrorKind::NotFound {
+                Ok(HolderProof::Waiting(message))
+            } else {
+                Err(message)
+            }
         }
     }
 }

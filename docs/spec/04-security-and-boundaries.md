@@ -1372,7 +1372,9 @@ registers while a disable lands re-checks the flag, so none escapes a cut.
 A host with a unix `[gateway] address` refuses to start unless the exclusive
 holder of its own state home's store advertises exactly that socket; `gateway
 check` and `plakd doctor` apply the same check, so a host never relays through a
-gateway that holds another store. The caller key file must be owner-only; a
+gateway that holds another store. Startup tolerates a short listener bring-up
+window, but retries never accept another socket or fall back to local custody.
+The caller key file must be owner-only; a
 unix gateway gets a key only when `gateway.key_file` names one. The service
 replaces a stale socket only when it is this user's socket. The audit log
 records metadata only; a failed append is counted and shown by `plakd gateway

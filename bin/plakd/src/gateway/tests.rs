@@ -975,11 +975,23 @@ fn a_globally_disabled_service_still_drains_and_exits() {
     let gateway =
         super::service::Gateway::open_with(&paths, config, Box::new(MemoryBridge::new(instance)))
             .unwrap();
+    let lock = super::holder::lock_path(&state_root);
+    assert!(super::holder::is_busy(
+        &super::holder::advertised_socket(&lock).unwrap_err()
+    ));
     let served = std::thread::spawn(move || gateway.serve_foreground());
     // The path appears at bind, before the listener accepts.
-    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while super::holder::advertised_socket(&lock)
+        .ok()
+        .flatten()
+        .as_ref()
+        != Some(&socket)
+    {
+        assert!(!served.is_finished() && std::time::Instant::now() < deadline);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok());
     let address = super::GatewayAddress::Unix(socket);
     let disabled: AdminResponse = super::client::admin(
         &address,
@@ -995,7 +1007,6 @@ fn a_globally_disabled_service_still_drains_and_exits() {
         super::client::admin(&address, None, &AdminRequest::Drain {}).unwrap();
     assert!(matches!(drained, AdminResponse::Draining {}));
     served.join().unwrap().unwrap();
-    let lock = super::holder::lock_path(&state_root);
     super::holder::HolderLock::try_acquire(&lock, super::holder::HolderMode::Exclusive)
         .expect("a drained service releases the holder lock");
 }

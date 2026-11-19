@@ -4398,6 +4398,9 @@ worker test checks that a panicking call is refused and Status still works.
 The shutdown timeout test confirms that the holder remains exclusive even
 after the detached worker returns. CLI and console tests cover per-account
 row errors and the diagnostic on a failed account list.
+Startup tests check that the gateway advertises only once listening, and
+that host startup waits through a missing holder, unpublished or missing
+socket, and a socket that is bound but not listening.
 
 Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
 peer. Those bytes, with the dial authority normalized, are pinned equal to a

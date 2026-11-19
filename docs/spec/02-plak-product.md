@@ -6340,7 +6340,9 @@ UMask=0077
 
 `plakd gateway serve` is one process. It takes the exclusive credential holder
 lock, listens on its Unix socket, and may listen on one TCP address. The Unix
-socket directory is mode 0700 and the socket mode 0600. A same-UID peer without
+socket directory is mode 0700 and the socket mode 0600. The holder publishes
+the Unix socket path only after the configured listeners are listening.
+A same-UID peer without
 a caller key is the local administrator. TCP always requires a caller key and
 refuses a bind that is not loopback or tailnet (100.64.0.0/10,
 `fd7a:115c:a1e0::/48`) unless the server file sets `allow_non_tailnet`, and the
@@ -6428,6 +6430,9 @@ A host with `[gateway] address` set does not take the credential holder lock,
 does not resolve API keys or read `secrets/`, and does not open or create the
 subscription store. With a unix address it refuses to start unless the
 exclusive holder of its own state home's store advertises exactly that socket.
+At startup it waits up to three seconds for the holder proof and a successful
+Unix connection, retrying a missing advertisement or a missing or refusing
+socket. A different advertised path still refuses immediately.
 Its API-key routes and its subscription routes use the gateway's custody, and
 an existing session reopens with its recorded binding, because the binding
 names the provider account and key generation, never where the credential is

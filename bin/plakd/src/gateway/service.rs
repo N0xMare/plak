@@ -47,8 +47,6 @@ impl Gateway {
                 error.to_string()
             }
         })?;
-        lock.advertise(&config.socket)
-            .map_err(|error| error.to_string())?;
         let instance = plakous::gateway::server::new_instance()
             .ok_or_else(|| "could not mint a gateway instance".to_owned())?;
         let callers = Callers::load(&server_config::callers_path(home))
@@ -104,6 +102,7 @@ impl Gateway {
             lock,
         } = self;
         let stop_state = Arc::clone(&state);
+        let listening = Arc::clone(&lock);
         let result = runtime.block_on(async move {
             let stop = async move {
                 let mut terminate =
@@ -119,7 +118,7 @@ impl Gateway {
                 stop_state.draining.store(true, Ordering::Relaxed);
                 Ok(())
             };
-            run(state, server, stop).await
+            run(state, server, &listening, stop).await
         });
         let deadline = Instant::now() + RUNTIME_SHUTDOWN;
         accounts.close();
@@ -150,9 +149,10 @@ const DRAIN_DEADLINE: Duration = Duration::from_secs(30);
 /// How long the runtime's remaining tasks get after the drain deadline.
 const RUNTIME_SHUTDOWN: Duration = Duration::from_secs(5);
 
-pub(crate) async fn run(
+async fn run(
     state: Arc<GatewayState>,
     server: RelayServer<ProductGateway>,
+    lock: &HolderLock,
     stop: impl Future<Output = Result<(), String>>,
 ) -> Result<(), String> {
     prepare_socket(&state.config.socket)?;
@@ -172,6 +172,8 @@ pub(crate) async fn run(
         }
         None => None,
     };
+    lock.advertise(&state.config.socket)
+        .map_err(|error| format!("could not advertise the gateway listener: {error}"))?;
     {
         let mut listeners = match state.listeners.lock() {
             Ok(guard) => guard,

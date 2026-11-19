@@ -145,7 +145,7 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     // Custody is resolved once, here, and every consumer takes this value
     // through `services`; `[gateway]` changes need a host restart.
     let custody = services.custody()?;
-    refuse_external_gateway(services, &custody)?;
+    runtime.block_on(refuse_external_gateway(services, &custody))?;
     let holder = hold_host_store(services, &custody)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
@@ -320,13 +320,14 @@ fn open_host(
 
 /// A gateway host carries no provider key variables, and a unix gateway
 /// must hold this host's own state store at the configured socket.
-fn refuse_external_gateway(
+async fn refuse_external_gateway(
     services: &Services,
     custody: &crate::gateway::HostCustody,
 ) -> CliResult<()> {
     crate::gateway::host_may_open_store(custody).map_err(CliFailure::new)?;
     custody
-        .verify_holder(services.home().state()?)
+        .verify_startup(services.home().state()?)
+        .await
         .map_err(CliFailure::new)
 }
 

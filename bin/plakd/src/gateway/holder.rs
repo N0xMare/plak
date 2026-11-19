@@ -1,8 +1,8 @@
 //! The credential-store holder lock.
 //!
 //! In-process gateways take it shared. The service takes it exclusive, so the
-//! two modes cannot overlap. While the service holds it, the file body is the
-//! service socket path a local CLI discovers.
+//! two modes cannot overlap. Once the service listens, it writes its socket
+//! path to the file for local discovery.
 
 use std::fs::File;
 use std::io::{self, Read as _, Seek as _, Write as _};
@@ -37,6 +37,10 @@ impl HolderLock {
             HolderMode::Shared => FlockOperation::NonBlockingLockShared,
         };
         flock(&file, operation)?;
+        if mode == HolderMode::Exclusive {
+            // A previous service may have exited without clearing its path.
+            file.set_len(0)?;
+        }
         Ok(Self {
             file: Some(file),
             mode,
@@ -95,6 +99,12 @@ pub(crate) fn advertised_socket(path: &Path) -> io::Result<Option<PathBuf>> {
 fn read_advertisement(path: &Path) -> io::Result<PathBuf> {
     let mut text = String::new();
     File::open(path)?.read_to_string(&mut text)?;
+    if text.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "the gateway holder has not advertised a listening socket",
+        ));
+    }
     let line = text.trim();
     let path = PathBuf::from(line);
     if line.is_empty() || !path.is_absolute() {

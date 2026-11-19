@@ -165,6 +165,9 @@ for one version bump, without native protocol compatibility.
   check` and `doctor` fail, unless the gateway holds this host's own store at
   the configured socket. Doctor reads credential rows from the gateway and
   counts a gateway failure.
+- Publish the gateway holder's socket only once it is listening. Host startup
+  retries a not-yet-ready local gateway for up to three seconds without
+  accepting a mismatched holder.
 - Fix gateway subscription status, account listing, logout, removal and
   login on an adopted store. Status refuses a failed read rather than
   omitting the account, and gateway usage reads the held subscription's
