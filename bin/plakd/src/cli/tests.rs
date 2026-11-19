@@ -78,6 +78,44 @@ fn host_step_drain_accepts_bounded_and_idle_without_settlement_or_abandon_flags(
 }
 
 #[test]
+fn host_upgrade_runner_inspection_requires_both_flags_and_conflicts_with_abandon() {
+    let source = "100-0000000000000001";
+    let ordinary = ["host", "upgrade", "--expect-binary", "0123456789ab"];
+    assert!(matches!(
+        parse(args(&ordinary)),
+        Ok(Command::HostUpgrade {
+            inspection: None,
+            ..
+        })
+    ));
+    let paired = [
+        "--inspect-source",
+        source,
+        "--inspect-runner",
+        "desk",
+        "--inspect-runner",
+        "lab",
+    ];
+    assert!(matches!(
+        parse(args(&[ordinary.as_slice(), &paired].concat())),
+        Ok(Command::HostUpgrade { inspection: Some(proof), .. })
+            if proof.source_instance == source && proof.deploy_inspect_runners == ["desk", "lab"]
+    ));
+    for incomplete in [["--inspect-runner", "desk"], ["--inspect-source", source]] {
+        assert!(parse(args(&[ordinary.as_slice(), &incomplete].concat())).is_err());
+    }
+    let abandon = ["host", "upgrade", "--abandon", "desk"];
+    assert!(matches!(
+        parse(args(&abandon)),
+        Ok(Command::HostUpgrade {
+            inspection: None,
+            ..
+        })
+    ));
+    assert!(parse(args(&[abandon.as_slice(), &paired].concat())).is_err());
+}
+
+#[test]
 fn host_stdio_bridge_requires_transport_and_refuses_server_flags() {
     assert!(matches!(
         parse(args(&["host", "connect", "--stdio"])).unwrap(),

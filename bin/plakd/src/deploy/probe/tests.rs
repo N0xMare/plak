@@ -98,7 +98,7 @@ case "$*" in
   'deploy-credential-generation claude/work') printf '18\n' ;;
   'doctor') printf 'layout\tOK\n' ;;
   'session check-binding --all --summary') printf '{{"compatible":true,"count":200000}}\n' ;;
-  'host upgrade '*) touch "$PLAK_HOME/surrendered" ;;
+  'host upgrade '*) printf '%s\n' "$@" > "$PLAK_HOME/surrendered" ;;
   *) exit 8 ;;
 esac
 "#,
@@ -268,12 +268,27 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
     assert!(error.message().contains("candidate snapshot is missing"));
     assert!(!target.host.product_home.join("surrendered").exists());
     let wrong_instance = HostOp::HostLink {
-        candidate,
+        candidate: candidate.clone(),
         instance: unexpected.instance,
     };
     let error = target::execute_host(target, wrong_instance, &mut io::empty()).unwrap_err();
     assert!(error.message().contains("no longer Ready"));
     assert_host_fence(target, &serving, &absent);
+    assert!(serving.paired.is_empty());
+    target::upgrade(target, &candidate, &serving, 10, null()).unwrap();
+    let capture = target.host.product_home.join("surrendered");
+    assert!(
+        fs::read_to_string(&capture).unwrap().lines().eq([
+            "host",
+            "upgrade",
+            "--expect-binary",
+            serving.facts.binary_id.as_str(),
+            "--drain",
+            "10s",
+        ]),
+        "an unpaired target must send the legacy requester argv without inspection flags",
+    );
+    fs::remove_file(capture).unwrap();
     assert_eq!(
         fs::read_link(target.host.node.home.join(".local/bin/plakd")).unwrap(),
         source

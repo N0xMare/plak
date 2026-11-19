@@ -33,7 +33,10 @@ targets must be on separate machines. The operator machine is separate from
 both. Use distinct evidence paths, and give both stages the same receipt path.
 The SSH strings catch obvious overlap; before staging, deploy checks the
 actual Linux machine digests against local production evidence and receipts,
-including roles reached through a different SSH name.
+including roles reached through a different SSH name. Deploy reads at most
+32 MiB of the production evidence log for this check. If the log exceeds the
+bound, rotate it or archive old, settled evidence before retrying. Do not
+discard an unresolved intent to get under the limit.
 
 A client's manifest has exactly `schema: 1`, `platform` matching its node,
 `wire: {"number": N, "schema_pin": "…"}`,
@@ -104,6 +107,9 @@ once it observes the recorded source image and stable link. If the host
 request might have been sent, it must also prove the exact source is idle
 with no pending receipt and cancel the request before restoring. Neither
 case issues a new upgrade in that invocation. If the outcome is still uncertain,
-leave the runner links in place while inspecting the host. Do not discard the
+leave the runner links in place while inspecting the host. If a staging target
+matches production evidence, deploy also leaves its links untouched during
+withdrawal. For any runner link already advanced, verify source custody and
+restore the recorded source-compatible link manually. Do not discard the
 evidence log or race a manual handoff against an open intent. There is no
 automatic host rollback after surrender.
