@@ -512,14 +512,14 @@ fn previous_gateway_endpoint(
                 tokio::spawn(async move {
                     let mut reader = tokio::io::BufReader::new(&mut io);
                     let mut line = String::new();
-                    reader.read_line(&mut line).await.expect("versions request");
+                    reader.read_line(&mut line).await?;
                     assert_eq!(line, "GET /versions HTTP/1.1\r\n");
                     while line != "\r\n" {
                         line.clear();
-                        assert_ne!(reader.read_line(&mut line).await.expect("header"), 0);
+                        assert_ne!(reader.read_line(&mut line).await?, 0);
                     }
-                    io.write_all(&reply).await.expect("versions reply");
-                    io.shutdown().await.expect("close versions connection");
+                    io.write_all(&reply).await?;
+                    io.shutdown().await
                 });
             } else {
                 let server = server.clone();

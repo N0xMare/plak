@@ -162,19 +162,12 @@ impl NativeSubscriptions {
         })
         .await??;
         if enforce_login_recovery {
-            let paths = self.state.clone();
-            let consent_generation = loaded_acceptance.generation.clone();
-            if run_blocking(move || {
-                paths.login_recovery_required_for_status(
-                    NativeProvider::Xai,
-                    Some(&consent_generation),
-                    local_status,
-                )
-            })
-            .await??
-            {
-                return Err(NativeSubscriptionError::CredentialUnavailable);
-            }
+            self.require_recovered_login(
+                NativeProvider::Xai,
+                &loaded_acceptance.generation,
+                local_status,
+            )
+            .await?;
         }
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;

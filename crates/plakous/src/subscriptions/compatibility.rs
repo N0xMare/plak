@@ -7,6 +7,28 @@ use super::{
 };
 
 impl NativeSubscriptions {
+    pub(super) async fn require_recovered_login(
+        &self,
+        provider: NativeProvider,
+        consent_generation: &str,
+        credential: NativeAuthStatus,
+    ) -> Result<(), NativeSubscriptionError> {
+        let paths = self.state.clone();
+        let consent_generation = consent_generation.to_owned();
+        if run_blocking(move || {
+            paths.login_recovery_required_for_status(
+                provider,
+                Some(&consent_generation),
+                credential,
+            )
+        })
+        .await??
+        {
+            return Err(NativeSubscriptionError::CredentialUnavailable);
+        }
+        Ok(())
+    }
+
     pub(super) async fn acquire_compatibility_lock(
         &self,
         provider: NativeProvider,

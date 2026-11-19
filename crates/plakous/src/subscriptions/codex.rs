@@ -88,19 +88,12 @@ impl NativeSubscriptions {
                 .map(map_codex_status)
                 .map_err(map_codex_error)?;
         if enforce_login_recovery {
-            let paths = self.state.clone();
-            let consent_generation = loaded_acceptance.generation.clone();
-            if run_blocking(move || {
-                paths.login_recovery_required_for_status(
-                    NativeProvider::Codex,
-                    Some(&consent_generation),
-                    local_status,
-                )
-            })
-            .await??
-            {
-                return Err(NativeSubscriptionError::CredentialUnavailable);
-            }
+            self.require_recovered_login(
+                NativeProvider::Codex,
+                &loaded_acceptance.generation,
+                local_status,
+            )
+            .await?;
         }
         #[cfg(any(test, feature = "test-clock"))]
         let clock = self.state.clock();
