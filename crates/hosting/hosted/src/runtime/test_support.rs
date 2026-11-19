@@ -188,7 +188,7 @@ pub(super) fn wait_out_crashed_lease(
         if !held {
             return;
         }
-        std::thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
