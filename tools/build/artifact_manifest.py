@@ -71,9 +71,12 @@ def versions(values, field):
 
 def validate_build_info(info):
     fields(
-        info, "export flavor gateway host_upgrade product_version revision runner state_key wire"
+        info,
+        "export flavor gateway host_upgrade omitted_features product_version revision runner state_key test_hooks wire",
     )
     require(info["flavor"] == "release", "expected plain release build")
+    require(info["test_hooks"] is False, "shipping artifacts must not include test hooks")
+    require(info["omitted_features"] == [], "shipping artifacts must not omit product features")
     matches(info["revision"], REVISION, "revision")
     matches(info["product_version"], VERSION, "product version")
     matches(info["state_key"], STATE_KEY, "state key")
@@ -256,11 +259,11 @@ def copy_tarball(source, destination, files):
     require(seen == set(NAMES), "tarball is missing shipping executables")
 
 
-def stage(source, manifest, destination, platform):
+def stage(source, manifest, destination, platform, source_build=False):
     data = read_canonical(manifest.read_bytes())
     validate_manifest(data)
     allowed = {platform}
-    if platform == "x86_64-unknown-linux-musl":
+    if source_build and platform == "x86_64-unknown-linux-musl":
         allowed.add("x86_64-unknown-linux-gnu")
     require(data["platform"] in allowed, "artifact platform does not match this machine")
     files = data["files"]
@@ -293,6 +296,7 @@ def main():
     importer.add_argument("manifest", type=Path)
     importer.add_argument("destination", type=Path)
     importer.add_argument("platform")
+    importer.add_argument("--source-build", action="store_true")
     args = vars(parser.parse_args())
     action = args.pop("action")
     try:

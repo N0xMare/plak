@@ -47,6 +47,13 @@ class ShippingArtifacts(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 manifests.validate_manifest({**self.data, **mutation})
+        for facts, error in (
+            ({"test_hooks": True}, "must not include test hooks"),
+            ({"test_hooks": 0}, "must not include test hooks"),
+            ({"omitted_features": ["js"]}, "must not omit product features"),
+        ):
+            with self.subTest(facts=facts), self.assertRaisesRegex(ValueError, error):
+                manifests.validate_build_info({**self.data["build_info"], **facts})
         with self.assertRaisesRegex(ValueError, "duplicate"):
             manifests.read_canonical(b'{"x":1,"x":2}\n')
         with self.assertRaisesRegex(ValueError, "noncanonical"):
@@ -184,6 +191,13 @@ class BuildInfoProbe(unittest.TestCase):
             self.assertEqual(json.loads(run("version", "--build-info").stdout), probe)
             self.assertEqual(list(home.iterdir()), [])
             self.assertFalse(state.exists())
+            version = run("version").stdout
+            self.assertIs(probe["test_hooks"], "; test-hooks" in version)
+            omitted = [f"-{name}" for name in probe["omitted_features"]]
+            if omitted:
+                self.assertIn("; features " + ",".join(omitted), version)
+            else:
+                self.assertNotIn("; features ", version)
             self.assertNotIn("--build-info", run("version", "--help").stdout)
             for flag in ("state-key", "export-version", "host-upgrade-probe", "reload-probe"):
                 self.assertEqual(

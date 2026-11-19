@@ -1,4 +1,4 @@
-# Sourced by tools/musl/musl-native.sh and tools/release/package-release.sh:
+# Sourced by tools/musl/musl-native.sh and tools/build/build-plakd.sh:
 # checks the pinned Rust 1.100.0 native Linux x86_64 musl prerequisites and exports the compiler,
 # linker and CARGO_BUILD_TARGET for x86_64-unknown-linux-musl.
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then

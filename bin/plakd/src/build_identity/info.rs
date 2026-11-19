@@ -12,10 +12,12 @@ struct BuildInfo<'a> {
     flavor: String,
     gateway: Versions<&'static [u16]>,
     host_upgrade: HostUpgrade,
+    omitted_features: Vec<&'static str>,
     product_version: &'static str,
     revision: String,
     runner: Runner<'a>,
     state_key: String,
+    test_hooks: bool,
     wire: Wire,
 }
 
@@ -67,6 +69,7 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
             coordinator: carry::upgrade::PROTOCOL,
             receipt: carry::upgrade::receipt::VERSION,
         },
+        omitted_features: crate::build_features::omitted_features(),
         product_version: plakous::VERSION,
         revision: version.source_revision,
         runner: Runner {
@@ -77,6 +80,7 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
             },
         },
         state_key: home::state::state_key(),
+        test_hooks: super::TEST_HOOKS,
         wire: Wire {
             number: WIRE_VERSION,
             schema_pin,

@@ -55,7 +55,7 @@ fi
 static=()
 case "$(uname -s) $(uname -m)" in
   "Linux x86_64")
-    source tools/musl/musl-toolchain.sh
+    export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     static=(--require-static) ;;
   "Darwin arm64")
     export CARGO_BUILD_TARGET=aarch64-apple-darwin ;;

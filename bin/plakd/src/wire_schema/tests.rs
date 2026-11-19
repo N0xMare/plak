@@ -4,13 +4,8 @@ use super::*;
 
 #[test]
 fn protocol_twelve_schema_has_an_exact_build_independent_pin() {
-    let mut schema = document();
-    schema.as_object_mut().unwrap().remove("binary_id");
-    schema.sort_all_objects();
-    let bytes = serde_json::to_vec(&schema).unwrap();
-    let digest = plakous::model::sha256_hex(&[&bytes]);
     assert_eq!(
-        digest,
+        pin().unwrap(),
         "8b865947bed5fa08a8b4e2a9c5887a6a124e8288907728da3066651d0b8a9b4b"
     );
 }

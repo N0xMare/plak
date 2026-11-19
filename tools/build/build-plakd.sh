@@ -138,6 +138,13 @@ if [[ "$mode" == --install || "$mode" == --artifacts ]]; then
   fi
   PLAK_SOURCE_REVISION="$(clean_revision)"
   export PLAK_SOURCE_REVISION
+  if [[ -n "$artifacts_only" && "$(uname -s)" == Linux ]]; then
+    if [[ "${CARGO_BUILD_TARGET:-x86_64-unknown-linux-musl}" != x86_64-unknown-linux-musl ]]; then
+      echo "build-plakd: Linux --artifacts requires x86_64-unknown-linux-musl" >&2
+      exit 2
+    fi
+    source tools/musl/musl-toolchain.sh
+  fi
   # An explicit target applies Rust flags to shipping code, not host build
   # scripts and proc macros. Keep Cargo's native target when not overridden.
   rustc_facts="$(rustc -vV)"

@@ -9,10 +9,6 @@ also keep compatibility with their immediately preceding version.
 
 ## Unreleased
 
-- Build plain release artifacts from a clean Git revision with build paths
-  remapped. The artifacts include a verified manifest; `install.sh` can stage
-  a local bundle without moving command links.
-
 ### Persisted formats
 
 - State key `r28.e39.p39.t11` (runtime format epoch 39, product schema 39).
@@ -112,6 +108,10 @@ also keep compatibility with their immediately preceding version.
 
 ### plakd
 
+- `just install release` now refuses a dirty tree, including untracked,
+  nonignored files, or any setting of `RUSTFLAGS`. Plain shipping artifacts
+  remap build paths and include a verified manifest; `install.sh` can stage
+  a local bundle without moving command links.
 - Refuse session delete and `plakd runner unpair` while a durable job has no
   terminal evidence, including a finished child of a session on that runner.
   The `running_jobs` lifecycle reason names the process ids and both remedies:

@@ -28,8 +28,10 @@ def info(version="0.0.2"):
         "export": {"read": [6, 7], "write": 7},
         "gateway": {"served": [1, 2], "spoken": [1, 2]},
         "host_upgrade": {"coordinator": 3, "receipt": 1},
+        "omitted_features": [],
         "runner": {"protocol": 9, "retention": {"served": [1], "spoken": [1]}},
         "state_key": "r1.e1.p1.t1",
+        "test_hooks": False,
         "wire": {"number": 9, "schema_pin": "2" * 64},
     }
 

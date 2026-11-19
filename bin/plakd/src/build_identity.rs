@@ -15,6 +15,7 @@ pub(crate) use interactive::newer_build_installed;
 pub(crate) use snapshot::installed_for_binary;
 
 pub(crate) const JJ_ENABLED: bool = cfg!(feature = "jj");
+const TEST_HOOKS: bool = cfg!(feature = "test-hooks");
 
 pub(crate) const FLAVOR: &str = match (cfg!(feature = "maintainer"), cfg!(debug_assertions)) {
     (true, true) => "maintainer debug",
@@ -453,11 +454,7 @@ pub(crate) fn write_binary_manifest(directory: &Path) -> std::io::Result<()> {
 }
 
 pub(crate) fn version_label() -> String {
-    let hooks = if cfg!(feature = "test-hooks") {
-        "; test-hooks"
-    } else {
-        ""
-    };
+    let hooks = if TEST_HOOKS { "; test-hooks" } else { "" };
     format!(
         "{} ({FLAVOR}; binary {}{hooks}{})",
         plakous::VERSION,

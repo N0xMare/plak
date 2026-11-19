@@ -75,6 +75,9 @@ snapshot under `~/.local/lib/plak/release` (workers under the shared
 `~/.local/lib/plak/sidecars`) with links `plakd`, `plakous-js-host`, and `plakous-py-host`
 in `~/.local/bin`. Put `~/.local/bin` on your PATH. It refuses to replace
 non-plakd files or links there, and refuses to run from a linked Git worktree.
+It also refuses a dirty tree, including untracked, nonignored files, and any
+setting of `RUSTFLAGS`, even an empty one. Commit or remove those changes and
+unset `RUSTFLAGS` before building.
 Rebuilding never rewrites an executable a running session uses.
 
 Without `just`, build the same executables with Cargo:

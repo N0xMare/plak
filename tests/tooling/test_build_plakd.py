@@ -807,6 +807,8 @@ class BuildPlakTests(unittest.TestCase):
             repo = base / "repo"
             (repo / "tools/build").mkdir(parents=True)
             shutil.copy(ROOT / "tools/build/build-plakd.sh", repo / "tools/build/build-plakd.sh")
+            (repo / "tools/musl").mkdir()
+            shutil.copy(ROOT / "tools/musl/musl-toolchain.sh", repo / "tools/musl")
             shutil.copy(ROOT / "install.sh", repo / "install.sh")
             copy_emitter(repo)
             log = base / "calls.log"
@@ -822,12 +824,15 @@ class BuildPlakTests(unittest.TestCase):
                 f'#!/bin/sh\ncase "$1" in rev-parse) echo {REVISION} ;; status) printf "%s" "${{FAKE_DIRTY:-}}" ;; esac\n'
             )
             (fake / "git").chmod(0o755)
+            gnu = "x86_64-unknown-linux-gnu"
             for name, body in (
                 (
                     "rustc",
-                    f"printf '%s\\n' 'host: {LINUX}' 'release: 1.100.0' 'commit-hash: {'b' * 40}' 'LLVM version: 23.1.5'",
+                    f"printf '%s\\n' 'host: {gnu}' 'release: 1.100.0' 'commit-hash: {'b' * 40}' 'LLVM version: 23.1.5'",
                 ),
                 ("uname", 'case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac'),
+                ("rustup", f"echo {LINUX}"),
+                ("musl-gcc", "exit 0"),
             ):
                 (fake / name).write_text(f"#!/bin/sh\n{body}\n")
                 (fake / name).chmod(0o755)
@@ -836,6 +841,7 @@ class BuildPlakTests(unittest.TestCase):
             (fake / "cargo").write_text(f"""#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == -V ]]; then echo 'cargo 1.100.0 (aaaaaaaaa 2026-11-09)'; exit; fi
+[[ "${{PLAK_SOURCE_REVISION:-}}" != spoofed ]] || exit 2
 printf 'cargo %s\\n' "$*" >>{log}
 profile=debug; packages=(); args=("$@")
 for ((i = 0; i < ${{#args[@]}}; i++)); do
@@ -860,7 +866,13 @@ done
 """)
             (fake / "cargo").chmod(0o755)
             (fake / "strip").write_text(
-                f"#!/bin/sh\nprintf 'strip %s\\n' \"$1\" >>{log}\nprintf '# stripped\\n' >>\"$1\"\n"
+                f"""#!/bin/sh
+printf 'strip %s\\n' "$1" >>{log}
+printf '# stripped\\n' >>"$1"
+if [ "${{FAKE_LEAK_FILE:-}}" = "${{1##*/}}" ]; then
+    printf '# leaked %s\\n' "$FAKE_LEAK_PATH" >>"$1"
+fi
+"""
             )
             (fake / "strip").chmod(0o755)
             home = base / "home"
@@ -896,9 +908,13 @@ done
                     self.assertIn(message, result.stderr)
                     self.assertEqual(log.read_text(), "")
                     self.assertFalse(lib.exists())
+            result = run("--artifacts", CARGO_BUILD_TARGET=gnu)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(f"Linux --artifacts requires {LINUX}", result.stderr)
+            self.assertEqual(log.read_text(), "")
             result = run("--install", PLAK_SOURCE_REVISION="spoofed")
             self.assertEqual(result.returncode, 0, result.stderr)
-            raw = base / "target" / LINUX / "release"
+            raw = base / "target" / gnu / "release"
             self.assertEqual(
                 log.read_text().splitlines(),
                 [
@@ -924,16 +940,44 @@ done
                 self.assertEqual(worker.parent.parent, lib / "sidecars" / name)
                 self.assertEqual((installed.parent / name).resolve(), worker)
             self.assertNotIn("maintainer", installed.read_text())
+            foreign_home = base / "public-install"
+            refused = subprocess.run(
+                ["sh", repo / "install.sh", "--from", raw / "stripped", "--no-link"],
+                env={**env, "HOME": str(foreign_home)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(refused.returncode, 1, refused.stderr)
+            self.assertIn("artifact platform does not match", refused.stderr)
+            self.assertFalse(foreign_home.exists())
+
+            refused = subprocess.run(
+                ["sh", repo / "install.sh", "--source-build", raw, "maintainer", raw],
+                env={**env, "HOME": "relative-home"},
+                cwd=base,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(refused.returncode, 1, refused.stderr)
+            self.assertIn("HOME must be absolute", refused.stderr)
+            self.assertFalse((base / "relative-home").exists())
 
             result = run("--artifacts")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), str(raw / "stripped"))
+            shipping_dir = base / "target" / LINUX / "release/stripped"
+            self.assertEqual(result.stdout.strip(), str(shipping_dir))
             self.assertNotIn("--features", log.read_text())
             self.assertEqual((home / ".local/bin/plakd").resolve(), installed)
             for name in ("plakd", "plakous-js-host", "plakous-py-host"):
-                data = (raw / "stripped" / name).read_bytes()
                 for path in (repo, base / "cargo-home"):
-                    self.assertNotIn(os.fsencode(path), data, name)
+                    with self.subTest(binary=name, leaked_path=path):
+                        refused = run("--artifacts", FAKE_LEAK_FILE=name, FAKE_LEAK_PATH=str(path))
+                        self.assertEqual(refused.returncode, 1, refused.stderr)
+                        self.assertIn(f"{name} contains a physical build path", refused.stderr)
+                        self.assertIn(os.fsencode(path), (shipping_dir / name).read_bytes())
+                        self.assertFalse((shipping_dir / "manifest.json").exists())
 
             checker = repo / "tools/build/check-artifact-linkage.py"
             checker_source = checker.read_text()

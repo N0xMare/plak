@@ -912,8 +912,8 @@ cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker
 
 The bare Cargo commands above build the same package selections but are not
 the shipping recipe. `build-plakd.sh --install` (plain release) and
-`--artifacts` first require a clean Git checkout, including untracked,
-nonignored files, and set `PLAK_SOURCE_REVISION` only from `git rev-parse HEAD`;
+`--artifacts` first require a clean Git checkout, refusing tracked changes
+and untracked, nonignored files. They set `PLAK_SOURCE_REVISION` only from `git rev-parse HEAD`;
 an exported value is ignored. They recheck the clean revision before
 manifest emission. They map the physical Cargo home, checkout and target
 directory to `/cargo`, `/plakd` and `/target`, respectively, with the most
@@ -1698,7 +1698,11 @@ while its executables still report `<version>`, so the final tag can name the
 same qualified commit. The build is
 `tools/build/build-plakd.sh --artifacts`: the `just install release` Cargo invocations
 and artifact linkage check, without installing. The shipping recipe in §6.1
-owns path remapping for both modes. `tools/release/release_tarball.py` writes
+owns path remapping for both modes. On Linux, `--artifacts` sources the pinned
+native musl recipe and refuses a requested target other than
+`x86_64-unknown-linux-musl`. The native GNU target is allowed only for
+`just install release` from source, not for shipping or local artifact import.
+`tools/release/release_tarball.py` writes
 `plakd-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
 tarball and wire schema in the output directory (default `<target dir>/release-dist`).
 The packaging script also runs the built target's supported `plakd wire schema`
@@ -1724,6 +1728,10 @@ or environment values. The fields are `schema`, `revision`, `platform`,
 `Cargo.lock` hash), `toolchain`, `files`, `snapshot_id` and `build_info`.
 `toolchain` records Rust release, commit hash, host triple and LLVM version
 from `rustc -vV`, and Cargo release and commit hash from `cargo -V`.
+Shipping builds use the pinned recipe. Ambient overrides, including
+`CARGO_PROFILE_*`, `RUSTC_WRAPPER`, `CC`/`CFLAGS` and Cargo configuration,
+are not captured in the manifest; builds with overrides need not be
+byte-identical to the pinned recipe.
 `files` has exactly `plakd`, `plakous-js-host` and `plakous-py-host`,
 each with `length` in bytes, full lowercase `sha256` and 12-hex `display_id`.
 `snapshot_id` remains the §6.1 hash of the three lines in that order.
@@ -1734,11 +1742,16 @@ version flags and neither opens a store nor contacts a service. It reports
 `flavor`, `revision`, `product_version`, `state_key`, `export` read/write
 versions, `host_upgrade` coordinator/receipt versions, `runner` protocol
 and retention served/spoken versions, `gateway` served/spoken versions,
-and the exact `wire` number and schema pin (chapter 02 §4.4).
+the exact `wire` number and schema pin (chapter 02 §4.4), whether `test_hooks`
+are compiled in, and the sorted list of `omitted_features`.
+Shipping manifests require `test_hooks: false` and `omitted_features: []`.
 Missing or inconsistent facts fail manifest emission. To compare the full
 digests of two native builds from separately checked out copies of the same
-clean revision, run `bash tools/build/compare-shipping-builds.sh NEW_EVIDENCE_DIRECTORY`
-with locked dependencies already cached. The comparison is report-only,
+clean revision, run `tools/build/compare-shipping-builds.sh NEW_EVIDENCE_DIRECTORY`
+with locked dependencies already cached. The recipe seeds separate Cargo
+homes with cached registry inputs and uses separate target directories.
+It checks both outputs for either checkout's physical path.
+The comparison is report-only,
 not a gate or a guarantee across toolchains or SDKs.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed

@@ -26,8 +26,8 @@ owner_mode() {
   facts="$(stat -f "%u $bsd" "$1" 2>/dev/null)" || facts="$(stat -c '%u %a' "$1")"
   echo "$facts"
 }
-# Same rules as tools/build/build-plakd.sh: physical installation ancestors
-# are user/root-owned and not writable by others, except root-owned sticky roots.
+# Physical installation ancestors are user/root-owned and not writable by
+# others, except root-owned sticky roots.
 safe_dir() (
   [ -d "$1" ] && [ ! -L "$1" ] || die "unsafe or symlinked directory refused: $1"
   dir="$(cd "$1" && pwd -P)"
@@ -113,7 +113,9 @@ case "${1:-}" in
     [ "$#" -eq 4 ] || usage
     source_link_target="$(cd "$4" && pwd -P)"
     case "$3" in
-      release) mode=local; local_source=$2 ;;
+      release)
+        [ -d "$2" ] || die "a source build requires an artifact directory"
+        mode=local; local_source=$2 ;;
       maintainer) mode=maintainer; snapshot_flavor=maintainer; artifacts=$2 ;;
       *) usage ;;
     esac ;;
@@ -133,7 +135,7 @@ case "${1:-}" in
   *) usage ;;
 esac
 
-if [ "$mode" = local ] || [ "$mode" = link ]; then
+if [ "$mode" != remote ]; then
   case "${HOME:-}" in /*) [ "$HOME" != / ] || die "HOME must not be /" ;; *) die "HOME must be absolute" ;; esac
 fi
 if [ "$mode" = remote ] || [ "$mode" = local ]; then
@@ -213,8 +215,9 @@ elif [ "$mode" = local ]; then
   work="$(mktemp -d "${TMPDIR:-/tmp}/plakd-install.XXXXXX")"
   trap 'rm -rf "$work"' EXIT
   trap 'exit 1' HUP INT TERM
-  expected_snapshot="$(python3 "$installer_dir/tools/build/artifact_manifest.py" stage \
-    "$local_source" "$manifest" "$work" "$triple")"
+  set -- "$local_source" "$manifest" "$work" "$triple"
+  if [ -n "$source_link_target" ]; then set -- "$@" --source-build; fi
+  expected_snapshot="$(python3 "$installer_dir/tools/build/artifact_manifest.py" stage "$@")"
   artifacts="$work"
   strict_markers=1
 fi
