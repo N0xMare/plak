@@ -6391,8 +6391,9 @@ caller management and `drain` are local-admin only. A global disable still
 admits the local administrator's `enable`, `disable`, `drain`, `caller
 list` and `status`; relays, facts and refresh stay blocked for everyone. `drain` stops
 accepting and waits up to 30 seconds for in-flight relays, refresh claims
-and admin calls. A refresh claim runs to completion on its own task even
-when its caller leaves. The listener runtime shutdown and account worker
+and admin calls, including flushing their HTTP replies. That includes the
+drain acknowledgement itself. A refresh claim runs to completion on its
+own task even when its caller leaves. The listener runtime shutdown and account worker
 join share a further five seconds. If the worker has not joined by that
 deadline, the service exits with an error and keeps the holder lock until
 process exit. A failed audit append is counted; `plakd

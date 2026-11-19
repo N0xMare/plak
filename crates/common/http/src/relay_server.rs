@@ -220,6 +220,7 @@ struct ServerInner<S> {
     upstream: Client,
     instance: UuidText,
     max_request_body_bytes: usize,
+    draining: CancellationToken,
     /// Repository tests' loopback dial targets for pinned origins; always
     /// empty in product builds, which cannot set them.
     dial_overrides: Vec<(String, Origin)>,
@@ -242,6 +243,7 @@ impl<S: GatewayService> RelayServer<S> {
                 upstream,
                 instance,
                 max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+                draining: CancellationToken::new(),
                 dial_overrides: Vec::new(),
             }),
         }
@@ -260,6 +262,7 @@ impl<S: GatewayService> RelayServer<S> {
             upstream: inner.upstream.clone(),
             instance: inner.instance.clone(),
             max_request_body_bytes: inner.max_request_body_bytes,
+            draining: inner.draining.clone(),
             dial_overrides: inner.dial_overrides.clone(),
         };
         change(&mut next);
@@ -274,7 +277,14 @@ impl<S: GatewayService> RelayServer<S> {
         &self.inner.instance
     }
 
-    /// Serves one connection until the caller closes it.
+    /// Starts graceful shutdown on connections served by this instance.
+    /// They stop accepting requests but flush responses already in flight.
+    /// The listener remains the caller's responsibility.
+    pub fn drain(&self) {
+        self.inner.draining.cancel();
+    }
+
+    /// Serves one connection until the caller closes it or the server drains.
     ///
     /// # Errors
     /// Returns the HTTP/1.1 connection failure.
@@ -287,11 +297,18 @@ impl<S: GatewayService> RelayServer<S> {
             let inner = Arc::clone(&inner);
             async move { Ok::<_, Infallible>(inner.handle(request, peer).await) }
         });
-        hyper::server::conn::http1::Builder::new()
+        let connection = hyper::server::conn::http1::Builder::new()
             .keep_alive(true)
-            .serve_connection(TokioIo::new(io), service)
-            .await
-            .map_err(ServeError)
+            .serve_connection(TokioIo::new(io), service);
+        tokio::pin!(connection);
+        tokio::select! {
+            biased;
+            () = self.inner.draining.cancelled() => {
+                connection.as_mut().graceful_shutdown();
+                connection.await.map_err(ServeError)
+            }
+            result = &mut connection => result.map_err(ServeError),
+        }
     }
 }
 

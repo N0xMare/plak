@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use plakous::gateway::server::{Peer, RelayServer};
 use tokio::net::{TcpListener, UnixListener};
+use tokio::task::JoinSet;
 
 use super::audit::Audit;
 use super::bridge::{AccountBridge, AccountThread, AccountWorker};
@@ -184,8 +185,7 @@ async fn run(
             listeners.push(format!("tcp:{addr}"));
         }
     }
-    let unix_server = server.clone();
-    let tcp_server = server;
+    let mut connections = JoinSet::new();
     tokio::pin!(stop);
     loop {
         if state.draining.load(Ordering::Relaxed) {
@@ -196,34 +196,40 @@ async fn run(
                 result?;
                 break;
             }
+            _ = connections.join_next(), if !connections.is_empty() => {}
             accepted = unix.accept() => {
                 let Ok((stream, _)) = accepted else { continue; };
                 let same_user = stream.peer_cred().map(|cred| cred.uid()).ok()
                     == Some(rustix::process::geteuid().as_raw());
                 let peer = Peer::Unix { same_user };
-                let task = unix_server.clone();
-                tokio::spawn(async move {
+                let task = server.clone();
+                connections.spawn(async move {
                     let _ = task.serve(stream, peer).await;
                 });
             }
             accepted = accept_tcp(tcp.as_ref()), if tcp.is_some() => {
                 let Ok((stream, peer_addr)) = accepted else { continue; };
                 let peer = Peer::Tcp(peer_addr);
-                let task = tcp_server.clone();
-                tokio::spawn(async move {
+                let task = server.clone();
+                connections.spawn(async move {
                     let _ = task.serve(stream, peer).await;
                 });
             }
         }
     }
-    // `inflight` counts every relay until its audit and every call, including
-    // refresh claims, which run to completion on their own task even when
-    // their caller leaves.
-    let deadline = tokio::time::Instant::now() + DRAIN_DEADLINE;
-    while state.inflight.load(Ordering::Relaxed) > 0 && tokio::time::Instant::now() < deadline {
+    server.drain();
+    let _ = tokio::time::timeout(DRAIN_DEADLINE, finish_connections(connections, &state)).await;
+    Ok(())
+}
+
+async fn finish_connections(mut connections: JoinSet<()>, state: &GatewayState) {
+    // A call leaves the in-flight count before HTTP has flushed its reply.
+    // Join the connections too, including the one that requested drain.
+    while connections.join_next().await.is_some() {}
+    // Detached claims may outlive a caller that closed its connection.
+    while state.inflight.load(Ordering::Relaxed) > 0 {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    Ok(())
 }
 
 async fn accept_tcp(
