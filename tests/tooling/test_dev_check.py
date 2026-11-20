@@ -652,6 +652,23 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         cargo = [c['args'][0] for c in calls]
         self.assertLess(cargo.index('clippy'), cargo.index('test'))
 
+    def test_combined_batch_reuses_the_isolated_compile_target(self):
+        self.env['PLAK_BATCH_BASE'] = 'test-base'
+        result, _, _ = self.run_gate('--steps', 'static,standalone,tests-parallel')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        features = next(
+            row for row in records if row.get('python') == ['tools/gate/check_features.py']
+        )
+        standalone = [
+            row for row in records if row.get('args', [])[:3] == ['clippy', '--locked', '-p']
+        ]
+        self.assertTrue(standalone)
+        self.assertNotEqual(features['target_dir'], self.env['CARGO_TARGET_DIR'])
+        for check in standalone:
+            self.assertEqual(check['target_dir'], features['target_dir'])
+            self.assertLess(records.index(features), records.index(check))
+
     def test_contracts_overlap_the_test_build_and_finish_before_tooling(self):
         # The fake test build waits for contracts, proving the overlap.
         self.commit_fixture()

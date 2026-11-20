@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tomllib
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 import tempfile
 
@@ -155,12 +156,18 @@ def exact_inventory(root: Path) -> set[str]:
     return set().union(*target_inventory(root).values())
 
 
-def test_match(selector: str, name: str) -> bool:
+def test_matcher(selector: str) -> Callable[[str], bool]:
     if selector.startswith("="):
-        return name == selector[1:]
+        exact = selector[1:]
+        return lambda name: name == exact
     if selector.startswith("/") and selector.endswith("/"):
-        return re.search(selector[1:-1], name) is not None
-    return selector in name
+        search = re.compile(selector[1:-1]).search
+        return lambda name: search(name) is not None
+    return lambda name: selector in name
+
+
+def test_match(selector: str, name: str) -> bool:
+    return test_matcher(selector)(name)
 
 
 class NextestLaneTests(unittest.TestCase):
@@ -236,7 +243,8 @@ class NextestLaneTests(unittest.TestCase):
             self.assertEqual(len(terms), len(set(terms)), f"duplicate {name} predicate")
             body = profiles()[name]["default-filter"]
             self.assertEqual(re.sub(r"[|()]", "", PREDICATE.sub("", body)).split(), [], name)
-            matches = {test for test in inventory if any(test_match(term, test) for term in terms)}
+            matchers = [test_matcher(term) for term in terms]
+            matches = {test for test in inventory if any(match(test) for match in matchers)}
             self.assertFalse(
                 membership.keys() & matches,
                 f"{name} overlaps an earlier lane: {sorted(membership.keys() & matches)}",

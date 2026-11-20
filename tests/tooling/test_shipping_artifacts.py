@@ -193,7 +193,7 @@ class ShippingArtifacts(unittest.TestCase):
         archive = self.root / "bundle.tar.gz"
         marker = self.artifacts / "binary-id"
         marker.write_text("not transferred")
-        with tarfile.open(archive, "w:gz") as tar:
+        with tarfile.open(archive, "w:gz", compresslevel=1) as tar:
             tar.add(self.artifacts, arcname="release")
             tar.add(marker, arcname="../outside-the-install")
         result = self.install("--from", archive, "--manifest", self.manifest, "--no-link")

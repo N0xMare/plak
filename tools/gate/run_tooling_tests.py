@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run the `tests/tooling` unittest modules a few at a time.
 
-Three modules take two thirds of the suite's five minutes one after another, so
-the modules run as separate `python3 -m unittest` processes, largest file
-first. Each module's output is printed whole when it finishes, and the run
-fails if any module fails. Four at a time keeps the load light: a few modules
-assert process-cleanup deadlines against the wall clock.
+Modules run as separate `python3 -m unittest` processes. Start measured slow
+modules first so they do not keep otherwise idle workers waiting at the end.
+Each module's output is printed whole, and the run fails if any module fails.
+Four at a time keeps the load light: a few modules assert process-cleanup
+deadlines against the wall clock.
 
 In batch mode, changes outside the tooling inputs only run the tree readers.
 """
@@ -24,6 +24,14 @@ from changed_packages import batch_changes
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUITE = REPO_ROOT / "tests" / "tooling"
 WORKERS = 4
+SLOW_MODULES = {
+    "test_check_prod_loc",
+    "test_dev_check",
+    "test_lint_ratchet",
+    "test_nextest_lanes",
+    "test_policy_validators",
+    "test_shipping_artifacts",
+}
 TREE_READERS = {
     "test_agent_kind_docs",
     "test_artifact_linkage",
@@ -49,7 +57,10 @@ FULL_TOOLING_PREFIXES = (
 
 
 def selected_modules(paths: list[str] | None) -> list[Path]:
-    modules = sorted(SUITE.glob("test_*.py"), key=lambda path: (-path.stat().st_size, path.name))
+    modules = sorted(
+        SUITE.glob("test_*.py"),
+        key=lambda path: (path.stem not in SLOW_MODULES, -path.stat().st_size, path.name),
+    )
     found = {module.stem for module in modules}
     if missing := TREE_READERS - found:
         raise SystemExit(f"missing mandatory tooling modules: {', '.join(sorted(missing))}")

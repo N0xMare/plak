@@ -778,7 +778,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate `feature-check/` target directory. Full also audits the publication evidence allowlist (chapter 06 §6.5) |
+| `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate target directory. Full also audits the publication evidence allowlist (chapter 06 §6.5) |
 | `builds` | Link plakd in its release resolution and with maintainer features, build the two sidecars, and verify their linkage against the maintainer binary; rustc warnings denied |
 | `rustdoc` | Workspace all-features documentation with warnings denied |
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
@@ -819,9 +819,12 @@ test artifacts. Independent runners use separate checkout, target and scratch
 roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
 preparation and package-lite. Standalone, package-lite and public compile
-contracts run under nice in their own target directories beside test
-preparation, subject to the Cargo jobs budget. When Linux batch has spare
-Cargo slots, formatting and structure checks also run beside test preparation.
+contracts run under nice in targets separate from workspace test
+preparation, subject to the Cargo jobs budget. In a combined Linux batch
+with sufficient build slots, the feature checker and standalone lint run
+in sequence in the standalone target, reusing matching Cargo artifacts
+without unifying their feature resolutions. This chain starts beside
+workspace clippy and continues during the test build.
 Clippy finishes first because it shares the test build's target directory.
 Build and rustdoc groups that use the main target also finish before the test
 build, so they cannot overwrite its executables. The gate joins all these
@@ -890,7 +893,9 @@ in a persistent `.public-contracts/<target-dir-name>/<target-triple>`
 directory beside `CARGO_TARGET_DIR` (default target name `target`). The
 triple is `CARGO_BUILD_TARGET` or rustc's host triple. The gitignore keeps the
 cache through checkout cleanup; `PLAK_PUBLIC_CONTRACTS_DIR` overrides the
-cache root, with the triple still appended. The pinned musl container uses
+cache root, with the triple still appended. Contract compilations disable
+rustc incremental state; Cargo can still reuse compiled units and the
+runner's compiler cache, if configured. The pinned musl container uses
 `/qual/target/public-contracts-<image-tag>` as that root. No diagnostic pin
 is relaxed to keep builds warm.
 

@@ -566,6 +566,9 @@ run_wasm_portability_checks() {
   done <<<"$crates"
 }
 
+feature_target="$target_dir/feature-check"
+standalone_started=false
+
 run_static_tree_checks() {
   local failed=''
   echo "== fmt =="
@@ -577,13 +580,20 @@ run_static_tree_checks() {
   echo "== structure: workspace =="
   python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
   echo "== structure: features (static) =="
-  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
+  CARGO_TARGET_DIR="$feature_target" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
     || failed="${failed:+$failed }features"
   if [[ "$tier" == full ]]; then
     echo "== structure: evidence allowlist =="
     python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
   fi
   printf '%s %s\n' "$SECONDS" "$failed" >"$group_spool/static-tree.state"
+}
+
+run_static_structure() {
+  run_static_tree_checks >"$group_spool/static-tree.log" 2>&1
+  if [[ "$standalone_started" == true ]]; then
+    buffer_group standalone
+  fi
 }
 
 begin_static() {
@@ -594,13 +604,23 @@ begin_static() {
     echo "== dependencies: fetch locked (offline first) =="
     cargo fetch --locked --offline || cargo fetch --locked || fetch_failed=fetch
     structure_jobs=$((jobs / 4))
+    if [[ "$batch_scoped" == true && "$test_build_needed" == true && "$jobs" -ge 4 ]] \
+      && selected standalone && ! selected builds && ! selected variants \
+      && ! selected rustdoc && ! selected rustdoc-alone; then
+      # Both check independent resolutions, not a shared feature graph.
+      # Sequence them in one target so Cargo can reuse matching dependency
+      # units, while the workspace Clippy and test build use their own target.
+      feature_target="$target_dir/standalone"
+      standalone_started=true
+      structure_jobs=$((jobs / 3))
+    fi
     if [[ "$structure_jobs" -lt 1 ]]; then structure_jobs=1; fi
     if [[ "$jobs" -gt 1 ]]; then
       clippy_jobs=$((jobs - structure_jobs))
-      CARGO_BUILD_JOBS=$structure_jobs run_static_tree_checks >"$group_spool/static-tree.log" 2>&1 &
+      CARGO_BUILD_JOBS=$structure_jobs run_static_structure &
       structure_pid=$!
     else
-      run_static_tree_checks >"$group_spool/static-tree.log" 2>&1
+      run_static_structure
     fi
   fi
   # Clippy and the test build share the main target. Finish clippy first.
@@ -855,7 +875,7 @@ fi
 # collectively get no more slots than that cap.
 compile_only=()
 if selected standalone; then
-  compile_only+=(standalone)
+  if [[ "$standalone_started" != true ]]; then compile_only+=(standalone); fi
   # Full packaging already exercises no-verify on the same cohort.
   if ! selected package || [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
     compile_only+=(package-lite)
@@ -898,6 +918,7 @@ if [[ "$test_build_needed" == true ]]; then
   if [[ -z "$py_host" ]]; then test_build_ok=false; fi
 fi
 
+if [[ "$standalone_started" == true ]]; then replay_group standalone; fi
 if [[ ${#background[@]} -gt 0 ]]; then
   for index in ${!background[@]}; do
     replay_group "${compile_only[index]}" "${background[index]}"

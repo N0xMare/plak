@@ -311,8 +311,12 @@ def production_line_mask(lines: list[str]) -> list[bool]:
     External declarations are counted here; whole-file exclusions are separate.
     This is a lexical metric, not Rust reachability or a compiler configuration.
     """
-    blanked = blank_literals(lines)
     counted = [True] * len(lines)
+    # Blanking literals and comments can expose a module, but cannot add
+    # either its keyword or its same-line opening brace.
+    if not any("mod" in line and "{" in line for line in lines):
+        return counted
+    blanked = blank_literals(lines)
     depth = 0
     test_depth: int | None = None
     for index, code in enumerate(blanked):

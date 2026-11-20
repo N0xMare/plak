@@ -3831,6 +3831,8 @@ def _cached_test_module_targets(
     source: str,
     crate_root: bool,
 ) -> tuple[ModuleTarget, ...]:
+    if "mod" not in source:
+        return ()
     targets: list[ModuleTarget] = []
     masked = _blank_rust_non_code(source)
     base = path.parent
@@ -3887,6 +3889,8 @@ def _cached_test_module_targets(
 def explicit_rust_source_targets(path: Path, source: str) -> set[Path]:
     """Literal source references that must keep a production file counted."""
     targets: set[Path] = set()
+    if "path" not in source and "include" not in source:
+        return targets
     tokens = rust_tokens(source)
     for index in range(len(tokens) - 2):
         if (
