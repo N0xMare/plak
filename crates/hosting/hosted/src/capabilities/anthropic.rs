@@ -2,7 +2,7 @@ use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
-/// Anthropic direct-API route facts, readable even when its runtime is omitted.
+/// Anthropic direct-API route facts, independent of Claude subscription credentials.
 pub static ANTHROPIC: RouteCapability = RouteCapability {
     review_deadline,
     hosted_retrieval,

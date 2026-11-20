@@ -20,7 +20,7 @@ use super::*;
 
 const DAEMON: &str = "PLAKOUS_HOSTED_MCP_RUNNER_DAEMON";
 const HOST: &str = "PLAKOUS_HOSTED_MCP_RUNNER_HOST";
-const MODULE: &str = "mcp_binding::available::runner_tests";
+const MODULE: &str = "mcp_binding::runner_tests";
 
 fn version() -> VersionTriple {
     VersionTriple::current("mcp-runner", "debug")

@@ -713,7 +713,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A published export whose directory sync failed is kept and logged.
     ("plakd", "src/carry/document.rs"): {"warn"},
     ("plakd", "src/carry/history.rs"): {"tags", "stringify"},
-    ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
+    ("plakous-hosted", "src/mcp_binding.rs"): {"warn"},
     # The instruction-read wire of the hidden runner seam (spec 01 §8.5).
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-support` only: scripted offline model plans for child fixtures.
@@ -2083,7 +2083,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # MCP binding: the facade's MCP client, a host environment for the pool's
     # service processes or the selected runner's for a server placed there,
     # and the named-secret value type.
-    ("plakous-hosted", "src/mcp_binding/available.rs"): {
+    ("plakous-hosted", "src/mcp_binding.rs"): {
         'mcp': {
             'HeaderName',
             'HeaderValue',
@@ -2121,12 +2121,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         },
     },
     # `plakd mcp list|show` report an OAuth server's stored login.
-    ("plakd", "src/commands/mcp/available.rs"): {"mcp": {"McpOAuthStatus"}},
+    ("plakd", "src/commands/mcp.rs"): {"mcp": {"McpOAuthStatus"}},
     ("plakous-hosted", "src/mcp_binding/secret_value.rs"): {
         "mcp": {"SensitiveBytes", "ServiceSecretValue"},
-    },
-    ("plakous-hosted", "src/mcp_binding/unavailable.rs"): {
-        "mcp": {"McpToolRecord"},
     },
     ("plakd", "src/commands/mcp_login.rs"): {
         "mcp": {
@@ -2189,8 +2186,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "xai": {"XaiImagePort", "XaiRetrievalPort", "lowest_responses_effort"},
     },
     # The OpenRouter executor connects its side-request port.
-    ("plakous-hosted", "src/openrouter/available.rs"): {
+    ("plakous-hosted", "src/openrouter.rs"): {
         "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},
+        "runner": {"RunnerServices"},
     },
     # The frozen [tools.fetch_url], [tools.web_search] and [tools.x_search]
     # tables read into the tools' bounds and options.
@@ -2319,9 +2317,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ('plakd', 'src/commands/runner/services/host.rs'): {
         'runner': {'PlacementFailure', 'ProbePhase', 'WorkspaceCatalog'}
     },
-    ('plakous-hosted', 'src/openrouter.rs'): {'runner': {'RunnerServices'}},
     ('plakous-hosted', 'src/skills.rs'): {'runner': {'RunnerServices'}},
-    ('plakous-hosted', 'src/mcp_binding.rs'): {'runner': {'RunnerServices'}},
     # A node's explicit plan and prompt name the backend its tools run on.
     ('plakous-hosted', 'src/agent/build/policy.rs'): {
         'runner': {'RunnerServices'},

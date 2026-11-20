@@ -171,7 +171,7 @@ fn an_unconfigured_server_refuses_with_its_remedy() -> TestResult {
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )
     .err();
     assert_eq!(
@@ -204,7 +204,7 @@ fn a_template_naming_mcp_fake_binds_into_every_presentation_and_nested_catalog()
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(bound.notices, Vec::<String>::new());
     let plan = ToolPlan::new(&selection, []).with_mcp(&selection, bound);
@@ -295,7 +295,7 @@ fn a_secret_reaches_the_server_environment_and_no_refusal_text() -> TestResult {
         workspace.path(),
         secrets(&[("tok", SECRET_VALUE)]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(bound.names.len(), 1);
     let plan = ToolPlan::new(&selection, []).with_mcp(&selection, bound);
@@ -310,7 +310,7 @@ fn a_secret_reaches_the_server_environment_and_no_refusal_text() -> TestResult {
         other_workspace.path(),
         secrets(&[("tok", "a-different-value")]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )
     .err()
     .ok_or("a server that exited at startup bound")?;
@@ -346,7 +346,7 @@ fn a_wildcard_omits_an_unlowerable_tool_with_a_notice_and_an_explicit_name_refus
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert!(
         bound
@@ -369,7 +369,7 @@ fn a_wildcard_omits_an_unlowerable_tool_with_a_notice_and_an_explicit_name_refus
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )
     .err()
     .ok_or("an unlowerable tool named explicitly bound")?;
@@ -419,7 +419,7 @@ fn an_http_server_binds_with_its_bearer_secret() -> TestResult {
         workspace.path(),
         secrets(&[("tok", SECRET_VALUE)]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(
         bound
@@ -436,7 +436,7 @@ fn an_http_server_binds_with_its_bearer_secret() -> TestResult {
         other_workspace.path(),
         secrets(&[("tok", "a-different-value")]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )
     .err()
     .ok_or("a wrong bearer bound")?;
@@ -471,7 +471,7 @@ fn frozen_records_rebuild_the_same_tools_without_a_new_listing() -> TestResult {
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(created.notices.len(), 1, "{:?}", created.notices);
     assert_eq!(created.records.len(), created.names.len());
@@ -481,7 +481,7 @@ fn frozen_records_rebuild_the_same_tools_without_a_new_listing() -> TestResult {
         workspace.path(),
         secrets(&[]),
         Some(&created.records),
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(reopened.names, created.names);
     assert_eq!(reopened.records, created.records);
@@ -501,7 +501,7 @@ fn frozen_records_rebuild_the_same_tools_without_a_new_listing() -> TestResult {
         workspace.path(),
         secrets(&[]),
         Some(&echo),
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(
         narrowed
@@ -544,7 +544,7 @@ fn resources_add_the_read_resource_tool_or_refuse_without_the_capability() -> Te
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(
         names(&created),
@@ -557,7 +557,7 @@ fn resources_add_the_read_resource_tool_or_refuse_without_the_capability() -> Te
         workspace.path(),
         secrets(&[]),
         Some(&created.records),
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(names(&reopened), names(&created));
 
@@ -582,7 +582,7 @@ fn resources_add_the_read_resource_tool_or_refuse_without_the_capability() -> Te
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )
     .err()
     .ok_or("a server without resources bound read_resource")?;
@@ -720,7 +720,7 @@ fn a_verification_rebuilds_frozen_mcp_tools_without_starting_a_server() -> TestR
         workspace.path(),
         secrets(&[]),
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     let reopened = bind_mcp_tools(
         &selection,
@@ -728,7 +728,7 @@ fn a_verification_rebuilds_frozen_mcp_tools_without_starting_a_server() -> TestR
         workspace.path(),
         secrets(&[]),
         Some(&created.records),
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     let gone = sections(rendered(
         workspace
@@ -745,7 +745,7 @@ fn a_verification_rebuilds_frozen_mcp_tools_without_starting_a_server() -> TestR
         &gone,
         &secrets(&[]),
         Some(&created.records),
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     assert_eq!(verified.names, reopened.names);
     assert_eq!(verified.records, reopened.records);
@@ -768,7 +768,7 @@ fn a_verification_rebuilds_frozen_mcp_tools_without_starting_a_server() -> TestR
             &gone,
             &secrets(&[]),
             None,
-            super::super::McpNodeServices::default()
+            super::McpNodeServices::default()
         )
         .is_err()
     );
@@ -838,7 +838,7 @@ fn a_runner_placed_server_without_a_runner_reads_only_the_runner_shelf() -> Test
         workspace.path(),
         runner_shelf,
         None,
-        super::super::McpNodeServices::default(),
+        super::McpNodeServices::default(),
     )?;
     let placed = bound.placed_records();
     assert_eq!(placed.len(), 1);

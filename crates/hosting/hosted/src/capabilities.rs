@@ -157,7 +157,7 @@ pub(crate) const fn for_platform(provider: PlatformProvider) -> &'static RouteCa
     unreachable!()
 }
 
-/// Compiled native routes in registry order; API routes are never included.
+/// Native subscription routes in registry order; API routes are never included.
 pub fn native_providers() -> impl Iterator<Item = NativeProvider> {
     ROUTES.iter().filter_map(|route| route.native_provider())
 }
@@ -249,7 +249,10 @@ pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
     account.parse::<crate::account::AccountRef>().map(|_| ())
 }
 
-/// Admit a native route by identity without resolving subscription credentials.
+/// Check that a facade native identity has an entry in the hosted registry.
+///
+/// This guards against registry drift when the facade adds a native identity;
+/// it is not a feature check. All registered routes are built in.
 ///
 /// # Errors
 /// Returns a capability refusal for an unregistered identity.

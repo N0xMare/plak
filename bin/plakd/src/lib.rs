@@ -323,9 +323,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         test_hooks::install().map_err(CliFailure::new)?;
     }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
-    if let Command::CompatibilityNotice(provider) = &command {
-        plakous_hosted::capabilities::require_native(*provider)?;
-    }
 
     if matches!(command, Command::Help) {
         cli::render::global_help(&mut io::stdout().lock())
