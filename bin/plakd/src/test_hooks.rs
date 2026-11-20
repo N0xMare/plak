@@ -9,7 +9,7 @@
 //!
 //! Two environment variables select it, and both must be present:
 //!
-//! * `PLAK_TEST_MODEL` must be exactly [`SELECTOR`]. Naming the model rather
+//! * `PLAK_TEST_MODEL` must be exactly `SELECTOR`. Naming the model rather
 //!   than a bare boolean keeps the selector an explicit binding fact.
 //! * `PLAK_TEST_SCRIPT` names the JSON script document
 //!   (`plakous_offline_crash_harness::script`) the model replays.
