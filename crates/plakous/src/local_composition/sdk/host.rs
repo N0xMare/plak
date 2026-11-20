@@ -156,8 +156,20 @@ struct ToolReply {
 struct NestedReply {
     tx: oneshot::Sender<Result<ToolReply, LocalCompositionError>>,
     want: bool,
+    charge: CallCharge,
 }
+
+#[derive(Clone, Copy)]
+enum CallCharge {
+    CellCall,
+    Continuation,
+}
+
 impl LocalCompositionNestedResponder for NestedReply {
+    fn is_sdk_continuation(&self) -> bool {
+        matches!(self.charge, CallCharge::Continuation)
+    }
+
     fn wants_value(&self) -> bool {
         self.want
     }
@@ -213,6 +225,17 @@ impl Scope {
         input: Value,
         want: bool,
     ) -> Result<Option<ExecutionValue>, V> {
+        self.call_with_charge(tool, input, want, CallCharge::CellCall)
+            .await
+    }
+
+    async fn call_with_charge(
+        &self,
+        tool: &str,
+        input: Value,
+        want: bool,
+        charge: CallCharge,
+    ) -> Result<Option<ExecutionValue>, V> {
         let (tx, rx) = oneshot::channel();
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         self.tx
@@ -223,7 +246,7 @@ impl Scope {
                     tool_name: tool.into(),
                     input: Some(input),
                 },
-                responder: Box::new(NestedReply { tx, want }),
+                responder: Box::new(NestedReply { tx, want, charge }),
             })
             .await
             .map_err(|_| error_value("runtime", "SDK driver closed"))?;
@@ -464,9 +487,14 @@ async fn read(scope: &Scope, input: &Value) -> Result<V, V> {
     values::convert(scope.typed("read_file", args).await?)
         .map_err(|message| error_value("runtime", message.to_string()))
 }
-async fn process(scope: &Scope, tool: &str, args: Value) -> Result<ProcessValue, V> {
-    match scope.typed(tool, args).await? {
-        ExecutionValue::Process(value) => Ok(value),
+async fn process(
+    scope: &Scope,
+    tool: &str,
+    args: Value,
+    charge: CallCharge,
+) -> Result<ProcessValue, V> {
+    match scope.call_with_charge(tool, args, true, charge).await? {
+        Some(ExecutionValue::Process(value)) => Ok(value),
         _ => Err(error_value(
             "runtime",
             "process tool returned a foreign value",
@@ -518,13 +546,22 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
         args["keep_stdin_open"] = json!(pipe);
         "process_session_start"
     };
-    let mut value = process(scope, tool, args).await?;
+    let mut value = process(scope, tool, args, CallCharge::CellCall).await?;
     if background {
         return Ok(values::job(value.job_id));
     }
     if let Some(id) = value.session_id {
         if let Some(stdin) = input["stdin"].as_str() {
-            merge_process(&mut value,process(scope,"process_session_write",json!({"session_id":id,"input":stdin,"disposition":"close","yield_time_ms":0,"max_output_bytes":40000})).await?);
+            merge_process(
+                &mut value,
+                process(
+                    scope,
+                    "process_session_write",
+                    json!({"session_id":id,"input":stdin,"disposition":"close","yield_time_ms":0,"max_output_bytes":40000}),
+                    CallCharge::Continuation,
+                )
+                .await?,
+            );
         }
         if let Some(deadline) = deadline {
             while value.session_id.is_some() && tokio::time::Instant::now() < deadline {
@@ -536,13 +573,24 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
                 .unwrap_or(Limits::FOREGROUND_MS);
                 merge_process(
                     &mut value,
-                    process(scope, "process_session_poll", poll_args(id, remaining)).await?,
+                    process(
+                        scope,
+                        "process_session_poll",
+                        poll_args(id, remaining),
+                        CallCharge::Continuation,
+                    )
+                    .await?,
                 );
             }
         }
         if value.session_id.is_some() {
-            let stopped =
-                process(scope, "process_session_terminate", json!({"session_id":id})).await?;
+            let stopped = process(
+                scope,
+                "process_session_terminate",
+                json!({"session_id":id}),
+                CallCharge::Continuation,
+            )
+            .await?;
             merge_process(&mut value, stopped);
             value.status = "timed_out".into();
             value.session_id = None;
@@ -588,7 +636,10 @@ async fn observe_process(scope: &Scope, name: &str, input: &Value) -> Result<V, 
             ),
         )
     };
-    Ok(process_value(scope, process(scope, tool, args).await?))
+    Ok(process_value(
+        scope,
+        process(scope, tool, args, CallCharge::CellCall).await?,
+    ))
 }
 
 #[cfg(test)]

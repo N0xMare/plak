@@ -56,6 +56,29 @@ fn call(id: usize) -> crate::local_composition::LocalCompositionNestedCall {
 }
 
 #[tokio::test]
+async fn cell_refuses_the_101st_model_call_before_minting_a_sequence() -> TestResult {
+    let mut owner = owner()?;
+    let replies = Replies::default();
+    for id in 0..100 {
+        owner.admit_nested(call(id), Box::new(Reply(replies.clone())), 100)?;
+        assert!(owner.take_pending().is_some());
+    }
+    assert_eq!(owner.nested_sequence, 100);
+
+    owner.admit_nested(call(100), Box::new(Reply(replies.clone())), 100)?;
+    assert_eq!(owner.settle_deliveries().await.len(), 0);
+    assert_eq!(
+        *lock_mutex(&replies),
+        vec![Err(
+            "local composition exceeded its profile-bound total of 100 nested calls".into()
+        )]
+    );
+    assert_eq!(owner.nested_sequence, 100);
+    assert!(owner.pending_is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn headroom_refuses_new_nested_work_before_sequence_but_replays_old_identity() -> TestResult {
     let mut owner = owner()?;
     let replies = Replies::default();

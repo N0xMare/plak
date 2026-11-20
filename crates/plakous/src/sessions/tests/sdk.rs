@@ -46,7 +46,21 @@ const CELLS: &[(&str, &str)] = &[
         "first/second",
     ),
     (
-        "for i in range(66):\n    result = await proc.run(['/bin/echo', 'complete'])\n    assert result.exit_code == 0\n    assert len(result.omitted) == 0\nprint('66 complete jobs')\nresult = await proc.shell(\"head -c 60000 /dev/zero | tr '\\\\0' q\")\nassert len(result.omitted) > 0\nfull = result.omitted[0].full\nassert full is not None\nprint((await ctx.read(full)).text.startswith('q'))",
+        // The first 35 jobs cannot complete until the SDK sends stdin. The
+        // delay after that write also exercises its completion poll.
+        r#"for i in range(66):
+    if i < 35:
+        result = await proc.run(['/bin/sh', '-c', 'read line && sleep 0.05 && echo "$line"'], stdin='complete\n')
+    else:
+        result = await proc.run(['/bin/echo', 'complete'])
+    assert result.exit_code == 0
+    assert len(result.omitted) == 0
+print('66 complete jobs')
+result = await proc.shell("head -c 60000 /dev/zero | tr '\\0' q")
+assert len(result.omitted) > 0
+full = result.omitted[0].full
+assert full is not None
+print((await ctx.read(full)).text.startswith('q'))"#,
         "66 complete jobs",
     ),
     ("print('x' * 1100000)", "output bytes omitted"),

@@ -10523,7 +10523,13 @@ the model-request timeout cannot shorten it.
 A Python-raised `MemoryError("memory limit exceeded")` remains an ordinary
 cell failure, never a typed stop. In-engine memory remains bounded at 256 MiB.
 `proc.start` is for long work; `proc.run` and `proc.shell` join within their
-`timeout_s` bound (0–300 s) and stop a job that exceeds it. `proc.stdin` writes
+`timeout_s` bound (0–300 s) and stop a job that exceeds it. The 100-call
+cell quota charges each model-issued nested call once. Host-only stdin
+delivery, completion polls, and timeout stops that finish an admitted
+`proc.run` or `proc.shell` do not charge that quota. They still pass ordinary
+admission, outstanding-work, and settlement limits and get their own
+canonical child records. Explicit `proc.stdin`, `proc.poll`, `proc.join`,
+and `proc.cancel` calls charge normally. `proc.stdin` writes
 and optionally closes stdin. `proc.start(stdin=False)` closes non-TTY input
 by default; `stdin=True` keeps it open for subsequent writes. Processes have
 the user's full authority and are not sandboxed. Plak's SDK selection is

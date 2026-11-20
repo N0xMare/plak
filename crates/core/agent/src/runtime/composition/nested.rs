@@ -323,19 +323,12 @@ pub(in crate::runtime) fn reserve_local_composition_nested_slot(
             ),
         ));
     }
-    let sequence = prior_sequence.checked_add(1).ok_or_else(|| {
+    prior_sequence.checked_add(1).ok_or_else(|| {
         AgentError::new(
             AgentErrorKind::InvalidInput,
             "local composition nested-call bound was exhausted",
         )
-    })?;
-    if sequence > 100 {
-        return Err(AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "local composition exceeded its profile-bound total of 100 nested calls",
-        ));
-    }
-    Ok(sequence)
+    })
 }
 
 impl CompositionOwner {
@@ -351,6 +344,30 @@ impl CompositionOwner {
                     .map(|replay| replay.waiters.len())
                     .sum::<usize>(),
             )
+    }
+
+    fn reserve_nested_call(
+        &mut self,
+        responder: &dyn crate::local_composition::LocalCompositionNestedResponder,
+        outstanding: usize,
+        limit: usize,
+    ) -> Result<u32, AgentError> {
+        let sequence =
+            reserve_local_composition_nested_slot(outstanding, limit, self.nested_sequence)?;
+        let continuation = responder.is_sdk_continuation()
+            && self.integration.result_projection()
+                == crate::local_composition::LocalCompositionResultProjection::BytesRunPyV1;
+        if !continuation {
+            if self.charged_nested_calls >= 100 {
+                return Err(AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "local composition exceeded its profile-bound total of 100 nested calls",
+                ));
+            }
+            self.charged_nested_calls += 1;
+        }
+        self.nested_sequence = sequence;
+        Ok(sequence)
     }
 
     pub(in super::super) fn admit_nested(
@@ -437,13 +454,12 @@ impl CompositionOwner {
             return queue_local_composition_nested_result(self, responder, Err(error));
         }
         let request_sequence =
-            match reserve_local_composition_nested_slot(outstanding, limit, self.nested_sequence) {
+            match self.reserve_nested_call(responder.as_ref(), outstanding, limit) {
                 Ok(sequence) => sequence,
                 Err(error) => {
                     return queue_local_composition_nested_result(self, responder, Err(error));
                 }
             };
-        self.nested_sequence = request_sequence;
         self.nested_replays.insert(
             call.runtime_call_id.clone(),
             LocalCompositionNestedReplay {
@@ -589,6 +605,7 @@ impl CompositionOwner {
     }
     pub(in super::super) fn reset_nested_for_cell(&mut self) {
         self.nested_sequence = 0;
+        self.charged_nested_calls = 0;
         self.nested_replays.clear();
         self.pending_nested.clear();
         self.completed_nested.clear();
@@ -596,6 +613,7 @@ impl CompositionOwner {
     }
     pub(in super::super) fn reset_nested_after_cleanup(&mut self) {
         self.nested_sequence = 0;
+        self.charged_nested_calls = 0;
         self.next_nested_commit_sequence = 1;
         self.nested_replays.clear();
         self.completed_nested.clear();
