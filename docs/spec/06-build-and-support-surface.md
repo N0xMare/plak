@@ -990,7 +990,7 @@ just musl container --fast plakd  # optional targeted iteration
 `just musl container` is a maintainer-only gate. `tools/musl/musl-check.sh` uses the
 preloaded image `plak-qual-base:86ab9e67` (image ID `86ab9e67a545`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
-run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.4,
+run, and the native gates above remain the public evidence. The image holds Alpine 3.24.4,
 Rust 1.100.0 with a musl host toolchain, clippy, rustfmt, the
 `wasm32-unknown-unknown` target and C/C++ tools, Python 3.14,
 curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
