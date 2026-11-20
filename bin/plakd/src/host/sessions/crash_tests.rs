@@ -36,6 +36,16 @@ fn create_crash_worker() {
 fn host_creation_commit_crash_cuts_replay_only_durable_facts() {
     for after in [false, true] {
         let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let gateway = crate::gateway::test_service::GatewayFixture::start(
+            &paths,
+            &temporary.path().join("gateway-state"),
+        );
+        let address = gateway.custody().address().unwrap().label();
+        std::fs::write(
+            paths.config_file(),
+            format!("[gateway]\naddress = {:?}\n", address),
+        )
+        .unwrap();
         let workspace = temporary.path().join("workspace");
         std::fs::create_dir(&workspace).unwrap();
         let workspace = std::fs::canonicalize(workspace).unwrap();
@@ -65,8 +75,9 @@ fn host_creation_commit_crash_cuts_replay_only_durable_facts() {
         assert_eq!(
             output.status.code(),
             Some(91),
-            "{}",
-            String::from_utf8_lossy(&output.stdout)
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
         let mut store = ProductStore::open(&paths).unwrap();
         let rows = store.directory(None).unwrap();
@@ -84,8 +95,9 @@ fn host_creation_commit_crash_cuts_replay_only_durable_facts() {
         let output = retry.output().unwrap();
         assert!(
             output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stdout)
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
         let mut store = ProductStore::open(&paths).unwrap();
         assert_eq!(store.directory(None).unwrap().len(), 1);

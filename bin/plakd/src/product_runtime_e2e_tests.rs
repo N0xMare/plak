@@ -710,6 +710,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     verify_reverse_binding(
         &paths,
         &workspace,
+        &gateway,
         &source_id,
         &branch_b_id,
         &evidence,
@@ -778,6 +779,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     verify_fast_return(
         &paths,
         &workspace,
+        &gateway,
         &source_id,
         account_injection(&workspace, &controller, B, FAST)?,
     )
@@ -1368,15 +1370,17 @@ fn verify_binding_b(
 fn verify_reverse_binding(
     paths: &PlakPaths,
     workspace: &Path,
+    gateway: &GatewayFixture,
     source_id: &str,
     branch_b_id: &str,
     evidence: &Path,
     injection: Arc<ScriptedRuntimeFactory>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut reverse_config = host_config(
+    let mut reverse_config = profile_host_config(
         paths,
         workspace,
         product_sessions::load_session(paths, branch_b_id)?,
+        gateway,
     );
     reverse_config.ready_catalog = profile_ready_catalog();
     // `host_config` fixes the source tuple; this host reopens the B branch.
@@ -1446,6 +1450,7 @@ fn verify_reverse_binding(
 fn verify_fast_return(
     paths: &PlakPaths,
     workspace: &Path,
+    gateway: &GatewayFixture,
     source_id: &str,
     injection: Arc<ScriptedRuntimeFactory>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1471,10 +1476,11 @@ fn verify_fast_return(
     );
     let standard_id = standard.id.clone();
 
-    let mut reverse = host_config(
+    let mut reverse = profile_host_config(
         paths,
         workspace,
         product_sessions::load_session(paths, &standard_id)?,
+        gateway,
     );
     reverse.ready_catalog = profile_ready_catalog();
     reverse.model_id = "binding-b-model".to_owned();
