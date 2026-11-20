@@ -6516,18 +6516,36 @@ accounts as `not_enrolled`. Named logins of the same kind remain distinct.
 Apply re-plans and runs BASELINE before staging: doctor, credential status,
 `session check-binding --all --summary` (compatibility and count), and one
 CLI canary per account in use.
-The canary uses the existing Plakous admission and agent loop against the
-enrolled gateway, an empty tool registry, no compaction or topology, a physical
-inference allowance of one with no retry reserve, a 16-output-token request
-cap, and a 90-second deadline with bounded cleanup. It writes the archived
-product session before admission, uses an ephemeral runtime so there is
-no recoverable orphan, joins shutdown, and emits no
-assistant text. Routes unable to prove these bounds refuse. The adapter
-supports qualifying Grok and Claude OAuth routes; in particular Codex OAuth
-does not accept a request output-token cap. Baseline uses the incumbent's
-adapter, not the destination's adapter run against the old gateway. Compare the gateway's
-OAuth generation before and after each canary and across BASELINE and
-verification; an increase is normal and a decrease refuses.
+All canaries use the exact enrolled gateway account and inventory model, a
+fixed short prompt, no tools, a single physical inference with no retry
+admission, and a 90-second deadline with bounded cleanup. They emit no assistant
+text. The archived product audit row is written before inference; neither
+path creates a recoverable runtime. Claude OAuth and SuperGrok use the
+existing ephemeral Plakous admission and agent loop, with no compaction or
+topology and a provider-side 16-output-token cap. OpenAI API, Anthropic API,
+xAI API and OpenRouter use a fixed, tool-free request through the existing
+single-exchange gateway relay, with the same 16-token provider cap. They
+do not create a durable API configuration or enter ordinary API retry
+admission. Their archived row is a marker with no saved target, account or
+model configuration; the deploy and gateway evidence identify the selection.
+OpenRouter binds Chat with required parameters and no fallback.
+An HTTP refusal identifies only the status and never redispatches.
+
+Codex OAuth does not accept a request output-token cap. Its native canary
+uses the exact authenticated model's lowest admitted effort, checked against
+the inventory pin, and cancels and joins the stream at the first terminal
+result or after observing 64 text or reasoning bytes. Loss of observation
+refuses. This is a local observation threshold, not a provider generation
+or billing cap; an in-flight delta can cross it. Its evidence class is
+`locally_bounded`; other canaries use the provider-capped class. Compare the
+gateway's OAuth generation before and after each canary and across BASELINE
+and verification; an increase is normal and a decrease refuses.
+
+Routes unable to prove the appropriate bounds refuse. BASELINE uses the
+incumbent's adapter, not a destination adapter run against an old gateway.
+When the incumbent lacks any in-use adapter, move to the first fully capable
+build by the manual same-key procedure before enrolling that fleet. There is
+no deploy source-capability bootstrap or omission exception.
 
 The staged destination binary runs the handoff operations. Stage the
 immutable host and runner snapshots without linking with the chapter 06

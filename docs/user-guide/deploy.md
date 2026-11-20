@@ -42,13 +42,20 @@ the manifest or replace individual sidecars.
 
 List every account in use with its exact name and cheap canary model. Plan
 refuses any missing in-use account; signed-out accounts show `not_enrolled`.
-The built-in bounded canary covers Grok and Claude OAuth only. Use the
-manual same-key procedure for a fleet with an in-use account that has no
-bounded canary, such as Codex or an API route. Do not omit a route or
-sign out an account just to pass plan. Grok and Claude OAuth models must
-admit the tool-free 16-token canary at the specified low or disabled effort.
-The incumbent must provide the adapter for BASELINE; updating only the
-destination doesn't add canary support to the source.
+Canaries cover Codex OAuth, Claude OAuth, SuperGrok, OpenAI API, Anthropic
+API, xAI API and OpenRouter. Choose a cheap model that supports the
+tool-free 16-token request at low or disabled effort. For OpenRouter the
+model must support these parameters on Chat without fallback. Codex has no
+provider-side cap: pin the model's lowest admitted effort and review its
+`locally_bounded` evidence. The canary cancels at 64 observed text or
+reasoning bytes or ends on completion; it cannot cap provider billing.
+
+The incumbent must provide every in-use adapter for BASELINE. Move a fleet
+whose incumbent lacks an adapter to the first capable build using the
+manual same-key procedure before its first deploy. The following deploy is
+the first eligible automated upgrade. Updating only the destination does
+not add canary support to the source; do not omit a route or sign out an
+account to pass plan.
 
 For a one-Mac fleet, use a separate macOS user for staging, not another
 product home under the production UID. Give each user their own HOME,

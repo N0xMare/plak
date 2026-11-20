@@ -771,7 +771,7 @@ impl<F: Fleet> Deploy<'_, F> {
                     .generations
                     .insert(account.clone(), reply.generation_after);
                 check(
-                    reply.adapter == "bounded_cli_v1",
+                    reply.adapter == super::canary::class(route.kind()),
                     "unknown bounded canary adapter",
                 )?;
                 verdicts.insert(account.clone(), reply.adapter);

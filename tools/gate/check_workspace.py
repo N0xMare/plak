@@ -1716,6 +1716,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Deploy distinguishes API refusals without exposing provider bodies,
+    # and its Codex cutoff must refuse an explicit loss of output events.
+    ("plakd", "src/deploy/canary.rs"): {"gateway": {"ApiCanaryFailure"}},
+    ("plakd", "src/deploy/canary/local.rs"): {"agent": {"EventDelivery"}},
     # The synchronous account bridge carries the same stack as its executor.
     ("plakd", "src/gateway/bridge.rs"): {"agent": {"RUNTIME_EXECUTOR_STACK_BYTES"}},
     # Route admission reads non-secret key facts through gateway custody.

@@ -547,13 +547,23 @@ fn run_canary(target: &Target<'_>, expected: &str, route: &Route) -> CliResult<C
     let binary = current(target, expected)?;
     qualify(target, &binary, route)?;
     let before = generation(target, &binary, route)?;
-    let result = target.product(&binary, canary_args(route, false), timing::CANARY)?;
+    let result = target.product_reply(&binary, canary_args(route, false), timing::CANARY)?;
+    if !result.status.success() {
+        if let Some(status) = super::canary::refused_status(&result.stdout) {
+            return Err(fail(&format!(
+                "API canary refused by upstream (HTTP {status}); no replay"
+            )));
+        }
+        return Err(fail(
+            "bounded canary failed; inspect the documented command on the target",
+        ));
+    }
     check(
-        result == b"plakd-deploy-canary-pass\n",
+        result.stdout == super::canary::pass_line(route.kind()).as_bytes(),
         "invalid canary terminal/cleanup verdict",
     )?;
     Ok(Canary {
-        adapter: "bounded_cli_v1".into(),
+        adapter: super::canary::class(route.kind()).into(),
         generation_before: before,
         generation_after: generation(target, &binary, route)?,
     })

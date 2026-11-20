@@ -484,6 +484,25 @@ fn deploy_plan_requires_every_enrolled_family_in_incumbent_canary_capabilities()
     report(&families);
     fleet.staging("plan", "ready", "");
     assert_eq!(fleet.events(), NO_EVENTS);
+    let applied = fleet.staging("apply", "green", "");
+    for phase in ["baseline", "verification"] {
+        for account in families {
+            let class = if account == "codex" {
+                "locally_bounded"
+            } else {
+                "bounded_cli_v1"
+            };
+            assert_eq!(applied[phase]["canaries"][account], class);
+        }
+    }
+    assert_eq!(
+        fleet
+            .events()
+            .iter()
+            .filter(|event| *event == "canary")
+            .count(),
+        2 * families.len()
+    );
 }
 
 #[test]
@@ -1610,7 +1629,10 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|route| (route["account"].as_str().unwrap().to_owned(), json!(5)))
+                .map(|route| {
+                    let account = route["account"].as_str().unwrap();
+                    (account.to_owned(), fake_canary_generation(account, 5))
+                })
                 .collect::<serde_json::Map<_, _>>();
             json!({"doctor":"green","status":"ready","bindings":"compatible","binding_count":10_000_000,"generations":generations})
         }
@@ -1629,11 +1651,22 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
             } else {
                 6
             };
-            json!({"adapter":"bounded_cli_v1","generation_before":5,"generation_after":generation})
+            let account = op["route"]["account"].as_str().unwrap();
+            let class = if account.split('/').next() == Some("codex") {
+                "locally_bounded"
+            } else {
+                "bounded_cli_v1"
+            };
+            json!({"adapter":class,"generation_before":fake_canary_generation(account, 5),"generation_after":fake_canary_generation(account, generation)})
         }
         other => panic!("unexpected SSH operation: {other}"),
     };
     json!({"ok":value})
+}
+
+fn fake_canary_generation(account: &str, value: u64) -> Value {
+    let subscription = matches!(account.split('/').next(), Some("codex" | "claude" | "grok"));
+    json!(subscription.then_some(value))
 }
 
 fn simulate_upgrade(data: &mut Value, op: &Value, want: &Value) -> Value {

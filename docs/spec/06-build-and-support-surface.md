@@ -1859,7 +1859,8 @@ requires an equivalent paired-runner transition multiset by platform
 (`unchanged`, `same_triple`, `changed_triple`), measured from each runner
 link's own image build info against its native destination, independent of runner
 names, and equivalent canary model and effort coverage, including account
-counts. Staging and production receipts must identify disjoint target
+counts and the exact route-bound canary class (chapter 02 §4.6).
+Staging and production receipts must identify disjoint target
 logins; a shared physical machine is allowed only on macOS under different
 UIDs and homes. An already converged read-only check
 neither needs nor renews the receipt. Resuming a recorded production

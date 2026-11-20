@@ -52,6 +52,15 @@ impl GatewayFixture {
     }
 
     fn start_with_fault(tcp: Option<SocketAddr>, oauth: Option<&TcpListener>, fault: &str) -> Self {
+        Self::start_fixture(tcp, oauth, fault, false)
+    }
+
+    fn start_fixture(
+        tcp: Option<SocketAddr>,
+        oauth: Option<&TcpListener>,
+        fault: &str,
+        api_keys: bool,
+    ) -> Self {
         let root = tempfile::Builder::new().prefix("gw").tempdir().unwrap();
         let base = root.path();
         fs::set_permissions(base, fs::Permissions::from_mode(0o700)).unwrap();
@@ -78,6 +87,16 @@ impl GatewayFixture {
             4_000_000_000,
         );
         let mut serve = command(base);
+        if api_keys {
+            for variable in [
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "XAI_API_KEY",
+                "OPENROUTER_API_KEY",
+            ] {
+                serve.env(variable, "synthetic-deploy-test-key");
+            }
+        }
         serve
             .args(["gateway", "serve"])
             .env("PLAK_TEST_GATEWAY_REVIEW_CLOCK", "1")
@@ -170,6 +189,86 @@ impl GatewayFixture {
         );
         assert!(self.process.wait().unwrap().success());
     }
+}
+
+#[test]
+fn deploy_api_canaries_relay_exactly_once_per_refusal_without_a_runtime() {
+    let cases = [
+        ("openai", "api.openai.com", "/v1/responses"),
+        ("anthropic", "api.anthropic.com", "/v1/messages"),
+        ("xai-api", "api.x.ai", "/v1/responses"),
+        ("openrouter", "openrouter.ai", "/api/v1/chat/completions"),
+    ];
+    let mut faults = String::new();
+    for (_, host, path) in cases {
+        write!(&mut faults, "host={host},path={path},nth=1,fault=429,retry-after=0;host={host},path={path},nth=2,fault=503;").unwrap();
+    }
+    let gateway = GatewayFixture::start_fixture(None, None, &faults, true);
+    let root = gateway.root.path();
+    for (account, _, _) in cases {
+        let start = || {
+            let mut cli = command(root);
+            cli.args([
+                "deploy-canary",
+                "--account",
+                account,
+                "--model=example-model",
+                "--effort=none",
+            ]);
+            cli
+        };
+        let preflight = start().arg("--preflight").output().unwrap();
+        assert!(preflight.status.success(), "{account}: {preflight:?}");
+        assert_eq!(preflight.stdout, b"");
+        for status in [429, 503] {
+            let output = start().output().unwrap();
+            assert!(!output.status.success(), "{account}: {output:?}");
+            assert_eq!(
+                output.stdout,
+                format!("plakd-deploy-canary-upstream-http {status}\n").as_bytes(),
+                "{account}: {output:?}"
+            );
+        }
+    }
+    let audit = command(root).args(["gateway", "audit"]).output().unwrap();
+    assert!(audit.status.success());
+    let posts: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
+        .unwrap()
+        .lines()
+        .map(|row| serde_json::from_str::<serde_json::Value>(row).unwrap())
+        .filter(|row| row["method"] == "POST")
+        .collect();
+    assert_eq!(posts.len(), 8);
+    for (account, host, path) in cases {
+        let mut statuses: Vec<_> = posts
+            .iter()
+            .filter(|row| row["account"] == account)
+            .map(|row| {
+                assert_eq!(row["upstream_origin"], format!("https://{host}"));
+                assert_eq!(row["upstream_path"], path);
+                row["upstream_status"].as_u64().unwrap()
+            })
+            .collect();
+        statuses.sort_unstable();
+        assert_eq!(statuses, [429, 503]);
+    }
+    assert!(posts.iter().all(|row| row["attempt"] == 0));
+    let db = root
+        .join("home/state")
+        .join(plakd::home::state::state_key())
+        .join("product.sqlite3");
+    let db = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .unwrap();
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM sessions WHERE title='Deployment canary' AND archived=1
+            AND locator IS NULL AND account IS NULL AND model IS NULL AND effort IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 8);
+    gateway.finish();
 }
 
 fn state(root: &Path) -> PathBuf {

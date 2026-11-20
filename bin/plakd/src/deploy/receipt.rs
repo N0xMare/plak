@@ -100,7 +100,10 @@ fn coverage(receipt: &Receipt) -> bool {
             health.canaries.as_ref().is_some_and(|passed| {
                 let mut actual: Vec<_> = passed.keys().map(|account| kind(account)).collect();
                 actual.sort_unstable();
-                actual == wanted && passed.values().all(|adapter| adapter == "bounded_cli_v1")
+                actual == wanted
+                    && passed
+                        .iter()
+                        .all(|(account, adapter)| adapter == super::canary::class(kind(account)))
             })
         })
 }

@@ -176,6 +176,17 @@ impl<'a> Target<'a> {
         capture(cmd, seconds)
     }
 
+    pub(super) fn product_reply(
+        &self,
+        binary: &Path,
+        args: impl IntoIterator<Item = impl AsRef<OsStr>>,
+        seconds: u64,
+    ) -> CliResult<operator_process::Output> {
+        let mut cmd = command(binary.as_os_str(), &self.host.node, &self.host.product_home);
+        cmd.args(args);
+        operator_process::capture(cmd, None, Duration::from_secs(seconds), shipping::LIMIT)
+    }
+
     fn host_pid(&self) -> CliResult<String> {
         if self.host.node.platform == Platform::Mac {
             return Ok(super::launchd::observe(self, HOST_AGENT, &self.unit_path())?.pid);

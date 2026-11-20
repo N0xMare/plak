@@ -1,21 +1,15 @@
 use super::*;
 use plakous::subscriptions::SubscriptionRequestClass;
 
-fn options() -> Options {
-    Options {
-        capabilities: false,
-        preflight: false,
-        account: Some("claude/work".into()),
-        model: Some("claude-opus-5-5".into()),
-        effort: Some("low".into()),
-        protocol: None,
-    }
-}
-
 #[test]
 fn canary_selection_is_ephemeral_tool_free_and_dispatch_bounded() {
-    let account = "claude/work".parse().unwrap();
-    let selected = selection(&options(), &account).unwrap();
+    let selected = selection(
+        NativeProvider::Claude,
+        "claude-opus-5-5",
+        Some(ReasoningEffort::Low),
+        None,
+    )
+    .unwrap();
     let behavior = selected.behavior();
     assert!(behavior.tools.is_empty() && behavior.hosted_tools.is_empty());
     assert_eq!(behavior.tool_choice, ToolChoice::None);
@@ -31,15 +25,53 @@ fn canary_selection_is_ephemeral_tool_free_and_dispatch_bounded() {
 }
 
 #[test]
-fn canary_does_not_fall_back_for_codex_openai_or_a_selected_protocol() {
-    for account in ["codex", "openai"] {
-        let error = selection(&options(), &account.parse().unwrap()).unwrap_err();
-        assert!(error.message().contains("no bounded deploy canary adapter"));
+fn canary_codex_uses_no_wire_bound_and_a_different_evidence_class() {
+    let selected = selection(
+        NativeProvider::Codex,
+        "gpt-6.2-sol",
+        Some(ReasoningEffort::Low),
+        Some(NativeToolMode::CodeModeOnly),
+    )
+    .unwrap();
+    assert_eq!(
+        selected.behavior().output_bound,
+        OutputBoundDisposition::NoRequestBound
+    );
+    assert_eq!(selected.behavior().tool_choice, ToolChoice::None);
+    assert_eq!(
+        selected.behavior().local_durability,
+        LocalDurabilityDisposition::Ephemeral
+    );
+    assert_eq!(class("codex"), "locally_bounded");
+    assert_ne!(pass_line("codex"), pass_line("grok"));
+    assert_eq!(
+        lowest_effort(&[
+            ReasoningEffort::High,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium
+        ])
+        .unwrap(),
+        Some(ReasoningEffort::Low),
+    );
+}
+
+#[test]
+fn canary_http_refusal_is_a_closed_content_free_line() {
+    assert_eq!(
+        refused_status(b"plakd-deploy-canary-upstream-http 429\n"),
+        Some(429)
+    );
+    assert_eq!(
+        refused_status(b"plakd-deploy-canary-upstream-http 503\n"),
+        Some(503)
+    );
+    for malformed in [
+        &b"plakd-deploy-canary-upstream-http 0429\n"[..],
+        b"plakd-deploy-canary-upstream-http 200\n",
+        b"plakd-deploy-canary-upstream-http 503 unrelated text\n",
+    ] {
+        assert_eq!(refused_status(malformed), None);
     }
-    let mut options = options();
-    options.protocol = Some("messages".into());
-    let error = selection(&options, &"claude".parse().unwrap()).unwrap_err();
-    assert!(error.message().contains("does not select a wire protocol"));
 }
 
 #[tokio::test(start_paused = true)]

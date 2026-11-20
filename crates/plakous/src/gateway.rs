@@ -10,9 +10,11 @@ pub use plakous_http::relay::{
     custodied_placeholder,
 };
 
+mod api_canary;
 mod client;
 pub mod server;
 
+pub use api_canary::{ApiCanaryFailure, PreparedApiCanary};
 pub use client::{CustodiedKeySource, GatewayCustody};
 
 /// Each compiled provider's exact upstream pins and credential header names.
