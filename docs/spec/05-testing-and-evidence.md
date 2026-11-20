@@ -1031,7 +1031,9 @@ checks stay global; fast narrows the facade and hosted profile compilations.
 
 Batch runners set `PLAK_BATCH_BASE` to the commit immediately before the batch.
 The gate maps its diff to longest-prefix package owners, including untracked
-non-ignored files and ignored proptest regression seeds. A root Cargo input,
+non-ignored files. Local discovery without a batch base also sees ignored
+proptest regression seeds; an explicit batch base excludes ignored seeds
+left on persistent runners. A root Cargo input,
 `vendor/` or a shared test fixture selects the workspace. The MCP fixture
 server is a package, not a loose fixture. Configuration reference inputs
 outside the workspace select plakd. A clean checkout without an explicit

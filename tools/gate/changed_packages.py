@@ -110,6 +110,12 @@ def changed_paths(root: Path = REPO_ROOT, base: str | None = None) -> list[str]:
     return vcs_listing.changed_paths(root, base)
 
 
+def batch_paths(root: Path, base: str | None) -> list[str]:
+    # Previously generated regression seeds may remain in a persistent lane.
+    # Only a tracked seed is an input to the committed batch diff.
+    return vcs_listing.changed_paths(root, base, include_ignored_seeds=not base)
+
+
 def reverse_dependencies(names: list[str], packages: list[dict]) -> list[str]:
     """Include all dependency kinds and targets, even inactive optional edges."""
     known = {package["name"] for package in packages}
@@ -184,7 +190,7 @@ def main(argv: list[str]) -> int:
         if vcs_listing.kind(REPO_ROOT) == "export" and not base:
             print("all()")
             return 0
-        paths = changed_paths(base=base)
+        paths = batch_paths(REPO_ROOT, base)
         if not paths and not base:
             # A clean Git checkout without a supplied batch base must not
             # report an empty selection for a previously committed batch.
@@ -194,7 +200,7 @@ def main(argv: list[str]) -> int:
         print(batch_filter(touched_packages(paths, package_dirs(packages=packages)), packages))
         return 0
     if argv[:1] == ["--install-families"]:
-        paths = argv[1:] or changed_paths(base=base)
+        paths = argv[1:] or batch_paths(REPO_ROOT, base)
         for family in install_families(paths, package_dirs()):
             print(family)
         return 0

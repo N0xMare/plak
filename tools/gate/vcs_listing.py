@@ -63,7 +63,9 @@ def listed_files(root: Path) -> list[str]:
     return sorted(files)
 
 
-def changed_paths(root: Path, base: str | None = None) -> list[str]:
+def changed_paths(
+    root: Path, base: str | None = None, *, include_ignored_seeds: bool = True
+) -> list[str]:
     backend = kind(root)
     if backend == 'export':
         raise RuntimeError('changed paths require a repository; pass packages explicitly')
@@ -112,14 +114,15 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
                 'self.source().path() ++ "\\0" ++ self.target().path() ++ "\\0"',
             ).split('\0')
         )
-    for current, directories, names in os.walk(root):
-        directories[:] = [
-            name
-            for name in directories
-            if name not in {'.git', '.jj', '.plak', '.dev-tools', 'target'}
-        ]
-        if 'proptest-regressions' in Path(current).relative_to(root).parts:
-            paths.update((Path(current) / name).relative_to(root).as_posix() for name in names)
+    if include_ignored_seeds:
+        for current, directories, names in os.walk(root):
+            directories[:] = [
+                name
+                for name in directories
+                if name not in {'.git', '.jj', '.plak', '.dev-tools', 'target'}
+            ]
+            if 'proptest-regressions' in Path(current).relative_to(root).parts:
+                paths.update((Path(current) / name).relative_to(root).as_posix() for name in names)
     return sorted(paths - {''})
 
 

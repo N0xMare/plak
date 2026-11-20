@@ -74,6 +74,9 @@ class TouchedPackagesTests(unittest.TestCase):
             paths = CHANGED.changed_paths(root)
             self.assertEqual(paths, [regression])
             self.assertEqual(CHANGED.touched_packages(paths, DIRS), ["plakous-model"])
+            self.assertEqual(CHANGED.batch_paths(root, "HEAD"), [])
+            git("add", "-f", regression)
+            self.assertEqual(CHANGED.batch_paths(root, "HEAD"), [regression])
 
     def touched(self, *paths):
         return CHANGED.touched_packages(list(paths), DIRS)
