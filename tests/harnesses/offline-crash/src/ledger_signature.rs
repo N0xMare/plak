@@ -11,6 +11,24 @@ use std::path::Path;
 mod root_terminal_answers;
 pub use root_terminal_answers::{inspect_completed_root_answers, inspect_root_lifecycles};
 
+/// Reads the current checkpoint of a fixture branch without claiming ownership.
+///
+/// # Errors
+/// Returns read-only store lookup and integrity failures.
+pub fn inspect_branch_checkpoint(
+    database: &Path,
+    branch: SessionLocator,
+) -> Result<
+    std::sync::Arc<plakous_agent::internal::RuntimeCheckpoint>,
+    plakous_agent::internal::SessionStoreError,
+> {
+    let loaded = SqliteSessionStore::inspect_branch(
+        database,
+        SessionRef::new(branch.session_id(), branch.branch_id()),
+    )?;
+    Ok(std::sync::Arc::clone(loaded.checkpoint().checkpoint()))
+}
+
 /// The committed compaction strategy and number of protected trailing segments.
 ///
 /// # Errors

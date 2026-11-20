@@ -755,3 +755,34 @@ fn host_upgrade_preflights_web_assets_and_preserves_resolved_service_arguments()
     );
     stop(&mut host);
 }
+
+fn identity(fixture: &Fixture, key: &str, id: &str) -> (plakous::sessions::SessionLocator, String) {
+    let state = fixture.home().join("state").join(key);
+    let product = rusqlite::Connection::open_with_flags(
+        state.join("product.sqlite3"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let locator: String = product
+        .query_row("SELECT locator FROM sessions WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let locator: plakous::sessions::SessionLocator = locator.parse().unwrap();
+    let native = rusqlite::Connection::open_with_flags(
+        state.join("runtime.sqlite3"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let line = native
+        .query_row(
+            "SELECT line_id FROM branches WHERE session_id=?1 AND branch_id=?2",
+            rusqlite::params![
+                locator.session_id().to_string(),
+                locator.branch_id().to_string()
+            ],
+            |row| row.get(0),
+        )
+        .unwrap();
+    (locator, line)
+}

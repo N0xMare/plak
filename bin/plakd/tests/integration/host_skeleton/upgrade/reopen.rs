@@ -21,7 +21,7 @@ fn terminal_history(changed: bool) {
         .home()
         .join("state")
         .join(plakd::home::state::state_key());
-    let before = dormant::identity(&fixture, &plakd::home::state::state_key(), &session);
+    let before = identity(&fixture, &plakd::home::state::state_key(), &session);
     wait_for_terminal_history(&state.join("runtime.sqlite3"), before.0);
     assert!(
         !runner::alive(runner::job(&fixture).0),
@@ -40,7 +40,7 @@ fn terminal_history(changed: bool) {
         destination.request(21, Op::Detach { attachment }),
         Outcome::Ok(Answer::Detached)
     );
-    let after = dormant::identity(&fixture, &plakd::home::state::state_key(), &session);
+    let after = identity(&fixture, &plakd::home::state::state_key(), &session);
     assert_eq!(after.0.session_id(), before.0.session_id());
     assert_eq!(after.0.branch_id(), before.0.branch_id());
     assert_eq!(after.1, before.1);
@@ -62,20 +62,10 @@ fn terminal_history(changed: bool) {
 fn wait_for_terminal_history(path: &std::path::Path, source: plakous::sessions::SessionLocator) {
     let deadline = Instant::now() + WAIT;
     loop {
-        let snapshot = plakous::sessions::SessionBackend::inspect_move_source_unsettled_sqlite(
-            path,
-            &[source.session_id()],
-        )
-        .unwrap();
-        let branch = snapshot.sessions[0]
-            .branches
-            .iter()
-            .find(|branch| branch.session.branch_id() == source.branch_id())
-            .unwrap();
-        let checkpoint = snapshot.sessions[0]
-            .checkpoints
-            .iter()
-            .find(|checkpoint| checkpoint.id() == branch.checkpoint)
+        let checkpoint =
+            plakous_offline_crash_harness::ledger_signature::inspect_branch_checkpoint(
+                path, source,
+            )
             .unwrap();
         let jobs = checkpoint.manifest().jobs();
         let promoted = jobs.next_id() > 1;
