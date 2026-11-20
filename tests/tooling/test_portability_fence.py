@@ -118,7 +118,7 @@ class PortabilityFenceTests(unittest.TestCase):
             [*checker.PORTABLE_CRATES, "plakous-store"],
         )
 
-    def test_libc_is_banned_and_notify_is_banned_ahead_of_the_lock(self):
+    def test_native_crates_stay_banned_even_when_absent_from_the_lock(self):
         nodes, errors = checker.parse_feature_tree(LIBC)
         self.assertEqual(errors, [])
         self.assertEqual(
@@ -129,8 +129,7 @@ class PortabilityFenceTests(unittest.TestCase):
             ],
         )
         names = set(re.findall(r'^name = "([^"]+)"', (ROOT / "Cargo.lock").read_text(), re.M))
-        self.assertEqual(checker.BANNED_NATIVE_CRATES - names, {"notify"})
-        self.assertIn("notify", checker.BANNED_NATIVE_CRATES)
+        self.assertEqual(checker.BANNED_NATIVE_CRATES - names, {"notify", "reqwest"})
 
     def test_tree_arguments_are_the_normal_closure_at_both_resolutions(self):
         default = checker.portable_tree_args("plakous-model", all_features=False)

@@ -725,7 +725,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A `#[cfg(test)]`-only module of the host crate: it cannot be an
     # integration test because the projection it exercises is
     # `pub(crate)`. Nothing here ships in the CLI binary.
-    ("plakd", "src/topology_resources_projection.rs"): {"assert_eq"},
+    ("plakd", "src/topology_resources_projection_tests.rs"): {"assert_eq"},
     ("plakd", "src/commands/session_delete_tests.rs"): {"assert_eq", "assert_ne"},
     # Read-only child history projects its bounded JSONL response at the CLI boundary.
     ("plakd", "src/commands/session/read_only.rs"): {"json"},

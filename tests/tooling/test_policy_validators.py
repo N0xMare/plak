@@ -2063,8 +2063,7 @@ fn production() {}
 use std::process::ExitCode;
 fn run(launch: Option<&std::path::Path>) {{
     let launch = shell::home::launch_directory();
-    let _ = Services::from_env(Some(sink), launch);
-    let _ = Services::from_env(None, launch);
+    let _ = Services::from_env(launch);
 }}
 {main_extra}
 """,
