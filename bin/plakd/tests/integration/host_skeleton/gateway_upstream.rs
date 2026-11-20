@@ -68,7 +68,8 @@ pub(super) fn prompt(client: &mut Client, id: RequestId, attachment: u64, text: 
             }
             SessionObservation::DraftRejected(_) => panic!("{text}: {last_notice:?}"),
             observation => {
-                seen_answer |= format!("{observation:?}").contains("answer from the loopback relay")
+                seen_answer |=
+                    format!("{observation:?}").contains("answer from the loopback relay");
             }
         }
     }

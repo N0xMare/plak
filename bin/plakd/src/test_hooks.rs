@@ -63,7 +63,7 @@ pub(crate) fn gateway_review_clock(
 pub(crate) fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewayService>(
     server: plakous::gateway::server::RelayServer<S>,
 ) -> Result<plakous::gateway::server::RelayServer<S>, String> {
-    let Some(port) = std::env::var_os("PLAK_TEST_GATEWAY_ANTHROPIC_PORT") else {
+    let Some(port) = hook_environment("PLAK_TEST_GATEWAY_ANTHROPIC_PORT") else {
         return Ok(server);
     };
     let port = port

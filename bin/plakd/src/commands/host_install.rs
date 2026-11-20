@@ -149,7 +149,7 @@ fn failed(error: io::Error) -> CliFailure {
 }
 
 fn installed_gateway_address(paths: &PlakPaths) -> CliResult<String> {
-    let socket = if cfg!(target_os = "linux") {
+    let socket = if std::env::consts::OS == "linux" {
         manager_runtime().join("plak/gateway.sock")
     } else {
         default_socket(paths)
@@ -192,7 +192,7 @@ fn systemd_override_roots(config: &Path) -> Vec<PathBuf> {
 }
 
 fn refuse_legacy_host(home: &Path) -> io::Result<()> {
-    let mac = cfg!(target_os = "macos");
+    let mac = std::env::consts::OS == "macos";
     let name = if mac {
         "com.plak.host.plist"
     } else {
