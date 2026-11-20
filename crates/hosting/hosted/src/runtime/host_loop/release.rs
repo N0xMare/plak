@@ -19,8 +19,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .agent()
                 .is_some_and(|agent| !agent.retains_background_jobs())
         {
-            // Projection can leave debt. Already-started process stops and
-            // their canonical terminals must still settle before lease release.
+            // Reserve the shared stop-and-record window and lease release
+            // even for a one-shot whose final projection must report refusal.
             return Some(started + QUIT_PRE_RELEASE_PROJECTION_BOUND);
         }
         self.projection_deadline(one_shot)

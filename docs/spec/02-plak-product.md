@@ -2165,11 +2165,13 @@ cleanup failure) is followed by one lease-free pass through the common
 projector entry, bounded at 400 ms outside quit. Quit projection stages
 (terminal publication, final product and tree projection, and the post-release
 pass) share the absolute one-second quit deadline rather than stacking fresh
-bounds. For escalated quit without a job
-keeper, the pre-release projector yields sooner to preserve the existing job
-terminal settlement and lease release windows. Any projection debt can be
-applied by the post-release pass if time remains; a release that returns after
-the quit deadline starts no pass. It applies the release record and any
+bounds. For escalated quit without a job keeper, the pre-release projector
+yields at 450 ms. The remaining time reserves up to 400 ms shared by non-root
+job stop waits and canonical stop/terminal recording, then 150 ms for lease
+release. The earlier cutoff also applies to an attached one-shot; when its
+required final projection cannot finish, it still reports a projection
+failure. A release that returns after the quit deadline starts no post-release
+pass. It applies the release record and any
 abandonment or job terminals committed during release. A timed-out pass is
 logged as benign projection debt: it does not change the release result or
 the CLI or one-shot exit status, and the next plain open applies the remaining
