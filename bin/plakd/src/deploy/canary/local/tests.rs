@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
+use plakous::agent::TurnUsage;
 use plakous::model::{OutputLocation, ReasoningDelta, TextDelta};
 
 use super::*;
@@ -34,7 +35,7 @@ async fn codex_cancel_at_bound_cancels_then_joins_cancelled() {
 async fn codex_cancel_at_bound_accepts_early_terminal_without_cancelling() {
     for terminal in [Terminal::Completed, Terminal::Cancelled] {
         let ended = AgentEventKind::TurnCompleted {
-            usage: Default::default(),
+            usage: TurnUsage::default(),
         };
         let mut events = [Observation::Bytes(63), classify(&ended)].into_iter();
         let result = drive(
