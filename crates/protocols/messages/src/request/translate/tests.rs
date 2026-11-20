@@ -1150,7 +1150,7 @@ fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestRes
             },
         )
     };
-    let plain = (1..=4)
+    let text_only = (1..=4)
         .map(|id| {
             batch_item(
                 id,
@@ -1159,7 +1159,7 @@ fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestRes
             )
         })
         .collect::<TestResult<Vec<_>>>()?;
-    let (plain_plan, target) = fixture(plain.clone())?;
+    let (plain_plan, target) = fixture(text_only.clone())?;
     let target = target.with_strict_thinking_replay(true);
     let plain_wire = lower_request(&plain_plan, &target, ToolOwnership::default())?;
     let mut source = target.clone();
@@ -1175,7 +1175,7 @@ fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestRes
     assert_ne!(unsigned, signed);
 
     for signed_first in [false, true] {
-        let history = plain
+        let history = text_only
             .iter()
             .enumerate()
             .map(|(index, item)| {
@@ -1193,7 +1193,7 @@ fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestRes
         let proof = plan
             .request()
             .input()
-            .semantic_prefix_identity(plain.len())?;
+            .semantic_prefix_identity(text_only.len())?;
         let policy = target.clone().with_completed_history_prefix(Some(proof));
         let wire = lower_request(&plan, &policy, ToolOwnership::default())?;
         let expected = if signed_first {
@@ -1207,7 +1207,7 @@ fn mixed_completed_thinking_keeps_first_notice_order_and_wire_bytes() -> TestRes
                 .map(ModelDiagnostic::history_projection_identity)
                 .eq(expected)
         );
-        assert!(wire.replay_diagnostics().is_empty());
+        assert_eq!(wire.replay_diagnostics(), [] as [String; 0]);
         assert_eq!(wire.body(), plain_wire.body());
     }
     Ok(())
