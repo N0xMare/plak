@@ -4,8 +4,8 @@ use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 /// Claude subscription route facts; never interchangeable with an API-key route.
 pub static CLAUDE: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "claude",
     aliases: &["claude"],
     kind: RouteKind::Native(NativeProvider::Claude),

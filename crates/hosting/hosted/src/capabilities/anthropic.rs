@@ -4,8 +4,8 @@ use crate::binding::ResolvedProtocol;
 
 /// Anthropic direct-API route facts, readable even when its runtime is omitted.
 pub static ANTHROPIC: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "anthropic",
     aliases: &["anthropic"],
     kind: RouteKind::Platform(PlatformProvider::Anthropic),

@@ -2,8 +2,8 @@ use super::{RouteCapability, RouteKind};
 
 /// Gateway route facts; the binding, not this table, selects its exact wire.
 pub static OPENROUTER: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "openrouter",
     aliases: &["openrouter"],
     kind: RouteKind::OpenRouter,

@@ -4,8 +4,8 @@ use crate::binding::ResolvedProtocol;
 
 /// `OpenAI` direct-API route facts, independent of a `ChatGPT` subscription.
 pub static OPENAI: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "openai",
     aliases: &["openai"],
     kind: RouteKind::Platform(PlatformProvider::OpenAi),

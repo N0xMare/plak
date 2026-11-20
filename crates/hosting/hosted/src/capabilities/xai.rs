@@ -4,8 +4,8 @@ use crate::binding::ResolvedProtocol;
 
 /// xAI direct-API route facts, independent of Grok subscription credentials.
 pub static XAI: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "xai-api",
     aliases: &["xai-api"],
     kind: RouteKind::Platform(PlatformProvider::Xai),

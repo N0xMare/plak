@@ -4,8 +4,8 @@ use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 /// Grok subscription route facts, independent of direct xAI API credentials.
 pub static GROK: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "grok",
     aliases: &["grok", "supergrok", "xai-oauth"],
     kind: RouteKind::Native(NativeProvider::Xai),

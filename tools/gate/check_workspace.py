@@ -2210,34 +2210,31 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/capabilities.rs"): {
         "model": {"HostedRetrievalTable"},
     },
-    ("plakous-hosted", "src/capabilities/anthropic_available.rs"): {
+    ("plakous-hosted", "src/capabilities/anthropic.rs"): {
         "model": {"HostedRetrievalTable"},
         "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL"},
     },
-    ("plakous-hosted", "src/capabilities/claude_available.rs"): {
+    ("plakous-hosted", "src/capabilities/claude.rs"): {
         "model": {"HostedRetrievalTable"},
     },
-    ("plakous-hosted", "src/capabilities/codex_available.rs"): {
+    ("plakous-hosted", "src/capabilities/codex.rs"): {
         "model": {"HostedRetrievalTable"},
     },
-    ("plakous-hosted", "src/capabilities/grok_available.rs"): {
+    ("plakous-hosted", "src/capabilities/grok.rs"): {
         "model": {"HostedRetrievalTable"},
         "xai": {"SUPERGROK_ALLOW_TOOL_RESULT_IMAGES"},
     },
-    ("plakous-hosted", "src/capabilities/openai_available.rs"): {
+    ("plakous-hosted", "src/capabilities/openai.rs"): {
         "model": {"HostedRetrievalTable"},
         "openai": {"OPENAI_API_HOSTED_RETRIEVAL"},
     },
-    ("plakous-hosted", "src/capabilities/openrouter_available.rs"): {
+    ("plakous-hosted", "src/capabilities/openrouter.rs"): {
         "model": {"HostedRetrievalTable"},
         "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
     },
-    ("plakous-hosted", "src/capabilities/xai_available.rs"): {
+    ("plakous-hosted", "src/capabilities/xai.rs"): {
         "model": {"HostedRetrievalTable"},
         "xai": {"XAI_API_HOSTED_RETRIEVAL"},
-    },
-    ("plakous-hosted", "src/capabilities/route_unavailable.rs"): {
-        "model": {"HostedRetrievalTable"},
     },
     ('plakd', 'src/host.rs'): {'runner': {'RunnerStatus'}},
     ('plakd', 'src/host/sessions/options.rs'): {'runner': {'RunnerRow', 'WorkspaceCatalog'}},

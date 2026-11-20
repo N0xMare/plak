@@ -4,8 +4,8 @@ use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 /// Codex subscription route facts, independent of direct `OpenAI` API credentials.
 pub static CODEX: RouteCapability = RouteCapability {
-    review_deadline: review_deadline,
-    hosted_retrieval: hosted_retrieval,
+    review_deadline,
+    hosted_retrieval,
     account: "codex",
     aliases: &["codex", "chatgpt"],
     kind: RouteKind::Native(NativeProvider::Codex),
