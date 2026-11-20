@@ -6325,7 +6325,7 @@ async fn codex_revoke_rereads_after_peer_refresh_without_reentering_the_flight()
                 .expect("peer completes refresh");
         }
     };
-    let mut hooks = super::refresh::CodexRevokeHooks {
+    let mut hooks = refresh::CodexRevokeHooks {
         manager: &manager,
         flight: None,
         after_fence_read: Some(&mut after_read),

@@ -2934,12 +2934,14 @@ async fn xai_revoke_rereads_once_then_leaves_a_second_peer_refresh_busy() -> Tes
                 moves -= 1;
             }
         };
-        let mut hooks = super::refresh::XaiRevokeHooks {
+        let mut hooks = XaiRevokeHooks {
             core: &manager.core,
             _flight: manager.core.refresh_flight.lock().await,
             after_fence_read: Some(&mut after_read),
         };
-        endpoint.responses.send(response(&json!({}))).await?;
+        if peer_moves == 1 {
+            endpoint.responses.send(response(&json!({}))).await?;
+        }
         let outcome = tokio::time::timeout(
             Duration::from_secs(10),
             run_claimed_revoke(store, &manager.core.client, &mut hooks),
