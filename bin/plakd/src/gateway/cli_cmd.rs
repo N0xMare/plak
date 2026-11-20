@@ -10,17 +10,17 @@ use super::AdminLink;
 use super::ServerConfig;
 use super::address::GatewayAddress;
 
-pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate::CliResult<u64> {
+pub(crate) fn deployment_generation(services: &Services, account: &str) -> CliResult<u64> {
     use plakous::gateway::protocol::facts::{CredentialStatus, FactsReply, FactsRequest};
     use plakous::gateway::protocol::{Endpoint, GatewayAccount};
 
     let custody = services.custody()?;
     let link = custody
         .admin()
-        .ok_or_else(|| crate::CliFailure::new("deploy requires an enrolled gateway"))?;
+        .ok_or_else(|| CliFailure::new("deploy requires an enrolled gateway"))?;
     verify_holder(services, link)?;
     let account = GatewayAccount::new(account.to_owned())
-        .map_err(|_| crate::CliFailure::new("invalid deploy account"))?;
+        .map_err(|_| CliFailure::new("invalid deploy account"))?;
     let answer = super::client::request::<FactsReply>(
         &link.address,
         link.key(),
@@ -36,7 +36,7 @@ pub(crate) fn deployment_generation(services: &Services, account: &str) -> crate
     {
         return Ok(generation);
     }
-    Err(crate::CliFailure::new(
+    Err(CliFailure::new(
         "deploy credential generation is unavailable",
     ))
 }
