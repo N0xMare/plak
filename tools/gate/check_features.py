@@ -714,7 +714,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
     "plakous-py-worker": "69292766720fd343d9c1ce2701cee97bf9c89fccfd5b74618ebae180ba970e63",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
-    "plakous": "3e85fa1deafa1eab5f214ec649383cdc50c87b34ab23751f6ab9170d7361a55d",
+    "plakous": "96bf15a73ea7b3d151783e9d560e5e4ddb4c01925b2a013a898682bf4bf9a131",
     "plakous-agent": "12970a9102d2f4c3c8ddb521bde4f620ed572e74ac5e3eb2c51008ffe16c9bdb",
     "plakous-anthropic": "bf8596389f2397e5b4b37958805dcb02242e634a47fe839580a66116a3d0a414",
     # Claimed store steps use Tokio's blocking pool; contention tests pause time.
@@ -726,7 +726,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "ad0a1ee24f44529a51628f2b64f08ccd8e01017d40ffb1e43f520bc9cc465bad",
     "plakous-messages": "c6c01e92cc73bd03edd722df0f757c54cd73aeef8ff7f171c8b9c0cce2048bfb",
     "plakous-model": "04297fb5135a6bec3b2b5838aa8a0f71620162cfa4166529f1e110702fd0a16f",
-    "plakous-openai": "88ffcbc7abc38782549cd33c19983181a52f3deb1e7a3bddb9b56b78fa58466a",
+    "plakous-openai": "d0a91cf760584de2bf0e16e183838c5217c00ac5d4d1c472acceaa50a5a636c3",
     "plakous-tool-files": "9cf5507dfcf328a640f3a2c0050088d8dc22a883d3057e4395e7ad9f52562178",
     "plakous-tool-process": "18b6bb113b7688192f89888d2ce6f67910ae86cc4bd847f6ad3ce7539d5a0ddc",
     "plakous-tool-web": "33d1500e1fab1de492a8d7b983d47803ed1da2b747278bd7b6973c054ecaaf6e",
