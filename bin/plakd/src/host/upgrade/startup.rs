@@ -18,7 +18,9 @@ pub(in crate::host) fn prepare_host(
     services: &Services,
 ) -> CliResult<(Services, Arc<plakous::runner::WorkspaceCatalog>)> {
     for receipt in pending(services)? {
-        if let Err(failure) = finish_source(services, &receipt) {
+        if !receipt.groups.is_empty()
+            && let Err(failure) = finish_source(services, &receipt)
+        {
             deferred("source retirement", &failure);
         }
     }
@@ -43,17 +45,21 @@ pub(in crate::host) fn prepare_host(
             }
             continue;
         }
-        for mapping in receipt
-            .mappings
-            .iter()
-            .filter(|mapping| !mapping.ready && !mapping.abandoned && mapping.runner == "local")
-        {
-            if let Err(failure) = importing::one(&services, &receipt, mapping) {
-                deferred(&mapping.successor, &failure);
-            }
-        }
+        import_local_mappings(&services, &receipt);
     }
     runner::prepare(&services, None)
+}
+
+fn import_local_mappings(services: &Services, receipt: &Receipt) {
+    for mapping in receipt
+        .mappings
+        .iter()
+        .filter(|mapping| !mapping.ready && !mapping.abandoned && mapping.runner == "local")
+    {
+        if let Err(failure) = importing::one(services, receipt, mapping) {
+            deferred(&mapping.successor, &failure);
+        }
+    }
 }
 
 fn pending(services: &Services) -> CliResult<Vec<Receipt>> {

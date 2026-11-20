@@ -111,27 +111,7 @@ pub(super) fn apply(services: &Services, request: &Request) -> CliResult<Vec<Aba
             }
             continue;
         }
-        let selected = abandoned.len();
-        for mapping in &mut receipt.mappings {
-            if mapping.runner == "local"
-                || mapping.ready
-                || (mapping.successor != target && mapping.runner != target)
-            {
-                continue;
-            }
-            mapping.abandoned = true;
-            abandoned.push(Abandoned {
-                successor: mapping.successor.clone(),
-                export: receipt::root(paths)
-                    .join(receipt.id.to_string())
-                    .join(format!("{}.json", mapping.source)),
-            });
-        }
-        if abandoned.len() == selected {
-            continue;
-        }
-        startup::acknowledge(&mut receipt);
-        receipt.save(paths)?;
+        abandon_mappings(paths, &mut receipt, target, &mut abandoned)?;
     }
     if abandoned.is_empty() {
         return Err(CliFailure::new(
@@ -139,4 +119,33 @@ pub(super) fn apply(services: &Services, request: &Request) -> CliResult<Vec<Aba
         ));
     }
     Ok(abandoned)
+}
+
+fn abandon_mappings(
+    paths: &crate::home::paths::PlakPaths,
+    receipt: &mut receipt::Receipt,
+    target: &str,
+    abandoned: &mut Vec<Abandoned>,
+) -> CliResult<()> {
+    let selected = abandoned.len();
+    for mapping in &mut receipt.mappings {
+        if mapping.runner == "local"
+            || mapping.ready
+            || (mapping.successor != target && mapping.runner != target)
+        {
+            continue;
+        }
+        mapping.abandoned = true;
+        abandoned.push(Abandoned {
+            successor: mapping.successor.clone(),
+            export: receipt::root(paths)
+                .join(receipt.id.to_string())
+                .join(format!("{}.json", mapping.source)),
+        });
+    }
+    if abandoned.len() != selected {
+        startup::acknowledge(receipt);
+        receipt.save(paths)?;
+    }
+    Ok(())
 }

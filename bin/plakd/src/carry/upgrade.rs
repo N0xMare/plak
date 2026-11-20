@@ -94,6 +94,14 @@ pub(crate) fn print_probe(
         writeln!(out).map_err(|_| CliFailure::new("stdout failed"))?;
         return Ok(crate::ProcessOutcome::Success);
     }
+    print_settled_probe(services, capacity, out)
+}
+
+fn print_settled_probe(
+    services: &Services,
+    capacity: Option<&std::path::Path>,
+    out: &mut dyn std::io::Write,
+) -> CliResult<crate::ProcessOutcome> {
     match capacity {
         Some(path) => serde_json::to_writer(
             &mut *out,
