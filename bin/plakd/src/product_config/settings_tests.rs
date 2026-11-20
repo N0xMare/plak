@@ -4,8 +4,7 @@ pub(crate) fn oauth_accounts() -> impl Iterator<Item = &'static str> {
     crate::capabilities::ROUTES
         .iter()
         .filter(|capability| {
-            capability.route.compiled
-                && capability.auth_kind() == plakous_host_protocol::views::AuthKind::Oauth
+            capability.auth_kind() == plakous_host_protocol::views::AuthKind::Oauth
         })
         .map(|capability| capability.route.account)
 }

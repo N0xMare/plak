@@ -7,32 +7,8 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "web-fetch")]
-mod fetch_url;
-#[cfg(not(feature = "web-fetch"))]
-#[path = "tools/fetch_url_unavailable.rs"]
 mod fetch_url;
 
-#[cfg(any(
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter"
-))]
-mod image_gen;
-#[cfg(not(any(
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter"
-)))]
-#[path = "tools/image_gen_unavailable.rs"]
 mod image_gen;
 
 use plakous::model::ToolName;
@@ -695,6 +671,6 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "web-fetch", feature = "js", feature = "python"))]
+#[cfg(test)]
 #[path = "tools/executor_contracts_tests.rs"]
 mod executor_contracts;

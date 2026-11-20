@@ -9,16 +9,8 @@ use std::path::PathBuf;
 const PYTHON_ENGINE_VERSION: &str = "micro-monty-0.0.2";
 
 /// The JavaScript evaluator worker's install layout.
-#[cfg(feature = "js")]
-pub mod js_host;
-#[cfg(not(feature = "js"))]
-#[path = "sidecars/javascript_unavailable.rs"]
 pub mod js_host;
 /// The Python evaluator worker's install layout.
-#[cfg(feature = "python")]
-pub mod python_bundle;
-#[cfg(not(feature = "python"))]
-#[path = "sidecars/python_unavailable.rs"]
 pub mod python_bundle;
 
 /// Plak's locator: `PLAK_JS_HOST` / `PLAK_PY_HOST`, else a sibling.

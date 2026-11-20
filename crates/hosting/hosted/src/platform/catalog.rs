@@ -423,8 +423,8 @@ pub fn bundled_catalog(provider: PlatformProvider, reason: &str) -> ApiModelCata
     super::runtime::bundled(provider, source)
 }
 
-#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+#[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+#[cfg(test)]
 use super::runtime::{anthropic::catalog as anthropic_catalog, openai::catalog as openai_catalog};

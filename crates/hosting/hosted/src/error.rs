@@ -274,7 +274,7 @@ impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
             CliFailureKind::Usage,
             format!(
                 "{error}; available: {}",
-                crate::capabilities::compiled_features().join(", ")
+                crate::capabilities::PRODUCT_CAPABILITIES.join(", ")
             ),
         );
         failure.source = Some(Box::new(LookupFailure::Capability(error)));
@@ -284,9 +284,6 @@ impl From<crate::capabilities::CapabilityUnavailable> for CliFailure {
 
 impl From<crate::capabilities::AccountAdmissionError> for CliFailure {
     fn from(error: crate::capabilities::AccountAdmissionError) -> Self {
-        if let crate::capabilities::AccountAdmissionError::CapabilityUnavailable(error) = error {
-            return Self::from(error);
-        }
         let kind = if matches!(
             error,
             crate::capabilities::AccountAdmissionError::AccountUnavailable { .. }

@@ -7,22 +7,8 @@ use plakous::subscriptions::NativeProvider;
 
 use crate::binding::{PlatformProvider, ResolvedProtocol};
 
-#[cfg(not(all(
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "openai",
-    feature = "xai-api",
-    feature = "anthropic",
-    feature = "openrouter"
-)))]
-mod route_unavailable;
-
 mod build;
-pub use build::{
-    BUILD_CAPABILITIES, BuildCapability, CapabilityKind, CapabilityUnavailable, compiled_features,
-    omitted_features, require_composition, require_feature,
-};
+pub use build::{CapabilityKind, CapabilityUnavailable, PRODUCT_CAPABILITIES};
 
 mod anthropic;
 mod claude;
@@ -52,14 +38,9 @@ pub enum RouteKind {
     OpenRouter,
 }
 
-/// Static route registry entry. Identities remain readable when their runtime
-/// feature is omitted; only `compiled` answers build availability.
+/// Static route registry entry.
 #[derive(Debug)]
 pub struct RouteCapability {
-    /// Whether this build includes the route's executable implementation.
-    pub compiled: bool,
-    /// Public feature whose omission produces the capability refusal.
-    pub feature: &'static str,
     pub(crate) review_deadline: fn() -> Option<u64>,
     pub(crate) hosted_retrieval: fn() -> Option<plakous::model::HostedRetrievalTable>,
     /// Canonical default-account prefix; named accounts retain this route.
@@ -133,8 +114,8 @@ const fn same_id(left: &str, right: &str) -> bool {
     true
 }
 
-/// Parse an exact default or named account and return its route, including
-/// omitted routes. Invalid identities return `None`; credentials are not read.
+/// Parse an exact default or named account and return its route,
+/// without reading credentials. Invalid identities return `None`.
 #[must_use]
 pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
     account
@@ -178,10 +159,7 @@ pub(crate) const fn for_platform(provider: PlatformProvider) -> &'static RouteCa
 
 /// Compiled native routes in registry order; API routes are never included.
 pub fn native_providers() -> impl Iterator<Item = NativeProvider> {
-    ROUTES
-        .iter()
-        .filter(|route| route.compiled)
-        .filter_map(|route| route.native_provider())
+    ROUTES.iter().filter_map(|route| route.native_provider())
 }
 
 /// Complete, ungated account vocabulary used by frozen template bind hints.
@@ -197,27 +175,6 @@ pub fn no_native_protocol_accounts() -> impl Iterator<Item = &'static str> {
         .iter()
         .filter(|route| !route.native_protocol_vocabulary)
         .map(|route| route.account)
-}
-
-/// Admits the compiled tool packs selected by an unchanged binding vocabulary.
-///
-/// # Errors
-///
-/// Returns the exact omitted tool-pack capability without selecting a substitute.
-pub fn require_tools(
-    selection: &crate::tool_plan::TemplateToolSelection,
-) -> Result<(), CapabilityUnavailable> {
-    use crate::tool_plan::{OptionalTool, SelectedTool};
-    if selection
-        .entries()
-        .contains(&SelectedTool::Optional(OptionalTool::FetchUrl))
-    {
-        require_feature("web-fetch")?;
-    }
-    if selection.mcp_servers().next().is_some() {
-        require_feature("mcp")?;
-    }
-    Ok(())
 }
 
 /// An account selection that cannot be admitted by this build.
@@ -253,8 +210,6 @@ pub enum AccountAdmissionError {
         /// Default account whose identity must remain readable.
         account: String,
     },
-    /// A recognized route or tool pack was omitted at build time.
-    CapabilityUnavailable(CapabilityUnavailable),
 }
 
 impl std::fmt::Display for AccountAdmissionError {
@@ -280,54 +235,27 @@ impl std::fmt::Display for AccountAdmissionError {
                 formatter,
                 "default_account_not_removable: `{account}`; use logout or key clear"
             ),
-            Self::CapabilityUnavailable(error) => error.fmt(formatter),
         }
     }
 }
 
-impl std::error::Error for AccountAdmissionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UnknownAccount { .. }
-            | Self::AccountTargetMismatch { .. }
-            | Self::AccountUnavailable { .. }
-            | Self::AccountBusy { .. }
-            | Self::AccountSignedIn { .. }
-            | Self::DefaultAccountNotRemovable { .. } => None,
-            Self::CapabilityUnavailable(error) => Some(error),
-        }
-    }
-}
+impl std::error::Error for AccountAdmissionError {}
 
-/// Refuses unknown or omitted accounts without choosing another route.
+/// Refuses invalid account syntax without choosing another route or reading credentials.
 ///
 /// # Errors
-/// Returns an unknown-account refusal for invalid syntax or a capability
-/// refusal for an omitted route. Success does not prove credentials exist.
+/// Returns an unknown-account refusal for invalid syntax.
 pub fn require(account: &str) -> Result<(), AccountAdmissionError> {
-    let selection: crate::account::AccountRef = account.parse()?;
-    let route = selection.vertical().capability();
-    require_route(route).map_err(AccountAdmissionError::CapabilityUnavailable)
-}
-
-fn require_route(route: &RouteCapability) -> Result<(), CapabilityUnavailable> {
-    if route.compiled {
-        return Ok(());
-    }
-    Err(CapabilityUnavailable {
-        id: route.account,
-        kind: CapabilityKind::Route,
-        feature: route.feature,
-    })
+    account.parse::<crate::account::AccountRef>().map(|_| ())
 }
 
 /// Admit a native route by identity without resolving subscription credentials.
 ///
 /// # Errors
-/// Returns a capability refusal for an omitted or unregistered identity.
+/// Returns a capability refusal for an unregistered identity.
 pub fn require_native(provider: NativeProvider) -> Result<(), CapabilityUnavailable> {
-    if let Some(route) = for_native(provider) {
-        return require_route(route);
+    if for_native(provider).is_some() {
+        return Ok(());
     }
     Err(CapabilityUnavailable {
         id: provider.as_str(),
@@ -358,10 +286,7 @@ mod tests {
             );
         }
         for account in account_ids() {
-            assert_eq!(
-                require(account).is_ok(),
-                for_account(account).unwrap().compiled
-            );
+            assert!(require(account).is_ok());
         }
     }
 

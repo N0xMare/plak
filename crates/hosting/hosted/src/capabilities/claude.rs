@@ -1,20 +1,11 @@
-#[cfg(feature = "claude")]
-#[path = "claude_available.rs"]
-mod compiled;
-#[cfg(not(feature = "claude"))]
-#[path = "claude_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
-use plakous::subscriptions::NativeProvider;
+use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 /// Claude subscription route facts; never interchangeable with an API-key route.
 pub static CLAUDE: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "claude",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "claude",
     aliases: &["claude"],
     kind: RouteKind::Native(NativeProvider::Claude),
@@ -26,3 +17,13 @@ pub static CLAUDE: RouteCapability = RouteCapability {
     usage_label: Some("Claude"),
     subscription_label: Some("Claude Subscription"),
 };
+
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    NativeProvider::Claude.hosted_retrieval()
+}
+
+fn review_deadline() -> Option<u64> {
+    NativeSubscriptions::notice(NativeProvider::Claude)
+        .ok()
+        .map(plakous::subscriptions::CompatibilityNotice::expires_at)
+}

@@ -64,10 +64,6 @@ impl plakous::tools::SidecarLocator for NoSidecars {
 #[derive(Debug)]
 pub struct NoOpenRouterCredential;
 
-#[cfg(feature = "openrouter")]
-mod openrouter;
-#[cfg(not(feature = "openrouter"))]
-#[path = "doubles/openrouter_unavailable.rs"]
 mod openrouter;
 
 pub(crate) struct NoTelemetry;

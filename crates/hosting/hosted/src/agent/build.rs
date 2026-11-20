@@ -2,12 +2,6 @@
 //! registries and harness profiles, the build/open/resume entry points, and
 //! the session runtime bindings the product composes.
 
-#[cfg(any(
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter"
-))]
 pub(crate) mod api;
 mod binding;
 #[cfg(any(test, feature = "test-support"))]

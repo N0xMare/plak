@@ -88,9 +88,8 @@ filters. Linux batch overlaps tree checks and independent compile groups with
 test preparation, and tooling with the parallel lane before timed test lanes.
 
 Production install uses exact-tree batch evidence plus the install groups,
-full Mac suite and strict crash sweep (spec 06 §8). Full adds release-only
-variants, standalone rustdoc, archive verification and ignored retirement
-soaks. A passing full run on a clean tree records the evidence publication
+full Mac suite and strict crash sweep (spec 06 §8). Full adds standalone rustdoc, archive verification and ignored retirement
+soaks, and runs the library profiles in the `variants` group. A passing full run on a clean tree records the evidence publication
 requires. Inert documentation changes can reuse it; a `README.md` change
 needs new archive verification (spec 06 §6.5). Linux batch runs install
 families triggered by its base diff, or all families when no base is set.
@@ -132,14 +131,14 @@ MCP and local page fetch are independent at the facade boundary. Persisted route
 and tool vocabulary stays readable even when its runtime is omitted.
 The feature checker compiles eight library profiles without workspace feature
 unification: facade none, `full`, `composition`, `claude`, `openai` and
-`gateway`; hosted none and all-features. It
+`gateway`; hosted without optional features and with all features. It
 requires locally declared UUID generation features, including for test code.
 It validates 2n+3 feature closures per package (none, each singleton, full
 minus each feature, default and full), with a reviewed cap of 24 public
-optional features. Reduced products compile only in the full-only `variants`
-group, not in batch.
-`check_features.py` owns the sole named-variant table. Only the default product
-is shipped and supported; API and minimal are built and tested only.
+optional features. The default product is the only shipped and supported
+build. Its provider, evaluator, MCP, image, local fetch and Git capabilities
+are unconditional; the facade still offers independent feature selection.
+The `variants` group compiles library profiles only.
 The root workspace excludes `.plak` operator state and fork worktrees; the
 workspace checker requires this exclusion without permitting unreviewed ones.
 The workspace checker also ratchets, per package, item-level allows of

@@ -144,18 +144,7 @@ impl std::fmt::Debug for HostCustody {
 }
 
 impl HostCustody {
-    #[cfg(all(
-        test,
-        feature = "openai",
-        feature = "anthropic",
-        feature = "xai-api",
-        feature = "openrouter",
-        feature = "codex",
-        feature = "grok",
-        feature = "claude",
-        feature = "test-support",
-        feature = "web"
-    ))]
+    #[cfg(all(test, feature = "test-support", feature = "web"))]
     pub(crate) fn in_process_for_test(
         custody: GatewayCustody,
         home: &PlakPaths,
@@ -396,21 +385,12 @@ fn credential_headers(kind: &str) -> Option<&'static [&'static str]> {
         .or_else(|| grok::headers(kind))
 }
 
-#[cfg(feature = "openai")]
 mod openai {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "openai").then_some(plakous::gateway::pins::openai::OPENAI_API_CREDENTIAL_HEADERS)
     }
 }
 
-#[cfg(not(feature = "openai"))]
-mod openai {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "anthropic")]
 mod anthropic {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "anthropic")
@@ -418,28 +398,12 @@ mod anthropic {
     }
 }
 
-#[cfg(not(feature = "anthropic"))]
-mod anthropic {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "xai-api")]
 mod xai {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "xai-api").then_some(plakous::gateway::pins::xai::XAI_API_CREDENTIAL_HEADERS)
     }
 }
 
-#[cfg(not(feature = "xai-api"))]
-mod xai {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "openrouter")]
 mod openrouter {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "openrouter")
@@ -447,52 +411,21 @@ mod openrouter {
     }
 }
 
-#[cfg(not(feature = "openrouter"))]
-mod openrouter {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "codex")]
 mod codex {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "codex").then_some(plakous::gateway::pins::openai::CODEX_CREDENTIAL_HEADERS)
     }
 }
 
-#[cfg(not(feature = "codex"))]
-mod codex {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "claude")]
 mod claude {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "claude").then_some(plakous::gateway::pins::anthropic::CLAUDE_CREDENTIAL_HEADERS)
     }
 }
 
-#[cfg(not(feature = "claude"))]
-mod claude {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
-    }
-}
-
-#[cfg(feature = "grok")]
 mod grok {
     pub(super) fn headers(kind: &str) -> Option<&'static [&'static str]> {
         (kind == "grok").then_some(plakous::gateway::pins::xai::SUPERGROK_CREDENTIAL_HEADERS)
-    }
-}
-
-#[cfg(not(feature = "grok"))]
-mod grok {
-    pub(super) fn headers(_kind: &str) -> Option<&'static [&'static str]> {
-        None
     }
 }
 

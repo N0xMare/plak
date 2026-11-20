@@ -163,10 +163,6 @@ pub fn product_subscription_request_limits() -> CliResult<SubscriptionRequestLim
     .map_err(|_| CliFailure::new("product subscription gate limits are invalid"))
 }
 
-#[cfg(feature = "js")]
-mod composition;
-#[cfg(not(feature = "js"))]
-#[path = "policy/composition_unavailable.rs"]
 mod composition;
 pub(crate) use composition::{
     attach_codex_minimal, attach_local_composition, product_javascript_candidate_attachment,

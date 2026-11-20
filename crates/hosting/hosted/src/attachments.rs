@@ -34,10 +34,6 @@ pub fn check_message_budget<'a>(
     plakous_image::check_message_budget(text, images.into_iter().map(|image| image.bytes.len()))
 }
 
-#[cfg(feature = "images")]
-mod normalize;
-#[cfg(not(feature = "images"))]
-#[path = "attachments/unavailable.rs"]
 mod normalize;
 
 pub use normalize::{normalize, normalize_rgba, normalize_tool};
@@ -46,8 +42,6 @@ pub use normalize::{normalize, normalize_rgba, normalize_tool};
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum NormalizeError {
-    /// Image decoding was omitted from this build.
-    Unavailable(crate::capabilities::CapabilityUnavailable),
     /// The normalizer refused the image; displayed as its own message.
     Image(plakous_image::NormalizeError),
 }
@@ -55,7 +49,6 @@ pub enum NormalizeError {
 impl fmt::Display for NormalizeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unavailable(source) => write!(formatter, "{source}"),
             Self::Image(error) => write!(formatter, "{error}"),
         }
     }
@@ -64,7 +57,6 @@ impl fmt::Display for NormalizeError {
 impl std::error::Error for NormalizeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Unavailable(source) => Some(source),
             // Transparent: the chain continues at the normalizer's source.
             Self::Image(error) => std::error::Error::source(error),
         }
@@ -76,8 +68,6 @@ impl std::error::Error for NormalizeError {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImageFileError {
-    /// Image decoding was omitted from this build.
-    Unavailable(crate::capabilities::CapabilityUnavailable),
     /// The file could not be read or normalized; displayed as its own message.
     File(plakous_image::ImageFileError),
 }
@@ -85,7 +75,6 @@ pub enum ImageFileError {
 impl fmt::Display for ImageFileError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unavailable(error) => write!(formatter, "{error}"),
             Self::File(error) => write!(formatter, "{error}"),
         }
     }
@@ -94,7 +83,6 @@ impl fmt::Display for ImageFileError {
 impl std::error::Error for ImageFileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Unavailable(error) => Some(error),
             // Transparent: the chain continues at the reader's source.
             Self::File(error) => std::error::Error::source(error),
         }
@@ -107,12 +95,10 @@ impl std::error::Error for ImageFileError {
 ///
 /// # Errors
 ///
-/// Returns [`ImageFileError::Unavailable`] in a build without image decoding,
-/// and otherwise [`ImageFileError::File`] naming the file when it cannot be
+/// Returns [`ImageFileError::File`] naming the file when it cannot be
 /// read, is not a file, exceeds [`MAX_SOURCE_BYTES`], or is not an image
 /// within reach of the bounds.
 pub fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
-    crate::capabilities::require_feature("images").map_err(ImageFileError::Unavailable)?;
     normalize::read_image(path)
 }
 

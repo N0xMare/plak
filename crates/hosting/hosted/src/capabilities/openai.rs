@@ -1,20 +1,11 @@
-#[cfg(feature = "openai")]
-#[path = "openai_available.rs"]
-mod compiled;
-#[cfg(not(feature = "openai"))]
-#[path = "openai_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
 /// `OpenAI` direct-API route facts, independent of a `ChatGPT` subscription.
 pub static OPENAI: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "openai",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "openai",
     aliases: &["openai"],
     kind: RouteKind::Platform(PlatformProvider::OpenAi),
@@ -26,3 +17,18 @@ pub static OPENAI: RouteCapability = RouteCapability {
     usage_label: None,
     subscription_label: None,
 };
+
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    Some(plakous::openai::OPENAI_API_HOSTED_RETRIEVAL)
+}
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn review_deadline() -> Option<u64> {
+    Some(plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEW_DUE_AT_UNIX_SECONDS)
+}

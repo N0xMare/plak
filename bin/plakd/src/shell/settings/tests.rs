@@ -1323,7 +1323,6 @@ fn switch_now_names_the_profile_and_waits_for_an_empty_queue() {
 /// A fresh home's unattached session takes the profile's root and
 /// attaches on it, instead of refusing "fork now needs an idle attached
 /// session".
-#[cfg(all(feature = "codex", feature = "grok"))]
 #[test]
 fn an_unattached_empty_session_binds_the_profile_and_reattaches() {
     let dir = tempfile::tempdir().unwrap();
@@ -1603,7 +1602,6 @@ fn moved_remote_requester_use_now_never_bootstraps_a_fresh_home_default() {
 }
 
 /// A loadable home default is never replaced by Use now.
-#[cfg(all(feature = "codex", feature = "grok"))]
 #[test]
 fn use_now_keeps_a_loadable_home_default() {
     let dir = tempfile::tempdir().unwrap();

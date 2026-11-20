@@ -52,27 +52,13 @@ digits of SHA-256 over the executable. A `test-support` build intentionally
 keeps the `; test-hooks` version label for binary probes.
 `plakd version` and global help carry the same build identity alongside the
 package version. `0.0.4` alone is package metadata, not proof of build recency.
-The default build's version label is unchanged. A build omitting product
-features appends `; features -images,-python` (the omitted names, sorted) inside
-the build-identity parentheses. `plakd doctor` reports a `build_features` row:
-`default` or `omitted <sorted names>`. An omitted Python worker has no doctor
-worker row and is never resolved as an installed sidecar.
-
-Source builds can omit `images`, `python`, or `mcp`
-(chapter 06). A requested omitted capability returns typed
-`CapabilityUnavailable { id, kind, feature }`, rendered with the feature and
-the available build capabilities, and exits **2**. It never falls back to a
-different account, route, composition, or tool pack. There is no terminal or clipboard feature. Clients own local appearance and
-clipboard capture; server file and wire attachments still use `images`. Without `images`, `--image`, path
-attachments and JSONL image inputs refuse; CLI refusal precedes image file
-reads and retains `CapabilityUnavailable` as the `CliFailure` source.
-Canonical image history still replays without a decoder. Without `python`,
-composition options and model capability listings omit both `py-ptc` and
-`py-sdk`, and Python config/session bindings refuse before session writes, with
-the selected composition as the refusal id. Without `mcp`,
-`plakd mcp` commands and MCP-selecting templates
-refuse session admission (server definitions alone enable nothing). Read-only session
-show/log/export and carry export do not require the bound evaluator.
+`plakd doctor` reports `default` in its `build_features` row.
+All product routes, image attachments, JavaScript and Python compositions,
+MCP, local web fetch and Git are built in (chapter 06 §4). Worker sidecars
+are still resolved separately. Server definitions alone enable no MCP tools.
+There is no terminal or clipboard feature: clients own local appearance and
+clipboard capture. Read-only session show/log/export and carry export do not
+require the bound evaluator.
 
 Account admission is closed to `claude`, `codex`, `grok`, `anthropic`,
 `openai`, `xai-api`, and `openrouter`, including their existing unambiguous
@@ -85,8 +71,8 @@ An unbound empty shell remains valid. An unknown account never
 inherits the target provider's default credentials. Export stays v13 with its
 v12 importer; these account-admission rules do not change binding inputs or
 the document encodings.
-Read-only session labels retain unknown account metadata; unknown does not
-mean a known route omitted from this build, and displaying it admits no work.
+Read-only session labels retain unknown account metadata. Displaying it admits
+no work.
 
 The binary ID is read from the snapshot's install-time `binary-id` manifest
 when its device, inode, size and nanosecond modification time all match the
@@ -1496,12 +1482,8 @@ summarized turn counts survive. Presentation subjects survive unchanged for read
 typed transcript rows still carry independently.
 An imported session is created at genesis under the importing build's
 configuration, not attached to the source runtime. Frozen tool selections are
-not exported; an MCP-frozen local session's document therefore binds the
-destination's tools (none in an MCP-off build), rather than carrying MCP
-authority or requiring an MCP capability refusal. Local attach/resume still
-refuses an MCP-frozen record before writes. The document does carry its
-composition: importing `py-ptc` into a Python-off build refuses with
-`CapabilityUnavailable` (exit 2) before creating a successor.
+not exported: import binds the destination's tools rather than carrying the
+source's MCP authority. The document carries its composition.
 The document's replay account/model are declared, not authenticated. Ordinary
 `session import <file>` strips all provider-opaque replay by default, including
 reasoning envelopes, native compaction ciphertext and opaque result parts; only
@@ -4019,15 +4001,13 @@ closes. This does not change the v1 command or event encoding.
 | `bye` | — |
 
 `hello.capabilities` is additive in v1: a sorted, duplicate-free array with
-one canonical id per compiled route (`anthropic`, `claude`, `codex`, `grok`,
-`openai`, `openrouter`, `xai-api`) plus the compiled `BUILD_CAPABILITIES`
-feature names (`images`, `js`, `mcp`, `python`, `web-fetch`). This is the closed current
-vocabulary, also used by capability refusals' `available:` list. Account
-aliases (`chatgpt`, `supergrok`, `xai-oauth`) and composition names (`py-ptc`,
-`py-sdk`) are not entries. `js` and `web-fetch` are explicit build capabilities,
-not inferred from a chosen composition or route. The default product reports
-all twelve ids; reduced products omit every route or feature not compiled.
-When Python is omitted, `python_host` and `python_host_target` are absent.
+one canonical id per route (`anthropic`, `claude`, `codex`, `grok`, `openai`,
+`openrouter`, `xai-api`) and the capability ids `images`, `js`, `mcp`,
+`python` and `web-fetch`. This closed vocabulary is also used by capability
+refusals' `available:` list. Account aliases (`chatgpt`, `supergrok`,
+`xai-oauth`) and composition names (`py-ptc`, `py-sdk`) are not entries.
+The list does not imply credentials, model enrolment or a resolved sidecar.
+The hello also reports `python_host` and `python_host_target`.
 
 `hello`, `ready`, `tool`, `error`, `turn`, `turn_lifecycle`, `tree`, `bye`, `model_refusal`, and `recovered` MUST NOT be dropped
 on the sink: they are the lines a client's own state machine depends on.

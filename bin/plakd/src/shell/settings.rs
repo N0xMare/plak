@@ -554,10 +554,6 @@ pub fn settings_view(config: &ProductConfig) -> crate::surface_protocol::Setting
                 plakous_hosted::binding::CompositionSelection::PySdk,
             ]
             .into_iter()
-            .filter(|composition| {
-                !composition.requires_python_worker()
-                    || crate::build_features::require_feature("python").is_ok()
-            })
             .map(
                 |composition| crate::surface_protocol::SettingsCompositionOption {
                     composition: composition.into(),

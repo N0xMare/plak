@@ -36,7 +36,7 @@ pub(crate) fn load_admitted_product_session(
         paths,
         store,
         session_id,
-        crate::build_features::admit_session,
+        crate::admission::admit_session,
         LookupMode::Work,
     )
 }

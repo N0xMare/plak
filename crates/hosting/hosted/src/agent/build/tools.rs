@@ -462,7 +462,6 @@ pub(in crate::agent) fn bind_node_tool_plan(
     mcp_binding: crate::mcp_binding::McpBinding,
 ) -> CliResult<crate::tool_plan::ToolPlan> {
     let selection = &tools.selection;
-    crate::capabilities::require_tools(selection)?;
     if selection.is_empty() {
         return Ok(crate::tool_plan::ToolPlan::default());
     }

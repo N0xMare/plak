@@ -332,9 +332,9 @@ plakous-hosted = [
 ]
 
 [workspace.metadata.plakous.facade-features]
-plakd = ["gateway", "sessions-sqlite"]
+plakd = ["anthropic", "claude", "codex", "composition", "composition-python", "gateway", "grok", "mcp", "openai", "openrouter", "sessions-sqlite", "web-fetch", "xai"]
 plakous-recursive-subagents = ["store"]
-plakous-hosted = ["sessions-sqlite"]
+plakous-hosted = ["anthropic", "claude", "codex", "composition", "composition-python", "grok", "mcp", "openai", "openrouter", "sessions-sqlite", "web-fetch", "xai"]
 
 [workspace.lints.rust]
 missing_docs = "deny"
@@ -423,12 +423,12 @@ lto = false
 # Placement debt is capped at the current inventory; reductions must lower ceilings.
 
 [workspace.metadata.plakous.cfg.plakd]
-feature-sites = ["src/lib.rs", "src/capabilities.rs"]
+feature-sites = ["src/lib.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs", "src/test_hooks.rs"]
-feature-ceiling = 84
+feature-ceiling = 83
 test-seam-ceiling = 41
 env-ceiling = 16
-reason = "Capability registry, grouped interactive identity/carry helpers and host-upgrade ownership/probe guards preserve reduced products. Upgrade crash, capacity and state-key hooks are isolated at the composition root; native contract-drift errors exist only with their compiled route."
+reason = "Maintainer, JJ and web remain optional. The existing identity, carry and host-upgrade hooks are confined to their product boundaries."
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 63
@@ -466,10 +466,10 @@ test-seam-ceiling = 1
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-hosted]
-feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-feature-ceiling = 28
+feature-sites = ["src/lib.rs"]
+feature-ceiling = 26
 test-seam-ceiling = 29
-reason = "Capability registry and existing placement debt; native drift refusals exist only when a native route is compiled and preserve their exact newer-build remedy."
+reason = "The existing library test seams and optional JJ integration retain their placement debt."
 
 [workspace.metadata.plakous.cfg.plakous-http]
 feature-ceiling = 17

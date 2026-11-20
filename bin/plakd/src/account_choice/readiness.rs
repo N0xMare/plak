@@ -40,13 +40,10 @@ pub(super) fn ready_accounts(custody: &HostCustody) -> Result<Vec<ReadyAccount>,
 fn gateway_ready_accounts(link: &AdminLink) -> Result<Vec<ReadyAccount>, String> {
     let names = link.accounts()?;
     let listed_accounts = || names.iter().filter_map(|name| parse_exact(name));
-    let expected = listed_accounts()
-        .filter(|account| account.vertical().capability().compiled)
-        .map(|account| account.to_string());
+    let expected = listed_accounts().map(|account| account.to_string());
     let roster = with_default_accounts(listed_accounts());
     let accounts = roster
         .iter()
-        .filter(|account| account.vertical().capability().compiled)
         .map(|account| GatewayAccount::new(account.as_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;

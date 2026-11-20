@@ -7,7 +7,6 @@ fn at(seconds: u64) -> TestResult<Timestamp> {
     Ok(Timestamp::new(seconds, 0)?)
 }
 
-#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 #[test]
 fn compatibility_drift_is_not_a_login_remedy() {
     let refusal = refusal(

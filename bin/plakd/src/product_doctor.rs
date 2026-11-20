@@ -785,13 +785,8 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         CheckKind::BuildFeatures,
         "product",
         Severity::Ok,
-        if crate::build_features::omitted_features().is_empty() {
-            "default"
-        } else {
-            "reduced"
-        }
-        .to_owned(),
-        crate::build_features::description(),
+        "default",
+        "default",
         None,
     ));
     checks.push(DoctorCheck::new(
@@ -861,25 +856,17 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         CheckKind::StdoutTerminal,
         input.terminals.stdout,
     ));
-    let evaluator = if input.python_containment_required {
-        "python"
-    } else {
-        "js"
-    };
-    if crate::build_features::require_feature(evaluator).is_ok() {
-        checks.extend(composition_checks(
-            input.composition_requirement,
-            input.composition_host,
-            input.python_containment_required,
-            input.runtime_directory.as_deref(),
-        ));
-    }
+    checks.extend(composition_checks(
+        input.composition_requirement,
+        input.composition_host,
+        input.python_containment_required,
+        input.runtime_directory.as_deref(),
+    ));
     if crate::capabilities::ROUTES.iter().any(|capability| {
-        capability.route.compiled
-            && matches!(
-                capability.doctor,
-                Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
-            )
+        matches!(
+            capability.doctor,
+            Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
+        )
     }) {
         checks.push(openrouter_catalog_check());
     }
@@ -888,7 +875,6 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     checks.extend(input.runner_ssh);
     for doctor in crate::capabilities::ROUTES
         .iter()
-        .filter(|capability| capability.route.compiled)
         .filter_map(|capability| capability.doctor.as_ref())
     {
         if let crate::capabilities::RouteDoctor::Oauth { kind, probe } = doctor {

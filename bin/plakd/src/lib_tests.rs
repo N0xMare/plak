@@ -104,7 +104,6 @@ fn exit_codes_match_the_documented_classification() {
     );
 }
 
-#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 #[test]
 fn native_contract_drift_is_auth_exit_three_without_relogin_advice() {
     let error = NativeSubscriptionError::CompatibilityDrift {

@@ -262,7 +262,6 @@ impl crate::openrouter::OpenRouterCredentials for NoCredentialReads {
     fn key_label(&self, _: &crate::account::AccountRef) -> CliResult<String> {
         panic!("named native usage must not inspect a gateway key")
     }
-    #[cfg(feature = "openrouter")]
     fn source(
         &self,
         _: &crate::account::AccountRef,

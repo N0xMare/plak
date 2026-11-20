@@ -6,7 +6,6 @@ pub(crate) mod console;
 mod forward;
 mod keys;
 mod load;
-#[cfg(feature = "mcp")]
 pub(crate) mod mcp_edit;
 mod policy;
 mod publication;

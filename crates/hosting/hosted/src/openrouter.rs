@@ -6,13 +6,9 @@ use plakous::{
     sessions::{SessionRuntimeBinding, SessionTargetBinding},
 };
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc};
-#[cfg(feature = "openrouter")]
 #[path = "openrouter/available.rs"]
 mod implementation;
-#[cfg(not(feature = "openrouter"))]
-#[path = "openrouter/unavailable.rs"]
-mod implementation;
-#[cfg(all(test, feature = "openrouter"))]
+#[cfg(test)]
 pub(crate) use implementation::binding_matrix_facts;
 pub use implementation::*;
 pub(crate) use implementation::{carry_input_window, construct_openrouter_runtime_with_fence};

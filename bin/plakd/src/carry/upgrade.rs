@@ -184,7 +184,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
     let paths = services.paths()?;
     let config = crate::product_config::ProductConfig::load(paths)
         .map_err(CliFailure::new)
-        .and_then(|config| crate::build_features::admit_config(&config));
+        .and_then(|config| crate::admission::admit_config(&config));
     let policy = crate::product_config::SessionPolicy::load(paths).map_err(CliFailure::new);
     let export_versions = super::IMPORTABLE_VERSIONS.to_vec();
     let export_versions = if crate::test_hooks::upgrade_import_refused() {

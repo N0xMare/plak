@@ -96,7 +96,6 @@ fn custodied_key_kinds() -> Vec<CustodiedKeyKind> {
     kinds
 }
 
-#[cfg(feature = "openai")]
 mod openai_kind {
     pub(super) fn push(kinds: &mut Vec<super::CustodiedKeyKind>) {
         kinds.push(super::CustodiedKeyKind {
@@ -109,12 +108,6 @@ mod openai_kind {
     }
 }
 
-#[cfg(not(feature = "openai"))]
-mod openai_kind {
-    pub(super) fn push(_kinds: &mut Vec<super::CustodiedKeyKind>) {}
-}
-
-#[cfg(feature = "anthropic")]
 mod anthropic_kind {
     pub(super) fn push(kinds: &mut Vec<super::CustodiedKeyKind>) {
         kinds.push(super::CustodiedKeyKind {
@@ -127,12 +120,6 @@ mod anthropic_kind {
     }
 }
 
-#[cfg(not(feature = "anthropic"))]
-mod anthropic_kind {
-    pub(super) fn push(_kinds: &mut Vec<super::CustodiedKeyKind>) {}
-}
-
-#[cfg(feature = "xai-api")]
 mod xai_kind {
     pub(super) fn push(kinds: &mut Vec<super::CustodiedKeyKind>) {
         kinds.push(super::CustodiedKeyKind {
@@ -145,12 +132,6 @@ mod xai_kind {
     }
 }
 
-#[cfg(not(feature = "xai-api"))]
-mod xai_kind {
-    pub(super) fn push(_kinds: &mut Vec<super::CustodiedKeyKind>) {}
-}
-
-#[cfg(feature = "openrouter")]
 mod openrouter_kind {
     pub(super) fn push(kinds: &mut Vec<super::CustodiedKeyKind>) {
         kinds.push(super::CustodiedKeyKind {
@@ -161,11 +142,6 @@ mod openrouter_kind {
             pins: plakous::gateway::pins::openrouter::OPENROUTER_UPSTREAM_PINS,
         });
     }
-}
-
-#[cfg(not(feature = "openrouter"))]
-mod openrouter_kind {
-    pub(super) fn push(_kinds: &mut Vec<super::CustodiedKeyKind>) {}
 }
 
 struct HomeKeyStore {
@@ -196,7 +172,6 @@ impl LocalKeyStore for HomeKeyStore {
     }
 }
 
-#[cfg(feature = "codex")]
 mod codex_login {
     use std::sync::Arc;
 
@@ -226,24 +201,6 @@ mod codex_login {
     }
 }
 
-#[cfg(not(feature = "codex"))]
-mod codex_login {
-    use plakous::gateway::server::LocalCustody;
-    use plakous::subscriptions::NativeSubscriptions;
-
-    pub(super) fn serves(_kind: &str) -> bool {
-        false
-    }
-
-    pub(super) fn register(
-        custody: LocalCustody,
-        _subscriptions: &NativeSubscriptions,
-    ) -> LocalCustody {
-        custody
-    }
-}
-
-#[cfg(feature = "claude")]
 mod claude_login {
     use std::sync::Arc;
 
@@ -270,24 +227,6 @@ mod claude_login {
     }
 }
 
-#[cfg(not(feature = "claude"))]
-mod claude_login {
-    use plakous::gateway::server::LocalCustody;
-    use plakous::subscriptions::NativeSubscriptions;
-
-    pub(super) fn serves(_kind: &str) -> bool {
-        false
-    }
-
-    pub(super) fn register(
-        custody: LocalCustody,
-        _subscriptions: &NativeSubscriptions,
-    ) -> LocalCustody {
-        custody
-    }
-}
-
-#[cfg(feature = "grok")]
 mod grok_login {
     use std::sync::Arc;
 
@@ -314,22 +253,5 @@ mod grok_login {
             Some(Arc::new(v1)),
             plakous::gateway::pins::xai::SUPERGROK_UPSTREAM_PINS,
         )
-    }
-}
-
-#[cfg(not(feature = "grok"))]
-mod grok_login {
-    use plakous::gateway::server::LocalCustody;
-    use plakous::subscriptions::NativeSubscriptions;
-
-    pub(super) fn serves(_kind: &str) -> bool {
-        false
-    }
-
-    pub(super) fn register(
-        custody: LocalCustody,
-        _subscriptions: &NativeSubscriptions,
-    ) -> LocalCustody {
-        custody
     }
 }

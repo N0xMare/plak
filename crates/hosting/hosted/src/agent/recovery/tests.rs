@@ -31,7 +31,6 @@ mod followup_recompile;
 mod live_lease;
 mod parent_followup;
 mod saturated_retask;
-#[cfg(all(feature = "codex", feature = "grok"))]
 mod spawn_accounts;
 use crate::agent::{ApiTopologyParent, NATIVE_RUN_MAX_MODEL_ROUNDS, ProductStateRoots};
 use crate::agent_tree::{

@@ -35,6 +35,7 @@
 )]
 
 mod account_choice;
+mod admission;
 #[cfg(test)]
 mod agent_composition_tests;
 #[doc(hidden)]
@@ -45,7 +46,6 @@ mod agent_wire;
 #[doc(hidden)]
 pub mod agents_projection;
 mod app_dispatch;
-mod build_features;
 mod build_identity;
 mod capabilities;
 mod carry;
@@ -323,7 +323,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         test_hooks::install().map_err(CliFailure::new)?;
     }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
-    build_features::admit_command(&command)?;
+    if let Command::CompatibilityNotice(provider) = &command {
+        plakous_hosted::capabilities::require_native(*provider)?;
+    }
 
     if matches!(command, Command::Help) {
         cli::render::global_help(&mut io::stdout().lock())

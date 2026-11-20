@@ -8,14 +8,6 @@ use crate::runtime::test_kit::BlockOn as _;
 
 use super::*;
 
-#[cfg(all(
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "js",
-    feature = "python"
-))]
 mod binding_contracts;
 pub(super) mod frozen_presentation;
 mod native_fixture;

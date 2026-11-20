@@ -221,7 +221,7 @@ fn build_attached_host_config(
     purpose: AttachedPurpose,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, AttachedConfigError> {
     let classify_rebind_fallback = purpose == AttachedPurpose::Rebind;
-    if let Err(error) = crate::build_features::admit_session(&record) {
+    if let Err(error) = crate::admission::admit_session(&record) {
         let unknown_account = std::error::Error::source(&error).is_some_and(|source| {
             matches!(
                 source.downcast_ref::<plakous_hosted::capabilities::AccountAdmissionError>(),

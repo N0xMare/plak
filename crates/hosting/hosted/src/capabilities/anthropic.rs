@@ -1,20 +1,11 @@
-#[cfg(feature = "anthropic")]
-#[path = "anthropic_available.rs"]
-mod compiled;
-#[cfg(not(feature = "anthropic"))]
-#[path = "anthropic_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
 /// Anthropic direct-API route facts, readable even when its runtime is omitted.
 pub static ANTHROPIC: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "anthropic",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "anthropic",
     aliases: &["anthropic"],
     kind: RouteKind::Platform(PlatformProvider::Anthropic),
@@ -26,3 +17,18 @@ pub static ANTHROPIC: RouteCapability = RouteCapability {
     usage_label: None,
     subscription_label: None,
 };
+
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    Some(plakous::anthropic::ANTHROPIC_API_HOSTED_RETRIEVAL)
+}
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn review_deadline() -> Option<u64> {
+    Some(plakous::anthropic::ANTHROPIC_PLATFORM_ADMISSION_REVIEW_DUE_AT_UNIX_SECONDS)
+}

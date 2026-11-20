@@ -99,7 +99,6 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     processing_tier: ProcessingTierDisposition,
 ) -> CliResult<SelectedProviderConfiguration> {
     crate::capabilities::require_native(provider)?;
-    crate::capabilities::require_composition(composition)?;
     if provider == NativeProvider::Codex && effort == Some(ReasoningEffort::Ultra) {
         return Err(CliFailure::new(
             "Codex Ultra is a multi-agent orchestration mode, not a single-agent reasoning effort",
@@ -365,7 +364,6 @@ pub(crate) async fn api_session_runtime_binding_with_owner(
     cached_evidence: Option<crate::openrouter::OpenRouterChatModelEvidence>,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
-    crate::capabilities::require_composition(parent.composition)?;
     parent
         .composition
         .admit_role(parent.topology_caller_id.is_some())?;
@@ -578,7 +576,6 @@ pub(in crate::agent) async fn coding_session_runtime_binding_for(
             .into(),
         );
     }
-    crate::capabilities::require_composition(spec.composition)?;
     spec.composition
         .admit_role(spec.topology_caller_id.is_some())?;
     spec.tool_selection.admit_composition(spec.composition)?;

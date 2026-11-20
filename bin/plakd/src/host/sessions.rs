@@ -1145,14 +1145,7 @@ fn new_record(
             .map(|name| name.as_str().to_owned())
             .collect(),
     });
-    crate::build_features::admit_selected(
-        &config,
-        record.account.as_deref(),
-        record.model.as_deref(),
-        record.composition,
-    )
-    .map_err(|_| binding(BindingRefusalKind::IncompatibleComposition))?;
-    crate::build_features::admit_session(&record)
+    crate::admission::admit_session(&record)
         .map_err(|_| binding(BindingRefusalKind::IncompatibleComposition))?;
     session.clone_into(&mut record.id);
     record.create_operation_id = format!("plak:create:{session}");

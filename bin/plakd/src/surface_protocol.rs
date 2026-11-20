@@ -11,7 +11,6 @@ use plakous_host_protocol::{
     intent_channel,
 };
 
-#[cfg(feature = "mcp")]
 pub(crate) mod mcp_lines;
 
 /// The intent enum Plak's surfaces send: the protocol plus [`SurfaceIntent`].

@@ -198,7 +198,7 @@ pub(crate) fn new_agent_record(
         record.effort = None;
     }
     if let (Some(account), Some(model)) = (record.account.as_deref(), record.model.as_deref()) {
-        crate::build_features::require_account(account)?;
+        plakous_hosted::capabilities::require(account)?;
         super::support::admit_account_model(account, model)
             .map_err(|refusal| CliFailure::classified(CliFailureKind::Usage, refusal))?;
     }
@@ -300,23 +300,9 @@ pub(crate) fn run_agent_after_admission(
     composition: Option<product_config::ProductCompositionSelection>,
     accounts: Vec<plakous_host_protocol::wire::AccountChoice>,
 ) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
-    if let Some(account) = &account {
-        crate::build_features::require_account(account.as_str())?;
-    }
     if let Some(provider) = provider {
         plakous_hosted::capabilities::require_native(provider)?;
     }
-    if let Some(provider) = platform {
-        crate::build_features::require_account(provider.account())?;
-    }
-    if wire.is_some() {
-        crate::build_features::require_account("openrouter")?;
-    }
-    if let Some(composition) = composition {
-        crate::build_features::require_composition(composition)?;
-    }
-    // The session's product context: the CLI's launch directory unless the
-    // caller names another workspace's.
     let paths = match context {
         Some(context) => context,
         None => services.paths()?,
@@ -367,13 +353,7 @@ pub(crate) fn run_agent_after_admission(
                 None,
             )?;
             record.account_choices = choices;
-            crate::build_features::admit_selected(
-                &cfg,
-                record.account.as_deref(),
-                record.model.as_deref(),
-                record.composition,
-            )?;
-            crate::build_features::admit_session(&record)?;
+            crate::admission::admit_session(&record)?;
             store.save(&mut record).map_err(CliFailure::new)?;
             (record, custody)
         }

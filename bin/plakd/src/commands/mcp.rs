@@ -2,10 +2,6 @@
 
 use crate::product_config::{ConfigWriteScope, McpServerConfig};
 
-#[cfg(feature = "mcp")]
-mod available;
-#[cfg(not(feature = "mcp"))]
-#[path = "mcp/unavailable.rs"]
 mod available;
 pub(crate) use available::{run, session_overview};
 

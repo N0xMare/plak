@@ -27,7 +27,7 @@ pub(crate) fn run_doctor(
     let loaded = product_config::ProductConfig::load(paths);
     let config = product_doctor::inspect_config(&paths.config_file(), |_| {
         loaded.as_ref().map_err(Clone::clone).and_then(|config| {
-            crate::build_features::admit_config(config).map_err(|error| error.to_string())
+            crate::admission::admit_config(config).map_err(|error| error.to_string())
         })
     });
     let config = match (&loaded, config) {

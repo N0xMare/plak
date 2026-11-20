@@ -1,8 +1,7 @@
 //! The product image normalizer installed on a coding agent.
 //!
 //! Route, model and image-input acceptance are derived by the agent from the
-//! bound provider configuration. This module only supplies the decoder. A
-//! build without image decoding still installs it; `normalize_tool` refuses.
+//! bound provider configuration. This module only supplies the decoder.
 
 use std::sync::Arc;
 
@@ -11,7 +10,6 @@ use plakous::tools::{ImageNormalizer, PreparedImage};
 use crate::attachments::{NormalizeError, normalize_tool};
 
 const UNSUPPORTED_IMAGE: &str = "unable to process image: invalid or unsupported image data";
-const IMAGE_READS_UNAVAILABLE: &str = "image reads are unavailable in this build";
 const IMAGE_BUDGET: &str = "image does not fit the 1 MiB tool-result budget even downscaled";
 
 /// The decoder for workspace image reads.
@@ -39,7 +37,6 @@ impl ImageNormalizer for HostedImageNormalizer {
 fn tool_normalize_error(error: &NormalizeError) -> String {
     match error {
         NormalizeError::Image(plakous_image::NormalizeError::Unfit) => IMAGE_BUDGET.to_owned(),
-        NormalizeError::Unavailable(_) => IMAGE_READS_UNAVAILABLE.to_owned(),
         NormalizeError::Image(_) => UNSUPPORTED_IMAGE.to_owned(),
     }
 }
@@ -52,45 +49,16 @@ mod tests {
     fn decoder_refusals_keep_the_safe_sentence_and_original_failure() {
         use std::error::Error as _;
         let error = normalizer().normalize(b"not an image").unwrap_err();
-        assert!(matches!(
-            error.to_string().as_str(),
-            UNSUPPORTED_IMAGE | IMAGE_READS_UNAVAILABLE
-        ));
+        assert_eq!(error.to_string(), UNSUPPORTED_IMAGE);
         assert!(
             error
                 .source()
                 .is_some_and(<dyn std::error::Error + 'static>::is::<NormalizeError>)
         );
     }
-
-    #[test]
-    fn a_missing_decoder_refuses_with_the_build_sentence() {
-        let error = NormalizeError::Unavailable(crate::capabilities::CapabilityUnavailable {
-            id: "images",
-            kind: crate::capabilities::CapabilityKind::Surface,
-            feature: "images",
-        });
-        assert_eq!(tool_normalize_error(&error), IMAGE_READS_UNAVAILABLE);
-    }
-
-    #[cfg(not(feature = "images"))]
-    #[test]
-    fn normalize_tool_without_a_decoder_is_unavailable() {
-        match normalize_tool(b"\x89PNG\r\n\x1a\n") {
-            Err(error) => {
-                assert!(matches!(error, NormalizeError::Unavailable(_)));
-                assert_eq!(tool_normalize_error(&error), IMAGE_READS_UNAVAILABLE);
-            }
-            Ok(_) => panic!("a build without image decoding decoded an image"),
-        }
-        match normalizer().normalize(b"\x89PNG\r\n\x1a\n") {
-            Err(error) => assert_eq!(error.to_string(), IMAGE_READS_UNAVAILABLE),
-            Ok(_) => panic!("a build without image decoding returned image bytes"),
-        }
-    }
 }
 
-#[cfg(all(test, feature = "images"))]
+#[cfg(test)]
 mod executor {
     use std::fs;
     use std::io::Write as _;

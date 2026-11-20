@@ -25,10 +25,6 @@ mod remote_account;
 mod route_custody;
 mod server_config;
 mod service;
-#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
-mod subscription_custody;
-#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
-#[path = "subscription_custody_unavailable.rs"]
 mod subscription_custody;
 
 pub(crate) use address::GatewayAddress;
@@ -376,7 +372,7 @@ pub(crate) fn read_key_file(path: &std::path::Path) -> Result<String, String> {
 
 #[cfg(test)]
 mod adoption_tests;
-#[cfg(all(test, feature = "codex", feature = "grok"))]
+#[cfg(test)]
 #[path = "../../tests/integration/support/gateway_seed.rs"]
 pub(crate) mod gateway_seed;
 #[cfg(test)]
@@ -384,26 +380,8 @@ pub(crate) mod test_service;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(
-    test,
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "codex",
-    feature = "claude",
-    feature = "grok"
-))]
+#[cfg(test)]
 mod continuity_tests;
 
-#[cfg(all(
-    test,
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "codex",
-    feature = "claude",
-    feature = "grok"
-))]
+#[cfg(test)]
 mod account_choice_tests;

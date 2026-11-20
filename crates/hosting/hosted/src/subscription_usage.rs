@@ -27,11 +27,7 @@ use plakous::model::{
     SubscriptionUsageBalance, SubscriptionUsageCredentialState, SubscriptionUsagePeriod,
     SubscriptionUsageRead, SubscriptionUsageSnapshot, SubscriptionUsageUnavailable,
 };
-#[cfg(feature = "openrouter")]
 #[path = "subscription_usage/openrouter.rs"]
-mod openrouter_usage;
-#[cfg(not(feature = "openrouter"))]
-#[path = "subscription_usage/openrouter_unavailable.rs"]
 mod openrouter_usage;
 use plakous::subscriptions::NativeProvider;
 use plakous_host_protocol::views::presentation::{

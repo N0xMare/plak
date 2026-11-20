@@ -158,7 +158,6 @@ fn an_api_account_ready_only_at_the_gateway_fills_chooses_and_spawns() {
     );
 }
 
-#[cfg(feature = "codex")]
 #[test]
 fn the_gateway_reports_the_default_and_named_subscription_slots() {
     use plakous::gateway::protocol::GatewayAccount;

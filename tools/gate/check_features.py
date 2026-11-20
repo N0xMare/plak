@@ -14,17 +14,17 @@ map) and compared to `cargo tree`. All packages use the same witness scheme.
 Named exclusion profiles independently pin complete external closures. The
 manifest security-surface digests are
 reviewed pins over the library layers (core, common, engine, protocol,
-provider, store, harness, facade) and stay hardcoded below.
+provider, store, harness, facade) and the product and hosted manifests and stay hardcoded below.
 
 `EXCLUDED_CLOSURE_PACKAGES` additionally pins, over the complete external
 closure Cargo reports, the packages a named feature profile must not reach.
 This is what makes the facade's evaluator decoupling provable: `composition`
 buys Code Mode and the JavaScript sidecar and nothing else.
 
-Without `--build`, eight `cargo check --lib` profiles prove feature-conditioned
+Normally, eight `cargo check --lib` profiles prove feature-conditioned
 code: facade none, `full`, `composition`, `claude`, `openai` and `gateway`;
-hosted none and `--all-features`. A rustc warning or error fails the run. Every public
-feature still has its closure witness.
+hosted with no optional features and `--all-features`. A rustc warning or
+error fails the run. Every public feature still has its closure witness.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -57,408 +56,11 @@ from plakous_policy import (  # noqa: E402
 from check_workspace import _blank_rust_non_code  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-# Layers whose manifests carry a reviewed security-surface digest.
+# Manifests carrying a reviewed security-surface digest.
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
+PRODUCT_DIGESTS = {"plakd", "plakous-hosted"}
 MAX_OPTIONAL_FEATURES = 24
 FACADE = "plakous"
-PRODUCT_FEATURES = (
-    "anthropic",
-    "claude",
-    "codex",
-    "grok",
-    "images",
-    "js",
-    "mcp",
-    "openai",
-    "openrouter",
-    "python",
-    "web-fetch",
-    "xai-api",
-)
-NAMED_VARIANTS = {
-    "default": ("default", ()),
-    "api": ("omit", ("codex", "grok", "claude")),
-    "minimal": ("only", ("openrouter", "git-cli")),
-}
-ADMISSION_OMISSIONS = {"images", "python", "mcp"}
-
-
-def named_variants(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
-    """The one named artifact table; only default is distributed."""
-    defaults = set((manifest.get("features") or {}).get("default", []))
-    profiles = []
-    for name, (kind, features) in NAMED_VARIANTS.items():
-        selected = set(features) if kind == "only" else defaults - set(features)
-        profiles.append(
-            (name, () if kind == "default" else tuple(sorted(selected)), kind == "default")
-        )
-    return profiles
-
-
-def product_feature_sets(manifest: dict[str, object]) -> list[tuple[str, tuple[str, ...], bool]]:
-    """Use the same bounded witness set for product and library packages."""
-    return feature_sets(optional_features(manifest), "full" in manifest.get("features", {}))
-
-
-def check_product_profiles(
-    manifests: dict[str, dict[str, object]],
-    root: Path = ROOT,
-    operation: str = "build",
-    target: str | None = None,
-    fixture_binary: str | None = None,
-    fixture_server: str | None = None,
-) -> list[str]:
-    """Compile each independent feature-off resolution; warnings fail this gate."""
-    if "plakd" not in manifests:
-        return []
-    errors = []
-    manifest = manifests["plakd"]
-    profiles = [profile for profile in named_variants(manifest) if profile[0] != "default"]
-    defaults = set(manifest["features"]["default"])
-    profiles.append(("admission", tuple(sorted(defaults - ADMISSION_OMISSIONS)), False))
-    for name, selected, default in profiles:
-        print(f"product {operation}: {name}", flush=True)
-        command = cargo_command(operation, selected, default, "plakd") + [
-            "--lib",
-            "--bins",
-            "--message-format=json",
-        ]
-        if target:
-            command.extend(["--target", target])
-        result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
-        diagnostics = compiler_diagnostics(result.stdout)
-        for diagnostic in diagnostics:
-            sys.stderr.write(diagnostic)
-        if result.returncode or diagnostics:
-            if not diagnostics:
-                sys.stderr.write(result.stderr)
-            errors.append(f"plakd [{name}]: feature-off compilation failed or emitted warnings")
-        elif operation == "build":
-            executable = None
-            for line in result.stdout.splitlines():
-                try:
-                    artifact = json.loads(line)
-                except ValueError:
-                    continue
-                if (
-                    artifact.get("reason") == "compiler-artifact"
-                    and artifact.get("target", {}).get("name") == "plakd"
-                    and artifact.get("executable")
-                ):
-                    executable = artifact["executable"]
-            if executable is None:
-                errors.append(f"plakd [{name}]: build reported no executable")
-            else:
-                errors.extend(product_smoke(executable, selected, name))
-                if name == "admission" and fixture_binary and fixture_server:
-                    import product_feature_fixture
-
-                    errors.extend(
-                        product_feature_fixture.check(fixture_binary, executable, fixture_server)
-                    )
-                if name in {"api", "minimal"} and fixture_binary:
-                    import product_feature_fixture
-
-                    errors.extend(product_feature_fixture.check_route(fixture_binary, executable))
-        command = cargo_command("clippy", selected, default, "plakd") + ["--lib", "--bins"]
-        if target:
-            command.extend(["--target", target])
-        result = subprocess.run(command + ["--", "-D", "warnings"], cwd=root, check=False)
-        if result.returncode:
-            errors.append(f"plakd [{name}]: feature-off clippy failed")
-    print(f"checked {len(profiles)} product feature-off profiles", flush=True)
-    return errors
-
-
-def product_builds(manifest: dict[str, object], target: str | None) -> list[str]:
-    """Keep the full test-support writer separate from the reduced binaries opening its stores."""
-    command = cargo_command("build", ("test-support",), True, "plakd") + [
-        "--bin",
-        "plakd",
-        "--message-format=json",
-    ]
-    if target:
-        command.extend(["--target", target])
-    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
-    diagnostics = compiler_diagnostics(result.stdout)
-    if result.returncode or diagnostics:
-        sys.stderr.write("".join(diagnostics) or result.stderr)
-        return ["full test-support feature fixture writer failed to build"]
-    binaries = [
-        row["executable"]
-        for line in result.stdout.splitlines()
-        if (row := json.loads(line)).get("reason") == "compiler-artifact"
-        and row.get("target", {}).get("name") == "plakd"
-        and row.get("executable")
-    ]
-    if not binaries:
-        return ["full test-support fixture writer reported no executable"]
-    writer_binary = binaries[-1]
-    command = cargo_command("build", (), True, "plakous-mcp-fake-server") + [
-        "--bin",
-        "mcp-fake-server",
-        "--message-format=json",
-    ]
-    if target:
-        command.extend(["--target", target])
-    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
-    diagnostics = compiler_diagnostics(result.stdout)
-    if result.returncode or diagnostics:
-        sys.stderr.write("".join(diagnostics) or result.stderr)
-        return ["MCP fixture server failed to build"]
-    binaries = [
-        row["executable"]
-        for line in result.stdout.splitlines()
-        if (row := json.loads(line)).get("reason") == "compiler-artifact"
-        and row.get("target", {}).get("name") == "mcp-fake-server"
-        and row.get("executable")
-    ]
-    if not binaries:
-        return ["MCP fixture server reported no executable"]
-    server_binary = binaries[-1]
-    with tempfile.TemporaryDirectory(prefix="plakd-feature-writer-") as directory:
-        writer = str(Path(directory) / "plakd")
-        shutil.copy2(writer_binary, writer)
-        errors = check_product_profiles(
-            {"plakd": manifest},
-            operation="build",
-            target=target,
-            fixture_binary=writer,
-            fixture_server=server_binary,
-        )
-        selected = tuple(
-            sorted(
-                set(manifest["features"]["default"]) - ADMISSION_OMISSIONS
-                | {"maintainer", "test-support"}
-            )
-        )
-        command = cargo_command("build", selected, False, "plakd") + [
-            "--bin",
-            "plakd",
-            "--message-format=json",
-        ]
-        if target:
-            command.extend(["--target", target])
-        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
-        diagnostics = compiler_diagnostics(result.stdout)
-        if result.returncode or diagnostics:
-            sys.stderr.write("".join(diagnostics) or result.stderr)
-            return errors + ["reduced test-support/maintainer fixture build failed"]
-        binaries = [
-            row["executable"]
-            for line in result.stdout.splitlines()
-            if (row := json.loads(line)).get("reason") == "compiler-artifact"
-            and row.get("target", {}).get("name") == "plakd"
-            and row.get("executable")
-        ]
-        if not binaries:
-            return errors + ["reduced test-support fixture reported no executable"]
-        import product_feature_fixture
-
-        errors.extend(
-            product_feature_fixture.check(writer, binaries[-1], server_binary, maintainer=True)
-        )
-        errors.extend(product_feature_fixture.image_diagnostic(binaries[-1]))
-        return errors
-
-
-def product_smoke(executable: str, selected: tuple[str, ...], profile: str) -> list[str]:
-    """Real reduced binaries refuse before credentials, providers or session writes."""
-    from gateway_fixture import running_gateway
-    from product_feature_fixture import isolated_environment
-
-    errors = []
-    with tempfile.TemporaryDirectory(prefix="plakd-feature-smoke-") as directory:
-        environment = dict(os.environ, PLAK_HOME=directory)
-        cases = [("version", ["version"], 0, "; features -"), ("help", ["help"], 0, "plakd")]
-        cases.append(("bare help", [], 0, "plakd"))
-        if "mcp" not in selected:
-            cases.append(("mcp", ["mcp", "list"], 2, "feature `mcp`"))
-        if "python" not in selected and "codex" in selected:
-            cases.append(
-                (
-                    "python",
-                    [
-                        "run",
-                        "--account",
-                        "codex",
-                        "--model",
-                        "gpt-6-astra",
-                        "--composition",
-                        "py-ptc",
-                        "--",
-                        "hello",
-                    ],
-                    2,
-                    "feature `python`",
-                )
-            )
-            cases.append(
-                (
-                    "python-jsonl",
-                    [
-                        "agent",
-                        "--account",
-                        "codex",
-                        "--model",
-                        "gpt-6-astra",
-                        "--composition",
-                        "py-ptc",
-                    ],
-                    2,
-                    "feature `python`",
-                )
-            )
-            cases.append(
-                (
-                    "sdk",
-                    [
-                        "run",
-                        "--account",
-                        "codex",
-                        "--model",
-                        "gpt-6-astra",
-                        "--composition",
-                        "py-sdk",
-                        "--",
-                        "hello",
-                    ],
-                    2,
-                    "`py-sdk` is not included in this build (compiled without feature `python`)",
-                )
-            )
-            cases.append(
-                (
-                    "sdk-jsonl",
-                    [
-                        "agent",
-                        "--account",
-                        "codex",
-                        "--model",
-                        "gpt-6-astra",
-                        "--composition",
-                        "py-sdk",
-                    ],
-                    2,
-                    "`py-sdk` is not included in this build (compiled without feature `python`)",
-                )
-            )
-        if "images" not in selected and "codex" in selected:
-            cases.append(
-                (
-                    "images",
-                    [
-                        "run",
-                        "--account",
-                        "codex",
-                        "--model",
-                        "gpt-6-astra",
-                        "--image",
-                        "missing.png",
-                        "--",
-                        "hello",
-                    ],
-                    2,
-                    "feature `images`",
-                )
-            )
-        for account in ("codex", "grok", "claude", "openai", "anthropic", "xai-api", "openrouter"):
-            if account not in selected:
-                arguments = (
-                    ["login", account]
-                    if account in ("codex", "grok", "claude")
-                    else [
-                        "run",
-                        "--account",
-                        account,
-                        "--model",
-                        "uncompiled-route",
-                        "--composition",
-                        "direct",
-                        "--",
-                        "hello",
-                    ]
-                )
-                cases.append((account, arguments, 2, f"feature `{account}`"))
-                cases.append(
-                    (
-                        f"{account}-jsonl",
-                        ["agent", "--account", account, "--model", "uncompiled-route"],
-                        2,
-                        f"feature `{account}`",
-                    )
-                )
-        for kind, arguments, code, expected in cases:
-            completed = subprocess.run(
-                [executable, *arguments],
-                cwd=directory,
-                env=environment,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=30,
-            )
-            if completed.returncode != code or expected not in completed.stdout + completed.stderr:
-                errors.append(
-                    f"plakd [{profile}] {kind}: expected exit {code} and {expected!r}; got {completed.returncode}: {completed.stdout}{completed.stderr}"
-                )
-            if kind.endswith("-jsonl"):
-                records = [json.loads(line) for line in completed.stdout.splitlines()]
-                if [record.get("kind") for record in records] != ["error", "bye"]:
-                    errors.append(f"plakd [{profile}] {kind} refusal must terminate with error/bye")
-            if kind.startswith("sdk") and (Path(directory) / "state").exists():
-                errors.append(f"plakd [{profile}] SDK admission refusal created state")
-        doctor = subprocess.run(
-            [executable, "doctor"],
-            cwd=directory,
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
-        omitted = sorted(set(PRODUCT_FEATURES) - set(selected))
-        expected = f"omitted {', '.join(omitted)}"
-        if not any(
-            "Build features" in line and expected in line for line in doctor.stdout.splitlines()
-        ):
-            errors.append(
-                f"plakd [{profile}] doctor: missing build_features {expected!r}: {doctor.stdout}{doctor.stderr}"
-            )
-        for feature in ("python", "mcp"):
-            if feature in selected or "codex" not in selected:
-                continue
-            root = Path(directory) / feature
-            root.mkdir(mode=0o700)
-            home, isolated = isolated_environment(root)
-            (home / "agents").mkdir(mode=0o700)
-            config = '[root]\nagent = "root-agent"\n'
-            template = 'account = "codex"\nmodel = "gpt-6-astra"\n'
-            if feature == "python":
-                template += 'composition = "py-ptc"\n'
-            else:
-                config += '[mcp_servers.example]\ntransport = "stdio"\ncommand = "/bin/false"\n'
-                template += 'tools = ["mcp:example"]\n'
-            (home / "agents/root-agent.toml").write_text(template)
-            with running_gateway(executable, home, root, isolated) as gateway:
-                (home / "config.toml").write_text(config + gateway)
-                # Select the root slot explicitly so this tests the selected
-                # template's capability, not the gateway's empty account roster.
-                completed = subprocess.run(
-                    [executable, "agent", "--account", "codex"],
-                    cwd=root,
-                    env=isolated,
-                    input="",
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=30,
-                )
-            if completed.returncode != 2 or f"feature `{feature}`" not in completed.stderr:
-                errors.append(
-                    f"plakd [{profile}] configured {feature}: expected typed exit 2; got {completed.returncode}: {completed.stdout}{completed.stderr}"
-                )
-    return errors
 
 
 def cache_path(root: Path = ROOT) -> Path:
@@ -591,41 +193,6 @@ def cached_workspace(root: Path = ROOT) -> Workspace:
 
 
 REQUIRED_DEPENDENCY_FEATURE_EDGES = {
-    ("plakd", "images", "plakous-hosted/images"),
-    ("plakous-hosted", "images", "plakous-image/normalize"),
-    ("plakd", "js", "plakous-hosted/js"),
-    ("plakd", "js", "plakous/composition"),
-    ("plakd", "python", "plakous-hosted/python"),
-    ("plakd", "python", "plakous/composition-python"),
-    ("plakd", "mcp", "plakous-hosted/mcp"),
-    ("plakd", "mcp", "plakous/mcp"),
-    ("plakd", "codex", "plakous/codex"),
-    ("plakd", "codex", "plakous-hosted/codex"),
-    ("plakous-hosted", "codex", "plakous/codex"),
-    ("plakd", "grok", "plakous/grok"),
-    ("plakd", "grok", "plakous-hosted/grok"),
-    ("plakous-hosted", "grok", "plakous/grok"),
-    ("plakd", "claude", "plakous/claude"),
-    ("plakd", "claude", "plakous-hosted/claude"),
-    ("plakous-hosted", "claude", "plakous/claude"),
-    ("plakd", "openai", "plakous/openai"),
-    ("plakd", "openai", "plakous-hosted/openai"),
-    ("plakous-hosted", "openai", "plakous/openai"),
-    ("plakd", "anthropic", "plakous/anthropic"),
-    ("plakd", "anthropic", "plakous-hosted/anthropic"),
-    ("plakous-hosted", "anthropic", "plakous/anthropic"),
-    ("plakd", "xai-api", "plakous/xai"),
-    ("plakd", "xai-api", "plakous-hosted/xai-api"),
-    ("plakous-hosted", "xai-api", "plakous/xai"),
-    ("plakd", "openrouter", "plakous/openrouter"),
-    ("plakd", "openrouter", "plakous-hosted/openrouter"),
-    ("plakous-hosted", "openrouter", "plakous/openrouter"),
-    ("plakd", "web-fetch", "plakous-hosted/web-fetch"),
-    ("plakd", "web-fetch", "plakous/web-fetch"),
-    ("plakous-hosted", "js", "plakous/composition"),
-    ("plakous-hosted", "python", "plakous/composition-python"),
-    ("plakous-hosted", "mcp", "plakous/mcp"),
-    ("plakous-hosted", "web-fetch", "plakous/web-fetch"),
     ("plakous", "mcp", "plakous-mcp/client"),
     ("plakous", "test-support", "plakous-openai?/test-support"),
     ("plakous", "test-support", "plakous-openrouter?/test-clock"),
@@ -688,8 +255,8 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
         "plakous-recursive-subagents/test-support",
     ),
 }
-# Native workspace engines are independent build capabilities. Every host edge
-# forwards explicitly; no default-enabled transitive edge may defeat selection.
+# JJ is optional in the host and product; Git is an unconditional dependency
+# feature there and remains selectable in the workspace and tree crates.
 REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
     (
         package,
@@ -707,10 +274,12 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
         "plakous-recursive-subagents-store": ["plakous-recursive-subagents"],
     }.items()
     for dependency in dependencies
-    for feature in ("git-cli", "jj-lib")
+    for feature in (("jj-lib",) if package in PRODUCT_DIGESTS else ("git-cli", "jj-lib"))
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
+    "plakd": "621fd9e7e44dba5f426249cbb8dc1b0b6d8f0d6ff4e080b1aa9910a18aabf0f5",
+    "plakous-hosted": "395fc37386c2c884f031f0a48708e3beffc4a5105d177ccbfb7ff1c577b91f9f",
     "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
     "plakous-py-worker": "69292766720fd343d9c1ce2701cee97bf9c89fccfd5b74618ebae180ba970e63",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
@@ -751,14 +320,6 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # `composition` is the cell client on its own: no credential, HTTP,
 # subscription or interpreter machinery for either source language.
 EXCLUDED_CLOSURE_PACKAGES = {
-    ("plakd", ("git-cli", "images", "python", "mcp")): (
-        "ratatui",
-        "crossterm",
-        "syntect",
-        "arboard",
-        "pulldown-cmark",
-    ),
-    ("plakd", ("git-cli", "python", "mcp")): ("image",),
     ("plakd", ("default",)): (
         "micro-monty",
         "jj-lib",
@@ -787,7 +348,7 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ("plakous", ("claude",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous-openai", ("native-auth",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
     ("plakous-xai", ("native-auth",)): ("aws-lc-rs", "aws-lc-sys", "rsa"),
-    ("plakd", ("git-cli",)): ("jj-lib", "gix", "pollster"),
+    ("plakd", ()): ("tungstenite", "tokio-tungstenite"),
     ("plakous", ("composition",)): (
         "htmd",
         "micro-monty",
@@ -823,23 +384,6 @@ EXCLUDED_CLOSURE_PACKAGES = {
     ),
     ("plakous", ("anthropic",)): ("jsonwebtoken",),
 }
-
-NAMED_VARIANT_EXCLUSIONS = {
-    "api": ("jsonwebtoken",),
-    "minimal": (
-        "rmcp",
-        "micro-monty",
-        "tungstenite",
-        "image",
-        "htmd",
-        "html5ever",
-        "jsonwebtoken",
-        "aws-lc-sys",
-        "plakous-js-eval",
-        "plakous-cell",
-    ),
-}
-
 
 # Repository-only capabilities of a dependency, keyed by the product and the
 # product feature that alone may turn them on. `PLAK_TEST_FAULTS` transport
@@ -940,16 +484,7 @@ def full_closure(package: str, selected: tuple[str, ...]) -> set[str]:
 def validate_excluded_closures() -> list[str]:
     """Check that each named profile's complete closure omits its excluded packages."""
     errors: list[str] = []
-    pins = dict(EXCLUDED_CLOSURE_PACKAGES)
-    manifest = load_workspace_manifests()["plakd"]
-    for name, selected, default in named_variants(manifest):
-        if name in NAMED_VARIANT_EXCLUSIONS:
-            pins[("plakd", selected)] = NAMED_VARIANT_EXCLUSIONS[name]
-    without_python = tuple(sorted(set(manifest["features"]["default"]) - {"python"}))
-    pins[("plakd", without_python)] = ("micro-monty",)
-    without_web = tuple(sorted(set(manifest["features"]["default"]) - {"web"}))
-    pins[("plakd", without_web)] = ("tungstenite", "tokio-tungstenite")
-    for (package, selected), excluded in sorted(pins.items()):
+    for (package, selected), excluded in sorted(EXCLUDED_CLOSURE_PACKAGES.items()):
         reached = full_closure(package, selected)
         present = sorted(name for name in excluded if name in reached)
         if present:
@@ -967,7 +502,7 @@ def load_workspace_manifests(root: Path = ROOT) -> dict[str, dict[str, object]]:
 
 def digest_packages(workspace: Workspace) -> set[str]:
     """Return the packages whose manifest surface carries a reviewed digest."""
-    return {package.name for package in workspace.in_layers(*DIGEST_LAYERS)}
+    return {package.name for package in workspace.in_layers(*DIGEST_LAYERS)} | PRODUCT_DIGESTS
 
 
 def dependency_package_name(name: str, value: object) -> str:
@@ -1204,14 +739,6 @@ def validate_feature_contracts(
                 "plakous-recursive-subagents-store",
                 "test-support",
                 "plakous-store/test-support",
-            ):
-                continue
-            # The hosted attachment normalizer is the common image crate,
-            # which client products use without the facade.
-            if (package, feature, edge) == (
-                "plakous-hosted",
-                "images",
-                "plakous-image/normalize",
             ):
                 continue
             if target != "plakous" and layers.get(target) != "host":
@@ -1455,17 +982,15 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
     native route), `openai` alone (the API route, including
     `responses_retrieval`'s `cfg(feature = "openai")` paths, without a
     native-auth route beside it) and `gateway` alone (the custody seam,
-    relay client and server core with no provider). Hosted: no features,
-    and `--all-features`.
-    Hosted defaults are compiled with the supported Plak default resolution,
-    not as another profile.
+    relay client and server core with no provider). Hosted: no optional features
+    and `--all-features`; the provider and tool dependencies are unconditional.
     """
     lib = ["--lib", "--message-format=json"]
     if package == FACADE:
         return [
             (name, cargo_command("check", selected, False, package) + lib)
             for name, selected in (
-                ("minimal", ()),
+                ("none", ()),
                 ("full", ("full",)),
                 ("composition", ("composition",)),
                 ("claude", ("claude",)),
@@ -1475,7 +1000,7 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
         ]
     if package == "plakous-hosted":
         return [
-            ("minimal", cargo_command("check", (), False, package) + lib),
+            ("no-optional-features", cargo_command("check", (), False, package) + lib),
             (
                 "all-features",
                 [
@@ -1499,7 +1024,7 @@ def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = 
 
 
 def check_hosted_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
-    """Compile hosted with no features and with every feature, un-unified."""
+    """Compile hosted without optional features and with all features."""
     return check_library_profiles(manifests, "plakous-hosted", root)
 
 
@@ -1552,16 +1077,14 @@ def closure(
 def main() -> int:
     """Check every package's feature closures and optionally compile each profile."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--build", action="store_true", help="cargo-check every profile")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--build", action="store_true", help="cargo-check every closure witness")
+    modes.add_argument(
+        "--library-only", action="store_true", help="compile only the library profiles"
+    )
     parser.add_argument(
         "--no-cache", action="store_true", help="query Cargo without reading or writing the cache"
     )
-    parser.add_argument(
-        "--product-builds",
-        action="store_true",
-        help="build and lint four distinct feature-off product resolutions",
-    )
-    parser.add_argument("--target", help="Cargo build target for product variants")
     parser.add_argument(
         "--library-packages",
         nargs="*",
@@ -1570,13 +1093,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.product_builds:
-        import tomllib
-
-        manifest = tomllib.loads((ROOT / "bin/plakd/Cargo.toml").read_text())
-        errors = product_builds(manifest, args.target)
+    if args.library_only:
+        manifests = load_workspace_manifests()
+        errors = check_facade_profiles(manifests) + check_hosted_profiles(manifests)
         for error in errors:
-            print(error, file=sys.stderr)
+            print(f"error: {error}", file=sys.stderr)
         return int(bool(errors))
 
     global CARGO_OUTPUTS
@@ -1610,10 +1131,6 @@ def main() -> int:
             continue
         has_full = "full" in (manifests[package].get("features") or {})
         profiles[package] = list(feature_sets(features, has_full))
-        if package == "plakd":
-            profiles[package].extend(
-                profile for profile in named_variants(manifests[package]) if profile[0] != "default"
-            )
     # Cache misses query concurrently; Cargo's package-cache lock caps useful
     # concurrency (measured 105 s at four workers, 109 s at ten).
     queries = [

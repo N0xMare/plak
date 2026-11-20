@@ -280,7 +280,6 @@ fn run_agent_stdio_stopping_on(
                         crate::sidecars::js_host::hello_status();
                     let (python_host, python_host_target) =
                         crate::sidecars::python_bundle::python_host_hello_status();
-                    let python_available = crate::build_features::require_feature("python").is_ok();
                     let elapsed_ms =
                         u64::try_from(process_started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     let handshake = format!(
@@ -296,9 +295,9 @@ fn run_agent_stdio_stopping_on(
                             &tree_state,
                             Some(&javascript_host),
                             Some(javascript_host_target),
-                            python_available.then_some(python_host.as_str()),
-                            python_available.then_some(python_host_target),
-                            Some(&crate::build_features::compiled_features()),
+                            Some(python_host.as_str()),
+                            Some(python_host_target),
+                            Some(plakous_hosted::capabilities::PRODUCT_CAPABILITIES),
                             Some(elapsed_ms),
                         ),
                         ready_line(None, Some(elapsed_ms))

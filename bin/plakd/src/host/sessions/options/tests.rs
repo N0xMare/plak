@@ -3,7 +3,6 @@ use crate::gateway::test_service::GatewayFixture;
 use plakous::runner::{ConfiguredRunner, PlacementFailure, WorkspaceCatalog};
 use std::sync::Arc;
 
-#[cfg(feature = "openai")]
 #[test]
 fn picker_without_state_home_keeps_api_models_and_omits_native_models() {
     let (root, paths) = PlakPaths::isolated_test_home();
@@ -170,17 +169,7 @@ fn cached_picker_rows_finish_once_profiles_stay_ungated_and_workspace_checks_sta
     }
 }
 
-#[cfg(all(
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "test-support",
-    feature = "web"
-))]
+#[cfg(all(feature = "test-support", feature = "web"))]
 #[test]
 fn native_picker_uses_cached_models_inside_the_host_runtime() {
     use plakous::gateway::GatewayCustody;
@@ -249,17 +238,7 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
     }
 }
 
-#[cfg(all(
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "test-support",
-    feature = "web"
-))]
+#[cfg(all(feature = "test-support", feature = "web"))]
 fn assert_native_picker(
     runtime: &tokio::runtime::Runtime,
     services: &crate::shell::services::Services,

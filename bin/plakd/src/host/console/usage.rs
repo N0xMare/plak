@@ -113,13 +113,6 @@ impl Console {
             );
         };
         let timeout = budget.min(super::limits::PROVIDER_DEADLINE);
-        if !account.vertical().capability().compiled {
-            return missing(
-                account,
-                "not_compiled",
-                "this account route was not compiled",
-            );
-        }
         if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
             // The gateway holds the key; this host never reads it.
             return missing(

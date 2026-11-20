@@ -23,9 +23,6 @@ pub(super) async fn page(
     };
     let account = accounts::exact(selected)?;
     let capability = account.vertical().capability();
-    if !capability.compiled {
-        return Ok(missing(page));
-    }
     if let Some(provider) = capability.platform_provider() {
         page.source = CatalogSource::Bundled;
         page.rows = crate::platform_catalog::entries(provider, composition);

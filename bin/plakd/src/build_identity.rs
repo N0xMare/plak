@@ -463,10 +463,9 @@ pub(crate) fn write_image_manifest(
 pub(crate) fn version_label() -> String {
     let hooks = if TEST_HOOKS { "; test-hooks" } else { "" };
     format!(
-        "{} ({FLAVOR}; binary {}{hooks}{})",
+        "{} ({FLAVOR}; binary {}{hooks})",
         plakous::VERSION,
         binary_id(),
-        crate::build_features::version_suffix(),
     )
 }
 

@@ -37,15 +37,6 @@ pub(crate) fn validate(
     effort: Option<ReasoningEffort>,
     composition: ProductCompositionSelection,
 ) -> Result<(), String> {
-    crate::build_features::require_account(provider.account()).map_err(|error| {
-        crate::refusal_text::failure_text(
-            &error,
-            crate::notice_text::RemedyContext {
-                frontend: crate::notice_text::Frontend::Run,
-                session_id: None,
-            },
-        )
-    })?;
     plakous_hosted::platform::bundled_catalog(provider, "offline")
         .admit(model, effort)
         .map_err(|error| {

@@ -577,7 +577,10 @@ run_static_tree_checks() {
   echo "== structure: workspace =="
   python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
   echo "== structure: features (static) =="
-  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
+  local features=("${worker_features[@]}")
+  # An explicit variants group compiles these profiles with the build flags.
+  if selected variants; then features=(--library-packages); fi
+  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${features[@]+"${features[@]}"} \
     || failed="${failed:+$failed }features"
   if [[ "$tier" == full ]]; then
     echo "== structure: evidence allowlist =="
@@ -673,13 +676,9 @@ run_group() {
       run_build_denying_warnings cargo build --locked -p plakous-py-worker -p plakous-js-runtime --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
     variants)
-      # Release-candidate evidence (`just full` or an explicit variants step).
-      # The integration batch does not build these reduced resolutions.
-      echo "== product feature-off builds and clippy: warnings denied =="
-      # The sccache server must be started with a stable TMPDIR (spec 06). That
-      # is what keeps a gate's test directory from being the server's scratch,
-      # so this group keeps the caller's RUSTC_WRAPPER instead of clearing it.
-      run_build_denying_warnings python3 tools/gate/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
+      echo "== standalone library feature profiles: warnings denied =="
+      CARGO_TARGET_DIR="$target_dir/feature-check" \
+        run_build_denying_warnings python3 tools/gate/check_features.py --library-only ;;
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"} ;;

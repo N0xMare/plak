@@ -97,7 +97,6 @@ fn bounded(text: &str) -> Option<BoundedText<64>> {
     BoundedText::new(text.to_owned()).ok()
 }
 
-#[cfg(feature = "openrouter")]
 mod openrouter {
     use std::sync::Arc;
 
@@ -198,14 +197,5 @@ mod openrouter {
             view: None,
             unavailable: bounded(reason),
         }
-    }
-}
-
-#[cfg(not(feature = "openrouter"))]
-mod openrouter {
-    use super::{AdminResponse, GatewayAccount, PlakPaths, not_observed};
-
-    pub(super) async fn read(_home: &PlakPaths, account: &GatewayAccount) -> AdminResponse {
-        not_observed(account)
     }
 }

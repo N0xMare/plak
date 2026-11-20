@@ -166,7 +166,7 @@ pub(super) async fn status(
         vertical: wire_vertical(vertical),
         name: account.name().map(|name| name.as_str().to_owned()),
         label: account.to_string(),
-        compiled: vertical.capability().compiled,
+        compiled: true,
         observed_at: as_of.to_owned(),
         native: None,
         key: None,
@@ -226,10 +226,6 @@ pub(super) async fn status(
                 "retained refresh history could not be read",
             )),
         }
-    }
-    if !row.compiled {
-        row.remedies
-            .push(remedy(ReadAction::UseMatchingBuild, account));
     }
     row
 }
@@ -353,7 +349,7 @@ pub(super) async fn exists(
     paths: &PlakPaths,
     account: &AccountRef,
 ) -> Result<bool, ReadRefusal> {
-    if !account.is_named() || !account.vertical().capability().compiled {
+    if !account.is_named() {
         return Ok(true);
     }
     if let Some(provider) = account.vertical().capability().native_provider() {

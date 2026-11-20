@@ -927,7 +927,7 @@ fn hello_ready_bye_are_stable() {
         Some("aarch64-apple-darwin"),
         Some("bundled"),
         Some("aarch64-apple-darwin"),
-        Some(&crate::build_features::compiled_features()),
+        Some(plakous_hosted::capabilities::PRODUCT_CAPABILITIES),
         None,
     );
     let object = object_from_line(&hello);
@@ -935,7 +935,20 @@ fn hello_ready_bye_are_stable() {
     assert_eq!(object["kind"], "hello");
     assert_eq!(
         object["capabilities"],
-        serde_json::json!(crate::build_features::compiled_features())
+        serde_json::json!([
+            "anthropic",
+            "claude",
+            "codex",
+            "grok",
+            "images",
+            "js",
+            "mcp",
+            "openai",
+            "openrouter",
+            "python",
+            "web-fetch",
+            "xai-api"
+        ])
     );
     assert_eq!(object["session_id"], "sess");
     assert_eq!(object["tree_id"], "tree");
@@ -951,20 +964,6 @@ fn hello_ready_bye_are_stable() {
     assert!(required_stdout_kind(&bye_line(None)));
 }
 
-#[cfg(all(
-    feature = "anthropic",
-    feature = "claude",
-    feature = "codex",
-    feature = "grok",
-    feature = "images",
-    feature = "js",
-    feature = "mcp",
-    feature = "openai",
-    feature = "openrouter",
-    feature = "python",
-    feature = "web-fetch",
-    feature = "xai-api"
-))]
 mod default_build {
     use super::*;
 
@@ -983,7 +982,7 @@ mod default_build {
             None,
             None,
             None,
-            Some(&crate::build_features::compiled_features()),
+            Some(plakous_hosted::capabilities::PRODUCT_CAPABILITIES),
             None,
         );
         assert_eq!(

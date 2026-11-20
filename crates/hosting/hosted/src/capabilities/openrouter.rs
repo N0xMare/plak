@@ -1,18 +1,9 @@
-#[cfg(feature = "openrouter")]
-#[path = "openrouter_available.rs"]
-mod compiled;
-#[cfg(not(feature = "openrouter"))]
-#[path = "openrouter_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 
 /// Gateway route facts; the binding, not this table, selects its exact wire.
 pub static OPENROUTER: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "openrouter",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "openrouter",
     aliases: &["openrouter"],
     kind: RouteKind::OpenRouter,
@@ -24,3 +15,18 @@ pub static OPENROUTER: RouteCapability = RouteCapability {
     usage_label: Some("OpenRouter"),
     subscription_label: None,
 };
+
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    Some(plakous::openrouter::OPENROUTER_HOSTED_RETRIEVAL)
+}
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn review_deadline() -> Option<u64> {
+    Some(plakous::openrouter::OPENROUTER_CHAT_REVIEW_DUE_AT)
+}

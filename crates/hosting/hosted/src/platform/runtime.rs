@@ -13,30 +13,18 @@ use plakous::model::{
     ProviderStorageDisposition, ReplayDisposition, RetentionDisposition, ToolName,
 };
 
-#[cfg(feature = "anthropic")]
 #[path = "anthropic.rs"]
 pub(super) mod anthropic;
-#[cfg(not(feature = "anthropic"))]
-#[path = "anthropic_unavailable.rs"]
-mod anthropic;
 #[path = "listing.rs"]
 pub(super) mod listing;
 
 pub(crate) fn openai_profile(model: &str) -> Option<&'static str> {
     openai::profile(model)
 }
-#[cfg(feature = "openai")]
 #[path = "openai.rs"]
 pub(super) mod openai;
-#[cfg(not(feature = "openai"))]
-#[path = "openai_unavailable.rs"]
-mod openai;
-#[cfg(feature = "xai-api")]
 #[path = "xai.rs"]
 pub(super) mod xai;
-#[cfg(not(feature = "xai-api"))]
-#[path = "xai_unavailable.rs"]
-mod xai;
 
 pub use listing::api_model_catalog;
 
@@ -45,11 +33,7 @@ use super::{
     PlatformModel, api_composition, bundled_catalog, catalog,
 };
 use crate::agent::build::api::ApiRuntimeSpec;
-#[cfg(any(feature = "openai", feature = "xai-api"))]
 mod retention;
-#[cfg(not(all(feature = "openai", feature = "anthropic", feature = "xai-api")))]
-#[path = "unavailable.rs"]
-mod unavailable;
 use crate::binding::{CompositionSelection, PlatformProvider};
 use crate::error::{CliFailure, CliResult};
 
@@ -291,7 +275,7 @@ fn platform_behavior(
     })
 }
 
-#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+#[cfg(test)]
 #[path = "tests.rs"]
 pub(crate) mod tests;
 

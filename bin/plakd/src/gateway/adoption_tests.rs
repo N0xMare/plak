@@ -87,7 +87,6 @@ fn init_writes_no_key_directory_and_a_named_one_is_refused() {
     assert!(file.contains("state_root = \""));
 }
 
-#[cfg(all(feature = "codex", feature = "grok"))]
 mod equal_binding {
     use std::sync::Arc;
 

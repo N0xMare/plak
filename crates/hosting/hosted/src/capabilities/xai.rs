@@ -1,20 +1,11 @@
-#[cfg(feature = "xai-api")]
-#[path = "xai_available.rs"]
-mod compiled;
-#[cfg(not(feature = "xai-api"))]
-#[path = "xai_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 use crate::binding::PlatformProvider;
 use crate::binding::ResolvedProtocol;
 
 /// xAI direct-API route facts, independent of Grok subscription credentials.
 pub static XAI: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "xai-api",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "xai-api",
     aliases: &["xai-api"],
     kind: RouteKind::Platform(PlatformProvider::Xai),
@@ -26,3 +17,18 @@ pub static XAI: RouteCapability = RouteCapability {
     usage_label: None,
     subscription_label: None,
 };
+
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    Some(plakous::xai::XAI_API_HOSTED_RETRIEVAL)
+}
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "route registry uses the same optional signature for every route"
+)]
+fn review_deadline() -> Option<u64> {
+    Some(plakous::xai::XAI_PLATFORM_REVIEW_DUE_AT_UNIX_SECONDS)
+}

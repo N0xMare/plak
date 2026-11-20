@@ -92,7 +92,6 @@ fn account_and_status_verbs_refuse_without_a_gateway() {
     ] {
         unavailable(home.cli(args));
     }
-    #[cfg(feature = "codex")]
     {
         let product = home.path().join("home");
         std::fs::write(

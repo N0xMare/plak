@@ -31,14 +31,18 @@ doc = false
 plakd-wire-types.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 plakous-hosted = { workspace = true, default-features = false }
-plakous-recursive-subagents.workspace = true
-plakous-recursive-subagents-store.workspace = true
+plakous-recursive-subagents = { workspace = true, features = ["git-cli"] }
+plakous-recursive-subagents-store = { workspace = true, features = ["git-cli"] }
 plakous-host-protocol.workspace = true
 # `test-support` only. The optional edge is what keeps the deterministic offline
 # model out of every build that does not explicitly ask for it.
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
-plakous = { workspace = true, features = ["gateway", "sessions-sqlite"] }
+plakous = { workspace = true, features = [
+    "anthropic", "claude", "codex", "composition", "composition-python",
+    "gateway", "grok", "mcp", "openai", "openrouter", "sessions-sqlite",
+    "web-fetch", "xai",
+] }
 nix = { workspace = true, features = ["signal"] }
 rusqlite = { workspace = true, features = ["hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "process", "system", "termios", "time"] }
@@ -94,20 +98,7 @@ harness = false
 required-features = ["test-support"]
 
 [features]
-codex = ["plakous/codex", "plakous-hosted/codex", "js"]
-grok = ["plakous/grok", "plakous-hosted/grok"]
-claude = ["plakous/claude", "plakous-hosted/claude"]
-openai = ["plakous/openai", "plakous-hosted/openai", "js"]
-xai-api = ["plakous/xai", "plakous-hosted/xai-api"]
-anthropic = ["plakous/anthropic", "plakous-hosted/anthropic"]
-openrouter = ["plakous/openrouter", "plakous-hosted/openrouter"]
-default = ["git-cli", "images", "js", "python", "mcp", "web-fetch", "web", "codex", "grok", "claude", "openai", "xai-api", "anthropic", "openrouter"]
-js = ["plakous/composition", "plakous-hosted/js"]
-web-fetch = ["plakous/web-fetch", "plakous-hosted/web-fetch"]
-images = ["plakous-hosted/images"]
-python = ["js", "plakous/composition-python", "plakous-hosted/python"]
-mcp = ["plakous/mcp", "plakous-hosted/mcp"]
-git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
+default = ["web"]
 jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
 maintainer = ["jj", "web"]
 # The supported web endpoint (`plakd host --web`): HTTP/1.1 and WebSocket on a

@@ -100,7 +100,6 @@ fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Optio
 }
 
 #[test]
-#[cfg(feature = "anthropic")]
 fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
     use super::gateway_process::GatewayProcess;
     use plakd_wire_types::console::{CustodyMode, HostRequest, HostResponse};
@@ -193,7 +192,6 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
     stop(&mut host);
 }
 
-#[cfg(feature = "anthropic")]
 mod gateway_upstream;
 
 fn serving_host(process: (Child, mpsc::Receiver<String>)) -> Option<Host> {

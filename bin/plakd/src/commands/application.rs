@@ -691,9 +691,6 @@ impl AccountOps for PlakousApplication {
         for route in plakous_hosted::capabilities::ROUTES {
             let vertical = route.account.parse::<AccountRef>()?.vertical();
             accounts.push(AccountRef::default_for(vertical));
-            if !vertical.capability().compiled {
-                continue;
-            }
             let names = if let Some(provider) = vertical.capability().native_provider() {
                 self.executor
                     .block_on(self.subscriptions.named_accounts(provider))

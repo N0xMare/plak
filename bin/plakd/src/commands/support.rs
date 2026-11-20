@@ -530,7 +530,6 @@ pub fn native_subscription_failure(
     let login = format!("run `plakd login {name}`");
     let auth = |message: String| CliFailure::classified(CliFailureKind::Auth, message);
     match error {
-        #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
         E::CompatibilityDrift { .. } => auth(error.to_string()),
         E::NotCompiled(provider) => unavailable_native_route(provider),
         E::UnsafeStorage => auth(subscription_storage_detail(state_home, account)),

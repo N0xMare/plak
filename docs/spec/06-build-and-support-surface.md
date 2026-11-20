@@ -327,7 +327,7 @@ Product catalog construction and attachment eligibility do not depend on the
 application client. Credential and model-admission tests, settings metadata
 default checks and JSONL compaction-view rebuild tests run on the host surfaces.
 
-Compile-time capabilities are additive. A capability merits a feature when it
+Library compile-time capabilities are additive. A capability merits a feature when it
 adds at least five exclusive packages, a C/system build or 1 MB stripped; ships
 or spawns an executable; has a distinct trust, legal or network posture; or
 integrates with a platform. Other choices belong in runtime configuration.
@@ -442,12 +442,13 @@ tracked Rust file of the package, tests included:
 `plakous-hosted::capabilities` owns the complete current route metadata in
 per-route modules and one ordered registry. plakd's private product registry
 adds its labels, recommendation aliases, doctor probe and bundled preset for
-each hosted identity. Every route stays registered, with its feature name and
-compiled flag; runtime construction and credential/catalog work live behind
-the route's module gate. The default behavior and speed-focused release profile
-are unchanged. Serialized
-binding enums, the complete template-account vocabulary and credential-store
-directory names remain ungated; they describe records, not enabled menus.
+each hosted identity. All seven routes and the JavaScript and Python
+compositions, MCP, image decoding, local web fetch and Git are always built
+into both the product and its hosted library. This is not a claim that an
+account is signed in or that a worker sidecar is present. The default product
+is the only shipped and supported build. Serialized binding enums, the complete
+template-account vocabulary and credential-store directory names still describe
+records, not runtime readiness.
 
 Installed-build probes remain product-owned and independent of terminal
 re-exec. Feature-dependent lookup and publication helpers belong in their
@@ -459,17 +460,12 @@ called out explicitly.
 
 | Crate | Feature | Effect |
 | --- | --- | --- |
-| `plakd`, `plakous-hosted` | `codex`, `grok`, `claude` | Independently forward the corresponding native facade route; `codex` additionally requires `js` |
-| `plakd`, `plakous-hosted` | `openai`, `anthropic`, `xai-api`, `openrouter` | Independently forward the API route (`xai-api` forwards facade `xai`); `openai` additionally requires `js` |
-| `plakd`, `plakous-hosted` | `images` | Default on; hosted image normalization, forwarding `plakous-image/normalize` and its optional `image` dependency; new attachments refuse without it, canonical history remains readable |
 | `plakous-image` | `normalize` | Default on for direct use; decoding, downscaling and re-encoding through the `image` crate, and the image-file reader, in its `normalize` module. Without it sniffing, the bounds, the message budget, the dropped-path check and the error vocabulary remain; `plakous-tools` uses it that way |
-| `plakd`, `plakous-hosted` | `js` | Default on; JavaScript/Code Mode admission, facade `composition`, and product JavaScript worker resolution |
-| `plakd`, `plakous-hosted` | `python` | Default on; explicitly forwards facade `composition-python`, implies `js`, and selects Python worker resolution |
-| `plakd`, `plakous-hosted` | `mcp` | Default on; forwards the facade client and selects active MCP commands/binding. Omission removes rmcp and the MCP transports while frozen records remain readable |
 | `plakous-mcp` | `client` | Internal runtime closure, default on for direct use. The facade disables this dependency's defaults and selects the client explicitly through `mcp`; without it only frozen record vocabulary, naming and errors remain |
-| `plakd`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
-| `plakd` | `maintainer` | Empty feature gating only plakd's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (section 6.2) |
-| `plakd` | `test-support` | Product test hooks, isolated fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
+| `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter, independent of providers in the facade |
+| `plakd` | `web` | Default on; HTTP and WebSocket host serving. Kept separate from the always-available local fetch tool |
+| `plakd` | `maintainer` | Adds `jj` and ensures `web`; gates maintainer verbs, the offline reload rehearsal and its test target, explicit processing-tier selection and automatic private inference capture (§4.1, §6.2) |
+| `plakd` | `test-support` | Repository-only scripted model, transport fault injection, isolated fixtures, crash tracing and cuts; retains the binary's `; test-hooks` label |
 | `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
 | `plakous` (`test-support`), `plakous-cell` | `test-hooks` on the cell | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` or the thread-scoped `plakous::test_session_lease::with_test_session_lease_seconds` (1 through 30 seconds; the scoped override also requires `store`), and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plakd/test-support` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads or the scoped override |
@@ -480,10 +476,11 @@ called out explicitly.
 | `plakous-store` | `test-support` | Benchmark instrumentation plus repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-support` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `plakd/test-support`; a sweep must require `plakd/test-support` for all three stores. |
 | `plakous-recursive-subagents-store` | `test-support` | Tree fixtures plus an optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plakd/test-support` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release plakd closures. |
 | `plakous-openai` | `test-support` | Test clocks and, when `native-auth` is already linked, the doc-hidden ephemeral Codex callback and catalog origin fixtures. The seam does not activate `native-auth`. |
-| `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, spec 05 section 2.6); the construction port itself is always available. A dev-dependency of `plakd`, never a production edge |
+| `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, chapter 05 §2.6); selected for product tests and by `plakd/test-support`, never by a shipping build |
 | `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plakd`, never a production edge |
-| `plakd` | `git-cli`, `jj` | Of the VCS features, defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plakd.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
-| `plakous-hosted`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding; library defaults include both. With defaults disabled, either or neither backend may be selected. Without JJ, colocated repositories use Git when enabled; JJ-only repositories refuse. |
+| `plakd` | `jj` | Forwards the native JJ backend, off in release tarballs. Without JJ, colocated repositories use Git copies with a doctor row and one new-session notice; JJ-only repositories refuse with an instruction to use the `jj` feature |
+| `plakous-hosted` | `jj-lib` | Optional JJ backend, on by default for standalone hosted builds. plakd disables hosted defaults and forwards this feature only through `jj` |
+| `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding with both on by library default. With defaults disabled, library consumers may select either or neither |
 | `plakous-workspace` | `test-support` | `FakeVcs` and the real-`git`/`jj` repository fixtures; a dev-dependency of `plakous-recursive-subagents`, never a production edge |
 | `plakous-recursive-subagents` | `test-support` | `MemoryTreeStore`, the tree's bootstrap and mutation fixtures, and the hub's; forwards `plakous-host-protocol/test-support` and `plakous-workspace/test-support`, never a production edge |
 | `plakous-recursive-subagents-store` | `test-support` | The store conformance suite's tree fixtures; never a production edge |
@@ -498,20 +495,18 @@ not supported embedder authority. plakd's maintainer feature enables its `jj` fe
 `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, and
 `plakous-host-protocol` in production, and on no other package in the tree —
 `plakous-workspace` in particular is reached only through the tree crate. The
-product and hosted crate declare only `sessions-sqlite` unconditionally on
-their default-disabled facade edges, and the orchestration tree only `store`. Their own route and evaluator features
-forward to the facade where each implementation lives; neither package can
-borrow those declarations from the other's feature unification. Product
-defaults include all seven routes, JS, Python, MCP, local web fetch, images,
-Git and the server capabilities. Hosted defaults additionally include the JJ backend.
+product and hosted crate each declare the facade route, evaluator, MCP, local
+web fetch and durable session dependency features they use. plakd also
+declares the facade's `gateway`; the tree declares only `store`. Hosted
+directly requests `plakous-image/normalize`. Both product manifests enable Git
+on their workspace or orchestration dependency edges. Embedders using
+`plakous` can still choose providers and tools independently, and its
+persisted route and tool vocabulary remains readable without an implementation.
 Every package must declare the dependency features its own Rust targets use;
 features enabled only by another workspace member are not evidence that the
 package builds on its own. plakd declares the signal feature used by same-user
 host discovery directly; shared console setup detection and MCP adapters
 are gated by their actual consuming surfaces, not the default feature set.
-The agent entry owns omitted-route admission so a reduced JSONL product still
-terminates rejection with `error` then `bye`, before session or credential
-admission; wire clients retain their own refusal framing.
 The gate's `builds` group therefore also builds each
 supported package alone, `cargo build -p <package>` with its own default
 features, rustc warnings denied (chapter 05 section 1); for `plakd` that is the release
@@ -560,37 +555,14 @@ deadline seams (`test-support` on the facade and OpenAI, `test-clock` on
 providers that only expose a clock seam, and cell/agent `test-hooks`) are
 excluded from these witnesses. They never enter `full` or the product
 default/maintainer release closures.
-The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
-Default is headless. `api` is default minus `codex`, `grok` and `claude`;
-`minimal` is exactly `openrouter,git-cli`. There is no redundant headless variant.
-The supported and shipped plakd is **default only**. Named variants are built
-and contract-tested in full, not shipped. Other combinations may compile;
-compilation does not establish support. Named variants also get closure
-witnesses in the static checker, without adding reduced compilation to check.
-Product setting bounds and account remedies do not depend on client
-presentation. CLI account admission and the web console share credential
-roster reads; the CLI does not compile the console to select an account.
-Store/composition tests compile without terminal adapters.
-Only the `variants` group (full only) builds the two reduced named products,
-plus an admission fixture that omits images, Python and MCP.
-Each distinct resolution builds its
-library and binary and runs clippy with warnings denied, then checks version,
-doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
-The admission fixture checks that an unused Python template does not block
-either CLI entry point with an explicit root account, while an implicit root
-without a Ready account still requires a choice (chapter 02 §4.4.1).
-The group also builds a full test-support fixture writer and a reduced
-test-support/maintainer reader to exercise real canonical stores, genesis
-import rebind, attached maintainer actions and an image diagnostic during an
-in-flight JSONL turn. Full-created canonical native sessions remain readable
-through show/log/export in the API and minimal binaries, while attach/resume
-returns typed `CapabilityUnavailable` (exit 2) without changing store bytes.
-These harness builds are not shipped variants. Complete external-closure pins
-exclude terminal/clipboard libraries from the product and JWT from API; minimal
-also excludes MCP, Python, evaluator clients, image decoding, HTML conversion
-and JWT. Default minus Python excludes Python composition admission; the product binary never embeds micro-monty. The default,
-facade-full and native-auth closures exclude aws-lc and rsa. The workspace
-checker pins forwarding, dependency optionality and defaults.
+plakd has four optional features (`web`, `jj`, `maintainer`, and
+`test-support`), for 11 closure witnesses. Hosted has two (`jj-lib` and
+`test-support`), for seven. The product and hosted manifests carry reviewed
+dependency/feature surface digests; the workspace checker pins each exact
+facade dependency feature list. The product's default and the facade's full
+and native-auth closures exclude aws-lc and rsa. The product still excludes
+terminal/clipboard libraries and does not embed either evaluator's engine.
+A build without `web` also excludes the WebSocket dependencies.
 
 The checker reports hits/misses and atomically caches Cargo tree/metadata
 outputs in `${CARGO_TARGET_DIR:-$ROOT/target}/feature-closure-cache.json` by a
@@ -602,9 +574,9 @@ bypass the cache. When `git ls-files` fails (including a container source
 export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
-Closures prove dependency edges, not that the code compiles. Without
-`--build`, the checker therefore also runs `cargo check --lib` on eight
-profiles. Six are facade resolutions, each un-unified:
+Closures prove dependency edges, not that the code compiles. The checker
+normally also runs `cargo check --lib` on eight profiles. Six are facade
+resolutions, each without workspace feature unification:
 
 - no features: the always-on facade, with no optional route or evaluator;
 - `full`: every public facade feature together;
@@ -615,16 +587,13 @@ profiles. Six are facade resolutions, each un-unified:
 - `gateway` alone: the custody seam, the relay client and the relay server
   core over local custody, with no provider route.
 
-`plakous-hosted` is compiled with no features and with `--all-features`.
-Hosted defaults are compiled through the supported plakd default resolution,
-not as another profile. A rustc warning or error in any workspace
-crate of that profile fails it. Cargo's
-fingerprints are its cache: an unchanged profile is a no-op, and a facade or
-dependency source change rechecks only the affected crates. Hosted profiles
-must compile without borrowing facade features from another workspace package.
-`--build` checks
-every witness and skips this step. The other public features keep their
-closure witnesses; they are not each a compile profile.
+`plakous-hosted` is compiled without optional features and with
+`--all-features`. Both profiles include every product route and tool; only the
+JJ and test-support features vary. A rustc warning or error fails the profile.
+`static` runs these library compiles (scoped by package in a fast gate).
+When the `variants` group is also selected, it runs them instead with the
+gate's build flags. `--build` on the checker checks every witness and skips the
+eight-profile step. Cargo fingerprints avoid recompiling unchanged inputs.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
@@ -763,7 +732,7 @@ The default product enables `web`, the supported `plakd host` and its web endpoi
 (chapter 02 §4.5, §4.6): `hyper` and `hyper-util` (HTTP/1.1 server and
 upgrades), `http-body-util`, `bytes`, `futures-util`, `ring` (the cookie
 HMAC, the WebSocket accept digest and `new_session`'s name-based ids) and
-`tokio-tungstenite`. A reduced product without `web` parses `plakd host` and
+`tokio-tungstenite`. A source build without `web` parses `plakd host` and
 refuses with a typed capability error. `maintainer` also selects `web`. There is
 no `plakd web`: the web endpoint is `plakd host --web`.
 
@@ -1986,8 +1955,7 @@ type unconditionally (default features off, `derive`, `std` and `uuid1`), so
 `plakd wire schema` prints the exact build's schema (chapter 02 section 4.4). It adds
 no crate to the lock graph (`schemars`, `schemars_derive`, `dyn-clone`,
 `ref-cast` and `serde_derive_internals` were already locked through `rmcp`),
-but it is now in every product closure, the minimal and API variants
-included, which before reached it only through MCP. A feature-gated derive was
+but it is in every product closure. A feature-gated derive was
 not taken: each `cfg_attr` is a feature site, and the protocol crate carries
 about 160 wire types.
 
@@ -2308,7 +2276,8 @@ lane, never with the wall-clock or weighted lanes (chapter 05 §1).
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
 sweep, the dependency audit and the publish dry run. Full adds per-package
-standalone rustdoc and archive verification, and runs the ignored 5,000-call
+standalone rustdoc and archive verification, compiles the standalone library
+feature profiles in `variants`, and runs the ignored 5,000-call
 and full indexed retirement soaks. `just soak` selects only that long test
 evidence (chapter 05 §2.3).
 
@@ -2392,8 +2361,7 @@ by removing presentation modules. Bare invocation is help, terminal resume and
 hidden launch/re-exec flags are removed, and explicit run/agent/wire session
 resume remains supported. The runnable Python example is test-only support.
 
-The default/reduced feature policy omits terminal/clipboard entries and their
-forwarding/closure witnesses. The remaining 2n+3 witnesses, standalone checks,
+The product has no terminal/clipboard features. The 2n+3 witnesses, standalone checks,
 portable builds and contracts run per batch; package verification runs at RC.
 Public host tests do not build or require any external client repository.
 Human client review is independent evidence, not a public gate dependency.

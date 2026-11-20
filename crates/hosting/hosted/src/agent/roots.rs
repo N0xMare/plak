@@ -12,17 +12,9 @@ use plakous::sessions::{AgentSessions, SessionBackend};
 use crate::agent_tree::TreeStore;
 use crate::{CliFailure, CliResult};
 
-#[cfg(feature = "js")]
 mod recorded_sidecar;
-#[cfg(not(feature = "js"))]
-#[path = "roots/recorded_sidecar_unavailable.rs"]
-mod recorded_sidecar;
-#[cfg(all(test, feature = "js"))]
+#[cfg(test)]
 use recorded_sidecar::RecordedSidecar;
-#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
-mod subscription_custody;
-#[cfg(not(any(feature = "codex", feature = "grok", feature = "claude")))]
-#[path = "roots/subscription_custody_unavailable.rs"]
 mod subscription_custody;
 
 /// Where a hosted session's agent tree is persisted: the product opens its
@@ -144,10 +136,6 @@ pub enum TelemetryHealth {
     },
 }
 
-#[cfg(any(feature = "openai", feature = "anthropic", feature = "xai-api"))]
-mod api;
-#[cfg(not(any(feature = "openai", feature = "anthropic", feature = "xai-api")))]
-#[path = "roots/api_unavailable.rs"]
 mod api;
 
 /// What a host process's sessions share of their jobs: the one bound on

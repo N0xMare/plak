@@ -119,7 +119,6 @@ impl ServerSite {
 fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), crate::CliFailure> {
     static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), crate::CliFailure>> =
         OnceLock::new();
-    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let pool = POOL.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -347,7 +346,6 @@ pub(crate) fn recorded_mcp_tools(
     if selection.mcp_servers().next().is_none() {
         return Ok(bound);
     }
-    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let frozen = frozen.ok_or_else(|| {
         "the session's mcp tools were never frozen, so a reopen would list its servers again"
             .to_owned()
@@ -546,7 +544,6 @@ fn on_probe_lease<T>(
     workspace_root: &std::path::Path,
     work: impl AsyncFnOnce(&McpLease) -> Result<T, crate::CliFailure>,
 ) -> Result<T, crate::CliFailure> {
-    crate::capabilities::require_feature("mcp").map_err(crate::CliFailure::from)?;
     let environment = Arc::new(service_environment(workspace_root, site, None)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

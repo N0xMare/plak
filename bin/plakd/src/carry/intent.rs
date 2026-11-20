@@ -83,7 +83,7 @@ pub(crate) fn work_id(
     };
     // A build that cannot run the session refuses before following or settling
     // anything, so the refusal opens no store for writing.
-    crate::build_features::admit_session(&record)?;
+    crate::admission::admit_session(&record)?;
     load_for_work(services, record, stderr).map(|record| record.id)
 }
 
@@ -111,7 +111,7 @@ pub(crate) fn resume(
     let (record, landed) = resolve_open(services, record)?;
     notes.extend(landed);
     *note = (!notes.is_empty()).then(|| notes.join("; "));
-    crate::build_features::admit_session(&record)?;
+    crate::admission::admit_session(&record)?;
     Ok(record)
 }
 

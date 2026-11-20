@@ -365,19 +365,16 @@ fn catalog_bundle_with_backend(
     composition: ProductCompositionSelection,
     gateway: &crate::gateway::AdminLink,
 ) -> HostCatalogBundle {
-    let oauth = crate::capabilities::ROUTES
-        .iter()
-        .filter(|capability| capability.route.compiled)
-        .filter_map(|capability| {
-            capability.route.native_provider().map(|provider| {
-                (
-                    capability.route.account,
-                    capability.label,
-                    capability.short_label,
-                    provider,
-                )
-            })
-        });
+    let oauth = crate::capabilities::ROUTES.iter().filter_map(|capability| {
+        capability.route.native_provider().map(|provider| {
+            (
+                capability.route.account,
+                capability.label,
+                capability.short_label,
+                provider,
+            )
+        })
+    });
     let mut providers = Vec::new();
     let mut sections = Vec::new();
     let mut native_models = Vec::new();
@@ -531,8 +528,7 @@ fn catalog_bundle_with_backend(
     for (account, label) in crate::capabilities::ROUTES
         .iter()
         .filter(|capability| {
-            capability.route.compiled
-                && capability.auth_kind() == plakous_host_protocol::views::AuthKind::ApiKey
+            capability.auth_kind() == plakous_host_protocol::views::AuthKind::ApiKey
         })
         .map(|capability| (capability.route.account, capability.label))
     {

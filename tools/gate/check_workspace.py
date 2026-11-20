@@ -6160,89 +6160,9 @@ def _check_workspace() -> int:
         libraries = [target for target in targets if "lib" in target["kind"]]
         if len(libraries) != 1 or libraries[0]["name"] != "plakd":
             errors.append("plakd must expose exactly one library named plakd")
-        app_features = app.metadata.get("features", {})
-        for section in ("dependencies", "dev-dependencies"):
-            hosted = app.manifest.get(section, {}).get("plakous-hosted", {})
-            if not isinstance(hosted, dict) or hosted.get("default-features") is not False:
-                errors.append(
-                    f"plakd {section}: hosted defaults must be disabled for product selection"
-                )
-        for feature in (
-            "images",
-            "js",
-            "python",
-            "mcp",
-            "web-fetch",
-            "codex",
-            "grok",
-            "claude",
-            "openai",
-            "xai-api",
-            "anthropic",
-            "openrouter",
-        ):
-            if f"plakous-hosted/{feature}" not in app_features.get(feature, []):
-                errors.append(f"plak/{feature} must forward the matching hosted capability")
         for dependency in ("ratatui", "crossterm", "pulldown-cmark", "syntect", "arboard"):
             if dependency in app.manifest.get("dependencies", {}):
                 errors.append(f"plakd: public terminal dependency {dependency} is not allowed")
-        if set(app_features) != {
-            "default",
-            "maintainer",
-            "test-support",
-            "git-cli",
-            "jj",
-            "images",
-            "js",
-            "python",
-            "mcp",
-            "web-fetch",
-            "codex",
-            "grok",
-            "claude",
-            "openai",
-            "xai-api",
-            "anthropic",
-            "openrouter",
-            "web",
-        }:
-            errors.append(
-                "plakd may expose only default, maintainer, test-support, web "
-                "workspace backend features and product build capabilities"
-            )
-        elif set(app_features.get("default", [])) != {
-            "git-cli",
-            "images",
-            "js",
-            "python",
-            "mcp",
-            "web-fetch",
-            "web",
-            "codex",
-            "grok",
-            "claude",
-            "openai",
-            "xai-api",
-            "anthropic",
-            "openrouter",
-        }:
-            errors.append("plakd default must enable git-cli and all product capabilities")
-        elif app_features.get("maintainer") != ["jj", "web"]:
-            errors.append("plakd maintainer feature must enable jj and web")
-        elif sorted(app_features.get("test-support", [])) != [
-            "dep:plakous-offline-crash-harness",
-            "plakous-hosted/test-support",
-            "plakous-recursive-subagents-store/test-support",
-            "plakous/test-support",
-        ]:
-            # The offline model selector must reach the binary through exactly
-            # the harness and hosted injection edges. The third edge traces
-            # the existing tree-store dependency without a harness -> tree ->
-            # recursive-subagents -> harness dev-dependency cycle.
-            errors.append(
-                "plakd test-support must enable exactly the offline crash harness "
-                "and the facade, hosted and tree-store test-support features"
-            )
 
     host = packages.get("plakous-hosted")
     if host is not None:
@@ -6252,57 +6172,6 @@ def _check_workspace() -> int:
         libraries = [target for target in targets if "lib" in target["kind"]]
         if len(libraries) != 1 or libraries[0]["name"] != "plakous_hosted":
             errors.append("plakous-hosted must expose exactly one library named plakous_hosted")
-        host_features = host.metadata.get("features", {})
-        if set(host_features) != {
-            "default",
-            "test-support",
-            "git-cli",
-            "jj-lib",
-            "images",
-            "js",
-            "python",
-            "mcp",
-            "web-fetch",
-            "codex",
-            "grok",
-            "claude",
-            "openai",
-            "xai-api",
-            "anthropic",
-            "openrouter",
-        }:
-            errors.append(
-                "plakous-hosted must expose exactly the workspace backends, test-support and product capabilities"
-            )
-        elif set(host_features.get("default", [])) != {
-            "git-cli",
-            "jj-lib",
-            "images",
-            "js",
-            "python",
-            "mcp",
-            "web-fetch",
-            "codex",
-            "grok",
-            "claude",
-            "openai",
-            "xai-api",
-            "anthropic",
-            "openrouter",
-        }:
-            errors.append(
-                "plakous-hosted default must enable both workspace backends and all product capabilities"
-            )
-        elif host_features.get("test-support") != [
-            "dep:tempfile",
-            "plakous-recursive-subagents/test-support",
-            "plakous-workspace/test-support",
-        ]:
-            errors.append(
-                "plakous-hosted test-support must enable only tempfile and the "
-                "tree and workspace test-support features"
-            )
-
     facade = packages.get("plakous")
     if facade is not None:
         expected_features = {

@@ -961,7 +961,6 @@ fn profile_home(
     config.set_key("orchestration.subagents", "true")?;
     config.save(&paths)?;
     let gateway_state = root.path().join("gateway-state");
-    #[cfg(all(feature = "codex", feature = "grok"))]
     {
         let provider = NativeProvider::Codex;
         let expiry = plakous::subscriptions::NativeSubscriptions::notice(provider)?.expires_at();

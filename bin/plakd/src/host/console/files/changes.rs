@@ -253,7 +253,6 @@ fn refusal(reason: execution::ChangesRefusal) -> ReadRefusal {
 #[allow(clippy::unwrap_used, reason = "ephemeral entry authority fixtures")]
 mod tests {
     use super::*;
-    #[cfg(feature = "git-cli")]
     use plakous::tools::runner::{
         RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink, RunnerVerb,
     };
@@ -500,7 +499,6 @@ mod tests {
         assert_eq!(state.results.len(), 0);
     }
 
-    #[cfg(feature = "git-cli")]
     fn saved_session(
         paths: &crate::home::paths::PlakPaths,
         root: &std::path::Path,
@@ -540,7 +538,6 @@ mod tests {
         (services, record, sessions)
     }
 
-    #[cfg(feature = "git-cli")]
     fn git(root: &std::path::Path, args: &[&str]) {
         let output = std::process::Command::new("git")
             .args([
@@ -558,7 +555,6 @@ mod tests {
         assert!(output.status.success(), "git fixture failed");
     }
 
-    #[cfg(feature = "git-cli")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn saved_status_and_diff_need_no_attachment_runtime_or_agent_wake() {
         use plakous_hosted::host_service::wire::HostSessions;
@@ -658,13 +654,11 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "git-cli")]
     struct Endpoint {
         status: execution::ChangesStatus,
         calls: Arc<std::sync::atomic::AtomicUsize>,
         patch: &'static str,
     }
-    #[cfg(feature = "git-cli")]
     impl RunnerLink for Endpoint {
         fn call(&self, call: RunnerCall) -> RunnerCallFuture {
             assert!(matches!(call.class(), RunnerClass::Unkeyed));
@@ -702,7 +696,6 @@ mod tests {
             Box::pin(std::future::ready(answer))
         }
     }
-    #[cfg(feature = "git-cli")]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn changes_use_the_selected_runner_and_stale_instances_never_dispatch() {
         use plakous::tools::runner::{RunnerBackend, runner_descriptor, runner_environment};

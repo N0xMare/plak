@@ -12,7 +12,7 @@ struct BuildInfo<'a> {
     flavor: String,
     gateway: Versions<&'static [u16]>,
     host_upgrade: HostUpgrade,
-    omitted_features: Vec<&'static str>,
+    omitted_features: &'static [&'static str],
     product_version: &'static str,
     revision: String,
     runner: Runner<'a>,
@@ -69,7 +69,7 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
             coordinator: carry::upgrade::PROTOCOL,
             receipt: carry::upgrade::receipt::VERSION,
         },
-        omitted_features: crate::build_features::omitted_features(),
+        omitted_features: &[],
         product_version: plakous::VERSION,
         revision: version.source_revision,
         runner: Runner {

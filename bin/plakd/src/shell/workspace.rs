@@ -27,9 +27,6 @@ pub(super) fn read_session(session: &plakous_hosted::runtime::SurfaceSession) ->
 mod tests {
     #[test]
     fn a_remote_path_present_on_the_host_never_reads_host_vcs_or_home() {
-        if !cfg!(feature = "git-cli") {
-            return;
-        }
         let root = tempfile::tempdir().unwrap();
         assert!(
             std::process::Command::new("git")
@@ -88,9 +85,6 @@ mod tests {
 
     #[test]
     fn refreshed_chrome_observes_branch_changes_from_a_launch_subdirectory() {
-        if !cfg!(feature = "git-cli") {
-            return;
-        }
         let root = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| {
             let output = std::process::Command::new("git")

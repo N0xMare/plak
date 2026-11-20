@@ -1,13 +1,10 @@
 //! Product-owned API-key sources. Every attempt resolves the selected key anew.
 use crate::home::paths::PlakPaths;
 use std::sync::Arc;
-#[cfg(feature = "anthropic")]
 #[path = "anthropic.rs"]
 mod anthropic;
-#[cfg(feature = "openai")]
 #[path = "openai.rs"]
 mod openai;
-#[cfg(feature = "xai-api")]
 #[path = "xai.rs"]
 mod xai;
 

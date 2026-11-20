@@ -11,16 +11,7 @@ use plakous_hosted::host_service::wire::HostPrincipal;
 
 use super::*;
 
-#[cfg(all(
-    feature = "openai",
-    feature = "anthropic",
-    feature = "xai-api",
-    feature = "openrouter",
-    feature = "codex",
-    feature = "grok",
-    feature = "claude",
-    feature = "test-support"
-))]
+#[cfg(feature = "test-support")]
 mod catalog_gateway;
 
 #[tokio::test(start_paused = true)]

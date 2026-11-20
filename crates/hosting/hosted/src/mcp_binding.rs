@@ -1,9 +1,5 @@
 //! Named-secret port and feature-selected MCP bindings.
 
-#[cfg(feature = "mcp")]
-mod available;
-#[cfg(not(feature = "mcp"))]
-#[path = "mcp_binding/unavailable.rs"]
 mod available;
 pub(crate) use available::{BoundMcpTools, bind_mcp_tools, recorded_mcp_tools};
 
@@ -12,15 +8,10 @@ pub(crate) struct McpNodeServices {
     pub runner: Option<plakous::runner::RunnerServices>,
     pub product_home: Option<std::path::PathBuf>,
 }
-#[cfg(feature = "mcp")]
 pub use available::{
     McpProbe, get_mcp_prompt, list_mcp_prompts, mcp_login_status, mcp_oauth_spec, probe_mcp_server,
 };
 
-#[cfg(feature = "mcp")]
-mod secret_value;
-#[cfg(not(feature = "mcp"))]
-#[path = "mcp_binding/secret_value_unavailable.rs"]
 mod secret_value;
 pub use secret_value::NamedSecretValue;
 

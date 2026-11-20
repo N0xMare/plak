@@ -1,22 +1,11 @@
-#[cfg(feature = "grok")]
-#[path = "grok_available.rs"]
-mod compiled;
-#[cfg(not(feature = "grok"))]
-#[path = "grok_unavailable.rs"]
-mod compiled;
-
 use super::{RouteCapability, RouteKind};
 use crate::binding::ResolvedProtocol;
-use plakous::subscriptions::NativeProvider;
-
-pub(crate) use compiled::tool_result_images;
+use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 /// Grok subscription route facts, independent of direct xAI API credentials.
 pub static GROK: RouteCapability = RouteCapability {
-    compiled: compiled::COMPILED,
-    feature: "grok",
-    review_deadline: compiled::review_deadline,
-    hosted_retrieval: compiled::hosted_retrieval,
+    review_deadline: review_deadline,
+    hosted_retrieval: hosted_retrieval,
     account: "grok",
     aliases: &["grok", "supergrok", "xai-oauth"],
     kind: RouteKind::Native(NativeProvider::Xai),
@@ -28,3 +17,16 @@ pub static GROK: RouteCapability = RouteCapability {
     usage_label: Some("SuperGrok"),
     subscription_label: Some("Grok Subscription"),
 };
+
+pub(crate) const fn tool_result_images() -> bool {
+    plakous::xai::SUPERGROK_ALLOW_TOOL_RESULT_IMAGES
+}
+fn hosted_retrieval() -> Option<plakous::model::HostedRetrievalTable> {
+    NativeProvider::Xai.hosted_retrieval()
+}
+
+fn review_deadline() -> Option<u64> {
+    NativeSubscriptions::notice(NativeProvider::Xai)
+        .ok()
+        .map(plakous::subscriptions::CompatibilityNotice::expires_at)
+}

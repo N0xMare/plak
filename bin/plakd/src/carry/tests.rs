@@ -54,7 +54,7 @@ fn import_and_resume_refuse_account_target_mismatches_before_credentials() {
         let mut record = SessionRecord::new(root.path().to_owned());
         record.account = Some(account.into());
         record.target_selection = document.binding.target_selection;
-        let resumed = crate::build_features::admit_session(&record).unwrap_err();
+        let resumed = crate::admission::admit_session(&record).unwrap_err();
         for failure in [imported, resumed] {
             assert!(matches!(
                 std::error::Error::source(&failure).unwrap().downcast_ref::<AccountAdmissionError>(),

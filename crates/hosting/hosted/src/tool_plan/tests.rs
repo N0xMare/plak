@@ -519,7 +519,6 @@ fn fetch_url_binds_on_every_route_and_registers_after_the_wrappers() -> TestResu
 }
 
 #[test]
-#[cfg(feature = "web-fetch")]
 fn tool_image_switch_narrows_only_the_subscription_route_and_rotates_binding() -> TestResult {
     use plakous::tools::ToolRegistryBuilder;
 
@@ -568,7 +567,6 @@ fn tool_image_switch_narrows_only_the_subscription_route_and_rotates_binding() -
         }
         assert_eq!(identities[0] != identities[1], route == ToolRoute::Grok);
     }
-    #[cfg(any(feature = "grok", feature = "xai-api"))]
     assert_ne!(
         plakous::xai::supergrok_tool_image_adapter_revision(false),
         plakous::xai::supergrok_tool_image_adapter_revision(true)

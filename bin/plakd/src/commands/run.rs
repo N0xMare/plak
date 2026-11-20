@@ -95,7 +95,7 @@ impl PlakousApplication {
         }
         let configured = config.default_binding();
         let composition = run_composition(composition, &configured, selection, model);
-        crate::build_features::admit_selected(config, Some(account), Some(model), composition)?;
+        plakous_hosted::capabilities::require(account)?;
         let paths = self.product_paths()?;
         let choices = crate::account_choice::fill_cli(
             config,
@@ -523,15 +523,7 @@ impl PlakousApplication {
         stderr: &mut dyn io::Write,
         limits: product_host::RunBounds,
     ) -> CliResult<ProcessOutcome> {
-        crate::build_features::admit_session(&session)?;
-        if session.plakous_locator.is_none() {
-            crate::build_features::admit_selected(
-                admitted,
-                session.account.as_deref(),
-                session.model.as_deref(),
-                session.composition,
-            )?;
-        }
+        crate::admission::admit_session(&session)?;
         let paths = self.product_paths()?;
         paths.ensure_layout().map_err(CliFailure::new)?;
         let roots = self.state_roots()?;

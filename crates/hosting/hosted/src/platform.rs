@@ -1,10 +1,6 @@
 //! Direct API vocabulary with independent route implementations.
 use crate::binding::{CompositionSelection, PlatformProvider};
 mod catalog;
-#[cfg(any(feature = "openai", feature = "anthropic", feature = "xai-api"))]
-mod runtime;
-#[cfg(not(any(feature = "openai", feature = "anthropic", feature = "xai-api")))]
-#[path = "platform/runtime_unavailable.rs"]
 mod runtime;
 pub use catalog::{
     ApiAdmissionError, ApiCatalogSource, ApiModelCatalog, ApiModelStatus, ApiWindow, PlatformModel,
@@ -12,9 +8,9 @@ pub use catalog::{
 };
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) struct UnavailableCredentials;
-#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+#[cfg(test)]
 use runtime::listing;
-#[cfg(all(test, feature = "openai", feature = "anthropic", feature = "xai-api"))]
+#[cfg(test)]
 pub(crate) use runtime::tests;
 pub use runtime::{
     AnthropicCredentials, OpenAiCredentials, PlatformCredentials, XaiCredentials, api_model_catalog,

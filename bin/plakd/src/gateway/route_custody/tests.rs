@@ -126,7 +126,6 @@ fn a_latched_gateway_custody_survives_a_config_that_breaks_or_drops_the_gateway(
         assert_eq!(custody.label(), started.label(), "after {changed:?}");
         let _roots = services.state_roots().unwrap();
         // No key file exists: a local read would refuse this account.
-        #[cfg(feature = "openai")]
         {
             use plakous_hosted::platform::OpenAiCredentials as _;
             let platform = crate::platform_product::ProductPlatformCredentials::shared(

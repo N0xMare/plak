@@ -6,21 +6,11 @@ mod client_fixture_contract;
 #[cfg(all(feature = "test-support", feature = "maintainer"))]
 mod crash_sweep;
 mod diagnostics_contract;
-#[cfg(all(
-    feature = "test-support",
-    feature = "codex",
-    feature = "claude",
-    feature = "grok"
-))]
+#[cfg(feature = "test-support")]
 mod gateway_admin;
 #[path = "support/gateway_process.rs"]
 mod gateway_process;
-#[cfg(all(
-    feature = "test-support",
-    feature = "codex",
-    feature = "claude",
-    feature = "grok"
-))]
+#[cfg(feature = "test-support")]
 #[path = "support/gateway_seed.rs"]
 mod gateway_seed;
 mod gateway_service;

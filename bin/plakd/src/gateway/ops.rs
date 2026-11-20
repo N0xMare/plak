@@ -625,7 +625,6 @@ mod tests {
 
     /// An empty slot has no account to keep: a remote login into it is not
     /// held to one.
-    #[cfg(feature = "claude")]
     #[test]
     fn an_empty_slot_is_not_signed_in() {
         let directory = tempfile::tempdir().unwrap();

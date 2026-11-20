@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(feature = "images")]
 #[test]
 fn a_read_file_is_a_draft_named_after_it_and_refusals_name_the_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -25,14 +24,6 @@ fn a_read_file_is_a_draft_named_after_it_and_refusals_name_the_file() {
     );
 }
 
-#[cfg(not(feature = "images"))]
-#[test]
-fn a_build_without_image_decoding_refuses_every_file() {
-    let error = read_image(Path::new("/nonexistent.png")).unwrap_err();
-    assert!(matches!(error, ImageFileError::Unavailable(_)));
-}
-
-#[cfg(feature = "images")]
 #[test]
 fn downscaled_drafts_keep_their_name_and_source_dimensions() {
     use std::io::Cursor;
