@@ -36,9 +36,6 @@ def contract_environment() -> dict[str, str]:
         )
     )
     environment["CARGO_TARGET_DIR"] = str(cache.resolve() / target)
-    # Keep reusable Cargo artifacts without accumulating rustc's work-in-progress
-    # state across fixture graphs. Non-incremental units can use a rustc cache.
-    environment["CARGO_INCREMENTAL"] = "0"
     return environment
 
 

@@ -895,9 +895,8 @@ in a persistent `.public-contracts/<target-dir-name>/<target-triple>`
 directory beside `CARGO_TARGET_DIR` (default target name `target`). The
 triple is `CARGO_BUILD_TARGET` or rustc's host triple. The gitignore keeps the
 cache through checkout cleanup; `PLAK_PUBLIC_CONTRACTS_DIR` overrides the
-cache root, with the triple still appended. Contract compilations disable
-rustc incremental state; Cargo can still reuse compiled units and the
-runner's compiler cache, if configured. The pinned musl container uses
+cache root, with the triple still appended. Contracts retain the runner's
+Cargo incremental and compiler-cache settings. The pinned musl container uses
 `/qual/target/public-contracts-<image-tag>` as that root. No diagnostic pin
 is relaxed to keep builds warm.
 
