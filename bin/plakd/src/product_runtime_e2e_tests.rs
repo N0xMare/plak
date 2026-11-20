@@ -6,6 +6,7 @@
     reason = "offline runtime qualification fixtures"
 )]
 
+use crate::gateway::test_service::GatewayFixture;
 use crate::product_host::{HostConfig, RuntimeRole, ScriptedRuntimeFactory};
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, SessionRecord, TranscriptRow};
@@ -638,7 +639,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     const A: &[u8] = b"binding-a-account";
     const B: &[u8] = b"binding-b-account";
     const A_RETURN: &[u8] = b"binding-a-return-account";
-    let (root, paths, workspace) = profile_home("low")?;
+    let (root, paths, workspace, gateway) = profile_home("low")?;
     std::fs::write(
         paths.home().join("agents/pa-root.toml"),
         "account = \"codex\"\nmodel = \"offline-loopback-v1\"\neffort = \"medium\"\ndescription = \"root\"\n",
@@ -657,7 +658,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     let source_id = source.id.clone();
     let fork_onto = profile_fork_action;
 
-    let mut first_config = host_config(&paths, &workspace, source);
+    let mut first_config = profile_host_config(&paths, &workspace, source, &gateway);
     first_config.ready_catalog = profile_ready_catalog();
     first_config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) =
@@ -724,7 +725,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     const A: &[u8] = b"fast-source-account";
     const B: &[u8] = b"standard-target-account";
     const FAST: &[u8] = b"fast-return-account";
-    let (root, paths, workspace) = profile_home("low")?;
+    let (root, paths, workspace, gateway) = profile_home("low")?;
     std::fs::write(
         paths.home().join("agents/pa-root.toml"),
         "account = \"codex\"\nmodel = \"offline-loopback-v1\"\neffort = \"medium\"\nfast_mode = true\ndescription = \"fast root\"\n",
@@ -746,7 +747,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     let source_id = source.id.clone();
     let fork_onto = profile_fork_action;
 
-    let mut first = host_config(&paths, &workspace, source);
+    let mut first = profile_host_config(&paths, &workspace, source, &gateway);
     first.ready_catalog = profile_ready_catalog();
     first.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) =
@@ -789,7 +790,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     const A: &[u8] = b"native-ptc-source";
     const B: &[u8] = b"direct-profile-root";
-    let (root, paths, workspace) = profile_home("low")?;
+    let (root, paths, workspace, gateway) = profile_home("low")?;
     std::fs::write(
         paths.home().join("agents/pb-root.toml"),
         "account = \"codex\"\nmodel = \"binding-b-model\"\neffort = \"low\"\ncomposition = \"direct\"\ndescription = \"direct root\"\n",
@@ -805,7 +806,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
     source.composition = plakous_hosted::binding::CompositionSelection::NativePtc;
     product_sessions::save_session(&paths, &mut source)?;
     let source_id = source.id.clone();
-    let mut config = host_config(&paths, &workspace, source);
+    let mut config = profile_host_config(&paths, &workspace, source, &gateway);
     config.ready_catalog = profile_ready_catalog();
     config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) =
@@ -931,7 +932,7 @@ pub(super) fn drive_injected_binding_host(
 /// codex account at `root_effort`, with one worker card, and topology on.
 fn profile_home(
     root_effort: &str,
-) -> Result<(tempfile::TempDir, PlakPaths, PathBuf), Box<dyn Error + Send + Sync>> {
+) -> RuntimeResult<(tempfile::TempDir, PlakPaths, PathBuf, GatewayFixture)> {
     let root = PlakPaths::isolated_tempdir();
     let home = root.path().join("home");
     let workspace = root.path().join("workspace");
@@ -957,7 +958,29 @@ fn profile_home(
     let mut config = crate::product_config::ProductConfig::load(&paths)?;
     config.set_key("orchestration.subagents", "true")?;
     config.save(&paths)?;
-    Ok((root, paths, workspace))
+    let gateway_state = root.path().join("gateway-state");
+    #[cfg(all(feature = "codex", feature = "grok"))]
+    {
+        let provider = NativeProvider::Codex;
+        let expiry = plakous::subscriptions::NativeSubscriptions::notice(provider)?.expires_at();
+        crate::gateway::gateway_seed::seed(&gateway_state, provider, None, expiry);
+    }
+    let gateway = GatewayFixture::start(&paths, &gateway_state);
+    Ok((root, paths, workspace, gateway))
+}
+
+fn profile_host_config(
+    paths: &PlakPaths,
+    workspace: &Path,
+    source: SessionRecord,
+    gateway: &GatewayFixture,
+) -> HostConfig<crate::surface_protocol::PlakExtension> {
+    let mut config = host_config(paths, workspace, source);
+    config.surface = Some(crate::shell::settings::ProductSurface::boxed(
+        paths,
+        gateway.custody(),
+    ));
+    config
 }
 
 fn profile_ready_catalog() -> plakous_host_protocol::views::ReadyCatalog {
@@ -989,7 +1012,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     const A: &[u8] = b"profile-source-account";
     const B: &[u8] = b"profile-target-account";
-    let (root, paths, workspace) = profile_home("low")?;
+    let (root, paths, workspace, gateway) = profile_home("low")?;
     let controller = BoundaryController::quiet_from_evidence_path(
         CrashBoundary::None,
         root.path().join("profile-fork.jsonl"),
@@ -1001,7 +1024,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_leaves_the_default()
     product_sessions::save_session(&paths, &mut source)?;
     let source_id = source.id.clone();
 
-    let mut config = host_config(&paths, &workspace, source);
+    let mut config = profile_host_config(&paths, &workspace, source, &gateway);
     config.ready_catalog = profile_ready_catalog();
     // The source attachment join is held half a second past runtime release, so
     // the quit below always lands while it is pending.
@@ -1062,7 +1085,7 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
     const A: &[u8] = b"profile-refused-source";
     const B: &[u8] = b"profile-refused-target";
     // `high` is absent from the catalog row, so the rebind refuses the root.
-    let (root, paths, workspace) = profile_home("high")?;
+    let (root, paths, workspace, gateway) = profile_home("high")?;
     let controller = BoundaryController::quiet_from_evidence_path(
         CrashBoundary::None,
         root.path().join("profile-refused.jsonl"),
@@ -1074,7 +1097,7 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
     product_sessions::save_session(&paths, &mut source)?;
     let config_before = std::fs::read_to_string(paths.config_file())?;
 
-    let mut config = host_config(&paths, &workspace, source);
+    let mut config = profile_host_config(&paths, &workspace, source, &gateway);
     config.ready_catalog = profile_ready_catalog();
     config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) =
@@ -1130,7 +1153,7 @@ fn fork_now_onto_a_treeless_running_profile_seeds_its_own_tree()
 fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     const A: &[u8] = b"profile-same-source";
     const B: &[u8] = b"profile-new-tree";
-    let (root, paths, workspace) = profile_home("low")?;
+    let (root, paths, workspace, gateway) = profile_home("low")?;
     let mut config = crate::product_config::ProductConfig::load(&paths)?;
     config.set_key("root.agent", "pb-root")?;
     config.set_key("roster.working_set", "pb-worker")?;
@@ -1170,7 +1193,7 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
             .map_err(|error| error.detail)?;
     }
 
-    let mut host = host_config(&paths, &workspace, source);
+    let mut host = profile_host_config(&paths, &workspace, source, &gateway);
     host.ready_catalog = profile_ready_catalog();
     host.runtime_factory =
         account_injection(&workspace, &controller, A, if with_tree { A } else { B })?;
