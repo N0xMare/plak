@@ -577,7 +577,7 @@ run_static_tree_checks() {
   echo "== structure: workspace =="
   python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
   echo "== structure: features (static) =="
-  local features=("${worker_features[@]}")
+  local features=(${worker_features[@]+"${worker_features[@]}"})
   # An explicit variants group compiles these profiles with the build flags.
   if selected variants; then features=(--library-packages); fi
   CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${features[@]+"${features[@]}"} \

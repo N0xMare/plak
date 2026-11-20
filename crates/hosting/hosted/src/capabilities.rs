@@ -114,8 +114,8 @@ const fn same_id(left: &str, right: &str) -> bool {
     true
 }
 
-/// Parse an exact default or named account and return its route,
-/// without reading credentials. Invalid identities return `None`.
+/// Parse an exact default or named account and return its route without
+/// reading credentials. Invalid identities return `None`.
 #[must_use]
 pub fn for_account(account: &str) -> Option<&'static RouteCapability> {
     account

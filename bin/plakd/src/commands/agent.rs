@@ -284,7 +284,7 @@ fn fill_agent_accounts(
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "Agent admission carries the explicit binding overrides through capability checks, session selection, and host configuration."
+    reason = "Agent admission carries the explicit binding overrides through session selection and host configuration."
 )]
 pub(crate) fn run_agent_after_admission(
     services: &crate::shell::services::Services,
@@ -303,6 +303,8 @@ pub(crate) fn run_agent_after_admission(
     if let Some(provider) = provider {
         plakous_hosted::capabilities::require_native(provider)?;
     }
+    // The session's product context: the CLI's launch directory unless the
+    // caller names another workspace's.
     let paths = match context {
         Some(context) => context,
         None => services.paths()?,
