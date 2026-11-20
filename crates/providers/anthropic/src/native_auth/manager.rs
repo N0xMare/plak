@@ -581,9 +581,29 @@ impl ClaudeNativeAuthManager {
     ///
     /// # Errors
     ///
-    /// Rejects stale or missing state.
+    /// Rejects missing state or a changed account. If the generation moves
+    /// again after one re-read, returns retryable store contention.
     pub fn revoke(&self) -> Result<CredentialGeneration, ClaudeNativeAuthError> {
-        self.logout_local()
+        let store = self.core.store()?;
+        let load = || store.load()?.ok_or(ClaudeNativeAuthError::NotLoggedIn);
+        let fence = load()?;
+        match store.logout(fence.generation()) {
+            Err(PrivateStoreError::StaleWriter) => {
+                let next = load()?;
+                if next.account_binding() != fence.account_binding() {
+                    return Err(PrivateStoreError::StoreBusy.into());
+                }
+                store.logout(next.generation()).map_err(|error| {
+                    if error == PrivateStoreError::StaleWriter {
+                        PrivateStoreError::StoreBusy
+                    } else {
+                        error
+                    }
+                    .into()
+                })
+            }
+            result => result.map_err(Into::into),
+        }
     }
 
     /// Returns the pinned enrolled coding catalog when the selected slot is Ready.

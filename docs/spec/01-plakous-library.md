@@ -5735,9 +5735,13 @@ cross-process lock with monotonic generations. The async ladder attempts both
 the execution and record locks without waiting on their holders. Contention
 from a writer, in-flight claim, reader or Ready lease leaves the record
 unchanged. Refresh and remote revoke both back off asynchronously for up to 30
-seconds before reporting retryable account busy; revoke does not substitute a
-different generation. If the exact fence moves, refresh asks the dialect
-again whether the current credential needs a refresh.
+seconds before reporting retryable account busy. If the exact fence moves,
+refresh asks the dialect again whether the current credential needs a refresh.
+Revoke re-reads the fence once within the same backoff, and can only claim the
+exact generation it read for the same account. A second move reports retryable
+account busy without dispatching revoke.
+Claude's local-only revoke follows the same one-re-read rule for its generation
+compare-and-swap, without an HTTP claim.
 Claimed HTTP store reads, restoration and terminal writes run on blocking
 workers with the same pinned directory authority. If an unstarted claim is
 abandoned during acquisition or pre-dispatch verification on a worker, the

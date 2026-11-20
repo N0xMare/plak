@@ -405,11 +405,13 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
     }
 
     async fn fence_to_revoke(&mut self) -> Result<CredentialFence, Self::Error> {
-        let current = self.manager.load_fence().await?;
-        if current.account_binding() != &self.manager.selected_account()? {
-            return Err(NativeCodexAuthError::AccountChanged);
+        if self.flight.is_none() {
+            let current = self.manager.load_fence().await?;
+            if current.account_binding() != &self.manager.selected_account()? {
+                return Err(NativeCodexAuthError::AccountChanged);
+            }
+            self.flight = Some(self.manager.enter_flight(&current).await?);
         }
-        self.flight = Some(self.manager.enter_flight(&current).await?);
         let current = self.manager.load_fence().await?;
         if current.account_binding() != &self.manager.selected_account()? {
             return Err(NativeCodexAuthError::AccountChanged);

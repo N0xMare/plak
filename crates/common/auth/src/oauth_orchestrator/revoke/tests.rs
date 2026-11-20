@@ -48,6 +48,7 @@ impl CredentialRefreshObserver for RecordingObserver {
 struct ScriptedRevokeHooks<'a> {
     observer: &'a RecordingObserver,
     fence: CredentialFence,
+    peer_refreshes: Option<(&'a PrivateCredentialStore, usize)>,
     authorize: Result<(), &'static str>,
     build_failure: Option<bool>,
     origin: Option<Origin>,
@@ -63,7 +64,25 @@ impl ClaimedRevokeHooks for ScriptedRevokeHooks<'_> {
     }
 
     fn fence_to_revoke(&mut self) -> impl Future<Output = Result<CredentialFence, Self::Error>> {
-        std::future::ready(Ok(self.fence.clone()))
+        let fence = self.fence.clone();
+        if let Some((store, remaining)) = &mut self.peer_refreshes
+            && *remaining > 0
+        {
+            let claim = store.begin_refresh(&fence).expect("peer claim");
+            let replacement = CredentialRecord::new(
+                fence.profile_id().clone(),
+                fence.account_binding().clone(),
+                claim.fence().generation().next().expect("next generation"),
+                CredentialStatus::Ready,
+                SecretBytes::new(b"refreshed payload".to_vec()),
+            )
+            .expect("refreshed credential");
+            self.fence = store
+                .complete_refresh(claim.start(), replacement)
+                .expect("peer refresh completion");
+            *remaining -= 1;
+        }
+        std::future::ready(Ok(fence))
     }
 
     fn build_revoke_request(
@@ -165,6 +184,7 @@ async fn revoke_with_a_ready_lease_refuses_without_a_claim()
     let mut hooks = ScriptedRevokeHooks {
         observer: &observer,
         fence: fence.clone(),
+        peer_refreshes: None,
         authorize: Ok(()),
         build_failure: None,
         origin: None,
@@ -185,12 +205,72 @@ async fn revoke_with_a_ready_lease_refuses_without_a_claim()
 }
 
 #[tokio::test]
+async fn revoke_claims_the_reread_generation_after_a_peer_refresh()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_dir, store, fence) = fixture_store()?;
+    let endpoint = loopback_endpoint().await?;
+    let server = spawn_loopback_response(
+        endpoint.listener,
+        endpoint.acceptor,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}",
+    );
+    let observer = RecordingObserver::new();
+    let mut hooks = ScriptedRevokeHooks {
+        observer: &observer,
+        fence,
+        peer_refreshes: Some((&store, 1)),
+        authorize: Ok(()),
+        build_failure: None,
+        origin: Some(endpoint.origin),
+        accept: Ok(()),
+    };
+    assert_eq!(
+        run_claimed_revoke(&store, &endpoint.client, &mut hooks).await,
+        Ok(())
+    );
+    server.await??;
+    let revoked = store.load()?.ok_or("missing tombstone")?;
+    assert_eq!(revoked.status(), CredentialStatus::Revoked);
+    assert_eq!(
+        revoked.generation(),
+        hooks.fence.generation().next()?.next()?
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_peer_refresh_leaves_revoke_busy_without_claiming()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_dir, store, fence) = fixture_store()?;
+    let observer = RecordingObserver::new();
+    let mut hooks = ScriptedRevokeHooks {
+        observer: &observer,
+        fence: fence.clone(),
+        peer_refreshes: Some((&store, 2)),
+        authorize: Ok(()),
+        build_failure: None,
+        origin: None,
+        accept: Ok(()),
+    };
+    let client = HttpClient::new_http1(Limits::default())?;
+    assert_eq!(
+        run_claimed_revoke(&store, &client, &mut hooks).await,
+        Err("busy")
+    );
+    assert_eq!(hooks.fence.generation().get(), fence.generation().get() + 4);
+    assert_eq!(store.load()?, Some(hooks.fence));
+    assert_eq!(observer.phases(), [] as [CredentialRefreshPhase; 0]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn authorize_dispatch_failure_emits_restored() -> Result<(), Box<dyn std::error::Error>> {
     let (_dir, store, fence) = fixture_store()?;
     let observer = RecordingObserver::new();
     let mut hooks = ScriptedRevokeHooks {
         observer: &observer,
         fence,
+        peer_refreshes: None,
         authorize: Err("denied"),
         build_failure: None,
         origin: None,
@@ -228,6 +308,7 @@ async fn revoke_build_failure_reopens_with_the_observed_durable_disposition()
         let observer = RecordingObserver::new();
         let mut hooks = ScriptedRevokeHooks {
             observer: &observer,
+            peer_refreshes: None,
             fence: fence.clone(),
             authorize: Ok(()),
             build_failure: Some(restore),
@@ -283,6 +364,7 @@ async fn revoke_accept_failure_reopens_quarantined() -> Result<(), Box<dyn std::
     let mut hooks = ScriptedRevokeHooks {
         observer: &observer,
         fence: fence.clone(),
+        peer_refreshes: None,
         authorize: Ok(()),
         build_failure: None,
         origin: Some(endpoint.origin),

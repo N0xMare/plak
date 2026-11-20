@@ -442,7 +442,8 @@ pub trait ClaimedRevokeHooks {
     /// Returns a dialect error when the compatibility profile is inactive.
     fn check_profile(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Fence to revoke after flight / account checks.
+    /// Fence to revoke after flight / account checks. On a claim fence
+    /// mismatch this can be called once more under the same flight.
     ///
     /// # Errors
     ///

@@ -31,13 +31,28 @@ where
     H: ClaimedRevokeHooks,
 {
     hooks.check_profile().await?;
-    let fence = hooks.fence_to_revoke().await?;
+    let mut fence = hooks.fence_to_revoke().await?;
     let started = Instant::now();
     let mut backoff = ClaimBackoff::new();
+    let mut reread = false;
     let claim = loop {
         match store.try_begin_claim(&fence, false).await {
             Ok(claim) => break claim,
+            Err(PrivateStoreError::FenceMismatch) if !reread => {
+                if !backoff.retry().await {
+                    return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
+                }
+                let next = hooks.fence_to_revoke().await?;
+                if next.account_binding() != fence.account_binding() {
+                    return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
+                }
+                fence = next;
+                reread = true;
+            }
             Err(PrivateStoreError::StoreBusy) if backoff.retry().await => {}
+            Err(PrivateStoreError::FenceMismatch) => {
+                return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
+            }
             Err(error) => return Err(hooks.map_store_error(error)),
         }
     };
