@@ -30,16 +30,19 @@ impl GroupCounts for ProcSnapshot {
             Observation::Full(counts) => counts.count(group),
         }
     }
+
+    fn counts_at_scan(&self) -> bool {
+        matches!(self.0, Observation::Full(_))
+    }
 }
 
 pub(super) fn snapshot() -> Option<ProcSnapshot> {
     let proc = open("/proc", READ | OFlags::DIRECTORY, Mode::empty()).ok()?;
-    if fstatfs(&proc).ok()?.f_type != PROC_SUPER_MAGIC {
-        return None;
-    }
     let own_pid = getpid();
     let own_group = getpgrp();
-    if !same_pid_namespace(&proc, own_pid) {
+    if !fstatfs(&proc).is_ok_and(|stat| stat.f_type == PROC_SUPER_MAGIC)
+        || !same_pid_namespace(&proc, own_pid)
+    {
         return live_groups().map(|groups| ProcSnapshot(Observation::Full(groups)));
     }
     let mut pids = BTreeMap::<i32, Vec<Pid>>::new();

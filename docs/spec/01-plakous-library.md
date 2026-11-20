@@ -8597,11 +8597,13 @@ termination phase. Concurrent probes share one complete membership observation a
 groups (a `/proc` scan on Linux, a bounded `ps` run on macOS) instead of
 scanning once per group. On Linux, when the procfs mount and caller have
 the same PID namespace, each scan gets membership from the kernel and
-reads process state only for members of queried groups. Without that
-namespace match it takes a full stat snapshot. A Linux `/proc` readdir is not a
-point-in-time snapshot, so an empty count holds only when two consecutive
-shared scans, both begun after the probe's fence, agree; the previous scan is
-kept so concurrent probes share that confirmation. A probe
+reads process state only for members of queried groups. Otherwise it
+takes a full stat snapshot. A Linux `/proc` readdir is not a point-in-time
+snapshot, so absence needs two consecutive observations begun after the
+probe's fence. Each reads the queried group's process state as part of the
+scan. A delayed read against cached membership can report a live candidate,
+but a delayed zero requires a fresh enumeration and immediate count; it
+never confirms an empty group. A probe
 requires a snapshot begun after its first membership query (following leader
 exit observation) or previous polling phase;
 starting a new termination phase invalidates its previous observation. Linux

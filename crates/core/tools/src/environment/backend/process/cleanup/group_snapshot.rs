@@ -15,17 +15,25 @@ mod linux;
 
 trait GroupCounts {
     fn count(&mut self, group: i32) -> Option<usize>;
+
+    /// Whether every group's liveness was read as part of enumeration.
+    fn counts_at_scan(&self) -> bool;
 }
 
 impl GroupCounts for BTreeMap<i32, usize> {
     fn count(&mut self, group: i32) -> Option<usize> {
         Some(self.get(&group).copied().unwrap_or(0))
     }
+
+    fn counts_at_scan(&self) -> bool {
+        true
+    }
 }
 
 struct Snapshot<S> {
     started: Instant,
     groups: Option<S>,
+    empty_at_scan: Option<i32>,
 }
 
 impl<S: GroupCounts> Snapshot<S> {
@@ -36,6 +44,14 @@ impl<S: GroupCounts> Snapshot<S> {
     fn serves(&self, fresh_since: Instant, now: Instant) -> bool {
         self.started >= fresh_since
             && now.saturating_duration_since(self.started) < Duration::from_millis(250)
+    }
+
+    fn proved_empty(&mut self, group: i32) -> bool {
+        self.empty_at_scan == Some(group)
+            || self
+                .groups
+                .as_mut()
+                .is_some_and(|counts| counts.counts_at_scan() && counts.count(group) == Some(0))
     }
 }
 
@@ -72,29 +88,46 @@ impl<S: GroupCounts> Snapshots<S> {
         mut scan: impl FnMut() -> Option<S>,
     ) -> Option<usize> {
         let checked = now();
-        if !self
-            .latest
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.serves(fresh_since, checked))
-        {
-            self.rescan(checked, &mut scan);
-        }
-        let count = self.latest.as_mut()?.count(group);
-        if !confirm_empty
-            || count != Some(0)
-            || self.earlier.as_mut().is_some_and(|snapshot| {
-                snapshot.serves(fresh_since, checked) && snapshot.count(group) == Some(0)
-            })
-        {
+        let count = match self.latest.as_mut() {
+            Some(snapshot) if snapshot.serves(fresh_since, checked) => snapshot.count(group),
+            _ => self.rescan(group, checked, &mut scan),
+        };
+        if count != Some(0) {
             return count;
         }
-        self.rescan(now(), &mut scan);
-        self.latest.as_mut()?.count(group)
+        // A delayed liveness read can miss a successor forked after
+        // enumeration. Resolve this group's state during a new scan instead.
+        if !self.latest.as_mut()?.proved_empty(group) {
+            let count = self.rescan(group, now(), &mut scan);
+            if count != Some(0) {
+                return count;
+            }
+        }
+        if !confirm_empty
+            || self.earlier.as_mut().is_some_and(|snapshot| {
+                snapshot.serves(fresh_since, checked) && snapshot.proved_empty(group)
+            })
+        {
+            return Some(0);
+        }
+        self.rescan(group, now(), &mut scan)
     }
 
-    fn rescan(&mut self, started: Instant, scan: &mut impl FnMut() -> Option<S>) {
-        let groups = scan();
-        self.earlier = self.latest.replace(Snapshot { started, groups });
+    fn rescan(
+        &mut self,
+        group: i32,
+        started: Instant,
+        scan: &mut impl FnMut() -> Option<S>,
+    ) -> Option<usize> {
+        let mut snapshot = Snapshot {
+            started,
+            groups: scan(),
+            empty_at_scan: None,
+        };
+        let count = snapshot.count(group);
+        snapshot.empty_at_scan = (count == Some(0)).then_some(group);
+        self.earlier = self.latest.replace(snapshot);
+        count
     }
 }
 
@@ -397,6 +430,57 @@ mod cleanup_contention_tests {
             snapshots.members(22, later, || later, true, || Some(groups(&[(22, 1)]))),
             Some(1)
         );
+    }
+
+    #[test]
+    fn delayed_liveness_reads_cannot_confirm_an_empty_group() {
+        struct LazyCounts<'a> {
+            enumerated_member: u32,
+            live_member: &'a Cell<u32>,
+        }
+
+        impl GroupCounts for LazyCounts<'_> {
+            fn count(&mut self, group: i32) -> Option<usize> {
+                Some(usize::from(
+                    group != 11
+                        || (self.enumerated_member != 0
+                            && self.enumerated_member == self.live_member.get()),
+                ))
+            }
+
+            fn counts_at_scan(&self) -> bool {
+                false
+            }
+        }
+
+        let mut snapshots = Snapshots::default();
+        let phase = Instant::now();
+        let clock = ticking(phase);
+        let live_member = Cell::new(1);
+        let scans = Cell::new(0);
+        let scan = || {
+            scans.set(scans.get() + 1);
+            Some(LazyCounts {
+                enumerated_member: live_member.get(),
+                live_member: &live_member,
+            })
+        };
+
+        assert_eq!(snapshots.members(22, phase, &clock, true, scan), Some(1));
+        let later = phase + Duration::from_millis(1) + Duration::from_micros(1);
+        assert_eq!(snapshots.members(33, later, &clock, true, scan), Some(1));
+        assert_eq!(scans.get(), 2);
+        // The original member forked a successor and exited after both
+        // enumerations. Querying their stored PID now returns zero twice.
+        live_member.set(2);
+        assert_eq!(snapshots.members(11, phase, &clock, true, scan), Some(1));
+        assert_eq!(scans.get(), 3);
+
+        // Even when the group really is empty, two immediate observations
+        // are needed; the cached lazy zero cannot confirm the first.
+        live_member.set(0);
+        assert_eq!(snapshots.members(11, phase, &clock, true, scan), Some(0));
+        assert_eq!(scans.get(), 5);
     }
 
     #[test]
