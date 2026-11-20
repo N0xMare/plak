@@ -84,11 +84,7 @@ impl Pair {
         start_env(&self.host, &[], &[("PATH", self.path.clone())])
     }
 
-    fn session(
-        &self,
-        conflict: bool,
-        steps: Vec<Value>,
-    ) -> (Host, Client, String, NodeAddress, u64) {
+    fn session(&self, conflict: bool, steps: &[Value]) -> (Host, Client, String, NodeAddress, u64) {
         let child = self.host.root.join("placed-child.json");
         let mut command = "test \"$(cat draft.txt)\" = 'live parent' && printf 'placed\n' > remote.txt && printf '%s\n' \"$PPID\" > process-parent".to_owned();
         if conflict {
@@ -128,7 +124,7 @@ impl Pair {
 
     fn assert_native_copy(&self, row: &Value, agent: &str) {
         let copy = Path::new(row["path"].as_str().unwrap());
-        assert!(copy.starts_with(&self.copies), "{copy:?}");
+        assert!(copy.starts_with(&self.copies), "{}", copy.display());
         assert_eq!(row["runner"], "secondary", "{row}");
         assert_eq!(row["agent_id"], agent);
         assert_eq!(
@@ -157,7 +153,7 @@ fn git(path: &Path, args: &[&str]) {
     );
 }
 
-fn tool(name: &str, arguments: Value) -> Value {
+fn tool(name: &str, arguments: &Value) -> Value {
     json!({"output":{"tool":{"name":name,"arguments":arguments}},"finish":"tool_calls"})
 }
 
@@ -168,7 +164,7 @@ fn answer(text: &str) -> Value {
 fn spawn(runner: &str, workspace: &str) -> Value {
     tool(
         "spawn_agent",
-        json!({
+        &json!({
             "template":"review", "tier":"mutate", "description":"placed worker", "prompt":"write remotely",
             "runner":runner,"workspace":workspace,
             "output_schema_json":"{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"],\"additionalProperties\":false}"
@@ -179,24 +175,24 @@ fn spawn(runner: &str, workspace: &str) -> Value {
 fn wait() -> Value {
     tool(
         "wait",
-        json!({"ids":["$result.agent_id"],"timeout_ms":15000}),
+        &json!({"ids":["$result.agent_id"],"timeout_ms":15000}),
     )
 }
 
 fn list() -> Value {
-    tool("list_agents", json!({"include_completed":true}))
+    tool("list_agents", &json!({"include_completed":true}))
 }
 
 fn adopt(candidate: &str, accept_conflicts: bool) -> Value {
     tool(
         "adopt_candidate",
-        json!({"candidate_id":candidate,"accept_conflicts":accept_conflicts}),
+        &json!({"candidate_id":candidate,"accept_conflicts":accept_conflicts}),
     )
 }
 
 fn tool_results(fixture: &Fixture, session: &str, count: usize) -> Vec<Value> {
     use plakd::store::session_records::SessionRecordStore as _;
-    use plakous::model::{ContentBlock, ToolResultPart};
+    use plakous::model::{ContentBlock, ConversationItem, HistorySegment, ToolResultPart};
     use plakous::sessions::AgentSessions;
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let records = plakd::store::session_records::SqliteSessionStore::new(paths.clone());
@@ -210,8 +206,8 @@ fn tool_results(fixture: &Fixture, session: &str, count: usize) -> Vec<Value> {
         results = history
             .segments()
             .iter()
-            .flat_map(|segment| segment.items())
-            .flat_map(|item| item.blocks())
+            .flat_map(HistorySegment::items)
+            .flat_map(ConversationItem::blocks)
             .filter_map(|block| match block {
                 ContentBlock::ToolResult(result) => Some(result.parts()),
                 _ => None,
@@ -240,7 +236,7 @@ fn cross_runner_child_fork_runs_holds_seals_and_adopts() {
     write_cut_marker(&pair.cuts.join("refuse"), b"refuse");
     let (mut host, mut client, session, node, attachment) = pair.session(
         false,
-        vec![
+        &[
             spawn("missing", "fork"),
             spawn("secondary", "inherit"),
             spawn("secondary", "fork"),
@@ -345,9 +341,9 @@ fn reopen_placed_child(pair: &Pair, session: &str, node: &NodeAddress, agent: &s
     root_script["steps"] = json!([
         tool(
             "send_agent_message",
-            json!({"agent_id":agent,"purpose":"followup","message":"prove the saved placement","refresh":false})
+            &json!({"agent_id":agent,"purpose":"followup","message":"prove the saved placement","refresh":false})
         ),
-        tool("wait", json!({"ids":[agent],"timeout_ms":15000})),
+        tool("wait", &json!({"ids":[agent],"timeout_ms":15000})),
         answer("reopened child ran")
     ]);
     pair.host.write_script(&root_script);
@@ -386,7 +382,7 @@ fn cross_runner_child_retains_text_conflict_on_parent_runner() {
     let pair = Pair::new();
     let (mut host, mut client, session, node, attachment) = pair.session(
         true,
-        vec![
+        &[
             spawn("secondary", "fork"),
             wait(),
             list(),
