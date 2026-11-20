@@ -1384,27 +1384,45 @@ class RepositoryPolicyTests(unittest.TestCase):
             with self.subTest(validator=validator.__name__):
                 self.assertEqual(validator(workspace), [])
 
-    def test_product_does_not_hard_enable_provider_facade_features(self) -> None:
-        expected = {"gateway", "sessions-sqlite"}
-        self.assertEqual(set(self.workspace.policy.facade_features["plakd"]), expected)
+    def test_product_and_hosted_declare_their_facade_features_directly(self) -> None:
+        expected = {
+            "anthropic",
+            "claude",
+            "codex",
+            "composition",
+            "composition-python",
+            "grok",
+            "mcp",
+            "openai",
+            "openrouter",
+            "sessions-sqlite",
+            "web-fetch",
+            "xai",
+        }
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
-        product = self.workspace.packages["plakd"]
-        for provider in ("openai", "anthropic", "xai"):
-            with self.subTest(provider=provider):
+        for name, features in (
+            ("plakd", expected | {"gateway"}),
+            ("plakous-hosted", expected),
+        ):
+            with self.subTest(package=name):
+                self.assertEqual(set(self.workspace.policy.facade_features[name]), features)
+                product = self.workspace.packages[name]
                 metadata = copy.deepcopy(product.metadata)
                 edge = next(
                     dependency
                     for dependency in metadata["dependencies"]
                     if dependency["name"] == "plakous" and dependency.get("kind") is None
                 )
-                edge["features"].append(provider)
+                edge["features"].remove("openai")
                 packages = dict(self.workspace.packages)
-                packages["plakd"] = replace(product, metadata=metadata)
+                packages[name] = replace(product, metadata=metadata)
                 errors = workspace_policy.validate_facade_features(
                     replace(self.workspace, packages=packages)
                 )
                 self.assertEqual(len(errors), 1)
-                self.assertTrue(errors[0].startswith("plakd must enable exactly plakous/"), errors)
+                self.assertTrue(
+                    errors[0].startswith(f"{name} must enable exactly plakous/"), errors
+                )
 
     def test_instruction_text_may_not_depend_on_a_harness_pack(self) -> None:
         # `harness -> harness` exists so a composition crate may compose packs;
@@ -2916,7 +2934,8 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(self.contracts(self.manifests), [])
         self.assertEqual(
             self.digests,
-            {name for name, layer in self.layers.items() if layer in feature_policy.DIGEST_LAYERS},
+            {name for name, layer in self.layers.items() if layer in feature_policy.DIGEST_LAYERS}
+            | {"plakd", "plakous-hosted"},
         )
         self.assertEqual(set(feature_policy.EXPECTED_SECURITY_SURFACE_DIGESTS), self.digests)
 
@@ -3047,9 +3066,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertNotIn("plakous-model", packages)
         profile_counts = {
             package: len(
-                feature_policy.product_feature_sets(self.manifests[package])
-                if package in {"plakd", "plakous-hosted"}
-                else feature_policy.feature_sets(
+                feature_policy.feature_sets(
                     feature_policy.optional_features(self.manifests[package]),
                     "full" in self.manifests[package]["features"],
                 )
@@ -3059,8 +3076,8 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous"], 2 * 15 + 3)
         # sqlite and the combined repository-only test seam.
         self.assertEqual(profile_counts["plakous-store"], 2 * 2 + 3)
-        self.assertEqual(profile_counts["plakd"], 2 * 17 + 3)
-        self.assertEqual(profile_counts["plakous-hosted"], 2 * 15 + 3)
+        self.assertEqual(profile_counts["plakd"], 2 * 4 + 3)
+        self.assertEqual(profile_counts["plakous-hosted"], 2 * 2 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 2 * 1 + 3)
         for count in profile_counts.values():
