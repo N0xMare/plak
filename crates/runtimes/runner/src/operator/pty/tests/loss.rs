@@ -136,23 +136,24 @@ fn operator_pty_fast_double_fork_escape_is_not_a_descendant_containment_claim() 
 #[test]
 #[ignore = "real orphaned shell runner-loss subprocess fixture"]
 fn operator_orphaned_shell_runner() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut launch =
-        account_launch(directory.path().to_owned(), "/usr/bin:/bin".into(), None).unwrap();
-    launch.shell = "/bin/sh".into();
-    let mut worker = Worker::spawn(
-        launch,
+    let ready = PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.env_clear();
+    command.args([
+        "-c",
+        "trap '' HUP; printf 'ORPHAN-READY\n'; n=0; while [ ! -f \"$1\" ]; do \
+         [ \"$n\" -lt 3000 ] || exit 1; n=$((n+1)); /bin/sleep 0.02; done",
+        "orphaned-shell",
+    ]);
+    command.arg(ready.with_extension("release"));
+    // A noninteractive shell does not return to a prompt on the hung-up PTY.
+    let mut worker = Worker::spawn_command(
+        command,
         TerminalDimensions::new(24, 80).unwrap(),
         Arc::default(),
     )
     .unwrap();
-    worker
-        .io_round(&mut VecDeque::from(
-            b"trap '' HUP; printf 'ORPHAN-READY\\n'; n=0; while [ \"$n\" -lt 60 ]; do n=$((n + 1)); sleep 1; done\n".to_vec(),
-        ))
-        .unwrap();
     until_output(&mut worker, b"ORPHAN-READY\r\n");
-    let ready = PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
     let pending = ready.with_extension("pending");
     std::fs::write(&pending, worker.identity.as_ref().unwrap().pid.to_string()).unwrap();
     std::fs::rename(pending, ready).unwrap();
@@ -227,4 +228,5 @@ fn operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead() {
         escape.current().is_some_and(|row| !row.zombie),
         "refusing a lost terminal must not kill the surviving shell"
     );
+    std::fs::write(handshake.with_extension("release"), b"").unwrap();
 }

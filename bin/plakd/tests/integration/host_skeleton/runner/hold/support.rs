@@ -109,7 +109,9 @@ impl Remote {
 }
 
 pub(super) fn wait_file(path: &Path) {
-    until("fixture marker", || path.is_file());
+    until(&format!("fixture marker {}", path.display()), || {
+        path.is_file()
+    });
 }
 
 pub(super) fn until(label: &str, predicate: impl FnMut() -> bool) {

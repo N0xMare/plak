@@ -230,8 +230,9 @@ including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.
 The host-only loss fixture waits for cleanup proof from the old runner itself,
 including when the replacement runner reports no terminals.
-The orphaned-shell fixture publishes a complete PID marker and on Linux
-checks that specific PID's start identity and state without a whole-system scan.
+The orphaned-shell fixture gates the HUP-ignoring shell's exit on a test
+marker and publishes a complete PID marker. On Linux it checks that specific
+PID's start identity and state without a whole-system scan.
 These platform-sensitive tests require both supported operating systems; Linux
 evidence alone is not macOS process-supervision qualification. The product client
 terminal scheduler and browser transport-loss evidence belong to their later
@@ -2430,6 +2431,10 @@ of the process alone does not imply durable publication.
 In the runner link host-kill cases, the effect itself marks that it has
 started on the runner and waits for release after the host is reaped. A
 host-side journal entry alone witnesses intent, not dispatch.
+The placement-hold host-loss case arms the successor's Ready barrier
+before startup and resumes the daemon before the successor transfers
+ownership. Only the source uses the deliberately short link windows that
+induce the hold.
 
 `durability::` stays in the serial lane, as that lane's table says.
 Every product and tree revision step ships with before- and after-commit crash

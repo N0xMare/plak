@@ -298,6 +298,13 @@ fn runner_hold_host_loss() {
     held(&mut Client::connect(&host), &session);
     kill(&mut host);
     drop(attached);
+    // The successor cut is the explicit Ready barrier, not a transfer to a
+    // paused peer under the original host's deliberately short read window.
+    let mut recovery = remote.script(&fixture);
+    recovery.as_object_mut().unwrap().remove("runner_windows");
+    fixture.write_script(&recovery);
+    remote.arm("before-ready");
+    paused.resume();
     let mut host = start_env(&fixture, &[], &[("PATH", remote.path.clone())]);
     let mut admin = Client::connect(&host);
     assert_eq!(providers(&fixture), 1);
@@ -306,8 +313,6 @@ fn runner_hold_host_loss() {
         SessionActivity::Busy,
         "a process-local hold was restored"
     );
-    remote.arm("before-ready");
-    paused.resume();
     remote.entered("before-ready");
     assert_eq!(providers(&fixture), 1);
     remote.release("before-ready");
