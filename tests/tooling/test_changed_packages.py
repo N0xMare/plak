@@ -188,12 +188,14 @@ class TouchedPackagesTests(unittest.TestCase):
     def test_install_path_triggers_nominate_the_directly_affected_families(self):
         for path, name in (
             ("bin/plakd/src/host/upgrade/carry.rs", "upgrade"),
+            ("bin/plakd/tests/integration/host_skeleton/upgrade/verdicts.rs", "upgrade"),
             ("crates/store/src/sqlite/host_move.rs", "upgrade"),
             ("bin/plakd/src/store/revisions.rs", "upgrade"),
             (
                 "crates/core/agent/src/runtime/operation_record/retirement/tests.rs",
                 "ledger-retirement",
             ),
+            ("bin/plakd/tests/integration/crash_sweep/mod.rs", "ledger-retirement"),
             ("crates/common/image/src/lib.rs", "image-residency"),
             ("crates/hosting/hosted/src/runtime/host_loop/residency.rs", "image-residency"),
             ("bin/plakd/src/commands/runner/services.rs", "runner-startup"),
@@ -203,6 +205,7 @@ class TouchedPackagesTests(unittest.TestCase):
             ("bin/plakd/src/terminal_registry/pins.rs", "operator-pins-rate"),
             ("bin/plakd/src/commands/session/lifecycle/keepalive.rs", "lifecycle-deletion"),
             ("crates/hosting/hosted/src/agent/park/tests.rs", "placement-hold"),
+            ("crates/harness/tool-process/src/placement_hold_tests.rs", "placement-hold"),
         ):
             with self.subTest(path=path):
                 self.assertEqual(CHANGED.install_families([path], {}), [name])

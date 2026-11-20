@@ -75,9 +75,13 @@ RUNTIME_EDGES = {
 INSTALL_FAMILY_PATHS = {
     "upgrade": (
         r"^bin/plakd/src/(?:host/(?:upgrade|store_revisions)|carry|deploy|store/revisions)(?:/|\.rs$)",
+        r"^bin/plakd/tests/integration/host_skeleton/upgrade(?:/|\.rs$)",
         r"/(?:host_move|[^/]*revisions?)(?:/|[_.])",
     ),
-    "ledger-retirement": (r"/[^/]*(?:ledger|retirement)[^/]*(?:/|\.rs$)",),
+    "ledger-retirement": (
+        r"/[^/]*(?:ledger|retirement)[^/]*(?:/|\.rs$)",
+        r"^bin/plakd/tests/integration/crash_sweep/mod\.rs$",
+    ),
     "image-residency": (r"/[^/]*(?:image|residency)[^/]*(?:/|\.rs$)",),
     "runner-startup": (
         r"^crates/(?:runtimes/runner|common/runner-(?:dial|protocol))/",
@@ -100,7 +104,8 @@ INSTALL_FAMILY_PATHS = {
     "placement-hold": (
         r"^crates/hosting/hosted/src/agent/(?:park|placement)(?:/|\.rs$)",
         r"^crates/core/agent/src/runtime/(?:durable/tests/placement_hold|driver/placement_wait)(?:/|\.rs$)",
-        r"^bin/plakd/(?:src/host/sessions/placement|tests/integration/placement_hold_tests)(?:/|\.rs$)",
+        r"^crates/harness/tool-process/src/placement_hold_tests\.rs$",
+        r"^bin/plakd/src/host/sessions/placement(?:/|\.rs$)",
     ),
 }
 
