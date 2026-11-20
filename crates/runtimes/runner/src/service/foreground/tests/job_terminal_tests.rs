@@ -1,10 +1,9 @@
 use super::*;
 use plakous_runner_protocol::retention::{Job, PAGE_SIZE};
-use plakous_tools::{JobStatus, JoinedProcessOutputCursor, MAX_JOINED_PROCESS_SESSIONS};
+use plakous_tools::{JobStatus, JoinedProcessOutputCursor};
 
 async fn populate(sessions: &RunnerSessions, count: u32) -> plakous_tools::JoinedProcessSessionId {
     let mut first = None;
-    let running_limit = u32::try_from(MAX_JOINED_PROCESS_SESSIONS).unwrap();
     for number in 1..=count {
         let id = sessions
             .start(
@@ -33,26 +32,23 @@ async fn populate(sessions: &RunnerSessions, count: u32) -> plakous_tools::Joine
             .unwrap();
         sessions.promote(id).await.unwrap();
         first.get_or_insert(id);
-        if number.is_multiple_of(running_limit) || number == count {
-            wait_for_terminal_jobs(sessions, number).await;
-        }
+        wait_for_terminal_job(sessions, number).await;
     }
     first.unwrap()
 }
 
-async fn wait_for_terminal_jobs(sessions: &RunnerSessions, count: u32) {
+async fn wait_for_terminal_job(sessions: &RunnerSessions, number: u32) {
     // A page of retained terminals need not be a page of live processes.
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let jobs = sessions.jobs().await.unwrap();
-            if jobs.len() == usize::try_from(count).unwrap()
-                && jobs
-                    .iter()
-                    .all(|job| matches!(job.status, JobStatus::Exited(_)))
+            if jobs
+                .iter()
+                .any(|job| job.number == number && matches!(job.status, JobStatus::Exited(Some(0))))
             {
                 break;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
