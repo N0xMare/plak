@@ -40,8 +40,7 @@ type ForegroundReporter =
 
 mod foreground;
 mod job_terminals;
-pub(crate) mod owner_transfer;
-pub use owner_transfer::ExactOwnerTransfer;
+mod owner_transfer;
 mod probe;
 mod requests;
 use requests::{
@@ -175,13 +174,11 @@ struct Inner {
 
 enum InspectionAnswer {
     Lines(Vec<LineStatus>),
-    OwnerFloors(Vec<plakous_runner_protocol::OwnerFloor>),
     JobTerminals {
         owner: LineOwner,
         jobs: Vec<plakous_runner_protocol::retention::Job>,
         next: Option<u32>,
     },
-    OwnerWitnessesForgotten,
 }
 
 struct State {
@@ -197,8 +194,6 @@ struct State {
     pending: HashMap<String, Pending>,
     transfers: HashMap<String, oneshot::Sender<RunnerFrame>>,
     questions: HashMap<String, oneshot::Sender<Result<InspectionAnswer, RunnerFailure>>>,
-    /// Idempotent ephemeral cleanup, retried only on this native connection.
-    witness_releases: HashMap<String, Vec<String>>,
     /// Why the runner refused the connection itself, such as an unpaired
     /// host.
     refusal: Option<Refusal>,
@@ -431,7 +426,6 @@ impl RunnerClient {
                     pending: HashMap::new(),
                     transfers: HashMap::new(),
                     questions: HashMap::new(),
-                    witness_releases: HashMap::new(),
                     refusal: None,
                     streams: HashMap::new(),
                     operator_streams: HashMap::new(),
@@ -569,9 +563,7 @@ impl RunnerClient {
         if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
             return match lines? {
                 InspectionAnswer::Lines(lines) => Ok(lines),
-                InspectionAnswer::OwnerFloors(_)
-                | InspectionAnswer::JobTerminals { .. }
-                | InspectionAnswer::OwnerWitnessesForgotten => Err(RunnerFailure::ReadInterrupted(
+                InspectionAnswer::JobTerminals { .. } => Err(RunnerFailure::ReadInterrupted(
                     "invalid line inspection answer".into(),
                 )),
             };
@@ -682,7 +674,6 @@ impl RunnerClient {
             state.refusal = None;
             state.closer.cancel();
             state.lose(|request| restarted || !replayable(request), restarted);
-            state.witness_releases.clear();
             state.instance.clone_from(&hello.instance);
             state.connection += 1;
             state.closer = closer.clone();
@@ -727,7 +718,6 @@ impl State {
         self.operator_streams.clear();
         self.transfers.clear();
         self.questions.clear();
-        self.witness_releases.clear();
         for (_, mut stream) in self.streams.drain() {
             stream.close();
         }
@@ -827,7 +817,6 @@ impl Inner {
                 return;
             }
             nonce += 1;
-            self.retry_witness_releases();
             self.send(HostFrame::Ping { nonce });
         }
     }
@@ -899,10 +888,6 @@ impl Inner {
                 self.answer_inspection(&request_id, InspectionAnswer::Lines(lines));
                 return;
             }
-            RunnerFrame::OwnerFloors { request_id, floors } => {
-                self.answer_inspection(&request_id, InspectionAnswer::OwnerFloors(floors));
-                return;
-            }
             RunnerFrame::JobTerminals {
                 request_id,
                 owner,
@@ -913,10 +898,6 @@ impl Inner {
                     &request_id,
                     InspectionAnswer::JobTerminals { owner, jobs, next },
                 );
-                return;
-            }
-            RunnerFrame::OwnerWitnessesForgotten { request_id } => {
-                self.witnesses_forgotten(&request_id);
                 return;
             }
             RunnerFrame::Stream(frame) => {

@@ -217,12 +217,6 @@ impl DurableSessionRuntime {
 }
 
 impl DurableBranchHold {
-    /// Exact held grant for the unsupported host-only ownership-move seam.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn move_lease(&self) -> BranchLease {
-        self.lease.clone()
-    }
     /// Renews the held branch lease without opening a driver.
     ///
     /// # Errors

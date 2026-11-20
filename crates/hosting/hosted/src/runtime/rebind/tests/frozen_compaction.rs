@@ -138,11 +138,11 @@ fn production_host_compact_build_keeps_a_previous_presentation_on_native_and_api
             .unwrap();
         assert_eq!(
             compact.target_binding().selected_provider_configuration(),
-            frozen.configuration().unwrap().selected_identity()
+            frozen.configuration().selected_identity()
         );
         assert_eq!(
             compact.target_binding().effective_provider_configuration(),
-            frozen.configuration().unwrap().effective_identity()
+            frozen.configuration().effective_identity()
         );
         let answer = executor
             .block_on(

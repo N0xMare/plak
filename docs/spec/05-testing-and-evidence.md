@@ -138,6 +138,13 @@ hooks model unknown/smaller windows and unsupported readers only in test-hooks
 probes. Runner qualification regressions independently pin the closed read
 allowlist, refusals for every other request/frame class, unchanged unpaired
 inspection and absence of persisted runner mutations after qualification.
+This fixture lane exercises settlement and recovery, not a cross-revision
+binary pair.
+
+Cross-revision settled-upgrade evidence comes from staging cutovers and deploy
+staging receipts (chapter 02 §4.6). Those cutovers run the literal source and
+destination binaries: the source produces the export and the destination
+imports it. No in-tree rehearsal substitutes for that evidence.
 
 Plain-start durability cases cut Prepared receipts after initial publication
 and after mapping publication with multiple roots, then restart as either key

@@ -44,8 +44,6 @@ pub use workspace::{
     WorkspaceOptions, WorkspaceRefusal,
 };
 
-#[doc(hidden)]
-pub use client::ExactOwnerTransfer;
 pub use client::{
     ClientWindows, ConnectError, OperatorReclamationGuard, OperatorTerminalStream, RecoveredCall,
     RunnerClient, RunnerConnectionRevision,

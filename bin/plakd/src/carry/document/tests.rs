@@ -50,7 +50,7 @@ fn document_kind_is_closed_and_cannot_authorize_a_move_via_portable_import() {
         let error = read_document(&path).unwrap_err().to_string();
         assert!(
             error.contains(if kind == "host_upgrade" {
-                "authorized host ownership-move operation"
+                "host_upgrade is a reserved document kind and cannot be imported"
             } else {
                 "unknown variant"
             }),

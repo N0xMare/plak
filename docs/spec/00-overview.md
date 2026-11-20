@@ -236,7 +236,9 @@ introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
 accepts only portable sessions; `host_upgrade` remains a reserved kind.
 
 The unused move tables in runtime schema 28, product generation 39, and tree
-generation 11 are reserved until the next planned state-key bump.
+generation 11 are reserved until the next planned state-key bump. Non-empty
+move tables and group-bearing upgrade receipts are unsupported test-only state
+with no compatibility claim.
 
 Host-upgrade receipts do not carry history, bindings, topology or job registries.
 They coordinate the versioned export carrier and record surrender/reconnect

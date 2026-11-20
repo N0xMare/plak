@@ -2901,7 +2901,9 @@ report), or `Refuse(reason)` for typed integrity. Callers differ only in where
 the evidence comes from:
 
 - the live open (`DurableSessionRuntime` open and agent construction) loads it
-  under its fresh lease and executes exactly the returned plan;
+  under its fresh lease and executes exactly the returned plan. Durable open
+  no longer performs a separate lease-revalidating write; any recovery writes
+  and all later commits remain fenced by the lease;
 - the `sessions::rehearsal` inspector reads it from one
   `SqliteSessionStore::inspect_branch` snapshot;
 - the recovery-scope check (§4.1) accepts every verdict except `Refuse`.
@@ -4276,11 +4278,9 @@ table marks `CodeModeOnly` is an enrolled API row, and every enrolled API row
 is either in the reference fixture, in sanitized authenticated evidence from
 that client version, or on an explicit reviewed API-only Direct list.
 Moving the reference-client pin rotates the Codex OAuth binding identity and
-requires a runtime format epoch cut. This pin move belongs to the same unshipped
-epoch 38 / `r28.e38.p38.t11` cut as the runtime move changes; it adds no
-second bump. Runtime epoch 39 and product schema 39 then move the state key
-to `r28.e39.p39.t11` (chapter 00). Cross-build session transfer uses export
-and import (§5.4).
+requires a runtime format epoch cut. The current state key is
+`r28.e39.p39.t11` (chapter 00). Cross-build session transfer uses export and
+import (§5.4).
 
 On a sampling request, a Responses `response.incomplete` with reason
 `content_filter` is a typed `ContentFilteredIncomplete` retry condition. Before
@@ -7013,14 +7013,7 @@ the normal recovery-required path before Ready. The driver's placement parking
   acquires leases, dispatches effects, acknowledges jobs nor consumes output.
   `Lines` and ordinary job snapshots expose presentation status without the
   original-worker terminal bit; `OwnerFloors` proves custody but not outcome.
-  The separate retention endpoint requires retained-owner authority, which a
-  source must not take merely to preflight a native move.
-  Source inspection may collect unconsumed job metadata without creating an
-  installation grant. Exact terminal samples complete ordinary settled-batch
-  validation, are persisted under the move's branch holds without consumption,
-  and are sampled again before native prepare and before surrender. A changed
-  or missing sampled row refuses before the irreversible decision. Terminal
-  output remains readable through the existing job verbs after transfer.
+  The separate retention endpoint requires retained-owner authority.
   Delegated proofs use the same original-worker cache refresh as ordinary
   retained listing. The complete proof read has a four-second bound; an
   unreachable or stalled original returns a refusal, never cached proof.
@@ -7059,44 +7052,9 @@ the normal recovery-required path before Ready. The driver's placement parking
   Rebinding the same host instance clears its previous connection's observations.
   A new instance clears only observations of instances without a live connection;
   another still-connected instance of the same home keeps its independent cache.
-  late replies cannot repopulate a retired connection's cache. Disposed groups
-  send this release without disconnecting independent groups; failed sends log
-  and retry only that idempotent release on the existing native client
-  reconciliation tick, until acknowledgement, definitive refusal or connection
-  replacement. A malformed reply is not retried. This
-  does not defer Ready or completion acknowledgement.
-  The observation never grants control. An unreachable original still cannot accept that CAS or
-  pass the final fresh sweep. A fresh native peer with no original witness
-  cannot take a higher owner for carried nonterminal jobs.
-  Missing or uncertain originals refuse the read without marking them
-  lost, releasing occupancy or taking authority. A new native peer may have no
-  floor while those originals still hold the imported source tuple. Every native
-  and original witness must be the exact imported source or the coordinator's
-  saved own intent before any higher lease is proposed, then the exact intended
-  owner in the final whole-group sweep. This finalizes unshipped protocol 9;
-  retention-v1 encodings are unchanged. The unsupported
-  host-layer exact-transfer client sends the existing `TransferOwner` CAS once
-  and returns a mismatching witness, never retrying from it or trusting a
-  cached acceptance. Ordinary transfer/reopen retry semantics are unchanged.
-  A move coordinator must reject every witness except its imported source
-  owner or its own durably recorded intended owner; a higher proposed fence
-  does not authorize leapfrogging an unrelated witness.
-  A source witness may still name an exact retained predecessor branch before
-  the continued head's first runner call. Its line/generation, runner and fence
-  must match a carried source branch and its floor; it is not relabeled as the
-  current head or silently raised. An unrepresented or ahead-of-source witness
-  refuses before surrender.
-  Replacement retries retain exact own intended tuples rather than forgetting
-  an older CAS that may finish late. The coordinator and receiver each keep at
-  most 64 prior own intents per line/original; overflow withholds rather than
-  evicting a possibly dispatched tuple. The receiver also retains its initial
-  source and last positively accepted original owner. A fresh witness must be
-  that proven owner or an exact own pending intention, never an arbitrary
-  intermediate fence. The replacement intent is synced before its CAS;
-  positive acceptance advances the proven owner and prunes receiver history.
-  Confirmed transfers cannot revive their old source. This changes only the
-  unshipped group journal and this build's private native-9 delegation records,
-  not the retention-v1 endpoint. Foreign-witness retries remain forbidden.
+  Late replies cannot repopulate a retired connection's cache. These frames
+  are part of the native protocol; they do not change the retention-v1
+  endpoint or ordinary transfer and reopen semantics.
 - **Read-only qualification.** Instead of binding, a paired host may answer
   Hello with `Qualify { host_id, version }`. All three version components
   must match, and the runner's allowlist must admit the home. This mode is
@@ -11311,8 +11269,8 @@ current-binding provider refusal can force compaction before a credible anchor
 exists.
 
 The context-state encoding and digest are version 4. The optional imported
-compaction selection is reserved in that encoding; there is no host-move
-installer. Its decode and display semantics are unchanged.
+compaction selection is reserved in that encoding. Its decode and display
+semantics are unchanged.
 Epoch 39 carries the same context codec. It bumps because Codex and
 SuperGrok credential-authority digests no longer include the store path,
 which changes persisted session-binding bytes.

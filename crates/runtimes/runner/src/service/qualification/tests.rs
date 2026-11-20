@@ -246,7 +246,6 @@ async fn qualification_client_uses_only_workspace_reads_and_never_registers_a_ho
         ])
     );
     assert!(client.lines().await.is_err());
-    assert!(client.owner_floors(&["line".into()]).await.is_err());
     let workspace = fixture.root.path().join("workspace");
     assert!(
         client
@@ -383,6 +382,10 @@ async fn qualification_refuses_transfer_and_all_non_read_frames_and_leaves_unpai
             request_id: "floors".into(),
             lines: vec!["line".into()],
         },
+        HostFrame::ForgetOwnerWitnesses {
+            request_id: "forget".into(),
+            lines: vec!["line".into()],
+        },
         HostFrame::Cancel {
             request_id: "read".into(),
         },
@@ -418,6 +421,10 @@ async fn qualification_refuses_transfer_and_all_non_read_frames_and_leaves_unpai
         HostFrame::Request(fixture.request(RunnerVerb::ProbeWorkspace)),
         HostFrame::OwnerFloors {
             request_id: "floors".into(),
+            lines: vec!["line".into()],
+        },
+        HostFrame::ForgetOwnerWitnesses {
+            request_id: "forget".into(),
             lines: vec!["line".into()],
         },
     ] {
@@ -460,13 +467,21 @@ async fn owner_floors_are_bounded_host_scoped_and_do_not_create_authority() {
         branch: "branch".into(),
         fence: 7,
     };
-    lock(&fixture.service.inner.tables).transfer(
-        "other",
-        "other-instance",
-        "seed".into(),
-        None,
-        owner,
-    );
+    let paired = LineOwner {
+        line: "owned".into(),
+        ..owner.clone()
+    };
+    {
+        let mut tables = lock(&fixture.service.inner.tables);
+        tables.transfer(
+            "paired",
+            "normal",
+            "paired-seed".into(),
+            None,
+            paired.clone(),
+        );
+        tables.transfer("other", "other-instance", "seed".into(), None, owner);
+    }
     let before = fixture.floors.load();
     let mut peer = Peer::connect(
         &fixture,
@@ -495,12 +510,10 @@ async fn owner_floors_are_bounded_host_scoped_and_do_not_create_authority() {
         );
     }
     let lines = (0..256)
-        .map(|number| {
-            if number == 0 {
-                "line".into()
-            } else {
-                format!("unknown-{number}")
-            }
+        .map(|number| match number {
+            0 => "line".into(),
+            1 => "owned".into(),
+            _ => format!("unknown-{number}"),
         })
         .collect::<Vec<_>>();
     peer.send(HostFrame::OwnerFloors {
@@ -509,8 +522,25 @@ async fn owner_floors_are_bounded_host_scoped_and_do_not_create_authority() {
     })
     .await;
     assert!(
-        matches!(peer.next().await, RunnerFrame::OwnerFloors { request_id, floors } if request_id == "bounded" && floors.len() == lines.len() && floors.iter().zip(&lines).all(|(row, line)| &row.line == line && row.owner.is_none()))
+        matches!(peer.next().await, RunnerFrame::OwnerFloors { request_id, floors }
+        if request_id == "bounded" && floors.len() == lines.len()
+            && floors.iter().zip(&lines).all(|(row, line)| {
+                &row.line == line && row.owner.as_ref() == (line == "owned").then_some(&paired)
+            }))
     );
+    for request_id in ["forget", "again"] {
+        peer.send(HostFrame::ForgetOwnerWitnesses {
+            request_id: request_id.into(),
+            lines: vec!["owned".into(), "unknown".into()],
+        })
+        .await;
+        assert_eq!(
+            peer.next().await,
+            RunnerFrame::OwnerWitnessesForgotten {
+                request_id: request_id.into()
+            }
+        );
+    }
     assert_eq!(fixture.floors.load(), before);
     assert!(lock(&fixture.service.inner.lines).is_empty());
     assert!(lock(&fixture.service.inner.running).is_empty());

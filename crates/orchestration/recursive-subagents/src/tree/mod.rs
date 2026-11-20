@@ -774,7 +774,7 @@ pub struct ProductAgentTree {
     commands: BTreeMap<String, AgentCommand>,
     /// The tree projector's cursor per runtime session (`agent_feed_cursors`).
     feed_cursors: BTreeMap<String, u64>,
-    /// Imported semantic floor; native feeds intentionally start after this cut.
+    /// Per-attempt compaction views derived from the runtime feed.
     compaction_views: BTreeMap<AttemptId, plakous_host_protocol::views::AttemptCompaction>,
     compaction_cursors: BTreeMap<String, (u64, Option<AttemptId>, bool)>,
     /// Process-local work list, never evidence that a close was applied.

@@ -12,89 +12,17 @@ use plakous_tools::{FrozenToolRegistry, FrozenToolRegistryDescriptor, ToolExecut
 #[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct FrozenSessionPresentation {
-    configuration: Option<CompiledProviderConfiguration>,
-    registry: Option<FrozenToolRegistryDescriptor>,
-    plan: Option<plakous_agent::ResolvedHarnessPlan>,
-    semantic: Option<SemanticSessionPresentation>,
-}
-
-/// Unsupported host-move data. The export document, not a native codec, owns its encoding.
-#[doc(hidden)]
-#[derive(Clone, Debug)]
-pub struct SemanticSessionPresentation {
-    pub registrations: Vec<plakous_tools::SemanticToolRegistration>,
-    pub selected: Vec<plakous_model::ConfiguredTool>,
-    pub effective: Vec<plakous_model::ConfiguredTool>,
+    configuration: CompiledProviderConfiguration,
+    registry: FrozenToolRegistryDescriptor,
 }
 
 impl FrozenSessionPresentation {
-    /// Reconstructs data-only overrides; current executors are checked when the registry builds.
-    ///
-    /// # Errors
-    /// Refuses malformed or duplicate capability/executable identities.
-    pub fn from_semantic(data: SemanticSessionPresentation) -> Result<Self, AgentSessionsError> {
-        let mut names = std::collections::BTreeSet::new();
-        let mut ids = std::collections::BTreeSet::new();
-        if data.registrations.len() > 4096
-            || data.selected.len() > 4096
-            || data.effective.len() > 4096
-        {
-            return Err(invalid("semantic tool presentation is oversized"));
-        }
-        for record in &data.registrations {
-            plakous_tools::RegisteredToolId::new(record.registered_id.clone())
-                .map_err(|_| invalid("invalid semantic capability identity"))?;
-            plakous_tools::ToolExecutorId::new(record.executor_id.clone())
-                .map_err(|_| invalid("invalid semantic executable identity"))?;
-            if !names.insert(record.definition.name()) || !ids.insert(&record.registered_id) {
-                return Err(invalid("duplicate semantic tool presentation"));
-            }
-        }
-        Ok(Self {
-            configuration: None,
-            registry: None,
-            plan: None,
-            semantic: Some(data),
-        })
-    }
-
-    /// Captures the closed semantic presentation without source plans, hashes or registry bytes.
-    ///
-    /// # Errors
-    /// Refuses incomplete presentation data.
-    pub fn semantic(&self) -> Result<SemanticSessionPresentation, AgentSessionsError> {
-        if let Some(data) = &self.semantic {
-            return Ok(data.clone());
-        }
-        let configuration = self
-            .configuration
-            .as_ref()
-            .ok_or_else(|| invalid("missing presentation configuration"))?;
-        Ok(SemanticSessionPresentation {
-            registrations: self
-                .registry
-                .as_ref()
-                .ok_or_else(|| invalid("missing presentation registry"))?
-                .semantic_registrations(),
-            selected: configuration.selected().behavior().tools.clone(),
-            effective: configuration.effective().behavior().tools.clone(),
-        })
-    }
     /// The session's presented canonical definition, including nested tools.
     #[must_use]
     pub fn definition(&self, name: &ToolName) -> Option<&plakous_model::ToolDefinition> {
-        self.registry
-            .as_ref()
-            .and_then(|registry| registry.definition(name))
-            .or_else(|| {
-                self.semantic
-                    .as_ref()?
-                    .registrations
-                    .iter()
-                    .find(|record| record.definition.name() == name)
-                    .map(|record| &record.definition)
-            })
+        self.registry.definition(name)
     }
+
     /// Data-only requirements; no executable authority is reconstructed.
     ///
     /// # Errors
@@ -109,54 +37,20 @@ impl FrozenSessionPresentation {
         )>,
         AgentSessionsError,
     > {
-        if let Some(registry) = &self.registry {
-            return registry
-                .executor_requirements()
-                .map_err(|_| invalid("stored executable requirements are unreadable"));
-        }
-        self.semantic
-            .as_ref()
-            .ok_or_else(|| invalid("missing presentation data"))?
-            .registrations
-            .iter()
-            .map(|record| {
-                Ok((
-                    record.definition.name().clone(),
-                    plakous_tools::ToolExecutorId::new(record.executor_id.clone())
-                        .map_err(|_| invalid("invalid semantic executable identity"))?,
-                    record.executor_binding,
-                ))
-            })
-            .collect()
+        self.registry
+            .executor_requirements()
+            .map_err(|_| invalid("stored executable requirements are unreadable"))
     }
     /// The checkpoint's complete configuration; this is data, not fresh authority.
     #[must_use]
-    pub const fn configuration(&self) -> Option<&CompiledProviderConfiguration> {
-        self.configuration.as_ref()
-    }
-
-    /// The rehydrated plan, including its model and registry binding facts.
-    #[must_use]
-    pub const fn plan(&self) -> Option<&plakous_agent::ResolvedHarnessPlan> {
-        self.plan.as_ref()
+    pub const fn configuration(&self) -> &CompiledProviderConfiguration {
+        &self.configuration
     }
 
     /// The persisted executable name associated with a canonical tool.
     #[must_use]
     pub fn executor_id(&self, name: &ToolName) -> Option<plakous_tools::ToolExecutorId> {
-        self.registry
-            .as_ref()
-            .and_then(|registry| registry.executor_id_for_name(name))
-            .or_else(|| {
-                self.semantic
-                    .as_ref()?
-                    .registrations
-                    .iter()
-                    .find(|record| record.definition.name() == name)
-                    .and_then(|record| {
-                        plakous_tools::ToolExecutorId::new(record.executor_id.clone()).ok()
-                    })
-            })
+        self.registry.executor_id_for_name(name)
     }
 
     /// Checks release-owned executable identities without starting any executor.
@@ -170,39 +64,12 @@ impl FrozenSessionPresentation {
             &plakous_tools::ToolExecutorId,
         ) -> Option<plakous_tools::ToolExecutorBindingIdentity>,
     ) -> Result<(), plakous_tools::ToolBindingError> {
-        let mut current = current;
-        if let Some(registry) = &self.registry {
-            return registry.check_executor_identities(current);
-        }
-        for record in &self
-            .semantic
-            .as_ref()
-            .ok_or(plakous_tools::ToolDescriptorError::InvalidSemantics)?
-            .registrations
-        {
-            let id = plakous_tools::ToolExecutorId::new(record.executor_id.clone())
-                .map_err(|_| plakous_tools::ToolDescriptorError::InvalidSemantics)?;
-            let found = current(record.definition.name(), &id).ok_or_else(|| {
-                plakous_tools::ToolBindingError::MissingBinding { id: id.clone() }
-            })?;
-            if !found.accepts(&id, record.executor_binding) {
-                return Err(plakous_tools::ToolBindingError::BindingIdentityMismatch {
-                    id,
-                    expected: record.executor_binding,
-                    found,
-                });
-            }
-        }
-        Ok(())
+        self.registry.check_executor_identities(current)
     }
     /// The selected outer menu, including its execution/caller dispositions.
     #[must_use]
     pub fn selected_tools(&self) -> &[plakous_model::ConfiguredTool] {
-        match (&self.configuration, &self.semantic) {
-            (Some(configuration), _) => &configuration.selected().behavior().tools,
-            (_, Some(semantic)) => &semantic.selected,
-            _ => &[],
-        }
+        &self.configuration.selected().behavior().tools
     }
 
     pub(super) fn from_checkpoint(
@@ -245,10 +112,8 @@ impl FrozenSessionPresentation {
         }
         .map_err(|_| invalid("stored tool presentation is unreadable"))?;
         Ok(Self {
-            configuration: Some(manifest.provider_configuration().clone()),
-            registry: Some(registry),
-            plan: Some(plan),
-            semantic: None,
+            configuration: manifest.provider_configuration().clone(),
+            registry,
         })
     }
 
@@ -261,17 +126,7 @@ impl FrozenSessionPresentation {
         &self,
         live: &FrozenToolRegistry,
     ) -> Result<FrozenToolRegistry, plakous_tools::ToolBindingError> {
-        if let Some(registry) = &self.registry {
-            return registry.resolve(&ToolExecutorBindings::capture(live));
-        }
-        FrozenToolRegistryDescriptor::restore_semantic_registrations(
-            &self
-                .semantic
-                .as_ref()
-                .ok_or(plakous_tools::ToolDescriptorError::InvalidSemantics)?
-                .registrations,
-            live,
-        )
+        self.registry.resolve(&ToolExecutorBindings::capture(live))
     }
 
     /// Whether this construction registered the named capability.
@@ -295,11 +150,9 @@ impl FrozenSessionPresentation {
             SelectedProviderConfiguration::new(live.selected().route().clone(), selected)
                 .map_err(|_| invalid("frozen selected tool configuration is invalid"))?;
         let mut behavior = live.effective().behavior().clone();
-        behavior.tools = match (&self.configuration, &self.semantic) {
-            (Some(configuration), _) => configuration.effective().behavior().tools.clone(),
-            (_, Some(semantic)) => semantic.effective.clone(),
-            _ => return Err(invalid("missing semantic effective presentation")),
-        };
+        behavior
+            .tools
+            .clone_from(&self.configuration.effective().behavior().tools);
         let effective = EffectiveProviderConfiguration::compile(
             &selected,
             live.effective().descriptor().clone(),
@@ -311,10 +164,9 @@ impl FrozenSessionPresentation {
         .map_err(|_| invalid("frozen effective tool configuration is invalid"))?;
         let restored = CompiledProviderConfiguration::new(selected, effective)
             .map_err(|_| invalid("frozen tool configuration cannot be reconstructed"))?;
-        if self.configuration.as_ref().is_some_and(|source| {
-            restored.selected_identity() != source.selected_identity()
-                || restored.effective_identity() != source.effective_identity()
-        }) {
+        if restored.selected_identity() != self.configuration.selected_identity()
+            || restored.effective_identity() != self.configuration.effective_identity()
+        {
             return Err(
                 invalid("frozen presentation cannot hide changed provider configuration")
                     .with_binding_change(plakous_agent::BindingChange::ProviderConfiguration),

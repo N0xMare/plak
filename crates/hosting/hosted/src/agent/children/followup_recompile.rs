@@ -307,9 +307,7 @@ async fn recorded_binding(
         .created_tool_presentation(locator)
         .await
         .map_err(|error| session_refusal(&error))?;
-    let configuration = frozen
-        .configuration()
-        .ok_or_else(|| refused("the child session has no recorded provider configuration"))?;
+    let configuration = frozen.configuration();
     let route = configuration.selected().route();
     Ok(RecordedBinding {
         protocol: route.protocol().clone(),

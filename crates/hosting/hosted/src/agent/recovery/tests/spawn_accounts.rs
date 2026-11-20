@@ -169,7 +169,6 @@ fn assert_bound(fixture: &Fixture, child: &str, account: &str) -> SessionLocator
     let presentation = head.presentation.unwrap().unwrap();
     let stored = presentation
         .configuration()
-        .unwrap()
         .effective()
         .authority()
         .account_binding();

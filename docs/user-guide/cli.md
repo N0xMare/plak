@@ -849,7 +849,7 @@ the composition selection, including `py-sdk`, and session-owned named state.
 Both versions name the runner the session ran on and its profile (root
 template and working set); the imported session keeps that profile. Versions 11 and older are refused with `this build imports versions 12 and 13`.
 Version 13 tags portable sessions explicitly; ordinary import refuses the reserved
-`host_upgrade` kind. Dormant identity-preserving moves are not available yet.
+`host_upgrade` kind.
 New exports have no separate archive.
 Keep exports private: they contain full conversation/tool contents and named
 values, not a redacted transcript.

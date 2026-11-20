@@ -2156,25 +2156,7 @@ authorize runtime mutation except through typed facade calls. Resume
 reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
-Host-only runtime move preparation freezes every selected line under its exact
-branch holds. The operation persists its exact selected sessions; continued-line
-predecessors are not implicitly imported and need no extra holds. The line-wide
-gate still covers them, and commit releases all source line leases and owned
-host claims. Committed retirement is durable below ordinary and lease-only
-opens, including after source restart; precommit cleanup may undo only its own
-matching preparation. Destination batch staging imports no source lease or host
-claim and grants no execution authority. Hidden and abandoned lines cannot be
-opened or acquire/renew/revive a lease; publication is atomic for the batch and
-fresh acquisition exceeds its imported floors. Unguarded abandonment is
-Staged-only. The narrow host-owned Published abandonment seam additionally
-requires never-Ready proof under the receipt lock, exact current BranchHolds,
-unchanged installed checkpoints/revisions and execution-open=false. Every
-ordinary durable driver open sets that bit before returning, even when idle;
-read-only verification and lease-only importer reconciliation do not. A failed
-guard leaves the group withheld, never revokes an ordinary active owner. Hidden sessions
-are excluded from discovery, not erased. These unsupported composition
-seams introduce neither a foreign native-store reader nor a second cross-build
-carrier. Product dormant-tree move remains disabled.
+The reserved move tables confer no runtime or host authority (chapter 00).
 Committed/Acknowledged outgoing receipts exclude surrendered copies from
 cross-key resume/foreign-session discovery. Prepared and Aborted sources are
 not excluded; Aborted receipts impose no target gate. Pending and abandoned

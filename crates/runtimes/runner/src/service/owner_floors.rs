@@ -34,7 +34,7 @@ impl RunnerService {
         request_id: String,
         lines: &[String],
     ) -> RunnerFrame {
-        if !crate::client::owner_transfer::valid_floor_query(lines) {
+        if !valid_floor_query(lines) {
             return refused(
                 Some(request_id),
                 Refusal::Malformed {
@@ -63,7 +63,7 @@ impl RunnerService {
         request_id: String,
         lines: &[String],
     ) -> RunnerFrame {
-        if !crate::client::owner_transfer::valid_floor_query(lines) {
+        if !valid_floor_query(lines) {
             return refused(Some(request_id), Refusal::Malformed {
                 detail: "owner-floor reads require 1..=256 unique line IDs of at most 128 printable ASCII bytes".into(),
             });
@@ -97,4 +97,19 @@ impl RunnerService {
             }),
         }
     }
+}
+
+fn valid_floor_query(lines: &[String]) -> bool {
+    !lines.is_empty()
+        && lines.len() <= plakous_runner_protocol::OWNER_FLOOR_QUERY_LIMIT
+        && lines.iter().all(|line| {
+            !line.is_empty()
+                && line.len() <= 128
+                && line.bytes().all(|byte| byte.is_ascii_graphic())
+        })
+        && lines
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            == lines.len()
 }

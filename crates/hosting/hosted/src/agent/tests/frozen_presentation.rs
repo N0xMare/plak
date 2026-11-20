@@ -369,16 +369,6 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             if let Some(presentation) = head.presentation {
                 let presentation = presentation?;
                 assert_eq!(crate::agent::check_frozen_binding(&presentation)?, None);
-                let semantic = plakous::sessions::FrozenSessionPresentation::from_semantic(
-                    presentation.semantic()?,
-                )?;
-                assert_eq!(
-                    crate::agent::check_binding_data(
-                        presentation.configuration().unwrap(),
-                        &semantic
-                    )?,
-                    None
-                );
             }
         }
         assert_eq!(std::fs::read(&database)?, before);
@@ -551,13 +541,7 @@ async fn frozen_direct_presentations_reopen_roots_and_leaves_without_digest_chan
             "superseded bindings must still be decoded and reported"
         );
         let rebound = sessions.created_tool_presentation(target).await?;
-        assert_eq!(
-            rebound
-                .configuration()
-                .ok_or("recorded configuration")?
-                .selected_identity(),
-            fresh_identity
-        );
+        assert_eq!(rebound.configuration().selected_identity(), fresh_identity);
         assert_ne!(fresh_identity, identities.0);
         let incompatible = previous_send_extensions(&current, CompositionSelection::Direct, true)?;
         let live = coding_tool_registry_with_extensions(

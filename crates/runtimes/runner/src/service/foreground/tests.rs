@@ -16,7 +16,7 @@ use std::time::Duration;
 mod job_terminal_tests;
 
 #[tokio::test]
-async fn exact_move_cas_returns_foreign_witness_without_leapfrogging_or_using_cached_acceptance() {
+async fn wire_transfer_returns_foreign_witness_and_recovers_a_lost_acknowledgement() {
     let root = tempfile::tempdir().unwrap();
     let scope =
         ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap());
@@ -64,33 +64,21 @@ async fn exact_move_cas_returns_foreign_witness_without_leapfrogging_or_using_ca
         service.lines(Some("home")).await.is_empty(),
         "a floor-only line has no process-session table entry"
     );
-    let floors = client
-        .owner_floors(&[line.into(), "missing".into()])
-        .await
-        .unwrap();
-    assert_eq!(floors[0].owner, Some(foreign.clone()));
-    assert_eq!(floors[1].owner, None);
     assert!(
-        matches!(client.transfer_owner_exact(Some(&source), &owner(3)).await.unwrap(), crate::ExactOwnerTransfer::WitnessMismatch(actual) if actual == foreign)
+        matches!(client.transfer_owner_once_for_test(wire(1), &wire(3)).await, RunnerFrame::StaleOwner { current: actual, .. } if actual == foreign)
     );
     assert_eq!(
         lock(&service.inner.tables).owner("home", line).unwrap().0,
         foreign
     );
     assert!(matches!(
-        client
-            .transfer_owner_exact(Some(&owner(2)), &owner(3))
-            .await
-            .unwrap(),
-        crate::ExactOwnerTransfer::Accepted(_)
+        client.transfer_owner_once_for_test(wire(2), &wire(3)).await,
+        RunnerFrame::TransferAccepted { .. }
     ));
     assert!(
         matches!(
-            client
-                .transfer_owner_exact(Some(&source), &owner(3))
-                .await
-                .unwrap(),
-            crate::ExactOwnerTransfer::Accepted(_)
+            client.transfer_owner_once_for_test(wire(1), &wire(3)).await,
+            RunnerFrame::TransferAccepted { .. }
         ),
         "lost acknowledgement recovers the persisted intended owner"
     );
@@ -106,7 +94,7 @@ async fn exact_move_cas_returns_foreign_witness_without_leapfrogging_or_using_ca
         RunnerFrame::TransferAccepted { .. }
     ));
     assert!(
-        matches!(client.transfer_owner_exact(Some(&owner(3)), &owner(3)).await.unwrap(), crate::ExactOwnerTransfer::WitnessMismatch(actual) if actual == newer_foreign),
+        matches!(client.transfer_owner_once_for_test(wire(3), &wire(3)).await, RunnerFrame::StaleOwner { current: actual, .. } if actual == newer_foreign),
         "exact reconciliation must not return a cached acceptance"
     );
     // Ordinary reopening keeps its existing fresher-fence retry behavior.

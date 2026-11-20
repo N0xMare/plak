@@ -36,21 +36,7 @@ static RELEASE_EXECUTOR_NAMESPACES: LazyLock<Result<BTreeSet<String>, serde_json
 pub fn check_frozen_binding(
     frozen: &FrozenSessionPresentation,
 ) -> CliResult<Option<BindingChange>> {
-    let configuration = frozen.configuration().ok_or_else(|| {
-        CliFailure::new("binding inspection needs a recorded native configuration")
-    })?;
-    check_binding_data(configuration, frozen)
-}
-
-/// Checks semantic inspection data without opening source-native state or execution authority.
-///
-/// # Errors
-/// Refuses malformed data or unavailable external executors; binding cuts are the result.
-#[doc(hidden)]
-pub fn check_binding_data(
-    configuration: &plakous::model::CompiledProviderConfiguration,
-    frozen: &FrozenSessionPresentation,
-) -> CliResult<Option<BindingChange>> {
+    let configuration = frozen.configuration();
     let restored = frozen
         .restore_configuration(configuration)
         .map_err(CliFailure::from)?;

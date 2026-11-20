@@ -5690,6 +5690,13 @@ remain, so older builds that do not read upgrade receipts still refuse ordinary
 reopen. This is not an immutable fence against an older build or operator
 explicitly unarchiving or editing source state: do not do that after surrender.
 
+`plakd status`, `plakd doctor`, and remote runner reconciliation no longer read
+upgrade receipts. Host start, session open, and session metadata mutation still
+check the applicable receipt and return a typed refusal when it withholds
+authority. A durable session open no longer performs a separate
+lease-revalidating write; recovery writes and later commits remain lease-fenced
+(chapter 01 §5.5).
+
 Before pausing, the destination qualifies every required paired runner using
 its installed command, exact revision/flavor/protocol and pinned identity and
 roots. This authenticated, binding-free connection permits only configuration

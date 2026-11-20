@@ -376,7 +376,7 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
     }
     if header.kind == Some(DocumentKind::HostUpgrade) {
         return Err(ImportError::Invalid(
-            "host_upgrade requires the authorized host ownership-move operation, not portable import".to_owned(),
+            "host_upgrade is a reserved document kind and cannot be imported".to_owned(),
         ));
     }
     if header.raw_history.is_none() || header.checkpoint_present || header.archive_present {

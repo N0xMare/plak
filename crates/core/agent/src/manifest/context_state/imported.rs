@@ -5,7 +5,7 @@ use super::{
     RuntimeContextState, RuntimeManifestError, Writer, validate_digest,
 };
 
-/// Unsupported host-move selection, expressed without native canonical hashes.
+/// Semantic facts decoded from a persisted imported compaction selection.
 #[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImportedCompactionFacts {
