@@ -242,7 +242,7 @@ class FacadeProfileTests(unittest.TestCase):
         self.assertEqual(
             errors,
             [
-                "plakous [minimal]: cargo check failed",
+                "plakous [none]: cargo check failed",
                 "plakous [full]: cargo check reported 1 warning(s)",
                 "plakous [composition]: cargo check failed",
             ],
