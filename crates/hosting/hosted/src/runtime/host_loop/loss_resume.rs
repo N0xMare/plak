@@ -8,6 +8,7 @@ use super::{
     commit_session_update, dispatch_topology_navigator, durable_tree_id, emit_queue_snapshot,
     queue, record_emitted_tree_revision,
 };
+use crate::runtime::RootStanding;
 use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
@@ -19,7 +20,7 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// The live notice of a root a lost host left held.
 pub(super) const ROOT_LOSS_HELD_NOTE: &str =
-    "the turn the lost host was running is held; nothing continues until you resume it";
+    "the interrupted turn is held after its owner lost authority; resume it or send a new prompt";
 
 /// The live notice of a stop that ended the root's continuation.
 pub(super) const ROOT_LOSS_STOPPED_NOTE: &str =
@@ -61,26 +62,34 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) fn arm_root_loss_resume(&mut self) {
         let continues =
             self.role.config.resume_after_loss == crate::runtime::ResumeAfterLoss::Continue;
-        let root_held = match self.root_loss() {
-            Some(RootLossState::Pending(_)) => {
+        let root_held = match crate::runtime::root_standing(
+            self.role.config.store.as_ref(),
+            &self.role.config.session.id,
+        ) {
+            Ok(RootStanding::Continuing { held: false, .. }) => {
                 self.role.root_loss_resume_due = true;
                 false
             }
-            Some(RootLossState::Held) if continues || self.root_loss_handoff() => {
+            Ok(RootStanding::Continuing {
+                held: true,
+                handoff,
+            }) if continues || handoff => {
                 self.role.root_loss_resume_due = true;
                 self.resume_restored_queue();
                 false
             }
-            Some(RootLossState::Held) => true,
+            Ok(
+                RootStanding::ContinuationNeedsResume | RootStanding::Continuing { held: true, .. },
+            ) => true,
             _ => false,
         };
         let root = root_held.then_some(ROOT_LOSS_HELD_NOTE);
-        let notice = if continues {
+        let notice = if continues && !root_held {
             crate::runtime::tree::HeldNotice::Silent
         } else {
             crate::runtime::tree::HeldNotice::Name { root }
         };
-        if self.finish_attach_scan(notice) || continues {
+        if self.finish_attach_scan(notice) || (continues && !root_held) {
             return;
         }
         let tree_id = durable_tree_id(&self.role.config.topology_rows(), &self.role.config.session);

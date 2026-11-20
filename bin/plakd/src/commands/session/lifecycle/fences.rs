@@ -203,10 +203,8 @@ fn inspect_product(
 ) -> Result<(), LifecycleError> {
     let standing =
         plakous_hosted::runtime::root_standing(records, &record.id).map_err(CliFailure::new)?;
-    activity.turn |= matches!(
-        standing,
-        plakous_hosted::runtime::RootStanding::Continuing { .. }
-    ) || !record.pending_queue.is_empty()
+    activity.turn |= standing.is_continuing()
+        || !record.pending_queue.is_empty()
         || record.queue_commands.has_pending();
     Ok(())
 }

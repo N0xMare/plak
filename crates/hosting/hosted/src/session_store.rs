@@ -34,7 +34,14 @@ impl WakeControls {
     pub fn from_join(views: &SessionViews, intents: &ProductIntents) -> Self {
         Self {
             suppressed: views.wake_suppressed(intents),
-            paused: views.pause_cause(intents).is_some(),
+            paused: views.pause_cause(intents).is_some()
+                || (views
+                    .state
+                    .last_root_turn
+                    .as_ref()
+                    .is_some_and(|turn| crate::runtime::is_root_loss_command(&turn.command_id))
+                    && crate::runtime::root_standing_from_intents(intents, views)
+                        == crate::runtime::RootStanding::ContinuationNeedsResume),
         }
     }
 }

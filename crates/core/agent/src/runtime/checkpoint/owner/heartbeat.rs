@@ -3,6 +3,7 @@
 use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::checkpoint::owner::{
     CheckpointAuthority, DurableBranchContext, lease_authority_lost, lease_taken_over,
+    unproven_lease_loss,
 };
 use crate::runtime::checkpoint::storage_pause::StoragePause;
 use crate::runtime::terminal::lock_mutex;
@@ -93,9 +94,12 @@ impl LeaseHeartbeat {
                                 };
                             continue;
                         }
-                        Err(RenewalFailure::Transient(error) | RenewalFailure::Refused(error)) => {
-                            error
+                        // An unsuccessful transient renewal only ends authority
+                        // once the same-domain clock proves the old grant expired.
+                        Err(RenewalFailure::Transient(_)) => {
+                            lease_authority_lost(SessionStoreError::LeaseExpired)
                         }
+                        Err(RenewalFailure::Refused(error)) => error,
                     };
                     *lock_mutex(&failure_task) = Some(error);
                     lost_task.cancel();
@@ -116,7 +120,7 @@ impl LeaseHeartbeat {
             return Err(error);
         }
         if self.lost.is_cancelled() {
-            return Err(lease_authority_lost());
+            return Err(unproven_lease_loss());
         }
         Ok(())
     }
@@ -132,7 +136,11 @@ impl LeaseHeartbeat {
     pub(super) fn failure(&self) -> AgentError {
         lock_mutex(&self.failure)
             .clone()
-            .unwrap_or_else(lease_authority_lost)
+            .unwrap_or_else(unproven_lease_loss)
+    }
+
+    pub(super) fn failure_slot(&self) -> Arc<Mutex<Option<AgentError>>> {
+        Arc::clone(&self.failure)
     }
 
     pub(super) async fn stop_and_join(&mut self, timeout: Duration) -> Result<(), AgentError> {
@@ -180,7 +188,12 @@ enum RenewalFailure {
 
 impl RenewalFailure {
     fn from_store(error: StoreCallError) -> Self {
-        if error.is_retryable() || error.is(SessionStoreError::StorageFull) {
+        if let StoreCallError::Store(
+            cause @ (SessionStoreError::LeaseExpired | SessionStoreError::FenceSuperseded),
+        ) = error
+        {
+            Self::Refused(lease_authority_lost(cause))
+        } else if error.is_retryable() || error.is(SessionStoreError::StorageFull) {
             Self::Transient(error.into_agent())
         } else {
             Self::Refused(error.into_agent())
@@ -243,6 +256,19 @@ async fn renew_once(authority: &Arc<Mutex<CheckpointAuthority>>) -> Result<(), R
 
 // The caller holds the branch lease gate across renewal and use of this exact
 // acknowledged authority, including checkpoint commit and receipt recovery.
+pub(super) async fn renew_for_publication(
+    authority: &Arc<Mutex<CheckpointAuthority>>,
+    session: plakous_model::SessionId,
+) -> Result<DurableBranchContext, AgentError> {
+    if crate::test_hooks::publication_renewal_expires(session) {
+        return Err(RenewalFailure::from_store(StoreCallError::Store(
+            SessionStoreError::LeaseExpired,
+        ))
+        .into_agent());
+    }
+    renew_shared_durable_lease_under_gate(authority).await
+}
+
 pub(super) async fn renew_shared_durable_lease_under_gate(
     authority: &Arc<Mutex<CheckpointAuthority>>,
 ) -> Result<DurableBranchContext, AgentError> {
@@ -267,6 +293,11 @@ pub(super) async fn renew_shared_durable_lease_under_gate(
                 {
                     return Err(error);
                 }
+            }
+            Err(RenewalFailure::Transient(_))
+                if !storage_waiting(authority) && lease_live(authority) == Some(false) =>
+            {
+                return Err(lease_authority_lost(SessionStoreError::LeaseExpired));
             }
             Err(error) => return Err(error.into_agent()),
         }
@@ -303,10 +334,13 @@ async fn renew_under_gate(
         .await
         {
             Ok(revived) => revived,
-            Err(error) if error.is_retryable() || error.is(SessionStoreError::StorageFull) => {
-                return Err(RenewalFailure::Transient(error.into_agent()));
+            Err(error)
+                if error.is(SessionStoreError::FenceSuperseded)
+                    || error.is(SessionStoreError::LeaseHeld) =>
+            {
+                return Err(RenewalFailure::Refused(lease_taken_over()));
             }
-            Err(_) => return Err(RenewalFailure::Refused(lease_taken_over())),
+            Err(error) => return Err(RenewalFailure::from_store(error)),
         },
         Err(error) => return Err(RenewalFailure::from_store(error)),
     };

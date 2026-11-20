@@ -463,12 +463,18 @@ impl Applier<'_> {
             ),
             FeedFact::TurnTerminal {
                 turn_id,
+                command_id,
                 outcome,
                 steering_settled_unapplied,
                 usage,
                 ..
             } => {
-                self.turn_terminal(*turn_id, *outcome, *steering_settled_unapplied)?;
+                self.turn_terminal(
+                    *turn_id,
+                    command_id.as_str(),
+                    *outcome,
+                    *steering_settled_unapplied,
+                )?;
                 let header = self.record.header();
                 // Inherited terminals rebuild the view, not a second usage event.
                 if self.views.state.branch() == Some(header.branch_id) {

@@ -65,10 +65,7 @@ async fn retained_start_authority_rejects_elapsed_and_foreign_grants() -> TestRe
         ))
         .await?;
     assert!(newer.fence() > retained.fence());
-    assert_eq!(
-        admission.check().unwrap_err().kind(),
-        AgentErrorKind::OutcomeUnknown
-    );
+    assert!(admission.check().unwrap_err().is_durable_lease_loss());
 
     // A foreign domain must fail even when its numeric reading looks live.
     *lock_mutex(&store.lease_read_override) = Some(LeaseInstant::new(
@@ -76,21 +73,12 @@ async fn retained_start_authority_rejects_elapsed_and_foreign_grants() -> TestRe
         90,
         0,
     )?);
-    assert_eq!(
-        admission.check().unwrap_err().kind(),
-        AgentErrorKind::OutcomeUnknown
-    );
+    assert!(!admission.check().unwrap_err().is_durable_lease_loss());
     *lock_mutex(&store.lease_read_override) = Some(retained.expires_at());
-    assert_eq!(
-        admission.check().unwrap_err().kind(),
-        AgentErrorKind::OutcomeUnknown
-    );
+    assert!(admission.check().unwrap_err().is_durable_lease_loss());
     *lock_mutex(&store.lease_read_override) = Some(lease_instant(90, 0)?);
     store.fail_lease_clock.store(true, Ordering::Release);
-    assert_eq!(
-        admission.check().unwrap_err().kind(),
-        AgentErrorKind::OutcomeUnknown
-    );
+    assert!(!admission.check().unwrap_err().is_durable_lease_loss());
     let cleanup = owner.retire(Duration::from_secs(1), None).await;
     assert!(cleanup[0].is_ok());
     assert_eq!(

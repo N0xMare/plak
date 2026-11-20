@@ -4,13 +4,18 @@ use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest
 use plakous_hosted::sessions::projector::{
     Anchored, AnchoredIntent, PauseCause, RootContinuation, RootContinuationCause,
     RootContinuationDecision, RootInterrupt, RootInterruptCause, RootStopAnchor, SessionViews,
-    ViewWrites,
+    Submission, SubmissionKind, ViewWrites,
 };
 
 #[test]
 fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
-    for held_loss in [false, true] {
+    for (held_loss, policy) in [(false, "hold"), (true, "hold"), (true, "continue")] {
         let (temp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        std::fs::write(
+            paths.config_file(),
+            format!("[host]\nresume_after_loss = \"{policy}\"\n"),
+        )
+        .unwrap();
         let workspace = temp.path().join("workspace");
         std::fs::create_dir(&workspace).unwrap();
         let mut record = crate::store::sessions::SessionRecord::new(workspace.clone());
@@ -27,40 +32,21 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
             WriterMode::SingleLease,
         )
         .unwrap();
-        let stop = RootStopAnchor::Turn {
-            turn_id: "interrupted".to_owned(),
-        };
-        let mut before = SessionViews::empty();
-        if held_loss {
-            product
-                .write_root_interrupt(
-                    &record.id,
-                    &AnchoredIntent {
-                        anchor: 0,
-                        ordinal: 0,
-                        value: RootInterrupt {
-                            anchor: stop.clone(),
-                            cause: RootInterruptCause::OwnerLost,
-                        },
-                    },
-                )
-                .unwrap();
-        } else {
-            before = project_pause(
-                &mut product,
-                &record.id,
-                &before,
-                Some(PauseCause::RecoveryRequired {
-                    turn_id: "interrupted".to_owned(),
-                }),
-            );
-        }
+        let (before, stop) = recovered_pause(&mut product, &record.id, held_loss);
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
         assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
         assert!(!status(&paths).contains(&record.id));
 
         finish_child(&mut tree);
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+        if policy == "continue" {
+            assert!(!status(&paths).contains(&record.id));
+            assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
+            consent_to_resume(&mut product, &record.id, before.cursor.get(), stop);
+            assert!(!status(&paths).contains(&record.id));
+            assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
+            continue;
+        }
 
         let status_text = status(&paths);
         assert!(
@@ -86,7 +72,7 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
         assert!(needs_operator);
         if held_loss {
             assert_eq!(activity, SessionActivity::HeldAfterLoss);
-            consent_to_resume(&mut product, &record.id, stop);
+            consent_to_resume(&mut product, &record.id, before.cursor.get(), stop);
         } else {
             project_pause(&mut product, &record.id, &before, None);
         }
@@ -96,12 +82,81 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
     }
 }
 
-fn consent_to_resume(product: &mut ProductStore, id: &str, stop: RootStopAnchor) {
+#[test]
+fn status_counts_prepared_wakes_but_not_loss_continuation_commands() {
+    let (_temp, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+    let mut product = ProductStore::open(&paths).unwrap();
+    product.commit(&mut record).unwrap();
+    project_pause(
+        &mut product,
+        &record.id,
+        &SessionViews::empty(),
+        Some(PauseCause::RecoveryRequired {
+            turn_id: "blocked".into(),
+        }),
+    );
+    let submit = |product: &mut ProductStore, command: &str, item: &str| {
+        product
+            .write_submission(
+                &record.id,
+                &Submission {
+                    command_id: command.into(),
+                    kind: SubmissionKind::HostWake,
+                    canonical_command: "instruction".into(),
+                    queue_item_id: item.into(),
+                    queue_item_revision: 1,
+                    submitted_at_ms: 1,
+                    target_turn_id: None,
+                },
+            )
+            .unwrap();
+    };
+    submit(&mut product, "plak:resume-loss:root:pending", "loss");
+    assert!(!status(&paths).contains(&record.id));
+    submit(&mut product, "wake:mail", "ordinary");
+    assert!(status(&paths).contains("recovery_required: 1 pending mail/wake item;"));
+}
+
+fn recovered_pause(
+    product: &mut ProductStore,
+    id: &str,
+    held_loss: bool,
+) -> (SessionViews, RootStopAnchor) {
+    let turn_id = "interrupted".to_owned();
+    let stop = RootStopAnchor::Turn {
+        turn_id: turn_id.clone(),
+    };
+    let views = project_pause(
+        product,
+        id,
+        &SessionViews::empty(),
+        Some(PauseCause::RecoveryRequired { turn_id }),
+    );
+    if held_loss {
+        product
+            .write_root_interrupt(
+                id,
+                &AnchoredIntent {
+                    anchor: views.cursor.get(),
+                    ordinal: 0,
+                    value: RootInterrupt {
+                        anchor: stop.clone(),
+                        cause: RootInterruptCause::OwnerLost,
+                    },
+                },
+            )
+            .unwrap();
+    }
+    (views, stop)
+}
+
+fn consent_to_resume(product: &mut ProductStore, id: &str, anchor: u64, stop: RootStopAnchor) {
     product
         .write_root_continuation(
             id,
             &AnchoredIntent {
-                anchor: 0,
+                anchor,
                 ordinal: 0,
                 value: RootContinuation {
                     anchor: stop,

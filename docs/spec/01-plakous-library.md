@@ -12213,8 +12213,12 @@ the external `tests/fixtures/facade-consumer`.
 `RebindSessionRequest::starting_line`, `RebindSessionOutcome::Refused` with
 `RebindRefused`, `PruneHistoryOutcome::Superseded` and `LineEnded`,
 `AgentSessionsErrorKind::NotLineHead`, `LineEnded` and `NotQuiescent`,
-`AgentError::is_not_line_head` and `plakous::tools::LocalJobHost`. They break
-earlier embedders in these ways:
+`AgentError::is_not_line_head`, `AgentError::is_durable_lease_loss`, and
+`plakous::tools::LocalJobHost`. The lease-loss predicate requires
+`OutcomeUnknown` from a typed expired lease or superseded fence, with no
+provider or tool source. An unreadable clock, incomparable clock domains,
+and diagnostic text alone do not prove loss. The predicate neither grants
+custody nor certifies recovery. These surfaces break earlier embedders in these ways:
 
 1. A head-advancing rebind's source becomes read-only (a non-head branch):
    opening it for work, committing on it, rebinding or pruning it are refused

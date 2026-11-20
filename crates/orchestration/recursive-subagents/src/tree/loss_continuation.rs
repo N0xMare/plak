@@ -40,6 +40,8 @@ pub struct LossContinuation {
     pub state: LossContinuationState,
     /// The continuation's runtime command id once consent is recorded.
     pub command_id: Option<String>,
+    /// The lost turn was itself a loss or handoff continuation.
+    pub interrupted_continuation: bool,
 }
 
 impl ProductAgentTree {
@@ -122,6 +124,7 @@ impl ProductAgentTree {
                 anchor: decision.anchor.clone(),
                 state: LossContinuationState::Running,
                 command_id: Some(command_id.clone()),
+                interrupted_continuation: false,
             });
         }
         // A spent attempt takes no more turns, a continuation included.
@@ -157,6 +160,10 @@ impl ProductAgentTree {
         let decided = decisions
             .iter()
             .find(|(decision, _)| decision.anchor == anchor);
+        let interrupted_continuation = cause == ContinuationCause::OwnerLost
+            && matches!(&anchor, ContinuationAnchor::Turn { turn_id }
+            if decisions.iter().any(|(_, command)| self.commands.get(command).is_some_and(|row|
+                row.fact == Some(CommandFact::Accepted) && row.turn_id.as_ref() == Some(turn_id))));
         let (state, command_id) = match decided {
             None => (LossContinuationState::Held, None),
             Some((_, command_id))
@@ -175,6 +182,7 @@ impl ProductAgentTree {
             anchor,
             state,
             command_id,
+            interrupted_continuation,
         })
     }
 

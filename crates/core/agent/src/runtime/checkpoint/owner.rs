@@ -15,7 +15,7 @@ use crate::runtime::checkpoint::io::{
 #[cfg(test)]
 use crate::runtime::checkpoint::owner::heartbeat::renew_shared_durable_lease;
 use crate::runtime::checkpoint::owner::heartbeat::{
-    LeaseHeartbeat, renew_shared_durable_lease_under_gate,
+    LeaseHeartbeat, renew_for_publication, renew_shared_durable_lease_under_gate,
 };
 use crate::runtime::cleanup::{combine_cleanup_results, contain_cleanup_panic};
 use crate::runtime::continuation::checkpoint_bundle_error;
@@ -35,7 +35,7 @@ use crate::{
     AgentError, AgentErrorKind, BranchHead, BranchLease, BranchRevision, CheckpointId,
     CheckpointObjectBundle, CommitCheckpoint, DurabilityAttemptKind, PruneBranch, PruneReceipt,
     RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability, SessionStore,
-    SessionStoreCapacity, StoreAdmission, StoreBoundUsage,
+    SessionStoreCapacity, SessionStoreError, StoreAdmission, StoreBoundUsage,
 };
 use plakous_model::{
     CallId, CancellationToken, ContentBlock, ConversationView, Digest, ToolName, TurnId,
@@ -100,6 +100,7 @@ impl CheckpointAuthority {
 pub(in crate::runtime) struct StartAuthority {
     checkpoint: Arc<Mutex<CheckpointAuthority>>,
     lost: CancellationToken,
+    failure: Arc<Mutex<Option<AgentError>>>,
     shutdown: CancellationToken,
 }
 
@@ -120,12 +121,12 @@ impl StartAuthority {
                 }
                 let recovered = tokio::select! {
                     () = self.shutdown.cancelled() => return Err(cancelled_error()),
-                    () = self.lost.cancelled() => return Err(lease_authority_lost()),
+                    () = self.lost.cancelled() => return Err(self.authority_failure()),
                     result = store_call(StorePhase::Renew, branch.store_timeouts.operation, branch.store.recover_storage()) => result,
                 };
                 match recovered {
                     Ok(()) if !branch.store.storage_unavailable() => break,
-                    Ok(()) | Err(StoreCallError::Store(crate::SessionStoreError::StorageFull)) => {}
+                    Ok(()) | Err(StoreCallError::Store(SessionStoreError::StorageFull)) => {}
                     Err(error) => return Err(error.into_agent()),
                 }
                 if branch.store.storage_wait_cancelled() {
@@ -140,7 +141,7 @@ impl StartAuthority {
                     .await
                 {
                     return Err(if self.lost.is_cancelled() {
-                        lease_authority_lost()
+                        self.authority_failure()
                     } else {
                         cancelled_error()
                     });
@@ -235,30 +236,53 @@ impl StartAuthority {
             return Err(cancelled_error());
         }
         if self.lost.is_cancelled() {
-            return Err(lease_authority_lost());
+            return Err(self.authority_failure());
         }
         let authority = lock_mutex(&self.checkpoint);
         if let Some(branch) = &authority.durable {
             let now = branch
                 .store
                 .lease_now()
-                .map_err(|_| lease_authority_lost())?;
+                .map_err(|_| lease_clock_unreadable())?;
             if now
                 .same_domain_cmp(branch.lease.expires_at())
-                .map_err(|_| lease_authority_lost())?
+                .map_err(|_| lease_clock_unreadable())?
                 != std::cmp::Ordering::Less
             {
-                return Err(lease_authority_lost());
+                return Err(lease_authority_lost(SessionStoreError::LeaseExpired));
             }
         }
         Ok(())
     }
+
+    fn authority_failure(&self) -> AgentError {
+        lock_mutex(&self.failure)
+            .clone()
+            .unwrap_or_else(unproven_lease_loss)
+    }
 }
 
-fn lease_authority_lost() -> AgentError {
+fn unproven_lease_loss() -> AgentError {
     AgentError::new(
         AgentErrorKind::OutcomeUnknown,
         crate::error::DURABLE_LEASE_AUTHORITY_LOST,
+    )
+}
+
+fn lease_authority_lost(cause: SessionStoreError) -> AgentError {
+    AgentError::from_canonical_parts(
+        AgentErrorKind::OutcomeUnknown,
+        crate::error::DURABLE_LEASE_AUTHORITY_LOST,
+        None,
+        None,
+        Some(cause),
+    )
+}
+
+fn lease_clock_unreadable() -> AgentError {
+    AgentError::new(
+        AgentErrorKind::OutcomeUnknown,
+        "durable branch lease clock could not establish authority",
     )
 }
 
@@ -270,10 +294,13 @@ fn lease_lost_before_dispatch() -> AgentError {
 }
 
 fn lease_taken_over() -> AgentError {
-    AgentError::new(
-        AgentErrorKind::Session,
+    AgentError::from_canonical_parts(
+        AgentErrorKind::OutcomeUnknown,
         "durable branch lease expired and could not be revived; another owner may have \
          opened this session",
+        None,
+        None,
+        Some(SessionStoreError::FenceSuperseded),
     )
 }
 
@@ -355,6 +382,7 @@ impl CheckpointOwner {
         StartAuthority {
             checkpoint: Arc::clone(&self.state),
             lost: self.heartbeat.lost().clone(),
+            failure: self.heartbeat.failure_slot(),
             shutdown,
         }
     }
@@ -524,7 +552,7 @@ impl CheckpointOwner {
             // Publication blocks the periodic heartbeat on the same gate. Give
             // its potentially slow store operation freshly acknowledged lease
             // authority rather than the remainder of an earlier heartbeat.
-            let mut branch = renew_shared_durable_lease_under_gate(&self.state).await?;
+            let mut branch = renew_for_publication(&self.state, prior_topology.session_id).await?;
             let mut feed_facts = crate::feed::facts::commit_facts(&prior, &checkpoint)?;
             if !consumed_line_terminals.is_empty() {
                 feed_facts.push(crate::feed::FeedFact::LineJobTerminalsConsumed {
@@ -673,7 +701,7 @@ impl CheckpointOwner {
     /// A store refusal of `NotLineHead` means a rebind or carry moved this
     /// branch's line on: the branch is read-only, so this owner is fenced.
     fn fence_if_superseded(&self, error: &AgentError) {
-        if error.store_error() == Some(crate::SessionStoreError::NotLineHead) {
+        if error.store_error() == Some(SessionStoreError::NotLineHead) {
             self.heartbeat.fence(error);
         }
     }

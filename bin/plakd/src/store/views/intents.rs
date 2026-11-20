@@ -61,6 +61,20 @@ impl ProductStore {
             session_id,
             &mut intents,
         )?;
+        if views.pause_cause(&intents).is_none()
+            && views
+                .state
+                .last_root_turn
+                .as_ref()
+                .is_some_and(|turn| plakous_hosted::runtime::is_root_loss_command(&turn.command_id))
+        {
+            read_host_intents(
+                &tx,
+                "SELECT kind,anchor,ordinal,value FROM host_intents WHERE session_id=?1 AND kind IN ('interrupt_cause','continuation_decision') ORDER BY anchor,ordinal",
+                session_id,
+                &mut intents,
+            )?;
+        }
         tx.commit().map_err(unavailable)?;
         Ok(WakeControls::from_join(&views, &intents))
     }
@@ -103,15 +117,13 @@ pub(in crate::store) fn attention_facts_on(
         session_id,
         &mut intents,
     )?;
-    if policy == ResumeAfterLoss::Hold
-        && intents
-            .root_interrupts
-            .iter()
-            .max_by_key(|intent| (intent.anchor, intent.ordinal))
-            .is_some_and(|intent| {
-                intent.value.cause
-                    == plakous_hosted::sessions::projector::RootInterruptCause::OwnerLost
-            })
+    if intents
+        .root_interrupts
+        .iter()
+        .max_by_key(|intent| (intent.anchor, intent.ordinal))
+        .is_some_and(|intent| {
+            intent.value.cause == plakous_hosted::sessions::projector::RootInterruptCause::OwnerLost
+        })
     {
         intents.submission_anchors =
             intent_anchors(connection, session_id, "submissions", "command_id")?;
@@ -145,10 +157,11 @@ fn pending_wakes(connection: &Connection, id: &str, views: &SessionViews) -> Res
     for row in rows {
         let (id, anchor) = row.map_err(invalid)?;
         let anchor = from_i64(anchor).map_err(invalid)?;
-        if views
-            .state
-            .retained_from
-            .is_none_or(|floor| anchor >= floor)
+        if !plakous_hosted::runtime::is_root_loss_command(&id)
+            && views
+                .state
+                .retained_from
+                .is_none_or(|floor| anchor >= floor)
             && !views.state.deliveries.contains_key(&id)
         {
             count = count.saturating_add(1);

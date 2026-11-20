@@ -14,6 +14,17 @@ type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[test]
+fn operator_attention_warns_at_most_once_per_minute_on_entry() {
+    let mut track = super::PendingTrack::default();
+    let first = Instant::now();
+    assert!(track.should_warn(true, first));
+    assert!(!track.should_warn(true, first + Duration::from_secs(59)));
+    assert!(!track.should_warn(false, first + Duration::from_secs(60)));
+    assert!(track.should_warn(true, first + Duration::from_secs(60)));
+    assert!(!track.should_warn(true, first + Duration::from_secs(61)));
+}
+
 pub(super) fn snapshots(observed: &HostEventReceiver<TestExtension>) -> Vec<PendingContinuation> {
     observed
         .try_iter()

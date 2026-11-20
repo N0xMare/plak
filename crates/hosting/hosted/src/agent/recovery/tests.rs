@@ -28,6 +28,7 @@ use super::*;
 
 mod face;
 mod followup_recompile;
+mod live_lease;
 mod parent_followup;
 mod saturated_retask;
 #[cfg(all(feature = "codex", feature = "grok"))]

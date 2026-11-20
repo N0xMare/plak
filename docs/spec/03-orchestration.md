@@ -3994,9 +3994,11 @@ rebuilds them: such a child is neither marked nor owed at reopen, and its
 an owner loss only when the retained terminal's exact session, branch, turn
 and checkpoint prove loss of the active durable branch lease or ownership
 fence. The recorded error must be `OutcomeUnknown`, with no provider or tool
-origin, and carry either a typed lease expiry or superseded fence store error,
-or the exact runtime-owned diagnostic `durable branch lease authority was
-lost` without a store source. A missing, unreadable, or different cause
+origin, and carry a typed lease expiry or superseded fence store error.
+Transient renewal failures (unavailable, busy, or a renewal deadline) count
+only after the same-domain clock proves expiry. An unreadable clock, clock
+domain mismatch, corruption, unsupported schema, invalid request, or text
+without the typed proof does not qualify. A missing, unreadable, or different cause
 grants no consent. A refusal to prepare or dispatch, capacity or an
 unrecorded refusal, wake preflight, and other recovery-required causes do not
 qualify. Only once exact recovery settles the fence (and releases an old
@@ -4068,6 +4070,10 @@ or JSONL `resume` (chapter 02). Resume with no agent resumes every held
 child. Under `"continue"` the `recover_node` run the root's open starts
 resumes each held child once by itself. A live waiter whose exact recovery
 settles a proven lease fence uses that same consent and start path.
+If a continuation turn itself loses its owner, its new loss holds even under
+`"continue"`; only operator Resume or another explicitly authorized turn
+advances that loss. An already recorded continuation decision remains
+pending and retries under its original command id.
 The attached root sets the policy on
 the tree's hub when it opens. Each run ends with that continuation pass, after
 every recovery it made, and reports the children still held in one live tree
@@ -4146,9 +4152,11 @@ A submission owned by this session is never superseded; an unreadable,
 inconsistent or ambiguous ownership verdict refuses preparation visibly.
 There is no schema migration or re-encoding of stored canonical command ids.
 
-It records host generation 1: a
-loss names the one root turn a lost host left, so one decision per loss is
-already one per host generation. It is written before the turn is
+The root records host generation 1; the stopped-turn anchor, not that
+generation, identifies each loss. One live host can record more than one
+loss. A lost continuation turn gets its own anchored loss, but it holds for
+the operator even under `"continue"`: repeated lease fences must not
+start an unbounded chain of paid turns. Consent is written before the turn is
 prepared; the turn is a host instruction (a host-wake submission under that
 id) to continue the current task from the last completed step and to check
 uncertain tool effects before repeating anything, never a replay. Accepting
@@ -4180,8 +4188,9 @@ The operator's one Resume (`ResumeLossContinuation` with no agent: JSONL
 only recovers) resumes every held child, records the
 root's consent and runs its continuation, and lets the restored queue drain.
 Under `[host] resume_after_loss = "continue"` the root's open does the same
-for the root by itself: its held continuation runs once and its restored
-queue drains; a decision a crash left pending runs at the next open
+for the root by itself unless the loss interrupted a continuation: an
+eligible held continuation runs once and its restored queue drains; a
+decision a crash left pending runs at the next open
 under either policy. The attached root sets the policy on its tree's hub
 wherever the custody-take scan runs (every root attach) and again when it
 opens.

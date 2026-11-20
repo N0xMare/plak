@@ -12,6 +12,34 @@ pub(crate) fn final_runner_probe() {
     }
 }
 
+mod publication_renewal {
+    use plakous_model::SessionId;
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
+
+    static EXPIRE: Mutex<BTreeSet<SessionId>> = Mutex::new(BTreeSet::new());
+
+    /// Refuse the next checkpoint publication renewal of this exact test
+    /// session with `LeaseExpired`. The heartbeat and other sessions are
+    /// unaffected, so the runtime can publish its own terminal on retry.
+    pub fn expire_next_publication_renewal(session: SessionId) {
+        EXPIRE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session);
+    }
+
+    pub(crate) fn expires(session: SessionId) -> bool {
+        EXPIRE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&session)
+    }
+}
+
+pub use publication_renewal::expire_next_publication_renewal;
+pub(crate) use publication_renewal::expires as publication_renewal_expires;
+
 /// A credential-wait clear the event hub refused: the host keeps showing the
 /// wait, so a gate run names the refusal on stderr.
 pub(crate) fn credential_wait_clear_refused(error: &dyn std::fmt::Debug) {

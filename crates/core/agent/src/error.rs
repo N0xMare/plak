@@ -225,14 +225,10 @@ impl AgentError {
         self.kind == AgentErrorKind::OutcomeUnknown
             && self.model_error.is_none()
             && self.tool_kind.is_none()
-            && match self.store_error {
-                Some(SessionStoreError::LeaseExpired | SessionStoreError::FenceSuperseded) => true,
-                // The lease owner also records this exact internal diagnostic
-                // without a store source. Never classify a substring or prose
-                // from a provider or tool as lease evidence.
-                None => self.message() == DURABLE_LEASE_AUTHORITY_LOST,
-                Some(_) => false,
-            }
+            && matches!(
+                self.store_error,
+                Some(SessionStoreError::LeaseExpired | SessionStoreError::FenceSuperseded)
+            )
     }
 
     pub(crate) const fn store_error(&self) -> Option<SessionStoreError> {

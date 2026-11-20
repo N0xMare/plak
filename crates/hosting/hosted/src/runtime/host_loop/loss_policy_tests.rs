@@ -288,7 +288,7 @@ fn the_open_sends_one_attention_notice_for_the_root_and_its_children() {
     let attention = open_and_read_attention(config, &id);
     assert_eq!(attention.len(), 1, "{attention:#?}");
     assert!(
-        attention[0].starts_with("the turn the lost host was running is held, and so are 1 agent"),
+        attention[0].starts_with("the interrupted turn is held, and so are 1 agent"),
         "{attention:#?}"
     );
     assert!(attention[0].contains(&child), "{attention:#?}");

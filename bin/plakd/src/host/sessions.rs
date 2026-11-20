@@ -330,7 +330,9 @@ const fn owes_open(standing: RootStanding, continue_losses: bool) -> bool {
         RootStanding::Continuing { handoff: true, .. }
         | RootStanding::Continuing { held: false, .. } => true,
         RootStanding::Continuing { held: true, .. } => continue_losses,
-        RootStanding::Clear | RootStanding::Stopped => false,
+        RootStanding::Clear | RootStanding::Stopped | RootStanding::ContinuationNeedsResume => {
+            false
+        }
     }
 }
 
@@ -454,7 +456,8 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
 const fn activity_of(standing: RootStanding) -> SessionActivity {
     match standing {
         RootStanding::Stopped => SessionActivity::Stopped,
-        RootStanding::Continuing {
+        RootStanding::ContinuationNeedsResume
+        | RootStanding::Continuing {
             handoff: false,
             held: true,
         } => SessionActivity::HeldAfterLoss,

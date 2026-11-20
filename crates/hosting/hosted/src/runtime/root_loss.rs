@@ -93,7 +93,8 @@ pub(crate) struct LostRootTurn {
 }
 
 /// Whether `command_id` is a root continuation after a loss.
-pub(crate) fn is_root_loss_command(command_id: &str) -> bool {
+#[must_use]
+pub fn is_root_loss_command(command_id: &str) -> bool {
     command_id.starts_with(ROOT_LOSS_RESUME_PREFIX)
 }
 
@@ -187,6 +188,25 @@ fn state(loss: &Loss, intents: &ProductIntents, views: &SessionViews) -> Option<
             )
     });
     (!later).then_some(RootLossState::Held)
+}
+
+fn interrupted_continuation(loss: &Loss, views: &SessionViews) -> bool {
+    matches!(&loss.anchor, RootStopAnchor::Turn { turn_id }
+        if views.state.last_root_turn.as_ref().is_some_and(|turn|
+            turn.turn_id == *turn_id && is_root_loss_command(&turn.command_id)))
+}
+
+/// Whether the projected recovery pause belongs to the owner-loss continuation.
+pub(super) fn owner_loss_at_pause(
+    intents: &ProductIntents,
+    views: &SessionViews,
+    turn_id: &str,
+) -> Option<RootLossState> {
+    let loss = latest_loss(intents)?;
+    (loss.cause == RootContinuationCause::OwnerLost
+        && matches!(&loss.anchor, RootStopAnchor::Turn { turn_id: lost } if lost == turn_id))
+    .then(|| state(&loss, intents, views))
+    .flatten()
 }
 
 /// Where this open's scan for a lost root turn starts; `None` for a
@@ -362,9 +382,10 @@ impl LossScanner {
             }
             for record in records {
                 self.cursor = record.header().seq;
-                if branch.is_none_or(|branch| record.header().branch_id == branch) {
-                    self.record(&record);
-                }
+                self.record(
+                    &record,
+                    branch.is_some_and(|branch| record.header().branch_id == branch),
+                );
             }
         }
     }
@@ -382,10 +403,13 @@ impl LossScanner {
         true
     }
 
-    fn record(&mut self, record: &FeedRecord) {
+    fn record(&mut self, record: &FeedRecord, fence_branch: bool) {
         let seq = record.header().seq;
         for fact in record.facts() {
             (self.fold)(&mut self.lost, seq.get(), fact);
+            if !fence_branch {
+                continue;
+            }
             match fact {
                 FeedFact::TurnTerminal {
                     turn_id,
@@ -655,6 +679,9 @@ pub enum RootStanding {
     Clear,
     /// The root's latest interrupt is a stop: nothing continues it.
     Stopped,
+    /// The lost turn was already a continuation. Only a new operator Resume
+    /// or prompt can advance it, even under the automatic policy.
+    ContinuationNeedsResume,
     /// The root holds, or has pending, a continuation after its host was
     /// lost; `handoff` when the loss was a planned handoff, which continues
     /// by itself at the next open.
@@ -664,6 +691,17 @@ pub enum RootStanding {
         /// No decision yet: an `owner_lost` loss waits for the operator.
         held: bool,
     },
+}
+
+impl RootStanding {
+    /// Whether a root continuation is held or pending.
+    #[must_use]
+    pub const fn is_continuing(self) -> bool {
+        matches!(
+            self,
+            Self::Continuing { .. } | Self::ContinuationNeedsResume
+        )
+    }
 }
 
 /// Where the session `session_id`'s root stands by its durable intents.
@@ -708,6 +746,12 @@ pub fn root_standing_from_intents(intents: &ProductIntents, views: &SessionViews
     };
     match state(&loss, intents, views) {
         None | Some(RootLossState::Running) => RootStanding::Clear,
+        Some(RootLossState::Held)
+            if loss.cause == RootContinuationCause::OwnerLost
+                && interrupted_continuation(&loss, views) =>
+        {
+            RootStanding::ContinuationNeedsResume
+        }
         Some(standing) => RootStanding::Continuing {
             handoff: loss.cause == RootContinuationCause::Handoff,
             held: standing == RootLossState::Held,

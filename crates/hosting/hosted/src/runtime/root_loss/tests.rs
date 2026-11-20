@@ -3,6 +3,16 @@
 use super::*;
 use crate::sessions::projector::{AnchoredIntent, OpenTurn, Submission, SubmissionKind};
 
+#[test]
+fn root_loss_resume_prompt_is_pinned() {
+    let pins = &[plakous::tools::PromptPin::new(
+        "root.loss_resume",
+        ROOT_LOSS_RESUME_TEXT,
+        "9791a373a9439b16170d36610e9c2546f3ae7132a215f12eedd75cf75c4fc761",
+    )];
+    assert!(plakous::tools::drifted_pins(pins).is_empty());
+}
+
 fn lost(intents: &mut ProductIntents, anchor: u64, cause: RootInterruptCause) {
     intents.root_interrupts.push(AnchoredIntent {
         anchor,
@@ -633,12 +643,13 @@ fn a_scan_below_retention_restarts_and_finds_a_retained_terminal() {
         &mut scanner,
         6,
         vec![scan_accepted(9), scan_process_lost(9)],
+        true,
     );
     assert!(scanner.behind_retention(10), "the first answer restarts");
     assert_eq!(scanner.cursor, FeedSeq::new(9), "at the retained start");
     assert_eq!(scanner.lost, None);
-    scan_record(&mut scanner, 10, vec![scan_accepted(1)]);
-    scan_record(&mut scanner, 11, vec![scan_process_lost(1)]);
+    scan_record(&mut scanner, 10, vec![scan_accepted(1)], true);
+    scan_record(&mut scanner, 11, vec![scan_process_lost(1)], true);
     assert_eq!(
         scanner.lost.map(|lost| (lost.turn_id, lost.applied_seq)),
         Some((scan_turn(1).to_string(), 11))
@@ -651,24 +662,34 @@ fn a_scan_below_retention_restarts_and_finds_a_retained_terminal() {
 fn a_terminal_behind_retention_is_no_loss() {
     let mut scanner = LossScanner::new(FeedSeq::new(5));
     assert!(scanner.behind_retention(20));
-    scan_record(&mut scanner, 20, Vec::new());
+    scan_record(&mut scanner, 20, Vec::new(), true);
     assert_eq!(scanner.lost, None, "the lost turn's terminal was pruned");
     assert!(!scanner.behind_retention(30), "the scan restarts once");
 }
 
-fn scan_record(scanner: &mut LossScanner, seq: u64, facts: Vec<FeedFact>) {
+#[test]
+fn branch_filter_does_not_hide_legacy_process_loss() {
+    let mut scanner = LossScanner::new(FeedSeq::new(0));
+    scan_record(&mut scanner, 1, vec![scan_process_lost(1)], false);
+    assert_eq!(scanner.lost.unwrap().turn_id, scan_turn(1).to_string());
+}
+
+fn scan_record(scanner: &mut LossScanner, seq: u64, facts: Vec<FeedFact>, fence_branch: bool) {
     use plakous::sessions::feed::{FeedChange, FeedHeader};
-    scanner.record(&FeedRecord::from_store(
-        FeedHeader {
-            seq: FeedSeq::new(seq),
-            session_id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
-            branch_id: "00000000-0000-4000-8000-000000000002".parse().unwrap(),
-            committed_at_ms: 0,
-            change: FeedChange::LeaseReleased {
-                head: "00000000-0000-4000-8000-000000000003".parse().unwrap(),
-                fence: 1,
+    scanner.record(
+        &FeedRecord::from_store(
+            FeedHeader {
+                seq: FeedSeq::new(seq),
+                session_id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
+                branch_id: "00000000-0000-4000-8000-000000000002".parse().unwrap(),
+                committed_at_ms: 0,
+                change: FeedChange::LeaseReleased {
+                    head: "00000000-0000-4000-8000-000000000003".parse().unwrap(),
+                    fence: 1,
+                },
             },
-        },
-        facts,
-    ));
+            facts,
+        ),
+        fence_branch,
+    );
 }

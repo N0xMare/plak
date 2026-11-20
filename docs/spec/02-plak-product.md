@@ -4664,7 +4664,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   aggregates unresolved approvals, credential waits and context-capacity
   decisions across all resident nodes. It also marks current, non-archived
   sessions with pending work for a node waiting on a root pause cause, consent
-  after owner loss under `hold`, or child recovery. This part can be read
+  after owner loss under `hold`, a lost continuation that requires a fresh
+  Resume even under `continue`, or child recovery. A recovery pause for the
+  very turn that an automatic or already consented continuation will replace
+  does not ask for operator attention. It still pauses ordinary wakes until
+  the continuation is admitted, and the continuation submission itself is
+  not counted as a queued wake. This part can be read
   from durable facts even while the session is dormant. It does not count
   unrelated mail to runnable nodes, and it does not decide admission or
   continue a turn. It is also
@@ -6048,7 +6053,8 @@ settles asynchronously after endpoint binding, before local admission.
   sessions the last host left a continuation that runs by itself: a root
   whose latest loss is a planned handoff, a root continuation decided and
   not yet admitted (a crash left it pending), and, under `[host]
-  resume_after_loss = "continue"`, a root whose lost turn waits for Resume.
+  resume_after_loss = "continue"`, a root whose lost turn waits for Resume
+  and was not itself a continuation.
   Once it serves, a thread of its own opens each, one at a time, printing
   `plakd host: continuing session <id>`; the open runs the continuation as
   any open does (chapter 03 §14.1), once, and the session stays resident

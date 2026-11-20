@@ -49,6 +49,42 @@ async fn settled_recovery_remains_visible_when_followup_admission_refuses() {
     let hint = steer["message"].as_str().unwrap();
     assert!(hint.contains("acknowledge_recovery"), "{hint}");
     assert!(hint.contains(before.attempt_id.as_str()), "{hint}");
+    for attempt in [None, Some("wrong-attempt")] {
+        let mut request = json!({"agent_id": id, "purpose": "followup", "message": "continue"});
+        if let Some(attempt) = attempt {
+            request["acknowledge_recovery"] = json!(attempt);
+        }
+        let (ok, result) = fixture.invoke("send_agent_message", request).await;
+        assert!(!ok, "{result}");
+        if attempt.is_some() {
+            assert_eq!(code(&result), "attempt_mismatch");
+        } else {
+            assert!(
+                result["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("acknowledge_recovery")
+            );
+        }
+    }
+    assert_eq!(fixture.dispatches(), dispatched);
+    let (ok, result) = fixture
+        .invoke(
+            "send_agent_message",
+            json!({
+                "agent_id": id, "purpose": "followup", "message": "continue",
+                "acknowledge_recovery": before.attempt_id,
+            }),
+        )
+        .await;
+    assert!(ok, "{result}");
+    assert_ne!(
+        fixture
+            .runtime
+            .read(|tree| tree.attempt(&id).unwrap().attempt_id.clone())
+            .unwrap(),
+        before.attempt_id
+    );
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }
 

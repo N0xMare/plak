@@ -919,12 +919,12 @@ fn attention_text(root: Option<&str>, held: &[(String, String)]) -> Option<Strin
     let list = named.join(", ");
     Some(match root {
         Some(_) => format!(
-            "the turn the lost host was running is held, and so are {} {agents} it \
-             interrupted: {list}; nothing continues until you resume",
+            "the interrupted turn is held, and so are {} {agents}: {list}; \
+             nothing continues until you resume",
             held.len()
         ),
         None => format!(
-            "{} {agents} a lost host interrupted {} held: {list}; nothing continues until you \
+            "{} interrupted {agents} {} held: {list}; nothing continues until you \
              resume",
             held.len(),
             if held.len() == 1 { "is" } else { "are" }

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn durable_lease_loss_excludes_unproven_and_provider_causes() {
     let runtime = |message| AgentError::new(AgentErrorKind::OutcomeUnknown, message);
-    assert!(runtime(DURABLE_LEASE_AUTHORITY_LOST).is_durable_lease_loss());
+    assert!(!runtime(DURABLE_LEASE_AUTHORITY_LOST).is_durable_lease_loss());
     assert!(!runtime("unknown checkpoint outcome").is_durable_lease_loss());
     assert!(
         AgentError::from_ambiguous_store(SessionStoreError::LeaseExpired).is_durable_lease_loss()

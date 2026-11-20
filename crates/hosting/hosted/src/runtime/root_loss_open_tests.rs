@@ -163,6 +163,82 @@ fn lease_fence_holds_then_reuses_consent_after_a_crash_before_dispatch() {
     assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
 }
 
+#[test]
+fn live_root_lease_fence_continues_once_then_holds_if_its_continuation_fences() {
+    use crate::runtime::test_kit::BlockOn as _;
+    use plakous_offline_crash_harness::gate::GateHandle;
+    let root = tempfile::tempdir().unwrap();
+    let first = GateHandle::new();
+    let continued = GateHandle::new();
+    let (mut config, evidence) = scripted_host_with(
+        root.path(),
+        script(&serde_json::json!([
+            {"gate": first.script(), "output": {"text": "first"}},
+            {"gate": continued.script(), "output": {"text": "continuation"}},
+        ])),
+    );
+    config.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
+    let store = Arc::clone(&config.store);
+    let id = config.session.id.clone();
+    let roots = config.state_roots.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    send_attached_action(&actions, UserAction::Prompt("start".into()));
+    async { tokio::time::timeout(std::time::Duration::from_secs(30), first.entered()).await }
+        .block()
+        .unwrap();
+    let session = store
+        .load(&id)
+        .unwrap()
+        .plakous_locator
+        .unwrap()
+        .session_id();
+    plakous::test_session_lease::expire_next_publication_renewal(session);
+    first.release();
+    async { tokio::time::timeout(std::time::Duration::from_secs(30), continued.entered()).await }
+        .block()
+        .expect("eager recovery must start the one continuation with no operator input");
+    plakous::test_session_lease::expire_next_publication_renewal(session);
+    continued.release();
+    let mut seen = Vec::new();
+    wait_for(
+        &events,
+        &mut seen,
+        "the second lease loss holds",
+        held_notice,
+    );
+    assert_eq!(
+        crate::runtime::root_standing(store.as_ref(), &id).unwrap(),
+        crate::runtime::RootStanding::ContinuationNeedsResume
+    );
+    assert!(store.load_wake_controls(&id).unwrap().paused);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let intents = store.load_intents(&id).unwrap();
+    assert_eq!(intents.root_interrupts.len(), 2);
+    assert_ne!(
+        intents.root_interrupts[0].value.anchor,
+        intents.root_interrupts[1].value.anchor
+    );
+    assert_eq!(intents.root_continuations.len(), 1);
+    let lost = Lost {
+        release_error: None,
+        store,
+        state_roots: roots,
+        id,
+        evidence,
+        seen,
+    };
+    let mut reopen = next_host(
+        root.path(),
+        &lost,
+        &serde_json::json!([]),
+        lost.store.clone(),
+    );
+    reopen.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
+    assert!(open_and_quit(reopen).iter().any(held_notice));
+    assert_eq!(dispatches(&lost.evidence), 2, "no third provider dispatch");
+}
+
 /// How the host running the turn lets go.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Release {
@@ -266,7 +342,7 @@ pub(super) fn next_host(
 
 pub(super) fn held_notice(event: &HostEvent) -> bool {
     matches!(event, HostEvent::Row(plakous_host_protocol::views::transcript::TranscriptRow::Notice(notice))
-        if notice.text.contains("the turn the lost host was running is held"))
+        if notice.text.contains("the interrupted turn is held"))
 }
 
 pub(super) fn idle(event: &HostEvent) -> bool {
@@ -353,14 +429,14 @@ fn a_lost_root_turn_holds_until_the_one_resume_continues_it_once() {
     assert!(
         !views.rows.values().any(|row| row
             .text()
-            .is_some_and(|text| text.contains("the turn the lost host was running is held"))),
+            .is_some_and(|text| text.contains("the interrupted turn is held"))),
         "the held notice is live only"
     );
     assert!(
         !intents.notices.iter().any(|notice| notice
             .row
             .text()
-            .is_some_and(|text| text.contains("the turn the lost host was running is held"))),
+            .is_some_and(|text| text.contains("the interrupted turn is held"))),
         "the held notice is never stored"
     );
 }

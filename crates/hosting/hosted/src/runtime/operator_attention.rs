@@ -5,7 +5,10 @@ use plakous_host_protocol::notice_remedy::NoticeRemedy;
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
 use plakous_recursive_subagents::tree::{ContinuationCause, LossContinuationState};
 
-use super::root_loss::{RootStanding, root_standing_from_intents};
+use super::root_loss::{
+    RootLossState, RootStanding, is_root_loss_command, owner_loss_at_pause,
+    root_standing_from_intents,
+};
 
 /// Why the host is waiting for input. Contains no mail or provider text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,7 +35,7 @@ pub enum AttentionReason {
 
 impl AttentionReason {
     pub(crate) const fn pauses_root_wakes(self) -> bool {
-        !matches!(self, Self::HeldChild | Self::HeldRoot | Self::ChildRecovery)
+        !matches!(self, Self::HeldChild | Self::ChildRecovery)
     }
 
     /// The stable diagnostic reason label.
@@ -107,16 +110,26 @@ pub fn root_reason(
     intents: &ProductIntents,
     policy: super::ResumeAfterLoss,
 ) -> Option<AttentionReason> {
-    if policy == super::ResumeAfterLoss::Hold
-        && root_standing_from_intents(intents, views)
-            == (RootStanding::Continuing {
-                handoff: false,
-                held: true,
-            })
+    let standing = root_standing_from_intents(intents, views);
+    if standing == RootStanding::ContinuationNeedsResume
+        || (policy == super::ResumeAfterLoss::Hold
+            && standing
+                == (RootStanding::Continuing {
+                    handoff: false,
+                    held: true,
+                }))
     {
         return Some(AttentionReason::HeldRoot);
     }
     Some(match views.pause_cause(intents)? {
+        PauseCause::RecoveryRequired { turn_id }
+            if matches!(
+                owner_loss_at_pause(intents, views, &turn_id),
+                Some(RootLossState::Held | RootLossState::Pending(_))
+            ) =>
+        {
+            return None;
+        }
         PauseCause::RecoveryRequired { .. } => AttentionReason::RecoveryRequired,
         PauseCause::ContextCapacity { .. } => AttentionReason::ContextCapacity,
         PauseCause::SessionRefusal { .. } => AttentionReason::SessionRefusal,
@@ -159,12 +172,11 @@ impl PendingTreeWork {
             }
             let count = if node.status == NodeStatus::RecoveryRequired {
                 &mut work.child_recovery_mail
-            } else if policy == super::ResumeAfterLoss::Hold
-                && tree.loss_continuation(id).is_some_and(|loss| {
-                    loss.state == LossContinuationState::Held
-                        && loss.cause == ContinuationCause::OwnerLost
-                })
-            {
+            } else if tree.loss_continuation(id).is_some_and(|loss| {
+                loss.state == LossContinuationState::Held
+                    && loss.cause == ContinuationCause::OwnerLost
+                    && (policy == super::ResumeAfterLoss::Hold || loss.interrupted_continuation)
+            }) {
                 &mut work.child_held_mail
             } else {
                 continue;
@@ -221,6 +233,7 @@ pub fn prepared_wake_count(session: &crate::sessions::SessionRecord) -> u32 {
                 .pending_for(item)
                 .is_some_and(|submission| {
                     submission.kind == crate::sessions::projector::SubmissionKind::HostWake
+                        && !is_root_loss_command(&submission.command_id)
                 })
         })
         .count();

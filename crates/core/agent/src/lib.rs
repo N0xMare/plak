@@ -107,6 +107,10 @@ mod test_hooks {
         production
     }
 
+    pub(crate) const fn publication_renewal_expires(_: plakous_model::SessionId) -> bool {
+        false
+    }
+
     #[cfg(test)]
     pub(crate) fn note_working_prune_before_provider() {}
 
@@ -130,6 +134,12 @@ pub mod internal {
         BoundaryError, BoundaryHold, BoundaryPhase, BoundaryProgress,
     };
     pub use crate::test_hooks::commit_classes as commit_trace;
+    /// Repository lease-fault fixtures; unavailable in production builds.
+    #[doc(hidden)]
+    #[cfg(feature = "test-hooks")]
+    pub mod test_publication {
+        pub use crate::test_hooks::expire_next_publication_renewal;
+    }
     /// Test stand-in for a keeper. Production hosts do not call this.
     #[doc(hidden)]
     #[must_use]

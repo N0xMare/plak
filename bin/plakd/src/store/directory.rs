@@ -93,10 +93,8 @@ impl ProductStore {
                 super::views::intents_of(&transaction, &mut self.verified_submissions, &id)?;
             let views = super::views::views_of(&transaction, &id)?
                 .unwrap_or_else(plakous_hosted::sessions::projector::SessionViews::empty);
-            if matches!(
-                plakous_hosted::runtime::root_standing_from_intents(&intents, &views),
-                plakous_hosted::runtime::RootStanding::Continuing { .. }
-            ) {
+            if plakous_hosted::runtime::root_standing_from_intents(&intents, &views).is_continuing()
+            {
                 continuing = true;
             }
             let stopped = intents

@@ -189,12 +189,7 @@ fn refuse_pending_work(
         .iter()
         .any(|item| !commands.is_consumed(item));
     let standing = plakous_hosted::runtime::root_standing_from_intents(&intents, &views);
-    if matches!(
-        standing,
-        plakous_hosted::runtime::RootStanding::Continuing { .. }
-    ) || queued
-        || commands.has_pending()
-    {
+    if standing.is_continuing() || queued || commands.has_pending() {
         return Err(LifecycleError::Refused(LifecycleRefusal::Busy {
             turn: true,
             children: Vec::new(),

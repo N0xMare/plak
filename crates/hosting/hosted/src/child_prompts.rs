@@ -207,7 +207,7 @@ pub static CHILD_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "child.child_loss_resume_template",
         PLAK_CHILD_LOSS_RESUME_TEMPLATE,
-        "f01fb5bb2b6107400d9df624783c76ced77a5c8d70d01bd79f048440216eeb76",
+        "4fbdc6e5f1798e98c9ef710dd7cd1178adf7476d233b28faf907371dea9e9588",
     ),
     PromptPin::new(
         "child.child_handoff_resume_template",
@@ -308,7 +308,7 @@ impl TransientResume<'_> {
 /// The instruction of a continuation turn after the host running the
 /// child was lost, mid-turn or while it waited between turns (an owner-lost interrupt the operator resumed, or
 /// one `resume_after_loss = "continue"` resumes).
-pub const PLAK_CHILD_LOSS_RESUME_TEMPLATE: &str = "The host running this assignment was lost, which interrupted your work: a turn in progress, or your wait between turns. Continue the same assignment from the last completed step: check what already happened before you act, and do not repeat completed actions. This is a new turn, not a replay of anything that was lost. Keep the same turn_token and result schema; call submit_result when the assignment is done.";
+pub const PLAK_CHILD_LOSS_RESUME_TEMPLATE: &str = "The host running this assignment was lost, which interrupted your work: a turn in progress, or your wait between turns. Continue the same assignment from the last completed step: check what already happened before you act, and do not repeat completed actions. This is a new turn, not a replay of anything that was lost. Keep the same turn_token and result schema; call submit_result when the assignment is done.\nSome tool effects may be uncertain; verify them before repeating any action.";
 
 /// The instruction of a continuation turn after a planned handoff (a
 /// reload, a host restart or an upgrade) interrupted the child, mid-turn or

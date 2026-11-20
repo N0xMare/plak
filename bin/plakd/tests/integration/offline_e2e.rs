@@ -1588,7 +1588,7 @@ fn a_crash_restored_jsonl_queue_resumes_only_after_resume_queue() {
 /// new instruction turn; the next reopen holds nothing.
 #[test]
 fn a_jsonl_root_killed_mid_turn_is_held_until_resume_continues_it_once() {
-    const HELD: &str = "the turn the lost host was running is held";
+    const HELD: &str = "the interrupted turn is held";
     let fixture = Fixture::new(&stalled_answer());
     let mut agent = AgentProcess::start(&fixture, &[]);
     let hello = agent.wait_for("hello", |record| record["kind"] == "hello");

@@ -49,13 +49,11 @@ impl LossResume {
 /// The instruction of a continuation turn, by what stopped the node.
 fn continuation_instruction(cause: crate::agent_tree::ContinuationCause) -> String {
     if cause == crate::agent_tree::ContinuationCause::Handoff {
-        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE.to_owned()
+        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE
     } else {
-        format!(
-            "{}\nSome tool effects may be uncertain; verify them before repeating any action.",
-            crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
-        )
+        crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
     }
+    .to_owned()
 }
 
 /// Run the ordinary consent/start path only after the fenced child settled
@@ -64,7 +62,7 @@ pub(super) async fn continue_fenced_child(runtime: &Arc<ProductTopologyRuntime>,
     if runtime.continues_after_loss()
         && let Some(parent) = crate::agent::build::rejoin_parent(runtime)
     {
-        let _ = resume_after_loss(&parent, runtime, agent_id).await;
+        let _ = resume_after_loss(&parent, runtime, agent_id, true).await;
     }
 }
 
@@ -76,6 +74,7 @@ async fn resume_after_loss(
     parent: &SpawnParent,
     runtime: &Arc<ProductTopologyRuntime>,
     agent_id: &str,
+    automatic: bool,
 ) -> LossResume {
     let Ok(_claim) = crate::agent::recovery::claim_child(runtime, agent_id).await else {
         return LossResume::Busy;
@@ -83,7 +82,7 @@ async fn resume_after_loss(
     // A turn the open restored is settled as lost and the decision taken
     // again on it, once, in this same pass.
     for _ in 0..2 {
-        match resume_claimed(parent, runtime, agent_id).await {
+        match resume_claimed(parent, runtime, agent_id, automatic).await {
             Resumed::Settled(resume) => return resume,
             Resumed::Restored => {}
         }
@@ -108,6 +107,7 @@ enum Resumed {
 async fn record_consent(
     runtime: &ProductTopologyRuntime,
     agent_id: &str,
+    automatic: bool,
 ) -> Result<Option<(String, String, String, crate::agent_tree::ContinuationCause)>, String> {
     let decided_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -119,7 +119,13 @@ async fn record_consent(
         .mutate_then_emit(false, move |tree| {
             let Some(cause) = tree
                 .loss_continuation(&id)
-                .filter(|continuation| continuation.state != LossContinuationState::Running)
+                .filter(|continuation| match continuation.state {
+                    LossContinuationState::Running => false,
+                    LossContinuationState::Pending => true,
+                    LossContinuationState::Held => {
+                        !automatic || !continuation.interrupted_continuation
+                    }
+                })
                 .map(|continuation| continuation.cause)
             else {
                 return Ok(None);
@@ -141,15 +147,17 @@ async fn resume_claimed(
     parent: &SpawnParent,
     runtime: &Arc<ProductTopologyRuntime>,
     agent_id: &str,
+    automatic: bool,
 ) -> Resumed {
-    let (command_id, locator, path, cause) = match record_consent(runtime, agent_id).await {
-        Ok(Some(recorded)) => recorded,
-        Ok(None) => {
-            withdraw_ended_continuation(runtime, agent_id).await;
-            return Resumed::Settled(LossResume::NotHeld);
-        }
-        Err(error) => return Resumed::Settled(LossResume::Deferred(error)),
-    };
+    let (command_id, locator, path, cause) =
+        match record_consent(runtime, agent_id, automatic).await {
+            Ok(Some(recorded)) => recorded,
+            Ok(None) => {
+                withdraw_ended_continuation(runtime, agent_id).await;
+                return Resumed::Settled(LossResume::NotHeld);
+            }
+            Err(error) => return Resumed::Settled(LossResume::Deferred(error)),
+        };
     if !crate::agent::placement::ready(runtime.driver(), agent_id) {
         return Resumed::Settled(LossResume::Deferred(
             "child placement is unavailable".into(),
@@ -269,12 +277,14 @@ pub(in crate::agent) async fn continue_after_loss(
         let due = match continuation.state {
             LossContinuationState::Pending => true,
             LossContinuationState::Held => {
-                continues || continuation.cause == crate::agent_tree::ContinuationCause::Handoff
+                !continuation.interrupted_continuation
+                    && (continues
+                        || continuation.cause == crate::agent_tree::ContinuationCause::Handoff)
             }
             LossContinuationState::Running => false,
         };
         if due {
-            let _ = resume_after_loss(parent, runtime, &agent_id).await;
+            let _ = resume_after_loss(parent, runtime, &agent_id, true).await;
         }
     }
 }
@@ -313,7 +323,7 @@ pub(crate) async fn operator_resume_after_loss(
     };
     let mut resumed = Vec::new();
     for agent_id in targets {
-        let outcome = resume_after_loss(&parent, runtime, &agent_id).await;
+        let outcome = resume_after_loss(&parent, runtime, &agent_id, false).await;
         resumed.push((agent_id, outcome));
     }
     Ok(resumed)

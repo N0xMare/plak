@@ -585,6 +585,7 @@ async fn colocated_capacity_debt_never_extends_a_busy_runtime_lease() -> TestRes
 async fn a_revival_the_store_cannot_answer_is_not_reported_as_takeover() -> TestResult {
     for (revive_error, takeover) in [
         (SessionStoreError::BackendBusy, false),
+        (SessionStoreError::BackendUnavailable, false),
         (SessionStoreError::LeaseHeld, true),
     ] {
         let store = Arc::new(FlakyRenewStore::new(0, revive_error));
@@ -597,6 +598,31 @@ async fn a_revival_the_store_cannot_answer_is_not_reported_as_takeover() -> Test
         let failure = owner.heartbeat.failure();
         assert!(owner.heartbeat.lost().is_cancelled());
         assert_eq!(failure == lease_taken_over(), takeover, "{revive_error:?}");
+        assert!(failure.is_durable_lease_loss(), "{revive_error:?}");
+        let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_expired_grants_corrupt_or_invalid_revival_is_not_proven_ownership_loss() -> TestResult {
+    for cause in [
+        SessionStoreError::corrupt(),
+        SessionStoreError::UnsupportedSchema,
+        SessionStoreError::Invalid(internal::StoreInvalidReason::LeaseExpiryOverflow),
+        SessionStoreError::LeaseDomainMismatch,
+    ] {
+        let store = Arc::new(FlakyRenewStore::new(0, cause));
+        store
+            .expired
+            .store(true, std::sync::atomic::Ordering::Release);
+        store.now.store(200, std::sync::atomic::Ordering::Release);
+        let mut owner = flaky_owner(store)?;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(owner.heartbeat.lost().is_cancelled());
+        let failure = owner.heartbeat.failure();
+        assert_eq!(failure.store_error(), Some(cause));
+        assert!(!failure.is_durable_lease_loss());
         let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
     }
     Ok(())

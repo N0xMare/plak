@@ -4,6 +4,8 @@
 
 use std::cell::Cell;
 
+pub use plakous_agent::internal::test_publication::expire_next_publication_renewal;
+
 thread_local! {
     static LEASE_SECONDS: Cell<Option<u64>> = const { Cell::new(None) };
 }

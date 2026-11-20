@@ -68,7 +68,8 @@ pub(super) struct PendingTrack {
     /// transcript is the restored line, not a second one.
     baseline: bool,
     root_reason: Option<AttentionReason>,
-    reason_read_at: Option<Instant>,
+    root_paused: bool,
+    reason_read_at: Option<(Instant, bool)>,
     attention: Option<SessionAttention>,
     warned_at: Option<Instant>,
 }
@@ -78,6 +79,18 @@ impl PendingTrack {
         self.tree.map_or(0, |tree| {
             tree.work.results as usize + tree.work.questions as usize
         })
+    }
+
+    fn should_warn(&mut self, entered: bool, at: Instant) -> bool {
+        if entered
+            && self
+                .warned_at
+                .is_none_or(|last| at.duration_since(last) >= std::time::Duration::from_secs(60))
+        {
+            self.warned_at = Some(at);
+            return true;
+        }
+        false
     }
 }
 
@@ -114,13 +127,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let process_exits = u32::try_from(process_exits).unwrap_or(u32::MAX);
         let work = tree.work;
         let prepared_wakes = prepared_wake_count(&self.role.config.session);
-        let reason =
-            if work.results > 0 || work.questions > 0 || process_exits > 0 || prepared_wakes > 0 {
-                self.read_root_attention_reason()
-            } else {
-                self.role.pending_track.reason_read_at = None;
-                None
-            };
+        let has_work =
+            work.results > 0 || work.questions > 0 || process_exits > 0 || prepared_wakes > 0;
+        let reason = self.read_root_attention_reason(has_work);
         let attention = work.attention(reason, process_exits, prepared_wakes);
         let suppressed = self.role.config.session.child_wake_suppressed;
         let suppression_paused = suppressed
@@ -131,6 +140,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             questions: work.questions,
             process_exits,
             auto_continue_paused: suppression_paused
+                || self.role.pending_track.root_paused
                 || attention.is_some_and(|attention| attention.reason.pauses_root_wakes()),
         };
         self.publish_operator_attention(attention);
@@ -151,22 +161,31 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         self.role.pending_track.baseline = false;
     }
 
-    fn read_root_attention_reason(&mut self) -> Option<AttentionReason> {
+    fn read_root_attention_reason(&mut self, has_work: bool) -> Option<AttentionReason> {
         let now = Instant::now();
         let track = &mut self.role.pending_track;
-        if track
-            .reason_read_at
-            .is_none_or(|last| now.duration_since(last) >= TREE_OBSERVE_INTERVAL)
-        {
-            track.reason_read_at = Some(now);
-            if let Ok(reason) = self.role.config.store.load_attention_reason(
-                &self.role.config.session.id,
-                self.role.config.resume_after_loss,
-            ) {
+        if track.reason_read_at.is_none_or(|(last, work)| {
+            work != has_work || now.duration_since(last) >= TREE_OBSERVE_INTERVAL
+        }) {
+            track.reason_read_at = Some((now, has_work));
+            if has_work
+                && let Ok(reason) = self.role.config.store.load_attention_reason(
+                    &self.role.config.session.id,
+                    self.role.config.resume_after_loss,
+                )
+            {
                 track.root_reason = reason;
             }
+            if let Ok(controls) = self
+                .role
+                .config
+                .store
+                .load_wake_controls(&self.role.config.session.id)
+            {
+                track.root_paused = controls.paused;
+            }
         }
-        track.root_reason
+        if has_work { track.root_reason } else { None }
     }
 
     fn publish_operator_attention(&mut self, attention: Option<SessionAttention>) {
@@ -180,13 +199,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             release.attachments.publish_attention(attention);
         }
         if let Some(attention) = attention {
-            let now = Instant::now();
-            if entered
-                && track.warned_at.is_none_or(|last| {
-                    now.duration_since(last) >= std::time::Duration::from_secs(60)
-                })
-            {
-                track.warned_at = Some(now);
+            if track.should_warn(entered, Instant::now()) {
                 super::wake::log_operator_attention(&self.role.config.session.id, attention);
             }
             let _ = self.role.events.send(ContentEvent::Row(attention.notice()));

@@ -1279,10 +1279,7 @@ fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::S
             &record.id,
         )
         .map_err(CliFailure::new)?;
-        if matches!(
-            standing,
-            plakous_hosted::runtime::RootStanding::Continuing { .. }
-        ) {
+        if standing.is_continuing() {
             blockers.push(Blocker {
                 session: record.id.clone(),
                 kind: BlockerKind::HeldWork,

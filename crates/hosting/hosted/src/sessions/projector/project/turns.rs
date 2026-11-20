@@ -1,4 +1,4 @@
-use crate::sessions::projector::LastRootOutcome;
+use crate::sessions::projector::{LastRootOutcome, LastRootTurn};
 
 use super::{
     Anchored, Applier, FeedCancelCause, FeedFact, FeedTurnOutcome, NoticeScope, PauseCause,
@@ -11,10 +11,26 @@ impl Applier<'_> {
     pub(super) fn turn_terminal(
         &mut self,
         turn_id: plakous::model::TurnId,
+        command_id: &str,
         outcome: FeedTurnOutcome,
         steering_unapplied: bool,
     ) -> Result<(), ProjectError> {
         let turn = turn_id.to_string();
+        // Retention can leave this terminal but not the continuation's
+        // admission. Preserve the exact stopped-command identity without
+        // overwriting the view of a different, possibly later turn.
+        if self.views.state.last_root_turn.is_none()
+            && crate::runtime::is_root_loss_command(command_id)
+        {
+            self.views.state.last_root_turn = Some(LastRootTurn {
+                turn_id: turn.clone(),
+                command_id: command_id.to_owned(),
+                outcome: None,
+                prompt: None,
+                committed_after_prompt: false,
+                history_seen: false,
+            });
+        }
         if let Some(last) = self
             .views
             .state
@@ -22,6 +38,7 @@ impl Applier<'_> {
             .as_mut()
             .filter(|last| last.turn_id == turn)
         {
+            last.command_id = command_id.to_owned();
             last.outcome = Some(match outcome {
                 FeedTurnOutcome::Completed { .. } => LastRootOutcome::Completed,
                 FeedTurnOutcome::Failed { .. } => LastRootOutcome::Failed,

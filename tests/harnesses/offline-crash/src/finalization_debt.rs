@@ -433,7 +433,7 @@ async fn seed_fence(
             .into(),
             model_error: None,
             tool_kind: None,
-            store_error: None,
+            store_error: lease_lost.then(|| serde_json::json!("LeaseExpired")),
         }),
         usage: plakous::agent::TurnUsage::default(),
     };
