@@ -247,6 +247,7 @@ impl PreparedAgent {
             exit_probe: Arc::clone(&exit_probe),
             steering: VecDeque::new(),
             tool_preempt: watch::channel(plakous_tools::ToolPreempt::None).0,
+            foreground_steer: watch::channel(plakous_tools::ToolPreempt::None).0,
             dispatch_preempts: Arc::new(Mutex::new(Vec::new())),
             nested_notice_preempts: Arc::new(Mutex::new(Vec::new())),
             roots: VecDeque::new(),

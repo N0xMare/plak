@@ -297,6 +297,12 @@ pub trait LocalCompositionNestedResponder: Send + Sync {
         false
     }
 
+    /// Identifies an SDK-owned foreground wait that accepts only steering.
+    #[doc(hidden)]
+    fn is_foreground_wait(&self) -> bool {
+        false
+    }
+
     fn wants_value(&self) -> bool {
         false
     }

@@ -134,7 +134,7 @@ impl LanguageModel for SdkModel {
                 "cell {}: {text}",
                 ordinal - 1
             );
-            if ordinal == 2 {
+            if ordinal == 2 && self.cells.len() == CELLS.len() {
                 assert!(
                     text.contains("42")
                         && text.contains("invalid key")
@@ -235,11 +235,17 @@ async fn real_python_sdk_pending_steer_stops_the_foreground_job() -> TestResult 
     Box::pin(sdk_driver(SdkScenario::Steer)).await
 }
 
+#[tokio::test]
+async fn real_python_sdk_background_completion_does_not_stop_the_foreground_job() -> TestResult {
+    Box::pin(sdk_driver(SdkScenario::BackgroundNotice)).await
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SdkScenario {
     Values,
     ForegroundStop,
     Steer,
+    BackgroundNotice,
 }
 
 async fn sdk_driver(scenario: SdkScenario) -> TestResult {
@@ -250,7 +256,13 @@ async fn sdk_driver(scenario: SdkScenario) -> TestResult {
     std::fs::write(directory.path().join("seed"), "hello SDK\n")?;
     std::fs::write(directory.path().join("ref_seed"), "hello SDK\n")?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
-    let process = Arc::new(plakous_tool_process::ProcessSessionTools::posix_sh()?);
+    let process = Arc::new(
+        plakous_tool_process::ProcessSessionTools::posix_sh()?.with_config(
+            plakous_tool_process::ProcessPackConfig {
+                completion_notices: scenario == SdkScenario::BackgroundNotice,
+            },
+        ),
+    );
     let mut registry = ToolRegistryBuilder::default();
     let packs = plakous_compose::standard_coding_packs(
         Arc::new(plakous_tool_files::InMemoryPlanState::default()),
@@ -278,6 +290,16 @@ async fn sdk_driver(scenario: SdkScenario) -> TestResult {
                 "result = await proc.run(['/bin/sleep', '60'], timeout_s=300)\nassert result.status == 'terminated', result.status\nprint('foreground job stopped for steer')",
                 "foreground job stopped for steer",
             )],
+            SdkScenario::BackgroundNotice => &[
+                (
+                    "await proc.start(['/bin/sh', './wait-for-release', 'background-release'])\nprint('background job started')",
+                    "background job started",
+                ),
+                (
+                    "result = await proc.run(['/bin/sh', './wait-for-release', 'foreground-release'], timeout_s=60)\nassert result.exit_code == 0, result.status\nprint('foreground job survived the notice')",
+                    "foreground job survived the notice",
+                ),
+            ],
         },
         scripted: Arc::new(
             plakous_test_support::ScriptedModel::new(facts.clone(), [])
@@ -355,11 +377,14 @@ async fn sdk_driver(scenario: SdkScenario) -> TestResult {
         attachment
     };
     let promoted = (scenario == SdkScenario::Steer).then(|| Arc::new(tokio::sync::Notify::new()));
+    let finished =
+        (scenario == SdkScenario::BackgroundNotice).then(|| Arc::new(tokio::sync::Notify::new()));
     let builder = crate::local_composition::attach_local_composition(
         AgentBuilder::new(configured, registry, workspace)
             .job_host(Arc::new(SdkJobHost {
                 outputs: plakous_tools::JobOutputRoot::open(&directory.path().join("jobs"))?,
                 promoted: promoted.clone(),
+                finished: finished.clone(),
             }))
             .tool_policy(Arc::new(AlwaysAllowPolicy))
             .harness_plan(plan)
@@ -380,7 +405,14 @@ async fn sdk_driver(scenario: SdkScenario) -> TestResult {
             SessionRuntimeBinding::new(builder),
         ))
         .await?;
-    let turn = session.agent().prompt("exercise the SDK").await?;
+    if finished.is_some() {
+        install_release_fixture(directory.path())?;
+        session.agent().set_notice_delivery_available(true);
+    }
+    let mut turn = session.agent().prompt("exercise the SDK").await?;
+    if let Some(finished) = finished {
+        release_background_then_foreground(directory.path(), &mut turn, &finished).await?;
+    }
     let result =
         if let Some(promoted) = promoted {
             tokio::time::timeout(Duration::from_secs(20), promoted.notified()).await?;
@@ -439,6 +471,7 @@ async fn sdk_driver(scenario: SdkScenario) -> TestResult {
 struct SdkJobHost {
     outputs: plakous_tools::JobOutputRoot,
     promoted: Option<Arc<tokio::sync::Notify>>,
+    finished: Option<Arc<tokio::sync::Notify>>,
 }
 impl plakous_tools::JobHost for SdkJobHost {
     fn service(&self, _: plakous_model::LineId) -> Option<plakous_tools::JoinedSessionsPort> {
@@ -450,11 +483,21 @@ impl plakous_tools::JobHost for SdkJobHost {
         fresh: plakous_tools::JoinedSessionsPort,
     ) -> Result<plakous_tools::JoinedSessionsPort, plakous_tools::ExecutionBackendError> {
         fresh.bind_job_outputs(self.outputs.clone(), owner.session_id, owner.branch_id);
-        if let Some(promoted) = self.promoted.clone() {
+        if self.promoted.is_some() || self.finished.is_some() {
+            let promoted = self.promoted.clone();
+            let finished = self.finished.clone();
             fresh.observe_jobs(
                 move |job| {
-                    if job.status == plakous_tools::JobStatus::Running {
+                    if let Some(promoted) = &promoted
+                        && job.status == plakous_tools::JobStatus::Running
+                    {
                         promoted.notify_one();
+                    }
+                    if let Some(finished) = &finished
+                        && job.number == 1
+                        && job.status == plakous_tools::JobStatus::Exited(Some(0))
+                    {
+                        finished.notify_one();
                     }
                     true
                 },
@@ -463,4 +506,38 @@ impl plakous_tools::JobHost for SdkJobHost {
         }
         Ok(fresh)
     }
+}
+
+fn install_release_fixture(directory: &Path) -> TestResult {
+    std::fs::write(
+        directory.join("wait-for-release"),
+        "n=0\nuntil [ -f \"$1\" ]; do\n  n=$((n + 1))\n  [ \"$n\" -lt 6000 ] || exit 1\n  sleep 0.01\ndone\n",
+    )?;
+    Ok(())
+}
+
+async fn release_background_then_foreground(
+    directory: &Path,
+    turn: &mut plakous_agent::Turn,
+    finished: &tokio::sync::Notify,
+) -> TestResult {
+    let mut events = turn.take_events()?;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let event = events.recv().await?;
+            if matches!(event.kind(), plakous_agent::AgentEventKind::ToolStarted { identity, .. }
+                if identity.canonical_name().as_str() == "process_session_poll")
+            {
+                return Ok::<(), Box<dyn std::error::Error>>(());
+            }
+        }
+    })
+    .await??;
+    std::fs::write(directory.join("background-release"), "")?;
+    tokio::time::timeout(Duration::from_secs(20), finished.notified()).await?;
+    // Synchronize with the same notice ingress as the real completion. The
+    // foreground job cannot exit on its own while that notice is accepted.
+    turn.control().notice().await?;
+    std::fs::write(directory.join("foreground-release"), "")?;
+    Ok(())
 }

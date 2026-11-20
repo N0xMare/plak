@@ -116,13 +116,8 @@ impl Driver {
             progress,
         )
         .with_durable_dispatch_observer(observer.clone());
-        let (control, _preempt_guard) = if origin == ToolDispatchOrigin::TopLevel {
-            let (preempt, guard) = self.dispatch_preempt();
-            (control.with_preempt(preempt), Some(guard))
-        } else {
-            let (preempt, guard) = self.nested_notice_preempt();
-            (control.with_preempt(preempt), Some(guard))
-        };
+        let (preempt, _preempt_guard) = self.preempt_for_dispatch(origin);
+        let control = control.with_preempt(preempt);
         let tools = self.tools.clone();
         let mut execution = Box::pin(tools.execute_claimed(claimed, control));
         let mut progress_open = true;

@@ -157,6 +157,7 @@ struct NestedReply {
     tx: oneshot::Sender<Result<ToolReply, LocalCompositionError>>,
     want: bool,
     charge: CallCharge,
+    foreground_wait: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -168,6 +169,10 @@ enum CallCharge {
 impl LocalCompositionNestedResponder for NestedReply {
     fn is_sdk_continuation(&self) -> bool {
         matches!(self.charge, CallCharge::Continuation)
+    }
+
+    fn is_foreground_wait(&self) -> bool {
+        self.foreground_wait
     }
 
     fn wants_value(&self) -> bool {
@@ -227,6 +232,7 @@ impl Scope {
     ) -> Result<Option<ExecutionValue>, V> {
         self.call_with_charge(tool, input, want, CallCharge::CellCall)
             .await
+            .map_err(|error| runtime_error(&error))
     }
 
     async fn call_with_charge(
@@ -235,7 +241,7 @@ impl Scope {
         input: Value,
         want: bool,
         charge: CallCharge,
-    ) -> Result<Option<ExecutionValue>, V> {
+    ) -> Result<Option<ExecutionValue>, LocalCompositionError> {
         let (tx, rx) = oneshot::channel();
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         self.tx
@@ -246,20 +252,25 @@ impl Scope {
                     tool_name: tool.into(),
                     input: Some(input),
                 },
-                responder: Box::new(NestedReply { tx, want, charge }),
+                responder: Box::new(NestedReply {
+                    tx,
+                    want,
+                    charge,
+                    foreground_wait: matches!(charge, CallCharge::Continuation)
+                        && tool == "process_session_poll",
+                }),
             })
             .await
-            .map_err(|_| error_value("runtime", "SDK driver closed"))?;
+            .map_err(|_| LocalCompositionError::from("SDK driver closed"))?;
         let reply = rx
             .await
-            .map_err(|_| error_value("runtime", "SDK child reply closed"))?
-            .map_err(|message| error_value("runtime", message.to_string()))?;
+            .map_err(|_| LocalCompositionError::from("SDK child reply closed"))??;
         self.acks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(reply.ack);
         if want && reply.value.is_none() {
-            return Err(error_value("runtime", format!("{tool}: {}", reply.text)));
+            return Err(format!("{tool}: {}", reply.text).into());
         }
         Ok(reply.value)
     }
@@ -487,18 +498,19 @@ async fn read(scope: &Scope, input: &Value) -> Result<V, V> {
     values::convert(scope.typed("read_file", args).await?)
         .map_err(|message| error_value("runtime", message.to_string()))
 }
+fn runtime_error(error: &LocalCompositionError) -> V {
+    error_value("runtime", error.to_string())
+}
+
 async fn process(
     scope: &Scope,
     tool: &str,
     args: Value,
     charge: CallCharge,
-) -> Result<ProcessValue, V> {
+) -> Result<ProcessValue, LocalCompositionError> {
     match scope.call_with_charge(tool, args, true, charge).await? {
         Some(ExecutionValue::Process(value)) => Ok(value),
-        _ => Err(error_value(
-            "runtime",
-            "process tool returned a foreign value",
-        )),
+        _ => Err("process tool returned a foreign value".into()),
     }
 }
 
@@ -546,7 +558,9 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
         args["keep_stdin_open"] = json!(pipe);
         "process_session_start"
     };
-    let mut value = process(scope, tool, args, CallCharge::CellCall).await?;
+    let mut value = process(scope, tool, args, CallCharge::CellCall)
+        .await
+        .map_err(|error| runtime_error(&error))?;
     if background {
         return Ok(values::job(value.job_id));
     }
@@ -560,28 +574,37 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
                 json!({"session_id":id}),
                 CallCharge::Continuation,
             )
-            .await?;
+            .await
+            .map_err(|stop_error| {
+                let stop =
+                    format!("could not stop job p{id}: {stop_error}; it may still be running");
+                let message = match &observed {
+                    Ok(_) => stop,
+                    Err(first_error) => format!("{first_error}; {stop}"),
+                };
+                error_value("runtime", message)
+            })?;
             merge_process(&mut value, stopped);
             if observed.as_ref().is_ok_and(|timed_out| *timed_out) {
                 value.status = "timed_out".into();
             }
         }
-        observed?;
+        observed.map_err(|error| runtime_error(&error))?;
     }
     Ok(process_value(scope, value))
 }
 
 // A full wait can return a live handle once to report newly observed leftover
 // members. Allow one more full wait for that case. A live result before the
-// deadline otherwise yields to preemption; issuing the same wait again could
-// spin while the driver's Notice is still pending.
+// deadline otherwise yields to steering. This internal wait does not receive
+// background or mail notices.
 async fn settle_foreground(
     scope: &Scope,
     value: &mut ProcessValue,
     id: u64,
     stdin: Option<&str>,
     deadline: tokio::time::Instant,
-) -> Result<bool, V> {
+) -> Result<bool, LocalCompositionError> {
     if let Some(stdin) = stdin
         && tokio::time::Instant::now() < deadline
     {
@@ -662,7 +685,9 @@ async fn observe_process(scope: &Scope, name: &str, input: &Value) -> Result<V, 
     };
     Ok(process_value(
         scope,
-        process(scope, tool, args, CallCharge::CellCall).await?,
+        process(scope, tool, args, CallCharge::CellCall)
+            .await
+            .map_err(|error| runtime_error(&error))?,
     ))
 }
 

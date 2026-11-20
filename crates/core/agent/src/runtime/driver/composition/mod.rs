@@ -78,6 +78,20 @@ mod outer;
 mod read_only;
 mod resources;
 
+fn nested_dispatch_origin(
+    state: &CompositionOwner,
+    pending: &PendingLocalCompositionNested,
+) -> ToolDispatchOrigin {
+    if pending.responder.is_sdk_continuation()
+        && state.integration().result_projection()
+            == crate::local_composition::LocalCompositionResultProjection::BytesRunPyV1
+        && pending.responder.is_foreground_wait()
+    {
+        ToolDispatchOrigin::NestedForegroundWait
+    } else {
+        ToolDispatchOrigin::NestedComposition
+    }
+}
 const LOCAL_COMPOSITION_FAILURE_TAG: &str = "plakous-local-composition-failure-v1";
 
 /// What a failed local composition records on its marker operation. It is

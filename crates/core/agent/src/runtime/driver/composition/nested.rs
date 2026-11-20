@@ -11,6 +11,7 @@ struct NestedRequest {
     digest: Digest,
     sequence: u32,
     want_value: bool,
+    origin: ToolDispatchOrigin,
 }
 
 impl Driver {
@@ -41,6 +42,7 @@ impl Driver {
         };
         let runtime_call_id = pending.call.runtime_call_id.clone();
         let want_value = state.integration().consumes_values() && pending.responder.wants_value();
+        let origin = nested_dispatch_origin(state, &pending);
         let result = Box::pin(self.execute_local_composition_nested(
             command,
             attempt_id,
@@ -50,6 +52,7 @@ impl Driver {
                 digest: pending.request_digest,
                 sequence: pending.request_sequence,
                 want_value,
+                origin,
             },
         ))
         .await;
@@ -82,6 +85,7 @@ impl Driver {
             digest: request_digest,
             sequence: request_sequence,
             want_value,
+            origin,
         }: NestedRequest,
     ) -> Result<(serde_json::Value, Option<plakous_tools::ExecutionValue>), AgentError> {
         const MAX_LOCAL_COMPOSITION_DEPTH: u16 = 1;
@@ -237,7 +241,7 @@ impl Driver {
                     presentation,
                     want_value,
                 },
-                ToolDispatchOrigin::NestedComposition,
+                origin,
                 state.exec_call_id(),
             )
             .await
@@ -306,7 +310,7 @@ impl Driver {
                     &mut items,
                     &mut operations,
                     &mut dispatched,
-                    ToolDispatchOrigin::NestedComposition,
+                    origin,
                     parent_call_id,
                 ))
                 .await;

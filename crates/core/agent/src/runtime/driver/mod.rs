@@ -69,6 +69,7 @@ mod tools;
 pub(super) enum ToolDispatchOrigin {
     TopLevel,
     NestedComposition,
+    NestedForegroundWait,
 }
 
 mod credential_wait;
@@ -120,6 +121,7 @@ struct Driver {
     exit_probe: Arc<exit_probe::ExitProbe>,
     steering: VecDeque<QueuedSteering>,
     tool_preempt: tokio::sync::watch::Sender<plakous_tools::ToolPreempt>,
+    foreground_steer: tokio::sync::watch::Sender<plakous_tools::ToolPreempt>,
     dispatch_preempts: Arc<Mutex<Vec<tokio::sync::watch::Sender<plakous_tools::ToolPreempt>>>>,
     nested_notice_preempts: Arc<Mutex<Vec<tokio::sync::watch::Sender<plakous_tools::ToolPreempt>>>>,
     roots: VecDeque<PromptCommand>,

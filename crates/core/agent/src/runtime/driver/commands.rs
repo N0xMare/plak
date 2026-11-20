@@ -4,7 +4,7 @@ use crate::input::UserInput;
 use crate::runtime::compaction::CompactOrigin;
 use crate::runtime::continuation::runtime_component;
 use crate::runtime::control::{command_binding, command_canonical_bytes};
-use crate::runtime::driver::{Driver, EffectDecisionTombstone};
+use crate::runtime::driver::{Driver, EffectDecisionTombstone, ToolDispatchOrigin};
 use crate::runtime::durable::turn_recovery::observe_live_abandonment;
 use crate::runtime::terminal::{
     cancelled_error, insert_known_turn, queued_turn_machine, remove_known_turn,
@@ -64,6 +64,23 @@ impl Drop for DispatchPreemptGuard {
 }
 
 impl Driver {
+    pub(super) fn preempt_for_dispatch(
+        &self,
+        origin: ToolDispatchOrigin,
+    ) -> (
+        watch::Receiver<plakous_tools::ToolPreempt>,
+        Option<DispatchPreemptGuard>,
+    ) {
+        let (preempt, guard) = match origin {
+            ToolDispatchOrigin::TopLevel => self.dispatch_preempt(),
+            ToolDispatchOrigin::NestedComposition => self.nested_notice_preempt(),
+            ToolDispatchOrigin::NestedForegroundWait => {
+                return (self.foreground_steer.subscribe(), None);
+            }
+        };
+        (preempt, Some(guard))
+    }
+
     pub(super) fn dispatch_preempt(
         &self,
     ) -> (
@@ -152,7 +169,21 @@ impl Driver {
     }
 
     pub(super) fn set_tool_preempt(&self, preempt: plakous_tools::ToolPreempt) {
+        use plakous_tools::ToolPreempt;
+
         self.tool_preempt.send_replace(preempt);
+        let steer = if preempt == ToolPreempt::Steer {
+            ToolPreempt::Steer
+        } else {
+            ToolPreempt::None
+        };
+        self.foreground_steer.send_if_modified(|current| {
+            if *current == steer {
+                return false;
+            }
+            *current = steer;
+            true
+        });
         for sender in self
             .dispatch_preempts
             .lock()

@@ -25,6 +25,7 @@ impl Driver {
     ) -> Result<LocalCompositionNestedFuture, (PendingLocalCompositionNested, AgentError)> {
         const MAX_LOCAL_COMPOSITION_DEPTH: u16 = 1;
         let nested = &pending.call;
+        let origin = nested_dispatch_origin(state, &pending);
         let prepared = async {
             if state.cell() != Some(nested.cell_id.as_str()) {
                 return Err(AgentError::new(
@@ -141,7 +142,7 @@ impl Driver {
                     attempt_id,
                     &call,
                     super::super::tools::AdmissionPresentation { presentation, want_value: state.integration().consumes_values() && pending.responder.wants_value() },
-                    ToolDispatchOrigin::NestedComposition,
+                    origin,
                     state.exec_call_id(),
                 )
                 .await
@@ -298,7 +299,7 @@ impl Driver {
             );
             let dispatch_witness = Arc::new(AtomicBool::new(false));
             let process_session_update = Arc::new(Mutex::new(None));
-            let (notice_preempt, notice_guard) = self.nested_notice_preempt();
+            let (notice_preempt, notice_guard) = self.preempt_for_dispatch(origin);
             let request = IndexedReadOnlyRequest {
                 authority: self.start_authority(),
                 operation_id: tool_operation,
@@ -315,7 +316,7 @@ impl Driver {
                 cancellation: command.cancellation.clone(),
                 shutdown: self.shutdown.clone(),
                 preempt: notice_preempt,
-                preempt_guard: Some(notice_guard),
+                preempt_guard: notice_guard,
                 clock: Arc::clone(&self.clock),
                 progress_capacity: self.config.tool_progress_capacity,
                 events: command.shared.events.clone(),

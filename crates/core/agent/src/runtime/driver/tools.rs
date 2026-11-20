@@ -1214,13 +1214,7 @@ impl Driver {
                 .with_turn(command.turn_id)
                 .with_attempt(attempt_id)
                 .with_call(call.call.call_id());
-            let (preempt, preempt_guard) = if origin == ToolDispatchOrigin::TopLevel {
-                let (preempt, guard) = self.dispatch_preempt();
-                (preempt, Some(guard))
-            } else {
-                let (preempt, guard) = self.nested_notice_preempt();
-                (preempt, Some(guard))
-            };
+            let (preempt, preempt_guard) = self.preempt_for_dispatch(origin);
             executions.push(Box::pin(execute_indexed_read_only(
                 IndexedReadOnlyRequest {
                     authority: self.start_authority(),
