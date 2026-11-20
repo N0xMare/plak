@@ -256,7 +256,9 @@ not (
   | test(user_stop_grants_the_term_grace_without_blocking_the_caller)
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
   | test(offline_e2e::durability::))
-| (test(host_skeleton::root_wake::)
+| (test(host_skeleton::runner::placement::durability::)
+  |
+  test(host_skeleton::root_wake::)
   |
   test(service::delegation::tests::loss::)
   |
@@ -574,6 +576,8 @@ default-filter = '''
 test-threads = 16
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
+  test(host_skeleton::runner::placement::durability::)
+  |
   test(host_skeleton::root_wake::)
   |
   test(service::delegation::tests::loss::)

@@ -2305,10 +2305,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+                  "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -2317,7 +2317,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -2348,6 +2348,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -2385,7 +2389,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -3126,7 +3130,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "4788fa799d76dfa0939b3946c2018ecf05979c1c3cdfb41faaf14fea31773698",
+          "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -3144,7 +3148,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "b34b995e8aedbaccf43558c234cc0f0f125d6e12f235204d91fbb68c4991ddee",
+          "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -3152,7 +3156,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "b34b995e8aedbaccf43558c234cc0f0f125d6e12f235204d91fbb68c4991ddee",
+          "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -3173,14 +3177,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "4788fa799d76dfa0939b3946c2018ecf05979c1c3cdfb41faaf14fea31773698",
+      "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "4788fa799d76dfa0939b3946c2018ecf05979c1c3cdfb41faaf14fea31773698",
+        "bytes": "830765b8983f50c643aed87cd02d907f39166f20fea439612e1c98bb93aaa445",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -3199,14 +3203,14 @@
       "route": "anthropic.platform",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "b34b995e8aedbaccf43558c234cc0f0f125d6e12f235204d91fbb68c4991ddee",
+        "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "0cc0f621fa341f7bf736e36ac3d792c487bbf2af0687942a8f08897fadc61128",
+      "bytes": "7313a8d7d697068d31a018eeab58ff8686a81fbf460a0d331154f7f3c58aca3f",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -3232,7 +3236,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "2dcd7d9e20e47be2d5afb386e5d8fa58fac63f0a14768f254110afa6240b4111",
+      "bytes": "0bf78030044d4e3ddd12da14d473769ed72952488e1c8504ae67f329bced034b",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -3522,7 +3526,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -3531,7 +3535,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -3723,13 +3727,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "74201f6927a78e53eca5a2755bff6b8b39f1c07d474b67b0474e2c113391134b",
+      "bytes": "45c89ee0bf8575f76301acf32ef334ae687034c20f49e15387c8f79945a9a068",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "b34b995e8aedbaccf43558c234cc0f0f125d6e12f235204d91fbb68c4991ddee",
+      "bytes": "074def607325c835efbca6897f75f324b3ea6bee9b89cb2425611d35ab591fb1",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -5210,7 +5214,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "fa4fe459da2b1a3ee829b7d4401f1af2033cc2a59418ea588dca80dc28ae6a90",
+      "bytes": "bc4b44513851cd124cd446d930e30b1961ba2d590f051069bed97913bd366ec2",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -5236,7 +5240,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "b4d9a021e9e6d42dd582eece6cbaa9f48f7dbc1eb79ba03759fa520f53b818e3",
+      "bytes": "16b7d99f69dabe165938695efbfdf62889a3f0e11eb8fca347b53a6d793cbd07",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -5526,7 +5530,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -5535,7 +5539,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -5773,7 +5777,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "6d1719e3cb7b329a4a3620426a6724665e5ad6c0a35885abbeca3dd3adaf70f6",
+      "bytes": "4c88ac79f875a7e17ec4adfd33d000e81df1a1008bea611ff8d00b081ff13b3b",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -7281,7 +7285,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "99509870e1139835317bb5e384b3bcced9cc30227942632f088d01a0e73e15a1",
+      "bytes": "bc6c52332ef95344f5122ac2cd9f5beeebeab458340ae5248c576920c18593b9",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -7307,7 +7311,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "d01331ee08ce2a68bf3c9052b22246252a2642c0b08840b12d5b21537d864e79",
+      "bytes": "483d9baca96a7aad2f7386b150d0ee842b6eb92421940312da708a28b6599346",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -7597,7 +7601,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -7606,7 +7610,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -7867,7 +7871,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "c31b391879f5df6bf0d65ee07420a5e8637e18cfe2095fd1db49c98cf034f246",
+      "bytes": "31edeed974f2a135c8c098bdee96e25c1651a08c6b9130ffc44e64d43cb8b0c4",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -11323,10 +11327,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+                  "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -11335,7 +11339,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -11366,6 +11370,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -11403,7 +11411,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -11657,7 +11665,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "875220ad4948c5507d50fdada1fe561c770c39a09050d3824aa0c33d690da1c9",
+          "bytes": "2acf488b17326c3d5521405ba44bf8db33af4632e00286e4dcae808718bad7d1",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -11675,7 +11683,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "2fde019722889b244276253e10ed1cd492d01a74b3b36f7bf1cf82793f53c982",
+          "bytes": "6b07e2cd55212f95806bf5da0a6434e826197028854fbfa3e41656d02416d134",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -11683,7 +11691,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "2fde019722889b244276253e10ed1cd492d01a74b3b36f7bf1cf82793f53c982",
+          "bytes": "6b07e2cd55212f95806bf5da0a6434e826197028854fbfa3e41656d02416d134",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -11704,14 +11712,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "875220ad4948c5507d50fdada1fe561c770c39a09050d3824aa0c33d690da1c9",
+      "bytes": "2acf488b17326c3d5521405ba44bf8db33af4632e00286e4dcae808718bad7d1",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "875220ad4948c5507d50fdada1fe561c770c39a09050d3824aa0c33d690da1c9",
+        "bytes": "2acf488b17326c3d5521405ba44bf8db33af4632e00286e4dcae808718bad7d1",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -11730,14 +11738,14 @@
       "route": "anthropic.claude_oauth",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "2fde019722889b244276253e10ed1cd492d01a74b3b36f7bf1cf82793f53c982",
+        "bytes": "6b07e2cd55212f95806bf5da0a6434e826197028854fbfa3e41656d02416d134",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "2f6957750b9dad31cd345b731b02ef057d3799151035bffe66af96c7a0d32791",
+      "bytes": "0d4c17af1e313c002016d8d09551614b0f5048d0712ed2ab16ba579c311d7439",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -11763,7 +11771,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "6b276e446a80bf041ab04810edc327b4a544d50392ff65eada46fe4d97853ae6",
+      "bytes": "214af9d95b00296cbe7a94401ae8a5ef74362ce7ad4185bb600b0fec68eb7702",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -12053,7 +12061,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -12062,7 +12070,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -12254,13 +12262,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "12f2776b08a38904fd1dd0840b548bde98657c4b61263be8ed6007be1669ab4e",
+      "bytes": "64ba77c7bff68e3d746ef2da65fa769bdc173c796c3f2413ad51ff033983bc90",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "2fde019722889b244276253e10ed1cd492d01a74b3b36f7bf1cf82793f53c982",
+      "bytes": "6b07e2cd55212f95806bf5da0a6434e826197028854fbfa3e41656d02416d134",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -13531,7 +13539,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "6aa2707057e41b8039c09c9dabcb3965bdd5d38e647ac5fa09a24ee439674aa7",
+      "bytes": "95347959a1e3a71162850c6aef794d44e05d5b412ce996bdba5d2b4610fe79df",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -13557,7 +13565,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "ee5c7da4c55b8aeb6ab27ffeda8e525644b60ddd85d67d179abf2b94cdedcc00",
+      "bytes": "6ea6f42d17d08d519dd264d39d53af2d88d87ebd0593f006ead4b1abe656225b",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -13847,7 +13855,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -13856,7 +13864,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -14094,7 +14102,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "c7f6c7dd74566f8a396f3a68213bb39b063b268f49be32fed184a92680079c91",
+      "bytes": "b0e114d7caf857b6e9287e06057d8ac121d87fe41f6f11d18ed0870429fb0d2a",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -15392,7 +15400,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "68b3df13626029742fb353c064999cb0613d3235b7079da4e71d903eb402c22e",
+      "bytes": "82ec771dc6067c9531aef9b5e68c8bcf14cf6c288c62ef864c433f8addd485ba",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -15418,7 +15426,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "c7238f896a3916f8da168e498657943fdbb94287f13b71148e2b8d4f006bb93e",
+      "bytes": "645fe088285f07021c3c1c981f975eb7319111044f4b4028febef0e01827afa1",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -15708,7 +15716,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -15717,7 +15725,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -15978,7 +15986,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "f6ec764eabb86382ecac3f25d26179209f015c449516b4a363dac0b70fe69b9f",
+      "bytes": "d386eb85d41ae81af0fdd2fcf7d3be274ba548817e0fec2c1222c1b35f5d3ec8",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -18851,10 +18859,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+                  "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -18863,7 +18871,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -18894,6 +18902,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -18931,7 +18943,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -19241,7 +19253,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "967f00414e4d81398b19be7342a7150af49a33bf6319559a239c7fd14ab13ae7",
+          "bytes": "ccd720f1d400953c92978fda70f270d9d33b4bd59e648b02fd61558d2f420f1c",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -19259,7 +19271,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "56b57eb41f9f071ad348e89b216af68319b9b2ddd3dc090b9e009ceac81ee58d",
+          "bytes": "5b5809df6101213171697ff768a88a6226ed07a998855fdd9c345f99e3a26b89",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -19267,7 +19279,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "56b57eb41f9f071ad348e89b216af68319b9b2ddd3dc090b9e009ceac81ee58d",
+          "bytes": "5b5809df6101213171697ff768a88a6226ed07a998855fdd9c345f99e3a26b89",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -19288,14 +19300,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "967f00414e4d81398b19be7342a7150af49a33bf6319559a239c7fd14ab13ae7",
+      "bytes": "ccd720f1d400953c92978fda70f270d9d33b4bd59e648b02fd61558d2f420f1c",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "967f00414e4d81398b19be7342a7150af49a33bf6319559a239c7fd14ab13ae7",
+        "bytes": "ccd720f1d400953c92978fda70f270d9d33b4bd59e648b02fd61558d2f420f1c",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -19314,14 +19326,14 @@
       "route": "openai.codex_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "56b57eb41f9f071ad348e89b216af68319b9b2ddd3dc090b9e009ceac81ee58d",
+        "bytes": "5b5809df6101213171697ff768a88a6226ed07a998855fdd9c345f99e3a26b89",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "3cad51519d5567acc4e98353e2afe49fe6578ba3d3eb2a64a08fb94def68844a",
+      "bytes": "eb28a2a990cf1593c8551fe6e5b3d3f454febb8101f6fafa111f8bc88c48c899",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -19347,7 +19359,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "df84b2de59cf9e1902ad93dd3eff433e0dcaadd4c7cd880ab6fdcd9bf7b16e89",
+      "bytes": "8695a792049b21c9de064032a2b7461f08af2278992f07fa0e3281ac3b9e97c6",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -19637,7 +19649,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -19646,7 +19658,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -19838,13 +19850,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "47b244bc89bf1e3bdbd2544bb5c939f218e043321b0feda5ecd979a1b87e8993",
+      "bytes": "5f769073ba02c9c9dd389ef16fcf5e552e7081d522bf59d12e2e1ad9216ae441",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "56b57eb41f9f071ad348e89b216af68319b9b2ddd3dc090b9e009ceac81ee58d",
+      "bytes": "5b5809df6101213171697ff768a88a6226ed07a998855fdd9c345f99e3a26b89",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -21103,7 +21115,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "0d6c887e601765118d2e39584964bf3cf8e5b8c157e3f978d62e5744e38d2421",
+      "bytes": "2013555b85199d8d390d2218d3acca0478e6f124e3d893b2d7f5c2e71aa5b083",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -21129,7 +21141,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "f04812c744faf90ad3df0fc0106680a4fd8dc6d7a9d94281c5ec73002de5caff",
+      "bytes": "29500b11ae858436184a7c50944726c2c9294f6fd563be699a5e3e53411b685c",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -21419,7 +21431,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -21428,7 +21440,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -21666,7 +21678,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "368b00f5d28b6a7d39dd8653882ea147aba79d85b0f50db3c011292e75154e62",
+      "bytes": "53d9e3329cd92c9aad348a11cb06be9b3208a1f91f1f68ce1411ecf0b6e46da0",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -22855,7 +22867,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "d9ed56d2856f7b2e9dde78bcb7b29929bf78bfab6ba9d8e3007b9b6f8b80895e",
+      "bytes": "fdb532362c3b0cc8e3700bf6b69e5040e0b66cd4392f21282c2131699dced7d5",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -22881,7 +22893,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "148a3fed690b2a84960082ac0060d3cc513e669bb6e98be37d931cf78e1f3545",
+      "bytes": "640f9ccf508fbb30389ff6dd51971914f1319769c2a6dee6de99433aa6f55817",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -23171,7 +23183,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -23180,7 +23192,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -23418,7 +23430,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "4befc3b79d1ac466e32306807192c213cea71f0729a2c1cfbcc21aecabf52891",
+      "bytes": "5ff3bca012196921b5659dc28ea385ff0d052c230224a28a1d3bb5ae504573c6",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -24704,7 +24716,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "48e20fa18a91f7cda6909c0b099a2e0c80dff6e9f490a316e39d0b0d52919909",
+      "bytes": "329f462b1417467128de5d8955e25176c61bb3fc8d31649491119a665d3bca8c",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -24730,7 +24742,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "e54c512f172b0760f4948ca63f627eab3d498fa4ad3ca699d961f5f9f160b23e",
+      "bytes": "87a2380c73e40d9ce6fe46c3ee4765686d5855f0982544d34c0c5ed4b9bf1674",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -25020,7 +25032,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -25029,7 +25041,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -25290,7 +25302,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "6795f5c7d630d45f8aaf0f55c6433e0715fd204ae766b85feea2d5fea84e86d6",
+      "bytes": "7df2bd01aa4094975d923e1a53605d5bb9cf03260ad77bbfdfdd0899cf450c44",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -28662,10 +28674,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; get_command_or_subagent_output returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; get_command_or_subagent_output returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "c48fc36efd36ae38360b79f2c1edbb4633688569115c862be89f96f128e4e4b9",
+                  "bytes": "f58881ae0268c5160a195c139c8e67c1b38482c63834822c211a1771d106d711",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -28674,7 +28686,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -28705,6 +28717,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -28742,7 +28758,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -28853,7 +28869,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
+          "bytes": "a640e6a1a0f2bde268de1e658c3a0ba2c62309c7cef5d237acc0b953a7e2abe7",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -28871,7 +28887,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
+          "bytes": "6d6fc96f9e8f842613cd77cbba23a0920d7e42e478f8df63a87563a5660a37a6",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -28879,7 +28895,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
+          "bytes": "6d6fc96f9e8f842613cd77cbba23a0920d7e42e478f8df63a87563a5660a37a6",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -28900,14 +28916,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
+      "bytes": "a640e6a1a0f2bde268de1e658c3a0ba2c62309c7cef5d237acc0b953a7e2abe7",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "170a2b75c9bad03bd96de2d2808e06317f14e084bb81c5cacf27bae1e88bf2b9",
+        "bytes": "a640e6a1a0f2bde268de1e658c3a0ba2c62309c7cef5d237acc0b953a7e2abe7",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -28926,14 +28942,14 @@
       "route": "xai.grok_subscription",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
+        "bytes": "6d6fc96f9e8f842613cd77cbba23a0920d7e42e478f8df63a87563a5660a37a6",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "bd278aa14030dce571e5c80bf44dbe1e5ac2670a048548911cff2085c07d14ad",
+      "bytes": "14235a09f597653f0a79c6f27261c0887085ed85fcf9ff3c8a12f713881a5b1d",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -28959,7 +28975,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "a14caafeb9a9a3a920d712be25bfeaead931feabad8cf2c4969df20b39144f02",
+      "bytes": "4d866315be221def7d4a4986c9aa72d8b23c10b96c3cd24fa404e733823cfaff",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -29249,7 +29265,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "c48fc36efd36ae38360b79f2c1edbb4633688569115c862be89f96f128e4e4b9",
+          "bytes": "f58881ae0268c5160a195c139c8e67c1b38482c63834822c211a1771d106d711",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -29258,7 +29274,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -29450,13 +29466,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "018d46b080a7ee38be38c27f247514fbf36293dbc21de2ad0501e7767dfc51a3",
+      "bytes": "e917056edb28be2449e41efc1e52b0b8d1d280bad88d291aa6ca4e03417b841e",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "585fc8261abc8155f8c3c326c36e8c101651020e069bee99dc2fec9a896362ed",
+      "bytes": "6d6fc96f9e8f842613cd77cbba23a0920d7e42e478f8df63a87563a5660a37a6",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -30719,7 +30735,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "b4808ce701d30a5a072cb49cf15ab9544f24f9a1f9236d44f9b99d2adbcd3095",
+      "bytes": "27861b2b4afddd135fe5c6a3a7a668f1d4371caf305625a7c6f45d69aadc7811",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -30745,7 +30761,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "cb6bd0db706731141c5ac06a0f64c8cf89d07b5ef1863c1fd5bd1c5c9dbd82ee",
+      "bytes": "be001aa71d38ae6d01d10bc2baa34af82fd1ba2055884459ae8b64464aa5fe35",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -31035,7 +31051,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "c48fc36efd36ae38360b79f2c1edbb4633688569115c862be89f96f128e4e4b9",
+          "bytes": "f58881ae0268c5160a195c139c8e67c1b38482c63834822c211a1771d106d711",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -31044,7 +31060,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -31282,7 +31298,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "5de94ccb931ef6262abbe43bfb8b8b0b574729601f495f921a168e35aa64cf79",
+      "bytes": "f6eeac52a1ec8014910a5a1a2dbd641a4eb1dd9e717bcf4fa0949eb3d21766f0",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -32572,7 +32588,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "ebc89d45e15ed54efee0afaa0fedf23548f765875faca4ecaf00b5fc20675b4b",
+      "bytes": "1e400238899050a696c26c17520620f67a5ff00721d4b1acae61a54aa8227fff",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -32598,7 +32614,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "6082a2066c755cd152dfa8188dfb43eabe3435faf3feed2472ff85fa8344db0d",
+      "bytes": "ca65e39edd5d1bef5a4be2054c49f5f995694ad5a52ddbe24df0508602b3c760",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -32888,7 +32904,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "c48fc36efd36ae38360b79f2c1edbb4633688569115c862be89f96f128e4e4b9",
+          "bytes": "f58881ae0268c5160a195c139c8e67c1b38482c63834822c211a1771d106d711",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -32897,7 +32913,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -33158,7 +33174,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "e8e4c9d8f7effca7a9dc996777daef5638a9860d4cf5c58e6e5c6f21dceb8e1f",
+      "bytes": "742de5e67974cda9e90d9402ff4005eb12f1c6fe7a52af65588c03c352ee7885",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -35859,10 +35875,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+                  "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -35871,7 +35887,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -35902,6 +35918,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -35939,7 +35959,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -36605,7 +36625,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "d6dfc6c5056c4f9a8234673da5dcc787f2785a23fa7abeb4f481fac165fd1852",
+          "bytes": "73c7cd4ec7d5f252945376215188dabe1a6c9837c840ab66631f27245f2c1ff0",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -36623,7 +36643,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "90a4daefa3cd848e9b2c45825d32a02c699e0dad347e2b1a6dfbc96da551da32",
+          "bytes": "784f42ef5daf9e84eae1b0eefd7daea3e5d471fe8301f0e2382d6f0a3a21248e",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -36631,7 +36651,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "90a4daefa3cd848e9b2c45825d32a02c699e0dad347e2b1a6dfbc96da551da32",
+          "bytes": "784f42ef5daf9e84eae1b0eefd7daea3e5d471fe8301f0e2382d6f0a3a21248e",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -36652,14 +36672,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "d6dfc6c5056c4f9a8234673da5dcc787f2785a23fa7abeb4f481fac165fd1852",
+      "bytes": "73c7cd4ec7d5f252945376215188dabe1a6c9837c840ab66631f27245f2c1ff0",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "d6dfc6c5056c4f9a8234673da5dcc787f2785a23fa7abeb4f481fac165fd1852",
+        "bytes": "73c7cd4ec7d5f252945376215188dabe1a6c9837c840ab66631f27245f2c1ff0",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -36678,14 +36698,14 @@
       "route": "openai.platform",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "90a4daefa3cd848e9b2c45825d32a02c699e0dad347e2b1a6dfbc96da551da32",
+        "bytes": "784f42ef5daf9e84eae1b0eefd7daea3e5d471fe8301f0e2382d6f0a3a21248e",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "c4d4fe70e5316072c70943d1619ebf96631082e57429e9f54febc5971444e65c",
+      "bytes": "d0a75d50dc7388cc25d83ee08b63dcca59b1c37cecc375f2411c1e26e3b051d5",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -36711,7 +36731,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "5f7a7025db96da69deb65802244049740ff32bb96fe813878328ef60b0597a66",
+      "bytes": "7bf18ca5dc3f95c884b0ea8339543bf51acb6f642b766888d69dab034567f016",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -37001,7 +37021,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -37010,7 +37030,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -37202,13 +37222,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "55bd94ca4d099dab84e610450a3fa700a72350c2b8086d649093ddaa31d24d49",
+      "bytes": "5a96e66d5f69adbbfd45dbc616505be1b63d2a17e1ea78c6fdd71c1e7a9be389",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "90a4daefa3cd848e9b2c45825d32a02c699e0dad347e2b1a6dfbc96da551da32",
+      "bytes": "784f42ef5daf9e84eae1b0eefd7daea3e5d471fe8301f0e2382d6f0a3a21248e",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -38655,7 +38675,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "d433ff16cc8932a17196c83500f799e2544e55c3d86a806d300110d5466cc6b0",
+      "bytes": "cc9a4171f7fba52e0c660eb881bbce30730202a1a4bebc23d312dd65cd3a2868",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -38681,7 +38701,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "22ad07e96e1cdfac90a50e9a8f017ecfdaa9992124d1086cadfb145407671425",
+      "bytes": "612567ea55afe25a881cf5ec24f0f43acb32219276198d72a54a6c98dac852c0",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -38971,7 +38991,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -38980,7 +39000,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -39218,7 +39238,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "d3fc03880507eca906e7bc979dad7422714df946358f9a9c0622c72eb445b698",
+      "bytes": "80893c33e2372ee15bea49f0ae3f417d10dd4931354e87235a55dac4e4699d20",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -40595,7 +40615,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "fee739313839b5963f6b379a456a0bd7121184f51f2ae133398832d8e2d02216",
+      "bytes": "8b0539235aefe8147aed18369b5f1576d16dc664d663a7a0b5da01b7cb123abc",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -40621,7 +40641,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "942d372d7edca2d49292567f9ca99877ba1f2935628e11b5d6887921ee58f756",
+      "bytes": "33af46c065339d45b35b99bfe42f14f58876252a08656470079e0fe424f1a278",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -40911,7 +40931,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -40920,7 +40940,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -41158,7 +41178,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "2d2e4f9cdf10b4786f25b8292a1454b05f7f2189e86e1e9fa2896ce5cae95dfd",
+      "bytes": "00ad9669902ebf249bed794a038a286639523791b9632ef766019ba081f342d3",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -42632,7 +42652,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "afbf72de330dce1e56ee0bb8abd232075dc4ab2f32bc79a41487a36aa708073a",
+      "bytes": "e87af891a71186901a47e4619335f4a72bd4321fb7640aa029e3143ec0bd4f0f",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -42658,7 +42678,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "fa2a208e5ca921f3aa25d7b90d3afc465a3a2dce61102571451b1fc05d5f1938",
+      "bytes": "42b991b29425adda2a67248a461c35142ac0d1f567820ab69564b0f90054becf",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -42948,7 +42968,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -42957,7 +42977,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -43218,7 +43238,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "7841c2de0195d82dbbf8bb3b6a8ce34dedf0645613c05d0d6f2d85de6a737bc0",
+      "bytes": "a71be7e006191030e79722b83b7dea535dc15c0e3fd1f73a5f3ef102c9af8651",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -45930,10 +45950,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+                  "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -45942,7 +45962,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -45973,6 +45993,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -46010,7 +46034,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -46659,7 +46683,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "be8da75411516d107c88761f08949d54d20e8c48887007a29e6aee189acc3390",
+          "bytes": "a215ff6927efedbfb954ea040900dc8610051cb28672ec309e0a32c244bdf8e0",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -46677,7 +46701,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "9d973104e71d96cee5c03f12bd12fbb6de97a334d8d99f592346d7688020ed58",
+          "bytes": "4db0df6037dddb861bbe8e37d26bed5d5c631bec8c5b9b2c3f3d08e483b8788b",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -46685,7 +46709,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "9d973104e71d96cee5c03f12bd12fbb6de97a334d8d99f592346d7688020ed58",
+          "bytes": "4db0df6037dddb861bbe8e37d26bed5d5c631bec8c5b9b2c3f3d08e483b8788b",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -46706,14 +46730,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "be8da75411516d107c88761f08949d54d20e8c48887007a29e6aee189acc3390",
+      "bytes": "a215ff6927efedbfb954ea040900dc8610051cb28672ec309e0a32c244bdf8e0",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "be8da75411516d107c88761f08949d54d20e8c48887007a29e6aee189acc3390",
+        "bytes": "a215ff6927efedbfb954ea040900dc8610051cb28672ec309e0a32c244bdf8e0",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -46732,14 +46756,14 @@
       "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "9d973104e71d96cee5c03f12bd12fbb6de97a334d8d99f592346d7688020ed58",
+        "bytes": "4db0df6037dddb861bbe8e37d26bed5d5c631bec8c5b9b2c3f3d08e483b8788b",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "270c1118b87f5353b46c0ce6d07e0e2c8d8200e3a3a89304182fc9ddbfb794a2",
+      "bytes": "6dc0ef8c0ffe6dbd118e8e035050dc9e95672bcb057302531fb853e172242b1f",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -46765,7 +46789,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "b0ab8b3ac9608528d4d76d6ecf84b040c11ced7ea74f7c2338f5c7325e904d29",
+      "bytes": "f00d1f694e366e9390986128274c6ca83d845e1d321260dbe759dd037841928b",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -47055,7 +47079,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -47064,7 +47088,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -47256,13 +47280,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "d56626a3fbe9937d04bdeaa3fd58752be909f692edbcc6658033bef352e2ca49",
+      "bytes": "31da0459dc5714afaf57970450cd9732ba5c9e9101e47fdfdfe45f76f7b0b2cd",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "9d973104e71d96cee5c03f12bd12fbb6de97a334d8d99f592346d7688020ed58",
+      "bytes": "4db0df6037dddb861bbe8e37d26bed5d5c631bec8c5b9b2c3f3d08e483b8788b",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -48679,7 +48703,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "44f456337ef18ed89d6069cdde0caa57b117125a33311758a37351a404e49507",
+      "bytes": "536fa79fdf86e0aabee5ab07d1386d6de8ad34acb692bae8a60f86f753685743",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -48705,7 +48729,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "8040bc5c11857b8c00ea10184c12dda749536a491eb110dbd14312a047ebde6e",
+      "bytes": "fa0498c70236ee2706f9a0062a3b70d9eaa788f71a880ed863c85f396a3c35bc",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -48995,7 +49019,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -49004,7 +49028,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -49242,7 +49266,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "df4f83c6d52827448af4ee131c7f636a43ac8fe29ebc57acd4e20e5dbd99c341",
+      "bytes": "b9846a8ceaf0588753aff3623f6eac97c4c48286ca144c3875eb493630e7b4e7",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -50686,7 +50710,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "ea66e52e7840f9dfb4614a55dfda1cec13d03c4031d1d5dde2b767dcd93ee255",
+      "bytes": "8943510fe0e35b978b30412a83fa1b1988dbb0e10105931ff6d023aae4635137",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -50712,7 +50736,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "a3df7835a8047f04f42983a1d0e83517572833b58d5e76c2d44045628e5dfb7a",
+      "bytes": "926ea69bb06b077b0910d14b42740185aae7e6df84398a36b7a064533a4ef62c",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -51002,7 +51026,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -51011,7 +51035,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -51272,7 +51296,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "7241c8ae6cea2b25a21f8cac7289fa455d75ce087e9fea4177a4056ac534266a",
+      "bytes": "70a548d9e191a08b3cea83debd8f86f30ac042196407aa79e23ad524eec9ed19",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -53969,10 +53993,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+                  "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -53981,7 +54005,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -54012,6 +54036,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -54049,7 +54077,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -54698,7 +54726,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "3b5bf0abf0b5d92ad1df7fc3a092e84387f1b07a9170f4d5705c7762ae8442fa",
+          "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -54716,7 +54744,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "a1d826bb662be0cffa9104d767beef14f42e17e0c6ad138f6193ac341bce638a",
+          "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -54724,7 +54752,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "a1d826bb662be0cffa9104d767beef14f42e17e0c6ad138f6193ac341bce638a",
+          "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -54745,14 +54773,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "3b5bf0abf0b5d92ad1df7fc3a092e84387f1b07a9170f4d5705c7762ae8442fa",
+      "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "3b5bf0abf0b5d92ad1df7fc3a092e84387f1b07a9170f4d5705c7762ae8442fa",
+        "bytes": "5c4a61074f2de93496062336a77fa16637863a360c5770fd9d309cea436cd8c4",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -54771,14 +54799,14 @@
       "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "a1d826bb662be0cffa9104d767beef14f42e17e0c6ad138f6193ac341bce638a",
+        "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "14c3f13f6ad04c14c9bc7c5e41a62885e3de9a19bc3c62149e36ccf7579132d9",
+      "bytes": "bbe001222ca3cddc716a4a286c1af9563a58c867149399fefb90fa6eb124b974",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -54804,7 +54832,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "7a0d389f108882f378d93413ee0b36c682e594f387fea1bdfaf6b83cfb982828",
+      "bytes": "00118f2baf5c1492faf571a04315dcc514a3abce602673ee74c6d2a9caa88cf5",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -55094,7 +55122,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -55103,7 +55131,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -55295,13 +55323,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "d56626a3fbe9937d04bdeaa3fd58752be909f692edbcc6658033bef352e2ca49",
+      "bytes": "31da0459dc5714afaf57970450cd9732ba5c9e9101e47fdfdfe45f76f7b0b2cd",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "a1d826bb662be0cffa9104d767beef14f42e17e0c6ad138f6193ac341bce638a",
+      "bytes": "33ae16a9ca75424b8e0f957adca4cb1c6289e00fd57e8f175e46bf55eb587db9",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -56718,7 +56746,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "89f30fc7a2c0a38e15b03fd4487a4095bd02d2e88f3303cc5a6828f502311ea5",
+      "bytes": "4bd074996a204cf09712f71e743985872ed956ecb925b51f2c7ee2fac8f74d89",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -56744,7 +56772,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "d37ec054f5ec10e70a43a46d53bee1f7b4b04e0a6ac146984b6999a9f4e78d0e",
+      "bytes": "7518e7a9cd391830fea355d43b9a831e4cd18ac0f85db082cc675b12ff7a1512",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -57034,7 +57062,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -57043,7 +57071,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -57281,7 +57309,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "df4f83c6d52827448af4ee131c7f636a43ac8fe29ebc57acd4e20e5dbd99c341",
+      "bytes": "b9846a8ceaf0588753aff3623f6eac97c4c48286ca144c3875eb493630e7b4e7",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -58725,7 +58753,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "8ce9cfdac16401f87224fa2fa895591689428cc2bf9548b5c2bab93cc9e5ac68",
+      "bytes": "30b4042fc1bb5b44ddcbbdb3c2591b7c07136bbeb280deb527068a09d0e079d1",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -58751,7 +58779,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "83fc013dd826e16d9995cadb878c3a9a794da9793bd2d1d2d447e8d5a1f409eb",
+      "bytes": "29b492c6e22fd2e403352089bf17cf81e55fea2ac759cc6d3b08410596f75694",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -59041,7 +59069,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -59050,7 +59078,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -59311,7 +59339,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "7241c8ae6cea2b25a21f8cac7289fa455d75ce087e9fea4177a4056ac534266a",
+      "bytes": "70a548d9e191a08b3cea83debd8f86f30ac042196407aa79e23ad524eec9ed19",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -62008,10 +62036,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+                  "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -62020,7 +62048,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -62051,6 +62079,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -62088,7 +62120,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -62737,7 +62769,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "9d5bd2ee095ef60a954bcf00bd00d4c712b3817efd4c7d165822e62a50f8ab40",
+          "bytes": "141afa25a62eac603780f28e36541b02274ecdb18811117be154bdb1a4a6ba1d",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -62755,7 +62787,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "79b73f3f9f44fc27bab3fc3216644b80ae58e88af65c5fa47813fb850ec36616",
+          "bytes": "c0c35d1d5ed4e79afabb730ffa9bdb9766fdf5d93247bd227f37527885f61a11",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -62763,7 +62795,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "79b73f3f9f44fc27bab3fc3216644b80ae58e88af65c5fa47813fb850ec36616",
+          "bytes": "c0c35d1d5ed4e79afabb730ffa9bdb9766fdf5d93247bd227f37527885f61a11",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -62784,14 +62816,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "9d5bd2ee095ef60a954bcf00bd00d4c712b3817efd4c7d165822e62a50f8ab40",
+      "bytes": "141afa25a62eac603780f28e36541b02274ecdb18811117be154bdb1a4a6ba1d",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "9d5bd2ee095ef60a954bcf00bd00d4c712b3817efd4c7d165822e62a50f8ab40",
+        "bytes": "141afa25a62eac603780f28e36541b02274ecdb18811117be154bdb1a4a6ba1d",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -62810,14 +62842,14 @@
       "route": "openrouter.chat.platform:77473e207852e417408a64fef65581056f9bc30a8ef9a1c17cef5d4bc1d89cb7",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "79b73f3f9f44fc27bab3fc3216644b80ae58e88af65c5fa47813fb850ec36616",
+        "bytes": "c0c35d1d5ed4e79afabb730ffa9bdb9766fdf5d93247bd227f37527885f61a11",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "b5dc810d8e9a9d07a94594f091e5cca62eb80db8a5fae0d46a3063a3fe074695",
+      "bytes": "e8df116640e00dea1ade0575dc716196cb4f7f2def328f80cecbd24c6c342968",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -62843,7 +62875,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "947661da0814d5fd19ae78e6b884638b141d6aa356ecac93d587df8c60344fbd",
+      "bytes": "d2d8ea0b510b7a0595e8afe7257c2667fe5570aa9bd036d356424cc1cc94dd35",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -63133,7 +63165,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -63142,7 +63174,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -63334,13 +63366,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "d56626a3fbe9937d04bdeaa3fd58752be909f692edbcc6658033bef352e2ca49",
+      "bytes": "31da0459dc5714afaf57970450cd9732ba5c9e9101e47fdfdfe45f76f7b0b2cd",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "79b73f3f9f44fc27bab3fc3216644b80ae58e88af65c5fa47813fb850ec36616",
+      "bytes": "c0c35d1d5ed4e79afabb730ffa9bdb9766fdf5d93247bd227f37527885f61a11",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -64757,7 +64789,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "4d940f207586f5dc9f325bb0ee19ab9ebfd44bba398a6ad7eed823b462a51aa3",
+      "bytes": "966ea82da7f601285cd60c783e8a9522a2a8fe94fa0038ea195407799bc54bce",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -64783,7 +64815,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "595f4eba5082db6716e15439942b238368ba42658db49c4498cf9bfa085e047e",
+      "bytes": "da0b6457575fccfae1535442e20168ab14ed07659a7f9bd6582140df0c9d8db6",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -65073,7 +65105,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -65082,7 +65114,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -65320,7 +65352,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "df4f83c6d52827448af4ee131c7f636a43ac8fe29ebc57acd4e20e5dbd99c341",
+      "bytes": "b9846a8ceaf0588753aff3623f6eac97c4c48286ca144c3875eb493630e7b4e7",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -66764,7 +66796,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "fe0c5186a38a83340b951d7f1fb8658bb8a1f49644aaf4093fd847bed8287c5f",
+      "bytes": "f1aa45f8ee5fd23409d9a7aa8fc821963623a67284a6124d6441c677a0786044",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -66790,7 +66822,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "a2ac35555c81ecc7cbb43818942de3b18310956f443e257c0277c7f951471f5e",
+      "bytes": "7e33c785661283253800350ae0d12d2e72586d9ee34fdfc3337dd596c1064fb4",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -67080,7 +67112,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "be44c39f8be0e3912a102dc3c02d094db717895f1edb8eff10af31aad8da99f1",
+          "bytes": "6639572b8c8d5667a81d205b36c8f775ffeaa58651b1a1f84ba89f1d105ad36e",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -67089,7 +67121,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -67350,7 +67382,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "7241c8ae6cea2b25a21f8cac7289fa455d75ce087e9fea4177a4056ac534266a",
+      "bytes": "70a548d9e191a08b3cea83debd8f86f30ac042196407aa79e23ad524eec9ed19",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -70430,10 +70462,10 @@
               "caller": "DirectOnly",
               "definition": {
                 "concurrency": "Serial",
-                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
+                "description": "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; wait_agent returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. For another paired runner, pass runner and workspace=fork. Omit runner for the card's default, or use local for your own runner. Paired runner names: none. Caps: 65 live nodes, depth 4, 64 undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\nSpawn sub-agents only when the user asks for delegation, sub-agents, or parallel work. Requests for depth, thoroughness, or research are not that permission. When asked, actually spawn; saying you will is not delegation. Otherwise do the work yourself.\n\nSpawn by template name only. Do not name accounts, models, or effort. Templates you may spawn:\n- implementer: gpt-5.6-sol worker (tier ≤ mutate · spawns none · adopts no)\n- reviewer: gpt-5.6-sol worker (tier ≤ read_only · spawns none · adopts no)",
                 "digest": {
                   "algorithm": "Sha256",
-                  "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+                  "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
                   "domain": "ToolDefinition",
                   "version": 4
                 },
@@ -70442,7 +70474,7 @@
                   "Structured": {
                     "digest": {
                       "algorithm": "Sha256",
-                      "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+                      "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
                       "domain": "ToolDefinition",
                       "version": 2
                     },
@@ -70473,6 +70505,10 @@
                           },
                           "request_key": {
                             "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+                            "type": "string"
+                          },
+                          "runner": {
+                            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
                             "type": "string"
                           },
                           "template": {
@@ -70510,7 +70546,7 @@
                       },
                       "digest": {
                         "algorithm": "Sha256",
-                        "bytes": "5b2f8c847fb6b5acf30234a25d9b378bad3a1d7781f3359e8f83e63e89989777",
+                        "bytes": "ec04198f58f96816c3cd494b46d47be3f4c63af235b14f2b3d8292d39874d927",
                         "domain": "ToolDefinition",
                         "version": 1
                       },
@@ -71176,7 +71212,7 @@
         },
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "29ede660a6620d43b4b99d4ed5fd313be8e4b13d21c1e557afeb3e7ced50a80a",
+          "bytes": "e4dab280122c37fcee08a5eaa1314873ae38e030b9017360ede9dede9d6b777b",
           "domain": "EffectiveProviderConfiguration",
           "version": 5
         },
@@ -71194,7 +71230,7 @@
         },
         "selected_identity": {
           "algorithm": "Sha256",
-          "bytes": "e811444dcd6f9f02e6a411351d7f8a71d156d59994e235a1bc0c527455a8e9c2",
+          "bytes": "bd9a85ff659f8efa2e4df6efa0f8e80d5516efc3fa4e347e0c6337ab75d6296d",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         }
@@ -71202,7 +71238,7 @@
       "selected": {
         "identity": {
           "algorithm": "Sha256",
-          "bytes": "e811444dcd6f9f02e6a411351d7f8a71d156d59994e235a1bc0c527455a8e9c2",
+          "bytes": "bd9a85ff659f8efa2e4df6efa0f8e80d5516efc3fa4e347e0c6337ab75d6296d",
           "domain": "SelectedProviderConfiguration",
           "version": 5
         },
@@ -71223,14 +71259,14 @@
     "context_sources": [],
     "effective_id": {
       "algorithm": "Sha256",
-      "bytes": "29ede660a6620d43b4b99d4ed5fd313be8e4b13d21c1e557afeb3e7ced50a80a",
+      "bytes": "e4dab280122c37fcee08a5eaa1314873ae38e030b9017360ede9dede9d6b777b",
       "domain": "EffectiveProviderConfiguration",
       "version": 5
     },
     "model_facts": {
       "effective_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "29ede660a6620d43b4b99d4ed5fd313be8e4b13d21c1e557afeb3e7ced50a80a",
+        "bytes": "e4dab280122c37fcee08a5eaa1314873ae38e030b9017360ede9dede9d6b777b",
         "domain": "EffectiveProviderConfiguration",
         "version": 5
       },
@@ -71249,14 +71285,14 @@
       "route": "xai.platform_api_key",
       "selected_provider_configuration_id": {
         "algorithm": "Sha256",
-        "bytes": "e811444dcd6f9f02e6a411351d7f8a71d156d59994e235a1bc0c527455a8e9c2",
+        "bytes": "bd9a85ff659f8efa2e4df6efa0f8e80d5516efc3fa4e347e0c6337ab75d6296d",
         "domain": "SelectedProviderConfiguration",
         "version": 5
       }
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "92dab90eb50b63730d133ccb288983cc32fb6a73e1fd296da0bd59ecbec87f3e",
+      "bytes": "c76ceb8af44af1437f8a2282fafa76001b9727c3f61ac6ee72296635cd6a3705",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -71282,7 +71318,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "ad33bd81032d1b553081db8e3093eb8c51dabb697036184bd9cfd3944005727a",
+      "bytes": "4ff666ba6ba94357036786616db1797cf6fbc417990e4a1cd29a1631cc589e5c",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -71572,7 +71608,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -71581,7 +71617,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -71773,13 +71809,13 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "0e1081fab10bfc2cff025bdd600dc1c38042299ef0c95083a8403d220065c2a9",
+      "bytes": "64549b607035868dac6e5e7320235e0cd6183afe984f6b91ea0c5ea506780f33",
       "domain": "ToolDefinition",
       "version": 9
     },
     "selected_id": {
       "algorithm": "Sha256",
-      "bytes": "e811444dcd6f9f02e6a411351d7f8a71d156d59994e235a1bc0c527455a8e9c2",
+      "bytes": "bd9a85ff659f8efa2e4df6efa0f8e80d5516efc3fa4e347e0c6337ab75d6296d",
       "domain": "SelectedProviderConfiguration",
       "version": 5
     }
@@ -73226,7 +73262,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "97eddca4298b8d3f407a78d5bb298c1af7c84bf23baac7f891d04288ca20c0ef",
+      "bytes": "f66e0a2b5e837b4940ae42d1ef282f91b2e05d203966f09e54603b806d30abbf",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -73252,7 +73288,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "a088737f13cc3e9445ae033dc31a8a63b74f213081bf8e1f59a7a399df2a5b30",
+      "bytes": "dc2e0433827bdbc483321771f233d27d959d57f0252784d3bcb1bc4b11efed4a",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -73542,7 +73578,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -73551,7 +73587,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -73789,7 +73825,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "95d3459a8e9e9c4c661d2470fa2f82b8fe1aa1d035e0f66bc51d5139cf635412",
+      "bytes": "cafaf241f7678a616efdefd95e43afcfd4e64e823d4ae5a0a159cc5e066642c3",
       "domain": "ToolDefinition",
       "version": 9
     },
@@ -75263,7 +75299,7 @@
     },
     "plan_digest": {
       "algorithm": "Sha256",
-      "bytes": "7eaa72ae7dc077ea75be1de5b423c4f139bcf459c0f9441751f6586a6ff64072",
+      "bytes": "65d6baf9b7acad0b3773b674dc89fadb36869da9c3a517f798d783aca791e18a",
       "domain": "ResolvedHarnessPlan",
       "version": 2
     },
@@ -75289,7 +75325,7 @@
     },
     "projection_digest": {
       "algorithm": "Sha256",
-      "bytes": "8f27cc22d1b180364d1b1ff50d6993538f649f5ce89aa2c81a409405e298649b",
+      "bytes": "c0c24da80cc89c2f53e51aff7644cc1b1a710add5323a1821ce6420c68043476",
       "domain": "ToolDefinition",
       "version": 4
     },
@@ -75579,7 +75615,7 @@
         },
         "definition": {
           "algorithm": "Sha256",
-          "bytes": "775fcb351e5db8166443e383f6c32a878e20474fb7458d706f7747f9fc0db85d",
+          "bytes": "ebf78494fe620776c1399660e168b9c545bcd4555c52edd80c3d4e8e46068f31",
           "domain": "ToolDefinition",
           "version": 4
         },
@@ -75588,7 +75624,7 @@
         "nesting": "nested_eligible",
         "schema": {
           "algorithm": "Sha256",
-          "bytes": "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c",
+          "bytes": "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98",
           "domain": "ToolDefinition",
           "version": 2
         }
@@ -75849,7 +75885,7 @@
     ],
     "registry_digest": {
       "algorithm": "Sha256",
-      "bytes": "959704a4315aa9686650c21b55555582de36fbf1884494af5962d462d73c49f4",
+      "bytes": "99027a9224ccc659fa9c630ecf2ed79735e06d9f49f79cda57afcd62a8224b5b",
       "domain": "ToolDefinition",
       "version": 9
     },
