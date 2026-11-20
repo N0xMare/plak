@@ -875,7 +875,7 @@ fn reopening_a_source_after_its_fork_published_keeps_the_forks_tree() {
     assert!(trees.custody_port().custody(&fork_id).unwrap().is_some());
 }
 
-fn running_job_script() -> Arc<ScriptPlan> {
+pub(super) fn running_job_script() -> Arc<ScriptPlan> {
     Arc::new(
         serde_json::from_value(serde_json::json!({
             "version": SCRIPT_VERSION,

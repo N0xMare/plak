@@ -118,6 +118,93 @@ fn quit_projection_stages_share_the_original_deadline() {
 }
 
 #[test]
+fn escalated_quit_records_the_stopped_job_when_projection_stalls() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use plakous::agent::AgentEventKind;
+    use plakous::model::ModelEvent;
+    use std::time::{Duration, Instant};
+
+    #[derive(Default)]
+    struct StallViewRead(AtomicBool);
+    impl StoreFaults for StallViewRead {
+        fn before(
+            &self,
+            call: StoreCall,
+            _session: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            if call == StoreCall::LoadViews {
+                self.0.store(true, Ordering::Release);
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Ok(())
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let plan = crate::runtime::recover_tests::running_job_script();
+    let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
+    let database = config.state_roots.runtime_database().to_owned();
+    let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+    let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+    let mut host = RootActor::open_blocking(config, &rx, Sender::over(tx), None).unwrap();
+    host.role
+        .config
+        .store
+        .save(&mut host.role.config.session)
+        .unwrap();
+    let locator = host.opened.locator();
+    let agent = host.opened.agent().unwrap().clone();
+    assert!(!agent.retains_background_jobs());
+    let _turn = host
+        .role
+        .executor
+        .block_on(async {
+            let mut turn = agent.prompt("release while active").await.unwrap();
+            let mut events = turn.take_events().unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    let event = events.recv().await.unwrap();
+                    if matches!(event.kind(), AgentEventKind::Model { event: Some(model), .. }
+                        if matches!(model.as_ref(), ModelEvent::TextDelta(text) if text.bytes() == b"waiting"))
+                    {
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            turn
+        })
+        .unwrap();
+    let labels =
+        || plakous::sessions::AgentSessions::unsettled_job_labels(&database, locator).unwrap();
+    assert_eq!(labels(), ["p1"]);
+
+    // Force the final projector's first load to block for the whole quit
+    // window. The canonical terminal lives in the separate runtime store.
+    drop(host.role.live.take());
+    let store = Arc::new(FaultStore::new(
+        host.role.config.store.clone(),
+        StallViewRead::default(),
+    ));
+    host.role.config.store = store.clone();
+    host.quit_started_at = Some(Instant::now());
+    agent.begin_job_stop();
+    host.role.events.quit_receipt.escalate();
+
+    let released = host.block(async |host| host.release().await);
+    assert!(store.faults.0.load(Ordering::Acquire));
+    released.unwrap();
+    assert!(labels().is_empty(), "release did not record the stop");
+    let jobs = agent.jobs();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(
+        jobs[0].status,
+        plakous::tools::JobStatus::Stopped(plakous::tools::JobStopReason::SessionExit)
+    );
+}
+
+#[test]
 fn terminal_committed_during_release_is_projected_before_shutdown_returns() {
     use plakous::agent::AgentEventKind;
     use plakous::model::ModelEvent;
@@ -148,7 +235,7 @@ fn terminal_committed_during_release_is_projected_before_shutdown_returns() {
     let turn = host.role.executor.block_on(async {
         let mut turn = agent.prompt("release while active").await.unwrap();
         let mut events = turn.take_events().unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let event = events.recv().await.unwrap();
                 if matches!(event.kind(), AgentEventKind::Model { event: Some(model), .. }
@@ -252,7 +339,7 @@ fn failed_pre_open_projection_does_not_fence_a_current_head() {
     config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
         inner.clone(),
         crate::runtime::test_support::SlowProjection {
-            delay: std::time::Duration::ZERO,
+            delay: Duration::ZERO,
             refuse: true,
         },
     ));
@@ -307,7 +394,7 @@ fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
         config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             inner.clone(),
             crate::runtime::test_support::SlowProjection {
-                delay: std::time::Duration::ZERO,
+                delay: Duration::ZERO,
                 refuse: true,
             },
         ));
@@ -357,7 +444,7 @@ fn post_release_projection_refusal_is_cleanup_and_preserves_release_failure() {
         host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
             inner.clone(),
             crate::runtime::test_support::SlowProjection {
-                delay: std::time::Duration::ZERO,
+                delay: Duration::ZERO,
                 refuse: true,
             },
         ));

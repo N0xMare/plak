@@ -458,7 +458,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 
     fn projection_deadline(&self, one_shot: bool) -> Option<Instant> {
         self.quit_started_at
-            .map(|started| started + Duration::from_secs(1))
+            .map(|started| started + release::QUIT_BOUND)
             .or_else(|| (!one_shot).then(|| Instant::now() + FINAL_PROJECTION_BOUND))
     }
 
@@ -473,7 +473,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return Ok(());
         }
         let target = self.live_target();
-        let deadline = self.projection_deadline(one_shot);
+        let deadline = self.final_projection_deadline(one_shot);
         let live = self.role.live.take();
         let pass = async {
             let refused = match live {
@@ -482,18 +482,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             };
             (refused, target.tree_pass().await.err())
         };
-        let (refused, tree_refused) = if let Some(deadline) = deadline {
-            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
-                .await
-                .unwrap_or_else(|_| {
-                    (
-                        Some("the final projector pass exceeded its bound".to_owned()),
-                        None,
-                    )
-                })
-        } else {
-            pass.await
-        };
+        let (refused, tree_refused) = match deadline {
+            Some(deadline) if Instant::now() >= deadline => None,
+            Some(deadline) => {
+                tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
+                    .await
+                    .ok()
+            }
+            None => Some(pass.await),
+        }
+        .unwrap_or_else(|| {
+            (
+                Some("the final projector pass exceeded its bound".to_owned()),
+                None,
+            )
+        });
         if let Some(error) = tree_refused {
             self.log_projector_debt(&error);
         }

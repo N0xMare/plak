@@ -2162,11 +2162,14 @@ that exceeds the interactive bound leaves projection debt for the next open;
 that open derives the head from the feed and lets the runtime close it.
 For a published record, a release receipt (including a released locator on a
 cleanup failure) is followed by one lease-free pass through the common
-projector entry, bounded at 400 ms outside quit. Every quit projection stage
-(terminal publication, final product and tree projection, and this post-release
-pass) uses the same absolute deadline, one second after quit began, rather than
-stacking fresh bounds; a release that returns after that deadline starts no
-post-release pass. It applies the release record and any
+projector entry, bounded at 400 ms outside quit. Quit projection stages
+(terminal publication, final product and tree projection, and the post-release
+pass) share the absolute one-second quit deadline rather than stacking fresh
+bounds. For escalated quit without a job
+keeper, the pre-release projector yields sooner to preserve the existing job
+terminal settlement and lease release windows. Any projection debt can be
+applied by the post-release pass if time remains; a release that returns after
+the quit deadline starts no pass. It applies the release record and any
 abandonment or job terminals committed during release. A timed-out pass is
 logged as benign projection debt: it does not change the release result or
 the CLI or one-shot exit status, and the next plain open applies the remaining

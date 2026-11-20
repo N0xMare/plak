@@ -1,8 +1,31 @@
 //! Release canonical ownership; the feed projector owns the head view.
 
 use super::{CliFailure, CliResult, RootActor, delete_unpublished_runtime};
+use std::time::{Duration, Instant};
+
+pub(super) const QUIT_BOUND: Duration = Duration::from_secs(1);
+const QUIT_JOB_SETTLEMENT_BUDGET: Duration = Duration::from_millis(400);
+const QUIT_LEASE_RELEASE_RESERVE: Duration = Duration::from_millis(150);
+const QUIT_PRE_RELEASE_PROJECTION_BOUND: Duration = QUIT_BOUND
+    .saturating_sub(QUIT_JOB_SETTLEMENT_BUDGET)
+    .saturating_sub(QUIT_LEASE_RELEASE_RESERVE);
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    pub(super) fn final_projection_deadline(&self, one_shot: bool) -> Option<Instant> {
+        if let Some(started) = self.quit_started_at
+            && self.role.events.quit_receipt.outcome() == super::super::HostQuitOutcome::Escalated
+            && self
+                .opened
+                .agent()
+                .is_some_and(|agent| !agent.retains_background_jobs())
+        {
+            // Projection can leave debt. Already-started process stops and
+            // their canonical terminals must still settle before lease release.
+            return Some(started + QUIT_PRE_RELEASE_PROJECTION_BOUND);
+        }
+        self.projection_deadline(one_shot)
+    }
+
     /// Releases the attachment, then ends every task the session started:
     /// no session task outlives release.
     pub(super) async fn release(&mut self) -> CliResult<()> {
@@ -48,13 +71,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             agent.begin_abandon();
         }
         let registry = self.role.config.state_roots.job_registry().clone();
-        let deadline = self.quit_started_at.unwrap_or_else(super::Instant::now)
-            + std::time::Duration::from_secs(1);
+        let deadline = self.quit_started_at.unwrap_or_else(Instant::now) + QUIT_BOUND;
         let job_budget = || {
             deadline
-                .saturating_duration_since(super::Instant::now())
-                .saturating_sub(std::time::Duration::from_millis(150))
-                .min(std::time::Duration::from_millis(400))
+                .saturating_duration_since(Instant::now())
+                .saturating_sub(QUIT_LEASE_RELEASE_RESERVE)
+                .min(QUIT_JOB_SETTLEMENT_BUDGET)
         };
         let keep_jobs = self
             .opened
@@ -86,7 +108,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                             .map_err(|_| "background process stop task failed".to_owned())?
                     } else {
                         registry
-                            .stop_all_except(std::time::Duration::from_millis(200), &owners)
+                            .stop_all_except(Duration::from_millis(200), &owners)
                             .await
                     }
                 };
@@ -109,11 +131,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 });
             async {
                 tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    registry.stop_all_except(
-                        std::time::Duration::from_millis(200),
-                        root_owner.as_slice(),
-                    ),
+                    Duration::from_secs(5),
+                    registry.stop_all_except(Duration::from_millis(200), root_owner.as_slice()),
                 )
                 .await
                 .map_err(|_| "background process stop deadline exceeded".to_owned())?
@@ -203,8 +222,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         };
         let cleanup_failure = if published {
             let deadline = self.quit_started_at.map_or_else(
-                || super::Instant::now() + super::FINAL_PROJECTION_BOUND,
-                |started| started + std::time::Duration::from_secs(1),
+                || Instant::now() + super::FINAL_PROJECTION_BOUND,
+                |started| started + QUIT_BOUND,
             );
             let projected = async {
                 let sessions = self.role.config.state_roots.runtime_sessions()?;
@@ -219,7 +238,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                     .scope(super::super::projection::probe::Caller::Release, pass);
                 // A spent budget starts no pass: a timeout only drops its
                 // future, so a page commit already on the blocking pool lands.
-                let projected = if super::Instant::now() < deadline {
+                let projected = if Instant::now() < deadline {
                     tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
                         .await
                         .ok()
