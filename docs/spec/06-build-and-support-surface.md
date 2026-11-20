@@ -2280,8 +2280,8 @@ integration batch gate:
 
 Per-package-alone rustdoc remains in every integration batch and full/RC run;
 `just steps rustdoc` selects the same complete group at every tier outside
-`--fast`. Every integration batch,
-production install and RC runs `package`, regardless of changed paths. Archive
+`--fast`. Production installs and release candidates run `package`, regardless
+of changed paths; integration batches do not. Archive
 verification is the standalone compilation witness for published-internal
 crates; source, build-script, compiler and Cargo configuration changes can
 affect it too. Only a matching cohort verification receipt (§6.5) may avoid
@@ -2304,8 +2304,10 @@ The full tier also runs the ignored 5,000-call and full indexed retirement
 soaks after its routine serial and durability tests. `just soak` selects that long evidence alone; ordinary check,
 platform and explicit serial groups keep the small retirement fixtures and
 exclude the soak (spec 05 §2.3).
-The groups remain sequential: the serial wall-clock-budget profile runs one
-test at a time, followed by the durability profile's host-scaled weighted pool:
+Independent batch groups may run on separate hosts or lanes, with macOS
+running alongside Linux. On the same host, the serial wall-clock-budget
+profile runs alone, one test at a time, and does not overlap durability or
+compiler-heavy groups. The durability profile uses a host-scaled weighted pool:
 `N = max(1, min(16, available_parallelism))`, using Rust's host/affinity/quota
 count. Internally parallel crash campaigns reserve the whole pool at late
 priority -50; priority plus full reservation keeps them separate from shared
