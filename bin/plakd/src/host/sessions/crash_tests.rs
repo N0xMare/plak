@@ -11,7 +11,8 @@ fn create_crash_worker() {
     };
     let workspace = std::env::var("PLAK_CREATE_CRASH_WORKSPACE").unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.into());
-    let services = Services::for_home(paths)
+    let state = paths.home().join("test-state");
+    let services = Services::for_home_with_state(paths, state)
         .with_runner_overlap(plakous::runner::MachineOverlapGuard::new(None, []));
     let mut product = ProductSessions::new(&services, None, None).unwrap();
     product.placement = Box::new(placement::LocalPlacement {
