@@ -662,27 +662,20 @@ fn attach_product_children(
     let Some(script) = &plan.product_child_script else {
         return Ok(());
     };
-    let registrations = plakous_hosted::runtime::test_kit::scripted_root_topology(
-        Arc::clone(&prepared.runtime),
-        tree_id,
-        workspace,
-        state_roots.clone(),
-        product_child_binding(
-            script.clone(),
-            evidence.with_file_name("child-evidence.jsonl"),
+    prepared.product_tools = Some(run_to_end(
+        plakous_hosted::runtime::test_kit::scripted_root_topology(
             Arc::clone(&prepared.runtime),
+            tree_id,
+            workspace,
+            state_roots.clone(),
+            product_child_binding(
+                script.clone(),
+                evidence.with_file_name("child-evidence.jsonl"),
+                Arc::clone(&prepared.runtime),
+            ),
+            continue_after_loss,
         ),
-        continue_after_loss,
-    );
-    prepared.product_tools = Some(match tokio::runtime::Handle::try_current() {
-        // A resident host's placement watcher must outlive synchronous
-        // binding compilation. Verification and standalone fixtures have
-        // no resident executor and keep the short-lived path.
-        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
-            tokio::task::block_in_place(|| handle.block_on(registrations))?
-        }
-        _ => run_to_end(registrations)??,
-    });
+    )??);
     Ok(())
 }
 

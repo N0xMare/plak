@@ -144,11 +144,7 @@ fn upgrade(fixture: &Fixture, binary: &str) -> std::process::Output {
 
 /// Recovery can create a different serving PID. The held guard in this
 /// disposable home proves that the process belongs to this fixture.
-pub(super) struct HomeHost(pub(super) PathBuf);
-
-pub(super) fn run_same_key_fixture_upgrade(fixture: &Fixture, path: &str) -> std::process::Output {
-    reopen::same_key_upgrade(fixture, path)
-}
+struct HomeHost(PathBuf);
 
 impl Drop for HomeHost {
     fn drop(&mut self) {

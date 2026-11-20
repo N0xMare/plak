@@ -2,6 +2,20 @@ use std::sync::Arc;
 
 use crate::CliResult;
 
+pub(super) fn watch_scripted_placement<P: plakous_host_protocol::ProtocolExtension>(
+    config: &super::HostConfig<P>,
+    tree_id: &str,
+) {
+    // Scripted bindings were compiled on a temporary executor. Attach runs
+    // on the worker that owns the root and can actually service reconnects.
+    if config.state_roots.runner_services().is_some()
+        && config.state_roots.runner_registry().is_some()
+        && let Some(runtime) = crate::topology_runtime::lookup(tree_id)
+    {
+        crate::agent::placement::watch_debt(&runtime);
+    }
+}
+
 /// Uses the product's placement port in a real paired-runner fixture.
 ///
 /// # Errors

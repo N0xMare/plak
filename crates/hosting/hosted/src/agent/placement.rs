@@ -4,7 +4,7 @@ use super::children::ChildTurnIdentity;
 use crate::agent_tree_tools::TreeDriver;
 use crate::topology_runtime::LiveChildTable;
 
-pub(super) fn watch_debt(owner: &Arc<crate::topology_runtime::ProductTopologyRuntime>) {
+pub(crate) fn watch_debt(owner: &Arc<crate::topology_runtime::ProductTopologyRuntime>) {
     let weak = Arc::downgrade(owner);
     owner.driver().tasks().spawn(async move {
         let mut previous = std::collections::BTreeSet::new();

@@ -2,15 +2,14 @@ use super::*;
 use plakous_hosted::agent_tree_protocol::NodeStatus;
 
 #[test]
-fn same_key_upgrade_reopens_a_pre_placement_same_runner_tree() {
+fn a_pre_placement_same_runner_tree_reopens_through_routed_vcs() {
     let pair = Pair::new();
-    let _destination = upgrade::HomeHost(pair.host.home());
     let mut main_shaped = spawn("local", "fork");
     main_shaped["output"]["tool"]["arguments"]
         .as_object_mut()
         .unwrap()
         .remove("runner");
-    let (host, mut client, session, node, attachment) = pair.session(
+    let (mut host, mut client, session, node, attachment) = pair.session(
         false,
         &[main_shaped, wait(), answer("same-runner copy settled")],
     );
@@ -34,28 +33,28 @@ fn same_key_upgrade_reopens_a_pre_placement_same_runner_tree() {
             .starts_with(pair.host.workspace().join(".plak/worktrees"))
     );
     assert!(saved.runner_ancestors().is_empty());
-    let upgraded = upgrade::run_same_key_fixture_upgrade(&pair.host, &pair.path);
-    assert!(
-        upgraded.status.success(),
-        "{}",
-        String::from_utf8_lossy(&upgraded.stderr)
-    );
-    let mut client = Client::connect_at(&host.socket);
+    stop(&mut host);
+
+    script_followup(&pair, agent);
+    let mut host = pair.start();
+    let mut client = Client::connect(&host);
     pending_stop::ready(&mut client, &pair.launch_id);
-    client.attach(14, &node);
-    client.attach(
-        15,
-        &NodeAddress {
-            tree_id: node.tree_id.clone(),
-            agent_id: agent.to_owned(),
-        },
-    );
+    let attachment = client.attach(14, &node);
+    client.prompt(15, attachment, "reopen the old shape", "reopened child ran");
+    tool_results(&pair.host, &session, 4);
     let reopened = tree(&pair, &node);
     assert_eq!(reopened.node(agent).unwrap().path, child.path);
     assert_eq!(
         reopened.node(agent).unwrap().placement.runner_id.as_deref(),
         Some(pair.launch_id.as_str())
     );
+    assert_eq!(
+        std::fs::read_to_string(child.path.join("reopen-parent"))
+            .unwrap()
+            .trim(),
+        pair.launch.pid().unwrap().to_string(),
+    );
+    stop(&mut host);
 }
 
 fn begin(client: &mut Client, attachment: u64) {
@@ -346,14 +345,24 @@ fn a_working_child_defers_recovery_when_its_runner_is_down_at_reopen() {
         &[spawn("secondary", "fork"), answer("child assigned")],
     );
     pending_stop::ready(&mut client, &pair.secondary_id);
-    gate(&pair.cuts, "before-answer", "armed");
+    let child_script = pair.host.root.join("placed-child.json");
+    std::fs::write(
+        &child_script,
+        json!({
+            "version": 1,
+            "steps": [{"output":{"text":"late child answer"}, "stall_ms": 30_000}],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let evidence = pair.host.root.join("child-evidence.jsonl");
     client.prompt(
         41,
         attachment,
         "start the child before the cut",
         "child assigned",
     );
-    wait_for(|| pair.cuts.join("before-answer.entered").is_file());
+    wait_for(|| child_dispatches(&evidence) == 1);
     let saved = recorded_tree(&pair, &node);
     let child = saved.nodes().values().find(|node| node.depth == 1).unwrap();
     assert!(child.active_turn);
@@ -362,7 +371,6 @@ fn a_working_child_defers_recovery_when_its_runner_is_down_at_reopen() {
     let mut secondary = Paused::new(pair.secondary.pid().unwrap());
     drop(client);
     kill(&mut host);
-    gate(&pair.cuts, "before-answer", "release");
     replace_steps(&pair, &[answer("root reopened")]);
 
     let mut host = pair.start();
@@ -396,15 +404,19 @@ fn a_working_child_defers_recovery_when_its_runner_is_down_at_reopen() {
             .unwrap()
             .active_turn
     });
-    let dispatches = plakous_offline_crash_harness::evidence::read_evidence(
-        pair.host.root.join("child-evidence.jsonl"),
-    )
-    .unwrap()
-    .into_iter()
-    .filter(|event| {
-        event.kind == plakous_offline_crash_harness::evidence::EvidenceKind::ProviderDispatched
-    })
-    .count();
-    assert_eq!(dispatches, 1, "readiness is not paid continuation consent");
+    assert_eq!(
+        child_dispatches(&evidence),
+        1,
+        "readiness is not paid continuation consent"
+    );
     stop(&mut host);
+}
+
+fn child_dispatches(evidence: &Path) -> usize {
+    use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
+    read_evidence(evidence)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|event| event.kind == EvidenceKind::ProviderDispatched)
+        .count()
 }
