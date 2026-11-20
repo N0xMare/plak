@@ -497,8 +497,6 @@ fn prepare_scripted_tree(
     detached: bool,
 ) -> Result<PreparedTree, crate::CliFailure> {
     use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore};
-    use plakous_hosted::agent_tree_protocol::WriterMode;
-    use plakous_hosted::occupancy_vcs::VcsOps;
 
     // `plakd session show` looks the tree up by the product session id. The
     // in-memory canvas uses the hub key and can keep a private tree id; a
@@ -520,41 +518,13 @@ fn prepare_scripted_tree(
             Ok(None)
         }
     };
-    let real_port = runner_port(None)?;
-    let vcs: Arc<dyn VcsOps> = real_port.clone().unwrap_or_else(|| scripted_tree_vcs(plan));
-    let mut tree = if let Some(port) = real_port {
-        run_to_end(ProductAgentTree::bootstrap_root_with(
-            port,
-            bootstrap_id,
-            "root",
-            "owner",
-            workspace.to_path_buf(),
-            SELECTOR,
-            WriterMode::SingleLease,
-        ))?
-    } else {
-        ProductAgentTree::bootstrap_root_for_test_with(
-            Arc::clone(&vcs),
-            bootstrap_id,
-            "root",
-            "owner",
-            workspace.to_path_buf(),
-            SELECTOR,
-            WriterMode::SingleLease,
-        )
-    }
-    .map_err(|error| format!("offline scripted tree: {}", error.message))?;
-    if let Some(runner) = state_roots.runner_services() {
-        tree.place_genesis_root(plakous_hosted::agent_tree::NodePlacement {
-            runner_id: Some(runner.backend().runner_id().as_str().to_owned()),
-            workspace: Some(plakous_hosted::agent_tree::NodeWorkspace {
-                root: workspace.to_path_buf(),
-                cwd: workspace.to_path_buf(),
-            }),
-        })
-        .map_err(|error| format!("offline scripted tree placement: {}", error.message))?;
-    }
-    pin_product_child_roster(&mut tree, plan)?;
+    let mut tree = bootstrap_scripted_tree(
+        bootstrap_id,
+        workspace,
+        plan,
+        runner_port(None)?,
+        state_roots.runner_services(),
+    )?;
     let inner: Arc<dyn TreeStore> = if plan.durable_tree {
         paths
             .ensure_layout()
@@ -579,8 +549,9 @@ fn prepare_scripted_tree(
             error.detail
         )
     })? {
+        let vcs = tree.vcs_port();
         tree = ProductAgentTree::reopen(persisted);
-        tree.set_vcs(runner_port(Some(&tree))?.unwrap_or_else(|| Arc::clone(&vcs)));
+        tree.set_vcs(runner_port(Some(&tree))?.unwrap_or(vcs));
     }
     let runtime = if detached {
         let vcs = tree.vcs_port();
@@ -593,7 +564,6 @@ fn prepare_scripted_tree(
             ),
         )
     } else {
-        drop(vcs);
         attach_scripted_tree(tree_id, tree, store)?
     };
     let driver = runtime.driver().clone();
@@ -620,6 +590,51 @@ fn prepare_scripted_tree(
         runtime,
         product_tools: None,
     })
+}
+
+fn bootstrap_scripted_tree(
+    tree_id: &str,
+    workspace: &Path,
+    plan: &ScriptPlan,
+    runner_port: Option<Arc<dyn plakous_hosted::occupancy_vcs::VcsOps>>,
+    runner: Option<&plakous::runner::RunnerServices>,
+) -> Result<plakous_hosted::agent_tree::ProductAgentTree, crate::CliFailure> {
+    use plakous_hosted::agent_tree::ProductAgentTree;
+    use plakous_hosted::agent_tree_protocol::WriterMode;
+    let mut tree = if let Some(port) = runner_port {
+        run_to_end(ProductAgentTree::bootstrap_root_with(
+            port,
+            tree_id,
+            "root",
+            "owner",
+            workspace.to_path_buf(),
+            SELECTOR,
+            WriterMode::SingleLease,
+        ))?
+    } else {
+        ProductAgentTree::bootstrap_root_for_test_with(
+            scripted_tree_vcs(plan),
+            tree_id,
+            "root",
+            "owner",
+            workspace.to_path_buf(),
+            SELECTOR,
+            WriterMode::SingleLease,
+        )
+    }
+    .map_err(|error| format!("offline scripted tree: {}", error.message))?;
+    if let Some(runner) = runner {
+        tree.place_genesis_root(plakous_hosted::agent_tree::NodePlacement {
+            runner_id: Some(runner.backend().runner_id().as_str().to_owned()),
+            workspace: Some(plakous_hosted::agent_tree::NodeWorkspace {
+                root: workspace.to_path_buf(),
+                cwd: workspace.to_path_buf(),
+            }),
+        })
+        .map_err(|error| format!("offline scripted tree placement: {}", error.message))?;
+    }
+    pin_product_child_roster(&mut tree, plan)?;
+    Ok(tree)
 }
 
 /// Puts a `product_child_script` tree's children on the product's own

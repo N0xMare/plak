@@ -717,21 +717,10 @@ pub(crate) fn tree_vcs(
     };
     let id = tree_id.to_owned();
     let routed = RoutedVcs::with_resolver(home, tree_id, launch.to_owned(), move |runner| {
-        let registry = registry.clone();
-        let runner = runner.to_owned();
-        let hold = registry.retain_connection(&runner);
+        let services = registry.retained_services(runner);
         Arc::new(RemoteVcs::with_link(
-            {
-                let runner = runner.clone();
-                move || {
-                    let _hold = &hold;
-                    registry
-                        .reconciliation_services(&runner)
-                        .ok()
-                        .map(|services| services.backend().link())
-                }
-            },
-            runner,
+            move || services().map(|services| services.backend().link()),
+            runner.to_owned(),
             id.clone(),
         ))
     });

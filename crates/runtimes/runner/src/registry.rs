@@ -136,6 +136,19 @@ struct Entry {
     connection: Option<Connection>,
     refresh: refresh::ProbeState,
     required: bool,
+    placement_users: Arc<()>,
+}
+
+struct RetainedServices {
+    registry: RunnerRegistry,
+    id: String,
+    _placement: Option<Arc<()>>,
+}
+
+impl RetainedServices {
+    fn current(&self) -> Option<RunnerServices> {
+        self.registry.reconciliation_services(&self.id).ok()
+    }
 }
 
 #[derive(Clone)]
@@ -345,6 +358,7 @@ impl RunnerRegistry {
                     connection: None,
                     refresh: refresh::ProbeState::default(),
                     required: false,
+                    placement_users: Arc::new(()),
                 },
             );
         }
@@ -759,6 +773,7 @@ impl RunnerRegistry {
             .get(id)
             .is_some_and(|entry| {
                 entry.required
+                    || Arc::strong_count(&entry.placement_users) > 1
                     || match &entry.connection {
                         Some(Connection::Remote(client, services)) => {
                             client.has_pending_calls() || services.has_node_users()
@@ -775,11 +790,33 @@ impl RunnerRegistry {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
+            && Arc::strong_count(&entry.placement_users) == 1
             && let Some(Connection::Remote(client, services)) = &entry.connection
         {
             services.set_available(false);
             client.disconnect();
         }
+    }
+
+    /// Keep a configured runner eligible for reconnect while a caller owns
+    /// the returned lookup. It reads only the saved identity's services and
+    /// does not open their placement barrier.
+    pub fn retained_services(
+        &self,
+        id: &str,
+    ) -> impl Fn() -> Option<RunnerServices> + Send + Sync + use<> {
+        let retained = RetainedServices {
+            registry: self.clone(),
+            id: id.to_owned(),
+            _placement: self
+                .entries
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(id)
+                .filter(|entry| !entry.row.runner.names.is_empty())
+                .map(|entry| Arc::clone(&entry.placement_users)),
+        };
+        move || retained.current()
     }
 
     /// Local catalog remains host-owned; the process daemon serves no files.
