@@ -561,7 +561,9 @@ plakd has four optional features (`web`, `jj`, `maintainer`, and
 dependency/feature surface digests; the workspace checker pins each exact
 facade dependency feature list. The product's default and the facade's full
 and native-auth closures exclude aws-lc and rsa. The product still excludes
-terminal/clipboard libraries and does not embed either evaluator's engine.
+terminal/clipboard libraries. The default closure excludes `micro-monty`,
+`rquickjs` and `plakous-js-runtime`; the product does not embed either
+evaluator's engine.
 A build without `web` also excludes the WebSocket dependencies.
 
 The checker reports hits/misses and atomically caches Cargo tree/metadata
@@ -575,8 +577,8 @@ export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
 Closures prove dependency edges, not that the code compiles. The checker
-normally also runs `cargo check --lib` on eight profiles. Six are facade
-resolutions, each without workspace feature unification:
+normally also runs `cargo check --lib` on thirteen profiles. Eleven are
+facade resolutions, each without workspace feature unification:
 
 - no features: the always-on facade, with no optional route or evaluator;
 - `full`: every public facade feature together;
@@ -585,15 +587,20 @@ resolutions, each without workspace feature unification:
 - `openai` alone: the OpenAI API route, including the `cfg(feature = "openai")`
   paths in `responses_retrieval.rs`, without a native-auth route beside it;
 - `gateway` alone: the custody seam, the relay client and the relay server
-  core over local custody, with no provider route.
+  core over local custody, with no provider route;
+- API-only: `openai,xai,anthropic,openrouter,gateway,sessions-sqlite`, with
+  no native subscriptions;
+- `xai` alone: the Responses retrieval and image paths without OpenAI or
+  native subscriptions;
+- `openrouter`, `mcp` and `web-fetch` alone: the independent OpenRouter route,
+  MCP client and local fetch tool.
 
 `plakous-hosted` is compiled without optional features and with
 `--all-features`. Both profiles include every product route and tool; only the
 JJ and test-support features vary. A rustc warning or error fails the profile.
 `static` runs these library compiles (scoped by package in a fast gate).
-When the `variants` group is also selected, it runs them instead with the
-gate's build flags. `--build` on the checker checks every witness and skips the
-eight-profile step. Cargo fingerprints avoid recompiling unchanged inputs.
+`--build` on the checker checks every witness and skips the standalone
+profile step. Cargo fingerprints avoid recompiling unchanged inputs.
 
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
@@ -910,8 +917,6 @@ directories: one shared target directory is safe only for one worktree at a
 time. Share dependency compilation through sccache, not workspace artifacts.
 The shared sccache server must start with a stable `TMPDIR`, never a gate's
 per-checkout test directory, which another gate can remove while compiles run.
-The variants group keeps the caller's `RUSTC_WRAPPER`: that stable directory
-is what makes a shared server safe, so the group does not clear the wrapper.
 Cargo defaults to the host target; the supported Linux musl build requires
 `--target x86_64-unknown-linux-musl` and a musl C compiler/linker as described
 in the getting-started guide. A GNU host build is not musl qualification.
@@ -1688,7 +1693,8 @@ version flags and neither opens a store nor contacts a service. It reports
 versions, `host_upgrade` coordinator/receipt versions, `runner` protocol
 and retention served/spoken versions, `gateway` served/spoken versions,
 the exact `wire` number and schema pin (chapter 02 §4.4), whether `test_hooks`
-are compiled in, and the sorted list of `omitted_features`.
+are compiled in, and `omitted_features`, which is always empty in the
+only supported build. The field remains part of the probe contract.
 Shipping manifests require `test_hooks: false` and `omitted_features: []`.
 Missing or inconsistent facts fail manifest emission. To compare the full
 digests of two native builds from separately checked out copies of the same
@@ -2276,8 +2282,7 @@ lane, never with the wall-clock or weighted lanes (chapter 05 §1).
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
 sweep, the dependency audit and the publish dry run. Full adds per-package
-standalone rustdoc and archive verification, compiles the standalone library
-feature profiles in `variants`, and runs the ignored 5,000-call
+standalone rustdoc and archive verification, and runs the ignored 5,000-call
 and full indexed retirement soaks. `just soak` selects only that long test
 evidence (chapter 05 §2.3).
 

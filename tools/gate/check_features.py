@@ -20,10 +20,10 @@ closure Cargo reports, the packages a named feature profile must not reach.
 This is what makes the facade's evaluator decoupling provable: `composition`
 buys Code Mode and the JavaScript sidecar and nothing else.
 
-Normally, eight `cargo check --lib` profiles prove feature-conditioned
-code: facade none, `full`, `composition`, `claude`, `openai` and `gateway`;
-hosted with no optional features and `--all-features`. A rustc warning or
-error fails the run. Every public feature still has its closure witness.
+Normally, thirteen `cargo check --lib` profiles prove feature-conditioned
+code: eleven facade resolutions and hosted without optional features and
+with `--all-features`. A rustc warning or error fails the run. Every public
+feature still has its closure witness.
 """
 
 from __future__ import annotations
@@ -321,6 +321,8 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plakd", ("default",)): (
         "micro-monty",
+        "plakous-js-runtime",
+        "rquickjs",
         "jj-lib",
         "gix",
         "pollster",
@@ -977,12 +979,9 @@ def macos_unwind_size_note(diagnostic: dict[str, object]) -> bool:
 def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
     """The compile resolutions for one library, named and as Cargo arguments.
 
-    Facade: no features, `full`, `composition` alone, `claude` alone (one
-    native route), `openai` alone (the API route, including
-    `responses_retrieval`'s `cfg(feature = "openai")` paths, without a
-    native-auth route beside it) and `gateway` alone (the custody seam,
-    relay client and server core with no provider). Hosted: no optional features
-    and `--all-features`; the provider and tool dependencies are unconditional.
+    The facade's API profile compiles the gateway with API routes but no
+    native auth. The xAI singleton additionally exercises the Responses
+    imports that only apply when neither OpenAI nor Codex is enabled.
     """
     lib = ["--lib", "--message-format=json"]
     if package == FACADE:
@@ -995,6 +994,14 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
                 ("claude", ("claude",)),
                 ("openai", ("openai",)),
                 ("gateway", ("gateway",)),
+                (
+                    "api",
+                    ("openai", "xai", "anthropic", "openrouter", "gateway", "sessions-sqlite"),
+                ),
+                ("xai", ("xai",)),
+                ("openrouter", ("openrouter",)),
+                ("mcp", ("mcp",)),
+                ("web-fetch", ("web-fetch",)),
             )
         ]
     if package == "plakous-hosted":
@@ -1018,7 +1025,7 @@ def library_compile_commands(package: str) -> list[tuple[str, list[str]]]:
 
 
 def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
-    """Compile the facade's six representative resolutions."""
+    """Compile the facade's standalone feature profiles."""
     return check_library_profiles(manifests, FACADE, root)
 
 
@@ -1076,11 +1083,7 @@ def closure(
 def main() -> int:
     """Check every package's feature closures and optionally compile each profile."""
     parser = argparse.ArgumentParser()
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--build", action="store_true", help="cargo-check every closure witness")
-    modes.add_argument(
-        "--library-only", action="store_true", help="compile only the library profiles"
-    )
+    parser.add_argument("--build", action="store_true", help="cargo-check every closure witness")
     parser.add_argument(
         "--no-cache", action="store_true", help="query Cargo without reading or writing the cache"
     )
@@ -1091,13 +1094,6 @@ def main() -> int:
         help="worker-only library compile scope; closure validation remains workspace-wide",
     )
     args = parser.parse_args()
-
-    if args.library_only:
-        manifests = load_workspace_manifests()
-        errors = check_facade_profiles(manifests) + check_hosted_profiles(manifests)
-        for error in errors:
-            print(f"error: {error}", file=sys.stderr)
-        return int(bool(errors))
 
     global CARGO_OUTPUTS
     CARGO_OUTPUTS = None

@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 GROUPS = (
     'static',
     'builds',
-    'variants',
     'rustdoc',
     'rustdoc-alone',
     'standalone',
@@ -96,16 +95,12 @@ class DevCheckWorkerTests(unittest.TestCase):
                     self.assertEqual(
                         any(
                             s[0].endswith(checker)
-                            and '--library-only' not in s
                             and '--portable-crates' not in s
                             and '--wasm-libraries' not in s
                             for s in scripts
                         ),
                         tier != ('--install',),
                     )
-                self.assertEqual(
-                    sum('--library-only' in s for s in scripts), int('variants' in groups)
-                )
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -375,23 +370,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         return [call for call in map(json.loads, lines) if 'publish' in call]
 
-    def test_variants_forward_the_target_and_warning_flags_without_running_other_groups(self):
-        self.env['RUSTFLAGS'] = 'unused-base-flags'
-        self.env['CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'] = '-C target-feature=+crt-static'
-        result, calls, scripts = self.run_gate('--steps', 'variants')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([call['args'] for call in calls], [['nextest', '--version']])
-        self.assertIn(['tools/gate/check_features.py', '--library-only'], scripts)
-        call = next(call for call in self.python_calls if '--library-only' in call['python'])
-        self.assertEqual(call['target_rustflags'], '-C target-feature=+crt-static')
-        self.assertEqual(call['rustflags'], 'unused-base-flags -D warnings')
-
-    def test_variants_keep_the_compiler_wrapper_without_disabling_other_groups(self):
+    def test_builds_and_rustdoc_keep_the_compiler_wrapper(self):
         self.env['RUSTC_WRAPPER'] = 'sccache'
-        result, calls, _ = self.run_gate('--steps', 'builds,variants,rustdoc')
+        result, calls, _ = self.run_gate('--steps', 'builds,rustdoc')
         self.assertEqual(result.returncode, 0, result.stderr)
-        variants = next(call for call in self.python_calls if '--library-only' in call['python'])
-        self.assertEqual(variants['rustc_wrapper'], 'sccache')
         builds = [call for call in calls if call['args'][0] == 'build']
         self.assertEqual(len(builds), len(BUILDS))
         self.assertTrue(all(call['rustc_wrapper'] == 'sccache' for call in builds))

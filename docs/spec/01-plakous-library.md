@@ -7621,12 +7621,12 @@ identities behind opaque client tokens rather than exposing free diff inputs.
 The environment verifies its live backend identity and routes the canonical
 workspace through that same frozen node placement. A disconnected remote
 backend fails as remote I/O; it never falls back to an equal local pathname.
-The official Changes entry point takes the existing compile-time `git-cli`
-gate explicitly, from `plakous_hosted::occupancy_vcs::git_cli_enabled()` (the workspace gate).
-Paired startup passes that same build constant as
-`RunnerOptions::changes_git_enabled` (closed by default); dispatch checks the
-runner's gate too. Neither an environment variable nor a client field can
-turn Git on in a build without it.
+The official Changes entry point takes the workspace package's Git
+capability explicitly from `plakous_hosted::occupancy_vcs::git_cli_enabled()`.
+Git is always enabled in the product. Paired startup passes that build
+constant as `RunnerOptions::changes_git_enabled` (closed by default);
+dispatch checks the runner's gate too. Neither an environment variable nor a
+client field can grant that capability.
 
 A dropped unkeyed workspace-construction probe releases its host pending-reply
 slot and sends Cancel. This cleanup does not retire an effect-call key or change

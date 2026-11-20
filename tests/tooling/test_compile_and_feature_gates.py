@@ -204,7 +204,7 @@ class FacadeProfileTests(unittest.TestCase):
 
     def test_checks_the_representative_facade_profiles(self):
         clean = subprocess.CompletedProcess([], 0, json.dumps({"reason": "build-finished"}), "")
-        errors, commands, _ = self.check([clean] * 6)
+        errors, commands, _ = self.check([clean] * 11)
         self.assertEqual(errors, [])
         base = ["cargo", "check", "--locked", "--offline", "-p", "plakous", "--no-default-features"]
         tail = ["--lib", "--message-format=json"]
@@ -217,6 +217,13 @@ class FacadeProfileTests(unittest.TestCase):
                 base + ["--features", "claude"] + tail,
                 base + ["--features", "openai"] + tail,
                 base + ["--features", "gateway"] + tail,
+                base
+                + ["--features", "openai,xai,anthropic,openrouter,gateway,sessions-sqlite"]
+                + tail,
+                base + ["--features", "xai"] + tail,
+                base + ["--features", "openrouter"] + tail,
+                base + ["--features", "mcp"] + tail,
+                base + ["--features", "web-fetch"] + tail,
             ],
         )
 
@@ -238,7 +245,7 @@ class FacadeProfileTests(unittest.TestCase):
         )
         aborted = subprocess.CompletedProcess([], 101, "", "error: no matching package\n")
         clean = subprocess.CompletedProcess([], 0, "", "")
-        errors, _, stderr = self.check([failed, warned, aborted, clean, clean, clean])
+        errors, _, stderr = self.check([failed, warned, aborted] + [clean] * 8)
         self.assertEqual(
             errors,
             [
@@ -701,6 +708,23 @@ class PublicCompileGateTests(unittest.TestCase):
 
 
 class FeatureGateTests(unittest.TestCase):
+    def test_default_product_closure_rejects_planted_terminal_and_js_engine_edges(self) -> None:
+        def planted(package, selected):
+            return (
+                {"ratatui", "rquickjs", "plakous-js-runtime"}
+                if (package, selected) == ("plakd", ("default",))
+                else set()
+            )
+
+        with mock.patch.object(feature_gate, "full_closure", side_effect=planted):
+            self.assertEqual(
+                feature_gate.validate_excluded_closures(),
+                [
+                    "plakd [default]: closure reaches ['plakous-js-runtime', 'ratatui', "
+                    "'rquickjs'], which this profile must not link"
+                ],
+            )
+
     def test_cargo_commands_are_locked_and_offline(self) -> None:
         command = feature_gate.cargo_command("tree", ("openai",), False)
         self.assertIn("--locked", command)

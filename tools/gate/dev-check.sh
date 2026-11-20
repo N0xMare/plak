@@ -10,7 +10,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
 # Canonical group order, including replay of overlapped groups.
-all_groups=(static builds variants rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install package)
+all_groups=(static builds rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install package)
 batch_groups=static,standalone,contracts,tooling,tests-parallel,tests-durability,tests-serial
 
 tier=batch
@@ -577,10 +577,7 @@ run_static_tree_checks() {
   echo "== structure: workspace =="
   python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
   echo "== structure: features (static) =="
-  local features=(${worker_features[@]+"${worker_features[@]}"})
-  # An explicit variants group compiles these profiles with the build flags.
-  if selected variants; then features=(--library-packages); fi
-  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${features[@]+"${features[@]}"} \
+  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
     || failed="${failed:+$failed }features"
   if [[ "$tier" == full ]]; then
     echo "== structure: evidence allowlist =="
@@ -675,10 +672,6 @@ run_group() {
       echo "== release sidecars =="
       run_build_denying_warnings cargo build --locked -p plakous-py-worker -p plakous-js-runtime --bins ${target_args[@]+"${target_args[@]}"}
       python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
-    variants)
-      echo "== standalone library feature profiles: warnings denied =="
-      CARGO_TARGET_DIR="$target_dir/feature-check" \
-        run_build_denying_warnings python3 tools/gate/check_features.py --library-only ;;
     rustdoc)
       echo "== rustdoc =="
       RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"} ;;
@@ -849,7 +842,7 @@ if selected static; then
   fetch_failed='' clippy_failed='' structure_pid=''
   begin_static >"$group_spool/static.log" 2>&1
   if [[ "$batch_scoped" == true && "$test_build_needed" == true && -n "$structure_pid" ]] \
-    && ! selected builds && ! selected variants && ! selected rustdoc && ! selected rustdoc-alone; then
+    && ! selected builds && ! selected rustdoc && ! selected rustdoc-alone; then
     defer_static=true
     test_jobs=$((test_jobs - structure_jobs))
   else
@@ -872,7 +865,7 @@ if selected contracts; then compile_only+=(contracts); fi
 
 # Install/RC link and doc commands use the main target before test preparation.
 # In particular a later build must not overwrite the selected host binary.
-for group in builds variants rustdoc rustdoc-alone; do
+for group in builds rustdoc rustdoc-alone; do
   if selected "$group"; then run_timed "$group"; fi
 done
 

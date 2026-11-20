@@ -108,14 +108,11 @@ model, effort, composition, skills and protocol behavior.
 identity: sibling slots never borrow request budgets, even when their upstream
 limits are shared.
 
-Build capabilities are not configuration keys. The persisted account,
-composition and tool-selection vocabulary is unchanged in a feature-reduced
-binary, so read-only session operations still decode it. Session admission
-refuses only the selected Python-bound template/default/session when `python`
-is omitted, or the selected template's MCP tools when `mcp` is omitted
-(server definitions alone enable nothing), naming the unavailable feature
-(exit 2). Unused templates never block a session. It never silently drops tools or
-substitutes a composition. Doctor scans all templates for its config verdict.
+Build capabilities are not configuration keys. Product account, composition
+and tool capabilities are built in; runtime admission still checks the
+selected bindings. MCP server definitions alone enable no tools. Admission
+does not substitute a composition. Doctor scans all templates for its config
+verdict.
 
 A plakd home holds one `config.toml` plus one file per agent template:
 
@@ -618,10 +615,8 @@ other name is an unknown section.
 | `tools.web_search.blocked_domains` | array of string | `[]` | at most 10 domain names, none twice; exclusive with allowed_domains | Never search these domains. |
 | `tools.x_search.allowed_x_handles` | array of string | `[]` | at most 20 handles of 1 to 15 letters, digits or `_`, without `@` | Search only posts from these X handles; empty is every handle. |
 
-A template or session selecting `fetch_url` requires the compiled `web-fetch`
-capability. A build without it refuses config/session admission with the typed
-`CapabilityUnavailable` (exit 2), before attach or writes; it never drops the
-selected tool silently. Frozen fetch bounds remain readable for show/log/export.
+Local `fetch_url` is available on every product route. It uses the selected
+node's frozen fetch bounds, which remain readable for show/log/export.
 
 All product routes and evaluators are built in (chapter 06 §4). An exact
 account, model and composition still have to pass admission; a refusal

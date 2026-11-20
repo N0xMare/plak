@@ -780,7 +780,6 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 | --- | --- |
 | `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate `feature-check/` target directory. Full also audits the publication evidence allowlist (chapter 06 §6.5) |
 | `builds` | Link plakd in its release resolution and with maintainer features, build the two sidecars, and verify their linkage against the maintainer binary; rustc warnings denied |
-| `variants` | Compile the same eight facade and hosted library profiles as the static feature checker, with the gate's build target and warning flags. When selected alongside `static`, compile them here only. No reduced-product builds. Selected at full/RC or explicitly |
 | `rustdoc` | Workspace all-features documentation with warnings denied |
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
 | `standalone` | Clippy each of the publish-plan crates alone in its default resolution (`--lib --bins`, `--bins` for the binary-only Python worker, or `--all-targets` for supported packages), warnings denied, in a dedicated target directory. Check portable wasm32 libraries there (chapter 06 §7.5), and package the staged publication cohort with `cargo package --locked --offline --no-verify` in a separate `package-lite` target. When archive verification is selected on a repository tree it already supplies the packaging witness, so no separate package-lite run is needed |
@@ -918,7 +917,7 @@ matching `target.<cfg>.rustflags`, or else `build.rustflags` (the file value plu
 `CARGO_BUILD_RUSTFLAGS`, which Cargo merges after it), plus
 `-D warnings`. The addition is not exported to later steps, so the
 all-features test artifacts are not rebuilt. A linker configured in Cargo's
-rustflags therefore stays on the builds and variants groups.
+rustflags therefore stays on the builds group.
 Registry dependencies stay `--cap-lints allow`. A
 warning that exists only in a default or maintainer closure, and is hidden from
 `--all-features` clippy, fails this group.
@@ -1008,7 +1007,7 @@ exports all four for the test process.
 | Offline tests | `just steps tests-parallel,tests-durability,tests-serial,tests-install` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
-| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of eight standalone library profiles (facade none, `full`, `composition`, `claude`, `openai` and `gateway`; hosted without optional features and with all features), warnings denied (spec 06); the compiles move to `variants` when that group is selected, plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
+| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of thirteen standalone library profiles (eleven facade profiles, including API-only and standalone provider and tool profiles; hosted without optional features and with all features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per selected `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
@@ -1450,7 +1449,7 @@ keys in sibling slots to distinguish source authority from key identity, then
 remove one slot and require it to become unavailable without affecting its sibling.
 Mutants accepting unknown routes or bypassing
 session account admission must fail committed assertions. Read-only account
-labels remain distinct from admission and known-feature omission.
+labels remain distinct from admission.
 Explicit rebind tests separately preserve its configured-root remedy for an
 unresolvable source: valid policy yields the fallback notice and strips replay,
 while invalid policy refuses without choosing a root or changing replay.
@@ -3990,8 +3989,12 @@ measurement on a shared machine is evidence, not a gate. The restricted comparis
 to call a swing in either noisy metric a regression.
 
 **Build-closure evidence.** The opt-in build producer emits
-`plakous.perf-build.v11`, fixture revision 11, over 18 profiles. The
-`exchange` profile measures `plakous-exchange` with the folded attempt core.
+`plakous.perf-build.v12`, fixture revision 12, over 18 profiles. The
+`plakd` and `plakd-lib` profiles select `web` explicitly and measure the
+default product feature resolution. The unconditional product capabilities
+make those measurements a new baseline, not comparable to v11's flagless
+product profiles. Archived v11 measures `plakous-exchange` with the folded
+attempt core.
 Archived v10 retains its 18-profile contract, including `attempt` for
 `plakous-attempt` and a single `responses` profile. Archived v9 retains
 19 profiles with separate `responses-kernel` and `responses-host` profiles.

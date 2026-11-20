@@ -66,7 +66,7 @@ class PerfBuildProfileTests(unittest.TestCase):
                     ("--lib",),
                     ("sessions-sqlite",),
                 ),
-                "plakd": ("plakd", ("--bin", "plakd"), ()),
+                "plakd": ("plakd", ("--bin", "plakd"), ("web",)),
                 "agent": ("plakous-agent", ("--lib",), ()),
                 "tools": ("plakous-tools", ("--lib",), ()),
             },
@@ -123,7 +123,7 @@ class PerfBuildProfileTests(unittest.TestCase):
         self.assertEqual(
             perf_build.PRODUCT_TOPOLOGY_BUILD_PROFILES,
             {
-                "plakd-lib": ("plakd", ("--lib",), ()),
+                "plakd-lib": ("plakd", ("--lib",), ("web",)),
             },
         )
         self.assertEqual(
@@ -321,8 +321,8 @@ class PerfBuildProfileTests(unittest.TestCase):
                 features,
             ) in perf_build.BUILD_PROFILES.items()
         }
-        self.assertEqual(produced, perf_validator.V11_BUILD_PROFILE_CONTRACTS)
-        self.assertEqual(perf_build.SCHEMA, "plakous.perf-build.v11")
+        self.assertEqual(produced, perf_validator.V12_BUILD_PROFILE_CONTRACTS)
+        self.assertEqual(perf_build.SCHEMA, "plakous.perf-build.v12")
 
     def test_closure_facts_are_sorted_deduplicated_and_content_addressed(self) -> None:
         raw = (
@@ -673,8 +673,8 @@ class PerfBuildProfileTests(unittest.TestCase):
                 self.assertEqual(perf_validator.main(), 0)
                 validate.assert_called_once_with(directory)
 
-    def test_v11_fixture_and_archived_contracts_are_exact(self) -> None:
-        self.assertEqual(perf_build.FIXTURE, perf_validator.V11_BUILD_FIXTURE)
+    def test_v12_fixture_and_archived_contracts_are_exact(self) -> None:
+        self.assertEqual(perf_build.FIXTURE, perf_validator.V12_BUILD_FIXTURE)
         self.assertEqual(len(perf_validator.V11_BUILD_PROFILE_CONTRACTS), 18)
         self.assertNotIn("attempt", perf_validator.V11_BUILD_PROFILE_CONTRACTS)
         self.assertEqual(len(perf_validator.V10_BUILD_PROFILE_CONTRACTS), 18)
@@ -698,6 +698,7 @@ class PerfBuildProfileTests(unittest.TestCase):
             (9, perf_validator.V9_BUILD_FIXTURE),
             (10, perf_validator.V10_BUILD_FIXTURE),
             (11, perf_validator.V11_BUILD_FIXTURE),
+            (12, perf_validator.V12_BUILD_FIXTURE),
         ]:
             perf_validator.validate_current_build_fixture(
                 {"schema": f"plakous.perf-build.v{version}", "fixture": fixture}

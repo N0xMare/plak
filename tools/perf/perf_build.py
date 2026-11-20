@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
 
-SCHEMA = "plakous.perf-build.v11"
-FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 11}
+SCHEMA = "plakous.perf-build.v12"
+FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 12}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
     "minimal": ("plakous", ("--lib",), ()),
     "subscriptions": (
@@ -42,7 +42,7 @@ SUPPORTED_PUBLIC_BUILD_PROFILES = {
         ),
     ),
     "sessions-sqlite": ("plakous", ("--lib",), ("sessions-sqlite",)),
-    "plakd": ("plakd", ("--bin", "plakd"), ()),
+    "plakd": ("plakd", ("--bin", "plakd"), ("web",)),
     "agent": ("plakous-agent", ("--lib",), ()),
     "tools": ("plakous-tools", ("--lib",), ()),
 }
@@ -84,7 +84,7 @@ INTERNAL_TOPOLOGY_BUILD_PROFILES = {
     "messages": ("plakous-messages", ("--lib",), ()),
 }
 PRODUCT_TOPOLOGY_BUILD_PROFILES = {
-    "plakd-lib": ("plakd", ("--lib",), ()),
+    "plakd-lib": ("plakd", ("--lib",), ("web",)),
 }
 BUILD_PROFILES = {
     **SUPPORTED_PUBLIC_BUILD_PROFILES,

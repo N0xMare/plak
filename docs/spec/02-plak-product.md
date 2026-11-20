@@ -3926,13 +3926,12 @@ with `steer: true` is a steer **only while busy**; sent idle it is a diagnostic
 naming that fact on both stdout and stderr, and the connection stays open. The
 client never has to track busy state to stay correct — it just gets told.
 
-Every rejection is a typed diagnostic with a repairable message: a prompt with
-no text, an over-long prompt, a node action with no `agent_id`, an
-`invoke_tool` whose `name` is not a topology tool or whose `arguments` are not
-an object, or image input in a build without `images`. A capability refusal
-is an `error` diagnostic correlated with that prompt's `id`; it neither
-admits a turn nor changes an in-flight turn. None of them close the
-connection.
+Every rejection is a typed diagnostic with a repairable message: a prompt
+without text or images, an over-long prompt, invalid image input, a node
+action with no `agent_id`, or an `invoke_tool` whose `name` is not a topology
+tool or whose `arguments` are not an object. A rejected prompt produces an
+`error` diagnostic correlated with its `id`; it neither admits a turn nor
+changes an in-flight turn. These diagnostics do not close the connection.
 
 #### 4.3.2 Events
 
@@ -7168,8 +7167,7 @@ The sniff is at most 8 KiB; a non-image stops there, and an image is read
 whole. The workspace read's 16 MiB file bound is the only source bound: a
 larger file is refused before the sniff with the workspace read's
 resource-limit failure (`tool invocation failed: workspace file exceeds the
-hard content identity limit`), for an image and any other file alike. A
-build without image decoding refuses instead of returning the raw file.
+hard content identity limit`), for an image and any other file alike.
 Neither success records a text-read observation, so it does not authorize a
 later whole-file write. Job-output and skill-root paths (chapter 04 §2.1) stay
 on the text read.
