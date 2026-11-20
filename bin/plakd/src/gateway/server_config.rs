@@ -46,16 +46,25 @@ impl ServerConfig {
     }
 
     pub(crate) fn load(home: &PlakPaths) -> Result<Self, String> {
+        Self::load_with_socket(home, default_socket(home))
+    }
+
+    pub(crate) fn load_with_socket(home: &PlakPaths, default: PathBuf) -> Result<Self, String> {
         let path = Self::path(home);
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(format!("could not read {}: {error}", path.display())),
         };
-        Self::parse(home, &text)
+        Self::parse_with_socket(&text, default)
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(home: &PlakPaths, text: &str) -> Result<Self, String> {
+        Self::parse_with_socket(text, default_socket(home))
+    }
+
+    fn parse_with_socket(text: &str, default: PathBuf) -> Result<Self, String> {
         let file: File = if text.trim().is_empty() {
             File {
                 socket: None,
@@ -73,7 +82,7 @@ impl ServerConfig {
         let allow_non_tailnet = file.allow_non_tailnet.unwrap_or(false);
         let socket = match file.socket {
             Some(value) => absolute("socket", &value)?,
-            None => default_socket(home),
+            None => default,
         };
         let listen_tcp = match file.listen_tcp {
             Some(value) => {
@@ -135,7 +144,7 @@ impl ServerConfig {
                 path.display()
             ));
         }
-        let mut config = Self::parse(home, "")?;
+        let mut config = Self::parse_with_socket("", default_socket(home))?;
         if let Some(addr) = listen_tcp {
             address::admit_ip(addr.ip(), false).map_err(address_message)?;
             config.listen_tcp = Some(addr);

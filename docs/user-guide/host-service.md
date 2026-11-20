@@ -149,7 +149,11 @@ host as a rollback.
 If you still have pinned units, follow the [one-time migration](gateway.md#migrate-an-existing-service-once)
 instead. It moves paired runners first (they do not need a gateway), then the
 gateway while the old host keeps running, then carries the host before replacing
-its old unit and drop-ins.
+its old unit and drop-ins. Before carry on Linux, repoint the active
+`ExecStart` drop-in to the destination snapshot and daemon-reload without
+restarting. After carry commits, disable and stop the legacy
+`plak-host.service` before removing it and its drop-ins and enabling
+`plakd-host.service`, so two units do not contend for the home lock.
 Codex and SuperGrok refuse while the running host is still using protocol 1.
 
 Install a tested matching snapshot. For a host already supporting the upgrade

@@ -52,17 +52,27 @@ moves an existing gateway link. Neither service installer starts a process.
 
 Settle work and move paired runners first; runners do not need a gateway.
 Keep the same `PLAK_HOME` and `XDG_STATE_HOME`. Migrate the gateway while the
-old host keeps running:
+old host keeps running. On Linux, identify the old gateway's actual name
+with `systemctl --user list-unit-files 'plak*'` and use that name when retiring
+it. Check that `~/.local/bin/plakd-gateway` is absent (including dangling
+links); install never moves a preexisting link. If this link is already in
+service, use the ordinary link-flip upgrade below instead.
 
-1. Run `plakd gateway drain` if the old gateway exists and wait for it to exit.
-2. On Linux run `systemctl --user disable --now plak-gateway.service` for the
-   old gateway unit. On macOS boot out only
+1. Before touching the old gateway on Linux, run
+   `systemctl --user show -p Requires,BindsTo,PartOf plak-host.service`
+   (use the actual old host unit name). If one of these relationships
+   names the gateway, remove that stop-propagating relationship and
+   daemon-reload without restarting the host. Verify it is gone before
+   continuing.
+2. Run `plakd gateway drain` if the old gateway exists and wait for it to exit.
+3. On Linux run `systemctl --user disable --now <old-gateway-unit>` for the
+   name you confirmed. On macOS boot out only
    `"$HOME/Library/LaunchAgents/com.plakd.gateway.plist"` from `gui/$(id -u)`.
-3. Back up and remove the pinned gateway unit and its
-   `plak-gateway.service.d/` drop-ins outside the manager's search path. Move
+4. Back up and remove the pinned gateway unit and its
+   `<old-gateway-unit>.d/` drop-ins outside the manager's search path. Move
    provider-key `Environment=` entries to the private, mode-0600
    `~/.config/plak/gateway.env` on Linux; do not keep them in the unit.
-4. Run `<destination snapshot>/plakd gateway install`. This seeds the
+5. Run `<destination snapshot>/plakd gateway install`. This seeds the
    dedicated link from the destination binary. On Linux reload the user
    manager, then enable and start the gateway; on macOS bootstrap its plist.
    Run `plakd gateway check` and confirm the destination with
@@ -75,14 +85,26 @@ through the gateway migration. Remove any conflicting custom listener socket
 or host `[gateway] address` before the later co-located `host install`.
 Gateway-only systems keep their intended listener settings and stop here.
 
-Carry the host with `plakd host upgrade` before removing its old definition.
-Then back up and remove the pinned host unit and its `plakd-host.service.d/`
-drop-ins, advance `~/.local/bin/plakd`, and run `plakd host install` with the
-original web/UI flags. Reload the user manager where needed and enable and
-start the host. On macOS boot out the old host plist before removal and
-bootstrap the new one after installation. Local macOS commands against a
-local product home also need a local gateway: run `plakd gateway install`
-and bootstrap its LaunchAgent, even if you do not run a host there.
+On Linux, **before** running `plakd host upgrade`, change the existing host
+drop-in's `ExecStart` to point at the destination snapshot, preserving the
+existing environment and flags. Run `systemctl --user daemon-reload` without
+restarting the host.
+This keeps a crash during the carry window from relaunching the old build.
+Carry with `plakd host upgrade` while the old definition is still in place.
+After carry commits, run `systemctl --user disable --now plak-host.service`
+for the legacy unit (a planned handoff), then back up and remove its file
+and `plak-host.service.d/` drop-ins. If it already used the
+`plakd-host.service` name, retire that definition and its drop-ins instead.
+Advance `~/.local/bin/plakd`, run `plakd host install` with the original
+web/UI flags, reload as needed, and run
+`systemctl --user enable --now plakd-host.service`. Do not run two host
+units for the same home.
+
+On macOS carry first, boot out the old host plist (including
+`com.plak.host.plist` if used) before backing it up and removing it, advance
+the host link, then install and bootstrap the new plist. Local macOS commands
+against a local product home also need a local gateway: run
+`plakd gateway install` and bootstrap its LaunchAgent, even without a host.
 
 ## Upgrade with the host
 

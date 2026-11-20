@@ -367,7 +367,7 @@ mod gateway {
     /// A gateway refusal as the facade's error.
     pub(in crate::subscriptions) fn gateway_error(error: &CustodyError) -> NativeSubscriptionError {
         match error {
-            CustodyError::Unavailable => NativeSubscriptionError::Transport(None),
+            CustodyError::Unavailable => NativeSubscriptionError::GatewayUnavailable,
             CustodyError::Busy { .. } => NativeSubscriptionError::AccountBusy,
             CustodyError::AccountChanged => NativeSubscriptionError::AuthenticationAccountChanged,
             CustodyError::VersionMismatch { .. } => {

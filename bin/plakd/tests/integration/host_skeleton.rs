@@ -100,10 +100,16 @@ fn try_start(fixture: &Fixture, extra: &[&str], env: &[(&str, String)]) -> Optio
 }
 
 #[test]
+#[cfg(feature = "anthropic")]
 fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
     use super::gateway_process::GatewayProcess;
     use plakd_wire_types::console::{CustodyMode, HostRequest, HostResponse};
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    write_private(
+        &fixture.home().join("agents/lead.toml"),
+        "account = \"anthropic\"\nmodel = \"claude-sonnet-5\"\neffort = \"medium\"\ncomposition = \"direct\"\ndescription = \"offline provider fixture\"\n",
+    );
+    let (upstream_port, turns) = gateway_upstream::start();
     let socket = fixture.gateway_socket();
     write_private(
         &fixture.home().join("gateway.toml"),
@@ -113,20 +119,30 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
         GatewayProcess::start(
             fixture
                 .base_command()
-                .env("PLAK_TEST_FAULTS", "fault=connect"),
+                .env("ANTHROPIC_API_KEY", "fixture-only")
+                .env(
+                    "PLAK_TEST_GATEWAY_ANTHROPIC_PORT",
+                    upstream_port.to_string(),
+                ),
             &socket,
             &fixture.root.join("gateway.log"),
         )
     };
     let mut gateway = start_gateway();
-    let mut host = serving_host(spawn_host(fixture.base_command().arg("host"))).unwrap();
+    let mut host = await_serving_host(spawn_host(
+        fixture
+            .base_command()
+            .env_remove("PLAK_TEST_MODEL")
+            .arg("host"),
+    ))
+    .unwrap();
     let mut client = Client::connect(&host);
     let status = |client: &mut Client, id| {
         let answer = client.request(
             id,
             Op::Host {
                 request: HostRequest::AccountsStatus {
-                    account_id: Some("openai".into()),
+                    account_id: Some("anthropic".into()),
                     cursor: None,
                     limit: None,
                 },
@@ -146,6 +162,16 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
         assert_eq!(rows[0].custody.mode, CustodyMode::Service);
     };
     status(&mut client, 1);
+    let created = client.request(2, new_session(&fixture.workspace()));
+    let Outcome::Ok(Answer::Created { node, .. }) = created else {
+        panic!("could not create relayed session: {created:?}");
+    };
+    let attachment = client.attach(3, &node);
+    let prompt = |client: &mut Client, id, stage| {
+        gateway_upstream::prompt(client, id, attachment, stage);
+        assert_eq!(turns.recv_timeout(WAIT).unwrap(), stage);
+    };
+    prompt(&mut client, 4, "before drain");
     let drained = fixture
         .base_command()
         .args(["gateway", "drain"])
@@ -158,18 +184,33 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
     );
     gateway.wait_for_drain();
     let gateway = start_gateway();
-    status(&mut client, 2);
+    status(&mut client, 5);
+    prompt(&mut client, 6, "after drain");
     drop(gateway);
     let _gateway = start_gateway();
-    status(&mut client, 3);
+    status(&mut client, 7);
+    prompt(&mut client, 8, "after crash");
     stop(&mut host);
 }
 
-fn serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Option<Host> {
+#[cfg(feature = "anthropic")]
+mod gateway_upstream;
+
+fn serving_host(process: (Child, mpsc::Receiver<String>)) -> Option<Host> {
+    await_serving_host(process).ok()
+}
+
+fn await_serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Result<Host, String> {
+    let mut last = String::new();
     let line = loop {
-        let line = lines.recv_timeout(WAIT).ok()?;
+        let line = lines
+            .recv_timeout(WAIT)
+            .map_err(|error| format!("host startup: {error}; last diagnostic: {last}"))?;
         if line.starts_with("plakd host: serving on ") {
             break line;
+        }
+        if !line.is_empty() {
+            last = line;
         }
     };
     let socket = line
@@ -177,7 +218,7 @@ fn serving_host((child, lines): (Child, mpsc::Receiver<String>)) -> Option<Host>
         .and_then(|rest| rest.split(" (host ").next())
         .unwrap_or_else(|| panic!("start line: {line}"));
     assert!(line.contains(", instance "), "{line}");
-    Some(Host {
+    Ok(Host {
         child: Some(child),
         socket: PathBuf::from(socket),
         lines,

@@ -60,6 +60,20 @@ pub(crate) fn gateway_review_clock(
     subscriptions
 }
 
+pub(crate) fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewayService>(
+    server: plakous::gateway::server::RelayServer<S>,
+) -> Result<plakous::gateway::server::RelayServer<S>, String> {
+    let Some(port) = std::env::var_os("PLAK_TEST_GATEWAY_ANTHROPIC_PORT") else {
+        return Ok(server);
+    };
+    let port = port
+        .to_str()
+        .and_then(|value| value.parse().ok())
+        .ok_or("invalid test gateway Anthropic port")?;
+    plakous_offline_crash_harness::with_gateway_loopback(server, "https://api.anthropic.com", port)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
     pub(crate) fn bridge_discovery_window(default: std::time::Duration) -> std::time::Duration {

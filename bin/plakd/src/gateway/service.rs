@@ -80,6 +80,7 @@ impl Gateway {
         let bound = usize::try_from(state.config.max_request_body_bytes).unwrap_or(usize::MAX);
         let server = RelayServer::new(product, upstream, state.instance.clone())
             .with_max_request_body_bytes(bound);
+        let server = crate::test_hooks::gateway_loopback_anthropic(server)?;
         Ok(Self {
             state,
             server,

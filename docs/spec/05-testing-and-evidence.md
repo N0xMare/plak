@@ -4512,7 +4512,10 @@ re-prepared onto it and carries the rotated token.
 `just live gateway` prints the plan and a `just live estimate` line, and
 calls no provider. `just live gateway --paid` drives the shared live route
 drivers through a separate `plakd gateway serve` process holding copied keys
-and the machine's subscription store. A keyless caller sets `[gateway] address`
+and its test subscription store. Paid runs on the production machine use a
+separate `XDG_STATE_HOME` with its own login state, because the fixture
+gateway would otherwise contend for the production gateway's exclusive
+holder lock. A keyless caller sets `[gateway] address`
 to the service's Unix socket. The run drives one turn on each of seven routes (`codex`,
 `claude-haiku55-low`, `grok`, `api-openai`, `api-anthropic`, `api-xai`,
 `or-nemotron-free`), restarts its gateway, reopens every session and forces a

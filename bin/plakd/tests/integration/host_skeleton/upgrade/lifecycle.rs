@@ -142,7 +142,7 @@ fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
         json!({"frame":"refused","kind":"bridge_unavailable","reason":"stopping","retry_after_ms":500})
     );
     finished.recv_timeout(WAIT).unwrap();
-    assert!(began.elapsed() < Duration::from_secs(60));
+    assert!(began.elapsed() < Duration::from_secs(50));
     let budget: serde_json::Value =
         serde_json::from_slice(&std::fs::read(budget).unwrap()).unwrap();
     let elapsed = budget["elapsed_ms"].as_u64().unwrap();
@@ -152,11 +152,11 @@ fn host_lifecycle_stalled_peer_uses_the_same_total_stop_budget_as_handoff() {
         "the stalled handshake did not exercise the join allowance: {budget}"
     );
     assert!(
-        remaining < 54_000,
+        remaining < 44_000,
         "advisory waits were added outside the handoff budget: {budget}"
     );
     assert!(
-        elapsed + remaining <= 55_000,
+        elapsed + remaining <= 45_000,
         "the stop margin was spent twice: {budget}"
     );
 }

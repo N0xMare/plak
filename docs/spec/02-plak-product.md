@@ -4034,7 +4034,7 @@ closes. This does not change the v1 command or event encoding.
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status`, and on a usage-limit failure `usage_limit {kind, account, resets_at?, alternatives}` (§4.4.1) |
 | `recovered` | `operations[]`, and when the reopen closed an unfinished turn its `claim` ∈ `running_tool` \| `model_request` \| `compaction_not_applied` \| `nothing_started` \| `tool_round_completed` and `cause` ∈ `process_lost` \| `interrupted`; correlated with the `prompt` or `recover` that triggered it, or emitted on its own when the host recovered a fenced turn in place at idle, or after `ready` when the attach itself recovered a crash |
 | `tree` | `tree_id`, `revision`, `state`, `restored_paused` (always `false`; an exact reopened tree is live), `nodes[]` |
-| `error` | `message`, and `code` for a typed refusal a client keys on (`tree_hosted_elsewhere`) |
+| `error` | `message`, and `code` for a typed refusal a client keys on (including `tree_hosted_elsewhere` and `gateway_unavailable`, the latter when the required credential gateway is unconfigured or does not answer) |
 | `bye` | — |
 
 `hello.capabilities` is additive in v1: a sorted, duplicate-free array with
@@ -6285,8 +6285,12 @@ keeps its separate readiness path.
   joined within 45 s, leaving daemon-held jobs running (a session's work in flight is recorded handed off,
   and its next open continues it once by itself), and releases the lock.
   The stop is bounded: the process exits within 50 s of the signal however
-  its work stands, under the unit's `TimeoutStopSec`; a session not
-  released by then is left to the crash law (`owner_lost`). It prints
+  its work stands, under systemd's `TimeoutStopSec` or launchd's
+  `ExitTimeOut`; a session not released by then is left to the crash law
+  (`owner_lost`). On macOS 27.2.1, a GUI LaunchAgent set to 90 s reports
+  `exit timeout = 60`: launchd caps it at 60 s. The single host deadline
+  across platforms leaves ten seconds before that cap and reserves five
+  seconds of the host budget after session joins. It prints
   `plakd host: serving on <socket> (host <host id>, instance <instance>);
   gateway: <configured address>; tools get <source>` once
   it accepts.
@@ -6317,6 +6321,9 @@ socket or UI defaults. Install never accepts or emits `--dev-login` or a
 TCP listener. Other platforms refuse as not yet supported. It runs before
 product-store setup. It refuses a conflicting gateway address or a custom
 listener socket rather than replacing the operator's configuration.
+On Linux the installed address uses the manager's
+`/run/user/<uid>/plak/gateway.sock` (`%t/plak/gateway.sock`), regardless of
+the installer's `XDG_RUNTIME_DIR`.
 HOME containing `=` or `:` is refused: neither executable
 assignment parsing nor PATH components may be ambiguous. On Linux, a set
 XDG_CONFIG_HOME must resolve to `$HOME/.config`, or install refuses before
@@ -6345,8 +6352,11 @@ the C locale. Remote runners need IdentityAgent or IdentityFile in ssh config.
 
 Install checks both service definitions and the gateway link before changing
 configuration or either service definition, refuses nonempty systemd unit
-drop-in directories (back up and run `systemctl --user revert <unit>`), and
+drop-in directories in `systemd/user`, `systemd/user.control` or the user
+runtime's `systemd/user` (back up and run `systemctl --user revert <unit>`), and
 publishes each complete service file atomically without replacement.
+It refuses the legacy `plak-host.service` or `com.plak.host.plist` until
+the operator has carried the host and retired that definition.
 On Linux it then runs only `systemctl --user daemon-reload` (bounded at five
 seconds). It resolves the first executable systemctl on the installer's PATH to an absolute
 path, then invokes it with HOME, fixed PATH `/usr/bin:/bin` and only the

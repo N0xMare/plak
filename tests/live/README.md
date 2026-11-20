@@ -57,9 +57,10 @@ just live gateway --paid     # every route through a separate gateway; paid
 
 The live drivers start a separate test-hooks gateway and point their callers
 at its private Unix socket. It uses the same OAuth state as the account under
-test, but exclusively holds that store. If another gateway owns that state,
-the driver refuses rather than stopping it. Use a dedicated login state for
-live evidence, or settle and explicitly drain its existing gateway first.
+test, but exclusively holds that store. A paid run on the production machine
+needs a separate `XDG_STATE_HOME` with its own login state: the fixture gateway
+would otherwise contend for the production gateway's holder lock. The
+driver refuses rather than stopping the existing gateway.
 Upstream fault rules run in the test gateway; relay-hop rules run in the caller.
 
 Startup lookup fault proof (opt-in, real provider usage, fresh private home):

@@ -19,6 +19,16 @@ pub(crate) const fn gateway_review_clock(
     subscriptions
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same seam when test hooks are disabled"
+)]
+pub(crate) const fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewayService>(
+    server: plakous::gateway::server::RelayServer<S>,
+) -> Result<plakous::gateway::server::RelayServer<S>, String> {
+    Ok(server)
+}
+
 #[cfg(feature = "web")]
 #[path = "host_lifecycle.rs"]
 pub(crate) mod host_lifecycle;

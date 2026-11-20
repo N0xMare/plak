@@ -188,12 +188,18 @@ also keep compatibility with their immediately preceding version.
   environment settings to `~/.config/plak/gateway.env`. Run `gateway install`
   from the destination snapshot, reload and start the gateway, run
   `gateway check`, and confirm the pin with `readlink ~/.local/bin/plakd-gateway`.
-  Carry the host with `host upgrade` before removing its old unit and drop-ins.
+  Check the old host's stop dependencies before disabling the old gateway.
+  Repoint the existing host drop-in to the destination before carry without
+  restarting, then carry the host with `host upgrade`. After it commits,
+  disable and stop the legacy host before removing its old unit and drop-ins.
   Then advance the host link, rerun `host install` with the original flags,
   reload where needed, and enable and start it. Local macOS commands also
   need a gateway installed and bootstrapped. See the
   [one-time migration](docs/user-guide/gateway.md#migrate-an-existing-service-once).
   No persisted format changes.
+- Use a 50-second host stop deadline, with 45 seconds for session handoff.
+  GUI LaunchAgents are capped at 60 seconds on macOS 27.2.1; systemd's
+  90-second stop timeout is unchanged.
 - Resolve credential custody once per process from the home `config.toml`:
   a host resolves it at startup and every route, console read and write,
   carry probe and catalog refresh uses it. `[gateway]` changes need a host

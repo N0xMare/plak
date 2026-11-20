@@ -599,6 +599,7 @@ pub fn native_subscription_failure(
         E::GatewayCustody => auth(format!(
             "the {name} login is held by the credential gateway; login, logout, consent and account changes go through its admin verbs"
         )),
+        E::GatewayUnavailable => crate::gateway::GatewayUnavailable::CustodyCall.failure(),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)

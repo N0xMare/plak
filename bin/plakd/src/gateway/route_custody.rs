@@ -311,6 +311,7 @@ fn configured_link(home: &PlakPaths, config: &ProductConfig) -> crate::CliResult
 pub(crate) enum GatewayUnavailable<'a> {
     MissingAddress,
     Unreachable(&'a GatewayAddress),
+    CustodyCall,
 }
 
 impl GatewayUnavailable<'_> {
@@ -325,6 +326,9 @@ impl std::fmt::Display for GatewayUnavailable<'_> {
         match self {
             Self::MissingAddress => formatter.write_str(
                 "set [gateway] address and start the service; run `plakd gateway install` for a local gateway",
+            ),
+            Self::CustodyCall => formatter.write_str(
+                "the configured gateway did not answer; start its service (run `plakd gateway install` if the local service is absent)",
             ),
             Self::Unreachable(address @ GatewayAddress::Unix(_)) => write!(
                 formatter,

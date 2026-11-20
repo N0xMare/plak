@@ -2,7 +2,7 @@
 
 use std::io::{self, Write as _};
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "macos"))]
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,7 @@ pub(crate) fn run(
     if std::env::consts::OS == "linux" {
         validate_config_home(home, crate::environment::xdg_config_home().as_deref())?;
     }
+    refuse_legacy_host(home).map_err(failed)?;
     let gateway = GatewayUnit::render(home, paths.home(), &state).map_err(CliFailure::new)?;
     let address = installed_gateway_address(paths)?;
     let executable = home.join(".local/bin/plakd");
@@ -148,7 +149,11 @@ fn failed(error: io::Error) -> CliFailure {
 }
 
 fn installed_gateway_address(paths: &PlakPaths) -> CliResult<String> {
-    let socket = default_socket(paths);
+    let socket = if cfg!(target_os = "linux") {
+        manager_runtime().join("plak/gateway.sock")
+    } else {
+        default_socket(paths)
+    };
     let text = path_text(&socket, "gateway socket")?;
     let limit = if std::env::consts::OS == "macos" {
         103
@@ -160,7 +165,7 @@ fn installed_gateway_address(paths: &PlakPaths) -> CliResult<String> {
             "the gateway socket path exceeds the Unix-socket limit of {limit} bytes"
         )));
     }
-    let config = ServerConfig::load(paths).map_err(CliFailure::new)?;
+    let config = ServerConfig::load_with_socket(paths, socket.clone()).map_err(CliFailure::new)?;
     ServerConfig::require_host_state_root(&config.state_root).map_err(CliFailure::new)?;
     if config.socket != socket {
         return Err(CliFailure::new(
@@ -168,6 +173,77 @@ fn installed_gateway_address(paths: &PlakPaths) -> CliResult<String> {
         ));
     }
     Ok(GatewayAddress::Unix(socket).label())
+}
+
+fn manager_runtime() -> PathBuf {
+    PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
+}
+
+fn systemd_override_roots(config: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![config.join("systemd/user.control")];
+    if let Some(home) = crate::environment::inherited_home() {
+        roots.push(Path::new(&home).join(".config/systemd/user.control"));
+    }
+    roots.push(manager_runtime().join("systemd/user"));
+    if let Some(runtime) = crate::environment::xdg_runtime_dir().filter(|path| path.is_absolute()) {
+        roots.push(runtime.join("systemd/user"));
+    }
+    roots
+}
+
+fn refuse_legacy_host(home: &Path) -> io::Result<()> {
+    let mac = cfg!(target_os = "macos");
+    let name = if mac {
+        "com.plak.host.plist"
+    } else {
+        "plak-host.service"
+    };
+    let mut roots = if mac {
+        vec![home.join("Library/LaunchAgents")]
+    } else {
+        let config = home.join(".config");
+        let mut roots = systemd_override_roots(&config);
+        roots.insert(0, config.join("systemd/user"));
+        roots
+    };
+    roots.dedup();
+    for root in roots {
+        let unit = root.join(name);
+        let path = if path_exists(&unit)? {
+            unit.clone()
+        } else if !mac && nonempty_directory(&root.join("plak-host.service.d"))? {
+            root.join("plak-host.service.d")
+        } else {
+            continue;
+        };
+        let stop = if mac {
+            format!(
+                "launchctl bootout gui/{} {}",
+                rustix::process::getuid().as_raw(),
+                shell_words::quote(unit.to_str().unwrap_or_default()),
+            )
+        } else {
+            "systemctl --user disable --now plak-host.service".to_owned()
+        };
+        let backup = if mac {
+            "the old plist"
+        } else {
+            "plak-host.service and plak-host.service.d/"
+        };
+        return Err(io::Error::other(format!(
+            "legacy host definition at {}; after `plakd host upgrade` commits, run `{stop}` if loaded, back up and remove {backup}, then retry `plakd host install`",
+            path.display(),
+        )));
+    }
+    Ok(())
+}
+
+fn path_exists(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn path_text<'a>(path: &'a Path, name: &str) -> CliResult<&'a str> {
@@ -301,19 +377,33 @@ pub(crate) fn matching_unit(path: &Path, unit: &str, installer: &str) -> io::Res
 }
 
 fn check_drop_ins(path: &Path, name: &str, installer: &str) -> io::Result<()> {
-    let directory = path.with_file_name(format!("{name}.d"));
-    let mut entries = match std::fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if entries.next().transpose()?.is_some() {
-        return Err(io::Error::other(format!(
-            "refusing to install with drop-ins at {}; back them up, run `systemctl --user revert {name}`, then retry `plakd {installer} install`",
-            directory.display()
-        )));
+    let mut roots = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .map_or_else(Vec::new, systemd_override_roots);
+    if let Some(parent) = path.parent() {
+        roots.insert(0, parent.to_owned());
+    }
+    roots.dedup();
+    for root in roots {
+        let directory = root.join(format!("{name}.d"));
+        if nonempty_directory(&directory)? {
+            return Err(io::Error::other(format!(
+                "refusing to install with drop-ins at {}; back them up, run `systemctl --user revert {name}`, then retry `plakd {installer} install`",
+                directory.display()
+            )));
+        }
     }
     Ok(())
+}
+
+fn nonempty_directory(path: &Path) -> io::Result<bool> {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => Ok(entries.next().transpose()?.is_some()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn publish_unit(path: &Path, unit: &str) -> io::Result<()> {
@@ -357,7 +447,7 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn resolve_manager() -> CliResult<std::path::PathBuf> {
+fn resolve_manager() -> CliResult<PathBuf> {
     let path = crate::environment::inherited_path().unwrap_or_else(|| "/usr/bin:/bin".into());
     std::env::split_paths(&path).map(|directory| directory.join("systemctl"))
         .find(|path| is_executable(path)).and_then(|path| path.canonicalize().ok())

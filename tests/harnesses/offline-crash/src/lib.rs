@@ -56,6 +56,20 @@ pub use fixture::{
 use fixture::{probe_fixture, run_fixture, write_reply};
 use protocol::{ChildReply, ControlCommand, PROTOCOL_VERSION};
 
+/// Points a test gateway's pinned provider at an offline fixture, without
+/// changing the logical origin used to validate the route.
+///
+/// # Errors
+/// Refuses an invalid loopback port.
+pub fn with_gateway_loopback<S: plakous_http::relay_server::GatewayService>(
+    server: plakous_http::relay_server::RelayServer<S>,
+    logical_origin: &str,
+    port: u16,
+) -> Result<plakous_http::relay_server::RelayServer<S>, plakous_http::RequestError> {
+    let dial = plakous_http::Origin::loopback_http(std::net::Ipv4Addr::LOCALHOST.into(), port)?;
+    Ok(server.with_dial_override(logical_origin, dial))
+}
+
 /// Reads and executes one versioned JSON-lines command from standard input.
 ///
 /// This is public only so the package's thin binary can share the tested child

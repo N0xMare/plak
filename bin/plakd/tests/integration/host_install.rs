@@ -140,6 +140,19 @@ fn host_argv(
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))?;
     std::fs::create_dir_all(&fixture.product)?;
     std::fs::set_permissions(&fixture.product, std::fs::Permissions::from_mode(0o700))?;
+    // The fake manager below expands %t to the fixture's private runtime root.
+    let config = fixture.product.join("config.toml");
+    let service_socket = format!(
+        "/run/user/{}/plak/gateway.sock",
+        rustix::process::getuid().as_raw()
+    );
+    let fixture_socket = fixture.root.path().join("plak/gateway.sock");
+    let text = std::fs::read_to_string(&config)?;
+    assert!(text.contains(&service_socket));
+    std::fs::write(
+        &config,
+        text.replace(&service_socket, &fixture_socket.to_string_lossy()),
+    )?;
     std::fs::OpenOptions::new()
         .append(true)
         .open(fixture.product.join("config.toml"))?
@@ -219,8 +232,9 @@ fn host_lifecycle(managed: bool) -> TestResult {
         Command::new(fixture.home.join(".local/bin/plakd-gateway"))
             .env_clear()
             .env("HOME", &fixture.home)
-            .env("PLAK_HOME", &fixture.product),
-        &fixture.product.join("gateway/gateway.sock"),
+            .env("PLAK_HOME", &fixture.product)
+            .env("XDG_RUNTIME_DIR", fixture.root.path()),
+        &fixture.root.path().join("plak/gateway.sock"),
         &fixture.root.path().join("gateway.log"),
     );
     let log = fixture.root.path().join("host.log");
@@ -313,9 +327,27 @@ fn host_install_dry_run_touches_nothing_and_refuses_unsafe_flags() -> TestResult
         fixture.home.display()
     )));
     assert!(rendered.contains(&format!(
-        "[gateway]\naddress = \"unix:{}/gateway/gateway.sock\"",
-        fixture.product.display()
+        "[gateway]\naddress = \"unix:/run/user/{}/plak/gateway.sock\"",
+        rustix::process::getuid().as_raw()
     )));
+    let other_runtime = fixture
+        .command()
+        .env("XDG_RUNTIME_DIR", fixture.root.path())
+        .args([
+            "--web",
+            "unix:/tmp/web.sock",
+            "--ui",
+            "/tmp/ui",
+            "--dry-run",
+        ])
+        .output()?;
+    success(&other_runtime);
+    assert!(
+        String::from_utf8_lossy(&other_runtime.stdout).contains(&format!(
+            "address = \"unix:/run/user/{}/plak/gateway.sock\"",
+            rustix::process::getuid().as_raw()
+        ))
+    );
     assert!(!fixture.home.join(".config").exists());
     assert!(!fixture.product.exists());
     assert!(!fixture.log.exists());

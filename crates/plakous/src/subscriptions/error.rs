@@ -130,6 +130,8 @@ pub enum NativeSubscriptionError {
     /// consent, account listing) runs at the gateway, never on its store
     /// from here.
     GatewayCustody,
+    /// The credential gateway could not answer a custody call.
+    GatewayUnavailable,
     /// The credential gateway does not speak the protocol required by this route.
     GatewayProtocolMismatch,
     /// Internal application execution or coordination failed.
@@ -259,6 +261,7 @@ impl NativeSubscriptionError {
             Self::ModelLookup { .. } => unreachable!("handled above"),
             Self::Transport(_) => "native subscription transport failed",
             Self::GatewayCustody => "native subscription login is held by a credential gateway",
+            Self::GatewayUnavailable => "the credential gateway did not answer",
             Self::Internal => "native subscription operation failed internally",
             #[cfg(any(
                 feature = "codex",

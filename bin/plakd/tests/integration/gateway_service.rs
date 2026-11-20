@@ -92,6 +92,35 @@ fn account_and_status_verbs_refuse_without_a_gateway() {
     ] {
         unavailable(home.cli(args));
     }
+    #[cfg(feature = "codex")]
+    {
+        let product = home.path().join("home");
+        std::fs::write(
+            product.join("config.toml"),
+            format!(
+                "[gateway]\naddress = {:?}\n",
+                format!("unix:{}", home.path().join("absent.sock").display()),
+            ),
+        )
+        .unwrap();
+        for args in [
+            &["status", "codex"][..],
+            &["models", "codex"],
+            &[
+                "run",
+                "--account",
+                "codex",
+                "--model",
+                "gpt-6.2-sol",
+                "--effort",
+                "low",
+                "--",
+                "refuse",
+            ],
+        ] {
+            unavailable(home.cli(args));
+        }
+    }
     let secrets = home.path().join("home/secrets");
     assert!(!secrets.exists() || secrets.read_dir().unwrap().next().is_none());
     assert!(!home.path().join(".local/state/plak/subscriptions").exists());
@@ -219,22 +248,76 @@ fn installers_refuse_systemd_drop_ins_before_writing() {
             ],
         ),
     ] {
-        let directory = home.unit().with_file_name(format!("{unit}.d"));
-        std::fs::create_dir_all(&directory).unwrap();
-        let drop_in = directory.join("override.conf");
-        std::fs::write(&drop_in, "[Service]\n").unwrap();
-        let output = home.cli(args);
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains(&format!("systemctl --user revert {unit}"))
-        );
-        assert_eq!(std::fs::read_to_string(&drop_in).unwrap(), "[Service]\n");
-        assert!(!home.path().join("home").exists());
-        assert!(!home.path().join(".local/bin").exists());
-        assert!(!home.unit().exists());
-        std::fs::remove_file(drop_in).unwrap();
+        let runtime = home.path().join("runtime");
+        for directory in [
+            home.unit().with_file_name(format!("{unit}.d")),
+            home.path()
+                .join(format!(".config/systemd/user.control/{unit}.d")),
+            runtime.join(format!("systemd/user/{unit}.d")),
+        ] {
+            std::fs::create_dir_all(&directory).unwrap();
+            let drop_in = directory.join("override.conf");
+            std::fs::write(&drop_in, "[Service]\n").unwrap();
+            let output = home
+                .command(env!("CARGO_BIN_EXE_plakd"))
+                .env("XDG_RUNTIME_DIR", &runtime)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains(&format!("systemctl --user revert {unit}"))
+            );
+            assert_eq!(std::fs::read_to_string(&drop_in).unwrap(), "[Service]\n");
+            assert!(!home.path().join("home").exists());
+            assert!(!home.path().join(".local/bin").exists());
+            assert!(!home.unit().exists());
+            std::fs::remove_file(drop_in).unwrap();
+        }
     }
+}
+
+#[cfg(feature = "web")]
+#[test]
+fn host_install_refuses_the_legacy_host_before_writing() {
+    let home = Home::new();
+    let legacy = if cfg!(target_os = "macos") {
+        home.unit().with_file_name("com.plak.host.plist")
+    } else {
+        home.unit().with_file_name("plak-host.service")
+    };
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "legacy operator definition\n").unwrap();
+    let output = home.cli(&[
+        "host",
+        "install",
+        "--web",
+        "unix:/tmp/web.sock",
+        "--ui",
+        "/tmp/ui",
+    ]);
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        error.contains("after `plakd host upgrade` commits"),
+        "{error}"
+    );
+    assert!(
+        error.contains(if cfg!(target_os = "macos") {
+            "launchctl bootout"
+        } else {
+            "systemctl --user disable --now plak-host.service"
+        }),
+        "{error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(legacy).unwrap(),
+        "legacy operator definition\n"
+    );
+    assert!(!home.path().join("home").exists());
+    assert!(!home.path().join(".local/bin").exists());
+    assert!(!home.unit().exists());
 }
 
 #[test]
