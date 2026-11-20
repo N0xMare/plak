@@ -891,17 +891,27 @@ done
 
 background=()
 compile_count=${#compile_only[@]}
+if [[ " ${compile_only[*]:-} " == *" package-lite "* ]]; then
+  # Packaging without verification is brief and does not compile. Do not
+  # reserve one of the build slots for it throughout test preparation.
+  CARGO_BUILD_JOBS=1 buffer_group package-lite
+  compile_count=$((compile_count - 1))
+fi
 if [[ "$compile_count" -gt 0 && "$test_jobs" -gt "$compile_count" ]]; then
   compile_jobs=$((test_jobs / 8))
   if [[ "$test_build_needed" == false ]]; then
     compile_jobs=$((jobs / compile_count))
+  elif [[ "$standalone_started" == true && "$test_jobs" -ge 5 ]]; then
+    # The standalone chain has its own budget. Give the contracts more
+    # than one slot without cutting the parallelism of the test build.
+    compile_jobs=$((test_jobs / 4))
+    if [[ "$compile_jobs" -lt 2 ]]; then compile_jobs=2; fi
   fi
   if [[ "$compile_jobs" -lt 1 ]]; then compile_jobs=1; fi
   for group in ${compile_only[@]+"${compile_only[@]}"}; do
-    group_jobs=$compile_jobs
-    if [[ "$group" == package-lite ]]; then group_jobs=1; fi
-    test_jobs=$((test_jobs - group_jobs))
-    start_group "$group" "$group_jobs"
+    if [[ "$group" == package-lite ]]; then background+=(""); continue; fi
+    test_jobs=$((test_jobs - compile_jobs))
+    start_group "$group" "$compile_jobs"
     background+=("$group_pid")
   done
 fi
@@ -924,7 +934,9 @@ if [[ ${#background[@]} -gt 0 ]]; then
     replay_group "${compile_only[index]}" "${background[index]}"
   done
 else
-  for group in ${compile_only[@]+"${compile_only[@]}"}; do run_timed "$group"; done
+  for group in ${compile_only[@]+"${compile_only[@]}"}; do
+    if [[ "$group" == package-lite ]]; then replay_group package-lite; else run_timed "$group"; fi
+  done
 fi
 
 parallel_handled=false

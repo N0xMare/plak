@@ -818,9 +818,11 @@ given a batch base it shares the batch scoping policy: the runner owning
 test artifacts. Independent runners use separate checkout, target and scratch
 roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
-preparation and package-lite. Standalone, package-lite and public compile
-contracts run under nice in targets separate from workspace test
-preparation, subject to the Cargo jobs budget. In a combined Linux batch
+preparation and package-lite. Standalone and public compile contracts run
+under nice in targets separate from workspace test preparation, subject to
+the Cargo jobs budget. Package-lite uses a separate target and finishes
+before the test build, so it does not reserve a compile slot during it.
+In a combined Linux batch
 with sufficient build slots, the feature checker and standalone lint run
 in sequence in the standalone target, reusing matching Cargo artifacts
 without unifying their feature resolutions. This chain starts beside
