@@ -239,15 +239,8 @@ fn deploy_api_canaries_relay_exactly_once_per_refusal_without_a_runtime() {
             );
         }
     }
-    let audit = command(root).args(["gateway", "audit"]).output().unwrap();
-    assert!(audit.status.success());
-    let posts: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
-        .unwrap()
-        .lines()
-        .map(|row| serde_json::from_str::<serde_json::Value>(row).unwrap())
-        .filter(|row| row["method"] == "POST")
-        .collect();
-    assert_eq!(posts.len(), 8);
+    let posts = audit_posts(root, 8);
+    assert_eq!(posts.len(), 8, "{posts:?}");
     for (account, host, path) in cases {
         let mut statuses: Vec<_> = posts
             .iter()
@@ -343,14 +336,7 @@ fn deploy_api_canary_success_reset_and_deadline_relay_one_physical_post_each() {
         })
         .unwrap();
     upstream.join().unwrap();
-    let audit = command(root).args(["gateway", "audit"]).output().unwrap();
-    assert!(audit.status.success());
-    let posts: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .filter(|row| row["method"] == "POST")
-        .collect();
+    let posts = audit_posts(root, 3);
     assert_eq!(posts.len(), 3, "{posts:?}");
     assert!(
         posts
@@ -419,6 +405,26 @@ fn serve_api_canary_fixture(listener: &TcpListener) {
 
 fn state(root: &Path) -> PathBuf {
     root.join("xdg")
+}
+
+/// The gateway records an exchange after it finishes relaying it, so the row
+/// can trail the caller's exit; wait boundedly for the expected POST rows.
+fn audit_posts(root: &Path, expected: usize) -> Vec<serde_json::Value> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let audit = command(root).args(["gateway", "audit"]).output().unwrap();
+        assert!(audit.status.success(), "{audit:?}");
+        let posts: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|row| row["method"] == "POST")
+            .collect();
+        if posts.len() >= expected || Instant::now() >= deadline {
+            return posts;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn command(root: &Path) -> Command {

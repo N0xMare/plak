@@ -80,9 +80,12 @@ impl Audit {
         let mut options = OpenOptions::new();
         options.create(true).append(true).mode(0o600);
         let mut file = options.open(path)?;
-        serde_json::to_writer(&mut file, event)
+        // One write per line: concurrent appenders must never interleave a
+        // record with another record's newline.
+        let mut line = serde_json::to_vec(event)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        file.write_all(b"\n")?;
+        line.push(b'\n');
+        file.write_all(&line)?;
         Ok(())
     }
 

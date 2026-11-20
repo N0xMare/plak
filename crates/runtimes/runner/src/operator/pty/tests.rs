@@ -505,11 +505,12 @@ fn operator_runner_loss_child() {
     let mut worker = worker();
     until_output(&mut worker, b"PTY-READY\n");
     let pid = worker.identity.as_ref().unwrap().pid;
-    std::fs::write(
-        std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap(),
-        pid.to_string(),
-    )
-    .unwrap();
+    // Publish by rename: the parent polls for the path and must never read a
+    // created-but-unwritten file.
+    let handshake = PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
+    let pending = handshake.with_extension("pending");
+    std::fs::write(&pending, pid.to_string()).unwrap();
+    std::fs::rename(&pending, &handshake).unwrap();
     loop {
         std::thread::park();
     }
