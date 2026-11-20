@@ -1,13 +1,14 @@
 use super::{
-    AcquireBranch, ArchiveReceipt, ArchiveSession, BranchLease, BranchRevision, CheckpointId,
-    CommitCheckpoint, CommitReceipt, CommittedCheckpoint, CreateReceipt, CreateSession,
-    DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail, ForkBranch,
-    ForkReceipt, Future, LeaseInstant, LineRecord, LineTerminalsReceipt, LoadedBranch,
+    AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, BranchRevision,
+    CheckpointId, CommitCheckpoint, CommitReceipt, CommittedCheckpoint, CreateReceipt,
+    CreateSession, DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail,
+    ForkBranch, ForkReceipt, Future, LeaseInstant, LineRecord, LineTerminalsReceipt, LoadedBranch,
     NonZeroUsize, Page, Pin, PruneBranch, PruneReceipt, RecordLineJobTerminals, RecoverFork,
     SessionId, SessionQuery, SessionRef, SessionStoreError, SessionSummary, StoreReclaimMode,
     StoreReclaimReport, StoreUsage, StoredCheckpoint,
 };
-use crate::manifest::LineJobTerminal;
+use crate::checkpoint_bundle::RuntimeCheckpointInspection;
+use crate::manifest::{LineJobTerminal, RuntimeLifecycle};
 use plakous_model::LineId;
 
 /// Boxed future returned by object-safe store operations.
@@ -75,6 +76,53 @@ pub trait SessionStore: Send + Sync + 'static {
 
     /// Loads the exact current branch head and materialized checkpoint.
     fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch>;
+
+    /// Observes the current head and its lifecycle and recovery obligations.
+    /// This is not a validation of the full graph or authority to resume it.
+    fn load_branch_metadata(
+        &self,
+        selector: SessionRef,
+    ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
+        Box::pin(async move {
+            let loaded = self.load_branch(selector).await?;
+            let session = loaded.session();
+            let head = loaded.head();
+            let checkpoint = loaded.checkpoint();
+            let manifest = checkpoint.checkpoint().manifest();
+            let topology = manifest.topology();
+            if head.session() != selector
+                || session.session_id() != selector.session_id()
+                || session.is_archived()
+                || session.durability() != manifest.durability()
+                || head.checkpoint() != checkpoint.reference()
+                || topology.session_id != selector.session_id()
+                || topology.branch_id != selector.branch_id()
+                || topology.branch_revision != head.revision().get()
+            {
+                return Err(SessionStoreError::corrupt());
+            }
+            let mut requests = Vec::new();
+            if let RuntimeLifecycle::Working { obligations, .. } = manifest.lifecycle() {
+                for obligation in obligations {
+                    let id = obligation.operation_id();
+                    let record = manifest
+                        .ledger()
+                        .operation(id)
+                        .ok_or_else(SessionStoreError::corrupt)?;
+                    requests.push((id, record.request_identity()));
+                }
+            }
+            Ok((
+                head,
+                RuntimeCheckpointInspection {
+                    topology,
+                    durability: manifest.durability(),
+                    lifecycle: manifest.lifecycle().clone(),
+                    requests,
+                },
+            ))
+        })
+    }
 
     /// Loads one exact historical immutable checkpoint.
     fn load_checkpoint(&self, checkpoint: CheckpointId) -> StoreFuture<'_, StoredCheckpoint>;

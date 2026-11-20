@@ -2100,11 +2100,22 @@ async fn diagnostic_metadata_does_not_materialize_or_certify_history() -> TestRe
         metadata.topology.checkpoint_id,
         head.checkpoint().checkpoint_id()
     );
+    let (live_head, live_metadata) = store.load_branch_metadata(selector).await?;
+    assert_eq!(live_head, head);
+    assert_eq!(live_metadata.lifecycle, metadata.lifecycle);
+    store
+        .dispatch_read("metadata_did_not_materialize", |b| {
+            assert_eq!(b.checkpoints.decodes, 0);
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
     assert!(SqliteSessionStore::inspect_branch(&path, selector).is_err());
     assert_eq!(connection.execute(
         "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id=(SELECT id FROM runtime_objects WHERE kind=1 LIMIT 1)", [],
     )?, 1);
     assert!(SqliteSessionStore::inspect_branch_metadata(&path, selector).is_err());
+    assert!(store.load_branch_metadata(selector).await.is_err());
     store.shutdown().await?;
     Ok(())
 }

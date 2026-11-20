@@ -11,7 +11,7 @@ use super::{
 };
 #[cfg(feature = "sessions-sqlite")]
 use {
-    super::{RecoveryRequiredReport, store_error, types},
+    super::{RecoveryRequiredReport, reads::check_head_locator, store_error},
     plakous_store::SqliteSessionStore,
     std::path::Path,
 };
@@ -33,43 +33,8 @@ impl AgentSessions {
         let (head, metadata) =
             SqliteSessionStore::inspect_branch_metadata(path, locator.session_ref())
                 .map_err(store_error)?;
-        let current = SessionLocator::new(
-            head.session().session_id(),
-            head.session().branch_id(),
-            head.checkpoint().checkpoint_id(),
-        );
-        if current != locator {
-            return Err(AgentSessionsError::stale(current));
-        }
-        let RuntimeLifecycle::Working {
-            recovery_phase,
-            obligations,
-            ..
-        } = metadata.lifecycle
-        else {
-            return Ok(None);
-        };
-        let obligations = obligations
-            .into_iter()
-            .map(|obligation| {
-                metadata
-                    .requests
-                    .iter()
-                    .find(|(id, _)| *id == obligation.operation_id())
-                    .map(|(_, identity)| types::obligation_report(obligation, *identity))
-                    .ok_or_else(|| {
-                        AgentSessionsError::new(
-                            AgentSessionsErrorKind::Integrity,
-                            "working checkpoint lost its exact recovery obligations",
-                        )
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(RecoveryRequiredReport {
-            locator,
-            phase: types::recovery_phase_report(recovery_phase),
-            obligations,
-        }))
+        check_head_locator(locator, head)?;
+        RecoveryRequiredReport::from_metadata(locator, metadata)
     }
 
     /// Reconciles only the exact compaction operation bound to this identity.

@@ -583,6 +583,41 @@ pub struct RecoveryRequiredReport {
 }
 
 impl RecoveryRequiredReport {
+    pub(super) fn from_metadata(
+        locator: SessionLocator,
+        metadata: plakous_agent::internal::RuntimeCheckpointInspection,
+    ) -> Result<Option<Self>, AgentSessionsError> {
+        let RuntimeLifecycle::Working {
+            recovery_phase,
+            obligations,
+            ..
+        } = metadata.lifecycle
+        else {
+            return Ok(None);
+        };
+        let obligations = obligations
+            .into_iter()
+            .map(|obligation| {
+                metadata
+                    .requests
+                    .iter()
+                    .find(|(id, _)| *id == obligation.operation_id())
+                    .map(|(_, identity)| obligation_report(obligation, *identity))
+                    .ok_or_else(|| {
+                        AgentSessionsError::new(
+                            AgentSessionsErrorKind::Integrity,
+                            "working checkpoint lost its exact recovery obligations",
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(Self {
+            locator,
+            phase: recovery_phase_report(recovery_phase),
+            obligations,
+        }))
+    }
+
     pub(super) fn from_checkpoint(
         locator: SessionLocator,
         checkpoint: &RuntimeCheckpoint,

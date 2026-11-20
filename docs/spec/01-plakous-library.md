@@ -1807,6 +1807,11 @@ Jobs taking at least 250 ms also log a WARN with static label, lane, elapsed
 milliseconds and both lane depths. A request the exited actor can no longer
 take, or whose reply it dropped, returns `BackendUnavailable` and logs a WARN
 under the same target naming the lane and `reason=disconnected|reply_dropped`.
+Exact-head running-turn and detached context-status observations check the branch
+and checkpoint rows and authenticate the addressed lifecycle metadata and any
+recovery-obligation requests in one actor read snapshot. They do not load
+canonical history or certify the rest of the checkpoint graph for reopen or
+deletion.
 Every failed SQLite operation logs a content-free WARN under
 `plakous_store::sqlite_operation`: SQLite's result code, or for errors rusqlite
 raises itself a static category (`no_rows`, `invalid_query`, `invalid_value`,

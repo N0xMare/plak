@@ -50,6 +50,49 @@ async fn line_identity_does_not_load_conversation_checkpoints() -> TestResult {
 }
 
 #[tokio::test]
+async fn head_observations_do_not_request_materialized_branches() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(CountingReads::new()?);
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        store.clone(),
+        RuntimeDurability::Disabled,
+    ))?;
+    let locator = completed_session(&sessions, &workspace, "head-metadata").await?;
+    store.reset();
+
+    assert_eq!(sessions.head_running_turn(locator).await?, None);
+    let report = sessions
+        .context_status(ContextStatusRequest::new(
+            SessionOperationId::new("context:head-metadata")?,
+            locator,
+            ContextQuery::Current,
+        ))
+        .await?;
+    assert!(matches!(
+        report.kind(),
+        SessionContextStatusKind::Unavailable(_)
+    ));
+
+    let stale = SessionLocator::new(
+        locator.session_id(),
+        locator.branch_id(),
+        CheckpointId::try_from(Uuid::from_u128(1))?,
+    );
+    let error = sessions
+        .head_running_turn(stale)
+        .await
+        .expect_err("stale head");
+    assert_eq!(error.kind(), AgentSessionsErrorKind::StaleLocator);
+    assert_eq!(error.current_locator(), Some(locator));
+    assert_eq!(store.branches.load(Ordering::SeqCst), 0);
+    assert_eq!(store.checkpoints.load(Ordering::SeqCst), 0);
+    assert!(sessions.head_is_quiescent(locator).await?);
+    assert_eq!(store.branches.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn facade_placeholder_suffix_is_refused_before_any_receipt_read() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -109,6 +152,19 @@ impl SessionStore for CountingReads {
     ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
         self.branches.fetch_add(1, Ordering::SeqCst);
         self.inner.load_branch(session)
+    }
+
+    fn load_branch_metadata(
+        &self,
+        session: SessionRef,
+    ) -> store_api::StoreFuture<
+        '_,
+        (
+            store_api::BranchHead,
+            store_api::RuntimeCheckpointInspection,
+        ),
+    > {
+        self.inner.load_branch_metadata(session)
     }
 
     fn load_checkpoint(

@@ -6471,6 +6471,12 @@ The opt-in `perf_store --large-store-admission` scenario reports admission and
 actor `queue_wait_ns` over a 200-session/2,000-checkpoint store. Timing is
 informational and never determines gate success.
 
+The opt-in `perf_store --branch-reads` scenario compares cold and warm full
+head loads with history-free lifecycle observations over a synthetic store
+with 44 root sessions and 40 child sessions. Count-based facade and actor
+tests pin zero materialized loads for the observation path; the benchmark's
+timings are informational.
+
 ### Opt-In MCP OAuth Interoperability
 
 `just live mcp-oauth` (`tests/live/mcp_oauth/`) is a local, zero-inference

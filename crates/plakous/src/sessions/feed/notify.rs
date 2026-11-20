@@ -13,12 +13,12 @@ use std::task::{Poll, Waker};
 
 use crate::sessions::RuntimeCheckpoint;
 use plakous_agent::internal::{
-    AcquireBranch, ArchiveReceipt, ArchiveSession, BranchLease, CheckpointId, CommitCheckpoint,
-    CommitReceipt, CommittedCheckpoint, CreateReceipt, CreateSession, DeleteReceipt, DeleteSession,
-    DurabilityReport, FeedPage, FeedSeq, FeedTail, ForkBranch, ForkReceipt, LeaseInstant,
-    LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork, SessionQuery, SessionRef,
-    SessionStore, SessionStoreError, SessionSummary, StoreAdmission, StoreFuture, StoreReclaimMode,
-    StoreUsage, StoredCheckpoint,
+    AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, CheckpointId,
+    CommitCheckpoint, CommitReceipt, CommittedCheckpoint, CreateReceipt, CreateSession,
+    DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail, ForkBranch,
+    ForkReceipt, LeaseInstant, LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork,
+    RuntimeCheckpointInspection, SessionQuery, SessionRef, SessionStore, SessionStoreError,
+    SessionSummary, StoreAdmission, StoreFuture, StoreReclaimMode, StoreUsage, StoredCheckpoint,
 };
 use plakous_model::SessionId;
 
@@ -279,6 +279,13 @@ impl SessionStore for NotifyingStore {
 
     fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch> {
         self.inner.load_branch(session)
+    }
+
+    fn load_branch_metadata(
+        &self,
+        session: SessionRef,
+    ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
+        self.inner.load_branch_metadata(session)
     }
 
     fn load_checkpoint(&self, checkpoint: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {

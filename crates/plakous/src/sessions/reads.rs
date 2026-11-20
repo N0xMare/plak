@@ -157,6 +157,19 @@ impl AgentSessions {
 }
 
 impl AgentSessions {
+    pub(super) async fn head_metadata(
+        &self,
+        locator: SessionLocator,
+    ) -> Result<plakous_agent::internal::RuntimeCheckpointInspection, AgentSessionsError> {
+        let (head, metadata) = self
+            .store
+            .load_branch_metadata(locator.session_ref())
+            .await
+            .map_err(|error| store_error(error).for_session(locator.session_id))?;
+        check_head_locator(locator, head)?;
+        Ok(metadata)
+    }
+
     /// Whether the head at this locator is quiescent: no turn or session
     /// workflow is unsettled on it.
     ///
@@ -186,26 +199,18 @@ impl AgentSessions {
     /// lease. Quiescent heads and session workflow roots have no ordinary turn.
     ///
     /// # Errors
-    /// Returns typed exact-head lookup, stale-locator, integrity or backend failure.
+    /// Returns typed exact-head lookup, stale-locator, metadata integrity or backend failure.
     pub async fn head_running_turn(
         &self,
         head: SessionLocator,
     ) -> Result<Option<TurnId>, AgentSessionsError> {
-        Ok(
-            match self
-                .load_exact(head)
-                .await?
-                .checkpoint
-                .manifest()
-                .lifecycle()
-            {
-                RuntimeLifecycle::Working {
-                    root: RuntimeWorkingRoot::Turn { turn_id, .. },
-                    ..
-                } => Some(*turn_id),
-                _ => None,
-            },
-        )
+        Ok(match self.head_metadata(head).await?.lifecycle {
+            RuntimeLifecycle::Working {
+                root: RuntimeWorkingRoot::Turn { turn_id, .. },
+                ..
+            } => Some(turn_id),
+            _ => None,
+        })
     }
 
     /// The process budgets bound to the session's stored runtime environment.
@@ -494,4 +499,19 @@ impl AgentSessions {
             exact.checkpoint.manifest().ledger().clone(),
         ))
     }
+}
+
+pub(super) fn check_head_locator(
+    requested: SessionLocator,
+    head: plakous_agent::internal::BranchHead,
+) -> Result<(), AgentSessionsError> {
+    let current = SessionLocator::new(
+        head.session().session_id(),
+        head.session().branch_id(),
+        head.checkpoint().checkpoint_id(),
+    );
+    if current != requested {
+        return Err(AgentSessionsError::stale(current));
+    }
+    Ok(())
 }

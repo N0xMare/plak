@@ -36,6 +36,8 @@ use serde_json::{Value, json};
 #[path = "../tests/integration/conformance.rs"]
 mod conformance;
 
+mod branch_reads;
+
 const SCHEMA: &str = "plakous.perf-store.v6";
 const FIXTURE: &str = "linear-semantic-checkpoint-trace-v3";
 const BASELINE: &str = "unratified-raw-distribution-v1";
@@ -141,8 +143,13 @@ struct Options {
     turn_sweep: &'static [u64],
     dry_run: bool,
     large_store_admission: bool,
-    cold_lineage: bool,
+    read_workload: Option<ReadWorkload>,
     restart_probe: Option<(PathBuf, u64)>,
+}
+
+enum ReadWorkload {
+    ColdLineage,
+    BranchReads,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -152,8 +159,11 @@ async fn main() -> BenchResult<()> {
         return run_sqlite_restart_probe(path, *turns).await;
     }
     emit_metadata(&options);
-    if options.cold_lineage {
-        return run_cold_lineage().await;
+    if let Some(workload) = options.read_workload {
+        return match workload {
+            ReadWorkload::ColdLineage => run_cold_lineage().await,
+            ReadWorkload::BranchReads => branch_reads::run().await,
+        };
     }
     if options.dry_run {
         println!(
@@ -192,7 +202,7 @@ fn options() -> BenchResult<Options> {
     let mut turn_sweep = DEFAULT_TURN_SWEEP;
     let mut dry_run = false;
     let mut large_store_admission = false;
-    let mut cold_lineage = false;
+    let mut read_workload = None;
     let mut restart_probe = None;
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -201,7 +211,8 @@ fn options() -> BenchResult<Options> {
             "--long" => turn_sweep = LONG_TURN_SWEEP,
             "--dry-run" => dry_run = true,
             "--large-store-admission" => large_store_admission = true,
-            "--cold-lineage" => cold_lineage = true,
+            "--cold-lineage" => read_workload = Some(ReadWorkload::ColdLineage),
+            "--branch-reads" => read_workload = Some(ReadWorkload::BranchReads),
             "--bench" => {}
             "--restart-probe" => {
                 let path = arguments
@@ -220,7 +231,7 @@ fn options() -> BenchResult<Options> {
         turn_sweep,
         dry_run,
         large_store_admission,
-        cold_lineage,
+        read_workload,
         restart_probe,
     })
 }

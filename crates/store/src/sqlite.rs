@@ -26,11 +26,11 @@ use plakous_agent::internal::{
     DigestDomain, DurabilityReport, FeedBranchTransition, FeedChange, FeedLocator, FeedPage,
     FeedSeq, FeedTail, ForkBranch, ForkLineage, ForkOperation, ForkReceipt, LeaseClock,
     LeaseDomain, LeaseInstant, LineOrigin, LineStep, LoadedBranch, Page, PruneBranch, PruneReceipt,
-    RecoverFork, RunId, RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability,
-    RuntimeManifest, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind, SessionHead,
-    SessionId, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreError,
-    SessionSummary, SessionWorkflowId, StoreAdmission, StoreCapacityBound, StoreFuture,
-    StoreInvalidReason, StoreUsage, StoredCheckpoint, Timestamp,
+    RecoverFork, RunId, RuntimeCheckpoint, RuntimeCheckpointInspection, RuntimeCheckpointKind,
+    RuntimeDurability, RuntimeManifest, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind,
+    SessionHead, SessionId, SessionQuery, SessionRef, SessionRevision, SessionStore,
+    SessionStoreError, SessionSummary, SessionWorkflowId, StoreAdmission, StoreCapacityBound,
+    StoreFuture, StoreInvalidReason, StoreUsage, StoredCheckpoint, Timestamp,
 };
 use rusqlite::{
     Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
@@ -1222,6 +1222,17 @@ impl SessionStore for SqliteSessionStore {
             b.load_branch(s)
         })
     }
+    fn load_branch_metadata(
+        &self,
+        selector: SessionRef,
+    ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
+        self.dispatch_read("load_branch_metadata", move |b| {
+            b.require_open()?;
+            let snapshot = b.connection.transaction().map_err(map_sqlite)?;
+            inspection::branch_metadata(&snapshot, selector)
+        })
+    }
+
     fn load_checkpoint(&self, c: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {
         self.dispatch_read("load_checkpoint", move |b| {
             #[cfg(feature = "test-support")]

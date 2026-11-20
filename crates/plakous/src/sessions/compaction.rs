@@ -3,10 +3,10 @@ use super::{
     AgentSessionEndpointError, AgentSessions, AgentSessionsError, AgentSessionsErrorKind,
     CompactReason, CompactSessionOutcome, CompactSessionRequest, ContextQuery,
     ContextStatusRequest, DurableCompactionReceipt, DurableCompactionRecoveryOutcome,
-    DurableSessionAddress, SessionBranchKey, SessionContextStatus, SessionContextStatusKind,
-    SessionLocator, SessionOperationId, SessionRuntimeBinding, SessionWorkflowUnavailable,
-    compaction_pending_user_input, runtime_error, validate_compaction_operation_id,
-    validate_compaction_publication,
+    DurableSessionAddress, RecoveryRequiredReport, SessionBranchKey, SessionContextStatus,
+    SessionContextStatusKind, SessionLocator, SessionOperationId, SessionRuntimeBinding,
+    SessionWorkflowUnavailable, compaction_pending_user_input, runtime_error,
+    validate_compaction_operation_id, validate_compaction_publication,
 };
 
 impl AgentSessions {
@@ -26,8 +26,8 @@ impl AgentSessions {
         };
         let branch = SessionBranchKey::new(request.locator.session_id, request.locator.branch_id);
         let Some(endpoint) = self.drivers.endpoint(branch) else {
-            let exact = self.load_exact(request.locator).await?;
-            let recovery = exact.recovery_report();
+            let metadata = self.head_metadata(request.locator).await?;
+            let recovery = RecoveryRequiredReport::from_metadata(request.locator, metadata)?;
             return Ok(SessionContextStatus {
                 operation_id: request.operation_id,
                 locator: request.locator,

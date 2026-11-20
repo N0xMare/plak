@@ -1306,6 +1306,21 @@ async fn abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspecti
         committed.head().session().branch_id(),
         committed.head().checkpoint().checkpoint_id(),
     );
+    assert_eq!(sessions.head_running_turn(head).await?, Some(turn_id));
+    let status = sessions
+        .context_status(ContextStatusRequest::new(
+            SessionOperationId::new("context:recorded-abandonment")?,
+            head,
+            ContextQuery::Current,
+        ))
+        .await?;
+    let SessionContextStatusKind::RecoveryRequired(report) = status.kind() else {
+        return Err("detached working head must report recovery required".into());
+    };
+    assert_eq!(
+        Some(report.clone()),
+        AgentSessions::inspect_recovery_sqlite(&database, head)?
+    );
     let OpenSessionOutcome::Opened {
         session: reopened, ..
     } = sessions

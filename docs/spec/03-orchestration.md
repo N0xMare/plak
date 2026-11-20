@@ -5016,6 +5016,9 @@ incremental projection caller rereads from the session start (or its retention
 seed) outside the tree lock and retries once, carrying authenticated wait
 evidence. The reread spans the retained session through its initial observed tail,
 not a fixed page window; its record bound is the runtime session retention limit.
+When seeding behind retention, the projector reads each named head's running
+ordinary turn from exact checkpoint metadata, not from materialized history
+(chapter 01 §5.2).
 A second refusal maps to the existing `operation_recovery_required`;
 no internal retry condition adds a model-visible wire code.
 
