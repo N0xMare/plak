@@ -341,9 +341,13 @@ repository can never grant web access.
 | `web.config_write` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed allowlisted home configuration, template and profile writes. Grants deferred execution through tools, on_mint and env. Requires config_read; home-only, default off and captured at host startup. |
 | `web.files_read` | bool | `false` | true or false; home-scoped; host restart required | Allow admitted web principals to inspect saved workspaces and Changes. Exact file bytes may contain secrets. Same-user sockets are trusted independently; default off and captured at host startup. |
 | `web.terminal` | bool | `false` | true or false; home-scoped; host restart required | Allow confirmed interactive operator shells as the runner user. Shells are not confined to the workspace. Same-user sockets are trusted independently; default off and captured at host startup. |
-| `gateway.address` | string | `(unset)` | Required for hosts; unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped; host restart required | Where the host sends account and relay calls. `plakd host install` sets the service's Unix socket (`/run/user/<uid>/plak/gateway.sock` on Linux, matching systemd's `%t`). Standalone account administration without host configuration targets the local gateway service; neither mode opens credentials in-process. |
+| `gateway.address` | string | `(unset)` | Required for hosts; unix:<absolute path> or tcp:<ip>:<port>; loopback, tailnet or allow_non_tailnet; home-scoped; host restart required | Where the host sends account and relay calls. `plakd host install` sets the default Unix socket. Standalone account administration without host configuration targets the local gateway service; neither mode opens credentials in-process. |
 | `gateway.key_file` | string | `(unset)` | absolute path; mode 0600; home-scoped; host restart required | The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup. |
 | `gateway.allow_non_tailnet` | bool | `false` | true or false; home-scoped; host restart required | Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. Captured at host startup. |
+
+On Linux, the socket written by `plakd host install` is
+`/run/user/<uid>/plak/gateway.sock`, matching systemd's `%t` regardless of
+the installer's environment.
 
 `<home>/gateway.toml` is the gateway service file, not a key in this table.
 It has no key directory: the service reads API keys from the home `secrets/`
