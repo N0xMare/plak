@@ -2775,6 +2775,12 @@ version. There is no top-level prompt positional or terminal resume command.
 | `runner serve`, `runner connect --stdio`, `runner allow <host-id>`, `runner ps [<name>]`, `runner pair <name>`, `runner unpair <name>` | Runners (chapter 01 section 8.4, chapter 04 section 2.9). On a runner machine, `serve` runs the runner daemon in the foreground until it is idle (07 section 3.7), with the tree's version control registered as its extension: it answers only absolute paths without `..` that resolve under the roots or the `copies` root and outside the product home, and takes copies carried from another runner under `copies` (chapter 01 section 8.5); the hidden `serve --local` runs this home's home-local runner in the foreground until it is idle (300 s), or its socket is removed or replaced (chapter 01 section 8.4); startup creates runner directories only below an existing product home and refuses a deleted home rather than resurrecting it: it needs no `runner.toml`, binds only this home's `host-id` from any build of its runner protocol version, carries only process sessions, serves any workspace outside the product home, and its independently owned startup probe must reconcile before local sessions open; `connect --stdio` bridges standard input and output to the daemon of this build's version triple and, when none answers, starts `plakd runner serve` detached in its own process group with a cleared environment (`PATH`, `HOME`, `PLAK_HOME`) and its stderr in `runner/builds/<triple-key>/serve.log`; a host's ssh runs it. `allow` pairs a host by adding its id, a lowercase uuid, to `runner.toml` `hosts`. `ps` lists the daemon's lines for every host through an inspecting connection bound under this machine's own host id (a remote inspection sees only its own host's lines, without job commands or output), each `held` or `orphaned` with its job count, or prints `no runner is running`. On a host, `pair <name>` refuses a build whose source revision is `unknown`, runs `plakd runner allow <host-id>` on `[runners.<name>]` over ssh with the strict options, binds to prove it (an unpaired bind is reported at once) and records the runner's identity in `runners/<name>/runner.json`; `ps <name>` lists what that runner holds for this host. `unpair <name>` refuses while a root or child placed on that runner has a durable job with no terminal evidence, even when the child's root is elsewhere (open the session and stop the jobs, or pass `--abandon-jobs`, §2.5.2) and otherwise removes only `runners/<name>/runner.json`. `secret set|rm|list <name>` manages this machine's runner secrets (`secrets/runner/`, chapter 04 section 3.1), which an MCP server placed on this runner reads; `set` reads the value from a hidden prompt. Session placement resolves paired runner identity explicitly; no process-global runner is selected. |
 | `version`, `help [<command>]` | |
 
+Unpair inspects root records and child trees whose saved placement can
+involve that runner; an unreadable unrelated session is not a job refusal.
+Once any tree has a cross-runner child, the host must not run a build older
+than cross-runner placement support until all such trees are closed or retired
+ (§4.6, chapter 03 §14).
+
 `session show` also inspects the root session's canonical Plakous branch head
 through the read-only SQLite diagnostic. It displays the head view after an
 in-memory projector pass over the feed past the stored cursor (read through
@@ -4362,6 +4368,9 @@ arguments or frozen template card (chapter 03 §2). The existing node
 placement record and NodeView carry the result; neither client wire 12 nor the
 runner transport changes. The opaque topology tool arguments and result text
 in model calls and maintainer `invoke_tool` gain the runner vocabulary.
+A new child bind or exact reopen on its parent's runner also requires that
+runner's admission barrier. While it is pending, binding refuses; the recovery
+driver holds the affected node and retries after admission.
 
 `SessionInfoView.runner` is also required and names the attached node's own
 saved placement, decorated by the host. Clients pair the existing product
@@ -5529,6 +5538,12 @@ Live WAL reader coordination may update SQLite shared memory; no durable
 database or WAL bytes are written.
 
 ### 4.6 `plakd host`
+
+Host rollback below the first build supporting cross-runner child placement
+is unsupported once any tree has a cross-runner child, until all such trees
+are closed or retired. These trees use existing store records, so an older
+build would not be rejected by store admission and could route a child to
+its root's runner instead of the child's saved placement.
 
 `plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]` is an explicit
 same-user operator action, invoked using the destination executable and its own

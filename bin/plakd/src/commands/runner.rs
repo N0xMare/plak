@@ -713,7 +713,18 @@ fn unpair(
     })?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let sessions = product.session_ids().map_err(CliFailure::new)?;
+    let mut sessions: std::collections::BTreeSet<_> = product
+        .root_ids_on_runner(&pin.runner_id)
+        .map_err(CliFailure::new)?
+        .into_iter()
+        .collect();
+    let child_trees =
+        plakous_recursive_subagents_store::SqliteTreeStore::tree_ids_with_children_on(
+            &paths.subagents_database(),
+            &pin.runner_id,
+        )
+        .map_err(|error| CliFailure::new(error.message()))?;
+    sessions.extend(child_trees);
     let mut blocked = Vec::new();
     for id in sessions {
         let labels = match product.load(&id) {
@@ -724,7 +735,7 @@ fn unpair(
                 abandon_jobs,
             )
             .map_err(|error| CliFailure::new(error.to_string()))?,
-            Err(_) if abandon_jobs => vec!["unknown".to_owned()],
+            Err(_) if abandon_jobs => vec!["job records on this runner unknown".to_owned()],
             Err(error) => return Err(CliFailure::new(error.clone())),
         };
         if !labels.is_empty() {

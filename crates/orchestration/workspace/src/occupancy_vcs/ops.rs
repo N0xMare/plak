@@ -218,7 +218,8 @@ pub trait VcsOps: Send + Sync {
         ready(Err(transfer_unavailable()))
     }
 
-    /// The commit `reference` names in `repo`, if any.
+    /// The commit `reference` names in `repo`, if any. An explicit
+    /// `^{tree}` suffix asks for the commit's Git tree instead.
     fn ref_commit<'a>(
         &'a self,
         repo: &'a Path,

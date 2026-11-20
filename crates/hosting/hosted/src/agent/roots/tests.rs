@@ -35,6 +35,80 @@ fn local_stop_stays_pending_behind_the_live_reconciliation_barrier() {
 }
 
 #[tokio::test]
+async fn unavailable_child_placement_keeps_stop_pending_without_falling_back() {
+    use crate::agent_tree::{InterruptCause, NodePlacement, ProductAgentTree};
+    use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};
+    use plakous::runner::{ConfiguredRunner, RunnerRegistry, WorkspaceCatalog};
+
+    let home = tempfile::tempdir().unwrap();
+    let workspace = home.path().join("workspace");
+    let product = home.path().join("product");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(&product).unwrap();
+    let registry = RunnerRegistry::default();
+    for id in ["local", "peer"] {
+        registry.configure(ConfiguredRunner {
+            runner_id: id.into(),
+            names: vec![id.into()],
+        });
+    }
+    registry
+        .ready_local(
+            Arc::new(WorkspaceCatalog::local(Some(&workspace), &[], &product).unwrap()),
+            0,
+        )
+        .unwrap();
+    let mut roots = ProductStateRoots::with_doubles(product, home.path().join("state"))
+        .with_runner_readiness(registry.clone(), "local");
+    roots.daemon_client = Some(bound_daemon(&workspace).await);
+    let mut tree = ProductAgentTree::bootstrap_root_for_test(
+        "cross-stop",
+        "root",
+        "owner",
+        workspace,
+        "tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    tree.place_genesis_root(NodePlacement {
+        runner_id: Some("peer".into()),
+        ..NodePlacement::default()
+    })
+    .unwrap();
+    let child = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap();
+    tree.place_genesis_root(NodePlacement::default()).unwrap();
+    tree.bind_session_locator(&child.agent_id, "must-not-use-the-root-client")
+        .unwrap();
+    tree.set_active_turn(&child.agent_id, true).unwrap();
+    tree.interrupt_running_descendants_for(InterruptCause::Stopped)
+        .unwrap();
+    let store = roots.tree_store().unwrap();
+    tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
+    assert!(!roots.runner_pending());
+    assert!(roots.tree_runner_stop_pending("cross-stop"));
+    assert!(!registry.needs_connection("peer"));
+    roots
+        .finish_child_process_stops("cross-stop")
+        .await
+        .unwrap();
+    assert!(roots.tree_runner_stop_pending("cross-stop"));
+    assert!(registry.needs_connection("peer"));
+    assert_eq!(
+        store
+            .load("cross-stop")
+            .unwrap()
+            .unwrap()
+            .rows()
+            .recorded_process_stops()
+            .len(),
+        1
+    );
+    roots.daemon_client.as_ref().unwrap().disconnect();
+}
+
+#[tokio::test]
 async fn child_process_stop_collects_every_failure_instead_of_stopping_at_the_first() {
     use crate::agent_tree::{InterruptCause, ProductAgentTree};
     use crate::agent_tree_protocol::{SpawnAgentRequest, WriterMode};

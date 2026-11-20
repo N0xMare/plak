@@ -178,6 +178,11 @@ restore the recorded source-compatible link manually. Do not discard the
 evidence log or race a manual handoff against an open intent. There is no
 automatic host rollback after surrender.
 
+Deploy recovery is forward-only. Once any tree has a cross-runner child,
+do not run a host build older than cross-runner placement support until all
+such trees are closed or retired. Older builds can open the same store but
+would route children to the wrong machine.
+
 If a gateway action lost its reply, status reconciles the recorded drain,
 link and holder. It never repeats the drain; it can cancel a request that
 never started, start from a proven clean exit, or record an already Ready

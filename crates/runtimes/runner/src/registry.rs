@@ -377,18 +377,20 @@ impl RunnerRegistry {
             .collect()
     }
 
-    /// Resolve an alias against current configuration and pairing pins,
-    /// without dialing any runner. Returns none for an unpaired name.
+    /// Resolve an alias or pinned identity against current pairing pins,
+    /// without dialing any runner. An alias takes precedence over an id.
     ///
     /// # Errors
     /// The pairing catalog could not be read.
     pub fn paired_id(&self, name: &str) -> Result<Option<String>, PlacementFailure> {
         self.refresh_configuration()?;
-        Ok(self
-            .rows()
+        let rows = self.rows();
+        let exact = rows.iter().any(|row| row.runner.runner_id == name);
+        Ok(rows
             .into_iter()
             .find(|row| row.runner.names.iter().any(|alias| alias == name))
-            .map(|row| row.runner.runner_id))
+            .map(|row| row.runner.runner_id)
+            .or_else(|| exact.then(|| name.to_owned())))
     }
 
     /// Publishes a fully reconciled connection. The caller must complete

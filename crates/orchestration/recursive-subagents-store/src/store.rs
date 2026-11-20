@@ -68,6 +68,18 @@ impl SqliteTreeStore {
     pub fn inspect_node_locators(database: &Path) -> Result<Vec<(String, String)>, OpenError> {
         SubagentsDatabase::inspect_node_locators(database)
     }
+
+    /// Identifies trees with a child on the given paired runner without
+    /// decoding any tree images or acquiring custody.
+    ///
+    /// # Errors
+    /// Refuses an unreadable or unadmitted tree store.
+    pub fn tree_ids_with_children_on(
+        database: &Path,
+        runner_id: &str,
+    ) -> Result<Vec<String>, OpenError> {
+        SubagentsDatabase::tree_ids_with_children_on(database, runner_id)
+    }
     /// Reads one existing tree's exact persisted rows without a writer or
     /// in-memory reopen transition.
     pub fn inspect(database: &Path, tree_id: &str) -> Result<TreeInspection, OpenError> {

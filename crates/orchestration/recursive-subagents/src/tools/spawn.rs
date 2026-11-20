@@ -335,10 +335,11 @@ impl TopologyTool {
                 format!("runner {name:?} is not paired on this host"),
             )
         })?;
-        let id = binder
-            .admit_runner(&name, parent.as_deref(), request.workspace.is_inherit())
-            .await?;
-        if Some(id.as_str()) == parent.as_deref() {
+        let id = binder.resolve_runner(&name)?;
+        let crosses =
+            ProductAgentTree::cross_runner_spawn_source(parent.as_deref(), request, &id)?.is_some();
+        binder.require_runner_ready(&id).await?;
+        if !crosses {
             return Ok(None);
         }
         self.driver

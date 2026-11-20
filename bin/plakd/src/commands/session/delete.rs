@@ -6,7 +6,7 @@ use crate::store::sessions as product_sessions;
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 use plakous_hosted::runtime as product_host;
-use plakous_recursive_subagents_store::TreeInspection;
+use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 use std::io;
 
 pub fn confirm_session_mutation(
@@ -576,18 +576,26 @@ pub(crate) fn running_job_labels(
     runner_id: Option<&str>,
     abandon_jobs: bool,
 ) -> Result<Vec<String>, LifecycleError> {
-    let Some(locator) = record.plakous_locator else {
-        return Ok(Vec::new());
-    };
     let mut locators = Vec::new();
     let root_runner = record
         .runner
         .as_ref()
         .map_or("local", |runner| runner.runner_id.as_str());
-    if runner_id.is_none_or(|id| id == root_runner) {
+    if let Some(locator) = record.plakous_locator
+        && runner_id.is_none_or(|id| id == root_runner)
+    {
         locators.push(("root".to_owned(), Some(locator)));
     }
-    match crate::topology_product::inspect_session_tree(paths, record) {
+    // Unpair enumerates the exact tree IDs with placements on that runner;
+    // a successor with no own tree need not read its predecessor again.
+    let inspection = if runner_id.is_some() {
+        SqliteTreeStore::inspect(&paths.subagents_database(), &record.id)
+            .map(|tree| (record.id.clone(), tree))
+            .map_err(|error| CliFailure::new(error.message()))
+    } else {
+        crate::topology_product::inspect_session_tree(paths, record)
+    };
+    match inspection {
         Ok((tree_id, TreeInspection::Tree(tree))) if tree_id == record.id => {
             for node in tree.rows().nodes().values() {
                 if node.parent_agent_id.is_none()
@@ -612,7 +620,7 @@ pub(crate) fn running_job_labels(
             }
         }
         Ok(_) => {}
-        Err(_) if abandon_jobs => locators.push(("root".to_owned(), None)),
+        Err(_) if abandon_jobs => locators.push(("tree jobs".to_owned(), None)),
         Err(error) => return Err(CliFailure::new(error.to_string()).into()),
     }
     let mut processes = Vec::new();

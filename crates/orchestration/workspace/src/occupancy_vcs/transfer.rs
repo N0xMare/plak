@@ -364,18 +364,25 @@ pub(crate) fn sweep(repo: &Path, max_age: std::time::Duration) -> Result<u32, Vc
     Ok(removed)
 }
 
-/// The commit `reference` names in `repo`, if it names one.
+/// The commit `reference` names in `repo`, or its tree for an explicit
+/// tree peel, if it exists.
 pub(crate) fn ref_commit(repo: &Path, reference: &str) -> Result<Option<String>, VcsError> {
     if !repo.exists() {
         return Ok(None);
     }
+    let object = if let Some(reference) = reference.strip_suffix("^{tree}") {
+        format!("{reference}^{{commit}}^{{tree}}")
+    } else {
+        format!("{reference}^{{commit}}")
+    };
     let output = git_query(
         repo,
         &[
             "rev-parse",
             "--verify",
             "--quiet",
-            &format!("{reference}^{{commit}}"),
+            "--end-of-options",
+            &object,
         ],
     )
     .map_err(|error| transfer_error(error.to_string()))?;

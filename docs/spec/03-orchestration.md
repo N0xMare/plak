@@ -363,7 +363,7 @@ The enforcement of "this node may change files" on `execute` is the
 and a parent adopts it.
 
 A child runs on its parent's runner unless placed elsewhere. `spawn_agent`
-accepts an optional `runner` alias; omission reads the frozen card default,
+accepts an optional `runner` alias or paired id; omission reads the frozen card default,
 then uses the parent's runner. Explicit `local` always uses the parent's
 runner, even when it is paired and remote. The host resolves other names
 against current paired configuration and checks the target's readiness before
@@ -732,7 +732,7 @@ Arguments — required `template`, `prompt`, `output_schema_json`, `tier`:
 | `output_schema_json` | string | non-empty; object types only, no `$ref` and no combinators; `additionalProperties: true` is refused |
 | `tier` | `read_only \| execute \| mutate` | clipped to the template ceiling |
 | `workspace` | `inherit \| fork`, optional | omit or `inherit` shares the caller's checkout; `fork` mints an isolated copy |
-| `runner` | string, optional | paired name or `local` for the parent's placement; omitted uses the frozen card default, then the parent's runner |
+| `runner` | string, optional | paired name or id, or `local` for the parent's placement; omitted uses the frozen card default, then the parent's runner |
 | `description` | string, optional | short label for the attempt; does not select bind |
 | `inputs` | array of strings, optional | schema cap `MAX_SPAWN_INPUTS` = 8; **exactly one** is admitted at dispatch; requires `workspace=fork` |
 | `request_key` | string, optional | caller-minted dedup key |
@@ -3780,14 +3780,19 @@ The persisted node's `runner_id`, not the current route or port's admission
 answer, selects this stage guard. The stage is published before dispatch even
 if the route disappeared. A mixed local/remote batch stages each remote seal
 under its actual runner, without inventing a local runner for unrelated effects.
-Once a stage exists an unresolved seal
-remains the existing explicit VCS recovery obligation, never an automatic retry.
+Once a stage exists an unresolved seal remains an explicit VCS recovery
+obligation, except when an exact verifiable carry-back apply was published.
+In that case reopen checks the recorded candidate and base pins and reads
+the pinned Git tree; it never snapshots the child again. It carries that
+same pinned candidate only if the destination candidate ref is absent.
 An in-process reservation has no such pre-dispatch proof and remains ambiguous.
 For a carried seal, an unstarted ticket waits for both the sealing runner and
 the runner that must take its bundle. The tree restores routes from saved node
 paths before recovering either runner; it does not infer a local path when a
 runner is unavailable. Hold state, elapsed time and waiters add no persisted
 fields or wire versions.
+A child on the parent's runner also refuses bind or reopen while that
+runner's admission is pending; deferred recovery waits for readiness.
 
 Root and child adapters share a small exact-retry state and reopened-turn
 classification. It permits one stale-head adoption and bounds child lease waits;
@@ -5706,6 +5711,11 @@ checkout. A crash at any
 stage boundary leaves a reproducible or verifiable record and no fault: the
 reopened tree reruns the spawn or the seal, and both converge
 (`cross_runner_fork_stages`).
+Once any tree has a cross-runner child, the host must not run a build older
+than cross-runner placement support until all such trees are closed or retired.
+Older builds can read these records but do not route the saved child path to
+its runner. Deploy recovery is forward-only regardless of placement
+(chapter 02 §4.6).
 A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Every queued
 effect is drained after the tree mutex is released, including when the initial

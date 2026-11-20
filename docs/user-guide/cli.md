@@ -456,6 +456,7 @@ A template can set `runner = "build"` as its default. An explicit
 `runner = "local"` overrides the template and means the **parent's**
 runner, not necessarily the host. An inherit child must stay with the
 parent. An unknown or unready runner refuses without starting a child.
+You can pass the paired runner ID from a spawn receipt instead of its name.
 A host-local root, a non-Git checkout, and a spawn with candidate inputs
 cannot transfer a copy to another runner.
 
@@ -464,6 +465,13 @@ non-secret uncommitted work, under its `copies` directory. Tools run
 natively there. A mutate child's sealed candidate comes back to the
 parent runner; adopt it as usual, including the normal conflict workflow.
 An execute or read-only fork is a detached snapshot.
+
+After upgrading, do not add a runner to a template used by a root frozen
+before the upgrade until you recompile or retire that root. Once any tree
+has a cross-runner child, do not roll the host back below the first build
+with cross-runner placement support until all such trees are closed or
+retired. An older build can read the tree but cannot route its remote child
+correctly.
 
 ---
 

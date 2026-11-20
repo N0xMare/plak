@@ -425,6 +425,8 @@ pub struct SealTicket {
     /// The runners a candidate sealed on another runner than its parent's
     /// is carried back between, into the parent's checkout.
     pub(crate) carry: Option<cross_runner::SealCarry>,
+    /// The exact commit named by a published verifiable carry-back stage.
+    carried_commit: Option<String>,
 }
 
 impl SealTicket {

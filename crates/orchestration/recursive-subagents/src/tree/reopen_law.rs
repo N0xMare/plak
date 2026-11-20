@@ -6,8 +6,8 @@ use super::{NodeStatus, ProductAgentTree, TreeAdmissionState};
 
 impl ProductAgentTree {
     /// The reopen law for a persisted tree (design section 6.4): what the
-    /// last process left in flight was its lost owner's. In-flight VCS is
-    /// faulted as before. A running child the rows show parked between
+    /// last process left in flight was its lost owner's. Unproved in-flight
+    /// VCS is faulted. A running child the rows show parked between
     /// turns is interrupted with cause `owner_lost`; its attempt, subtree
     /// and surviving jobs are kept. A running child with a bound or active
     /// turn is owed a `recover_node`, which marks it from its feed (or

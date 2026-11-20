@@ -783,17 +783,23 @@ pub(in crate::agent) async fn child_session_runtime_binding(
     // A new child uses current construction inputs, never a parent's reopen pin.
     let mut scoped_parent = parent.clone();
     let parent_roots = parent.state_roots();
-    let placement =
-        crate::topology_runtime::lookup(spawn_parent_tree_id(parent)).and_then(|runtime| {
-            runtime
-                .read(|tree| {
-                    tree.nodes()
-                        .get(agent_id)
-                        .map(|node| node.placement.runner_id.clone())
-                })
-                .ok()
-                .flatten()
-        });
+    let tree_id = spawn_parent_tree_id(parent);
+    let read_placement = |tree: &crate::agent_tree::ProductAgentTree| {
+        tree.nodes()
+            .get(agent_id)
+            .map(|node| node.placement.runner_id.clone())
+    };
+    let placement = if let Some(runtime) = crate::topology_runtime::lookup(tree_id) {
+        runtime
+            .read(read_placement)
+            .map_err(|error| crate::CliFailure::recovery_required(error.message))?
+    } else {
+        parent_roots
+            .tree_store()?
+            .load(tree_id)
+            .map_err(|error| crate::CliFailure::recovery_required(error.detail))?
+            .and_then(|stored| read_placement(stored.rows()))
+    };
     let mut roots = match placement {
         Some(ref id) => parent_roots.for_child_runner(id.as_deref())?,
         None => parent_roots.clone(),

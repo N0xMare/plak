@@ -206,6 +206,11 @@ impl SealTicket {
     /// phase. An unpin refusal is a recoverable seal failure, never an empty
     /// candidate success.
     pub async fn seal(&self, vcs: &dyn VcsOps) -> Result<Option<VcsSnapshot>, VcsError> {
+        if let Some(commit) = &self.carried_commit {
+            return super::cross_runner::recover_seal_back(vcs, self, commit)
+                .await
+                .map(Some);
+        }
         let mut sealed = vcs
             .seal(
                 &self.path,

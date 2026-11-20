@@ -10,11 +10,13 @@ struct Pair {
     host: Fixture,
     // Owns and cleans up the second runner home independently of the first.
     _secondary: Fixture,
+    launch: ChildRunner,
     secondary: ChildRunner,
     launch_id: String,
     secondary_id: String,
     copies: PathBuf,
     cuts: PathBuf,
+    launch_cuts: PathBuf,
     path: String,
 }
 
@@ -35,7 +37,7 @@ impl Pair {
         git(&host.workspace(), &["add", "shared.txt"]);
         git(&host.workspace(), &["commit", "-qm", "base"]);
         std::fs::write(host.workspace().join("draft.txt"), "live parent\n").unwrap();
-        let (_, path, launch_id) = pending_stop::remote(&host);
+        let (launch, path, launch_id) = pending_stop::remote(&host);
         let copies = secondary_home.root.canonicalize().unwrap().join("copies");
         let (secondary, _, secondary_id) =
             pending_stop::remote_with_copies(&secondary_home, Some(&copies));
@@ -57,25 +59,28 @@ impl Pair {
         )
         .unwrap();
         let cuts = secondary_home.root.join("cuts");
+        let launch_cuts = host.root.join("launch-cuts");
         std::fs::create_dir(&cuts).unwrap();
-        let proxy = secondary_home.root.join("proxy.py");
+        std::fs::create_dir(&launch_cuts).unwrap();
+        let proxy = host.root.join("proxy.py");
         std::fs::write(&proxy, include_str!("hold_proxy.py")).unwrap();
         let ssh = host.root.join("ssh-bin/ssh");
         let original = std::fs::read_to_string(&ssh).unwrap();
         let prefix = original.split_once("shift\nshift\n").unwrap().0;
-        let trailer = original.split_once("shift\nshift\n").unwrap().1;
         std::fs::write(&ssh, format!(
-            "{prefix}shift\nif [ \"$1\" = secondary-fixture ]; then\n  shift\n  [ ! -f '{}' ] || exit 1\n  export PLAK_HOME='{}'\n  exec python3 '{}' '{}' \"$@\"\nfi\nshift\n{trailer}",
-            cuts.join("refuse").display(), secondary.home.display(), proxy.display(), cuts.display(),
+            "{prefix}shift\ncase \"$1\" in\n  secondary-fixture) cuts='{}'; export PLAK_HOME='{}';;\n  fixture) cuts='{}'; export PLAK_HOME='{}';;\n  *) exit 1;;\nesac\nshift\n[ ! -f \"$cuts/refuse\" ] || exit 1\n[ \"$3\" = connect ] || exec \"$@\"\nexec python3 '{}' \"$cuts\" \"$@\"",
+            cuts.display(), secondary.home.display(), launch_cuts.display(), launch.home.display(), proxy.display(),
         )).unwrap();
         Self {
             host,
             _secondary: secondary_home,
+            launch,
             secondary,
             launch_id,
             secondary_id,
             copies,
             cuts,
+            launch_cuts,
             path,
         }
     }
@@ -139,6 +144,9 @@ impl Pair {
         );
     }
 }
+
+#[path = "placement_durability.rs"]
+mod durability;
 
 fn git(path: &Path, args: &[&str]) {
     let output = std::process::Command::new("git")
@@ -241,7 +249,7 @@ fn cross_runner_child_fork_runs_holds_seals_and_adopts() {
             spawn("secondary", "inherit"),
             spawn("secondary", "fork"),
             answer("refusals checked"),
-            spawn("secondary", "fork"),
+            spawn(&pair.secondary_id, "fork"),
             answer("child assigned"),
             answer("root continued independently"),
             wait(),
@@ -329,7 +337,7 @@ fn cross_runner_child_fork_runs_holds_seals_and_adopts() {
     );
 }
 
-fn reopen_placed_child(pair: &Pair, session: &str, node: &NodeAddress, agent: &str, path: &Path) {
+fn script_followup(pair: &Pair, agent: &str) {
     let mut root_script: Value =
         serde_json::from_slice(&std::fs::read(pair.host.script()).unwrap()).unwrap();
     let child = Path::new(root_script["product_child_script"].as_str().unwrap());
@@ -347,6 +355,10 @@ fn reopen_placed_child(pair: &Pair, session: &str, node: &NodeAddress, agent: &s
         answer("reopened child ran")
     ]);
     pair.host.write_script(&root_script);
+}
+
+fn reopen_placed_child(pair: &Pair, session: &str, node: &NodeAddress, agent: &str, path: &Path) {
+    script_followup(pair, agent);
     let mut host = pair.start();
     let mut client = Client::connect(&host);
     pending_stop::ready(&mut client, &pair.launch_id);
@@ -374,6 +386,50 @@ fn reopen_placed_child(pair: &Pair, session: &str, node: &NodeAddress, agent: &s
             .trim(),
         pair.secondary.pid().unwrap().to_string(),
     );
+    stop(&mut host);
+}
+
+#[test]
+fn frozen_template_defaults_to_a_peer_and_explicit_local_overrides_it() {
+    let pair = Pair::new();
+    let agents = pair.host.home().join("agents");
+    std::fs::create_dir_all(&agents).unwrap();
+    std::fs::write(
+        agents.join("review.toml"),
+        "account = \"openrouter\"\nmodel = \"offline/child\"\ndescription = \"Fixture card\"\nrunner = \"secondary\"\n",
+    ).unwrap();
+    let mut from_card = spawn("secondary", "fork");
+    from_card["output"]["tool"]["arguments"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runner");
+    let (mut host, mut client, session, node, attachment) = pair.session(
+        false,
+        &[
+            from_card,
+            wait(),
+            answer("template applied"),
+            spawn("local", "inherit"),
+            wait(),
+            answer("override applied"),
+        ],
+    );
+    pending_stop::ready(&mut client, &pair.secondary_id);
+    client.prompt(11, attachment, "use the frozen default", "template applied");
+    client.prompt(
+        12,
+        attachment,
+        "use the parent's placement",
+        "override applied",
+    );
+    let results = tool_results(&pair.host, &session, 4);
+    assert_eq!(results[0]["runner"], pair.secondary_id);
+    assert_eq!(results[2]["runner"], pair.launch_id);
+    let tree = tree(&pair, &node);
+    let remote = tree.node(results[0]["agent_id"].as_str().unwrap()).unwrap();
+    let retained = tree.node(results[2]["agent_id"].as_str().unwrap()).unwrap();
+    assert!(remote.path.starts_with(&pair.copies));
+    assert_eq!(retained.path, tree.node("root").unwrap().path);
     stop(&mut host);
 }
 
@@ -449,6 +505,7 @@ fn cross_runner_child_retains_text_conflict_on_parent_runner() {
     stop(&mut host);
 }
 
+#[track_caller]
 fn wait_for(mut predicate: impl FnMut() -> bool) {
     let deadline = std::time::Instant::now() + WAIT;
     while !predicate() {

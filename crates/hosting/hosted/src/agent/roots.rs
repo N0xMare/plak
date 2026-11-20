@@ -536,11 +536,9 @@ impl ProductStateRoots {
             .map(|services| services.backend().runner_id().as_str().to_owned())
     }
 
-    pub(super) async fn admit_spawn_runner(
+    pub(super) fn resolve_spawn_runner(
         &self,
         name: &str,
-        parent: Option<&str>,
-        inherit: bool,
     ) -> Result<String, crate::agent_tree::TopologyError> {
         use crate::agent_tree::TopologyError;
         use crate::agent_tree_protocol::TopologyErrorCode;
@@ -551,31 +549,40 @@ impl ProductStateRoots {
                 format!("runner {name:?} is not paired on this host"),
             )
         };
+        self.runner_registry()
+            .ok_or_else(unknown)?
+            .paired_id(name)
+            .map_err(|_| {
+                TopologyError::new(
+                    TopologyErrorCode::RunnerUnreachable,
+                    "pairing catalog unavailable",
+                )
+            })?
+            .ok_or_else(unknown)
+    }
+
+    pub(super) async fn require_spawn_runner_ready(
+        &self,
+        id: &str,
+    ) -> Result<(), crate::agent_tree::TopologyError> {
+        use crate::agent_tree::TopologyError;
+        use crate::agent_tree_protocol::TopologyErrorCode;
+
         let unready = || {
             TopologyError::new(
                 TopologyErrorCode::RunnerUnreachable,
-                format!("runner {name:?} is not ready"),
+                format!("runner {id:?} is not ready"),
             )
         };
-        let registry = self.runner_registry().ok_or_else(unknown)?;
-        let id = registry
-            .paired_id(name)
-            .map_err(|_| unready())?
-            .ok_or_else(unknown)?;
-        if inherit && parent != Some(id.as_str()) {
-            return Err(TopologyError::new(
-                TopologyErrorCode::RunnerMismatch,
-                "an inherit child works in its parent's checkout, so it runs on its parent's runner",
-            ));
-        }
-        if registry.services(&id).is_err() {
+        let registry = self.runner_registry().ok_or_else(unready)?;
+        if registry.services(id).is_err() {
             registry
-                .refresh(Some(std::slice::from_ref(&id)))
+                .refresh(Some(&[id.to_owned()]))
                 .await
                 .map_err(|_| unready())?;
-            registry.services(&id).map_err(|_| unready())?;
+            registry.services(id).map_err(|_| unready())?;
         }
-        Ok(id)
+        Ok(())
     }
 
     pub(super) fn for_child_runner(&self, id: Option<&str>) -> CliResult<Self> {

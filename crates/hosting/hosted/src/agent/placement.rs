@@ -41,7 +41,7 @@ pub(super) fn watch_debt(owner: &Arc<crate::topology_runtime::ProductTopologyRun
             let released = ready.difference(&previous).next().is_some();
             previous = ready;
             if seals {
-                // Only queued tickets drain; a staged/uncertain seal has none.
+                // Uncertain seals without a verifiable carry have no ticket.
                 let _ = runtime.mutate_and_settle(|_| ()).await;
             }
             if released {

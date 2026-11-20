@@ -33,6 +33,57 @@ struct NotReadyBinder {
     binds: AtomicUsize,
 }
 
+struct ResolveWithoutDial;
+
+impl ChildController for ResolveWithoutDial {
+    fn services(&self) -> ChildServices {
+        ChildServices::BIND
+    }
+
+    fn resolve_runner(&self, _name: &str) -> Result<String, TopologyError> {
+        Ok("peer".into())
+    }
+
+    fn require_runner_ready<'a>(
+        &'a self,
+        _id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + 'a>> {
+        panic!("a structurally refused spawn must not start runner admission")
+    }
+}
+
+#[tokio::test]
+async fn cross_runner_spawn_refuses_local_source_and_candidate_input_without_dialing() {
+    for parent in [None, Some("launch")] {
+        let root = tempfile::tempdir().unwrap();
+        let mut tree = bootstrap_tree("tree1", root.path());
+        tree.place_genesis_root(crate::tree::NodePlacement {
+            runner_id: parent.map(str::to_owned),
+            ..Default::default()
+        })
+        .unwrap();
+        let store: Arc<dyn TreeStore> = Arc::new(MemoryTreeStore::new());
+        tree.acknowledge_revision(store.save_in_custody(&tree).unwrap());
+        let tool = spawn_tool(
+            driver_on(tree, store.clone()),
+            Some(Arc::new(ResolveWithoutDial)),
+        );
+        let mut request = spawn_request();
+        request.workspace = SpawnWorkspace::Fork;
+        request.runner = Some("peer".into());
+        request.inputs = parent.map(|_| vec!["cand-1".into()]);
+        let outcome = tool
+            .spawn_with("refused".into(), &serde_json::to_value(request).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome_json(&outcome)["code"],
+            "cross_runner_copy_unavailable"
+        );
+        assert_eq!(reload(&store, "tree1").nodes().len(), 1);
+    }
+}
+
 struct ChangingReadinessBinder {
     ready: AtomicBool,
     admissions: AtomicUsize,

@@ -219,6 +219,25 @@ impl ProductStore {
             .and_then(|mut statement| statement.query_map([], |row| row.get(0))?.collect())
             .map_err(|error| format!("the session identities could not be read: {error}"))
     }
+
+    /// IDs of roots on this paired runner, or with unreadable placement
+    /// evidence. The rest of the record need not decode for this prefilter.
+    pub(crate) fn root_ids_on_runner(&self, runner_id: &str) -> Result<Vec<String>, String> {
+        self.connection
+            .prepare(
+                "SELECT id FROM sessions WHERE CASE
+                    WHEN runner_display IS NULL THEN 0
+                    WHEN json_valid(runner_display) THEN
+                        COALESCE(json_extract(runner_display,'$.runner_id')=?1,1)
+                    ELSE 1 END ORDER BY id",
+            )
+            .and_then(|mut statement| {
+                statement
+                    .query_map([runner_id], |row| row.get(0))?
+                    .collect()
+            })
+            .map_err(|error| format!("root runner placements could not be read: {error}"))
+    }
     /// The newest sessions, at most [`MAX_DIRECTORY_ROWS`], of `workspace`
     /// when given, else of the whole home.
     ///

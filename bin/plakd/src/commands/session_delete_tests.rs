@@ -1632,3 +1632,35 @@ fn unpair_abandon_jobs_continues_with_an_unreadable_child_locator() -> TestResul
     assert!(!pin_dir.join("runner.json").exists());
     Ok(())
 }
+
+#[test]
+fn unpair_skips_an_unrelated_unreadable_session() -> TestResult {
+    let f = fixture(false)?;
+    rusqlite::Connection::open(f.paths.product_database())
+        .checked()?
+        .execute(
+            "UPDATE sessions SET target_selection='unreadable' WHERE id=?1",
+            [&f.record.id],
+        )
+        .checked()?;
+    assert!(crate::store::ProductStore::inspect_session_read_only(&f.paths, &f.record.id).is_err());
+    let pin = f.paths.home().join("runners/build/runner.json");
+    std::fs::create_dir_all(pin.parent().unwrap()).checked()?;
+    std::fs::write(
+        &pin,
+        r#"{"runner_id":"elsewhere","source_revision":"abc","flavor":"test","binary_id":null,"machine_id":"machine-1","roots":["/tmp"]}"#,
+    )
+    .checked()?;
+    let mut output = Vec::new();
+    crate::commands::runner::run(
+        &f.paths,
+        crate::commands::runner::RunnerCommand::Unpair {
+            name: "build".into(),
+            abandon_jobs: false,
+        },
+        &mut output,
+    )?;
+    assert_eq!(String::from_utf8(output)?, "unpaired runner build\n");
+    assert!(!pin.exists());
+    Ok(())
+}

@@ -255,6 +255,27 @@ impl SubagentsDatabase {
         })
     }
 
+    pub(crate) fn tree_ids_with_children_on(
+        database: &Path,
+        runner_id: &str,
+    ) -> Result<Vec<String>, OpenError> {
+        Self::inspect_rows(database, Vec::new(), |tx| {
+            let unreadable =
+                |_| OpenError::unavailable("could not inspect child runner placements");
+            let mut statement = tx
+                .prepare(
+                    "SELECT DISTINCT tree_id FROM agent_nodes
+                     WHERE parent_agent_id IS NOT NULL AND runner_id=?1 ORDER BY tree_id",
+                )
+                .map_err(unreadable)?;
+            statement
+                .query_map([runner_id], |row| row.get(0))
+                .map_err(unreadable)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(unreadable)
+        })
+    }
+
     fn inspect_rows<T>(
         database: &Path,
         absent: T,

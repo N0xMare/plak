@@ -260,6 +260,7 @@ impl ProductAgentTree {
             base_change_id,
             prior_status,
             carry: self.seal_carry(agent_id),
+            carried_commit: None,
         };
         if let Some(node) = self.nodes.get_mut(agent_id) {
             node.status = NodeStatus::Sealing;

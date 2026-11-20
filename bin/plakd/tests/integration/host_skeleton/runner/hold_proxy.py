@@ -79,6 +79,8 @@ def main():
                         for key in ("request_id", "class", "digest", "replay", "age_ms")
                     }
                     evidence["verb"] = frame["operation"]["verb"]
+                    if evidence["verb"].startswith("vcs."):
+                        evidence["vcs_op"] = frame["operation"]["payload"]["op"]
                     with mutex:
                         requests[frame["request_id"]] = evidence
                         marker = directory / "final-probe.next"
@@ -107,6 +109,10 @@ def main():
                 count = len(held_probes)
                 claim_marker(directory / f"final-probe.{count}")
                 continue
+            if frame["kind"] == "result" and request:
+                operation = request.get("vcs_op")
+                if operation in {"mint", "bundle_apply"}:
+                    cut(f"after-{operation.replace('_', '-')}")
             if (
                 frame["kind"] == "result"
                 and request

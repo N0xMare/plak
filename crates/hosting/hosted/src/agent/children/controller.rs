@@ -54,17 +54,19 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
             .unwrap_or_else(|| id.to_owned())
     }
 
-    fn admit_runner<'a>(
+    fn resolve_runner(&self, name: &str) -> Result<String, crate::agent_tree::TopologyError> {
+        self.binder.parent.state_roots().resolve_spawn_runner(name)
+    }
+
+    fn require_runner_ready<'a>(
         &'a self,
-        name: &'a str,
-        parent: Option<&'a str>,
-        inherit: bool,
-    ) -> Boxed<'a, Result<String, crate::agent_tree::TopologyError>> {
+        id: &'a str,
+    ) -> Boxed<'a, Result<(), crate::agent_tree::TopologyError>> {
         Box::pin(
             self.binder
                 .parent
                 .state_roots()
-                .admit_spawn_runner(name, parent, inherit),
+                .require_spawn_runner_ready(id),
         )
     }
 

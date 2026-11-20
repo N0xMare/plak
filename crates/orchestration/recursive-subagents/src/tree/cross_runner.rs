@@ -413,19 +413,60 @@ pub(super) async fn seal_back(
     .await
 }
 
+/// Recover the published carry boundary from the pinned Git objects, without
+/// taking another snapshot of the child's worktree.
+pub(super) async fn recover_seal_back(
+    vcs: &dyn VcsOps,
+    ticket: &SealTicket,
+    commit: &str,
+) -> Result<VcsSnapshot, VcsError> {
+    use plakous_workspace::occupancy_vcs::candidate_refs;
+
+    let disputed = || {
+        VcsError::new(
+            VcsErrorKind::RecoveryRequired,
+            "the carried seal's recorded candidate or base pin could not be verified",
+        )
+    };
+    let carry = ticket.carry.as_ref().ok_or_else(disputed)?;
+    let [candidate, base, ..] = candidate_refs(&ticket.namespace, ticket.candidate_id.as_str());
+    let held = vcs.ref_commit(&carry.dest, &candidate).await?;
+    let repo = match held.as_deref() {
+        Some(held) if held == commit => &carry.dest,
+        Some(_) => return Err(disputed()),
+        None => &ticket.path,
+    };
+    if vcs.ref_commit(repo, &candidate).await?.as_deref() != Some(commit)
+        || vcs.ref_commit(repo, &base).await?.as_deref() != Some(ticket.base_commit.as_str())
+    {
+        return Err(disputed());
+    }
+    let content = vcs
+        .ref_commit(repo, &format!("{commit}^{{tree}}"))
+        .await?
+        .filter(|content| content != &ticket.base_content)
+        .ok_or_else(disputed)?;
+    let sealed = VcsSnapshot {
+        commit: commit.to_owned(),
+        content,
+        change_id: None,
+        history_left_base: false,
+    };
+    if held.is_none() {
+        Box::pin(seal_back(vcs, ticket, carry, &sealed)).await?;
+    }
+    Ok(sealed)
+}
+
 impl ProductAgentTree {
-    /// The carry a spawn on `runner` needs: `None` on its parent's own
-    /// runner.
-    pub(super) fn spawn_carry(
-        &self,
-        caller_id: &str,
+    pub(crate) fn cross_runner_spawn_source<'a>(
+        parent: Option<&'a str>,
         request: &SpawnAgentRequest,
-        runner: Option<&str>,
-    ) -> Result<Option<Carry>, TopologyError> {
-        let parent = self.node(caller_id)?.placement.runner_id.clone();
-        let Some(runner) = runner.filter(|runner| parent.as_deref() != Some(*runner)) else {
+        runner: &str,
+    ) -> Result<Option<&'a str>, TopologyError> {
+        if parent == Some(runner) {
             return Ok(None);
-        };
+        }
         if request.workspace.is_inherit() {
             return Err(TopologyError::new(
                 TopologyErrorCode::RunnerMismatch,
@@ -442,6 +483,24 @@ impl ProductAgentTree {
                 "a copy crosses runners only from its parent's live state, without candidate inputs",
             ));
         }
+        Ok(Some(source))
+    }
+
+    /// The carry a spawn on `runner` needs: `None` on its parent's own
+    /// runner.
+    pub(super) fn spawn_carry(
+        &self,
+        caller_id: &str,
+        request: &SpawnAgentRequest,
+        runner: Option<&str>,
+    ) -> Result<Option<Carry>, TopologyError> {
+        let Some(runner) = runner else {
+            return Ok(None);
+        };
+        let parent = self.node(caller_id)?.placement.runner_id.as_deref();
+        let Some(source) = Self::cross_runner_spawn_source(parent, request, runner)? else {
+            return Ok(None);
+        };
         let Some(port) = self.vcs_port().transfer_port(runner) else {
             return Err(copy_unavailable(
                 "the tree's port does not reach that runner, so a copy cannot be carried there",
@@ -454,7 +513,7 @@ impl ProductAgentTree {
             ));
         }
         Ok(Some(Carry {
-            source,
+            source: source.to_owned(),
             target: runner.to_owned(),
             tree_id: self.tree_id.clone(),
             target_mirror: self.vcs_port().transfer_mirror(runner),

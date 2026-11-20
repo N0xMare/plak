@@ -80,20 +80,28 @@ pub trait ChildController: Send + Sync {
         id.to_owned()
     }
 
-    /// Resolve a paired name and, for a copy, check its current readiness.
+    /// Resolve a requested paired name or id without dialing.
     ///
     /// # Errors
-    /// Refuses unknown names, inherit on another runner, and unready placement.
-    fn admit_runner<'a>(
-        &'a self,
-        name: &'a str,
-        parent: Option<&'a str>,
-        inherit: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<String, TopologyError>> + Send + 'a>> {
-        let _ = (parent, inherit);
-        Box::pin(std::future::ready(Err(TopologyError::new(
+    /// Refuses unknown or unpaired runner identities.
+    fn resolve_runner(&self, name: &str) -> Result<String, TopologyError> {
+        Err(TopologyError::new(
             TopologyErrorCode::RunnerNotConfigured,
             format!("runner {name:?} is not paired on this host"),
+        ))
+    }
+
+    /// Obtain the current admission barrier for a resolved runner.
+    ///
+    /// # Errors
+    /// Refuses unready placement.
+    fn require_runner_ready<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TopologyError>> + Send + 'a>> {
+        Box::pin(std::future::ready(Err(TopologyError::new(
+            TopologyErrorCode::RunnerUnreachable,
+            format!("runner {id:?} is not ready"),
         ))))
     }
 

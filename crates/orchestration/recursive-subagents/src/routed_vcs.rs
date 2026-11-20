@@ -105,6 +105,15 @@ impl RoutedVcs {
         };
         // A transferred copy is <mirror>/.plak/worktrees/<copy>. The
         // runner and tree components distinguish it from the launch checkout.
+        if self.home.stage_runner() == Some(runner)
+            && self
+                .launch
+                .as_ref()
+                .is_some_and(|launch| path.starts_with(launch))
+            && absolute_without_parent(path)
+        {
+            return Ok(());
+        }
         let mirror = path.ancestors().nth(3).filter(|mirror| {
             mirror.file_name().and_then(|name| name.to_str()) == Some(self.tree_id.as_str())
                 && mirror
@@ -112,14 +121,12 @@ impl RoutedVcs {
                     .and_then(Path::file_name)
                     .and_then(|name| name.to_str())
                     == Some(runner)
+                && absolute_without_parent(path)
                 && path
                     .strip_prefix(mirror)
                     .is_ok_and(|suffix| suffix.starts_with(".plak/worktrees"))
         });
         let Some(mirror) = mirror else {
-            if self.home.stage_runner() == Some(runner) {
-                return Ok(());
-            }
             return Err(VcsError::mint_unavailable(
                 "saved copy is outside its runner's tree mirror",
             ));
@@ -191,6 +198,16 @@ impl RoutedVcs {
 fn ready<'a, T: Send + 'a>(value: T) -> VcsFuture<'a, T> {
     Box::pin(std::future::ready(value))
 }
+
+fn absolute_without_parent(path: &Path) -> bool {
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|part| part == std::path::Component::ParentDir)
+}
+
+#[cfg(test)]
+mod tests;
 
 impl VcsOps for RoutedVcs {
     fn placement_ready(&self, path: &Path) -> Option<bool> {

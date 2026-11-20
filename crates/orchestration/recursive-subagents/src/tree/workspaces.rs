@@ -179,7 +179,8 @@ impl ProductAgentTree {
 
     /// A pending seal reservation or an `Adopting` or `Discarding` workspace row means
     /// a VCS subprocess was in flight (or a removal failed) when the process
-    /// ended. Reopening one is `RecoveryRequired` and MUST NOT auto-retry —
+    /// ended. Without proof of an unsent seal or a verifiable seal-back,
+    /// reopening one is `RecoveryRequired` and MUST NOT auto-retry:
     /// the snapshot or the three-way landing may have half-run.
     ///
     /// An in-flight row faults its nodes that are not closed: its occupants,
@@ -211,7 +212,7 @@ impl ProductAgentTree {
                 attempt_id: Option<super::AttemptId>,
                 reserved_at: super::FoldAnchor,
             }
-            if self.restore_unstarted_seal(&agent_id, &canonical) {
+            if self.restore_runner_seal(&agent_id, &canonical) {
                 continue;
             }
             let Ok(reservation) = serde_json::from_str::<SealReservation>(&canonical) else {

@@ -437,6 +437,7 @@ struct PreparedTree {
 /// Without the file the card stays a leaf and existing child shapes keep the
 /// spawn menu they had.
 fn pin_product_child_roster(
+    paths: &product_paths::PlakPaths,
     tree: &mut plakous_hosted::agent_tree::ProductAgentTree,
     plan: &ScriptPlan,
 ) -> Result<(), String> {
@@ -444,8 +445,16 @@ fn pin_product_child_roster(
         return Ok(());
     };
     tree.pin_bind_hints_for_test(crate::roster_input::product_bind_hints());
-    let mut review =
-        plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child");
+    let mut review = match std::fs::read_to_string(paths.home().join("agents/review.toml")) {
+        Ok(text) => crate::roster_input::roster_binding_from_template(
+            "review",
+            &product_config::parse_template(&text, "review")?,
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            plakous_hosted::orchestration::RosterBinding::leaf("openrouter", "offline/child")
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     if script.with_file_name("grandchild-script.json").is_file() {
         let note = plakous_recursive_subagents::protocol::TemplateName::parse("note")
             .map_err(|error| format!("offline script grandchild template: {error}"))?;
@@ -519,6 +528,7 @@ fn prepare_scripted_tree(
         }
     };
     let mut tree = bootstrap_scripted_tree(
+        paths,
         bootstrap_id,
         workspace,
         plan,
@@ -593,6 +603,7 @@ fn prepare_scripted_tree(
 }
 
 fn bootstrap_scripted_tree(
+    paths: &product_paths::PlakPaths,
     tree_id: &str,
     workspace: &Path,
     plan: &ScriptPlan,
@@ -633,7 +644,7 @@ fn bootstrap_scripted_tree(
         })
         .map_err(|error| format!("offline scripted tree placement: {}", error.message))?;
     }
-    pin_product_child_roster(&mut tree, plan)?;
+    pin_product_child_roster(paths, &mut tree, plan)?;
     Ok(tree)
 }
 
@@ -651,20 +662,27 @@ fn attach_product_children(
     let Some(script) = &plan.product_child_script else {
         return Ok(());
     };
-    prepared.product_tools = Some(run_to_end(
-        plakous_hosted::runtime::test_kit::scripted_root_topology(
+    let registrations = plakous_hosted::runtime::test_kit::scripted_root_topology(
+        Arc::clone(&prepared.runtime),
+        tree_id,
+        workspace,
+        state_roots.clone(),
+        product_child_binding(
+            script.clone(),
+            evidence.with_file_name("child-evidence.jsonl"),
             Arc::clone(&prepared.runtime),
-            tree_id,
-            workspace,
-            state_roots.clone(),
-            product_child_binding(
-                script.clone(),
-                evidence.with_file_name("child-evidence.jsonl"),
-                Arc::clone(&prepared.runtime),
-            ),
-            continue_after_loss,
         ),
-    )??);
+        continue_after_loss,
+    );
+    prepared.product_tools = Some(match tokio::runtime::Handle::try_current() {
+        // A resident host's placement watcher must outlive synchronous
+        // binding compilation. Verification and standalone fixtures have
+        // no resident executor and keep the short-lived path.
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| handle.block_on(registrations))?
+        }
+        _ => run_to_end(registrations)??,
+    });
     Ok(())
 }
 
