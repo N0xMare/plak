@@ -75,6 +75,80 @@ fn readable_schemas(value: &mut Value) {
     }
 }
 
+fn map_canonical_bytes(
+    value: &mut Value,
+    map: impl Fn(&mut Value) -> TestResult + Copy,
+) -> TestResult {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if key == "canonical_bytes" {
+                    map(value)?;
+                } else {
+                    map_canonical_bytes(value, map)?;
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                map_canonical_bytes(value, map)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
+    for row in matrix.as_object_mut().unwrap().values_mut() {
+        let config = &mut row["configuration"];
+        if config["selected"]["behavior"] == config["effective"]["behavior"] {
+            config["selected"]
+                .as_object_mut()
+                .unwrap()
+                .remove("behavior");
+        }
+    }
+    map_canonical_bytes(&mut matrix, |value| {
+        let bytes = serde_json::from_value::<Vec<u8>>(value.take())?;
+        *value = match String::from_utf8(bytes) {
+            Ok(text) => Value::String(text),
+            Err(error) => json!({"hex": plakous::model::hex_lower(error.as_bytes())}),
+        };
+        Ok(())
+    })?;
+    Ok(matrix)
+}
+
+fn expand_fixture(mut matrix: Value) -> TestResult<Value> {
+    // Compare the full facts, including selected behavior for every row. An
+    // omitted value pins equality to the fixture's effective behavior.
+    for row in matrix.as_object_mut().unwrap().values_mut() {
+        let config = &mut row["configuration"];
+        if config["selected"].get("behavior").is_none() {
+            config["selected"]["behavior"] = config["effective"]["behavior"].clone();
+        }
+    }
+    map_canonical_bytes(&mut matrix, |value| {
+        let bytes = if let Some(text) = value.as_str() {
+            text.as_bytes().to_vec()
+        } else {
+            let hex = value["hex"].as_str().ok_or("expected UTF-8 or hex pin")?;
+            let (pairs, trailing) = hex.as_bytes().as_chunks::<2>();
+            if !trailing.is_empty() {
+                return Err("odd-length hex pin".into());
+            }
+            pairs
+                .iter()
+                .map(|pair| Ok(u8::from_str_radix(std::str::from_utf8(pair)?, 16)?))
+                .collect::<TestResult<Vec<_>>>()?
+        };
+        *value = json!(bytes);
+        Ok(())
+    })?;
+    Ok(matrix)
+}
+
 fn normalized_facts(mut facts: Value, workspace: &Path) -> TestResult<Value> {
     normalize_strings(&mut facts["profile"], workspace);
     normalize_strings(&mut facts["context_sources"], workspace);
@@ -292,9 +366,10 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
     let actual = Value::Object(output);
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/binding-contracts.json");
     if std::env::var("PLAK_UPDATE_BINDING_CONTRACTS").is_ok_and(|value| value == "1") {
-        std::fs::write(&path, serde_json::to_vec_pretty(&actual)?)?;
+        let fixture = compact_fixture(actual.clone())?;
+        std::fs::write(&path, serde_json::to_vec_pretty(&fixture)?)?;
     }
-    let expected: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    let expected = expand_fixture(serde_json::from_slice(&std::fs::read(&path)?)?)?;
     let mut changes = Vec::new();
     let routes = expected
         .as_object()
