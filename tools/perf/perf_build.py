@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/gate"))
 import vcs_listing  # noqa: E402
 
-SCHEMA = "plakous.perf-build.v10"
-FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 10}
+SCHEMA = "plakous.perf-build.v11"
+FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 11}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
     "minimal": ("plakous", ("--lib",), ()),
     "subscriptions": (
@@ -79,7 +79,7 @@ COMPONENT_BUILD_PROFILES = {
 # retained implementation package boundaries named by the crate-boundary handoff.
 INTERNAL_TOPOLOGY_BUILD_PROFILES = {
     **COMPONENT_BUILD_PROFILES,
-    "attempt": ("plakous-exchange", ("--lib",), ()),
+    "exchange": ("plakous-exchange", ("--lib",), ()),
     "responses": ("plakous-responses", ("--lib",), ()),
     "messages": ("plakous-messages", ("--lib",), ()),
 }

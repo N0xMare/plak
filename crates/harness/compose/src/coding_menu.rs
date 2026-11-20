@@ -12,9 +12,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use plakous_model::{ProjectedToolPresentationV2, ToolName};
-use plakous_tool_files::FilesToolPack;
-use plakous_tool_files::SearchToolPack;
-use plakous_tool_files::{InMemoryPlanState, PlanState, PlanToolPack};
+use plakous_tool_files::{
+    FilesToolPack, InMemoryPlanState, PlanState, PlanToolPack, SearchToolPack,
+};
 use plakous_tool_process::{ProcessSessionTools, ProcessToolPack};
 use plakous_tools::{
     CodingPresentation, CompiledSurface, FrozenToolRegistry, NestedToolEligibility,

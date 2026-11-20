@@ -25,6 +25,10 @@ also keep compatibility with their immediately preceding version.
 
 ### Plakous
 
+- Retire the published-internal crates `plakous-attempt`, `plakous-runner-dial`,
+  `plakous-tool-search`, and `plakous-tool-plan`. They stop at their last
+  published versions and are not yanked. The workspace now has 39 packages.
+
 - Use micro-monty in the isolated Python worker for py-ptc and py-sdk. Call
   tools with keyword arguments or a dictionary, inspect signatures with
   `help(tool)`, and consume structured results directly. Tool failures raise

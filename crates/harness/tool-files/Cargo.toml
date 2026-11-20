@@ -8,8 +8,8 @@ license.workspace = true
 repository.workspace = true
 documentation = "https://docs.rs/plakous-tool-files"
 readme = "README.md"
-keywords = ["llm", "agent", "tools", "files"]
-categories = ["filesystem", "development-tools"]
+keywords = ["llm", "tools", "patch", "search", "planning"]
+categories = ["filesystem", "development-tools", "text-processing"]
 exclude.workspace = true
 
 [package.metadata.plakous]

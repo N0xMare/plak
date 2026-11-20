@@ -76,7 +76,7 @@ fn scripted_code_mode_runtime_binding_inner(
     //
     // **Not `standard_coding_packs_in_memory`.** That helper mints its plan
     // state with `InMemoryPlanState::new()`, whose authority is
-    // `memory.plan.<pid>.<counter>` (`tool-plan/src/lib.rs`). The harness plan
+    // `memory.plan.<pid>.<counter>` (`tool-files/src/plan.rs`). The harness plan
     // binds that authority, so a session created in one process compiles a
     // different plan from the one that reopens it in another, and revalidation
     // refuses with "builder harness plan disagrees with durable semantics". A

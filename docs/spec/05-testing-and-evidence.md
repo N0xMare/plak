@@ -3990,11 +3990,13 @@ measurement on a shared machine is evidence, not a gate. The restricted comparis
 to call a swing in either noisy metric a regression.
 
 **Build-closure evidence.** The opt-in build producer emits
-`plakous.perf-build.v10`, fixture revision 10, over 18 profiles, including one
-`responses` profile for `plakous-responses`. The validator treats v9, fixture
-revision 9, as an immutable archived 19-profile contract with separate
-`responses-kernel` and `responses-host` profiles. Campaign validation selects
-the exact profile set and fixture revision belonging to its schema.
+`plakous.perf-build.v11`, fixture revision 11, over 18 profiles. The
+`exchange` profile measures `plakous-exchange` with the folded attempt core.
+Archived v10 retains its 18-profile contract, including `attempt` for
+`plakous-attempt` and a single `responses` profile. Archived v9 retains
+19 profiles with separate `responses-kernel` and `responses-host` profiles.
+Campaign validation selects the exact profile set and fixture revision
+belonging to its schema.
 
 **Benchmark workloads.** Three deterministic offline `cargo bench` executables
 are outside every gate (§1.2). `perf_core` (`-p plakous`) times
