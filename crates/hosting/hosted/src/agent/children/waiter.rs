@@ -287,7 +287,8 @@ impl crate::node::TurnRole<()> for ChildTurns {
         // A child has no operator to wait for, so a turn its owner fenced
         // is recovered at once: release the stopped session and reopen it,
         // which abandons the turn exactly as a crash reattach would. The
-        // attempt then ends as an ordinary failure the parent can re-task.
+        // attempt then ends as ordinary failure unless the terminal proves
+        // lease loss and recovery can hand off to the continuation path.
         if let Ok(result) = &terminal
             && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
         {
@@ -340,10 +341,11 @@ impl crate::node::TurnRole<()> for ChildTurns {
                         .read(|tree| tree.tree_id.clone())
                         .ok()
                         .and_then(|id| crate::topology_runtime::lookup(&id))
-                        && let Ok(held) = crate::agent::recovery::settle_child_lease_loss(
+                        && let Ok(held) = crate::agent::recovery::settle_child_fence(
                             &runtime,
                             &agent_id,
                             identity.clone(),
+                            crate::runtime::root_loss::RecoveryFence::LeaseLoss,
                             evidence,
                         )
                         .await

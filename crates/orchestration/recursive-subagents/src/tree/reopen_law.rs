@@ -142,6 +142,32 @@ impl ProductAgentTree {
         self.bump();
     }
 
+    /// Keeps the recovered attempt open without granting loss continuation.
+    /// The caller has settled the exact non-lease fence; a new turn still
+    /// needs an explicit admission.
+    ///
+    /// # Errors
+    /// Returns a refusal to record or fold the anchored interrupt.
+    pub fn interrupt_after_fence(
+        &mut self,
+        agent_id: &str,
+        attempt_id: super::AttemptId,
+    ) -> Result<(), super::TopologyError> {
+        if self.lift_lost_owner(agent_id) {
+            self.record_operator_intent(
+                agent_id,
+                Some(attempt_id),
+                super::operator_intents::Decision::Interrupt {
+                    effective: true,
+                    cause: None,
+                },
+            )?;
+        }
+        self.recovery_settled(agent_id);
+        self.bump();
+        Ok(())
+    }
+
     /// Law L inside a feed fold, where an abandoned turn's terminal is the
     /// evidence: the interrupt is applied in place rather than recorded as
     /// an intent, so a rebuild of the same feed applies it again.

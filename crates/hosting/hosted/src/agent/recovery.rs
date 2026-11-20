@@ -935,7 +935,7 @@ async fn recover_claimed_child(
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
             .map_err(|error| session_refusal(&error.message))?;
     }
-    if ended || fence == Some(crate::runtime::root_loss::RecoveryFence::Other) {
+    if ended {
         let recorded = runtime
             .record_then_apply(agent_id, {
                 let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
@@ -947,16 +947,18 @@ async fn recover_claimed_child(
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), recorded))
             .map_err(|error| session_refusal(&error.message))?;
     }
-    if fence == Some(crate::runtime::root_loss::RecoveryFence::LeaseLoss)
-        && let Some(turn) = turn.and_then(|turn| turn.parse().ok())
-    {
-        settle_child_lease_loss(
+    if let Some(fence) = fence {
+        let turn = turn
+            .and_then(|turn| turn.parse().ok())
+            .ok_or_else(|| session_refusal("the fenced child's bound turn is invalid"))?;
+        settle_child_fence(
             runtime,
             agent_id,
             super::children::ChildTurnIdentity {
                 attempt: attempt_id.clone(),
                 turn,
             },
+            fence,
             Vec::new(),
         )
         .await?;
@@ -1055,12 +1057,13 @@ async fn release_reopened(
     Ok((resolution, feed))
 }
 
-/// Mark an exactly settled lease-loss fence on the still-current attempt.
-/// The ordinary owner-lost interrupt is the durable consent anchor.
-pub(in crate::agent) async fn settle_child_lease_loss(
+/// Mark an exactly settled fence on the still-current attempt. Only a
+/// proven lease loss gets the ordinary durable consent anchor.
+pub(in crate::agent) async fn settle_child_fence(
     runtime: &ProductTopologyRuntime,
     agent_id: &str,
     identity: super::children::ChildTurnIdentity,
+    fence: crate::runtime::root_loss::RecoveryFence,
     evidence: Vec<(String, bool)>,
 ) -> Result<bool, TopologyError> {
     let id = agent_id.to_owned();
@@ -1069,7 +1072,14 @@ pub(in crate::agent) async fn settle_child_lease_loss(
             return Ok(false);
         }
         tree.settle_wait_receipts(&id, &evidence)?;
-        tree.lose_owner(&id, Some(identity.attempt));
+        match fence {
+            crate::runtime::root_loss::RecoveryFence::LeaseLoss => {
+                tree.lose_owner(&id, Some(identity.attempt));
+            }
+            crate::runtime::root_loss::RecoveryFence::Other => {
+                tree.interrupt_after_fence(&id, identity.attempt)?;
+            }
+        }
         if tree.node(&id)?.status == NodeStatus::Interrupted {
             tree.release_attempt_turn(&id)?;
         }

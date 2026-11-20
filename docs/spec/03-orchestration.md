@@ -1360,11 +1360,12 @@ Code Cell abandonment and local finalization debt alone are not missing
 executor evidence and must not be labelled `recovery_effect_evidence_refused`.
 An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
-abandonment report. A successful recycle of a fenced child settles the
-attempt without continuing it, unless the exact terminal proves a durable
-lease loss. In that case the child is interrupted with cause `owner_lost`
-and its attempt is kept (§14.1). A non-lease fence whose reopen has not
-settled stays `recovery_required`; reopening it does not grant loss consent.
+abandonment report. The live waiter's successful recycle of a non-lease
+fence ends the attempt as `turn_abandoned`. When the waiter did not settle
+it, later recovery can keep the attempt open and interrupt it without an
+owner-loss cause; an explicit admission can then start work again. A fence
+whose reopen has not settled stays `recovery_required`. A proven lease
+fence instead uses the owner-loss path (§14.1).
 An abandonment report already proves a successful recycle; only a reopen
 without that report needs a quiescent-head probe. A probe failure is logged as
 such and keeps the attempt recovery-required; it is not a reopen failure.

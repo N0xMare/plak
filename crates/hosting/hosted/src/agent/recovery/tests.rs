@@ -3427,14 +3427,11 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
     assert_eq!(fixture.failure_kind(&id).as_deref(), Some(TURN_ABANDONED));
 }
 
-#[tokio::test]
-async fn recorded_child_lease_fence_holds_then_continues_once() {
-    let fixture = Fixture::new("recorded-child-lease-fence");
-    let id = fixture.spawn();
+async fn bind_recorded_lease_fence(fixture: &Fixture, id: &str) {
     let sessions = fixture.sessions();
     let CreateSessionOutcome::Created { session, .. } = sessions
         .create(CreateSessionRequest::new(
-            spawn_child_operation_id(&fixture.tree_id, &id).unwrap(),
+            spawn_child_operation_id(&fixture.tree_id, id).unwrap(),
             fixture.binding(),
         ))
         .await
@@ -3447,7 +3444,14 @@ async fn recorded_child_lease_fence_holds_then_continues_once() {
         plakous_offline_crash_harness::seed_lease_fence(&fixture.database(), source)
             .await
             .unwrap();
-    fixture.bind_turn(&id, &locator, turn);
+    fixture.bind_turn(id, &locator, turn);
+}
+
+#[tokio::test]
+async fn recorded_child_lease_fence_holds_then_continues_once() {
+    let fixture = Fixture::new("recorded-child-lease-fence");
+    let id = fixture.spawn();
+    bind_recorded_lease_fence(&fixture, &id).await;
     fixture
         .runtime
         .mutate_then_emit(false, {
@@ -3524,8 +3528,8 @@ async fn recover_agent_finalization_debt_settles_without_loss_continuation() {
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true);
-    assert_eq!(receipt["failure_kind"], "recovered_without_turn");
-    assert_eq!(fixture.status(&id), NodeStatus::Failed);
+    assert!(receipt["failure_kind"].is_null(), "{receipt}");
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
     assert!(
         fixture
             .runtime
@@ -4514,8 +4518,7 @@ async fn mail_before_recover_node_waits_and_the_marked_child_then_takes_it() {
     assert_eq!(delivery["disposition"], "started", "{delivery}");
 }
 
-/// A child a lost host interrupted: its bound turn was closed by the exact
-/// open, and its `recover_node` marked it owner-lost.
+/// A child whose recorded lease fence its `recover_node` marked owner-lost.
 async fn owner_lost_child(fixture: &Fixture) -> String {
     // A native account, so the product composes the child's Starts.
     fixture
@@ -4534,11 +4537,7 @@ async fn owner_lost_child(fixture: &Fixture) -> String {
         .await
         .unwrap();
     let id = fixture.spawn();
-    let holder = fixture.sessions();
-    let (held, handle, _) = fixture.start_failing_turn(&holder, &id).await;
-    Fixture::await_unknown_outcome(&handle).await;
-    fixture.bind_turn(&id, &held.locator(), handle.turn_id());
-    held.release().await.unwrap();
+    bind_recorded_lease_fence(fixture, &id).await;
     fixture
         .runtime
         .mutate_then_emit(false, |tree| {

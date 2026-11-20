@@ -254,7 +254,6 @@ async fn settle_bound_fence(
     attached: AttachedCodingSession,
     fence: crate::runtime::root_loss::RecoveryFence,
 ) -> Result<(), String> {
-    use crate::runtime::root_loss::RecoveryFence;
     let locator = attached.locator();
     let sessions = Arc::clone(&attached.sessions);
     let id = &child.agent_id;
@@ -288,27 +287,10 @@ async fn settle_bound_fence(
     let (identity, evidence) = proof?;
     release.map_err(|error| error.to_string())?;
     crate::agent::ledger::project_feed(runtime, id, &sessions, locator.session_id()).await?;
-    if fence == RecoveryFence::LeaseLoss {
-        crate::agent::recovery::settle_child_lease_loss(runtime, id, identity, evidence)
-            .await
-            .map_err(|error| error.message)?;
-    } else {
-        let agent = id.clone();
-        runtime.record_then_apply(id, move |tree| {
-            if identity.still_owns(tree, &agent) {
-                tree.record_host_turn_failure(
-                    &agent, crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
-                        kind: crate::agent_tree::TURN_ABANDONED,
-                    },
-                    "child session recovered after a non-lease fence; the attempt left no result".to_owned(),
-                    evidence,
-                )?;
-                tree.recovery_settled(&agent);
-            }
-            Ok(())
-        }).await?;
-    }
-    Ok(())
+    crate::agent::recovery::settle_child_fence(runtime, id, identity, fence, evidence)
+        .await
+        .map_err(|error| error.message)?;
+    withdraw_unadmitted(&runtime.driver().for_agent(id), id).await
 }
 
 /// The child's owed recovery ran and nothing was lost.
@@ -450,35 +432,7 @@ async fn mark_and_project(
         .await;
         return;
     }
-    let withdrawn = match crate::agent::ledger::prepared_commands(&driver, agent_id) {
-        Ok(commands) => {
-            let mut withdrawn = Ok(());
-            // A continuation consent already recorded is resubmitted under
-            // its own command id, never withdrawn.
-            let kept = driver
-                .read(|tree| {
-                    commands
-                        .iter()
-                        .filter(|command| {
-                            tree.is_loss_continuation_command(agent_id, &command.command_id)
-                        })
-                        .map(|command| command.command_id.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            for command in commands
-                .into_iter()
-                .filter(|command| !kept.contains(&command.command_id))
-            {
-                if let Err(error) = command.settle(&driver, false).await {
-                    withdrawn = Err(error);
-                }
-            }
-            withdrawn
-        }
-        Err(error) => Err(error),
-    };
-    if let Err(error) = withdrawn {
+    if let Err(error) = withdraw_unadmitted(&driver, agent_id).await {
         record_mark_fault(
             &driver,
             agent_id,
@@ -503,6 +457,33 @@ async fn mark_and_project(
         }
     })
     .await;
+}
+
+async fn withdraw_unadmitted(
+    driver: &crate::agent_tree_tools::TreeDriver,
+    agent_id: &str,
+) -> Result<(), String> {
+    let commands = crate::agent::ledger::prepared_commands(driver, agent_id)?;
+    // A pending continuation keeps its command to retry under the same id.
+    let kept = driver
+        .read(|tree| {
+            commands
+                .iter()
+                .filter(|command| tree.is_loss_continuation_command(agent_id, &command.command_id))
+                .map(|command| command.command_id.clone())
+                .collect::<Vec<_>>()
+        })
+        .map_err(|error| error.message)?;
+    let mut withdrawn = Ok(());
+    for command in commands
+        .into_iter()
+        .filter(|command| !kept.contains(&command.command_id))
+    {
+        if let Err(error) = command.settle(driver, false).await {
+            withdrawn = Err(error);
+        }
+    }
+    withdrawn
 }
 
 /// What an owner-lost mark could not finish, as the child's fault reason.
