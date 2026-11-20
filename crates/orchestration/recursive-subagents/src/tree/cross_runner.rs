@@ -450,7 +450,9 @@ pub(super) async fn recover_seal_back(
         commit: commit.to_owned(),
         content,
         change_id: None,
-        history_left_base: false,
+        history_left_base: vcs
+            .history_left_base(&ticket.path, &ticket.base_commit, commit)
+            .await?,
     };
     if held.is_none() {
         Box::pin(seal_back(vcs, ticket, carry, &sealed)).await?;

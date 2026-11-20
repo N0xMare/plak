@@ -228,7 +228,7 @@ impl TopologyTool {
                         }
                         return Err(Box::new(Self::topology_failure(&error)));
                     }
-                    Ok::<_, Answered>(tree.take_effects())
+                    Ok::<_, Answered>(driver.hold_effects(tree.take_effects()))
                 })
                 .await
                 .map_err(|_| lock_poisoned())?;
@@ -409,13 +409,14 @@ impl TopologyTool {
         operation_id: &str,
         request: &SpawnAgentRequest,
         resolved_account: Option<String>,
-    ) -> Result<(Result<(SpawnAgentOutput, bool), TopologyError>, Effects), ToolRuntimeError> {
+    ) -> Result<(Result<(SpawnAgentOutput, bool), TopologyError>, HeldEffects), ToolRuntimeError>
+    {
         let tool = self.clone();
         let (caller, operation_id, request) =
             (caller.to_owned(), operation_id.to_owned(), request.clone());
         let placement = match self.spawn_placement(&caller, &request).await {
             Ok(placement) => placement,
-            Err(error) => return Ok((Err(error), Effects::default())),
+            Err(error) => return Ok((Err(error), self.driver.hold_effects(Effects::default()))),
         };
         let binding = SpawnBinding {
             parent_composition: self
@@ -745,7 +746,10 @@ impl TopologyTool {
             }
         }
         let (output, effects) = if let Some(output) = replay {
-            (Ok((output, true)), Effects::default())
+            (
+                Ok((output, true)),
+                self.driver.hold_effects(Effects::default()),
+            )
         } else {
             self.spawn_admit(&caller, &operation_id, &request, resolved_account)
                 .await?

@@ -715,6 +715,7 @@ pub(crate) fn tree_vcs(
     let Some(registry) = roots.runner_registry().cloned() else {
         return Ok(home);
     };
+    let launch = saved.map_or(launch, |tree| tree.launch_checkout.as_path());
     let id = tree_id.to_owned();
     let routed = RoutedVcs::with_resolver(home, tree_id, launch.to_owned(), move |runner| {
         let services = registry.retained_services(runner);

@@ -561,7 +561,7 @@ async fn child_seal_persists_after_the_root_released_the_hub() {
         !pending.is_empty(),
         "a failed mutate copy seals its partial work"
     );
-    children::settle_or_fault(&driver, pending, &child).await;
+    children::settle_or_fault(&driver, driver.hold_effects(pending), &child).await;
     let persisted = store.load(&tree_id).expect("load").expect("rows");
     let rows = persisted.rows();
     assert_eq!(rows.node(&child).expect("node").status, NodeStatus::Failed);

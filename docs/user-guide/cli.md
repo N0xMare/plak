@@ -467,8 +467,10 @@ parent runner; adopt it as usual, including the normal conflict workflow.
 An execute or read-only fork is a detached snapshot.
 
 After upgrading, do not add a runner to a template used by a root frozen
-before the upgrade until you recompile or retire that root. Once any tree
-has a cross-runner child, do not roll the host back below the first build
+before the upgrade until you recompile or retire that root. Run every paired
+runner on the host's exact source revision and build flavor. Older runners
+cannot resolve the pinned Git tree during seal recovery and fail closed.
+Once any tree has a cross-runner child, do not roll the host back below the first build
 with cross-runner placement support until all such trees are closed or
 retired. An older build can read the tree but cannot route its remote child
 correctly.

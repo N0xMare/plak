@@ -3782,17 +3782,19 @@ if the route disappeared. A mixed local/remote batch stages each remote seal
 under its actual runner, without inventing a local runner for unrelated effects.
 Once a stage exists an unresolved seal remains an explicit VCS recovery
 obligation, except when an exact verifiable carry-back apply was published.
-In that case reopen checks the recorded candidate and base pins and reads
-the pinned Git tree; it never snapshots the child again. It carries that
-same pinned candidate only if the destination candidate ref is absent.
+In that case reopen checks the recorded candidate and base pins, reads
+the pinned Git tree, and checks history against the child copy's recorded
+base; it never snapshots the child again. It carries that same pinned
+candidate only if the destination candidate ref is absent.
 An in-process reservation has no such pre-dispatch proof and remains ambiguous.
 For a carried seal, an unstarted ticket waits for both the sealing runner and
 the runner that must take its bundle. Housekeeping and child ownership
 changes that do not settle VCS work leave queued tickets for the effect
-driver. The tree restores routes from saved node
-paths before recovering either runner; it does not infer a local path when a
-runner is unavailable. Hold state, elapsed time and waiters add no persisted
-fields or wire versions.
+driver. When a writer does hand off queued work, dropping the batch early
+leaves settlement to a release owner. The tree restores routes from saved
+node paths and its launch checkout before recovering either runner; it
+does not infer a local path when a runner is unavailable. Hold state,
+elapsed time and waiters add no persisted fields or wire versions.
 A child on the parent's runner also refuses bind or reopen while that
 runner's admission is pending; deferred recovery waits for readiness.
 

@@ -90,7 +90,11 @@ async fn base_pin_attachment_survives_dropped_first_mutation_effects() {
             assert!(settled.adopts[0].is_ok());
             assert_eq!(fixture.vcs.calls_of(FakeOp::Adopt).len(), 1);
         }
-        driver.settle(Effects::default()).await.unwrap();
+        driver
+            .hold_effects(Effects::default())
+            .settle()
+            .await
+            .unwrap();
         assert_eq!(fixture.vcs.calls_of(FakeOp::RestoreBase).len(), 1);
     }
 }
@@ -146,7 +150,11 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
         None,
     );
     driver.reconcile_attachment().await.unwrap();
-    let settled = driver.settle(Effects::default()).await.unwrap();
+    let settled = driver
+        .hold_effects(Effects::default())
+        .settle()
+        .await
+        .unwrap();
     assert_eq!(settled.cleanup_failures, Vec::new());
     let (submitted, _) = driver
         .mutate_and_settle({
@@ -165,7 +173,11 @@ async fn base_pin_failure_is_workspace_local_and_is_not_retried_by_settle() {
         .await
         .unwrap();
     assert!(submitted.is_ok(), "{submitted:?}");
-    driver.settle(Effects::default()).await.unwrap();
+    driver
+        .hold_effects(Effects::default())
+        .settle()
+        .await
+        .unwrap();
     let mut tree = driver.read(Clone::clone).unwrap();
     assert_eq!(
         tree.begin_adopt_for_test("root", &fixture.request)

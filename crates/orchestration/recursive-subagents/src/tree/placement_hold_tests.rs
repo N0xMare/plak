@@ -49,7 +49,7 @@ async fn placement_hold_routed_local_home_publishes_remote_seal_before_dispatch_
     let tree = Arc::new(std::sync::Mutex::new(tree));
     let driver = crate::tools::TreeDriver::new(tree.clone(), store, routed, None);
     driver.save(&mut tree.lock().unwrap()).unwrap();
-    driver.settle(effects).await.unwrap();
+    driver.hold_effects(effects).settle().await.unwrap();
     assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 2);
     assert_eq!(
         staged.load(Ordering::SeqCst),
@@ -172,6 +172,15 @@ async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
     let workspace = node.workspace_id.clone();
     tree.workspaces.get_mut(&workspace).unwrap().base_commit = Some("a".repeat(40));
     vcs.set_placement_ready(path.clone(), false);
+    tree.submit_result(
+        &child,
+        &SubmitResultRequest {
+            turn_token: 1,
+            output_json: r#"{"ok":true}"#.into(),
+        },
+        None,
+    )
+    .unwrap();
     tree.record_turn_completed(&child).unwrap();
 
     let tree_id = tree.tree_id.clone();
@@ -186,7 +195,7 @@ async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
         .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap()
         .agent_id;
-    let runtime = crate::hub::ProductTopologyRuntime::new(tree, store, vcs.clone(), None);
+    let runtime = crate::hub::ProductTopologyRuntime::new(tree, store.clone(), vcs.clone(), None);
     let driver = runtime.driver();
     driver.mutate_and_settle(|_| ()).await.unwrap();
     let sessions =
@@ -211,6 +220,21 @@ async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
 
     runtime.mutate_and_settle(|_| ()).await.unwrap();
     assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
+    let saved = store.load(&tree_id).unwrap().unwrap();
+    let saved = saved.rows();
+    assert_eq!(saved.node(&child).unwrap().status, NodeStatus::Completed);
+    assert!(
+        saved
+            .candidates()
+            .values()
+            .any(|candidate| candidate.producing_agent_id == child)
+    );
+    assert!(saved.operations().values().any(|row| {
+        row.tool_name == "seal_effect"
+            && row.caller_agent_id == child
+            && row.terminal_code.is_none()
+            && row.terminal_response.is_some()
+    }));
     assert!(
         !runtime
             .read(ProductAgentTree::has_ready_deferred_seals)

@@ -787,7 +787,7 @@ pub fn persist_or_fault(
 /// refusal is then surfaced like [`persist_or_fault`].
 pub async fn settle_or_fault(
     driver: &TreeDriver,
-    effects: crate::agent_tree::Effects,
+    effects: crate::agent_tree_tools::HeldEffects,
     agent_id: &str,
 ) {
     if effects.is_empty() {
@@ -889,9 +889,6 @@ pub(in crate::agent) async fn end_attempt_work(
             })
             .await
             .map_err(|error| error.message)?;
-        // Held across the retirements and the job stop, so an early return
-        // or an abort leaves the closed copies' seals to a release owner.
-        let effects = driver.hold_effects(effects);
         let (closed, mut failure, ended) = result.map_err(|error| error.message)?;
         if !ended {
             return effects

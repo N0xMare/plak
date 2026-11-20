@@ -195,7 +195,12 @@ pub(in crate::agent) async fn start_instruction_turn(
                 }
             })
             .await
-            .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
+            .unwrap_or_else(|error| {
+                (
+                    Err(error.message),
+                    driver.hold_effects(crate::agent_tree::Effects::default()),
+                )
+            });
         if let Err(error) = published {
             settle_or_fault(driver, effects, agent_id).await;
             if let Err(retirement_error) =

@@ -912,7 +912,7 @@ async fn recorded_intent_second_save_refusal_reverts_and_reserves_once_on_retry(
             assert!(!effects.is_empty());
             effects
         });
-        driver.settle(effects).await.unwrap();
+        driver.hold_effects(effects).settle().await.unwrap();
         assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
         driver.locked_for_test(|tree| {
             driver.apply_recorded(tree, &child).unwrap();
@@ -1187,7 +1187,7 @@ async fn refused_effect_result_save_keeps_follow_on_removal_queued_until_acknowl
                 tree.take_effects()
             })
         };
-        assert!(driver.settle(effects).await.is_err());
+        assert!(driver.hold_effects(effects).settle().await.is_err());
         assert_eq!(vcs.calls_of(FakeOp::Hook).len(), 1);
         assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
         runtime.mutate_then_emit(false, |_| Ok(())).await.unwrap();
@@ -1365,6 +1365,71 @@ async fn settle_records_every_effect_before_reporting_a_refused_publish() {
         tree.take_effects().is_empty(),
         "the drain ran to completion"
     );
+}
+
+#[tokio::test]
+async fn refused_watcher_save_still_settles_the_already_acknowledged_seal() {
+    use crate::protocol::{NodeStatus, SubmitResultRequest};
+    use plakous_workspace::occupancy_vcs::fake::{FakeOp, FakeVcs};
+    use std::time::Duration;
+
+    let root = tempfile::tempdir().unwrap();
+    let vcs = Arc::new(FakeVcs::new());
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        vcs.clone(),
+        "watcher-save-refusal",
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut binding = RosterBinding::leaf("test-account", "selected-tuple");
+    binding.max_tier = Tier::Mutate;
+    tree.pin_template("implement", binding);
+    let child = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    let path = tree.node(&child).unwrap().path.clone();
+    vcs.set_placement_ready(path.clone(), false);
+    tree.submit_result(
+        &child,
+        &SubmitResultRequest {
+            turn_token: 1,
+            output_json: r#"{"ok":true}"#.into(),
+        },
+        None,
+    )
+    .unwrap();
+    tree.record_turn_completed(&child).unwrap();
+    let store = Arc::new(SecondSaveStore {
+        inner: MemoryTreeStore::new(),
+        saves: AtomicUsize::new(0),
+        fail_at: AtomicUsize::new(2),
+        stale: false,
+    });
+    let driver = driver_on(tree, store.clone());
+    driver.mutate_and_settle(|_| ()).await.unwrap();
+    vcs.set_placement_ready(path, true);
+
+    let refused = driver.mutate_and_settle(|_| ()).await.unwrap_err();
+    assert!(refused.message.contains("second save refused"));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !driver.release_owners().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the dropped handoff returns to its owner");
+    let saved = store.load("watcher-save-refusal").unwrap().unwrap();
+    assert_eq!(
+        saved.rows().node(&child).unwrap().status,
+        NodeStatus::Completed
+    );
+    assert!(saved.rows().attempt(&child).unwrap().candidate_id.is_some());
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
 }
 
 #[tokio::test]

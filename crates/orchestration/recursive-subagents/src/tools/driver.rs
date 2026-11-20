@@ -856,6 +856,7 @@ impl TreeDriver {
     }
 
     /// Runs `work` as the tree's next writer and takes the effects it queued.
+    /// Dropping the returned effects hands them to a release owner.
     ///
     /// Clones the whole tree on every call so a callback that publishes can
     /// park without holding the live tree mutex. Internal guarded mutations
@@ -865,7 +866,7 @@ impl TreeDriver {
     /// # Errors
     ///
     /// Refuses a poisoned tree, or a queued writer that gave up.
-    pub async fn mutate<R, W>(&self, work: W) -> Result<(R, Effects), TopologyError>
+    pub async fn mutate<R, W>(&self, work: W) -> Result<(R, HeldEffects), TopologyError>
     where
         W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
         R: Send + 'static,
@@ -879,7 +880,7 @@ impl TreeDriver {
     /// # Errors
     ///
     /// Refuses a poisoned tree.
-    pub async fn mutate_owed<R, W>(&self, work: W) -> Result<(R, Effects), TopologyError>
+    pub async fn mutate_owed<R, W>(&self, work: W) -> Result<(R, HeldEffects), TopologyError>
     where
         W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
         R: Send + 'static,
@@ -887,7 +888,11 @@ impl TreeDriver {
         self.mutate_turn(work, Turn::Owed).await
     }
 
-    async fn mutate_turn<R, W>(&self, work: W, turn: Turn) -> Result<(R, Effects), TopologyError>
+    async fn mutate_turn<R, W>(
+        &self,
+        work: W,
+        turn: Turn,
+    ) -> Result<(R, HeldEffects), TopologyError>
     where
         W: FnOnce(&mut ProductAgentTree) -> R + Send + 'static,
         R: Send + 'static,
@@ -899,12 +904,10 @@ impl TreeDriver {
                 // Unlike the internal guarded path, its borrow cannot release a lock.
                 tree.detach();
                 let result = work(tree);
-                let effects = tree.take_effects();
+                let effects = owner.hold_effects(tree.take_effects());
                 (result, effects)
             },
-            // A caller gone before its effects reached it leaves them to a
-            // release owner, which settles them.
-            move |_, (_, effects): (R, Effects)| owner.settle_detached(effects),
+            |_, _| {},
             turn,
         )
         .await
@@ -937,7 +940,8 @@ impl TreeDriver {
     /// settled by a release owner.
     pub fn hold_effects(&self, effects: Effects) -> HeldEffects {
         HeldEffects {
-            _activity: (!effects.is_empty()).then(|| self.writer.effect_activity.enter()),
+            activity: (!effects.is_empty()).then(|| self.writer.effect_activity.enter()),
+            executor: tokio::runtime::Handle::try_current().ok(),
             driver: self.clone(),
             effects: Some(effects),
         }
@@ -946,9 +950,8 @@ impl TreeDriver {
     /// One mutation, settled: applies `work`, then runs everything it queued
     /// with the mutex released and records the result.
     ///
-    /// The pairing a caller above this crate should reach for, because the
-    /// two halves cannot come apart — [`Self::mutate`] hands the effects out
-    /// and only a caller that then drops them can strand one.
+    /// Use [`Self::mutate`] when the caller needs to do work between the
+    /// mutation and settlement, such as stopping jobs before closing a copy.
     ///
     /// # Errors
     ///
@@ -971,14 +974,14 @@ impl TreeDriver {
         R: Send + 'static,
     {
         let driver = self.clone();
-        let (result, effects) = self
+        let (result, mut effects) = self
             .mutate(move |tree| {
                 let result = work(tree);
                 driver.save(tree).map(|()| result)
             })
             .await?;
         let result = result?;
-        let settled = self.settle_here(effects).await?;
+        let settled = self.settle_here(effects.take()).await?;
         Ok((result, settled))
     }
 
@@ -997,12 +1000,13 @@ impl TreeDriver {
     ///
     /// Refuses a poisoned tree, effects without an acknowledged revision,
     /// and reports the first save error after recording every run effect.
-    pub async fn settle(&self, effects: Effects) -> Result<Settled, TopologyError> {
+    pub async fn settle(&self, mut effects: HeldEffects) -> Result<Settled, TopologyError> {
         if effects.is_empty() {
             return Ok(Settled::default());
         }
         // A release owner: a caller that leaves mid-way strands no effect.
         let driver = self.clone();
+        let effects = effects.take();
         self.owned(async move { driver.settle_here(effects).await })
             .await
     }
@@ -1174,7 +1178,7 @@ impl TreeDriver {
         Arc::clone(&self.vcs)
     }
 
-    pub(crate) async fn fold_startup(&self) -> Result<Effects, TopologyError> {
+    pub(crate) async fn fold_startup(&self) -> Result<HeldEffects, TopologyError> {
         let driver = self.clone();
         self.write(move |tree| {
             if tree.revision != tree.stored_revision {
@@ -1182,7 +1186,7 @@ impl TreeDriver {
             }
             let targets = tree.startup_fold_targets();
             if targets.is_empty() && tree.pending_close_folds.is_empty() {
-                return Ok(tree.take_effects());
+                return Ok(driver.hold_effects(tree.take_effects()));
             }
             driver.fold_and_commit_guarded(tree, |tree| {
                 for agent in targets {
@@ -1190,7 +1194,7 @@ impl TreeDriver {
                 }
                 Ok(())
             })?;
-            Ok(tree.take_effects())
+            Ok(driver.hold_effects(tree.take_effects()))
         })
         .await?
     }
@@ -1487,20 +1491,37 @@ mod test_support;
 /// [`TreeDriver::hold_effects`].
 #[must_use = "dropped unsettled, the effects go to a release owner"]
 pub struct HeldEffects {
-    _activity: Option<step_activity::EffectGuard>,
+    activity: Option<step_activity::EffectGuard>,
+    executor: Option<tokio::runtime::Handle>,
     driver: TreeDriver,
     effects: Option<Effects>,
 }
 
 impl HeldEffects {
+    /// Whether this handoff owes any effects.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.effects.as_ref().is_none_or(Effects::is_empty)
+    }
+
+    pub(super) fn absorb(&mut self, mut other: Self) {
+        self.effects
+            .get_or_insert_with(Effects::default)
+            .absorb(other.take());
+        self.activity = self.activity.take().or_else(|| other.activity.take());
+    }
+
+    fn take(&mut self) -> Effects {
+        self.effects.take().unwrap_or_default()
+    }
+
     /// Settles the held effects as [`TreeDriver::settle`] does.
     ///
     /// # Errors
     ///
     /// As [`TreeDriver::settle`].
-    pub async fn settle(mut self) -> Result<Settled, TopologyError> {
-        let effects = self.effects.take().unwrap_or_default();
-        self.driver.settle(effects).await
+    pub async fn settle(self) -> Result<Settled, TopologyError> {
+        self.driver.clone().settle(self).await
     }
 
     /// Gives the effects up unrun, for a caller that deliberately leaves
@@ -1513,6 +1534,8 @@ impl HeldEffects {
 impl Drop for HeldEffects {
     fn drop(&mut self) {
         if let Some(effects) = self.effects.take() {
+            // An unread writer reply can be dropped by the native undo thread.
+            let _entered = self.executor.as_ref().map(tokio::runtime::Handle::enter);
             self.driver.settle_detached(effects);
         }
     }

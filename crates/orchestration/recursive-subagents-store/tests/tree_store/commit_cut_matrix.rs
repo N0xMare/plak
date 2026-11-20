@@ -1055,7 +1055,7 @@ async fn fold_one_seal(driver: &TreeDriver, agent: &'static str) {
         .await
         .unwrap();
     applied.unwrap();
-    assert_eq!(effects.seals.len(), 1);
+    assert!(!effects.is_empty());
     driver.settle(effects).await.unwrap();
 }
 

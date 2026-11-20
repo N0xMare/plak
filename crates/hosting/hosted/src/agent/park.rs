@@ -588,7 +588,12 @@ async fn start_wake_turn(
             }
         })
         .await
-        .unwrap_or_else(|error| (Err(error.message), crate::agent_tree::Effects::default()));
+        .unwrap_or_else(|error| {
+            (
+                Err(error.message),
+                driver.hold_effects(crate::agent_tree::Effects::default()),
+            )
+        });
     settle_or_fault(driver, effects, agent_id).await;
     let acknowledged = match published {
         Ok(()) => settle_wake(

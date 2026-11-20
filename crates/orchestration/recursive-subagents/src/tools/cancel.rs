@@ -449,7 +449,7 @@ impl TopologyTool {
                 } else {
                     Effects::default()
                 };
-                (materialized, pending)
+                (materialized, driver.hold_effects(pending))
             })
             .await;
         let Ok((persist_error, pending)) = recorded else {

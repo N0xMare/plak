@@ -461,7 +461,10 @@ impl crate::node::TurnRole<()> for ChildTurns {
                     }
                 })
                 .await
-                .map_or_default(|((), effects)| effects);
+                .map_or_else(
+                    |_| driver.hold_effects(crate::agent_tree::Effects::default()),
+                    |((), effects)| effects,
+                );
             settle_or_fault(&driver, pending, &agent_id).await;
             retire_live_child(&driver, live, &agent_id, completed_turn).await;
             return AfterTerminal::Settled(());
@@ -1025,7 +1028,10 @@ pub(in crate::agent) async fn finalize_child_failure(
             }
         })
         .await
-        .map_or_default(|((), effects)| effects);
+        .map_or_else(
+            |_| driver.hold_effects(crate::agent_tree::Effects::default()),
+            |((), effects)| effects,
+        );
     settle_or_fault(driver, pending, agent_id).await;
     mutate_child(driver, agent_id, {
         let (identity, agent_id, observer) =
@@ -1323,7 +1329,10 @@ pub(super) async fn finalize_child_turn(
             }
         })
         .await
-        .map_or_default(|((), effects)| effects);
+        .map_or_else(
+            |_| driver.hold_effects(crate::agent_tree::Effects::default()),
+            |((), effects)| effects,
+        );
     settle_or_fault(driver, pending, agent_id).await;
     mutate_child(driver, agent_id, {
         let (identity, agent_id, observer) =

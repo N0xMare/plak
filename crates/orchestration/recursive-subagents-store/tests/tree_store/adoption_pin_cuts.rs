@@ -149,7 +149,11 @@ async fn adoption_cut(jj: bool, cut: Cut) {
         "{cut:?}"
     );
     assert_reopened_status(&store, &child.workspace.id, cut);
-    driver.settle(Effects::default()).await.unwrap();
+    driver
+        .hold_effects(Effects::default())
+        .settle()
+        .await
+        .unwrap();
     assert_eq!(read_base(repo.path(), jj, &child.agent_id), expected);
     if let Some(request) = retry {
         assert_retry_lands(&driver, repo.path(), &child, &request, &expected).await;
@@ -188,7 +192,11 @@ async fn assert_retry_lands(
         .read(|tree| row_base(tree, &child.workspace.id))
         .unwrap();
     assert_ne!(published, expected);
-    driver.settle(Effects::default()).await.unwrap();
+    driver
+        .hold_effects(Effects::default())
+        .settle()
+        .await
+        .unwrap();
     assert_eq!(
         read_base(launch, false, &child.agent_id),
         published,

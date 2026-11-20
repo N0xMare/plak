@@ -191,6 +191,137 @@ struct RecoverDuringJobStop {
     child: String,
 }
 
+fn refuse_reclamation_job_stop(root: &Path) -> plakous::tools::JoinedSessionsPort {
+    use plakous::tools::runner::{
+        RunnerBackend, RunnerCall, RunnerCallFuture, RunnerFailure, RunnerLink, RunnerVerb,
+        runner_environment,
+    };
+    use plakous::tools::{
+        ExecutionBackendDescriptor, ExecutionEnvironmentConfig, ExecutionEnvironmentLimits,
+        ExecutionEnvironmentScope, JoinedSessionsPort, LineOwner,
+    };
+
+    struct JobStopRefusal;
+    impl RunnerLink for JobStopRefusal {
+        fn call(&self, call: RunnerCall) -> RunnerCallFuture {
+            let answer = match call.verb() {
+                RunnerVerb::ProbeWorkspace => match call.payload()["op"].as_str() {
+                    Some("canonicalize") => Ok(json!({"path": call.payload()["path"]})),
+                    Some("filesystem_identity") => Ok(json!({"device": 1, "inode": 2})),
+                    _ => Err(RunnerFailure::Unsupported),
+                },
+                RunnerVerb::JobsStop => Err(RunnerFailure::NotSent("test job stop held".into())),
+                _ => Err(RunnerFailure::Unsupported),
+            };
+            Box::pin(std::future::ready(answer))
+        }
+    }
+    let mut descriptor = serde_json::to_value(ExecutionBackendDescriptor::local_runner()).unwrap();
+    descriptor["runner_id"] = json!("test-job-runner");
+    let runner = Arc::new(RunnerBackend::new(descriptor, Arc::new(JobStopRefusal)).unwrap());
+    let id = "00000000-0000-4000-8000-000000000001";
+    let environment = runner_environment(
+        ExecutionEnvironmentScope::Run(id.parse().unwrap()),
+        root,
+        root,
+        ExecutionEnvironmentConfig::new(ExecutionEnvironmentLimits::default(), [], []).unwrap(),
+        runner,
+    )
+    .unwrap()
+    .with_line_owner(LineOwner::new(
+        id.parse().unwrap(),
+        1,
+        id.parse().unwrap(),
+        1,
+    ));
+    JoinedSessionsPort::runner(environment.joined_process_sessions().unwrap())
+}
+
+#[tokio::test]
+async fn reclamation_job_stop_refusal_does_not_abandon_an_unrelated_ready_seal() {
+    use crate::protocol::{NodeStatus, SubmitResultRequest};
+    use plakous_workspace::occupancy_vcs::fake::{FakeOp, FakeVcs};
+
+    let root = tempfile::tempdir().unwrap();
+    let vcs = Arc::new(FakeVcs::new());
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        vcs.clone(),
+        "reclaim-stop-refusal",
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut binding = RosterBinding::leaf("test-account", "selected-tuple");
+    binding.max_tier = Tier::Mutate;
+    tree.pin_template("implement", binding);
+    let reclaim = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(
+        &reclaim,
+        "00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003",
+    )
+    .unwrap();
+    tree.record_turn_completed(&reclaim).unwrap();
+    tree.settle_for_test();
+    let result = tree
+        .poll_wait("root", &AwaitAgents::Pending)
+        .unwrap()
+        .unwrap();
+    tree.acknowledge_wait_mail("root", &result);
+    tree.mark_wait_delivered("root", &result);
+    let child = tree
+        .spawn_agent("root", &mint_spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    let path = tree.node(&child).unwrap().path.clone();
+    vcs.set_placement_ready(path.clone(), false);
+    tree.submit_result(
+        &child,
+        &SubmitResultRequest {
+            turn_token: 1,
+            output_json: r#"{"ok":true}"#.into(),
+        },
+        None,
+    )
+    .unwrap();
+    tree.record_turn_completed(&child).unwrap();
+    let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+    driver.mutate_and_settle(|_| ()).await.unwrap();
+    driver.set_workspace_size_reader(|_| Ok(Some(1 << 40)));
+    driver.bind_job_host(Some(Arc::new(FixtureJobHost(Mutex::new(Some(
+        refuse_reclamation_job_stop(root.path()),
+    ))))));
+    vcs.set_placement_ready(path, true);
+
+    let error = driver.reclaim_dormant_checkouts().await.unwrap_err();
+    assert!(error.message.contains("test job stop held"), "{error:?}");
+    assert!(
+        driver
+            .read(ProductAgentTree::has_ready_deferred_seals)
+            .unwrap()
+    );
+    assert_eq!(
+        vcs.calls_of(FakeOp::Seal).len(),
+        1,
+        "only the prior seal ran"
+    );
+    assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
+    driver.mutate_and_settle(|_| ()).await.unwrap();
+    driver
+        .read(|tree| {
+            assert_eq!(tree.node(&child).unwrap().status, NodeStatus::Completed);
+            assert!(tree.attempt(&child).unwrap().candidate_id.is_some());
+        })
+        .unwrap();
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 2);
+    assert!(vcs.calls_of(FakeOp::Unmint).is_empty());
+}
+
 impl plakous::tools::JobHost for RecoverDuringJobStop {
     fn service(&self, _: plakous::model::LineId) -> Option<plakous::tools::JoinedSessionsPort> {
         None

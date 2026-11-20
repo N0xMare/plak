@@ -39,7 +39,8 @@ impl ProductTopologyRuntime {
             .map_err(|error| error.message)?
             .map_err(|error| error.message)?;
         self.driver
-            .settle(effects)
+            .hold_effects(effects)
+            .settle()
             .await
             .map_err(|error| error.message)?;
         Ok(result)

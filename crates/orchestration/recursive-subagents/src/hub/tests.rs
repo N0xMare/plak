@@ -2467,6 +2467,71 @@ fn barrier_child(
 }
 
 #[tokio::test]
+async fn binding_and_releasing_a_sibling_preserves_the_ready_seal() {
+    use crate::protocol::{SpawnAgentRequest, Tier, WriterMode};
+    use plakous_workspace::occupancy_vcs::fake::{FakeOp, FakeVcs};
+
+    let root = tempfile::tempdir().unwrap();
+    let vcs = Arc::new(FakeVcs::new());
+    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
+        vcs.clone(),
+        "sibling-ownership-seal",
+        "root",
+        "owner",
+        root.path().to_owned(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    let mut binding = crate::epoch::RosterBinding::leaf("test-account", "selected-tuple");
+    binding.max_tier = Tier::Mutate;
+    tree.pin_template("implement", binding);
+    let child = tree
+        .spawn_agent(
+            "root",
+            &SpawnAgentRequest::test_named("implement", Tier::Mutate, "impl", "edit").with_fork(),
+            None,
+        )
+        .unwrap()
+        .agent_id;
+    let sibling = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    let path = tree.node(&child).unwrap().path.clone();
+    vcs.set_placement_ready(path.clone(), false);
+    tree.record_turn_completed(&child).unwrap();
+    let store = memory_store();
+    let runtime = ProductTopologyRuntime::new(tree, store.clone(), vcs.clone(), None);
+    runtime.mutate_and_settle(|_| ()).await.unwrap();
+    vcs.set_placement_ready(path, true);
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let turn = runtime
+        .try_occupy_live(sibling.clone(), Box::new(barrier_child(&entered, &finish)))
+        .await
+        .ok()
+        .unwrap();
+    runtime
+        .read(|tree| {
+            assert_eq!(
+                tree.owned_turn_id(&sibling),
+                Some(turn.to_string().as_str())
+            );
+            assert!(tree.has_ready_deferred_seals());
+        })
+        .unwrap();
+    assert!(vcs.calls_of(FakeOp::Seal).is_empty());
+    finish.notify_one();
+    runtime.cancel_live(&sibling).await.unwrap();
+    assert!(!runtime.read(|tree| tree.has_turn_owner(&sibling)).unwrap());
+    let saved = store.load("sibling-ownership-seal").unwrap().unwrap();
+    assert!(saved.rows().attempt(&child).unwrap().candidate_id.is_some());
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
+}
+
+#[tokio::test]
 async fn refused_retirement_publication_clears_the_slot_but_keeps_fault() {
     use std::str::FromStr;
     let root = tempfile::tempdir().unwrap();

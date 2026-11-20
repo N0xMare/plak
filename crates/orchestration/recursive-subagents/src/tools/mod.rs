@@ -616,13 +616,13 @@ impl TopologyTool {
     }
 
     /// Runs an effects batch with the mutex released, on a blocking worker.
-    async fn settle(&self, effects: Effects) -> Result<Settled, ToolRuntimeError> {
+    async fn settle(&self, effects: HeldEffects) -> Result<Settled, ToolRuntimeError> {
         self.settle_typed(effects)
             .await
             .map_err(|error| ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message))
     }
 
-    async fn settle_typed(&self, effects: Effects) -> Result<Settled, TopologyError> {
+    async fn settle_typed(&self, effects: HeldEffects) -> Result<Settled, TopologyError> {
         self.driver.settle(effects).await
     }
 
