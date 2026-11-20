@@ -12784,11 +12784,10 @@ and OAuth foundations only. Subscription identifiers, statuses, notices and
 frozen model vocabulary remain nameable with no route compiled. Operations
 on an omitted route return `NativeSubscriptionError::NotCompiled` before
 private-state locks, credential reads or transport work. No operation selects
-another vertical. The hosted registry maps omitted route admission to typed
-`CapabilityUnavailable`; API credentials, live lists and runtime construction
-are selected by the same per-route feature. Cached listings retain their
-existing provider-tagged encoding; no smaller build rewrites another route's
-records merely because it cannot execute that route.
+another vertical. These independent features are for facade consumers; the
+hosted product includes every route (chapter 06 §4). Cached listings retain
+their provider-tagged encoding; a facade consumer does not rewrite another
+route's records merely because it cannot execute that route.
 
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/gate/check_features.py` pins this over the

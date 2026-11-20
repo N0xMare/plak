@@ -12,9 +12,8 @@ The expected closure is walked from the package's own feature table over the
 workspace's normal dependency edges (from `cargo metadata`, no hardcoded edge
 map) and compared to `cargo tree`. All packages use the same witness scheme.
 Named exclusion profiles independently pin complete external closures. The
-manifest security-surface digests are
-reviewed pins over the library layers (core, common, engine, protocol,
-provider, store, harness, facade) and the product and hosted manifests and stay hardcoded below.
+reviewed manifest digests cover the library layers (core, common, engine,
+protocol, provider, store, harness, facade), the product and the hosted crate.
 
 `EXCLUDED_CLOSURE_PACKAGES` additionally pins, over the complete external
 closure Cargo reports, the packages a named feature profile must not reach.
@@ -278,8 +277,8 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
-    "plakd": "621fd9e7e44dba5f426249cbb8dc1b0b6d8f0d6ff4e080b1aa9910a18aabf0f5",
-    "plakous-hosted": "395fc37386c2c884f031f0a48708e3beffc4a5105d177ccbfb7ff1c577b91f9f",
+    "plakd": "b4be2e97b07fa02678f6610e2a6672ad2d77ff35801eea1ba33dd2add6be9384",
+    "plakous-hosted": "bb952cc674b62474288a95219cd5f795322fe161a62420f2c5e08ddd752f55c9",
     "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
     "plakous-py-worker": "69292766720fd343d9c1ce2701cee97bf9c89fccfd5b74618ebae180ba970e63",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",

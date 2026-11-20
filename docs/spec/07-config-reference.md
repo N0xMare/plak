@@ -623,19 +623,11 @@ capability. A build without it refuses config/session admission with the typed
 `CapabilityUnavailable` (exit 2), before attach or writes; it never drops the
 selected tool silently. Frozen fetch bounds remain readable for show/log/export.
 
-The same capability verdict applies to a template, card or default selecting
-an uncompiled account or evaluator. Execution admission returns the typed
-`CapabilityUnavailable` (exit 2), without selecting another account. Existing
-session show/log/export does not require its route to be compiled. Stored
-binding validation checks the frozen vocabulary, not today's model enrollment;
-attach, resume and rebind separately require the compiled route before writes.
-The route feature uses the account spelling: `codex`, `grok`, `claude`,
-`openai`, `anthropic`, `xai-api` or `openrouter`. Codex and OpenAI additionally
-select JS; Python is an explicit independent selection requiring JS. A build
-without a route omits it from login/model menus, presets and catalog refresh;
-an explicit command selecting it still returns the typed refusal. The named
-headless, API and minimal build variants are qualified in the full-only gate,
-not alternative configuration profiles or distributed artifacts.
+All product routes and evaluators are built in (chapter 06 §4). An exact
+account, model and composition still have to pass admission; a refusal
+never selects another account or evaluator. Stored binding validation checks
+the frozen vocabulary, not today's model enrollment. Read-only session
+show/log/export does not require credentials or a worker sidecar.
 
 A set `allowed_domains`, `blocked_domains` or `allowed_x_handles` replaces
 the list the model passes on a call. Each option travels in the route
