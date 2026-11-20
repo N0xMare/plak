@@ -665,8 +665,7 @@ fn rolling_cut_stops_at_the_newest_exchange_and_empty_middles() {
     );
 }
 
-#[test]
-fn rolling_cut_composes_with_older_intent_groups() {
+fn rolling_cut_with_older_groups() -> ConversationView {
     let segments = vec![
         HistorySegment::new(
             HistorySegmentKind::RecentIntent,
@@ -676,6 +675,13 @@ fn rolling_cut_composes_with_older_intent_groups() {
         complete_exchange(100),
         HistorySegment::new(
             HistorySegmentKind::RecentIntent,
+            vec![text(3, Actor::User, "second older ask")],
+        )
+        .expect("second older intent"),
+        complete_exchange(200),
+        reasoning(250),
+        HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
             vec![text(2, Actor::User, "current ask")],
         )
         .expect("latest intent"),
@@ -683,27 +689,53 @@ fn rolling_cut_composes_with_older_intent_groups() {
         reasoning(400),
         complete_exchange(500),
     ];
-    let source = ConversationView::from_shared(
+    ConversationView::from_shared(
         CanonicalHistory::new(segments).expect("history"),
         WorkingProjection::default(),
+    )
+}
+
+#[test]
+fn rolling_cut_pins_plan_and_intent_group_identities() {
+    let plan = ContextHistoryPlan::new(&rolling_cut_with_older_groups()).expect("plan");
+    assert_eq!(
+        crate::hex_lower(plan.identity().bytes()),
+        "d4ba0e1960b48a4a045618d3c94bfdf536cb61bc227a809640b544c21058a4d2"
     );
+    let group_identities = plan
+        .selected_intent_groups()
+        .iter()
+        .map(|group| crate::hex_lower(group.identity().bytes()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        group_identities,
+        [
+            "9433ce6eefda4f48f10da6f60fb6e904702b3ba16582f8f9581a4a6c1c2a6eff",
+            "8e9ee9fae9e7b844e4d9d0148a7a0e03d35d587909a2945a59a71214bb47de7d",
+            "6289880cc3307bc1412590e540c255384ec7446d4a56a2730ac9fbb20b5d6d92",
+        ]
+    );
+}
+
+#[test]
+fn rolling_cut_composes_with_older_intent_groups() {
+    let source = rolling_cut_with_older_groups();
     let plan = ContextHistoryPlan::new(&source).expect("plan");
 
-    // Older group folds whole; inside the active turn only the sealed
-    // middle (positions 3..5 minus none-selectable kinds) joins the cut.
+    // Older groups fold whole; only the sealed middle of the active turn joins the cut.
     assert_eq!(
         plan.selected_intent_groups()
             .iter()
             .map(|group| (group.start_position(), group.end_position()))
             .collect::<Vec<_>>(),
-        vec![(0, 2), (3, 5)]
+        vec![(0, 2), (2, 5), (6, 8)]
     );
     assert_eq!(
         plan.selected_segments()
             .iter()
             .map(|segment| segment.position())
             .collect::<Vec<_>>(),
-        vec![0, 1, 3, 4]
+        vec![0, 1, 2, 3, 4, 6, 7]
     );
     assert_eq!(
         plan.disposition().kind(),
@@ -723,6 +755,9 @@ fn rolling_cut_composes_with_older_intent_groups() {
         vec![
             HistorySegmentKind::RecentIntent,
             HistorySegmentKind::ToolExchange,
+            HistorySegmentKind::RecentIntent,
+            HistorySegmentKind::ToolExchange,
+            HistorySegmentKind::ReasoningReplay,
             HistorySegmentKind::RecentIntent,
             HistorySegmentKind::ToolExchange,
             HistorySegmentKind::ReasoningReplay,
