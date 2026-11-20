@@ -3,7 +3,6 @@ use super::*;
 #[test]
 fn unknown_accounts_refuse_selection_and_resume_before_credentials() {
     use plakous_hosted::capabilities::AccountAdmissionError;
-    let config = crate::product_config::ProductConfig::default_product();
     for account in ["openai/work/extra", "missing", "", "xai", "OPENAI"] {
         let failure =
             crate::CliFailure::from(plakous_hosted::capabilities::require(account).unwrap_err());
