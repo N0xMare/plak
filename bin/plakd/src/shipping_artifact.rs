@@ -182,7 +182,7 @@ impl Toolchain {
 }
 
 impl BuildInfo {
-    fn validate(&self) -> CliResult<()> {
+    pub(crate) fn validate(&self) -> CliResult<()> {
         check(
             crate::carry::upgrade::state_key_valid(&self.state_key),
             "invalid state key",
@@ -207,7 +207,7 @@ impl BuildInfo {
 }
 
 impl FileFacts {
-    fn validate(&self) -> CliResult<()> {
+    pub(crate) fn validate(&self) -> CliResult<()> {
         check(
             self.length > 0
                 && self.length <= BLOB_LIMIT

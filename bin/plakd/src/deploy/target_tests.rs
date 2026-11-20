@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use super::{Reply, VERSION, receive_host, serve, shipping};
+use crate::snapshot_install::Flavor::Release;
 
 fn response(mut raw: &[u8]) -> Reply {
     let mut output = Vec::new();
@@ -66,10 +67,17 @@ fn stage_host_checks_manifest_and_bootstrap_before_accepting_exact_sidecar_bytes
     let manifest = manifest();
     let pin = shipping::digest(&manifest);
     let input = b"plakous-js-hostplakous-py-host";
-    let error = receive_host(&binary, &manifest, &"0".repeat(64), &mut &input[..]).unwrap_err();
+    let error = receive_host(
+        &binary,
+        &manifest,
+        &"0".repeat(64),
+        Release,
+        &mut &input[..],
+    )
+    .unwrap_err();
     assert!(error.message().contains("manifest digest differs"));
     std::fs::write(&binary, b"other").unwrap();
-    let error = receive_host(&binary, &manifest, &pin, &mut &input[..]).unwrap_err();
+    let error = receive_host(&binary, &manifest, &pin, Release, &mut &input[..]).unwrap_err();
     assert!(error.message().contains("digest mismatch"));
     std::fs::write(&binary, b"plakd").unwrap();
     let mut trailing = input.to_vec();
@@ -78,10 +86,12 @@ fn stage_host_checks_manifest_and_bootstrap_before_accepting_exact_sidecar_bytes
         (&input[..input.len() - 1], "length differs"),
         (trailing.as_slice(), "trailing SSH transfer data"),
     ] {
-        let error = receive_host(&binary, &manifest, &pin, &mut body).unwrap_err();
+        let error = receive_host(&binary, &manifest, &pin, Release, &mut body).unwrap_err();
         assert!(error.message().contains(expected), "{error:?}");
     }
-    let received = receive_host(&binary, &manifest, &pin, &mut &input[..]).unwrap();
+    let (received, maintainer) =
+        receive_host(&binary, &manifest, &pin, Release, &mut &input[..]).unwrap();
+    assert!(maintainer.is_none());
     for name in shipping::NAMES {
         assert_eq!(
             std::fs::read(received.path().join(name)).unwrap(),

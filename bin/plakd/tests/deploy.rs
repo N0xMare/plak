@@ -13,6 +13,7 @@ use sha2::{Digest as _, Sha256};
 
 const NAMES: [&str; 3] = ["plakd", "plakous-js-host", "plakous-py-host"];
 const PLATFORM: &str = "x86_64-unknown-linux-musl";
+const GNU: &str = "x86_64-unknown-linux-gnu";
 const MAC: &str = "aarch64-apple-darwin";
 const KEY: &str = "r28.e39.p39.t11";
 const NO_EVENTS: [String; 0] = [];
@@ -381,12 +382,6 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     f.staging("plan", "blocked", "SSH returned no bounded verdict");
     assert_eq!(f.events(), NO_EVENTS);
     f.reset();
-    f.configure(&"a".repeat(40), &["grok", "codex"]);
-    f.change(|d| d["host"]["accounts"]["codex"] = json!("ready"));
-    f.staging("plan", "blocked", "no bounded deploy canary for codex");
-    assert_eq!(f.events(), NO_EVENTS);
-    f.reset();
-    f.configure(&"a".repeat(40), &["grok"]);
     let plan = f.staging("plan", "ready", "");
     assert_eq!(plan["observed"]["accounts"]["openai"], "not_enrolled");
     assert_eq!(
@@ -447,6 +442,146 @@ fn deploy_staging_rejects_ineligible_candidates_before_ssh() {
             assert_eq!(f.events(), NO_EVENTS);
         }
     }
+}
+
+#[test]
+fn deploy_plan_requires_every_enrolled_family_in_incumbent_canary_capabilities() {
+    let families = [
+        "anthropic",
+        "claude",
+        "codex",
+        "grok",
+        "openai",
+        "openrouter",
+        "xai-api",
+    ];
+    let fleet = Fleet::new();
+    fleet.configure(&"a".repeat(40), &families);
+    let report = |advertised: &[&str]| {
+        fleet.change(|data| {
+            data["host"]["accounts"] = json!(
+                families
+                    .into_iter()
+                    .map(|kind| (kind, "ready"))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            );
+            data["host"]["canary"] = json!(advertised);
+        });
+    };
+    for missing in families {
+        let advertised: Vec<_> = families
+            .into_iter()
+            .filter(|kind| *kind != missing)
+            .collect();
+        report(&advertised);
+        fleet.staging(
+            "plan",
+            "blocked",
+            &format!("no bounded deploy canary for {missing}"),
+        );
+        assert_eq!(fleet.events(), NO_EVENTS);
+    }
+    report(&families);
+    fleet.staging("plan", "ready", "");
+    assert_eq!(fleet.events(), NO_EVENTS);
+}
+
+#[test]
+fn deploy_pinned_gnu_maintainer_snapshot_checks_libc_before_transfer() {
+    let f = Fleet::new();
+    let release = read(&f.path("host/manifest.json"));
+    let build = {
+        let mut build = release["build_info"].clone();
+        build["flavor"] = json!("maintainer release");
+        build
+    };
+    let lib = f.path("snapshots");
+    let snapshot = lib
+        .join("maintainer")
+        .join(release["snapshot_id"].as_str().unwrap());
+    fs::create_dir_all(&snapshot).unwrap();
+    fs::copy(f.path("host/plakd"), snapshot.join("plakd")).unwrap();
+    fs::write(snapshot.join("state-key"), format!("{KEY}\n")).unwrap();
+    for name in &NAMES[1..] {
+        let digest = release["files"][name]["sha256"].as_str().unwrap();
+        let directory = lib.join("sidecars").join(name).join(digest);
+        fs::create_dir_all(&directory).unwrap();
+        let worker = directory.join(name);
+        fs::copy(f.path("host").join(name), &worker).unwrap();
+        std::os::unix::fs::symlink(worker, snapshot.join(name)).unwrap();
+    }
+    let manifest = json!({
+        "snapshot_schema": 1, "platform": GNU, "snapshot_id":release["snapshot_id"],
+        "files": release["files"], "build_info":build, "glibc":[2,39,0]
+    });
+    let path = snapshot.join("deploy-manifest.json");
+    write(&path, &manifest);
+    fs::write(f.path("gnu-snapshot"), snapshot.to_str().unwrap()).unwrap();
+    let root = f.temp.path().display();
+    let artifact = snapshot.display();
+    let pin = hash(fs::read(&path).unwrap());
+    let revision = "a".repeat(40);
+    let source = "1".repeat(64);
+    fs::write(
+        f.path("inventory.toml"),
+        format!(
+            r#"
+schema = 2
+repo = "{root}"
+revision = "{revision}"
+[manifests.{GNU}]
+artifact = "{artifact}"
+manifest_sha256 = "{pin}"
+flavor = "maintainer"
+[staging]
+drain_seconds = 60
+evidence = "{root}/staging.jsonl"
+receipt = "{root}/receipt.json"
+[[staging.machines]]
+[staging.machines.node]
+ssh = "example-staging"
+login = "example"
+home = "/srv/example"
+uid = 1000
+platform = "{GNU}"
+[staging.machines.host]
+product_home = "/srv/example/.plak"
+source_sha256 = "{source}"
+web_socket = "/srv/example/host.sock"
+ui = "/srv/example/ui"
+[staging.machines.gateway]
+service = "example-gateway.service"
+socket = "/srv/example/gateway.sock"
+sha256 = "{source}"
+[[staging.routes]]
+account = "grok"
+model = "example-model"
+effort = "low"
+"#
+        ),
+    )
+    .unwrap();
+    f.change(|data| {
+        data["glibc"] = json!("glibc 2.9");
+        data["host"]["stage_identity"]["platform"] = json!(GNU);
+        data["host"]["facts"]["runner_triple"]["flavor"] = json!("maintainer release");
+        data["no_clients"] = json!(true);
+    });
+    f.staging("plan", "blocked", "older than required 2.39");
+    assert_eq!(f.events(), NO_EVENTS);
+    assert_eq!(
+        fs::read_to_string(f.path("invocation")).unwrap(),
+        "planning"
+    );
+    assert!(!f.path("staging.jsonl").exists());
+    f.staging("apply", "blocked", "older than required 2.39");
+    assert_eq!(f.events(), NO_EVENTS);
+    assert!(!f.path("receipt.json").exists());
+    f.change(|data| data["glibc"] = json!("glibc 2.39"));
+    f.staging("plan", "ready", "");
+    f.staging("apply", "green", "");
+    assert!(f.events().contains(&"stage_host".to_owned()));
+    f.staging("apply", "no_op", "");
 }
 
 #[test]
@@ -1096,7 +1231,7 @@ fn next(input: &mut impl BufRead) -> String {
     line.strip_suffix('\n').unwrap().to_owned()
 }
 
-fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i32) {
+fn assert_ssh_settings(args: &[&str]) {
     for setting in [
         "-oStrictHostKeyChecking=yes",
         "-oForwardAgent=no",
@@ -1105,6 +1240,18 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         "/dev/null",
     ] {
         assert!(args.contains(&setting), "missing {setting}");
+    }
+}
+
+fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i32) {
+    assert_ssh_settings(args);
+    if args.last() == Some(&"exec /usr/bin/getconf GNU_LIBC_VERSION") {
+        assert_eq!(input.fill_buf().unwrap(), b"");
+        let data = read(&root.join("fleet.json"));
+        return (
+            format!("{}\n", data["glibc"].as_str().unwrap()).into_bytes(),
+            0,
+        );
     }
     let script = args
         .iter()
@@ -1118,7 +1265,7 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
     assert!(script.contains("/usr/bin/shasum -a 256"));
     let image = read_candidate(input, transferred);
     let call: Value = serde_json::from_str(&next(input)).unwrap();
-    assert_eq!(call["deploy_protocol"], 3);
+    assert_eq!(call["deploy_protocol"], 4);
     let request = &call["call"]["request"];
     let op = &request["op"];
     let mut name = op["op"].as_str().unwrap().to_owned();
@@ -1143,6 +1290,7 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
         _ => panic!("unexpected role {role}"),
     };
     assert_candidate_bytes(root, &image, node, transferred);
+    assert_candidate_build_info(node, &call);
     let prod = call["stage"] == "production";
     if name == "client_observe" {
         return (
@@ -1194,6 +1342,17 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
     (encoded(&response), if lost { 255 } else { 0 })
 }
 
+fn assert_candidate_build_info(node: &Value, call: &Value) {
+    if node["platform"] == GNU {
+        assert_eq!(
+            call["maintainer_build"],
+            json!({"platform":GNU, "revision":"a".repeat(40), "state_key":KEY})
+        );
+    } else {
+        assert!(call["maintainer_build"].is_null());
+    }
+}
+
 fn observed_reply(data: &Value, name: &str, observed: &Value) -> (Vec<u8>, i32) {
     if data["transport_loss"] == true {
         return (Vec::new(), 255);
@@ -1239,6 +1398,12 @@ fn assert_candidate_bytes(root: &Path, image: &(String, Vec<u8>), node: &Value, 
 }
 
 fn deployed(root: &Path, node: &Value) -> String {
+    if node["platform"] == GNU {
+        let path = PathBuf::from(fs::read_to_string(root.join("gnu-snapshot")).unwrap());
+        let snapshot = path.file_name().unwrap().to_str().unwrap();
+        let home = node["home"].as_str().unwrap();
+        return format!("{home}/.local/lib/plak/maintainer/{snapshot}/plakd");
+    }
     let directory = if node["platform"] == MAC {
         "mac"
     } else {
@@ -1392,6 +1557,14 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
                 op["manifest_sha256"]
             );
             assert_eq!(blob, b"plakous-js-hostplakous-py-host");
+            assert_eq!(
+                op["flavor"],
+                if data["no_clients"] == true {
+                    "maintainer"
+                } else {
+                    "release"
+                }
+            );
             data["candidate"] = want["sha256"].clone();
             Value::Null
         }
@@ -1465,7 +1638,9 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
 
 fn simulate_upgrade(data: &mut Value, op: &Value, want: &Value) -> Value {
     assert_eq!(op["candidate"]["sha256"], data["candidate"]);
-    assert_eq!(data["client"], "staged");
+    if data["no_clients"] != true {
+        assert_eq!(data["client"], "staged");
+    }
     assert_eq!(op["previous"]["instance"], data["host"]["instance"]);
     if data["paired_fleet"] == true {
         assert_eq!(data["runner"], "current");

@@ -252,6 +252,7 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
         &fs::read(source).unwrap(),
     );
     let candidate = Candidate {
+        flavor: crate::snapshot_install::Flavor::Release,
         snapshot,
         sha256: serving.sha256.clone(),
     };
@@ -261,6 +262,7 @@ fn assert_target_guards(target: &Target<'_>, source: &Path) {
     let error = target::upgrade(target, &candidate, &unexpected, 10, null()).unwrap_err();
     assert!(error.message().contains("serving facts changed"));
     let absent = Candidate {
+        flavor: crate::snapshot_install::Flavor::Release,
         snapshot: "f".repeat(64),
         sha256: candidate.sha256.clone(),
     };

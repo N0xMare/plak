@@ -16,6 +16,7 @@ use crate::shipping_artifact::{
 use crate::{CliResult, ProcessOutcome};
 
 mod archive;
+pub(crate) mod maintainer;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -25,14 +26,15 @@ pub(crate) enum Action {
     Link { id: String },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-enum Flavor {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Flavor {
     Release,
     Maintainer,
 }
 
 impl Flavor {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Release => "release",
             Self::Maintainer => "maintainer",
@@ -69,11 +71,11 @@ pub(crate) fn run(action: Action, stdout: &mut dyn Write) -> CliResult<ProcessOu
     Ok(ProcessOutcome::Success)
 }
 
-pub(crate) fn install_dir(path: &Path, no_link: bool) -> CliResult<PathBuf> {
+pub(crate) fn install_dir(path: &Path) -> CliResult<PathBuf> {
     install(&Install {
         from: path.to_owned(),
         manifest: None,
-        no_link,
+        no_link: true,
         flavor: Flavor::Release,
         source_build: None,
         release_download: false,
@@ -130,7 +132,12 @@ fn install(options: &Install) -> CliResult<PathBuf> {
     expected["plakd"].verify(running)?;
     let layout = Layout::resolve(options.flavor)?;
     let id = shipping::snapshot_id(&expected);
-    let snapshot = layout.publish(verified.path(), &expected, &id)?;
+    let manifest = if options.flavor == Flavor::Maintainer {
+        maintainer::Manifest::from_build(verified.path(), &expected, &id)?
+    } else {
+        None
+    };
+    let snapshot = layout.publish(verified.path(), &expected, &id, manifest.as_deref())?;
     if !options.no_link {
         layout.link(
             &snapshot,
@@ -183,12 +190,21 @@ pub(crate) fn link_snapshot(id: &str) -> CliResult<()> {
     Layout::resolve(Flavor::Release)?.link_verified(id)
 }
 
-pub(crate) fn link_snapshot_in(home: &Path, id: &str) -> CliResult<()> {
-    Layout::from_home(home, Flavor::Release)?.link_verified(id)
+pub(crate) fn link_snapshot_in(home: &Path, flavor: Flavor, id: &str) -> CliResult<()> {
+    Layout::from_home(home, flavor)?.link_verified(id)
 }
 
-pub(crate) fn verified_snapshot_in(home: &Path, id: &str) -> CliResult<PathBuf> {
-    Layout::from_home(home, Flavor::Release)?.verified(id)
+pub(crate) fn verified_snapshot_in(home: &Path, flavor: Flavor, id: &str) -> CliResult<PathBuf> {
+    Layout::from_home(home, flavor)?.verified(id)
+}
+
+pub(crate) fn stage_maintainer(
+    path: &Path,
+    raw: &[u8],
+    m: &maintainer::Manifest,
+) -> CliResult<PathBuf> {
+    m.check_current(path)?;
+    Layout::resolve(Flavor::Maintainer)?.publish(path, &m.files, &m.snapshot_id, Some(raw))
 }
 
 struct Layout {
@@ -249,6 +265,7 @@ impl Layout {
         verified: &Path,
         files: &BTreeMap<String, FileFacts>,
         id: &str,
+        deploy_manifest: Option<&[u8]>,
     ) -> CliResult<PathBuf> {
         let root = self.root.join(self.flavor.name());
         ensure(&root)?;
@@ -281,8 +298,17 @@ impl Layout {
             format!("{}\n", crate::carry::VERSION),
         )
         .map_err(io)?;
+        if let Some(raw) = deploy_manifest {
+            immutable_bytes(&stage.path().join(maintainer::MANIFEST), raw)?;
+        }
         publish_directory(stage.path(), &snapshot)?;
         self.verify_snapshot(&snapshot, id)?;
+        if let Some(raw) = deploy_manifest {
+            check(
+                shipping::read(&snapshot.join(maintainer::MANIFEST), shipping::LIMIT)? == raw,
+                "installed maintainer manifest differs",
+            )?;
+        }
         Ok(snapshot)
     }
 
@@ -428,6 +454,11 @@ fn immutable(source: &Path, dest: &Path, facts: &FileFacts) -> CliResult<()> {
     output
         .set_permissions(fs::Permissions::from_mode(0o555))
         .map_err(io)
+}
+
+fn immutable_bytes(dest: &Path, raw: &[u8]) -> CliResult<()> {
+    let mut output = create_file(dest, 0o444)?;
+    output.write_all(raw).map_err(io)
 }
 
 fn publish_directory(stage: &Path, dest: &Path) -> CliResult<()> {

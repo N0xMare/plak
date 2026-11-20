@@ -70,7 +70,9 @@ struct Gateway {
 pub(super) fn validate_node(node: &Node, operator: Option<&str>) -> CliResult<AccountIdentity> {
     node.validate()?;
     check(
-        Platform::native() == Some(node.platform),
+        Platform::native().is_some_and(|native| {
+            native == node.platform || native.is_linux() && node.platform.is_linux()
+        }),
         "unexpected target platform",
     )?;
     let uid = rustix::process::geteuid().as_raw();
@@ -131,7 +133,9 @@ impl<'a> Target<'a> {
 
     pub(super) fn unit_path(&self) -> PathBuf {
         match self.host.node.platform {
-            Platform::Linux => self.host.node.home.join(".config/systemd/user").join(UNIT),
+            Platform::Linux | Platform::LinuxGnu => {
+                self.host.node.home.join(".config/systemd/user").join(UNIT)
+            }
             Platform::Mac => self.plist(HOST_AGENT),
         }
     }
@@ -202,7 +206,7 @@ impl<'a> Target<'a> {
 
     fn process_image(&self, pid: &str) -> CliResult<PathBuf> {
         match self.host.node.platform {
-            Platform::Linux => {
+            Platform::Linux | Platform::LinuxGnu => {
                 let exe = self.proc_root.join(pid).join("exe");
                 let path = exe.canonicalize().map_err(io)?;
                 let running = fs::metadata(exe).map_err(io)?;
@@ -290,7 +294,7 @@ impl<'a> Target<'a> {
     fn running_host_pid(&self) -> CliResult<String> {
         match self.host.node.platform {
             Platform::Mac => super::launchd::running_pid(self, HOST_AGENT),
-            Platform::Linux => {
+            Platform::Linux | Platform::LinuxGnu => {
                 Ok(active_pid(&self.properties(UNIT, &["ActiveState", "MainPID"])?)?.to_owned())
             }
         }
@@ -427,7 +431,7 @@ impl<'a> Target<'a> {
         check(
             start.canonicalize().ok().as_ref() == Some(&process),
             match self.host.node.platform {
-                Platform::Linux => {
+                Platform::Linux | Platform::LinuxGnu => {
                     "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway"
                 }
                 Platform::Mac => {
@@ -788,7 +792,7 @@ pub(super) fn command(binary: &OsStr, node: &Node, product_home: &Path) -> std::
             },
         )
         .current_dir(&node.home);
-    if node.platform == Platform::Linux {
+    if node.platform.is_linux() {
         cmd.env("XDG_RUNTIME_DIR", &runtime).env(
             "DBUS_SESSION_BUS_ADDRESS",
             format!("unix:path={runtime}/bus"),

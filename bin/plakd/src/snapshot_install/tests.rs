@@ -12,7 +12,7 @@ pub(crate) fn publish_fixture(home: &Path, binary: &[u8]) -> (PathBuf, String) {
     let id = shipping::snapshot_id(&files);
     let path = Layout::from_home(home, Flavor::Release)
         .unwrap()
-        .publish(source.path(), &files, &id)
+        .publish(source.path(), &files, &id, None)
         .unwrap();
     (path, id)
 }
@@ -97,7 +97,9 @@ fn symlinked_digest_directories_are_not_followed() {
     let files = shipping::collect(source.path()).unwrap();
     let layout = Layout::from_home(home.path(), Flavor::Release).unwrap();
     let id = shipping::snapshot_id(&files);
-    let error = layout.publish(source.path(), &files, &id).unwrap_err();
+    let error = layout
+        .publish(source.path(), &files, &id, None)
+        .unwrap_err();
     assert!(error.message().contains("symlinked installation directory"));
 }
 

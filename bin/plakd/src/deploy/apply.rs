@@ -257,6 +257,7 @@ impl<F: Fleet> Deploy<'_, F> {
             self.fleet.host(HostOp::StageHost {
                 manifest: self.artifacts.host().raw.clone(),
                 manifest_sha256: self.artifacts.host().pin.clone(),
+                flavor: self.artifacts.host().manifest.flavor,
             })?;
             log.record(&self.intent, "stage_host", &())?;
         }
@@ -286,6 +287,7 @@ impl<F: Fleet> Deploy<'_, F> {
                     RunnerOp::Stage {
                         manifest: artifact.raw.clone(),
                         manifest_sha256: artifact.pin.clone(),
+                        flavor: artifact.manifest.flavor,
                     },
                 )?;
             }

@@ -22,11 +22,23 @@ stage entirely. Pin the full manifest SHA-256 for every platform you enroll.
 All artifacts, including those for staging, must be from one full revision
 in the advertised `origin/main` first-parent history. A candidate on an
 integration branch is not eligible yet. Fetch main separately if the local
-checkout cannot validate its history. Supply the unpacked shipping release
-artifact from `tools/release/package-release.sh` (`--untagged` for a
-rehearsal). Linux deploy takes x86-64 musl artifacts only. A native GNU or
-maintainer source-build snapshot is not a deploy artifact, even if it runs
-on the target.
+checkout cannot validate its history. For a shipping release, supply the
+unpacked artifact from `tools/release/package-release.sh` (`--untagged`
+for a rehearsal) and pin its `manifest.json`. Linux shipping releases are
+x86-64 musl.
+
+For a maintainer host or runner, run `just build maintainer` in the exact
+source checkout, then that build's
+`plakd snapshot install --from <target-dir>/maintainer --source-build <target-dir> --flavor maintainer --no-link`.
+Use the printed immutable directory and keep its matching installer-published
+sidecars reachable at their original content-addressed paths. In the
+inventory's platform table, set `flavor = "maintainer"` and pin the SHA-256
+of `deploy-manifest.json`. Use the actual build triple, including
+`x86_64-unknown-linux-gnu` for a GNU maintainer build. On GNU Linux both the
+build-side and target installer need `/usr/bin/readelf`; the target needs
+`/usr/bin/getconf` for deploy's read-only libc check. If the target's GLIBC
+is too old, build a qualified snapshot on a compatible system; don't edit
+the manifest or replace individual sidecars.
 
 List every account in use with its exact name and cheap canary model. Plan
 refuses any missing in-use account; signed-out accounts show `not_enrolled`.
@@ -35,6 +47,8 @@ manual same-key procedure for a fleet with an in-use account that has no
 bounded canary, such as Codex or an API route. Do not omit a route or
 sign out an account just to pass plan. Grok and Claude OAuth models must
 admit the tool-free 16-token canary at the specified low or disabled effort.
+The incumbent must provide the adapter for BASELINE; updating only the
+destination doesn't add canary support to the source.
 
 For a one-Mac fleet, use a separate macOS user for staging, not another
 product home under the production UID. Give each user their own HOME,

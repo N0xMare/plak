@@ -62,6 +62,13 @@ fn respond(header: &[u8], input: &mut dyn Read) -> Reply {
 }
 
 fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value> {
+    if let Some(build) = request.maintainer_build {
+        snapshot_install::maintainer::check_bootstrap(
+            build.platform.triple(),
+            &build.revision,
+            &build.state_key,
+        )?;
+    }
     match request.call {
         Call::Host { host, op } => {
             let target = Target::new(&host, request.operator_machine.as_deref())?;
@@ -145,7 +152,13 @@ pub(super) fn execute_host(
         HostOp::StageHost {
             manifest,
             manifest_sha256,
-        } => data(&stage_host(manifest.as_bytes(), &manifest_sha256, body)?),
+            flavor,
+        } => data(&stage_host(
+            manifest.as_bytes(),
+            &manifest_sha256,
+            flavor,
+            body,
+        )?),
         HostOp::DestinationUnit { candidate } => {
             check_unit(target, &staged(target, &candidate)?)?;
             data(&())
@@ -198,7 +211,11 @@ pub(super) fn execute_host(
                 observed.sha256 == candidate.sha256 && observed.instance == instance,
                 "replacement is no longer Ready",
             )?;
-            snapshot_install::link_snapshot_in(&target.host.node.home, &candidate.snapshot)?;
+            snapshot_install::link_snapshot_in(
+                &target.host.node.home,
+                candidate.flavor,
+                &candidate.snapshot,
+            )?;
             data(&())
         }
         HostOp::MarkProduction { expected } => {
@@ -221,11 +238,12 @@ fn staged(target: &Target<'_>, candidate: &Candidate) -> CliResult<PathBuf> {
 }
 
 pub(super) fn staged_in(node: &Node, candidate: &Candidate) -> CliResult<PathBuf> {
-    let binary = snapshot_install::verified_snapshot_in(&node.home, &candidate.snapshot)
-        .map_err(|_| {
-            fail("candidate snapshot is missing or unverified; restage the exact artifact")
-        })?
-        .join("plakd");
+    let binary =
+        snapshot_install::verified_snapshot_in(&node.home, candidate.flavor, &candidate.snapshot)
+            .map_err(|_| {
+                fail("candidate snapshot is missing or unverified; restage the exact artifact")
+            })?
+            .join("plakd");
     check(
         FileFacts::read(&binary)?.sha256 == candidate.sha256,
         "staged binary digest differs",
@@ -316,24 +334,44 @@ pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str)
     )
 }
 
-pub(super) fn stage_host(raw: &[u8], pin: &str, body: &mut dyn Read) -> CliResult<PathBuf> {
+pub(super) fn stage_host(
+    raw: &[u8],
+    pin: &str,
+    flavor: snapshot_install::Flavor,
+    body: &mut dyn Read,
+) -> CliResult<PathBuf> {
     let bootstrap = crate::build_identity::running_executable()
         .ok_or_else(|| fail("cannot identify staged installer image"))?;
-    let work = receive_host(bootstrap, raw, pin, body)?;
-    snapshot_install::install_dir(work.path(), true)
+    match receive_host(bootstrap, raw, pin, flavor, body)? {
+        (work, None) => snapshot_install::install_dir(work.path()),
+        (work, Some(manifest)) => snapshot_install::stage_maintainer(work.path(), raw, &manifest),
+    }
 }
 
 fn receive_host(
     bootstrap: &Path,
     raw: &[u8],
     pin: &str,
+    flavor: snapshot_install::Flavor,
     body: &mut dyn Read,
-) -> CliResult<tempfile::TempDir> {
+) -> CliResult<(
+    tempfile::TempDir,
+    Option<snapshot_install::maintainer::Manifest>,
+)> {
     check(
         shipping::digest(raw) == pin,
         "transferred manifest digest differs",
     )?;
-    let manifest = Manifest::parse(raw)?;
+    let maintainer = (flavor == snapshot_install::Flavor::Maintainer)
+        .then(|| snapshot_install::maintainer::Manifest::parse(raw))
+        .transpose()?;
+    let release;
+    let files = if let Some(manifest) = &maintainer {
+        &manifest.files
+    } else {
+        release = Manifest::parse(raw)?;
+        &release.files
+    };
     let work = tempfile::tempdir().map_err(io)?;
     let dest = work.path().join("plakd");
     let mut output = OpenOptions::new()
@@ -342,14 +380,14 @@ fn receive_host(
         .mode(0o500)
         .open(&dest)
         .map_err(io)?;
-    shipping::copy(bootstrap, &mut output, &manifest.files["plakd"])?;
+    shipping::copy(bootstrap, &mut output, &files["plakd"])?;
     drop(output);
     for name in NAMES.into_iter().skip(1) {
-        receive(body, &work.path().join(name), &manifest.files[name])?;
+        receive(body, &work.path().join(name), &files[name])?;
     }
     eof(body)?;
     fs::write(work.path().join("manifest.json"), raw).map_err(io)?;
-    Ok(work)
+    Ok((work, maintainer))
 }
 
 fn receive(body: &mut dyn Read, path: &Path, facts: &FileFacts) -> CliResult<()> {

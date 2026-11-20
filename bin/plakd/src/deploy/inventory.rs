@@ -40,6 +40,8 @@ pub(super) struct Inventory {
 pub(super) enum Platform {
     #[serde(rename = "x86_64-unknown-linux-musl")]
     Linux,
+    #[serde(rename = "x86_64-unknown-linux-gnu")]
+    LinuxGnu,
     #[serde(rename = "aarch64-apple-darwin")]
     Mac,
 }
@@ -48,6 +50,7 @@ impl Platform {
     pub(super) fn triple(self) -> &'static str {
         match self {
             Self::Linux => "x86_64-unknown-linux-musl",
+            Self::LinuxGnu => "x86_64-unknown-linux-gnu",
             Self::Mac => "aarch64-apple-darwin",
         }
     }
@@ -59,6 +62,10 @@ impl Platform {
             _ => None,
         }
     }
+
+    pub(super) fn is_linux(self) -> bool {
+        matches!(self, Self::Linux | Self::LinuxGnu)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +73,7 @@ impl Platform {
 pub(super) struct ArtifactPin {
     pub(super) artifact: PathBuf,
     pub(super) manifest_sha256: String,
+    pub(super) flavor: Option<crate::snapshot_install::Flavor>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -409,7 +417,7 @@ impl Host {
             "invalid host image digest",
         )?;
         let valid = match self.node.platform {
-            Platform::Linux => {
+            Platform::Linux | Platform::LinuxGnu => {
                 self.gateway_unit != "plakd-host.service"
                     && self
                         .gateway_unit

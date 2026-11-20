@@ -10,7 +10,7 @@ use crate::operator_process;
 use crate::shipping_artifact::{self as shipping, FileFacts, check, fail, io};
 
 use super::inventory::{Node, Platform, Stage};
-use super::protocol::{Call, Reply, Request, VERSION};
+use super::protocol::{Call, MaintainerBuild, Reply, Request, VERSION};
 
 // Fixed loaders; the path, size and digest are data, never shell arguments.
 const RUN: &str = r#"sh -c '
@@ -75,11 +75,37 @@ impl Ssh {
         })
     }
 
+    pub(super) fn require_glibc(node: &Node, ceiling: Option<[u32; 3]>) -> CliResult<()> {
+        let Some(ceiling) = ceiling else {
+            return Ok(());
+        };
+        let output = run(
+            node,
+            "exec /usr/bin/getconf GNU_LIBC_VERSION",
+            tempfile::tempfile().map_err(io)?,
+            super::timing::LOGIN,
+        )
+        .map_err(|_| fail("cannot read target GLIBC version with getconf"))?;
+        let version = super::probe::text(&output)?
+            .trim()
+            .strip_prefix("glibc ")
+            .ok_or_else(|| fail("target did not report a GNU libc version"))?;
+        let version = crate::snapshot_install::maintainer::glibc_version(version)?;
+        check(
+            version >= ceiling,
+            &format!(
+                "target GLIBC {}.{}.{} is older than required {}.{}.{}",
+                version[0], version[1], version[2], ceiling[0], ceiling[1], ceiling[2],
+            ),
+        )
+    }
+
     pub(super) fn call<T: DeserializeOwned>(
         &self,
         node: &Node,
         image: Image<'_>,
         call: Call,
+        maintainer_build: Option<MaintainerBuild>,
         files: &[Blob<'_>],
         timeout: u64,
     ) -> CliResult<T> {
@@ -99,6 +125,7 @@ impl Ssh {
             deploy_protocol: VERSION,
             operator_machine: self.operator_machine.clone(),
             stage: self.stage,
+            maintainer_build,
             call,
         };
         let request = shipping::canonical(&request)?;

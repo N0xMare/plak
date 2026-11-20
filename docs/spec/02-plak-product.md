@@ -6455,8 +6455,13 @@ strict host keys, batch mode and no shared connections or agent forwarding.
 Fixed remote loaders read request data on stdin; native target operations
 use closed JSON requests and replies and verified payload lengths and hashes.
 The operator starts those operations with a verified transfer of the candidate
-image and uses the verified installed candidate after staging. The target
-refuses an operator whose deploy protocol number differs (currently v3).
+image and uses the verified installed candidate after staging. Host and
+runner candidates can be shipping releases or tested maintainer snapshots
+as described in chapter 06 §6.6. Before bootstrapping a GNU Linux candidate,
+the operator compares its pinned GLIBC ceiling for all three executables
+with the target's read-only libc report; unavailable or too-old libc
+refuses. The target refuses an operator whose deploy protocol number
+differs (currently v4).
 Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
@@ -6517,8 +6522,10 @@ inference allowance of one with no retry reserve, a 16-output-token request
 cap, and a 90-second deadline with bounded cleanup. It writes the archived
 product session before admission, uses an ephemeral runtime so there is
 no recoverable orphan, joins shutdown, and emits no
-assistant text. Routes unable to prove these bounds refuse; the initial
-adapter is for qualifying Grok and Claude OAuth routes. Compare the gateway's
+assistant text. Routes unable to prove these bounds refuse. The adapter
+supports qualifying Grok and Claude OAuth routes; in particular Codex OAuth
+does not accept a request output-token cap. Baseline uses the incumbent's
+adapter, not the destination's adapter run against the old gateway. Compare the gateway's
 OAuth generation before and after each canary and across BASELINE and
 verification; an increase is normal and a decrease refuses.
 

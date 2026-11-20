@@ -24,7 +24,7 @@ pub(super) fn isolate_staging(
 ) -> Result<()> {
     let linux: BTreeSet<_> = targets
         .iter()
-        .filter(|node| node.platform == super::inventory::Platform::Linux)
+        .filter(|node| node.platform.is_linux())
         .map(|node| node.machine_sha256.as_str())
         .collect();
     if linux.is_empty() {

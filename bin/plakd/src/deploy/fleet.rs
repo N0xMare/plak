@@ -42,16 +42,14 @@ impl<'a> Remote<'a> {
         timeout: u64,
     ) -> CliResult<serde_json::Value> {
         let artifact = self.artifacts.image(node.platform);
-        let bootstrap = artifact.root.join("plakd");
+        let bootstrap = &artifact.paths["plakd"];
         let deployed = deployed(node, artifact);
-        let sidecars = NAMES.map(|name| artifact.root.join(name));
         let files: Vec<_> = if staging {
             NAMES
                 .into_iter()
-                .zip(&sidecars)
                 .skip(1)
-                .map(|(name, path)| Blob {
-                    path,
+                .map(|name| Blob {
+                    path: &artifact.paths[name],
                     facts: &artifact.manifest.files[name],
                 })
                 .collect()
@@ -62,15 +60,24 @@ impl<'a> Remote<'a> {
         let image = if installed && !staging {
             Image::Installed(&deployed, facts)
         } else {
-            Image::Transfer(&bootstrap, facts)
+            Ssh::require_glibc(node, artifact.manifest.glibc)?;
+            Image::Transfer(bootstrap, facts)
         };
-        self.ssh.call(node, image, call, &files, timeout)
+        self.ssh.call(
+            node,
+            image,
+            call,
+            artifact.maintainer_build(node.platform),
+            &files,
+            timeout,
+        )
     }
 }
 
 pub(super) fn deployed(node: &Node, artifact: &ProductArtifact) -> PathBuf {
     node.home
-        .join(".local/lib/plak/release")
+        .join(".local/lib/plak")
+        .join(artifact.manifest.flavor.name())
         .join(&artifact.manifest.snapshot_id)
         .join("plakd")
 }
@@ -114,7 +121,8 @@ impl Fleet for Remote<'_> {
     fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value> {
         let artifact = &self.artifacts.clients[&client.id];
         let native = self.artifacts.image(client.node.platform);
-        let bootstrap = native.root.join("plakd");
+        let bootstrap = &native.paths["plakd"];
+        Ssh::require_glibc(&client.node, native.manifest.glibc)?;
         let files = matches!(op, ClientOp::Stage).then(|| {
             [Blob {
                 path: &client.blob,
@@ -124,12 +132,13 @@ impl Fleet for Remote<'_> {
         let timeout = timing::client(&op);
         self.ssh.call(
             &client.node,
-            Image::Transfer(&bootstrap, &native.manifest.files["plakd"]),
+            Image::Transfer(bootstrap, &native.manifest.files["plakd"]),
             Call::Client {
                 node: client.node.clone(),
                 client: artifact.request(client),
                 op,
             },
+            native.maintainer_build(client.node.platform),
             files.as_ref().map_or(&[], |files| files.as_slice()),
             timeout,
         )

@@ -51,9 +51,11 @@ pub(super) fn execute(
         RunnerOp::Stage {
             manifest,
             manifest_sha256,
+            flavor,
         } => target::data(&target::stage_host(
             manifest.as_bytes(),
             &manifest_sha256,
+            flavor,
             body,
         )?),
         RunnerOp::Advance {
@@ -204,6 +206,7 @@ mod tests {
             sha256: FileFacts::read(&old.join("plakd")).unwrap().sha256,
         };
         let candidate = Candidate {
+            flavor: snapshot_install::Flavor::Release,
             snapshot,
             sha256: FileFacts::read(&new.join("plakd")).unwrap().sha256,
         };
@@ -221,7 +224,7 @@ mod tests {
         };
         snapshot_install::ensure(runner.link.parent().unwrap()).unwrap();
         symlink(&source.path, &runner.link).unwrap();
-        snapshot_install::link_snapshot_in(&home, &candidate.snapshot).unwrap();
+        snapshot_install::link_snapshot_in(&home, candidate.flavor, &candidate.snapshot).unwrap();
         assert_eq!(observe(&runner).unwrap(), source);
 
         let ticket = uuid::Uuid::new_v4();

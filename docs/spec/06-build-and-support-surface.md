@@ -1827,16 +1827,28 @@ its link command cannot relink pre-port snapshots. Neither local step
 starts or changes a service or moves a dedicated paired-runner command link.
 
 The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
-product surface and does not change either publishing or installation policy.
+product surface and does not widen the shipping or supported platform policy.
 It requires Git, OpenSSH and a read-capable source checkout of the origin
 on the operator, and native target operations from the artifact binary on
 the target. It accepts a full revision on the advertised
 `origin/main` first-parent history, never accepts a branch name or builds
 bits itself, and stages through the artifact's native snapshot installer.
-Supply a release artifact directory and full pinned manifest digest per
-enrolled target platform (`x86_64-unknown-linux-musl` or
-`aarch64-apple-darwin`). Each manifest names the same exact source revision;
-each SSH target executes the candidate for its own platform.
+Supply a directory and full pinned manifest digest per enrolled target
+platform. Shipping releases use `manifest.json` on
+`x86_64-unknown-linux-musl` or `aarch64-apple-darwin`. For a maintainer
+artifact, use `just build maintainer` followed by that binary's
+`snapshot install --flavor maintainer` source-build recipe and pin the
+immutable snapshot's `deploy-manifest.json`. Include the installer-published
+content-addressed sidecars that the snapshot names. Its manifest binds the
+binary and both sidecar digests, state key, and exact native triple, including
+`x86_64-unknown-linux-gnu` for GNU maintainer builds. The target revalidates
+the candidate's `version --build-info` facts, including full revision,
+`maintainer release` flavor, disabled test hooks and state key. Linux GNU
+installer runs require `readelf` to measure the three images' maximum
+versioned GLIBC requirement; deploy checks it against target
+`getconf GNU_LIBC_VERSION` before transferring a bootstrap, and the
+target remeasures it before installation. Each manifest names the same exact
+source revision; each SSH target executes the candidate for its own platform.
 Rehash the manifest and exact files at ingest, during transfer and on the
 target; the installer checks target build-info and publishes without linking.
 Client inputs are a separate pinned manifest and one blob, hashed at all three

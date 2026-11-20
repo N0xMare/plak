@@ -7,7 +7,7 @@ use crate::shipping_artifact::{Upgrade, Wire};
 
 use super::inventory::{Host, Node, Platform, Route, Runner, Stage};
 
-pub(super) const VERSION: u32 = 3;
+pub(super) const VERSION: u32 = 4;
 pub(crate) const RUNNER_INSPECTION_REFUSAL: &str = "deploy_runner_inspection:";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -30,7 +30,16 @@ pub(super) struct Request {
     pub(super) deploy_protocol: u32,
     pub(super) stage: Stage,
     pub(super) operator_machine: Option<String>,
+    pub(super) maintainer_build: Option<MaintainerBuild>,
     pub(super) call: Call,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct MaintainerBuild {
+    pub(super) platform: Platform,
+    pub(super) revision: String,
+    pub(super) state_key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -80,6 +89,7 @@ pub(super) enum HostOp {
     StageHost {
         manifest: String,
         manifest_sha256: String,
+        flavor: crate::snapshot_install::Flavor,
     },
     DestinationUnit {
         candidate: Candidate,
@@ -126,6 +136,7 @@ pub(super) enum RunnerOp {
     Stage {
         manifest: String,
         manifest_sha256: String,
+        flavor: crate::snapshot_install::Flavor,
     },
     Advance {
         ticket: uuid::Uuid,
@@ -144,6 +155,7 @@ pub(super) enum RunnerOp {
 pub(super) struct Candidate {
     pub(super) snapshot: String,
     pub(super) sha256: String,
+    pub(super) flavor: crate::snapshot_install::Flavor,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

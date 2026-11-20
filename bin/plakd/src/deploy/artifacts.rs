@@ -6,10 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::CliResult;
 use crate::operator_process;
-use crate::shipping_artifact::{self as shipping, FileFacts, Manifest, Wire, check, fail, hex};
+use crate::shipping_artifact::{
+    self as shipping, BuildInfo, FileFacts, Manifest, NAMES, Wire, check, fail, hex,
+};
+use crate::snapshot_install::{Flavor, maintainer};
 
 use super::inventory::{ArtifactPin, Client, Inventory, Platform, Selected};
-use super::protocol::{Candidate, ClientSpec};
+use super::protocol::{Candidate, ClientSpec, MaintainerBuild};
 
 pub(super) struct Artifacts {
     host: Platform,
@@ -20,10 +23,18 @@ pub(super) struct Artifacts {
 }
 
 pub(super) struct ProductArtifact {
-    pub(super) manifest: Manifest,
+    pub(super) manifest: ProductManifest,
     pub(super) raw: String,
     pub(super) pin: String,
-    pub(super) root: PathBuf,
+    pub(super) paths: BTreeMap<String, PathBuf>,
+}
+
+pub(super) struct ProductManifest {
+    pub(super) files: BTreeMap<String, FileFacts>,
+    pub(super) build_info: BuildInfo,
+    pub(super) snapshot_id: String,
+    pub(super) flavor: Flavor,
+    pub(super) glibc: Option<[u32; 3]>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -194,7 +205,7 @@ impl Artifacts {
                 "merge-base",
                 "--is-ancestor",
                 source,
-                &self.host().manifest.revision,
+                &self.host().manifest.build_info.revision,
             ],
         )?;
         match result.status.code() {
@@ -211,21 +222,64 @@ impl Artifacts {
 
 impl ProductArtifact {
     fn read(pin: &ArtifactPin, platform: Platform, revision: &str) -> CliResult<Self> {
-        let bytes = shipping::read(&pin.artifact.join("manifest.json"), shipping::LIMIT)?;
+        let flavor = pin.flavor.unwrap_or(Flavor::Release);
+        let filename = match flavor {
+            Flavor::Release => "manifest.json",
+            Flavor::Maintainer => maintainer::MANIFEST,
+        };
+        let bytes = shipping::read(&pin.artifact.join(filename), shipping::LIMIT)?;
         check(
             shipping::digest(&bytes) == pin.manifest_sha256,
             "platform manifest digest differs",
         )?;
-        let manifest = Manifest::parse(&bytes)?;
-        check(
-            manifest.revision == revision && manifest.platform == platform.triple(),
-            "wrong artifact revision or platform",
-        )?;
-        manifest.verify_dir(&pin.artifact)?;
+        let (manifest, paths) = match flavor {
+            Flavor::Release => {
+                let manifest = Manifest::parse(&bytes)?;
+                check(
+                    platform != Platform::LinuxGnu
+                        && manifest.revision == revision
+                        && manifest.platform == platform.triple(),
+                    "wrong artifact revision or platform",
+                )?;
+                manifest.verify_dir(&pin.artifact)?;
+                (
+                    ProductManifest {
+                        files: manifest.files,
+                        build_info: manifest.build_info,
+                        snapshot_id: manifest.snapshot_id,
+                        flavor,
+                        glibc: None,
+                    },
+                    NAMES
+                        .into_iter()
+                        .map(|name| (name.to_owned(), pin.artifact.join(name)))
+                        .collect(),
+                )
+            }
+            Flavor::Maintainer => {
+                let manifest = maintainer::Manifest::parse(&bytes)?;
+                check(
+                    manifest.build_info.revision == revision
+                        && manifest.platform == platform.triple(),
+                    "wrong maintainer snapshot revision or platform",
+                )?;
+                let paths = manifest.inputs(&pin.artifact)?;
+                (
+                    ProductManifest {
+                        files: manifest.files,
+                        build_info: manifest.build_info,
+                        snapshot_id: manifest.snapshot_id,
+                        flavor,
+                        glibc: manifest.glibc,
+                    },
+                    paths,
+                )
+            }
+        };
         Ok(Self {
             manifest,
             pin: pin.manifest_sha256.clone(),
-            root: pin.artifact.clone(),
+            paths,
             raw: String::from_utf8(bytes).map_err(|_| fail("manifest is not UTF-8"))?,
         })
     }
@@ -234,7 +288,16 @@ impl ProductArtifact {
         Candidate {
             snapshot: self.manifest.snapshot_id.clone(),
             sha256: self.manifest.files["plakd"].sha256.clone(),
+            flavor: self.manifest.flavor,
         }
+    }
+
+    pub(super) fn maintainer_build(&self, platform: Platform) -> Option<MaintainerBuild> {
+        (self.manifest.flavor == Flavor::Maintainer).then(|| MaintainerBuild {
+            platform,
+            revision: self.manifest.build_info.revision.clone(),
+            state_key: self.manifest.build_info.state_key.clone(),
+        })
     }
 }
 
