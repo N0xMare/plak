@@ -7363,11 +7363,11 @@ the normal recovery-required path before Ready. The driver's placement parking
   reads retain their model-call flag and owner: the hold waits and reissues the same arguments and cursor after
   release. A live keyed effect remains retained and replayed under its original
   key; excluding reads changes neither its retention nor its at-most-once law.
-- **Line table.** Protocol 3 adds `foreground` to each `Lines` entry: true
-  while an unpromoted process is live, independent of retained job snapshots.
-  Missing `foreground` in an obsolete protocol 1 or 2 line decodes as false
-  for inspection; those peers do not report foreground liveness.
-  Older protocol directories remain inspection-only.
+- **Line table.** Each current `Lines` entry reports `foreground`: true while
+  an unpromoted process is live, independent of retained job snapshots.
+  Older protocol directories remain inspection-only; a line without a
+  `foreground` field reports no foreground evidence. Only current general
+  protocol frames are pinned; retention has its own version and pins.
   `Lines` lists the lines the runner holds processes for: on
   a host's connection its own lines; on an inspecting one bound under the
   runner machine's own host identity (a local `plakd runner ps`) every host's;

@@ -1,10 +1,10 @@
-//! The frames of each protocol version, pinned. A home-local runner binds any
+//! The current protocol's frames, pinned. A home-local runner binds any
 //! build of its protocol version (spec 01 §8.4), so a frame that changes
 //! without a [`PROTOCOL_VERSION`] bump would meet a peer that reads it
 //! differently. Every variant of every frame enum is encoded here once; a
 //! change to any of them, to a verb or to a capability fails this test until
-//! the version is bumped and the new version's frames are pinned beside the
-//! old ones. A pinned file never changes.
+//! the version is bumped and the fixture is replaced with the new version's
+//! frames.
 
 use serde_json::{Value, json};
 
@@ -14,18 +14,8 @@ use crate::{
     capabilities, verbs,
 };
 
-/// Each protocol version's frames, one JSON value per line.
-const PINNED: &[(u32, &str)] = &[
-    (1, include_str!("pinned/v1.jsonl")),
-    (2, include_str!("pinned/v2.jsonl")),
-    (3, include_str!("pinned/v3.jsonl")),
-    (4, include_str!("pinned/v4.jsonl")),
-    (5, include_str!("pinned/v5.jsonl")),
-    (6, include_str!("pinned/v6.jsonl")),
-    (7, include_str!("pinned/v7.jsonl")),
-    (8, include_str!("pinned/v8.jsonl")),
-    (9, include_str!("pinned/v9.jsonl")),
-];
+const PINNED_VERSION: u32 = 9;
+const PINNED: &str = include_str!("pinned/v9.jsonl");
 
 fn owner() -> LineOwner {
     LineOwner {
@@ -398,47 +388,16 @@ fn encoded() -> String {
 }
 
 #[test]
-fn older_pinned_line_frames_decode_for_inspection() {
-    for (version, pinned) in PINNED
-        .iter()
-        .filter(|(version, _)| *version < PROTOCOL_VERSION)
-    {
-        let value = pinned
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .find(|value| value["kind"] == "lines" && value["lines"].is_array())
-            .unwrap();
-        let RunnerFrame::Lines { lines, .. } =
-            crate::frame::decode::<RunnerFrame>(&serde_json::to_vec(&value).unwrap()).unwrap()
-        else {
-            panic!("protocol {version} did not decode a lines frame");
-        };
-        assert!(
-            !lines.is_empty(),
-            "protocol {version} must exercise a line entry"
-        );
-        assert!(
-            lines.iter().all(|line| !line.foreground),
-            "protocol {version} has no foreground evidence"
-        );
-    }
-}
-
-#[test]
 fn a_frame_changes_only_with_a_protocol_version_bump() {
     let encoded = encoded();
-    let Some((_, pinned)) = PINNED
-        .iter()
-        .find(|(version, _)| *version == PROTOCOL_VERSION)
-    else {
-        panic!(
-            "protocol {PROTOCOL_VERSION} has no pinned frames: add pinned/v{PROTOCOL_VERSION}.jsonl \
-             holding exactly:\n{encoded}"
-        );
-    };
+    assert_eq!(
+        PINNED_VERSION, PROTOCOL_VERSION,
+        "protocol {PROTOCOL_VERSION} has no pinned frames: replace the fixture with \
+         pinned/v{PROTOCOL_VERSION}.jsonl holding exactly:\n{encoded}"
+    );
     assert!(
-        encoded == *pinned,
+        encoded == PINNED,
         "a frame, verb or capability changed under protocol {PROTOCOL_VERSION}: bump \
-         PROTOCOL_VERSION and pin the new frames beside the old ones. Now:\n{encoded}"
+         PROTOCOL_VERSION and pin the new frames in place of the old ones. Now:\n{encoded}"
     );
 }
