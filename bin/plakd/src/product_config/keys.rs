@@ -649,7 +649,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         field: ConfigField::ResumeAfterLoss,
         kind: "enum",
         constraint: "hold|continue; unset holds; home-scoped",
-        doc: "Whether the root and the sub-agents whose host was lost (a crash, a lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). Read when the root attaches and opens, and by plakd host's start scan, which under continue opens a session whose root's loss is held.",
+        doc: "Whether the root and sub-agents that lost their owner (a crash or a proven lease loss) hold for the operator's Resume or continue once by themselves with a new instruction turn, the root's restored queue draining too (chapter 03 §14.1). A loss that interrupted a continuation itself holds under either policy. Read when the root attaches and opens, and by plakd host's start scan, which opens eligible held roots under continue.",
         example: "\"continue\"",
         scope: ConfigScope::Immediate,
     },
