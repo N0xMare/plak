@@ -117,19 +117,23 @@ async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> Te
     // One manager's callers serialize on its lifecycle lock; separate
     // processes serialize on the store's refresh claim.
     let peer = peers.first().ok_or("no peer")?;
-    let refreshes: Vec<_> = (0..4)
-        .map(|_| {
-            let (peer, slot) = (Arc::clone(peer), slot.clone());
-            tokio::spawn(async move {
-                peer.custody_refresh_after_rejection(&slot, &rejected, selection)
-                    .await
-            })
-        })
-        .collect();
-    let mut answers = Vec::new();
-    for refresh in refreshes {
-        answers.push(refresh.await?);
+    let mut refreshes = tokio::task::JoinSet::new();
+    for _ in 0..4 {
+        let (peer, slot) = (Arc::clone(peer), slot.clone());
+        refreshes.spawn(async move {
+            peer.custody_refresh_after_rejection(&slot, &rejected, selection)
+                .await
+        });
     }
+    let mut answers = Vec::new();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while let Some(refresh) = refreshes.join_next().await {
+            answers.push(refresh?);
+        }
+        Ok::<(), tokio::task::JoinError>(())
+    })
+    .await
+    .map_err(|_| format!("custody refresh join stalled: {}/4 returned", answers.len()))??;
     let current = fixture.manager.custody_facts(&slot).await?;
     assert_eq!(current.status, CustodyStatus::Ready);
     assert_eq!(current.account_binding, facts.account_binding);
@@ -138,7 +142,9 @@ async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> Te
     for answer in answers {
         assert_eq!(answer?.generation, current.generation);
     }
-    let (requests, unexpected) = server.await??;
+    let (requests, unexpected) = tokio::time::timeout(Duration::from_secs(15), server)
+        .await
+        .map_err(|_| "custody refresh server stalled after all four refreshes returned")???;
     assert_eq!(request_kinds(&requests), ["catalog", "refresh", "userinfo"]);
     assert!(!unexpected, "a second grant reached the token endpoint");
     Ok(())
