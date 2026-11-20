@@ -1,4 +1,4 @@
-use super::{ConfigError, Deserialize, EndpointOrigin, OpenAiRoute, Routability, Serialize};
+use super::{Deserialize, EndpointOrigin, Routability, Serialize};
 
 /// Serializable, secret-free direct Codex subscription route configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -20,22 +20,6 @@ impl CodexSubscriptionRouteConfig {
         Routability::NonRoutable
     }
 
-    /// Resolves an official-origin route with an account-bound Codex authority.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error unless the configured origin is exactly the official
-    /// `ChatGPT` origin. No credential source is called during resolution.
-    /// Resolves an official-origin route directly from one explicit Codex store.
-    ///
-    /// The public facade exposes this constructor instead of the lower-level
-    /// credential source, keeping raw current-access generations out of the
-    /// facade API.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe store/source error or the same origin error as
-    /// [`Self::resolve`].
     /// Resolves the immutable native compatibility route with a Plak-owned manager.
     ///
     /// # Errors
@@ -46,7 +30,9 @@ impl CodexSubscriptionRouteConfig {
     pub(crate) fn resolve_native(
         self,
         manager: super::Arc<super::CodexSubscriptionCredentialManager>,
-    ) -> Result<OpenAiRoute, ConfigError> {
+    ) -> Result<super::OpenAiRoute, super::ConfigError> {
+        use super::{ConfigError, OpenAiRoute};
+
         if self.origin.as_str() != super::OPENAI_CHATGPT_ORIGIN {
             return Err(ConfigError::NonOfficialCodexSubscriptionOrigin);
         }

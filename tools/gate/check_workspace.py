@@ -369,7 +369,7 @@ EXPECTED_WORKING_DIRECTORY_CALLS: dict[SourceKey, list[str]] = {
 # `Home::from_env`) are reached only from the composition root; everything
 # below takes a context. None of the three may be imported under another name.
 EXPECTED_LAUNCH_DIRECTORY_READERS: dict[SourceKey, list[str]] = {
-    ("plakd", "src/lib.rs"): ["launch_directory", "Services::from_env", "Services::from_env"],
+    ("plakd", "src/lib.rs"): ["launch_directory", "Services::from_env"],
     ("plakd", "src/shell/services.rs"): ["Home::from_env"],
 }
 LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
