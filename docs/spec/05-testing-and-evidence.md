@@ -230,6 +230,8 @@ including one with a real surviving HUP-ignoring orphaned shell, and distinguish
 lost-instance receipts from permission to spawn or signal a remembered PID.
 The host-only loss fixture waits for cleanup proof from the old runner itself,
 including when the replacement runner reports no terminals.
+The orphaned-shell fixture publishes a complete PID marker and on Linux
+checks that specific PID's start identity and state without a whole-system scan.
 These platform-sensitive tests require both supported operating systems; Linux
 evidence alone is not macOS process-supervision qualification. The product client
 terminal scheduler and browser transport-loss evidence belong to their later
@@ -2420,6 +2422,10 @@ full-tier retirement soaks in both profiles still run alone.
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
 | Runner link faults and line ownership | `runner_killed_mid_job_restarts_with_its_owner_floor`, `host_killed_mid_call_is_recovered_and_readopted_by_its_host_id`, `host_crash_with_a_sibling_connected_orphans_only_its_lines` (a sibling process of the home stays bound while a holder is killed: it cannot stop the line's job with the owner it can read, and the line is orphaned at the dead holder's lease), `runner_restart_sibling_races_floor_owner` (a sibling binding first after a runner restart cannot take the floor owner; the floor's holder can), `crash_after_takeover_before_transfer` (a successor's durable newer owner never reached the runner; the next successor's newer owner takes the line and nothing wedges) — a runner daemon and a host in separate processes, each killed in turn (chapter 01 §8.4) |
 | Cross-runner fork stages | `cross_runner_fork_stages` — over two loopback runners, the process ends once each mint and seal-back stage (chapter 03 §14) is published and again once each has run before its answer is recorded; the reopened tree settles without a fault and the rerun converges. It is in process rather than a crash-sweep shape because the sweep drives one product process, whose port reaches only its selected runner |
+
+The paired terminal-history upgrade probes wait until the source checkpoint
+records both the terminal job state and the completed tool result; disappearance
+of the process alone does not imply durable publication.
 
 In the runner link host-kill cases, the effect itself marks that it has
 started on the runner and waits for release after the host is reaped. A

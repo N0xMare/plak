@@ -17,63 +17,15 @@ fn terminal_history(changed: bool) {
     let _cleanup = HomeHost(fixture.home());
     let (_daemon, path, id) = runner::remote_fixture(&fixture);
     let (mut host, _client, session, node) = placed_job(&fixture, &path, &id, changed, true);
-    let deadline = Instant::now() + WAIT;
-    while runner::alive(runner::job(&fixture).0) {
-        assert!(Instant::now() < deadline, "source job did not terminate");
-        std::thread::sleep(Duration::from_millis(10));
-    }
     let state = fixture
         .home()
         .join("state")
         .join(plakd::home::state::state_key());
     let before = dormant::identity(&fixture, &plakd::home::state::state_key(), &session);
-    let snapshot = plakous::sessions::SessionBackend::inspect_move_source_unsettled_sqlite(
-        state.join("runtime.sqlite3"),
-        &[before.0.session_id()],
-    )
-    .unwrap();
-    let branch = snapshot.sessions[0]
-        .branches
-        .iter()
-        .find(|branch| branch.session.branch_id() == before.0.branch_id())
-        .unwrap();
-    let checkpoint = snapshot.sessions[0]
-        .checkpoints
-        .iter()
-        .find(|checkpoint| checkpoint.id() == branch.checkpoint)
-        .unwrap();
-    let jobs = checkpoint.manifest().jobs().rows();
+    wait_for_terminal_history(&state.join("runtime.sqlite3"), before.0);
     assert!(
-        checkpoint.manifest().jobs().next_id() > 1,
-        "source must have promoted a job"
-    );
-    assert!(
-        jobs.iter().all(|job| job.terminal.is_some()),
-        "source jobs must be terminal"
-    );
-    let completed = checkpoint
-        .manifest()
-        .canonical()
-        .history()
-        .segments()
-        .iter()
-        .flat_map(plakous::model::HistorySegment::items)
-        .flat_map(plakous::model::ConversationItem::blocks)
-        .filter_map(|block| match block {
-            plakous::model::ContentBlock::ToolResult(result) => Some(result.parts()),
-            _ => None,
-        })
-        .flatten()
-        .filter_map(|part| match part {
-            plakous::model::ToolResultPart::Text(text) => {
-                serde_json::from_str::<serde_json::Value>(text.text()).ok()
-            }
-            _ => None,
-        })
-        .any(|result| result["exit_code"] == 0);
-    assert!(
-        completed,
-        "canonical history must retain the completed process result"
+        !runner::alive(runner::job(&fixture).0),
+        "the recorded terminal must have joined the source job"
     );
     let result = same_key_upgrade(&fixture, &path);
     assert!(
@@ -105,6 +57,58 @@ fn terminal_history(changed: bool) {
         1
     );
     stop(&mut host);
+}
+
+fn wait_for_terminal_history(path: &std::path::Path, source: plakous::sessions::SessionLocator) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let snapshot = plakous::sessions::SessionBackend::inspect_move_source_unsettled_sqlite(
+            path,
+            &[source.session_id()],
+        )
+        .unwrap();
+        let branch = snapshot.sessions[0]
+            .branches
+            .iter()
+            .find(|branch| branch.session.branch_id() == source.branch_id())
+            .unwrap();
+        let checkpoint = snapshot.sessions[0]
+            .checkpoints
+            .iter()
+            .find(|checkpoint| checkpoint.id() == branch.checkpoint)
+            .unwrap();
+        let jobs = checkpoint.manifest().jobs();
+        let promoted = jobs.next_id() > 1;
+        let terminal = jobs.rows().iter().all(|job| job.terminal.is_some());
+        let completed = checkpoint
+            .manifest()
+            .canonical()
+            .history()
+            .segments()
+            .iter()
+            .flat_map(plakous::model::HistorySegment::items)
+            .flat_map(plakous::model::ConversationItem::blocks)
+            .filter_map(|block| match block {
+                plakous::model::ContentBlock::ToolResult(result) => Some(result.parts()),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|part| match part {
+                plakous::model::ToolResultPart::Text(text) => {
+                    serde_json::from_str::<serde_json::Value>(text.text()).ok()
+                }
+                _ => None,
+            })
+            .any(|result| result["exit_code"] == 0);
+        if promoted && terminal && completed {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "source did not record terminal history: promoted={promoted}, terminal={terminal}, completed={completed}",
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -192,7 +196,7 @@ pub(super) fn placed_job(
             serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
         script["steps"].as_array_mut().unwrap().insert(1, json!({
             "output":{"tool":{"name":"process_session_write","arguments":{
-                "session_id":"$session_id", "input":"done\n", "disposition":"close", "yield_time_ms":1000
+                "session_id":"$session_id", "input":"done\n", "disposition":"close", "yield_time_ms":30_000
             }}},"finish":"tool_calls"
         }));
         fixture.write_script(&script);

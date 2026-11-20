@@ -19,13 +19,17 @@ impl Escape {
             .unwrap();
         Self(Identity::capture(pid).unwrap())
     }
+
+    fn current(&self) -> Option<Identity> {
+        Identity::capture_fixture_pid(self.0.pid)
+            .ok()
+            .filter(|row| row.started == self.0.started && row.session == self.0.session)
+    }
 }
 
 impl Drop for Escape {
     fn drop(&mut self) {
-        if Identity::capture(self.0.pid)
-            .is_ok_and(|row| row.started == self.0.started && row.session == self.0.session)
-        {
+        if self.current().is_some() {
             let pid = rustix::process::Pid::from_raw(i32::try_from(self.0.pid).unwrap()).unwrap();
             // Test teardown of a freshly checked individual, never a group or
             // recovery authority inferred from a vanished runner table.
@@ -148,11 +152,10 @@ fn operator_orphaned_shell_runner() {
         ))
         .unwrap();
     until_output(&mut worker, b"ORPHAN-READY\r\n");
-    std::fs::write(
-        std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap(),
-        worker.identity.as_ref().unwrap().pid.to_string(),
-    )
-    .unwrap();
+    let ready = std::path::PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
+    let pending = ready.with_extension("pending");
+    std::fs::write(&pending, worker.identity.as_ref().unwrap().pid.to_string()).unwrap();
+    std::fs::rename(pending, ready).unwrap();
     loop {
         std::thread::park();
     }
@@ -185,11 +188,13 @@ fn operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead() {
         .unwrap()
         .parse()
         .unwrap();
-    let escape = Escape(Identity::capture(pid).unwrap());
+    // This fixture already knows the exact shell PID; it does not need a
+    // bounded whole-machine scan to prove that this one identity still lives.
+    let escape = Escape(Identity::capture_fixture_pid(pid).unwrap());
     runner.kill().unwrap();
     runner.wait().unwrap();
     assert!(
-        !Identity::capture(pid).unwrap().zombie,
+        escape.current().is_some_and(|row| !row.zombie),
         "real HUP-ignoring shell survives its runner"
     );
     let service = OperatorTerminalService::new(
@@ -218,5 +223,8 @@ fn operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead() {
             refusal: OperatorRefusal::TerminalLost
         }
     );
-    assert!(!Identity::capture(escape.0.pid).unwrap().zombie);
+    assert!(
+        escape.current().is_some_and(|row| !row.zombie),
+        "refusing a lost terminal must not kill the surviving shell"
+    );
 }

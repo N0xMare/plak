@@ -79,6 +79,18 @@ impl Identity {
             anchor.store(false, Ordering::Release);
         }
     }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn capture_fixture_pid(pid: u32) -> Result<Self, ()> {
+        let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
+        parse_stat(pid, &text)
+    }
+
+    #[cfg(all(test, not(target_os = "linux")))]
+    pub(super) fn capture_fixture_pid(pid: u32) -> Result<Self, ()> {
+        Self::capture(pid)
+    }
+
     pub(super) fn capture(pid: u32) -> Result<Self, ()> {
         let deadline = Instant::now() + Duration::from_millis(500);
         loop {
