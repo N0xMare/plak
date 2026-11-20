@@ -4,7 +4,7 @@ use plakous_hosted::error::{CliFailure, CliResult};
 
 pub(crate) fn access(_: &std::net::SocketAddr, _: String) -> CliResult<crate::web::WebAccess> {
     Err(CliFailure::new(
-        "plakd host: --dev-login requires a maintainer or test-hooks build; it is not supported in the release product",
+        "plakd host: --dev-login requires a maintainer or test-support build; it is not supported in the release product",
     ))
 }
 
@@ -18,7 +18,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             failure.message(),
-            "plakd host: --dev-login requires a maintainer or test-hooks build; it is not supported in the release product"
+            "plakd host: --dev-login requires a maintainer or test-support build; it is not supported in the release product"
         );
     }
 }

@@ -6,7 +6,7 @@ pub use plakous_http::Origin as TestDialOrigin;
 use plakous_model::{ConfiguredLanguageModel, Timestamp};
 
 /// Supplies native construction evidence without credentials or inference.
-/// This test-clock-only seam has no supported embedder stability claim.
+/// This test-support seam has no supported embedder stability claim.
 ///
 /// # Errors
 /// Returns invalid fixed fixture time.

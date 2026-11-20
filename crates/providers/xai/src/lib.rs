@@ -41,7 +41,7 @@ pub use api_models::{
     xai_api_key_fingerprint, xai_api_models,
 };
 pub(crate) use api_models::{xai_platform_capacity_admitted, xai_platform_effort_admitted};
-pub use dialect::{XaiAccessMode, XaiDialect, XaiRouteKind, XaiTerminalConvention};
+pub use dialect::{XaiAccessMode, XaiDialect, XaiRouteKind};
 pub use hosted_support::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
 pub use images::{XAI_IMAGE_EDITS_PATH, XAI_IMAGE_GENERATIONS_PATH, XAI_IMAGE_MODEL, XaiImages};
 pub use model::{
@@ -74,10 +74,10 @@ pub use platform::{
     XAI_PLATFORM_GROK_46_CONTEXT_TOKENS, XAI_PLATFORM_GROK_46_HOSTED_CODE_PROFILE,
     XAI_PLATFORM_GROK_46_HOSTED_CODE_REVISION, XAI_PLATFORM_GROK_46_MODEL,
     XAI_PLATFORM_MAX_OUTPUT_TOKENS, XaiPlatformApiKeyAuthority, XaiPlatformConfigurationError,
-    XaiPlatformDocumentationWitness, XaiPlatformHostedCodeWitness, XaiPlatformHttpErrorClass,
-    XaiPlatformRequestLoweringFacts, XaiPlatformStreamEventPolicy,
-    compile_xai_platform_grok_46_hosted_code_configuration, xai_platform_http_error_policy,
-    xai_platform_request_lowering_facts, xai_platform_stream_event_policy,
+    XaiPlatformHostedCodeWitness, XaiPlatformHttpErrorClass, XaiPlatformRequestLoweringFacts,
+    XaiPlatformStreamEventPolicy, compile_xai_platform_grok_46_hosted_code_configuration,
+    xai_platform_http_error_policy, xai_platform_request_lowering_facts,
+    xai_platform_stream_event_policy,
 };
 pub use platform_binding::{
     ApiKey, XAI_PLATFORM_EXECUTION_REVISION, XAI_PLATFORM_GROK_46_PROFILE,

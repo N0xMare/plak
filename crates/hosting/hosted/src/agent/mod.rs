@@ -142,11 +142,10 @@ pub(crate) use recovery::{
     start_tree_recovery, wait_evidence_in,
 };
 pub use roots::TelemetryHealth;
-pub use roots::{
-    ExtraTelemetrySink, ProductTelemetry, RosterSource, SpawnAccountRead, TelemetrySinkFactory,
-    TreeStoreFactory,
-};
 pub use roots::{ProcessJobs, ProductStateRoots};
+pub use roots::{
+    ProductTelemetry, RosterSource, SpawnAccountRead, TelemetrySinkFactory, TreeStoreFactory,
+};
 
 // Test-only reach into the submodules' private items (`use super::*`).
 #[cfg(test)]

@@ -1500,7 +1500,7 @@ the gate even when only the package's default resolution exposes it.
 profile expires 90 days after its review (spec 01 §7.1), so a test that checks
 a compiled pin against the wall clock would turn red on that date. Codex and
 the facade inject a clock derived from the compiled review dates (the hidden
-`test-clock` seams). The Grok and Claude native-auth managers read one
+`test-support` seams). The Grok and Claude native-auth managers read one
 crate-private subscription clock: the system clock in supported builds, and
 in their own unit tests and `test-clock` builds a clock that starts one minute
 after that crate's compiled review and advances with elapsed monotonic time.

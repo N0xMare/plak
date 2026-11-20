@@ -50,7 +50,6 @@ pub(super) fn seed(workspace: &Path, with_submission: bool) -> crate::CliResult<
     let roots = crate::commands::support::product_state_roots_from(
         &paths,
         paths.home().join("fixture-state"),
-        None,
         records,
         &plakous_hosted::agent::ProcessJobs::default(),
         &crate::gateway::HostCustody::Local,

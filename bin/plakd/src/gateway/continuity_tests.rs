@@ -141,7 +141,6 @@ fn assert_gateway_roots(
     let roots = crate::commands::support::product_state_roots_from(
         paths,
         host_state.to_path_buf(),
-        None,
         records,
         &plakous_hosted::agent::ProcessJobs::default(),
         &super::HostCustody::resolve(paths).unwrap(),

@@ -1051,7 +1051,6 @@ fn model_commands_run_in_process_under_a_configured_gateway_without_the_store() 
         let app = crate::commands::application::PlakousApplication::new(
             state.clone(),
             None,
-            None,
             services.custody().unwrap(),
         )
         .unwrap();

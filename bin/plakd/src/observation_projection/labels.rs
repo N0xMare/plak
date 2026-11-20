@@ -97,7 +97,7 @@ pub(crate) fn durability_attempt_outcome_text(outcome: DurabilityAttemptOutcome)
     }
 }
 
-/// Shared phase label for the SQLite store and OTel export.
+/// Phase label written to the SQLite store.
 pub fn credential_refresh_phase_text(phase: CredentialRefreshPhase) -> &'static str {
     #[allow(
         unreachable_patterns,
@@ -113,7 +113,7 @@ pub fn credential_refresh_phase_text(phase: CredentialRefreshPhase) -> &'static 
     }
 }
 
-/// Shared failure-class label for the SQLite store and OTel export.
+/// Failure-class label written to the SQLite store.
 pub fn credential_refresh_failure_text(class: CredentialRefreshFailureClass) -> &'static str {
     #[allow(
         unreachable_patterns,

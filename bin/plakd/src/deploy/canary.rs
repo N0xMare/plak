@@ -229,7 +229,6 @@ fn run_native(
     let backend = PlakousApplication::new(
         services.home().state()?.to_path_buf(),
         None,
-        None,
         services.custody()?,
     )?;
     let subscriptions = backend.subscriptions_for(account)?;

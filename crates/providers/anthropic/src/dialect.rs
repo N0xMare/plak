@@ -180,26 +180,3 @@ impl Default for AnthropicMessagesDialect {
         Self::stable()
     }
 }
-
-/// Conservative evidence status for one codec surface.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[non_exhaustive]
-pub enum FeatureStatus {
-    /// The offline codec parses, preserves, and replays this surface. This is
-    /// not a route or model support claim.
-    CodecOnly,
-    /// The offline codec can parse this beta surface, but dispatch requires an
-    /// exact explicit beta binding and separate route/model evidence.
-    BetaCodecOnly,
-    /// Deliberately rejected rather than transformed or discarded.
-    Excluded,
-}
-
-/// One entry in the versioned Messages feature matrix.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FeatureMatrixEntry {
-    /// Stable feature name.
-    pub feature: &'static str,
-    /// Foundation support status.
-    pub status: FeatureStatus,
-}

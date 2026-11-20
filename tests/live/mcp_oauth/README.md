@@ -15,10 +15,10 @@ python3 tests/live/mcp_oauth/run.py --binary target/release/plakd --only dcr_loo
 python3 tests/live/mcp_oauth/run.py --previous-binary /path/to/other-state-key/plakd
 ```
 
-The recipe builds a `test-hooks` release binary. Direct Python invocation
+The recipe builds a release binary with `plakd/test-support`. Direct Python invocation
 requires one already built **from this checkout**. No sidecars are needed for
 the scripted direct composition. Every case starts a separate gateway on a
-private Unix socket. The driver refuses a non-test-hooks binary;
+private Unix socket. The driver requires the `; test-hooks` version label;
 the offline selector cannot fall back to a provider. `PLAK_TEST_FAULTS` injects
 revocation 503 and a calibrated `tools/call` 401; a separate MCP fixture injects
 a real HTTP 401 at `tools/call` so its
@@ -81,7 +81,7 @@ current location-bound rule requires `refuse`: metadata served at strict's
 well-known location cannot claim sibling tenantb. This keeps the parallel interoperability
 branch's resource-rule changes out of fixture implementation.
 
-State-key carry requires `--previous-binary` with test-hooks and a
+State-key carry requires `--previous-binary` with the same version label and a
 *different* state key. It uses the public session export/import commands, not
 SQLite edits or moving a state directory. The older build creates/exports a
 plain scripted session with an older-compatible config; the new build restores

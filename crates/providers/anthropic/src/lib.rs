@@ -80,10 +80,7 @@ pub use config::{
     CLAUDE_SONNET_5_HOSTED_PTC_PROFILE_ID, CLAUDE_SONNET_5_MODEL_ID,
     compile_anthropic_sonnet_5_configuration,
 };
-pub use dialect::{
-    ANTHROPIC_API_VERSION, AnthropicBetaFeature, AnthropicMessagesDialect, FeatureMatrixEntry,
-    FeatureStatus,
-};
+pub use dialect::{ANTHROPIC_API_VERSION, AnthropicBetaFeature, AnthropicMessagesDialect};
 pub use error::{
     AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES,
     RetryAdvice, RetrySafety, classify_provider_error_with_safety,
@@ -133,7 +130,7 @@ pub use route::{
     AnthropicApiKeyAuth, AnthropicApiKeyRequest, AnthropicAttemptAuthorization,
     AnthropicCredentialAuthority, AnthropicKeySource, AnthropicMessagesTargetBinding,
     AnthropicMessagesTransport, AnthropicModel, AnthropicPlatformRoute, ApiKey, ClaudeProfile,
-    ResolvedAnthropicMessages, ScopedFeatureEvidence, ThinkingSupport,
+    ResolvedAnthropicMessages, ThinkingSupport,
 };
 pub use stream::{
     AnthropicMessagesStreamDecoder, MessagesStopDetails, MessagesStopDetailsKind,

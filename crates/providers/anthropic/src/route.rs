@@ -16,10 +16,7 @@ use plakous_model::{
     ResolvedModelDescriptor, RouteId, SessionLineage, SystemClock, ValidatedRequestPlan,
 };
 
-use crate::{
-    AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicMessagesDialect,
-    FeatureMatrixEntry,
-};
+use crate::{AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicMessagesDialect};
 
 /// The only HTTPS origin authorized by [`AnthropicPlatformRoute`].
 pub const ANTHROPIC_PLATFORM_ORIGIN: &str = "https://api.anthropic.com";
@@ -1307,41 +1304,6 @@ impl fmt::Debug for AnthropicMessagesTargetBinding {
             )
             .field("lineage", &self.lineage)
             .finish()
-    }
-}
-
-/// Codec evidence explicitly scoped to one route, model, and dialect binding.
-#[derive(Clone, Copy, Debug)]
-pub struct ScopedFeatureEvidence<'a> {
-    route: &'a RouteId,
-    model: &'a ModelId,
-    dialect: &'a AnthropicMessagesDialect,
-    entries: &'static [FeatureMatrixEntry],
-}
-
-impl<'a> ScopedFeatureEvidence<'a> {
-    /// Returns the exact route scope.
-    #[must_use]
-    pub const fn route(&self) -> &'a RouteId {
-        self.route
-    }
-
-    /// Returns the exact provider model scope.
-    #[must_use]
-    pub const fn model(&self) -> &'a ModelId {
-        self.model
-    }
-
-    /// Returns the exact API-version and beta scope.
-    #[must_use]
-    pub const fn dialect(&self) -> &'a AnthropicMessagesDialect {
-        self.dialect
-    }
-
-    /// Returns parser/preservation evidence, never an advertised live claim.
-    #[must_use]
-    pub const fn entries(&self) -> &'static [FeatureMatrixEntry] {
-        self.entries
     }
 }
 

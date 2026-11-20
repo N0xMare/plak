@@ -42,7 +42,6 @@ pub const HOST_WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) fn product_state_roots_from(
     context: &product_paths::PlakPaths,
     state_home: PathBuf,
-    extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     session_records: Arc<dyn crate::store::session_records::SessionRecordStore>,
     jobs: &plakous_hosted::agent::ProcessJobs,
     custody: &crate::gateway::HostCustody,
@@ -98,11 +97,7 @@ pub(crate) fn product_state_roots_from(
             plakous_hosted::platform::ApiWindow::Working,
         );
     // A configured gateway holds the logins; the roots never open the store.
-    let roots = custody.roots(roots);
-    if let Some(sink) = extra_telemetry_sink {
-        roots.set_extra_telemetry_sink(sink);
-    }
-    Ok(roots)
+    Ok(custody.roots(roots))
 }
 
 /// Product (run and host) subscription gate limits; the host owns the one

@@ -1304,7 +1304,7 @@ cookie, the cookie key, or a frame's body.
 **Residual risks of the supported endpoint.** The default release supports the
 authenticated Unix-listener deployment, with these limits. `--dev-login` is
 not part of the supported release product: its loopback access implementation
-is compiled only in maintainer or test-hooks builds; default builds refuse it
+is compiled only in maintainer or test-support builds; default builds refuse it
 with an explicit build-capability diagnostic.
 
 - `ts.net` is a public suffix, so every node of a tailnet is one site to the
@@ -2927,9 +2927,10 @@ lost it: the next boot retires the grant either way (chapter 01 §5.2).
 
 Compiled subscription expiry and credential time checks always use the system
 clock in supported builds; documented API review dates never refuse a route.
-Hidden clock injection is restricted to the non-default `test-clock` feature
-for offline fixtures; default, maintainer and release closures must not enable
-it. It is not an embedder-supported authority override.
+Hidden clock injection is restricted to non-default test seams for offline
+fixtures: `test-support` on the facade and Codex, `test-clock` on the Grok and
+Claude providers. Default, maintainer and release closures must not enable
+them. The seams are not an embedder-supported authority override.
 
 The public product ships no application client. This removes terminal rendering,
 clipboard capture and terminal launch/re-exec, not host wire authorization,

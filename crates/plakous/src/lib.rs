@@ -477,7 +477,7 @@ pub mod anthropic {
         AnthropicLanguageModel, AnthropicListedModel, AnthropicMessagesDialect,
         AnthropicPlatformCapabilityProfile, AnthropicPlatformModelConfig,
         AnthropicPlatformModelResolver, ApiKey, CLAUDE_ENROLLMENTS, CLAUDE_SONNET_4_6_MODEL_ID,
-        CLAUDE_SONNET_5_MODEL_ID, ClaudeEnrollment, FeatureStatus, RetryAdvice, RetrySafety,
+        CLAUDE_SONNET_5_MODEL_ID, ClaudeEnrollment, RetryAdvice, RetrySafety,
         accept_anthropic_listed_models, anthropic_api_bundled_listing,
         anthropic_api_key_fingerprint, anthropic_api_models, claude_enrollment,
         claude_max_output_tokens, list_anthropic_api_models,

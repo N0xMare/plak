@@ -55,6 +55,8 @@ def main():
                 root / "crates/plakous/src/subscriptions/test_support.rs",
                 subscriptions / "test_support.rs",
             )
+            # The injected declaration targets the predecessor's test-clock
+            # feature, not the current checkout's test-support feature.
             with subscriptions.with_suffix(".rs").open("a") as output:
                 output.write(
                     '\n#[cfg(feature = "test-clock")]\n#[doc(hidden)]\npub mod test_support;\n'

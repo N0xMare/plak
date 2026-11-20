@@ -82,9 +82,9 @@ pub const FAULTS_ENV: &str = "PLAK_TEST_FAULTS";
 /// Where this process's gateway is, for a host fault plan.
 ///
 /// Set [`PLAK_TEST_GATEWAY`] to `external` when `[gateway] address` names
-/// another process, or `in-process` for the in-process gateway. Unset means
-/// direct local custody. `provider` is the gateway service: the host plan
-/// fails closed and the service reads [`FaultPlan::parse_provider`].
+/// another process. Embedders can set `in-process` or leave it unset for a
+/// direct provider client. The separate gateway service sets `provider` and
+/// parses its own plan with [`FaultPlan::parse_provider`].
 pub const PLAK_TEST_GATEWAY: &str = "PLAK_TEST_GATEWAY";
 
 /// Which hop a fault rule applies to.

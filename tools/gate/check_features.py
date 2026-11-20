@@ -171,7 +171,7 @@ def check_product_profiles(
 
 
 def product_builds(manifest: dict[str, object], target: str | None) -> list[str]:
-    """Keep the full test-hooks writer separate from the reduced binaries opening its stores."""
+    """Keep the full test-support writer separate from the reduced binaries opening its stores."""
     command = cargo_command("build", ("test-support",), True, "plakd") + [
         "--bin",
         "plakd",
@@ -183,7 +183,7 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
     diagnostics = compiler_diagnostics(result.stdout)
     if result.returncode or diagnostics:
         sys.stderr.write("".join(diagnostics) or result.stderr)
-        return ["full test-hooks feature fixture writer failed to build"]
+        return ["full test-support feature fixture writer failed to build"]
     binaries = [
         row["executable"]
         for line in result.stdout.splitlines()
@@ -192,7 +192,7 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
         and row.get("executable")
     ]
     if not binaries:
-        return ["full test-hooks fixture writer reported no executable"]
+        return ["full test-support fixture writer reported no executable"]
     writer_binary = binaries[-1]
     command = cargo_command("build", (), True, "plakous-mcp-fake-server") + [
         "--bin",
@@ -243,7 +243,7 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
         diagnostics = compiler_diagnostics(result.stdout)
         if result.returncode or diagnostics:
             sys.stderr.write("".join(diagnostics) or result.stderr)
-            return errors + ["reduced test-hooks/maintainer fixture build failed"]
+            return errors + ["reduced test-support/maintainer fixture build failed"]
         binaries = [
             row["executable"]
             for line in result.stdout.splitlines()
@@ -252,7 +252,7 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
             and row.get("executable")
         ]
         if not binaries:
-            return errors + ["reduced test-hooks fixture reported no executable"]
+            return errors + ["reduced test-support fixture reported no executable"]
         import product_feature_fixture
 
         errors.extend(
@@ -847,7 +847,7 @@ NAMED_VARIANT_EXCLUSIONS = {
 # Repository-only capabilities of a dependency, keyed by the product and the
 # product feature that alone may turn them on. `PLAK_TEST_FAULTS` transport
 # fault injection must be inert in every default and release `plakd`, and live
-# under `test-hooks`, where the live smoke depends on it.
+# under `plakd/test-support`, where the live smoke depends on it.
 TEST_ONLY_DEPENDENCY_FEATURES = {
     ("plakd", "test-support"): (
         ("plakous-http", "fault-injection"),
@@ -911,7 +911,7 @@ def validate_test_only_dependency_features() -> list[str]:
         if "test-hooks" in resolved_dependency_features(package, (), package):
             errors.append(f"{package} [default]: test-hooks is test-only")
     # The Grok and Claude review-anchored clocks reach only offline test
-    # builds (facade dev-dependencies): no plakd build, `test-hooks` live
+    # builds (facade dev-dependencies): no plakd build, `test-support` live
     # smoke builds included, may resolve them.
     for profile in PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS:
         for dependency in ANCHORED_CLOCK_PROVIDERS:

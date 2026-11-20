@@ -55,7 +55,6 @@ pub(crate) fn serve(home: &crate::home::paths::PlakPaths) -> Result<(), String> 
     let app = crate::commands::application::PlakousApplication::new(
         config.state_root.clone(),
         None,
-        None,
         HostCustody::Local,
     )
     .map_err(|error| error.to_string())?

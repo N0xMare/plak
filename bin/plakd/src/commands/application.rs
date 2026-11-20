@@ -382,9 +382,7 @@ pub fn catalog_summaries(
 ///
 /// It owns the async executor, the native-subscription state and the
 /// credential-telemetry guard, and it remembers the two homes the composition
-/// root resolved — so no method here reads the environment again, and every
-/// product state root this service opens carries the build's extra telemetry
-/// sink.
+/// root resolved, so no method here reads the environment again.
 pub struct PlakousApplication {
     pub(crate) executor: ApplicationExecutor,
     pub(crate) subscriptions: NativeSubscriptions,
@@ -392,7 +390,6 @@ pub struct PlakousApplication {
     session_records: Option<Arc<dyn crate::store::session_records::SessionRecordStore>>,
     state_home: PathBuf,
     login_subscriptions: Option<(AccountRef, NativeSubscriptions)>,
-    extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
     /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
@@ -419,12 +416,9 @@ impl PlakousApplication {
                 .and_then(crate::telemetry_sink::install_product_credential_telemetry);
         }
     }
-    /// `state_home` is the XDG state home, `extra_telemetry_sink` the
-    /// caller's telemetry observer and `custody` the process's latched
-    /// credential custody; all come from the composition root.
+    /// The composition root supplies the XDG state home and latched custody.
     pub(crate) fn new(
         state_home: PathBuf,
-        extra_telemetry_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
         product: Option<(
             product_paths::PlakPaths,
             Arc<dyn crate::store::session_records::SessionRecordStore>,
@@ -456,7 +450,6 @@ impl PlakousApplication {
             session_records,
             state_home,
             login_subscriptions: None,
-            extra_telemetry_sink,
             exchange_observer,
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             credential_telemetry,
@@ -598,13 +591,11 @@ impl PlakousApplication {
             .ok_or_else(|| CliFailure::new("product home is unavailable"))
     }
 
-    /// Product state roots under this service's homes, with the extra
-    /// telemetry sink attached.
+    /// Product state roots under this service's homes.
     pub(crate) fn state_roots(&self) -> CliResult<product_agent::ProductStateRoots> {
         let roots = product_state_roots_from(
             self.product_paths()?,
             self.state_home.clone(),
-            self.extra_telemetry_sink.clone(),
             self.session_records()?,
             &self.jobs,
             &self.custody,

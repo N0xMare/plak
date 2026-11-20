@@ -469,7 +469,7 @@ called out explicitly.
 | `plakous-mcp` | `client` | Internal runtime closure, default on for direct use. The facade disables this dependency's defaults and selects the client explicitly through `mcp`; without it only frozen record vocabulary, naming and errors remain |
 | `plakd`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
 | `plakd` | `maintainer` | Empty feature gating only plakd's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (section 6.2) |
-| `plakd` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
+| `plakd` | `test-support` | Product test hooks, isolated fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
 | `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
 | `plakous` (`test-support`), `plakous-cell` | `test-hooks` on the cell | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` or the thread-scoped `plakous::test_session_lease::with_test_session_lease_seconds` (1 through 30 seconds; the scoped override also requires `store`), and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plakd/test-support` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads or the scoped override |
@@ -477,7 +477,7 @@ called out explicitly.
 | `plakous-http` | `gateway-client`, `gateway-server` | The credential gateway relay client and the provider-blind relay server core (chapter 01 §7.5), each linking `plakous-gateway-protocol`; the server adds hyper's server half. Off by default; the facade's `gateway` enables both |
 | `plakous-auth` | `gateway` | The remote credential custodian over the relay client; implies `http-refresh` and `plakous-http/gateway-client` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
-| `plakous-store` | `test-support` | Benchmark instrumentation plus repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-support` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-support`; a sweep must require `cfg(feature="test-support")` for all three stores. |
+| `plakous-store` | `test-support` | Benchmark instrumentation plus repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-support` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `plakd/test-support`; a sweep must require `plakd/test-support` for all three stores. |
 | `plakous-recursive-subagents-store` | `test-support` | Tree fixtures plus an optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plakd/test-support` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release plakd closures. |
 | `plakous-openai` | `test-support` | Test clocks and, when `native-auth` is already linked, the doc-hidden ephemeral Codex callback and catalog origin fixtures. The seam does not activate `native-auth`. |
 | `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, spec 05 section 2.6); the construction port itself is always available. A dev-dependency of `plakd`, never a production edge |
@@ -555,10 +555,11 @@ none, each feature alone, all public features minus each feature, `default`
 and `full` (all public features when the package has no `full` key).
 Package selections are never cross-multiplied. These witnesses bound gate
 cost; they do not claim an exhaustive power-set proof. Named external-closure
-exclusions are checked independently. Hidden repository-only `test-clock` is
-not public, is excluded from these witnesses, and never enters `full` or the
-product default/maintainer release closures. The `plakous` and `plakous-cell`
-`test-hooks` features are hidden the same way.
+exclusions are checked independently. Hidden repository-only clock and
+deadline seams (`test-support` on the facade and OpenAI, `test-clock` on
+providers that only expose a clock seam, and cell/agent `test-hooks`) are
+excluded from these witnesses. They never enter `full` or the product
+default/maintainer release closures.
 The one named-variant table is `NAMED_VARIANTS` in `check_features.py`:
 Default is headless. `api` is default minus `codex`, `grok` and `claude`;
 `minimal` is exactly `openrouter,git-cli`. There is no redundant headless variant.
@@ -2080,7 +2081,7 @@ client or official native host binary is part of this execution path.
 
 Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
-`serde_json_canonicalizer`, `tracing`, `vt100`, the OpenTelemetry family, and
+`serde_json_canonicalizer`, `tracing`, `vt100`, and
 micro-monty at `=0.0.2`.
 
 ### 7.5 Portable crates

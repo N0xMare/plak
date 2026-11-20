@@ -4224,13 +4224,13 @@ source review: delivery is authenticated and server-side. The existing parser,
 Code Mode contract and GPT-6 prompt base apply unchanged; there is no reference
 bump, consent revision, prompt-source change or additional format cut. The
 capture proves catalog admission, not inference qualification.
-The hidden, non-default `test-clock` feature alone exposes the Codex manager
+The hidden, non-default `test-support` feature alone exposes the Codex manager
 and `NativeSubscriptions` clock seams for offline fixtures; it is not a
 supported facade API. Consent, catalog, side requests and token time checks
 share that test clock. Refresh-lead fixtures advance from a fixed review
 epoch using monotonic elapsed time. Production constructors remain clock-free
 and use the system clock. The Grok and Claude native-auth managers read a
-crate-private subscription clock that the same feature, and their own unit
+crate-private subscription clock that their own `test-clock` features and unit
 tests, anchor at the compiled review (spec 05 §2). OpenAI and xAI Platform
 fixtures use each surface's own review window; the Anthropic API surface has no
 calendar expiry, so its hosted fixtures may use the system clock.
@@ -12107,7 +12107,7 @@ and completed otherwise, including a process its own timer killed.
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
   The product persists that pair in telemetry schema 22, with the count
-  column nullable, and does not project it to OTEL. Turn model rounds and
+  column nullable. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
   prefix differs from the round that produced the active family artifact, with
@@ -12175,7 +12175,7 @@ busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 22 and projects it to OTEL.
+in telemetry schema 22.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

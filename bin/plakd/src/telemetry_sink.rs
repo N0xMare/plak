@@ -1,9 +1,8 @@
 //! Nonblocking typed telemetry sink backed by a dedicated writer thread.
 
 use std::collections::HashMap;
-use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
@@ -53,18 +52,12 @@ impl TelemetryWriterStatus {
 /// Bounded-channel sink feeding the dedicated telemetry writer thread.
 pub struct TelemetryWriter {
     sender: Mutex<Option<SyncSender<TelemetryItem>>>,
-    extra: Mutex<Option<Arc<ProductExporter>>>,
     write_errors: Arc<AtomicU64>,
     dropped: Arc<AtomicU64>,
     wal_checkpoint_busy: Arc<AtomicU64>,
     #[cfg(test)]
     #[allow(dead_code, reason = "kept alive so a detached writer can be joined")]
     thread: Mutex<Option<JoinHandle<()>>>,
-}
-
-struct ProductExporter {
-    sink: Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>,
-    disabled: AtomicBool,
 }
 
 impl TelemetryWriter {
@@ -89,7 +82,6 @@ impl TelemetryWriter {
         drop(thread);
         Ok(Arc::new(Self {
             sender: Mutex::new(Some(sender)),
-            extra: Mutex::new(None),
             write_errors,
             dropped,
             wal_checkpoint_busy,
@@ -104,7 +96,6 @@ impl TelemetryWriter {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let writer = Arc::new(Self {
             sender: Mutex::new(Some(sender)),
-            extra: Mutex::new(None),
             write_errors: Arc::new(AtomicU64::new(0)),
             dropped: Arc::new(AtomicU64::new(0)),
             wal_checkpoint_busy: Arc::new(AtomicU64::new(0)),
@@ -127,22 +118,6 @@ impl TelemetryWriter {
         reason = "Copy product observation enum"
     )]
     pub(crate) fn emit_product(&self, observation: ProductObservation) {
-        let extra = self
-            .extra
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(extra) = extra
-            && !extra.disabled.load(Ordering::Acquire)
-            && !matches!(
-                std::panic::catch_unwind(AssertUnwindSafe(|| extra
-                    .sink
-                    .try_emit_product(observation))),
-                Ok(Ok(()) | Err(TelemetrySinkError::Full))
-            )
-        {
-            extra.disabled.store(true, Ordering::Release);
-        }
         self.enqueue_product(TelemetryItem::Product(observation));
     }
 
@@ -401,113 +376,6 @@ pub(crate) enum TelemetryCache {
     Unavailable(String),
 }
 
-/// Fans one observation to multiple sinks without blocking the agent path.
-pub(crate) struct FanOutSink {
-    children: Vec<FanOutChild>,
-}
-
-struct FanOutChild {
-    sink: Arc<dyn TelemetrySink>,
-    disabled: AtomicBool,
-}
-
-impl FanOutChild {
-    fn new(sink: Arc<dyn TelemetrySink>) -> Self {
-        Self {
-            sink,
-            disabled: AtomicBool::new(false),
-        }
-    }
-}
-
-impl FanOutSink {
-    pub(crate) fn new(children: Vec<Arc<dyn TelemetrySink>>) -> Arc<Self> {
-        Arc::new(Self {
-            children: children.into_iter().map(FanOutChild::new).collect(),
-        })
-    }
-}
-
-impl TelemetrySink for FanOutSink {
-    #[allow(
-        clippy::large_types_passed_by_value,
-        reason = "TelemetrySink trait passes Copy observations by value"
-    )]
-    fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
-        let mut outcomes = Vec::with_capacity(self.children.len());
-        for child in &self.children {
-            if child.disabled.load(Ordering::Acquire) {
-                outcomes.push(None);
-                continue;
-            }
-            let result =
-                std::panic::catch_unwind(AssertUnwindSafe(|| child.sink.try_emit(observation)));
-            outcomes.push(Some(match result {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(TelemetrySinkError::Full)) => Err(TelemetrySinkError::Full),
-                // Any other admission failure or a panic retires the child for
-                // the rest of the process so it cannot keep costing the turn.
-                Ok(Err(_)) | Err(_) => {
-                    child.disabled.store(true, Ordering::Release);
-                    Err(TelemetrySinkError::Closed)
-                }
-            }));
-        }
-        merge_child_outcomes(&outcomes)
-    }
-}
-
-/// Combines per-child results: any acceptance wins; else any `Full`; else `Closed`.
-fn merge_child_outcomes(
-    outcomes: &[Option<Result<(), TelemetrySinkError>>],
-) -> Result<(), TelemetrySinkError> {
-    let mut any_ok = false;
-    let mut any_full = false;
-    let mut any_active = false;
-    for outcome in outcomes {
-        match outcome {
-            None => {}
-            Some(Ok(())) => {
-                any_ok = true;
-                any_active = true;
-            }
-            Some(Err(TelemetrySinkError::Full)) => {
-                any_full = true;
-                any_active = true;
-            }
-            Some(Err(_)) => {
-                any_active = true;
-            }
-        }
-    }
-    if any_ok {
-        return Ok(());
-    }
-    if any_full {
-        return Err(TelemetrySinkError::Full);
-    }
-    if any_active {
-        return Err(TelemetrySinkError::Closed);
-    }
-    Err(TelemetrySinkError::Closed)
-}
-
-fn compose_telemetry_sink(
-    writer: Arc<TelemetryWriter>,
-    extra: Option<Arc<dyn TelemetrySink>>,
-) -> Arc<dyn TelemetrySink> {
-    let product_writer = Arc::clone(&writer);
-    let writer: Arc<dyn TelemetrySink> = writer;
-    let inner = match extra {
-        None => writer,
-        Some(extra) => FanOutSink::new(vec![writer, extra]),
-    };
-    Arc::new(ModelDiagnosticsSink {
-        inner: Some(inner),
-        writer: Some(product_writer),
-    })
-}
-
 enum ModelLogKind {
     Retry(
         plakous::agent::TelemetryContext,
@@ -568,7 +436,6 @@ fn log_model_retry(context: plakous::agent::TelemetryContext, retry: &plakous::m
 /// Logging is independent of SQLite availability and analytics admission.
 struct ModelDiagnosticsSink {
     writer: Option<Arc<TelemetryWriter>>,
-    inner: Option<Arc<dyn TelemetrySink>>,
 }
 
 impl TelemetrySink for ModelDiagnosticsSink {
@@ -615,15 +482,14 @@ impl TelemetrySink for ModelDiagnosticsSink {
         reason = "TelemetrySink passes Copy observations by value"
     )]
     fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
-        self.inner
+        self.writer
             .as_ref()
             .ok_or(TelemetrySinkError::Closed)?
             .try_emit(observation)
     }
 }
 
-/// The product's telemetry: the SQLite writer under the product home, fanned
-/// out with any extra sink, plus its health and unavailability log.
+/// The SQLite writer under the product home, plus its health and unavailability log.
 #[derive(Clone, Debug)]
 pub(crate) struct ProductTelemetryFactory {
     paths: PlakPaths,
@@ -636,11 +502,8 @@ impl ProductTelemetryFactory {
 }
 
 impl plakous_hosted::agent::TelemetrySinkFactory for ProductTelemetryFactory {
-    fn open(
-        &self,
-        extra_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
-    ) -> Arc<dyn plakous_hosted::agent::ProductTelemetry> {
-        let cache = match open_product_telemetry(&self.paths, extra_sink) {
+    fn open(&self) -> Arc<dyn plakous_hosted::agent::ProductTelemetry> {
+        let cache = match open_product_telemetry(&self.paths) {
             Ok(ready) => TelemetryCache::Ready(ready),
             Err(error) => TelemetryCache::Unavailable(error.to_string()),
         };
@@ -675,10 +538,7 @@ impl plakous_hosted::agent::ProductTelemetry for OpenedProductTelemetry {
         match &self.cache {
             TelemetryCache::Ready(ready) => Some(Arc::clone(&ready.emitter)),
             TelemetryCache::Unavailable(_) => Some(Arc::new(TelemetryEmitter::enabled(Arc::new(
-                ModelDiagnosticsSink {
-                    inner: None,
-                    writer: None,
-                },
+                ModelDiagnosticsSink { writer: None },
             )))),
         }
     }
@@ -703,20 +563,19 @@ impl plakous_hosted::agent::ProductTelemetry for OpenedProductTelemetry {
     }
 }
 
-pub(crate) fn open_product_telemetry(
-    paths: &PlakPaths,
-    extra_sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
-) -> Result<TelemetryReady, TelemetryStoreOpenError> {
-    if let Some(writer) = telemetry_writer_for_home(paths.home()) {
-        install_product_exporter(&writer, extra_sink.clone());
-        let sink = compose_telemetry_sink(
-            Arc::clone(&writer),
-            extra_sink.map(|sink| sink as Arc<dyn TelemetrySink>),
-        );
-        let emitter = Arc::new(TelemetryEmitter::enabled(sink));
-        plakous::subscriptions::install_credential_telemetry(Arc::clone(&emitter));
-        return Ok(TelemetryReady { emitter, writer });
-    }
+fn open_product_telemetry(paths: &PlakPaths) -> Result<TelemetryReady, TelemetryStoreOpenError> {
+    let writer = match telemetry_writer_for_home(paths.home()) {
+        Some(writer) => writer,
+        None => open_product_writer(paths)?,
+    };
+    let emitter = Arc::new(TelemetryEmitter::enabled(Arc::new(ModelDiagnosticsSink {
+        writer: Some(Arc::clone(&writer)),
+    })));
+    plakous::subscriptions::install_credential_telemetry(Arc::clone(&emitter));
+    Ok(TelemetryReady { emitter, writer })
+}
+
+fn open_product_writer(paths: &PlakPaths) -> Result<Arc<TelemetryWriter>, TelemetryStoreOpenError> {
     let retention =
         TelemetryRetentionConfig::from(crate::product_config::TelemetryConfig::load(paths));
     let mut store = TelemetryStore::open(paths)?;
@@ -730,29 +589,7 @@ pub(crate) fn open_product_telemetry(
     }
     let writer = TelemetryWriter::spawn(store, 4096)?;
     register_telemetry_writer(paths.home(), &writer);
-    install_product_exporter(&writer, extra_sink.clone());
-    let sink = compose_telemetry_sink(
-        Arc::clone(&writer),
-        extra_sink.map(|sink| sink as Arc<dyn TelemetrySink>),
-    );
-    let emitter = Arc::new(TelemetryEmitter::enabled(sink));
-    plakous::subscriptions::install_credential_telemetry(Arc::clone(&emitter));
-    Ok(TelemetryReady { emitter, writer })
-}
-
-fn install_product_exporter(
-    writer: &TelemetryWriter,
-    sink: Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>>,
-) {
-    if let Some(sink) = sink {
-        *writer
-            .extra
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(ProductExporter {
-            sink,
-            disabled: AtomicBool::new(false),
-        }));
-    }
+    Ok(writer)
 }
 
 /// Keeps the credential-lifecycle writer alive for `plakd login` / `plakd logout`.
@@ -763,7 +600,7 @@ pub struct CredentialTelemetryGuard {
 /// Opens (or reuses) product telemetry and installs credential-lifecycle emission.
 #[must_use]
 pub fn install_product_credential_telemetry(paths: &PlakPaths) -> Option<CredentialTelemetryGuard> {
-    open_product_telemetry(paths, None)
+    open_product_telemetry(paths)
         .ok()
         .map(|ready| CredentialTelemetryGuard { _ready: ready })
 }

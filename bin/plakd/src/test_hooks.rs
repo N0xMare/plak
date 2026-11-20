@@ -1,6 +1,6 @@
 //! The offline model selector the repository gate drives the real binary with.
 //!
-//! This module exists only under the `test-hooks` feature. It is not in the
+//! This module exists only under the `test-support` feature. It is not in the
 //! default feature set, it is not enabled by any release build, and nothing in
 //! the shipped product references it. Its whole job is to let a spawned `plakd`
 //! process bind a deterministic in-process model instead of a provider, so the

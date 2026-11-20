@@ -391,7 +391,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
         ("var_os", (("string", "XDG_CONFIG_HOME"),)),
         # Explicit unmanaged-host OS/tool allowlist; fixture inputs go through
-        # the existing test-hooks reader, never the caller's entire environment.
+        # the existing test-support reader, never the caller's entire environment.
         ("var_os", (("identifier", "name"),)),
         ("var_os", (("string", "SSH_CONNECTION"),)),
         ("var_os", (("string", "SSH_TTY"),)),
@@ -403,7 +403,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         # The gateway socket's runtime directory.
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
-    # Maintainer/test-hooks private inference capture, explicitly selected per process.
+    # Maintainer/test-support private inference capture, explicitly selected per process.
     ("plakd", "src/commands/exchange_capture.rs"): [
         ("var_os", (("string", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"),)),
     ],
@@ -421,7 +421,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ("plakd", "src/commands/support.rs"): [
         ("var", (("identifier", "name"),)),
     ],
-    # `test-hooks` only, and never in `default` or a release build: the
+    # `test-support` only, and never in `default` or a release build: the
     # repository gate's offline model selector. Naming the model rather than a
     # bare flag keeps the selection an explicit binding fact.
     ("plakd", "src/test_hooks.rs"): [
@@ -446,7 +446,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
         ("var_os", (("string", "PLAK_TEST_PROVIDER_RELEASE"),)),
     ],
-    # `test-support` only, enabled by `plakd`'s `test-hooks`: a file whose
+    # `test-support` only, enabled by `plakd/test-support`: a file whose
     # existence collapses a configured whole-run deadline. Release builds do
     # not compile this module, so they do not read the variable.
     ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"): [
@@ -716,7 +716,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/mcp_binding/available.rs"): {"warn"},
     # The instruction-read wire of the hidden runner seam (spec 01 §8.5).
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
-    # `test-hooks` only: scripted offline model plans for child fixtures.
+    # `test-support` only: scripted offline model plans for child fixtures.
     ("plakd", "src/test_hooks.rs"): {"json"},
     ("plakd", "src/build_identity.rs"): {"cfg", "option_env"},
     # The `test-support`-only persistence benchmark checks that its final
@@ -1977,7 +1977,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "VersionTriple",
         },
     },
-    # `test-hooks` only: the offline script's child runner, bound and journaled
+    # `test-support` only: the offline script's child runner, bound and journaled
     # as a host's dial is, then selected for the process (spec 01 §8.5).
     ("plakd", "src/test_hooks.rs"): {
         'model': {'FixedClock'},
@@ -4538,9 +4538,7 @@ TEST_SEAM_FEATURES = frozenset(
     {
         "test-support",
         "test-hooks",
-        "commit-trace",
         "fault-injection",
-        "perf-instrumentation",
         "scripted-code-mode-enrolment",
     }
 )
@@ -5366,7 +5364,7 @@ def built_product_artifacts(root: Path) -> dict[str, Path]:
 
     Only `<target>/release` counts, where `<target>` is `CARGO_TARGET_DIR`
     or `root / "target"`. `target/debug` holds gate builds of a different
-    feature selection (`--all-features`, including `test-hooks`).
+    feature selection (`--all-features`, including `test-support`).
     The product parent is `cargo build --release --locked -p plakd`, whose facade
     features are the explicit set `bin/plakd` declares.
     """
@@ -5560,7 +5558,7 @@ def validate_packaged_dependencies(
 ) -> list[str]:
     """No packaged manifest names a repository-only package outside dev-dependencies.
 
-    `plakd` is judged by its published shape, which drops `test-hooks` and the
+    `plakd` is judged by its published shape, which drops `test-support` and the
     offline harness edge; dev-dependencies on repository-only packages must be
     version-less so packaging strips them.
     """

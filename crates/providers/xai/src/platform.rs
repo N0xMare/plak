@@ -149,42 +149,6 @@ fn valid_authority_label(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/".contains(&byte))
 }
 
-/// Closed documentation evidence for the exact public Platform model page.
-///
-/// This is neither authenticated discovery nor a provider capacity guarantee.
-/// It is retained only as request-lowering research and never creates a context
-/// contract or executable model descriptor.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct XaiPlatformDocumentationWitness {
-    model: ModelId,
-    context_tokens: u32,
-    source_revision: &'static str,
-    witness_identity: Digest,
-}
-
-impl XaiPlatformDocumentationWitness {
-    /// Exact requested/effective model attested by this closed row.
-    #[must_use]
-    pub const fn model(&self) -> &ModelId {
-        &self.model
-    }
-    /// Documentation-reported context, not a provider guarantee.
-    #[must_use]
-    pub const fn reference_context_tokens(&self) -> u32 {
-        self.context_tokens
-    }
-    /// Reviewed source/policy revision.
-    #[must_use]
-    pub const fn source_revision(&self) -> &'static str {
-        self.source_revision
-    }
-    /// Credential-free witness identity.
-    #[must_use]
-    pub const fn identity(&self) -> Digest {
-        self.witness_identity
-    }
-}
-
 /// Credential-free Grok 4.6 code-interpreter request-capability witness.
 ///
 /// xAI exposes no native PTC caller edge. This provider-hosted facility is only

@@ -441,7 +441,7 @@ fn gateway_host_wire_uses_host_catalogs_and_dispatches_subscription_prompts() {
     );
 
     // The CLI's models backend runs outside the host and repairs its cache.
-    let mut app = PlakousApplication::new(host_state.clone(), None, None, custody)
+    let mut app = PlakousApplication::new(host_state.clone(), None, custody)
         .unwrap()
         .with_account_home(Some(paths.clone()));
     for (account, _, exact) in MODELS {

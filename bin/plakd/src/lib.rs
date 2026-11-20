@@ -763,7 +763,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             }
             let mut backend = PlakousApplication::new(
                 services.home().state()?.to_path_buf(),
-                None,
                 if read_only {
                     None
                 } else {

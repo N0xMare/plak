@@ -95,31 +95,14 @@ pub trait RosterSource: Send + Sync {
 }
 
 #[must_use]
-/// Where a hosted session's telemetry goes: the product opens its sink (the
-/// SQLite writer, fanned out with any extra sink) and answers for its health.
+/// Where a hosted session's telemetry goes: the product opens its sink and
+/// answers for its health.
 /// The roots hold the port and cache one opening per process.
 pub trait TelemetrySinkFactory: Send + Sync {
     /// Open the telemetry sink once; the roots keep the result.
-    fn open(&self, extra_sink: Option<Arc<dyn ExtraTelemetrySink>>) -> Arc<dyn ProductTelemetry>;
+    fn open(&self) -> Arc<dyn ProductTelemetry>;
     /// Record that telemetry is unavailable for `session_id`.
     fn log_unavailable(&self, session_id: &str, reason: &str);
-}
-
-/// An optional exporter of both agent diagnostics and product observations.
-/// Product usage is carried above the facade, never through the agent sink.
-pub trait ExtraTelemetrySink: plakous::agent::TelemetrySink {
-    /// Nonblocking admission of one disposable product observation.
-    ///
-    /// # Errors
-    /// A full or closed exporter queue.
-    #[allow(
-        clippy::large_types_passed_by_value,
-        reason = "Copy product observation"
-    )]
-    fn try_emit_product(
-        &self,
-        observation: crate::product_observation::ProductObservation,
-    ) -> Result<(), plakous::agent::TelemetrySinkError>;
 }
 
 /// One process's opened product telemetry, as a hosted session uses it.
@@ -244,7 +227,6 @@ pub struct ProductStateRoots {
     telemetry_factory: Arc<dyn TelemetrySinkFactory>,
     telemetry: Arc<Mutex<Option<Arc<dyn ProductTelemetry>>>>,
     telemetry_unavailable_logged: Arc<Mutex<bool>>,
-    extra_telemetry_sink: Arc<Mutex<Option<Arc<dyn ExtraTelemetrySink>>>>,
     /// The task set of the session these roots were handed to: the
     /// attachment's own background work spawns into it. Tree work uses the
     /// tree's sets instead.
@@ -357,7 +339,6 @@ impl ProductStateRoots {
             telemetry_factory: telemetry,
             telemetry: Arc::new(Mutex::new(None)),
             telemetry_unavailable_logged: Arc::new(Mutex::new(false)),
-            extra_telemetry_sink: Arc::new(Mutex::new(None)),
             session_tasks: crate::TaskSet::new(),
         })
     }
@@ -777,14 +758,6 @@ impl ProductStateRoots {
         self.session_records.clone()
     }
 
-    /// Attaches an additional typed sink fanned in beside the SQLite writer.
-    pub fn set_extra_telemetry_sink(&self, sink: Arc<dyn ExtraTelemetrySink>) {
-        *self
-            .extra_telemetry_sink
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
-    }
-
     /// The product's native-subscription service, opened on the state root the
     /// product bound at construction.
     ///
@@ -1105,7 +1078,6 @@ impl ProductStateRoots {
             telemetry_factory: Arc::new(doubles::NoTelemetry),
             telemetry: Arc::new(Mutex::new(None)),
             telemetry_unavailable_logged: Arc::new(Mutex::new(false)),
-            extra_telemetry_sink: Arc::new(Mutex::new(None)),
             session_tasks: crate::TaskSet::new(),
         }
     }
@@ -1118,12 +1090,7 @@ impl ProductStateRoots {
         if let Some(cache) = retained.as_ref() {
             return Arc::clone(cache);
         }
-        let extra_sink = self
-            .extra_telemetry_sink
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        let cache = self.telemetry_factory.open(extra_sink);
+        let cache = self.telemetry_factory.open();
         *retained = Some(Arc::clone(&cache));
         cache
     }

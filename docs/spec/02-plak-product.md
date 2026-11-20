@@ -48,7 +48,8 @@ and `--reload-handoff` are absent. Continue recorded sessions with explicit
 
 Build identity distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
-digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
+digits of SHA-256 over the executable. A `test-support` build intentionally
+keeps the `; test-hooks` version label for binary probes.
 `plakd version` and global help carry the same build identity alongside the
 package version. `0.0.4` alone is package metadata, not proof of build recency.
 The default build's version label is unchanged. A build omitting product
@@ -727,10 +728,9 @@ recorded head refuses with the actual projector or store failure, not lease
 contention or recovery-required. Retrying a deterministic projector error is
 not a recovery remedy; the reported failure must be repaired.
 
-Deleting a telemetry file loses analytics and nothing else. Telemetry rows and
-exported OTel span attributes come from one content-free projection of each
-observation; SQLite pairing and upserts, and OTel span identity, parentage and
-TTFT buffering, belong to the respective sinks. Each schema has
+Deleting a telemetry file loses analytics and nothing else. Telemetry rows
+come from a content-free projection of observations; the SQLite writer owns
+pairing and upserts. Each schema has
 its own `telemetry/telemetry-v<schema>.sqlite3`; writers never drop or rewrite
 another schema's data. Old schema files and the legacy `telemetry.sqlite3` are
 left alone and reported by `plakd doctor`. Removal stays explicit; there is no
@@ -5402,7 +5402,7 @@ does not inherit another connection's pending answers.
   reach the node. A socket already at the path is replaced only when nothing
   accepts on it; a live one is refused, and the process removes only the
   socket it bound. A `127.0.0.1` listener is dev mode only: it needs
-  `--dev-login` (maintainer or test-hooks builds only; the default release
+  `--dev-login` (maintainer or test-support builds only; the default release
   refuses it explicitly), warns at start, and its origin is
   `http://127.0.0.1:<port>`. The host binds it after its control socket, and
   a listener that cannot be bound stops the host before it serves; it prints
@@ -7702,8 +7702,8 @@ figure observed on that turn. `compactions` stores `context_window_tokens`,
 the compaction, and `idle_gap_ns` before its paid call; a compaction no
 status decided (manual, endpoint, provider overflow, capacity pressure before
 a measurement) leaves threshold and occupancy null. None of these facts is
-admission or recovery authority, and none is an OTEL
-attribute. Clean commits write one `durability_attempts` row with attempt kind
+admission or recovery authority.
+Clean commits write one `durability_attempts` row with attempt kind
 `durability_finished`; a successful initial-commit attempt is not also recorded. Failed initial
 attempts and acknowledgement recovery keep their separate attempt rows.
 `model_attempts.served_path_fingerprint` is an opaque `dpt-v1` token: text,
@@ -7745,7 +7745,7 @@ per-attempt `model_attempts` rows are diagnostics and never summed into those
 totals.
 Only terminals on the product session's own branch segment emit usage.
 Inherited source terminals rebuild a fork or rebind successor's views without
-telemetry or OTel usage emissions, ledger updates, `TurnUsage` observations or
+usage telemetry, ledger updates, `TurnUsage` observations or
 `turn.usage` log lines, including when the successor is first opened later.
 Child terminals use the same keyed `TurnUsage` carrier after the tree
 projector's winning save, including release and recovery saves (chapter 03
@@ -7839,8 +7839,8 @@ cannot guarantee that arbitrary echoed content is absent. An adapter that
 withholds provider prose (such as Anthropic) keeps its safe diagnostic and
 carries the validated type when available. OpenRouter's nested raw upstream body
 is not a diagnostic. The row joins to
-`model_attempts` by attempt id and does not change that table, the SQLite
-schema, or OTLP export. The log is queued independently of the SQLite writer.
+`model_attempts` by attempt id and does not change that table. The log is
+queued independently of the SQLite writer.
 
 **Commands.** `plakd telemetry status` prints the path, schema version, size on
 disk (the main database plus `-wal` and `-shm` if they exist), the configured

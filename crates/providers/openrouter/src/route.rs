@@ -404,20 +404,8 @@ pub enum OpenRouterCredentialPurpose {
 
 #[derive(Debug)]
 enum OpenRouterCredentialProof<'a> {
-    Responses(
-        #[expect(
-            dead_code,
-            reason = "keeps the credential request borrowed from the admitted attempt"
-        )]
-        &'a ResponsesPhysicalRequestBinding,
-    ),
-    Chat(
-        #[expect(
-            dead_code,
-            reason = "keeps the credential request borrowed from the admitted attempt"
-        )]
-        &'a ChatPhysicalRequestBinding,
-    ),
+    Responses,
+    Chat,
     Messages(&'a MessagesPhysicalRequestBinding),
     Catalog(&'a Digest),
     Retrieval(&'a Digest),
@@ -428,41 +416,39 @@ enum OpenRouterCredentialProof<'a> {
 #[derive(Debug)]
 pub struct OpenRouterCredentialRequest<'a> {
     proof: OpenRouterCredentialProof<'a>,
+    // Responses and Chat borrow the admitted attempt without exposing its contents.
+    _binding: std::marker::PhantomData<&'a ()>,
 }
 
 impl<'a> OpenRouterCredentialRequest<'a> {
-    fn responses(binding: &'a ResponsesPhysicalRequestBinding) -> Self {
+    const fn new(proof: OpenRouterCredentialProof<'a>) -> Self {
         Self {
-            proof: OpenRouterCredentialProof::Responses(binding),
+            proof,
+            _binding: std::marker::PhantomData,
         }
     }
-    fn chat(binding: &'a ChatPhysicalRequestBinding) -> Self {
-        Self {
-            proof: OpenRouterCredentialProof::Chat(binding),
-        }
+    fn responses(_binding: &'a ResponsesPhysicalRequestBinding) -> Self {
+        Self::new(OpenRouterCredentialProof::Responses)
+    }
+    fn chat(_binding: &'a ChatPhysicalRequestBinding) -> Self {
+        Self::new(OpenRouterCredentialProof::Chat)
     }
     fn messages(binding: &'a MessagesPhysicalRequestBinding) -> Self {
-        Self {
-            proof: OpenRouterCredentialProof::Messages(binding),
-        }
+        Self::new(OpenRouterCredentialProof::Messages(binding))
     }
     fn catalog(operation: &'a Digest) -> Self {
-        Self {
-            proof: OpenRouterCredentialProof::Catalog(operation),
-        }
+        Self::new(OpenRouterCredentialProof::Catalog(operation))
     }
     fn retrieval(operation: &'a Digest) -> Self {
-        Self {
-            proof: OpenRouterCredentialProof::Retrieval(operation),
-        }
+        Self::new(OpenRouterCredentialProof::Retrieval(operation))
     }
 
     /// Purpose of the exact admitted request.
     #[must_use]
     pub const fn purpose(&self) -> OpenRouterCredentialPurpose {
         match self.proof {
-            OpenRouterCredentialProof::Responses(_) => OpenRouterCredentialPurpose::Responses,
-            OpenRouterCredentialProof::Chat(_) => OpenRouterCredentialPurpose::Chat,
+            OpenRouterCredentialProof::Responses => OpenRouterCredentialPurpose::Responses,
+            OpenRouterCredentialProof::Chat => OpenRouterCredentialPurpose::Chat,
             OpenRouterCredentialProof::Messages(_) => OpenRouterCredentialPurpose::Messages,
             OpenRouterCredentialProof::Catalog(_) => OpenRouterCredentialPurpose::Catalog,
             OpenRouterCredentialProof::Retrieval(_) => OpenRouterCredentialPurpose::Retrieval,

@@ -344,7 +344,6 @@ impl Services {
         let roots = crate::commands::support::product_state_roots_from(
             context,
             self.home.state()?.to_path_buf(),
-            None,
             self.session_records()?,
             &self.jobs,
             &self.custody()?,

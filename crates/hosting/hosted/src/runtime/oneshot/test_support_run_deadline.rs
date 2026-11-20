@@ -1,6 +1,6 @@
 //! File gate that collapses a configured non-interactive run deadline.
 //!
-//! Compiled only with `test-support`, which `plak`'s `test-hooks` enables.
+//! Compiled only with `test-support`, which `plakd/test-support` enables.
 //! Release builds use the stub in `oneshot` and never read the variable.
 
 pub(super) fn elapsed() -> bool {

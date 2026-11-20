@@ -38,16 +38,6 @@ impl XaiDialect {
     }
 }
 
-/// The terminal framing accepted by an xAI stream decoder.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[non_exhaustive]
-pub enum XaiTerminalConvention {
-    /// The documented public stream framing ends with `data: [DONE]`.
-    DoneSentinel,
-    /// A typed `response.completed`, `response.incomplete`, or `response.failed` event is required.
-    TypedResponseEvent,
-}
-
 /// One immutable xAI route family.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[non_exhaustive]
