@@ -4,7 +4,7 @@ use super::{
     TranscriptRow, control_error_label, host_owns_subject, item_rows, session_wide, tool_row,
 };
 use crate::sessions::projector::LastRootTurn;
-use crate::sessions::projector::{RootContinuationCause, RootContinuationDecision};
+use crate::sessions::projector::{RootContinuationCause, RootContinuationDecision, RootStopAnchor};
 
 impl Applier<'_> {
     pub(super) fn command_rejected(
@@ -80,7 +80,7 @@ impl Applier<'_> {
                 // transient retries must not clear an operator's suppression.
                 // Later intents still join after this fact; only a pause
                 // between the decision and this acceptance vetoes the rearm.
-                let resumes_loss = self.intents.root_continuations.iter().any(|intent| {
+                let loss_resume = self.intents.root_continuations.iter().find(|intent| {
                     intent.anchor < self.seq()
                         && matches!(
                             intent.value.cause,
@@ -98,14 +98,28 @@ impl Applier<'_> {
                                     > (intent.anchor, intent.ordinal)
                         })
                 });
-                if !host_wake || resumes_loss {
+                if !host_wake || loss_resume.is_some() {
                     let anchor = self.seq();
                     self.views.state.wake = Some(Anchored {
                         anchor,
                         value: false,
                     });
                 }
-                if !host_wake {
+                // Consent for a lost fenced turn clears that turn's own
+                // RecoveryRequired pause, not a newer host refusal.
+                let resumes_fence = loss_resume.is_some_and(|intent| {
+                    intent.value.cause == RootContinuationCause::OwnerLost
+                        && self.views.state.pause.as_ref().is_some_and(|paused| {
+                            matches!(
+                                (&intent.value.anchor, &paused.value),
+                                (RootStopAnchor::Turn { turn_id: lost },
+                                 Some(PauseCause::RecoveryRequired { turn_id })) if lost == turn_id
+                            ) && !self.intents.pause_causes.iter().any(|cause| {
+                                cause.anchor >= paused.anchor && cause.anchor < self.seq()
+                            })
+                        })
+                });
+                if !host_wake || resumes_fence {
                     let anchor = self.seq();
                     self.views.state.pause = Some(Anchored {
                         anchor,

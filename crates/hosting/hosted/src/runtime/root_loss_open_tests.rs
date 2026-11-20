@@ -48,6 +48,121 @@ fn lose_a_root_turn(root: &Path) -> Lost {
     release_a_running_root_turn(root, Release::Lost, Cancel::Deaf, |config| config)
 }
 
+fn recorded_lease_fence(root: &Path) -> Lost {
+    use crate::runtime::test_kit::BlockOn as _;
+    let (config, evidence) = scripted_host_with(
+        root,
+        script(&serde_json::json!([
+            {"output": {"text": "the earlier turn"}}
+        ])),
+    );
+    let store = Arc::clone(&config.store);
+    let id = config.session.id.clone();
+    let state_roots = config.state_roots.clone();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("earlier turn".into()));
+    wait_for(&events, &mut seen, "the earlier turn", turn_completed);
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let source = store.load(&id).unwrap().plakous_locator.unwrap();
+    let (locator, turn) =
+        plakous_offline_crash_harness::seed_lease_fence(state_roots.runtime_database(), source)
+            .block()
+            .unwrap();
+    assert_eq!(
+        crate::runtime::root_loss::child_fence(
+            &state_roots.runtime_sessions().unwrap(),
+            locator,
+            &turn.to_string()
+        )
+        .block(),
+        Ok(Some(crate::runtime::root_loss::RecoveryFence::LeaseLoss)),
+    );
+    Lost {
+        release_error: None,
+        store,
+        state_roots,
+        id,
+        evidence,
+        seen,
+    }
+}
+
+#[test]
+fn lease_fence_continues_once_under_continue_and_rearms_wakes() {
+    let root = tempfile::tempdir().unwrap();
+    let lost = recorded_lease_fence(root.path());
+    let mut config = next_host(
+        root.path(),
+        &lost,
+        &serde_json::json!([
+            {"output": {"text": "continued after the lease loss"}}
+        ]),
+        Arc::clone(&lost.store),
+    );
+    config.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let mut seen = Vec::new();
+    wait_for(
+        &events,
+        &mut seen,
+        "the lease-loss continuation",
+        turn_completed,
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+    let intents = lost.store.load_intents(&lost.id).unwrap();
+    assert_eq!(intents.root_interrupts.len(), 1);
+    assert_eq!(
+        intents.root_interrupts[0].value.cause,
+        RootInterruptCause::OwnerLost
+    );
+    assert_eq!(intents.root_continuations.len(), 1);
+    assert!(intents.submissions.iter().any(|submission| {
+        is_root_loss_command(&submission.command_id)
+            && submission
+                .canonical_command
+                .contains("Some tool effects may be uncertain")
+    }));
+    assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
+    open_and_quit(next_host(
+        root.path(),
+        &lost,
+        &serde_json::json!([]),
+        Arc::clone(&lost.store),
+    ));
+    assert_eq!(
+        dispatches(&lost.evidence),
+        2,
+        "one new instruction, no replay"
+    );
+}
+
+#[test]
+fn lease_fence_holds_then_reuses_consent_after_a_crash_before_dispatch() {
+    let root = tempfile::tempdir().unwrap();
+    let lost = recorded_lease_fence(root.path());
+    let seen = open_and_quit(next_host(
+        root.path(),
+        &lost,
+        &serde_json::json!([]),
+        Arc::clone(&lost.store),
+    ));
+    assert!(seen.iter().any(held_notice));
+    let record = lost.store.load(&lost.id).unwrap();
+    assert_eq!(
+        root_loss_state(lost.store.as_ref(), &record).unwrap(),
+        Some(RootLossState::Held)
+    );
+    assert_eq!(dispatches(&lost.evidence), 1);
+    let command = record_root_consent(lost.store.as_ref(), &record)
+        .unwrap()
+        .unwrap();
+    run_pending_continuation(root.path(), &lost, &command);
+    assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
+}
+
 /// How the host running the turn lets go.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Release {

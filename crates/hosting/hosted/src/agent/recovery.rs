@@ -874,10 +874,31 @@ async fn recover_claimed_child(
     let retained = runtime
         .read(|tree| tree.retained_wait_receipts(agent_id))
         .map_err(|error| session_refusal(&error.message))?;
-    let cursor = runtime
-        .read(|tree| tree.feed_read_cursor(&reopened.session.locator().session_id().to_string()))
+    let locator = reopened.session.locator();
+    let (cursor, turn) = runtime
+        .read(|tree| {
+            (
+                tree.feed_read_cursor(&locator.session_id().to_string()),
+                tree.attempt(agent_id)
+                    .and_then(|attempt| attempt.turn_id.clone()),
+            )
+        })
         .map_err(|error| session_refusal(&error.message))?;
     let sessions = Arc::clone(&reopened.session.sessions);
+    let fence = if let Some(turn) = &turn
+        && reopened.recovered.is_none()
+    {
+        let classification = crate::runtime::root_loss::child_fence(&sessions, locator, turn).await;
+        match classification {
+            Ok(fence) => fence,
+            Err(error) => {
+                let _ = reopened.session.release_opened().await;
+                return Err(session_refusal(&error));
+            }
+        }
+    } else {
+        None
+    };
     let (resolution, feed) = release_reopened(agent_id, reopened, retained, cursor).await?;
     let (projection, _feed) =
         super::feed_projection::retry_tree_feed(&sessions, feed, |feed| async move {
@@ -914,7 +935,7 @@ async fn recover_claimed_child(
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
             .map_err(|error| session_refusal(&error.message))?;
     }
-    if ended {
+    if ended || fence == Some(crate::runtime::root_loss::RecoveryFence::Other) {
         let recorded = runtime
             .record_then_apply(agent_id, {
                 let (agent_id, attempt_id) = (agent_id.to_owned(), attempt_id.clone());
@@ -924,6 +945,23 @@ async fn recover_claimed_child(
             .map_err(|error| session_refusal(&error))?;
         return runtime
             .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), recorded))
+            .map_err(|error| session_refusal(&error.message))?;
+    }
+    if fence == Some(crate::runtime::root_loss::RecoveryFence::LeaseLoss)
+        && let Some(turn) = turn.and_then(|turn| turn.parse().ok())
+    {
+        settle_child_lease_loss(
+            runtime,
+            agent_id,
+            super::children::ChildTurnIdentity {
+                attempt: attempt_id.clone(),
+                turn,
+            },
+            Vec::new(),
+        )
+        .await?;
+        return runtime
+            .read(|tree| tree.recover_receipt(agent_id, Some(&attempt_id), true))
             .map_err(|error| session_refusal(&error.message))?;
     }
     // Law L: the projection already interrupted a child whose abandoned
@@ -1015,6 +1053,29 @@ async fn release_reopened(
         },
     };
     Ok((resolution, feed))
+}
+
+/// Mark an exactly settled lease-loss fence on the still-current attempt.
+/// The ordinary owner-lost interrupt is the durable consent anchor.
+pub(in crate::agent) async fn settle_child_lease_loss(
+    runtime: &ProductTopologyRuntime,
+    agent_id: &str,
+    identity: super::children::ChildTurnIdentity,
+    evidence: Vec<(String, bool)>,
+) -> Result<bool, TopologyError> {
+    let id = agent_id.to_owned();
+    mutate_and_publish(runtime, agent_id, move |tree| {
+        if !identity.still_owns(tree, &id) {
+            return Ok(false);
+        }
+        tree.settle_wait_receipts(&id, &evidence)?;
+        tree.lose_owner(&id, Some(identity.attempt));
+        if tree.node(&id)?.status == NodeStatus::Interrupted {
+            tree.release_attempt_turn(&id)?;
+        }
+        Ok(tree.loss_continuation(&id).is_some())
+    })
+    .await
 }
 
 /// One tree mutation, applied to a copy that is published first and swapped

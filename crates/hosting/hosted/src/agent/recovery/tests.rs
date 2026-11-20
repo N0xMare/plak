@@ -3428,7 +3428,63 @@ async fn fenced_waiter_recycle_of_quiescent_head_settles_as_failed() {
 }
 
 #[tokio::test]
-async fn recover_agent_finalization_debt_settles_and_interrupts_the_child() {
+async fn recorded_child_lease_fence_holds_then_continues_once() {
+    let fixture = Fixture::new("recorded-child-lease-fence");
+    let id = fixture.spawn();
+    let sessions = fixture.sessions();
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(CreateSessionRequest::new(
+            spawn_child_operation_id(&fixture.tree_id, &id).unwrap(),
+            fixture.binding(),
+        ))
+        .await
+        .unwrap()
+    else {
+        panic!("expected a child session");
+    };
+    let source = session.release().await.unwrap();
+    let (locator, turn) =
+        plakous_offline_crash_harness::seed_lease_fence(&fixture.database(), source)
+            .await
+            .unwrap();
+    fixture.bind_turn(&id, &locator, turn);
+    fixture
+        .runtime
+        .mutate_then_emit(false, {
+            let id = id.clone();
+            move |tree| {
+                tree.record_turn_failure(
+                    &id,
+                    crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                    "recorded lease fence".into(),
+                )
+                .map_err(|error| error.message)
+            }
+        })
+        .await
+        .unwrap();
+    let (succeeded, receipt) = fixture.recover_agent(&id).await;
+    assert!(succeeded, "{receipt}");
+    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    assert_eq!(continuation_decisions(&fixture), 0);
+    assert_eq!(
+        fixture
+            .runtime
+            .read(|tree| tree.loss_continuation(&id).map(|held| held.state))
+            .unwrap(),
+        Some(crate::agent_tree::LossContinuationState::Held)
+    );
+
+    fixture.runtime.set_continue_after_loss(true);
+    recover_tree(&fixture.tree_id).await;
+    continuation_admitted(&fixture).await;
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_decisions(&fixture), 1);
+    assert_eq!(continuation_commands(&fixture).len(), 1);
+}
+
+#[tokio::test]
+async fn recover_agent_finalization_debt_settles_without_loss_continuation() {
     let fixture = Fixture::new("recover-finalization-debt-no-turn");
     let id = fixture.spawn();
     let (held, handle, _) = fixture.start_failing_turn(&fixture.sessions(), &id).await;
@@ -3468,8 +3524,14 @@ async fn recover_agent_finalization_debt_settles_and_interrupts_the_child() {
     let (succeeded, receipt) = fixture.recover_agent(&id).await;
     assert!(succeeded, "{receipt}");
     assert_eq!(receipt["recovered"], true);
-    assert!(receipt["failure_kind"].is_null(), "{receipt}");
-    assert_eq!(fixture.status(&id), NodeStatus::Interrupted);
+    assert_eq!(receipt["failure_kind"], "recovered_without_turn");
+    assert_eq!(fixture.status(&id), NodeStatus::Failed);
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.loss_continuation(&id).is_none())
+            .unwrap()
+    );
     let closed = fixture
         .runtime
         .read(|tree| tree.node(&id).unwrap().session_locator.clone().unwrap())

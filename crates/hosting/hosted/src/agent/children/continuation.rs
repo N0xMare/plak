@@ -49,11 +49,23 @@ impl LossResume {
 /// The instruction of a continuation turn, by what stopped the node.
 fn continuation_instruction(cause: crate::agent_tree::ContinuationCause) -> String {
     if cause == crate::agent_tree::ContinuationCause::Handoff {
-        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE
+        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE.to_owned()
     } else {
-        crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
+        format!(
+            "{}\nSome tool effects may be uncertain; verify them before repeating any action.",
+            crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
+        )
     }
-    .to_owned()
+}
+
+/// Run the ordinary consent/start path only after the fenced child settled
+/// and relinquished its old process-local owner.
+pub(super) async fn continue_fenced_child(runtime: &Arc<ProductTopologyRuntime>, agent_id: &str) {
+    if runtime.continues_after_loss()
+        && let Some(parent) = crate::agent::build::rejoin_parent(runtime)
+    {
+        let _ = resume_after_loss(&parent, runtime, agent_id).await;
+    }
 }
 
 /// Resumes `agent_id`'s continuation after a loss: records consent (one

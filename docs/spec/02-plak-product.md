@@ -3664,8 +3664,10 @@ place eagerly**: as soon as the host is idle, with no action needed, it releases
 the stopped attachment and runs the reopen above (the runtime closes what it
 can, the projector derives what that open committed — one operator line, a
 `Recovered` observation, a `turn.abandoned` record — and unadmitted workflow
-requests are withdrawn). Nothing is replayed and no durable cause is written:
-the fence is a process-local state, and a host that dies before the reopen
+requests are withdrawn). Nothing is replayed and the fence itself writes no
+host pause intent. A retained terminal that proves durable lease loss can
+record an owner-lost interrupt after recovery, under chapter 03 §14.1; other
+fences leave the ordinary operator pause in place. A host that dies before the reopen
 leaves the same unfinished turn for the next open to close. One that dies after
 the reopen's closure commits leaves the claim in the turn's terminal record,
 and the next open derives the line from it (§4.2). Projection debt
@@ -3680,7 +3682,8 @@ back, and the next action tries again. A recovery operation retries at once. A o
 recovers at open. Children and the agent tree keep their own recovery (chapter
 03 §14.1). The shared hosted exact-reopen helpers also serve children
 (chapter 03 §14.1); it runs at startup and on `run --session` after a
-crash. A queue paused by the fence stays paused until it is resumed: what was
+crash. A queue paused by the fence stays paused until it is resumed (or the
+matching lease-loss continuation is admitted): what was
 queued was written behind a turn whose outcome nobody saw. The recovery
 republishes the queue and its attach-style note names the exact resume control
 (Tab then `r`, or JSONL `resume_queue`); a prompt typed now still runs at once.

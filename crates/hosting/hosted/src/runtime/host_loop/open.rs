@@ -329,17 +329,22 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         // is derived from it. Recording it once its terminal is applied keeps
         // the lost turn's own submission older than the loss.
         if let Some(scan) = loss_scan.filter(|scan| scan.session() == runtime_session) {
-            let recorded =
-                match crate::runtime::root_loss::lost_root_turn(opened.sessions(), scan).await {
-                    Ok(Some(lost)) => crate::runtime::root_loss::record_root_owner_lost(
-                        config.store.as_ref(),
-                        &config.session,
-                        &lost,
-                    )
-                    .map(drop),
-                    Ok(None) => Ok(()),
-                    Err(error) => Err(error),
-                };
+            let recorded = match crate::runtime::root_loss::lost_root_turn(
+                opened.sessions(),
+                scan,
+                Some(opened.locator().branch_id()),
+            )
+            .await
+            {
+                Ok(Some(lost)) => crate::runtime::root_loss::record_root_owner_lost(
+                    config.store.as_ref(),
+                    &config.session,
+                    &lost,
+                )
+                .map(drop),
+                Ok(None) => Ok(()),
+                Err(error) => Err(error),
+            };
             if let Err(error) = recorded {
                 log_ev(
                     log.as_ref(),

@@ -629,12 +629,16 @@ fn scan_process_lost(n: u128) -> FeedFact {
 fn a_scan_below_retention_restarts_and_finds_a_retained_terminal() {
     let mut scanner = LossScanner::new(FeedSeq::new(5));
     // A candidate read before the retention answer is not kept.
-    scanner.record(FeedSeq::new(6), &[scan_accepted(9), scan_process_lost(9)]);
+    scan_record(
+        &mut scanner,
+        6,
+        vec![scan_accepted(9), scan_process_lost(9)],
+    );
     assert!(scanner.behind_retention(10), "the first answer restarts");
     assert_eq!(scanner.cursor, FeedSeq::new(9), "at the retained start");
     assert_eq!(scanner.lost, None);
-    scanner.record(FeedSeq::new(10), &[scan_accepted(1)]);
-    scanner.record(FeedSeq::new(11), &[scan_process_lost(1)]);
+    scan_record(&mut scanner, 10, vec![scan_accepted(1)]);
+    scan_record(&mut scanner, 11, vec![scan_process_lost(1)]);
     assert_eq!(
         scanner.lost.map(|lost| (lost.turn_id, lost.applied_seq)),
         Some((scan_turn(1).to_string(), 11))
@@ -647,7 +651,24 @@ fn a_scan_below_retention_restarts_and_finds_a_retained_terminal() {
 fn a_terminal_behind_retention_is_no_loss() {
     let mut scanner = LossScanner::new(FeedSeq::new(5));
     assert!(scanner.behind_retention(20));
-    scanner.record(FeedSeq::new(20), &[]);
+    scan_record(&mut scanner, 20, Vec::new());
     assert_eq!(scanner.lost, None, "the lost turn's terminal was pruned");
     assert!(!scanner.behind_retention(30), "the scan restarts once");
+}
+
+fn scan_record(scanner: &mut LossScanner, seq: u64, facts: Vec<FeedFact>) {
+    use plakous::sessions::feed::{FeedChange, FeedHeader};
+    scanner.record(&FeedRecord::from_store(
+        FeedHeader {
+            seq: FeedSeq::new(seq),
+            session_id: "00000000-0000-4000-8000-000000000001".parse().unwrap(),
+            branch_id: "00000000-0000-4000-8000-000000000002".parse().unwrap(),
+            committed_at_ms: 0,
+            change: FeedChange::LeaseReleased {
+                head: "00000000-0000-4000-8000-000000000003".parse().unwrap(),
+                fence: 1,
+            },
+        },
+        facts,
+    ));
 }

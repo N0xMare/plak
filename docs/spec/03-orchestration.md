@@ -1360,10 +1360,11 @@ Code Cell abandonment and local finalization debt alone are not missing
 executor evidence and must not be labelled `recovery_effect_evidence_refused`.
 An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
-abandonment report. The fenced turn waiter's successful recycle then settles
-the attempt as an ordinary failed attempt (`turn_abandoned`), not
-`recovery_required`; the operator's retry of such a quiescent reopen
-interrupts the child with cause `owner_lost`, attempt kept (law L, §14.1).
+abandonment report. A successful recycle of a fenced child settles the
+attempt without continuing it, unless the exact terminal proves a durable
+lease loss. In that case the child is interrupted with cause `owner_lost`
+and its attempt is kept (§14.1). A non-lease fence whose reopen has not
+settled stays `recovery_required`; reopening it does not grant loss consent.
 An abandonment report already proves a successful recycle; only a reopen
 without that report needs a quiescent-head probe. A probe failure is logged as
 such and keeps the attempt recovery-required; it is not a reopen failure.
@@ -3936,8 +3937,9 @@ retirement owns, or a turn waiter's recycle owns.
   `owner_lost` interrupt is recorded anew, anchored on that turn, and the
   child's continuation is decided on it under the policy (§14.1, continuation
   after a loss).
-- **Marked:** every open (the open restored the lost turn and it was
-  abandoned, closed it as abandoned, or found no turn) marks the child right
+- **Marked:** except for an already-terminal fence (below), every open
+  (the open restored the lost turn and it was abandoned, closed it as
+  abandoned, or found no turn) marks the child right
   after the open: the interrupt with cause
   `owner_lost` is written first, then the reopened session is released and the
   feed its open left is projected, so the abandoned turn's terminal folds as
@@ -3985,6 +3987,19 @@ of rows an earlier reopen already marked finds those children `interrupted`,
 not running, and marks nothing. Deleted views prove nothing until the feed
 rebuilds them: such a child is neither marked nor owed at reopen, and its
 `recover_node` judges the rebuilt rows by the same law.
+
+**Lease-loss fences.** A root or child `RecoveryRequired` terminal counts as
+an owner loss only when the retained terminal's exact session, branch, turn
+and checkpoint prove loss of the active durable branch lease or ownership
+fence. The recorded error must be `OutcomeUnknown`, with no provider or tool
+origin, and carry either a typed lease expiry or superseded fence store error,
+or the exact runtime-owned diagnostic `durable branch lease authority was
+lost` without a store source. A missing, unreadable, or different cause
+grants no consent. A refusal to prepare or dispatch, capacity or an
+unrecorded refusal, wake preflight, and other recovery-required causes do not
+qualify. Only once exact recovery settles the fence (and releases an old
+child owner) does the host record the ordinary anchored `owner_lost` interrupt.
+It does not turn unrelated parked work into an automatic retry.
 
 **Continuation after a loss.** Recovery spends no model call; paid work after
 a loss runs only through the host's continuation service. A child's
@@ -4041,14 +4056,17 @@ provider before the release stopped it can end needing recovery. Its command
 settles from its record, since its batch is already in history. Once its command is accepted and its turn runs, the
 continuation is **running**. The turn is a new host instruction to continue
 the assignment from the last completed step without repeating completed
-actions; it never replays the lost turn, carries the child's unread mail, and
+actions. For owner loss it records a caution about uncertain tool effects in
+the conversation; it never replays the lost turn, carries the child's unread mail, and
 counts against `max_turns` like any turn.
 
 Under `[host] resume_after_loss = "hold"` (the default) a held continuation
 waits for the operator's explicit resume intent through an attached client
 or JSONL `resume` (chapter 02). Resume with no agent resumes every held
 child. Under `"continue"` the `recover_node` run the root's open starts
-resumes each held child once by itself; the attached root sets the policy on
+resumes each held child once by itself. A live waiter whose exact recovery
+settles a proven lease fence uses that same consent and start path.
+The attached root sets the policy on
 the tree's hub when it opens. Each run ends with that continuation pass, after
 every recovery it made, and reports the children still held in one live tree
 notice that is never stored.
@@ -4082,9 +4100,10 @@ before that run marked it does not name it yet; the next one does.
 running is closed by the root's next exact open, whose terminal is an
 abandonment with cause `process_lost`. The root records that loss as an
 interrupt with cause `owner_lost` in the product store's root interrupt,
-anchored on the lost turn, whether or not its tree has rows. A turn a live
-owner fenced ends recovery-required instead and is not a loss of its owner:
-its in-place recovery records no interrupt. The open finds the loss in the
+anchored on the lost turn, whether or not its tree has rows. A proven
+lease-loss `RecoveryRequired` terminal follows the same rule after
+successful in-place recovery, including on a live host. Other fences do not
+record an owner-loss interrupt. The open finds the loss in the
 root's feed, not in a view a projection may already have moved past: before it
 projects anything it reads where to start, the earlier of the views' cursor
 and the anchor of the root's latest accepted turn-starting submission
@@ -4129,8 +4148,10 @@ It records host generation 1: a
 loss names the one root turn a lost host left, so one decision per loss is
 already one per host generation. It is written before the turn is
 prepared; the turn is a host instruction (a host-wake submission under that
-id) to continue the current task from the last completed step, never a
-replay. A pending decision whose submission exists is that queued item, which
+id) to continue the current task from the last completed step and to check
+uncertain tool effects before repeating anything, never a replay. Accepting
+that continuation supersedes the recovery pause for its exact lost turn,
+not a later pause. A pending decision whose submission exists is that queued item, which
 a reopen keeps rather than discarding like an unadmitted wake (once the
 decision is no longer pending the reopen discards it like any other); one
 whose submission does not exist yet is prepared again under the same id; a

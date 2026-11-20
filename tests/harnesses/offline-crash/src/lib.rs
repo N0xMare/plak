@@ -27,7 +27,8 @@ pub mod script;
 
 pub use crossed_root::seed_crossed_root;
 pub use finalization_debt::{
-    seed_fenced_code_cell, seed_finalization_debt, seed_uncertain_terminal_siblings,
+    seed_fenced_code_cell, seed_finalization_debt, seed_lease_fence,
+    seed_uncertain_terminal_siblings,
 };
 pub use saturated_ledger::seed_saturated_operation_ledger;
 

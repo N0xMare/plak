@@ -260,9 +260,15 @@ async fn root_stop_intent(
                 .map_err(CliFailure::new)?
             {
                 Some(turn) => Some(turn),
-                None => super::root_loss::lost_root_turn(&sessions, scan)
-                    .await
-                    .map_err(CliFailure::new)?,
+                None => super::root_loss::lost_root_turn(
+                    &sessions,
+                    scan,
+                    session
+                        .plakous_locator
+                        .map(plakous::sessions::SessionLocator::branch_id),
+                )
+                .await
+                .map_err(CliFailure::new)?,
             }
         } else {
             None

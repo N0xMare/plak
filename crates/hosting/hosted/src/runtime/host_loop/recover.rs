@@ -158,6 +158,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if restored_working {
             return self.drive_restored_turn().await;
         }
+        self.arm_recovered_loss().await;
         let _ = self.role.events.send(ContentEvent::Status {
             phase: HostPhase::Idle,
             queue_len: self.role.config.session.pending_queue.len(),
@@ -167,6 +168,37 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             }),
         });
         Ok(HostStep::Continue)
+    }
+
+    async fn arm_recovered_loss(&mut self) {
+        use crate::runtime::root_loss::{loss_scan, lost_root_turn, record_root_owner_lost};
+        let found = async {
+            let store = self.role.config.store.as_ref();
+            let session = &self.role.config.session;
+            let Some(scan) = loss_scan(store, session)? else {
+                return Ok(false);
+            };
+            let Some(lost) = lost_root_turn(
+                self.opened.sessions(),
+                scan,
+                Some(self.opened.locator().branch_id()),
+            )
+            .await?
+            else {
+                return Ok(false);
+            };
+            record_root_owner_lost(store, session, &lost)
+        }
+        .await;
+        match found {
+            Ok(true) => self.arm_root_loss_resume(),
+            Ok(false) => {}
+            Err(error) => log_ev(
+                self.role.log.as_ref(),
+                &self.role.config,
+                SessionEvent::new("session.root_loss_unrecorded").str("error", &error),
+            ),
+        }
     }
 
     /// Finishes the tree's custody-attach scan at the host's open. Its run

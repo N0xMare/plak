@@ -287,11 +287,6 @@ async fn seed_terminal_debt(
 ///
 /// # Errors
 /// Returns typed fixture construction or commit failures.
-#[allow(
-    clippy::too_many_lines,
-    clippy::items_after_statements,
-    reason = "the fixture writes one complete exact ledger cut"
-)]
 pub async fn seed_fenced_code_cell(
     database: &Path,
     source: SessionLocator,
@@ -299,6 +294,61 @@ pub async fn seed_fenced_code_cell(
     input: &[u8],
     finalized_root: bool,
 ) -> Result<SessionLocator, Box<dyn Error + Send + Sync>> {
+    seed_fence(
+        database,
+        source,
+        command,
+        input,
+        Fence::CodeCell { finalized_root },
+    )
+    .await
+    .map(|(locator, _)| locator)
+}
+
+/// Seeds the actual durable lease-fence terminal shape, without changing
+/// the fixture's provider or tool bindings.
+///
+/// # Errors
+/// Returns fixture construction or durable commit failures.
+pub async fn seed_lease_fence(
+    database: &Path,
+    source: SessionLocator,
+) -> Result<(SessionLocator, TurnId), Box<dyn Error + Send + Sync>> {
+    let mut input = Vec::new();
+    for field in [
+        b"start-instruction".as_slice(),
+        b"fixture lease fence".as_slice(),
+    ] {
+        input.extend_from_slice(&u64::try_from(field.len())?.to_be_bytes());
+        input.extend_from_slice(field);
+    }
+    seed_fence(
+        database,
+        source,
+        "fixture:lease-fence",
+        &input,
+        Fence::Lease,
+    )
+    .await
+}
+
+enum Fence {
+    CodeCell { finalized_root: bool },
+    Lease,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::items_after_statements,
+    reason = "the fixture writes one complete exact ledger cut"
+)]
+async fn seed_fence(
+    database: &Path,
+    source: SessionLocator,
+    command: &str,
+    input: &[u8],
+    fence: Fence,
+) -> Result<(SessionLocator, TurnId), Box<dyn Error + Send + Sync>> {
     use plakous_agent::internal::{DurableCommandDisposition, DurableCommandRecord};
     let store = SqliteSessionStore::open(database)?;
     let loaded = store
@@ -360,6 +410,13 @@ pub async fn seed_fenced_code_cell(
         tool_kind: Option<String>,
         store_error: Option<serde_json::Value>,
     }
+    let lease_lost = matches!(fence, Fence::Lease);
+    let finalized_root = !matches!(
+        fence,
+        Fence::CodeCell {
+            finalized_root: false
+        }
+    );
     let pending = Pending {
         remedy: None,
         version: 2,
@@ -368,7 +425,12 @@ pub async fn seed_fenced_code_cell(
         operation_id: first,
         outcome: Outcome::RecoveryRequired(ErrorRecord {
             kind: "OutcomeUnknown".into(),
-            message: "fenced fixture cell".into(),
+            message: if lease_lost {
+                "durable branch lease authority was lost"
+            } else {
+                "fenced fixture cell"
+            }
+            .into(),
             model_error: None,
             tool_kind: None,
             store_error: None,
@@ -435,33 +497,42 @@ pub async fn seed_fenced_code_cell(
             )?),
         ))?;
     }
-    let call_id = CallId::try_from(Uuid::new_v4())?;
-    let cell = DurableOperationRecord::new(
-        first + 1,
-        DurableOperationKind::CompositionEvaluation {
-            turn_id,
-            attempt_id: AttemptId::try_from(Uuid::new_v4())?,
-            call_id,
-            source_index: 0,
-        },
-        evaluation_request(call_id)?,
-        vec![
-            DurableOperationTransition::new(
-                source.checkpoint_id(),
-                DurableOperationState::Prepared,
-            ),
-            DurableOperationTransition::new(
-                CheckpointId::try_from(Uuid::new_v4())?,
-                DurableOperationState::Dispatched,
-            ),
-        ],
-    )?;
-    let ledger = prior
+    let mut ledger = prior
         .ledger()
         .append_command(command_record)?
-        .append_operation(root)?
-        .append_operation(cell)?;
+        .append_operation(root)?;
     let mut obligations = Vec::new();
+    if !lease_lost {
+        let call_id = CallId::try_from(Uuid::new_v4())?;
+        let cell = DurableOperationRecord::new(
+            first + 1,
+            DurableOperationKind::CompositionEvaluation {
+                turn_id,
+                attempt_id: AttemptId::try_from(Uuid::new_v4())?,
+                call_id,
+                source_index: 0,
+            },
+            evaluation_request(call_id)?,
+            vec![
+                DurableOperationTransition::new(
+                    source.checkpoint_id(),
+                    DurableOperationState::Prepared,
+                ),
+                DurableOperationTransition::new(
+                    CheckpointId::try_from(Uuid::new_v4())?,
+                    DurableOperationState::Dispatched,
+                ),
+            ],
+        )?;
+        ledger = ledger.append_operation(cell)?;
+        obligations.push(RecoveryObligation::new(
+            first + 1,
+            RecoveryHandlerSignature::new(
+                RecoveryObligationKind::CodeCell,
+                RecoveryAction::EvaluationAbandonmentRequired,
+            ),
+        ));
+    }
     if !finalized_root {
         obligations.push(RecoveryObligation::new(
             first,
@@ -471,13 +542,6 @@ pub async fn seed_fenced_code_cell(
             ),
         ));
     }
-    obligations.push(RecoveryObligation::new(
-        first + 1,
-        RecoveryHandlerSignature::new(
-            RecoveryObligationKind::CodeCell,
-            RecoveryAction::EvaluationAbandonmentRequired,
-        ),
-    ));
     let topology = prior.topology();
     let checkpoint = RuntimeCheckpoint::new(RuntimeManifest::new(
         prior.provenance().clone(),
@@ -493,13 +557,17 @@ pub async fn seed_fenced_code_cell(
             )?,
             ..topology
         },
-        RuntimeLifecycle::Working {
-            root: RuntimeWorkingRoot::Turn {
-                turn_id,
-                next_round: 1,
-            },
-            recovery_phase: WorkingRecoveryPhase::EffectReconciliation,
-            obligations,
+        if lease_lost {
+            RuntimeLifecycle::Quiescent
+        } else {
+            RuntimeLifecycle::Working {
+                root: RuntimeWorkingRoot::Turn {
+                    turn_id,
+                    next_round: 1,
+                },
+                recovery_phase: WorkingRecoveryPhase::EffectReconciliation,
+                obligations,
+            }
         },
         prior.harness_plan_component().clone(),
         prior.provider_configuration().clone(),
@@ -514,14 +582,40 @@ pub async fn seed_fenced_code_cell(
         prior.durability(),
     )?)?;
     let bundle = RuntimeCheckpointCodec::advance(&checkpoint, loaded.checkpoint().bundle())?;
-    store
-        .commit(CommitCheckpoint::new(lease.clone(), loaded.head(), bundle))
-        .await?;
+    let mut commit = CommitCheckpoint::new(lease.clone(), loaded.head(), bundle);
+    if lease_lost {
+        use plakous::agent::CommandId;
+        use plakous::sessions::feed::{FeedCommandKind, FeedFact, FeedTurnOutcome};
+        let command_id = CommandId::new(command)?;
+        commit = commit.with_feed_facts(vec![
+            FeedFact::CommandAccepted {
+                command_id: command_id.clone(),
+                kind: FeedCommandKind::Root {
+                    origin: plakous::model::TurnOrigin::HostWake,
+                },
+                turn_id: Some(turn_id),
+                sequence: prior
+                    .ledger()
+                    .commands()
+                    .last()
+                    .map_or(1, |row| row.sequence() + 1),
+                operation_id: Some(first),
+            },
+            FeedFact::TurnTerminal {
+                command_id,
+                turn_id,
+                outcome: FeedTurnOutcome::RecoveryRequired,
+                closed_exchange: false,
+                steering_settled_unapplied: false,
+                usage: pending.usage,
+            },
+        ]);
+    }
+    store.commit(commit).await?;
     store.release(lease).await?;
-    Ok(SessionLocator::new(
-        source.session_id(),
-        source.branch_id(),
-        checkpoint_id,
+    Ok((
+        SessionLocator::new(source.session_id(), source.branch_id(), checkpoint_id),
+        turn_id,
     ))
 }
 

@@ -1,8 +1,9 @@
 //! The root's continuation after its host was lost (spec 03 §14.1).
 //!
 //! A root turn a lost host left running is closed by the next exact open,
-//! whose terminal is an abandonment with cause `process_lost`. The root
-//! records that loss as a product-store root interrupt with cause
+//! whose terminal is an abandonment with cause `process_lost`. A settled
+//! recovery-required terminal with exact lease-loss evidence also qualifies.
+//! The root records the loss as a product-store root interrupt with cause
 //! `owner_lost`, anchored on the lost turn. Its continuation is held until
 //! the operator's Resume (or `resume_after_loss = "continue"`) records one
 //! decision naming that turn and runs one new host-instruction turn under
@@ -17,8 +18,8 @@
 
 use plakous::sessions::AgentSessions;
 use plakous::sessions::feed::{
-    FeedCancelCause, FeedCommandKind, FeedCursor, FeedFact, FeedPage, FeedPageRequest, FeedSeq,
-    FeedTurnOutcome,
+    FeedCancelCause, FeedCommandKind, FeedCursor, FeedFact, FeedPage, FeedPageRequest, FeedRecord,
+    FeedSeq, FeedTerminalOutcome, FeedTerminalRequest, FeedTurnOutcome,
 };
 
 use crate::session_store::SessionRecordStore;
@@ -33,7 +34,7 @@ use crate::sessions::projector::{
 pub(crate) const ROOT_LOSS_RESUME_PREFIX: &str = "plak:resume-loss:root:";
 
 /// The host instruction a root continuation after a loss runs.
-pub(crate) const ROOT_LOSS_RESUME_TEXT: &str = "Your previous turn was interrupted because the host running it was lost. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions.";
+pub(crate) const ROOT_LOSS_RESUME_TEXT: &str = "Your previous turn was interrupted because the host running it lost authority or stopped. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions. Some tool effects may be uncertain; verify them before repeating any action.";
 
 /// The host instruction a root continuation after a planned handoff runs.
 pub(crate) const ROOT_HANDOFF_RESUME_TEXT: &str = "Your previous turn was interrupted when the host running it handed this session over to a new host. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions.";
@@ -228,9 +229,9 @@ fn scan_start(views: &SessionViews, intents: &ProductIntents) -> Option<LossScan
 }
 
 /// The root turn a lost host left, if the feed after `scan` ends with one:
-/// its terminal is an abandonment with cause `process_lost` and no root
-/// turn was admitted after it. A fenced turn a live owner ended
-/// recovery-required is not a loss of its owner. A scan start below the
+/// its terminal is an abandonment with cause `process_lost` or a
+/// recovery-required terminal with exact lease-loss evidence, and no root
+/// turn was admitted after it. A scan start below the
 /// feed's retention restarts at the retained start, which is sound because
 /// only the last root terminal matters; a lost turn whose terminal is itself
 /// no longer retained is not found.
@@ -240,8 +241,69 @@ fn scan_start(views: &SessionViews, intents: &ProductIntents) -> Option<LossScan
 pub(crate) async fn lost_root_turn(
     sessions: &AgentSessions,
     scan: LossScan,
+    branch: Option<plakous::model::BranchId>,
 ) -> Result<Option<LostRootTurn>, String> {
-    LossScanner::new(scan.after).run(sessions, scan).await
+    let scanned = LossScanner::new(scan.after)
+        .run(sessions, scan, branch)
+        .await?;
+    if branch.is_some()
+        && let Some(fence) = scanned.fence
+        && fence.lease_lost(sessions).await
+    {
+        return Ok(Some(fence.turn));
+    }
+    Ok(scanned.lost)
+}
+
+/// An exact child turn still bound to its attempt. A non-lease fence is
+/// distinguished from no fence so custody take cannot resume it by default.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RecoveryFence {
+    LeaseLoss,
+    Other,
+}
+
+pub(crate) async fn child_fence(
+    sessions: &AgentSessions,
+    locator: plakous::sessions::SessionLocator,
+    turn_id: &str,
+) -> Result<Option<RecoveryFence>, String> {
+    let scan = LossScan {
+        session: locator.session_id(),
+        after: FeedSeq::ZERO,
+    };
+    let scanned = LossScanner::new(scan.after)
+        .run(sessions, scan, Some(locator.branch_id()))
+        .await?;
+    if let Some(fence) = scanned.fence.filter(|fence| fence.turn.turn_id == turn_id) {
+        return Ok(Some(if fence.lease_lost(sessions).await {
+            RecoveryFence::LeaseLoss
+        } else {
+            RecoveryFence::Other
+        }));
+    }
+    Ok(None)
+}
+
+struct FencedTerminal {
+    turn: LostRootTurn,
+    request: Option<FeedTerminalRequest>,
+}
+
+impl FencedTerminal {
+    async fn lease_lost(&self, sessions: &AgentSessions) -> bool {
+        let Some(request) = self.request else {
+            return false;
+        };
+        matches!(
+            sessions.feed_terminal(request).await,
+            Ok(FeedTerminalOutcome::Terminal(terminal))
+                if terminal.checkpoint() == request.checkpoint
+                    && matches!(terminal.result().outcome(),
+                        plakous::agent::TurnResultOutcome::RecoveryRequired(error)
+                            if error.is_durable_lease_loss())
+        )
+    }
 }
 
 /// The loss scan's position and candidate between feed pages.
@@ -249,6 +311,7 @@ struct LossScanner {
     cursor: FeedSeq,
     restarted: bool,
     lost: Option<LostRootTurn>,
+    fence: Option<FencedTerminal>,
     fold: fn(&mut Option<LostRootTurn>, u64, &FeedFact),
 }
 
@@ -262,6 +325,7 @@ impl LossScanner {
             cursor: after,
             restarted: false,
             lost: None,
+            fence: None,
             fold,
         }
     }
@@ -270,7 +334,8 @@ impl LossScanner {
         mut self,
         sessions: &AgentSessions,
         scan: LossScan,
-    ) -> Result<Option<LostRootTurn>, String> {
+        branch: Option<plakous::model::BranchId>,
+    ) -> Result<Self, String> {
         loop {
             let page = sessions
                 .feed_page(FeedPageRequest::after(FeedCursor::new(
@@ -286,13 +351,20 @@ impl LossScanner {
                 {
                     continue;
                 }
-                _ => return Ok(None),
+                _ => {
+                    self.lost = None;
+                    self.fence = None;
+                    return Ok(self);
+                }
             };
             if records.is_empty() {
-                return Ok(self.lost);
+                return Ok(self);
             }
             for record in records {
-                self.record(record.header().seq, record.facts());
+                self.cursor = record.header().seq;
+                if branch.is_none_or(|branch| record.header().branch_id == branch) {
+                    self.record(&record);
+                }
             }
         }
     }
@@ -305,14 +377,45 @@ impl LossScanner {
         }
         self.restarted = true;
         self.lost = None;
+        self.fence = None;
         self.cursor = FeedSeq::new(retained_from.saturating_sub(1));
         true
     }
 
-    fn record(&mut self, seq: FeedSeq, facts: &[FeedFact]) {
-        self.cursor = seq;
-        for fact in facts {
+    fn record(&mut self, record: &FeedRecord) {
+        let seq = record.header().seq;
+        for fact in record.facts() {
             (self.fold)(&mut self.lost, seq.get(), fact);
+            match fact {
+                FeedFact::TurnTerminal {
+                    turn_id,
+                    outcome: FeedTurnOutcome::RecoveryRequired,
+                    ..
+                } => {
+                    self.fence = Some(FencedTerminal {
+                        turn: LostRootTurn {
+                            turn_id: turn_id.to_string(),
+                            applied_seq: seq.get(),
+                        },
+                        request: crate::sessions::projector::record_checkpoint(record).map(
+                            |checkpoint| FeedTerminalRequest {
+                                session: record.header().session_id,
+                                branch: record.header().branch_id,
+                                checkpoint,
+                                turn_id: *turn_id,
+                            },
+                        ),
+                    });
+                }
+                FeedFact::TurnTerminal { .. }
+                | FeedFact::CommandAccepted {
+                    kind: FeedCommandKind::Root { .. },
+                    ..
+                } => {
+                    self.fence = None;
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -511,8 +614,9 @@ pub(crate) async fn handed_off_root_turn(
     scan: LossScan,
 ) -> Result<Option<LostRootTurn>, String> {
     LossScanner::folding(scan.after, fold_handed_off_turn)
-        .run(sessions, scan)
+        .run(sessions, scan, None)
         .await
+        .map(|scanned| scanned.lost)
 }
 
 /// One feed fact's effect on the handoff scan's candidate: a root admission

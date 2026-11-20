@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::SessionStoreError;
 
+pub(crate) const DURABLE_LEASE_AUTHORITY_LOST: &str = "durable branch lease authority was lost";
+
 /// Stable category for an agent-runtime failure.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[non_exhaustive]
@@ -213,6 +215,24 @@ impl AgentError {
     #[must_use]
     pub fn is_not_line_head(&self) -> bool {
         self.store_error == Some(SessionStoreError::NotLineHead)
+    }
+
+    /// Whether this error records loss of the active durable lease or fence.
+    /// Only a recovery-required terminal carrying this error is eligible for
+    /// owner-loss recovery; this query does not grant custody or prove a reopen.
+    #[must_use]
+    pub fn is_durable_lease_loss(&self) -> bool {
+        self.kind == AgentErrorKind::OutcomeUnknown
+            && self.model_error.is_none()
+            && self.tool_kind.is_none()
+            && match self.store_error {
+                Some(SessionStoreError::LeaseExpired | SessionStoreError::FenceSuperseded) => true,
+                // The lease owner also records this exact internal diagnostic
+                // without a store source. Never classify a substring or prose
+                // from a provider or tool as lease evidence.
+                None => self.message() == DURABLE_LEASE_AUTHORITY_LOST,
+                Some(_) => false,
+            }
     }
 
     pub(crate) const fn store_error(&self) -> Option<SessionStoreError> {

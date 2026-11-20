@@ -195,6 +195,22 @@ async fn recover_bound_child(
         ChildReopen::Attached {
             session: attached, ..
         } => {
+            match crate::runtime::root_loss::child_fence(
+                attached.sessions(),
+                attached.locator(),
+                &child.turn_id,
+            )
+            .await
+            {
+                Ok(Some(fence)) => {
+                    return settle_bound_fence(runtime, child, *attached, fence).await;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let _ = attached.release_opened_for_transfer().await;
+                    return Err(error);
+                }
+            }
             mark_owner_lost(runtime, &child.agent_id, Some(*attached)).await;
             Ok(())
         }
@@ -228,6 +244,71 @@ async fn recover_bound_child(
             }
         }
     }
+}
+
+/// The exact open settled a fenced turn rather than abandoning a lost
+/// process's turn. Apply the old terminal before any continuation mark.
+async fn settle_bound_fence(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    child: &InflightChild,
+    attached: AttachedCodingSession,
+    fence: crate::runtime::root_loss::RecoveryFence,
+) -> Result<(), String> {
+    use crate::runtime::root_loss::RecoveryFence;
+    let locator = attached.locator();
+    let sessions = Arc::clone(&attached.sessions);
+    let id = &child.agent_id;
+    let proof = async {
+        if !sessions
+            .head_is_quiescent(locator)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Err("the fenced child's reopened head is not quiescent".to_owned());
+        }
+        let (attempt, waits) = runtime
+            .read(|tree| {
+                (
+                    tree.attempt(id).map(|attempt| attempt.attempt_id.clone()),
+                    tree.retained_wait_receipts(id),
+                )
+            })
+            .map_err(|error| error.message)?;
+        let attempt =
+            attempt.ok_or_else(|| "the fenced child no longer has an attempt".to_owned())?;
+        let turn = child
+            .turn_id
+            .parse::<TurnId>()
+            .map_err(|error| error.to_string())?;
+        let evidence = crate::driver::reopen::wait_evidence(&sessions, locator, waits).await?;
+        Ok((super::ChildTurnIdentity { attempt, turn }, evidence))
+    }
+    .await;
+    let release = attached.release_opened_for_transfer().await;
+    let (identity, evidence) = proof?;
+    release.map_err(|error| error.to_string())?;
+    crate::agent::ledger::project_feed(runtime, id, &sessions, locator.session_id()).await?;
+    if fence == RecoveryFence::LeaseLoss {
+        crate::agent::recovery::settle_child_lease_loss(runtime, id, identity, evidence)
+            .await
+            .map_err(|error| error.message)?;
+    } else {
+        let agent = id.clone();
+        runtime.record_then_apply(id, move |tree| {
+            if identity.still_owns(tree, &agent) {
+                tree.record_host_turn_failure(
+                    &agent, crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
+                        kind: crate::agent_tree::TURN_ABANDONED,
+                    },
+                    "child session recovered after a non-lease fence; the attempt left no result".to_owned(),
+                    evidence,
+                )?;
+                tree.recovery_settled(&agent);
+            }
+            Ok(())
+        }).await?;
+    }
+    Ok(())
 }
 
 /// The child's owed recovery ran and nothing was lost.

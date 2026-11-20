@@ -258,7 +258,7 @@ impl StartAuthority {
 fn lease_authority_lost() -> AgentError {
     AgentError::new(
         AgentErrorKind::OutcomeUnknown,
-        "durable branch lease authority was lost",
+        crate::error::DURABLE_LEASE_AUTHORITY_LOST,
     )
 }
 

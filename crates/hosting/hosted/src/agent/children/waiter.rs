@@ -314,7 +314,8 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 .and_then(|tree_id| crate::topology_runtime::lookup(&tree_id))
                 .map(|runtime| runtime.mark_recycling(&agent_id));
             retire_live_child(&driver, live, &agent_id, completed_turn).await;
-            let recycled = recycle_fenced_child(&driver, &agent_id).await;
+            let lease_fence = error.is_durable_lease_loss().then_some(completed_turn);
+            let recycled = recycle_fenced_child(&driver, &agent_id, lease_fence).await;
             let (disposition, message) = match recycled {
                 Some(FencedChildRecycle::Abandoned(report)) => (
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::Failed {
@@ -334,6 +335,30 @@ impl crate::node::TurnRole<()> for ChildTurns {
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
                     "child session reopened but quiescence could not be established".to_owned(),
                 ),
+                Some(FencedChildRecycle::LeaseLoss(evidence)) => {
+                    if let Some(runtime) = driver
+                        .read(|tree| tree.tree_id.clone())
+                        .ok()
+                        .and_then(|id| crate::topology_runtime::lookup(&id))
+                        && let Ok(held) = crate::agent::recovery::settle_child_lease_loss(
+                            &runtime,
+                            &agent_id,
+                            identity.clone(),
+                            evidence,
+                        )
+                        .await
+                    {
+                        drop(recycling);
+                        if held {
+                            super::continuation::continue_fenced_child(&runtime, &agent_id).await;
+                        }
+                        return AfterTerminal::Settled(());
+                    }
+                    (
+                        crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
+                        "reopened child lease-loss settlement could not be published".to_owned(),
+                    )
+                }
                 None => (
                     crate::agent_tree::turn_outcome::FailedTurnDisposition::RecoveryRequired,
                     "child turn outcome is unknown and its session could not be reopened \
@@ -821,11 +846,16 @@ enum FencedChildRecycle {
     Abandoned(plakous::agent::AbandonedTurnReport),
     Quiescent,
     QuiescenceUnproved,
+    LeaseLoss(Vec<(String, bool)>),
 }
 
 /// Reopens a child session whose live owner fenced its turn, so the reopen
 /// abandons that turn or closes local finalization debt. `None` is a refusal.
-async fn recycle_fenced_child(driver: &TreeDriver, agent_id: &str) -> Option<FencedChildRecycle> {
+async fn recycle_fenced_child(
+    driver: &TreeDriver,
+    agent_id: &str,
+    lease_fence: Option<TurnId>,
+) -> Option<FencedChildRecycle> {
     let tree_id = driver.read(|tree| tree.tree_id.clone()).ok()?;
     let runtime = crate::topology_runtime::lookup(&tree_id)?;
     let parent = crate::agent::build::rejoin_parent(&runtime)?;
@@ -877,9 +907,40 @@ async fn recycle_fenced_child(driver: &TreeDriver, agent_id: &str) -> Option<Fen
             }
         }
     };
+    let recycled = match (recycled, lease_fence) {
+        (
+            recycled @ (FencedChildRecycle::Quiescent | FencedChildRecycle::Abandoned(_)),
+            Some(turn_id),
+        ) => {
+            use crate::runtime::root_loss::{RecoveryFence, child_fence};
+            match child_fence(session.sessions(), session.locator(), &turn_id.to_string()).await {
+                Ok(Some(RecoveryFence::LeaseLoss)) => {
+                    let retained = driver
+                        .read(|tree| tree.retained_wait_receipts(agent_id))
+                        .ok()?;
+                    match crate::driver::reopen::wait_evidence(
+                        session.sessions(),
+                        session.locator(),
+                        retained,
+                    )
+                    .await
+                    {
+                        Ok(evidence) => FencedChildRecycle::LeaseLoss(evidence),
+                        Err(_) => FencedChildRecycle::QuiescenceUnproved,
+                    }
+                }
+                Ok(_) => recycled,
+                Err(_) => FencedChildRecycle::QuiescenceUnproved,
+            }
+        }
+        (other, _) => other,
+    };
     let sessions = Arc::clone(&session.sessions);
     let session_id = session.locator().session_id();
-    let _ = session.release_opened().await;
+    let release = session.release_opened().await;
+    if release.is_err() && matches!(recycled, FencedChildRecycle::LeaseLoss(_)) {
+        return None;
+    }
     crate::agent::ledger::project_feed(&runtime, agent_id, &sessions, session_id)
         .await
         .ok()?;
