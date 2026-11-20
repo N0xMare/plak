@@ -1127,6 +1127,24 @@ fn deploy_requester_loss_does_not_repeat_surrender() {
 }
 
 #[test]
+fn deploy_gateway_plan_requires_the_incumbent_negotiated_version() {
+    let f = Fleet::new();
+    f.old_gateway();
+    f.change(|data| {
+        let host = &mut data["host"];
+        host["facts"]["gateway_spoken"] = json!([1, 2, 3]);
+        host["gateway"]["holder"]["versions"] = json!([1, 2, 3]);
+        host["gateway"]["holder"]["negotiated"] = json!(3);
+    });
+    f.staging(
+        "plan",
+        "blocked",
+        "must serve the incumbent host's negotiated protocol",
+    );
+    assert_eq!(f.events(), Vec::<String>::new());
+}
+
+#[test]
 fn deploy_gateway_only_converges_without_handing_off_the_host() {
     let f = Fleet::new();
     f.old_gateway();
@@ -1218,7 +1236,7 @@ fn deploy_gateway_drain_refusal_withdraws_the_runner_before_host_intent() {
     f.old_gateway();
     f.change(|data| data["gateway_refuse"] = json!(true));
     assert_eq!(
-        f.staging("apply", "blocked", "gateway drain refused")["withdrawn"],
+        f.staging("apply", "blocked", "gateway change withdrawn")["withdrawn"],
         true
     );
     assert!(

@@ -1,8 +1,8 @@
 # Operator deployment (private tooling)
 
 The hidden `plakd deploy` command is for a generated Linux systemd user host
-or Apple Silicon macOS LaunchAgent, with an unchanged local gateway and
-optional paired runners and exact-match clients. It does not update the gateway, migrate
+or Apple Silicon macOS LaunchAgent, with a co-resident gateway and
+optional paired runners and exact-match clients. It does not migrate
 custody, move state across keys, or write service units. Run it from an
 independent machine with Git and OpenSSH; the remote login needs a working
 user service manager and an enrolled SSH host key. No Python interpreter is
@@ -10,7 +10,7 @@ needed. Name a resolvable SSH host and login; deploy uses an empty SSH config,
 not per-user aliases or shared master sockets. Never run apply inside the
 host or runner being replaced. For a macOS host, enroll the running
 `com.plakd.host` and local gateway LaunchAgents in that user's logged-in GUI
-domain. The gateway agent must run the enrolled executable directly. The
+domain. The gateway agent must exec the dedicated gateway command link. The
 on-disk host plist and loaded arguments must match; deploy does not load or
 restart a LaunchAgent.
 
@@ -130,7 +130,7 @@ The gateway also needs the generated service with a dedicated
 `~/.local/bin/plakd-gateway` command link. Migrate older units using the
 gateway service procedure before enrollment. Plan checks the incumbent
 holder, service and command image, and requires a gateway replacement to
-support both the old and new host's negotiated protocol.
+support both hosts and keep serving the incumbent's negotiated version.
 
 ```sh
 plakd deploy plan --inventory "$inventory" --stage staging
@@ -147,6 +147,13 @@ host, switches exact-wire clients, and verifies. A gateway-only change leaves
 the host running without requesting a handoff. The
 candidate's generated unit must match the on-disk bytes before it can request
 handoff; use the manual same-key procedure if the template differs.
+A gateway change briefly takes custody offline even though the host stays up.
+Schedule it while the host is quiet. The gateway stops admitting new requests
+while draining (up to 30 seconds); exit, link change and startup share deploy's
+60-second gateway wait budget. While the gateway is draining or absent,
+turns needing gateway-backed credentials or inference can fail with a draining
+or unavailable gateway. Wait for verified custody before retrying work.
+Restoring the source, if needed, can extend the outage.
 A green staging transition writes the JSON receipt at the configured path.
 An unchanged, verified re-apply is a no-op and never refreshes that receipt.
 For production use the exact staging platform and client manifest digests,
@@ -174,9 +181,21 @@ automatic host rollback after surrender.
 If a gateway action lost its reply, status reconciles the recorded drain,
 link and holder. It never repeats the drain; it can cancel a request that
 never started, start from a proven clean exit, or record an already Ready
-replacement. Runner links can be restored before host handoff even when
-gateway health is unknown. If status cannot prove a clean exit or the
-recorded replacement, inspect the generated gateway service and holder of
-the credential-store lock before continuing; deploy does not switch back
-an already Ready gateway. Archive older schema logs only after settling
+replacement. If the candidate is inactive after a failed start or lost
+reply, deploy restores the pinned source link only after it can guard the
+released credential lock. It starts the source, verifies the holder, and
+withdraws pre-host runner links. Runner withdrawal does not need working
+gateway custody. Deploy never switches back a running candidate.
+
+If deploy recorded a drain claim but never sent it, first confirm the exact
+recorded incumbent still holds custody, is not draining, and no deploy action
+is active. If delivery is uncertain, wait out the drain window and inspect
+the holder before intervening.
+Run `plakd gateway drain` on that target for that holder, then resume with
+the recorded status command. If the manager races deploy, stop issuing
+service commands and inspect the loaded unit, dedicated link, process image
+and credential holder. Wait for a settled state and resume status. If the
+manager cannot prove a clean exit or a confirmed failure, or a different
+holder is running, use the gateway service runbook before continuing; do not
+force a relink or restart. Archive older schema logs only after settling
 their open intents; production promotion needs a fresh schema-5 receipt.

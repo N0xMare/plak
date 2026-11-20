@@ -36,6 +36,7 @@ pub(super) struct Target<'a> {
     pub(super) host: &'a Host,
     pub(super) machine: String,
     proc_root: PathBuf,
+    launchd_tools: Option<(&'a Path, &'a Path)>,
 }
 
 #[derive(Deserialize)]
@@ -108,7 +109,22 @@ impl<'a> Target<'a> {
             host,
             machine: account.machine_sha256,
             proc_root: PathBuf::from("/proc"),
+            launchd_tools: None,
         })
+    }
+
+    pub(super) fn launchctl(&self) -> &Path {
+        if let Some((tool, _)) = self.launchd_tools {
+            return tool;
+        }
+        "/bin/launchctl".as_ref()
+    }
+
+    pub(super) fn plutil(&self) -> &Path {
+        if let Some((_, tool)) = self.launchd_tools {
+            return tool;
+        }
+        "/usr/bin/plutil".as_ref()
     }
 
     pub(super) fn stage_identity(&self) -> StageIdentity {

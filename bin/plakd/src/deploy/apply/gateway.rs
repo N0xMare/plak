@@ -55,7 +55,7 @@ impl<F: Fleet> Deploy<'_, F> {
             GatewayOutcome::Withdrawn => {
                 self.withdraw_runner(pending, log, report)?;
                 Err(Halt::blocked(
-                    "gateway drain refused; the recorded pre-host changes were withdrawn",
+                    "gateway change withdrawn; the source gateway serves and pre-host runner links were restored",
                 ))
             }
         }

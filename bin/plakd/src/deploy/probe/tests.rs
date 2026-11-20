@@ -15,16 +15,16 @@ use serde_json::{Value, json};
 use super::{FileFacts, Host, NORMALIZE, Node, Target};
 use crate::deploy::{inventory::Route, target};
 
-const KEY: &str = "r28.e39.p39.t11";
+pub(super) const KEY: &str = "r28.e39.p39.t11";
 const GATEWAY: &str = "00000000-0000-0000-0000-000000000001";
 
-struct Socket {
+pub(super) struct Socket {
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Socket {
-    fn start(path: &Path, verdict: Value, hello: bool) -> Self {
+    pub(super) fn start(path: &Path, verdict: Value, hello: bool) -> Self {
         let listener = UnixListener::bind(path).unwrap();
         listener.set_nonblocking(true).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
@@ -64,13 +64,13 @@ impl Drop for Socket {
     }
 }
 
-fn program(path: &Path, code: &str) {
+pub(super) fn program(path: &Path, code: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, format!("#!/bin/sh\nset -eu\n{code}")).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
-fn image(home: &Path, name: &str, key: &str, unit: &str) -> PathBuf {
+pub(super) fn image(home: &Path, name: &str, key: &str, unit: &str) -> PathBuf {
     let image = home
         .join(".local/lib/plak/release")
         .join(name)
@@ -86,15 +86,21 @@ case "$*" in
     printf '{{"host_available":true,"config_error":null,"protocol":3,"receipt_version":3,"binary_id":"%s","state_key":"{key}","export_versions":[8],"runner_protocol":9,"runner_version":{{"protocol":9,"source_revision":"{revision}","flavor":"release"}}}}\n' "$id" ;;
   'version --state-key') printf '%s\n' '{key}' ;;
   'version --export-version') printf '8\n' ;;
-  'version --build-info') exit 2 ;;
+  'version --build-info')
+    test -f "$PLAK_HOME/build-info" || exit 2
+    cat "$PLAK_HOME/build-info" ;;
   'wire schema')
     id=$(cat "$PLAK_HOME/id")
     printf '{{"binary_id":"%s","wire_version":11}}\n' "$id" ;;
   'deploy-canary --capabilities') printf 'plakd-deploy-canary-v1\nclaude\ngrok\n' ;;
   'gateway install --dry-run') printf '# %s/.config/systemd/user/gateway.service\ngenerated gateway\n' "$HOME" ;;
   'gateway status --dry-run') printf 'state_root %s/state\nsocket %s/gateway.sock\n' "$HOME" "$PLAK_HOME" ;;
-  'gateway status') printf 'via gateway unix:%s/gateway.sock\ninstance {GATEWAY}\n' "$PLAK_HOME" ;;
-  'gateway check') printf 'via gateway unix:%s/gateway.sock\ngateway {GATEWAY} protocol 1,2\naccount claude/work\naccount claude/spare\n' "$PLAK_HOME" ;;
+  'gateway status')
+    instance=$(cat "$PLAK_HOME/gateway-instance" 2>/dev/null || printf '{GATEWAY}')
+    printf 'via gateway unix:%s/gateway.sock\ninstance %s\n' "$PLAK_HOME" "$instance" ;;
+  'gateway check')
+    instance=$(cat "$PLAK_HOME/gateway-instance" 2>/dev/null || printf '{GATEWAY}')
+    printf 'via gateway unix:%s/gateway.sock\ngateway %s protocol 1,2\naccount claude/work\naccount claude/spare\n' "$PLAK_HOME" "$instance" ;;
   'status') printf 'via gateway unix:%s/gateway.sock\nclaude/work: credential=ready\nclaude/spare: credential=signed-out\n' "$PLAK_HOME" ;;
   'status claude/work') printf 'claude/work: credential=ready\n' ;;
   'deploy-credential-generation claude/work') printf '18\n' ;;
@@ -204,6 +210,7 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
         host: &host,
         machine: "0".repeat(64),
         proc_root,
+        launchd_tools: None,
     };
     assert_health(&target);
     assert_target_guards(&target, &source);

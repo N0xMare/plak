@@ -17,6 +17,9 @@ use crate::snapshot_install;
 
 use super::{CUSTODY, Target, active_pid, capture, command, gateway_reply, text};
 
+#[cfg(test)]
+mod tests;
+
 const NORMALIZE: &str = "gateway image change requires the generated dedicated plakd-gateway service; use the gateway service migration runbook before deploy";
 
 #[derive(Debug, Eq, PartialEq)]
@@ -32,7 +35,14 @@ struct Service {
 enum State {
     Running(String),
     CleanExit,
+    Failed { start_limited: bool },
     Transition,
+}
+
+impl State {
+    fn vacant(&self) -> bool {
+        matches!(self, Self::CleanExit | Self::Failed { .. })
+    }
 }
 
 impl Target<'_> {
@@ -108,8 +118,13 @@ impl Target<'_> {
     ) -> CliResult<GatewayOutcome> {
         let mut fence = Fence::lock(&self.host.node, "gateway", intent.ticket)?;
         let mut drain = Fence::lock(&self.host.node, "gateway-drain", intent.ticket)?;
+        let mut restore = Fence::lock(&self.host.node, "gateway-restore", intent.ticket)?;
         if begin {
             fence.active()?;
+            check(
+                drain.untouched()?,
+                "gateway drain was already claimed; reconcile it",
+            )?;
         }
         let binary = self.gateway_source_host(intent)?;
         let facts = self.facts(&binary)?;
@@ -122,11 +137,28 @@ impl Target<'_> {
             intent.source.link.sha256 == self.host.gateway_sha256
                 && new != intent.source.link
                 && self.gateway_image(&intent.source.link.path)? == intent.source.link
+                && intent
+                    .source
+                    .holder
+                    .negotiated
+                    .is_some_and(|v| intent.served.contains(&v))
                 && negotiate(&facts.gateway_spoken, &intent.served)
                     .is_some_and(|v| v >= intent.minimum),
             "gateway source pin or incumbent protocol does not qualify",
         )?;
         let loaded = self.checked_gateway_service(&binary, intent, &new)?;
+        if !restore.untouched()? {
+            return self.restore_gateway(&binary, &facts, intent, &new, &mut fence, &mut restore);
+        }
+        if loaded.link == new && loaded.state.vacant() {
+            fence.active()?;
+            check(
+                !begin && !drain.untouched()?,
+                "gateway is inactive at the candidate link without a resumable drain",
+            )?;
+            return self.restore_gateway(&binary, &facts, intent, &new, &mut fence, &mut restore);
+        }
+        let deadline = gateway_deadline();
         if matches!(loaded.state, State::Running(_)) {
             let (observed, _) = self.observe_gateway(&binary, &facts.gateway_spoken)?;
             if observed.link == new {
@@ -162,7 +194,27 @@ impl Target<'_> {
             !drain.untouched()?,
             "gateway went inactive without the recorded drain",
         )?;
-        self.activate_gateway(&binary, &facts, intent, &new)
+        let outcome = if loaded.link == new {
+            // The prior requester may have started the candidate. Only observe.
+            self.await_gateway_holder(&binary, &facts, intent, &new, deadline)
+                .and_then(|observed| {
+                    verify_successor(intent, &new, &observed)?;
+                    Ok(GatewayOutcome::Ready { observed })
+                })
+        } else {
+            self.activate_gateway(&binary, &facts, intent, &new, deadline)
+        };
+        match outcome {
+            Ok(ready) => Ok(ready),
+            Err(error) => {
+                let loaded = self.checked_gateway_service(&binary, intent, &new)?;
+                if loaded.link == new && loaded.state.vacant() {
+                    self.restore_gateway(&binary, &facts, intent, &new, &mut fence, &mut restore)
+                } else {
+                    Err(error)
+                }
+            }
+        }
     }
 
     fn drain_gateway(
@@ -172,7 +224,6 @@ impl Target<'_> {
         destination: &Path,
         loaded: &Service,
     ) -> CliResult<bool> {
-        drain.active()?;
         check(
             self.gateway_service(destination)? == *loaded,
             "candidate gateway service or credential custody differs; use the manual procedure",
@@ -188,39 +239,130 @@ impl Target<'_> {
         facts: &Facts,
         intent: &GatewayIntent,
         new: &RunnerLink,
+        deadline: Instant,
     ) -> CliResult<GatewayOutcome> {
-        let loaded = self.await_gateway_exit(binary, intent, new)?;
-        self.gateway_source_host(intent)?;
+        let loaded = self.await_gateway_exit(binary, intent, new, deadline)?;
         check(
-            self.checked_gateway_service(binary, intent, new)? == loaded
-                && crate::gateway::deploy_holder_released(&loaded.state_root)?,
-            "credential holder or service changed before link flip",
+            loaded.link == intent.source.link && Instant::now() < deadline,
+            "gateway changed or exhausted its drain budget before link flip",
         )?;
-        if loaded.link != *new {
-            snapshot_install::atomic_link(&loaded.command, &new.path)?;
-            fs::File::open(snapshot_install::parent(&loaded.command)?)
-                .and_then(|dir| dir.sync_all())
-                .map_err(io)?;
-        }
-        let loaded = self.checked_gateway_service(binary, intent, new)?;
+        self.move_gateway_link(binary, intent, new, &loaded, None)?;
+        let after = self.checked_gateway_service(binary, intent, new)?;
         check(
-            loaded.state == State::CleanExit && loaded.link == *new,
+            after.state == State::CleanExit && after.link == *new && Instant::now() < deadline,
             "gateway service or command changed after link flip",
         )?;
-        self.start_gateway()?;
-        let deadline = Instant::now() + Duration::from_secs(timing::GATEWAY_WAIT);
+        self.start_gateway(false)?;
+        let observed = self.await_gateway_holder(binary, facts, intent, new, deadline)?;
+        verify_successor(intent, new, &observed)?;
+        Ok(GatewayOutcome::Ready { observed })
+    }
+
+    fn restore_gateway(
+        &self,
+        binary: &Path,
+        facts: &Facts,
+        intent: &GatewayIntent,
+        new: &RunnerLink,
+        fence: &mut Fence,
+        restore: &mut Fence,
+    ) -> CliResult<GatewayOutcome> {
+        let deadline = gateway_deadline();
+        let loaded = self.checked_gateway_service(binary, intent, new)?;
+        if loaded.link == *new {
+            fence.active()?;
+            self.move_gateway_link(binary, intent, new, &loaded, Some(restore))?;
+        } else {
+            check(
+                !restore.untouched()?,
+                "gateway restoration was not recorded",
+            )?;
+        }
+        let service = self.checked_gateway_service(binary, intent, new)?;
+        check(
+            service.link == intent.source.link,
+            "gateway link changed during restoration",
+        )?;
+        if service.state.vacant() {
+            fence.active()?;
+            drop(crate::gateway::deploy_guard_vacant(&service.state_root)?);
+            self.start_gateway(matches!(
+                service.state,
+                State::Failed {
+                    start_limited: true
+                }
+            ))?;
+        }
+        let observed = self.await_gateway_holder(binary, facts, intent, new, deadline)?;
+        check(
+            observed.command == intent.source.command
+                && observed.link == intent.source.link
+                && observed.custody_sha256 == intent.source.custody_sha256
+                && observed.holder.instance != intent.source.holder.instance
+                && observed.holder.versions == intent.source.holder.versions
+                && observed.holder.negotiated == intent.source.holder.negotiated,
+            "restored gateway holder, source image, custody or protocol could not be proved",
+        )?;
+        if fence.untouched()? {
+            fence.cancel()?;
+        }
+        Ok(GatewayOutcome::Withdrawn)
+    }
+
+    fn move_gateway_link(
+        &self,
+        binary: &Path,
+        intent: &GatewayIntent,
+        new: &RunnerLink,
+        loaded: &Service,
+        restore: Option<&mut Fence>,
+    ) -> CliResult<()> {
+        self.gateway_source_host(intent)?;
+        let _vacant = crate::gateway::deploy_guard_vacant(&loaded.state_root)?;
+        check(
+            loaded.state.vacant() && self.checked_gateway_service(binary, intent, new)? == *loaded,
+            "gateway service changed before link flip; inspect the service manager",
+        )?;
+        let path = if let Some(restore) = restore {
+            // A lost reply or crash after this point may only finish restoring the source.
+            if restore.untouched()? {
+                restore.claim_once()?;
+            }
+            &intent.source.link.path
+        } else {
+            &new.path
+        };
+        snapshot_install::atomic_link(&loaded.command, path)?;
+        fs::File::open(snapshot_install::parent(&loaded.command)?)
+            .and_then(|dir| dir.sync_all())
+            .map_err(io)
+    }
+
+    fn await_gateway_holder(
+        &self,
+        binary: &Path,
+        facts: &Facts,
+        intent: &GatewayIntent,
+        new: &RunnerLink,
+        deadline: Instant,
+    ) -> CliResult<GatewayObserved> {
         loop {
+            let service = self.checked_gateway_service(binary, intent, new)?;
+            check(
+                !matches!(service.state, State::Failed { .. }),
+                "gateway service failed while starting a credential holder",
+            )?;
             if fs::symlink_metadata(&self.host.gateway_socket)
                 .is_ok_and(|meta| meta.file_type().is_socket())
+                && matches!(service.state, State::Running(_))
                 && let Ok((observed, _)) = self.observe_gateway(binary, &facts.gateway_spoken)
             {
-                verify_successor(intent, new, &observed)?;
                 self.gateway_source_host(intent)?;
-                return Ok(GatewayOutcome::Ready { observed });
+                return Ok(observed);
             }
             check(
                 Instant::now() < deadline,
-                "new gateway holder is not ready; inspect service before host handoff",
+                "gateway holder is not ready; inspect service before host handoff",
             )?;
             thread::sleep(Duration::from_millis(200));
         }
@@ -244,8 +386,8 @@ impl Target<'_> {
         binary: &Path,
         intent: &GatewayIntent,
         new: &RunnerLink,
+        deadline: Instant,
     ) -> CliResult<Service> {
-        let deadline = Instant::now() + Duration::from_secs(timing::GATEWAY_WAIT);
         loop {
             match self.gateway_manager(&intent.source.command)?.1 {
                 State::CleanExit => {
@@ -260,6 +402,11 @@ impl Target<'_> {
                     pid == intent.source.holder.pid,
                     "unexpected running gateway during drain",
                 )?,
+                State::Failed { .. } => {
+                    return Err(fail(
+                        "gateway failed before a clean drain exit; inspect service",
+                    ));
+                }
                 State::Transition => {}
             }
             check(
@@ -413,6 +560,9 @@ impl Target<'_> {
                 State::CleanExit
             }
             Some("activating" | "deactivating") => State::Transition,
+            Some("failed") if at("MainPID") == Some("0") => State::Failed {
+                start_limited: at("Result") == Some("start-limit-hit"),
+            },
             _ => {
                 return Err(fail(
                     "gateway service is not running or cleanly inactive; inspect service",
@@ -438,10 +588,19 @@ impl Target<'_> {
         })
     }
 
-    fn start_gateway(&self) -> CliResult<()> {
+    fn start_gateway(&self, start_limited: bool) -> CliResult<()> {
+        if start_limited && self.host.node.platform != Platform::Mac {
+            let mut reset = command(
+                "systemctl".as_ref(),
+                &self.host.node,
+                &self.host.product_home,
+            );
+            reset.args(["--user", "reset-failed", &self.host.gateway_unit]);
+            capture(reset, timing::PROBE)?;
+        }
         let cmd = if self.host.node.platform == Platform::Mac {
             let mut cmd = command(
-                "/bin/launchctl".as_ref(),
+                self.launchctl().as_os_str(),
                 &self.host.node,
                 &self.host.product_home,
             );
@@ -462,6 +621,10 @@ impl Target<'_> {
         capture(cmd, timing::PROBE)?;
         Ok(())
     }
+}
+
+fn gateway_deadline() -> Instant {
+    Instant::now() + Duration::from_secs(timing::GATEWAY_WAIT)
 }
 
 fn negotiate(spoken: &[u32], served: &[u32]) -> Option<u32> {

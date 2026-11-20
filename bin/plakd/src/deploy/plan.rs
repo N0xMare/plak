@@ -207,39 +207,8 @@ pub(super) fn qualify(
         "coordinator/receipt change: enroll a compatible incumbent first",
     )?;
     let active = routes(observed, configuration)?;
-    let minimum = gateway_minimum(&active);
-    check(
-        observed
-            .gateway
-            .holder
-            .versions
-            .iter()
-            .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
-        &format!("in-use accounts require gateway protocol v{minimum} or newer"),
-    )?;
+    qualify_gateway(observed, configuration, artifacts, gateway_minimum(&active))?;
     let candidate = artifacts.candidate();
-    let gateway = &observed.gateway;
-    let destination = super::fleet::deployed(&configuration.host.node, artifacts.host());
-    check(
-        if gateway.link.sha256 == candidate.sha256 {
-            gateway.link.path == destination
-        } else {
-            gateway.link.sha256 == configuration.host.gateway_sha256
-        },
-        "unexpected gateway image or dedicated link; inspect and re-enroll source",
-    )?;
-    if gateway.link.sha256 != candidate.sha256 {
-        check(
-            want.gateway.served.iter().any(|version| {
-                *version >= minimum && observed.facts.gateway_spoken.contains(version)
-            }) && want
-                .gateway
-                .served
-                .iter()
-                .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
-            &format!("the new gateway cannot negotiate protocol v{minimum} with both hosts"),
-        )?;
-    }
     let source = &configuration.host.source_sha256;
     check(
         [source, &candidate.sha256].contains(&&observed.sha256),
@@ -268,6 +237,55 @@ pub(super) fn qualify(
         artifacts.check_ancestor(&triple.source_revision)?;
     }
     Ok(active)
+}
+
+fn qualify_gateway(
+    observed: &Observed,
+    configuration: &Selected<'_>,
+    artifacts: &Artifacts,
+    minimum: u32,
+) -> CliResult<()> {
+    let want = &artifacts.host().manifest.build_info;
+    check(
+        observed
+            .gateway
+            .holder
+            .versions
+            .iter()
+            .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
+        &format!("in-use accounts require gateway protocol v{minimum} or newer"),
+    )?;
+    let candidate = artifacts.candidate();
+    let gateway = &observed.gateway;
+    let destination = super::fleet::deployed(&configuration.host.node, artifacts.host());
+    check(
+        if gateway.link.sha256 == candidate.sha256 {
+            gateway.link.path == destination
+        } else {
+            gateway.link.sha256 == configuration.host.gateway_sha256
+        },
+        "unexpected gateway image or dedicated link; inspect and re-enroll source",
+    )?;
+    if gateway.link.sha256 != candidate.sha256 {
+        check(
+            gateway
+                .holder
+                .negotiated
+                .is_some_and(|version| want.gateway.served.contains(&version)),
+            "the new gateway must serve the incumbent host's negotiated protocol",
+        )?;
+        check(
+            want.gateway.served.iter().any(|version| {
+                *version >= minimum && observed.facts.gateway_spoken.contains(version)
+            }) && want
+                .gateway
+                .served
+                .iter()
+                .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
+            &format!("the new gateway cannot negotiate protocol v{minimum} with both hosts"),
+        )?;
+    }
+    Ok(())
 }
 
 pub(super) fn gateway_minimum(routes: &[Route]) -> u32 {

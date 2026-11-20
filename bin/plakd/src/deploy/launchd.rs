@@ -43,7 +43,7 @@ pub(super) fn observe_service(
     let node = &target.host.node;
     crate::snapshot_install::require_owned(crate::snapshot_install::parent(plist)?)?;
     let (service, loaded) = print(target, label)?;
-    let mut tool = probe::command("/usr/bin/plutil".as_ref(), node, &target.host.product_home);
+    let mut tool = probe::command(target.plutil().as_os_str(), node, &target.host.product_home);
     tool.args(["-convert", "json", "-o", "-", "--"]).arg(plist);
     let config = probe::decode(&probe::capture(tool, timing::PROBE)?)?;
     parse_service(probe::text(&loaded)?, &service, plist, config)
@@ -68,7 +68,11 @@ pub(super) fn running_pid(target: &Target<'_>, label: &str) -> CliResult<String>
 
 fn print(target: &Target<'_>, label: &str) -> CliResult<(String, Vec<u8>)> {
     let node = &target.host.node;
-    let mut manager = probe::command("/bin/launchctl".as_ref(), node, &target.host.product_home);
+    let mut manager = probe::command(
+        target.launchctl().as_os_str(),
+        node,
+        &target.host.product_home,
+    );
     let service = format!("gui/{}/{label}", node.uid);
     manager.args(["print", &service]);
     Ok((service, probe::capture(manager, timing::PROBE)?))

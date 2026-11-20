@@ -6334,7 +6334,8 @@ enrolled command links. A candidate must descend from the serving revision.
 The incumbent gateway must admit the minimum of every active family (v2
 for Codex and Grok). A changing gateway uses the same pinned product
 artifact as the host. Its served versions must negotiate that minimum
-with both the old and new host. Plan proves the loaded gateway command is
+with both the old and new host and retain the incumbent's recorded negotiated
+version, which a serving host may already have cached. Plan proves the loaded gateway command is
 the dedicated `~/.local/bin/plakd-gateway` link to an owned immutable image,
 that its target matches the process executable, and that the enrolled Unix
 socket answers for the credential-store holder. Unknown images, service
@@ -6440,8 +6441,17 @@ acknowledgement is reconciled by observing exact links and service/process
 identity, not by reissuing surrender or repeating a completed link change.
 Gateway reconciliation never resends a recorded drain. It cancels an
 unattempted request when the old holder still serves, or resumes forward
-from a proven clean exit or candidate link/holder. An unknown drain, failed
-start, or unrelated holder stops for inspection. The gateway successor
+from a proven clean drain exit on the source link. If activation fails and the
+candidate link is inactive (clean exit or a confirmed manager failure), or
+reconciliation observes that state after the recorded drain, deploy records
+restore direction, holds a shared vacancy guard on the credential-store lock,
+and atomically restores the pinned source link. It resets systemd's failure
+state only if start-limited, then starts the source service. It cancels the
+target fence and withdraws only after proving that the source image holds
+custody with the recorded protocol. Reconciliation finishes a recorded
+restore instead of trying the candidate again. A running successor, held
+credential lock, unknown drain, or ambiguous manager state prevents link
+restoration. The gateway successor
 generation is separately recorded before any host intent; later
 observations must match it. A pre-host refusal restores runner links using
 source image/link evidence even when the gateway is unavailable. An

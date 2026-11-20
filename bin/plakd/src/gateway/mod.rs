@@ -291,9 +291,8 @@ pub(crate) fn deploy_drain(socket: &std::path::Path, expected: &str) -> crate::C
     }
 }
 
-pub(crate) fn deploy_holder_released(state_root: &std::path::Path) -> crate::CliResult<bool> {
-    holder::advertised_socket(&holder::lock_path(state_root))
-        .map(|socket| socket.is_none())
+pub(crate) fn deploy_guard_vacant(state_root: &std::path::Path) -> crate::CliResult<std::fs::File> {
+    holder::guard_vacant(&holder::lock_path(state_root))
         .map_err(|_| "cannot prove the credential holder released its lock".into())
 }
 
