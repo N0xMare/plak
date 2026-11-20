@@ -237,7 +237,11 @@ impl CredentialCustodian for SubscriptionCustodian {
                         return Ok(current);
                     }
                     // A failed refresh shows in the facts' status.
-                    let _ = subscriptions.refresh(self.provider).await;
+                    if let Err(error @ NativeSubscriptionError::AccountBusy) =
+                        subscriptions.refresh(self.provider).await
+                    {
+                        return Err(custody_error(&error));
+                    }
                     self.current(slot).await
                 }
                 RefreshRequest::AfterRejection {

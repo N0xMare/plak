@@ -39,8 +39,15 @@ enum Hydration {
     Done,
 }
 
-fn store_error(_: ClaudeNativeAuthError) -> CustodyError {
-    CustodyError::Store
+fn store_error(error: ClaudeNativeAuthError) -> CustodyError {
+    match error {
+        ClaudeNativeAuthError::Store(plakous_auth::PrivateStoreError::StoreBusy) => {
+            CustodyError::Busy {
+                retry_after_ms: 100,
+            }
+        }
+        _ => CustodyError::Store,
+    }
 }
 
 fn identity(digest: plakous_model::Digest) -> IdentityDigest {
@@ -244,11 +251,11 @@ impl ClaudeNativeAuthManager {
         {
             return Ok(facts);
         }
-        if let Err(ClaudeNativeAuthError::Store(_)) = self
+        if let Err(error @ ClaudeNativeAuthError::Store(_)) = self
             .refresh_with_force(RefreshForce::WhileCurrent(rejected.generation))
             .await
         {
-            return Err(CustodyError::Store);
+            return Err(store_error(error));
         }
         self.settled_facts(slot).await
     }

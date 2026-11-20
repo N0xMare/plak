@@ -1,13 +1,12 @@
 //! Shared claimed-refresh ladder.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use plakous_http::Client as HttpClient;
 
 use super::hooks::ClaimedRefreshHooks;
 use super::{
-    BuildRequestFailure, CredentialRefreshDetail, CredentialRefreshObserver, RESTORE_POLL_INITIAL,
-    RESTORE_POLL_MAX,
+    BuildRequestFailure, ClaimBackoff, CredentialRefreshDetail, CredentialRefreshObserver,
 };
 use std::future::Future;
 
@@ -23,6 +22,8 @@ use crate::{
 ///
 /// When the dialect reports no refresh is needed (`fence_needing_refresh` →
 /// `None`), returns [`ClaimedRefreshHooks::fresh_output`].
+///
+/// Requires a Tokio runtime with its blocking pool and time driver enabled.
 ///
 /// # Errors
 ///
@@ -41,51 +42,35 @@ where
         return hooks.fresh_output();
     };
     let started = Instant::now();
-    let deadline = started + CLAIM_WAIT;
-    let mut backoff = RESTORE_POLL_INITIAL;
+    let mut backoff = ClaimBackoff::new();
     let claim = loop {
         match store
             .try_begin_claim(&fence, hooks.reclaim_unknown_refresh())
             .await
         {
             Ok(claim) => break claim,
-            // A peer writer or in-flight claim owns the store and nothing was
-            // written. Back off instead of failing: when the peer finishes,
-            // the durable fence changes and the dialect re-decides whether a
-            // refresh is still needed (a peer's completed refresh is fresh).
-            Err(PrivateStoreError::StoreBusy) => {
-                let now = Instant::now();
-                if now >= deadline {
-                    return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
-                }
-                tokio::time::sleep(backoff.min(deadline.saturating_duration_since(now))).await;
-                backoff = backoff.saturating_mul(2).min(RESTORE_POLL_MAX);
-                let current = match store.on_disk(PrivateCredentialStore::try_load).await {
-                    Ok(current) => current,
-                    Err(PrivateStoreError::StoreBusy) => continue,
-                    Err(error) => return Err(hooks.map_store_error(error)),
-                };
-                if current.as_ref() != Some(&fence) {
-                    match hooks.fence_needing_refresh().await? {
-                        Some(next) => fence = next,
-                        None => return hooks.fresh_output(),
-                    }
-                }
-            }
+            // Only the comparison under both claim locks can settle that a
+            // peer changed the record. A separate read races the next claim.
+            Err(PrivateStoreError::FenceMismatch) => match hooks.fence_needing_refresh().await? {
+                Some(next) => fence = next,
+                None => return hooks.fresh_output(),
+            },
+            Err(PrivateStoreError::StoreBusy) => {}
             Err(error) => return Err(hooks.map_store_error(error)),
+        }
+        if !backoff.retry().await {
+            return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
         }
     };
     super::operation::run(store, client, claim, &mut Refresh(hooks), started).await
 }
 
-/// Longest a claim waits behind a peer's writer or in-flight refresh before
-/// reporting the local contention fact.
-const CLAIM_WAIT: Duration = Duration::from_secs(30);
-
 /// Continue the claimed-refresh ladder from an already-taken unstarted claim.
 ///
 /// Used when a dialect (or test) must hold the claim before other store
 /// activity, then finish the same linear exchange/complete path.
+///
+/// Requires a Tokio runtime with its blocking pool and time driver enabled.
 ///
 /// # Errors
 ///
@@ -144,8 +129,12 @@ impl<H: ClaimedRefreshHooks> super::operation::Operation for Refresh<'_, H> {
     fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
         self.0.failure_detail(error)
     }
-    fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, error: &Self::Error) {
-        self.0.after_post_start_failure(store, error);
+    fn after_post_start_failure(
+        &mut self,
+        store: &PrivateCredentialStore,
+        error: &Self::Error,
+    ) -> impl Future<Output = ()> + Send {
+        self.0.after_post_start_failure(store, error)
     }
 }
 

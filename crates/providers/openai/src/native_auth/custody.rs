@@ -30,8 +30,13 @@ fn identity(digest: Digest) -> IdentityDigest {
     IdentityDigest::from_bytes(*digest.bytes())
 }
 
-fn store_error(_: NativeCodexAuthError) -> CustodyError {
-    CustodyError::Store
+fn store_error(error: NativeCodexAuthError) -> CustodyError {
+    match error {
+        NativeCodexAuthError::StoreBusy => CustodyError::Busy {
+            retry_after_ms: 100,
+        },
+        _ => CustodyError::Store,
+    }
 }
 
 impl CodexSubscriptionCredentialManager {
@@ -215,10 +220,10 @@ impl CodexSubscriptionCredentialManager {
             rejected.generation,
             CredentialStatus::Ready,
         );
-        if let Err(NativeCodexAuthError::Store) =
+        if let Err(error @ (NativeCodexAuthError::Store | NativeCodexAuthError::StoreBusy)) =
             self.refresh_rejected_selection(&rejected, selection).await
         {
-            return Err(CustodyError::Store);
+            return Err(store_error(error));
         }
         Ok(self.settled_snapshot(slot).await?.0)
     }

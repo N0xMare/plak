@@ -194,7 +194,10 @@ impl OAuthSession {
         let record = stored
             .record(next)
             .map_err(|error| self.refusal(&error.to_string(), None))?;
-        match store.replace(generation, &record) {
+        match store
+            .on_disk(move |store| store.replace(generation, &record))
+            .await
+        {
             Ok(()) | Err(PrivateStoreError::StaleWriter) => Ok(()),
             Err(error) => {
                 Err(self.refusal(&format!("could not confirm its login ({error})"), None))
@@ -289,7 +292,7 @@ impl OAuthSession {
 enum Answered {
     NotYet,
     /// `invalid_grant`: the grant is gone and the login is retired.
-    InvalidGrant,
+    InvalidGrant(CredentialGeneration),
     Otherwise,
 }
 
@@ -315,9 +318,11 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
     }
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
+        self.verified_token = None;
         let fence = self
             .store
-            .load()
+            .on_disk(PrivateCredentialStore::load)
+            .await
             .map_err(|error| store_failed("mcp login could not be read", error))?
             .ok_or_else(|| authorization("no login is stored"))?;
         if fence.status() != CredentialStatus::Ready {
@@ -330,13 +335,20 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
         {
             return Ok(None);
         }
-        let stored = read_ready(self.store, &fence)?;
+        let expected = fence.clone();
+        let stored = self
+            .store
+            .on_disk(move |store| Ok(read_ready(store, &expected)))
+            .await
+            .map_err(|error| store_failed("mcp login could not be read", error))??;
         if !stored.belongs_to(&self.session.expectation()) {
             return Err(authorization("the login belongs to another server"));
         }
         if self.rejected.is_some() && stored.renewed_after_rejection {
+            let generation = fence.generation();
             self.store
-                .logout(fence.generation())
+                .on_disk(move |store| store.logout(generation))
+                .await
                 .map_err(|error| store_failed("mcp rejected login could not be retired", error))?;
             return Err(authorization(
                 "the renewed credentials were rejected; a new login is required",
@@ -427,7 +439,7 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             let code = oauth_error_code(&body);
             self.answered =
                 if status == StatusCode::BAD_REQUEST && code.as_deref() == Some("invalid_grant") {
-                    Answered::InvalidGrant
+                    Answered::InvalidGrant(response.refresh_fence().generation())
                 } else {
                     Answered::Otherwise
                 };
@@ -493,14 +505,16 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
         Ok(())
     }
 
-    fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, _error: &Self::Error) {
-        match self.answered {
-            Answered::InvalidGrant => {
-                if let Err(error) = store.logout_local() {
-                    tracing::warn!(server = %self.session.server, %error, "mcp login was not retired after invalid_grant");
-                }
-            }
-            Answered::NotYet | Answered::Otherwise => {}
+    async fn after_post_start_failure(
+        &mut self,
+        store: &PrivateCredentialStore,
+        _error: &Self::Error,
+    ) {
+        if let Answered::InvalidGrant(generation) = self.answered
+            && let Err(error) = store.on_disk(move |store| store.logout(generation)).await
+            && error != PrivateStoreError::StaleWriter
+        {
+            tracing::warn!(server = %self.session.server, %error, "mcp login was not retired after invalid_grant");
         }
     }
 }

@@ -5729,13 +5729,19 @@ apply to revoke.
 Refresh is serialized by an in-process single-flight plus a per-slot
 cross-process lock with monotonic generations. The async ladder attempts both
 the execution and record locks without waiting on their holders. Contention
-leaves the record unchanged: refresh uses bounded async backoff and remote
-revoke reports local contention without dispatching.
+from a writer, in-flight claim, reader or Ready lease leaves the record
+unchanged. Refresh and remote revoke both back off asynchronously for up to 30
+seconds before reporting retryable account busy; revoke does not substitute a
+different generation. If the exact fence moves, refresh asks the dialect
+again whether the current credential needs a refresh.
 Claimed HTTP store reads, restoration and terminal writes run on blocking
-workers with the same pinned directory authority. A store step already
-running may finish its exact local transition if the waiter drops. It cannot
-start HTTP on the waiter's behalf; the claim's usual Unknown quarantine rules
-still apply. Before any refresh network call
+workers with the same pinned directory authority. If an unstarted claim is
+abandoned during acquisition or pre-dispatch verification on a worker, the
+worker pool attempts one exact, nonwaiting restoration. Contention, failed
+authority checks, runtime shutdown or process loss can still leave Unknown
+without dispatch. A store step already running may finish its exact local
+transition after the waiter drops, but cannot start HTTP on its behalf. The
+claim's usual Unknown quarantine rules still apply. Before any refresh network call
 the credential slot records `RefreshOutcomeUnknown`; an ambiguous refresh
 leaves that state and blocks inference. Clock allowance is per vertical: xAI
 uses 60 seconds of leeway when validating and re-minting tokens, Codex refreshes
@@ -9203,8 +9209,9 @@ and half its original issued lifetime it refreshes; a refresh that fails or
 finds the record quarantined is a definite failure, the
 request not sent, naming the login remedy. A refresh the token endpoint answers
 with 408, 429 or 5xx leaves the login quarantined: the server may already
-have rotated the token. `invalid_grant` retires it locally, so the next
-request names the login remedy; any other refusal, and an exchange whose
+have rotated the token. `invalid_grant` retires that claimed generation
+locally so the next request names the login remedy; it does not retire a
+newer login. Any other refusal, and an exchange whose
 outcome is unknown, also leave it quarantined. A 401 runs one claimed refresh,
 bound to the generation the rejected request carried and only while the store
 still holds it, as its own task, and never re-sends the request: the call is

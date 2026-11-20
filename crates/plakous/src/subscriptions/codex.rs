@@ -312,6 +312,7 @@ pub(super) fn map_codex_error(
         plakous_openai::NativeCodexAuthError::ProfileNotCurrent => {
             NativeSubscriptionError::ProfileInactive
         }
+        Codex::StoreBusy => NativeSubscriptionError::AccountBusy,
         plakous_openai::NativeCodexAuthError::Store => NativeSubscriptionError::UnsafeStorage,
         plakous_openai::NativeCodexAuthError::WrittenByNewerBuild => {
             NativeSubscriptionError::CredentialWrittenByNewerBuild

@@ -180,7 +180,14 @@ impl ManagerCore {
         &self,
         fence: &CredentialFence,
     ) -> Result<StoredTokens, ClaudeNativeAuthError> {
-        let lease = self.store()?.acquire_ready(fence)?;
+        Self::read_stored_from(self.store()?, fence)
+    }
+
+    pub(super) fn read_stored_from(
+        store: &PrivateCredentialStore,
+        fence: &CredentialFence,
+    ) -> Result<StoredTokens, ClaudeNativeAuthError> {
+        let lease = store.acquire_ready(fence)?;
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
         stored.validate()?;

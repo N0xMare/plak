@@ -683,8 +683,8 @@ pub enum PrivateStoreError {
     /// The advisory cross-process lock could not be established.
     #[error("credential store locking failed")]
     LockFailed,
-    /// Another writer or refresh claim currently owns the store; nothing was
-    /// written. A local contention fact, never a provider outcome.
+    /// A writer, claim, reader or Ready lease contends with this attempt.
+    /// Nothing was written. A local contention fact, never a provider outcome.
     #[error("credential store is busy")]
     StoreBusy,
     /// A bounded filesystem operation failed.

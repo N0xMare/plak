@@ -5,7 +5,7 @@ use std::time::Instant;
 use plakous_http::Client as HttpClient;
 
 use super::hooks::ClaimedRevokeHooks;
-use super::{BuildRequestFailure, CredentialRefreshObserver};
+use super::{BuildRequestFailure, ClaimBackoff, CredentialRefreshObserver};
 use crate::{
     ClaimedHttpError, ClaimedHttpResponse, PrivateCredentialStore, PrivateStoreError, RefreshClaim,
 };
@@ -15,6 +15,8 @@ use std::future::Future;
 ///
 /// Ladder: profile check → fence → begin-refresh (claim) → build revoke request →
 /// execute-claimed-http → accept response → revoke tombstone (or quarantine).
+///
+/// Requires a Tokio runtime with its blocking pool and time driver enabled.
 ///
 /// # Errors
 ///
@@ -31,10 +33,14 @@ where
     hooks.check_profile().await?;
     let fence = hooks.fence_to_revoke().await?;
     let started = Instant::now();
-    let claim = store
-        .try_begin_claim(&fence, false)
-        .await
-        .map_err(|error| hooks.map_store_error(error))?;
+    let mut backoff = ClaimBackoff::new();
+    let claim = loop {
+        match store.try_begin_claim(&fence, false).await {
+            Ok(claim) => break claim,
+            Err(PrivateStoreError::StoreBusy) if backoff.retry().await => {}
+            Err(error) => return Err(hooks.map_store_error(error)),
+        }
+    };
     super::operation::run(store, client, claim, &mut Revoke(hooks), started).await
 }
 

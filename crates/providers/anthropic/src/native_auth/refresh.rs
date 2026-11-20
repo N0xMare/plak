@@ -55,10 +55,11 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
     }
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
-        let fence = self
-            .core
-            .store()?
-            .load()?
+        self.request_permit = None;
+        let store = self.core.store()?;
+        let fence = store
+            .on_disk(PrivateCredentialStore::load)
+            .await?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         if fence.status() == CredentialStatus::RefreshRequired {
             self.request_permit = acquire_refresh_permit(self.request_gate)?;
@@ -67,7 +68,10 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
         if fence.status() != CredentialStatus::Ready {
             return Err(ClaudeNativeAuthError::NotReady);
         }
-        let stored = self.core.read_stored(&fence)?;
+        let expected = fence.clone();
+        let stored = store
+            .on_disk(move |store| Ok(ManagerCore::read_stored_from(store, &expected)))
+            .await??;
         let forced = match self.force {
             RefreshForce::IfDue => false,
             RefreshForce::Always => true,

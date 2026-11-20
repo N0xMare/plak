@@ -61,7 +61,7 @@ gateway = ["http-refresh", "dep:plakous-gateway-protocol", "plakous-http/gateway
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [lints]

@@ -112,6 +112,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
     }
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
+        self.request_permit = None;
         let initial = self.manager.load_fence().await?;
         let selected = self.manager.selected_account()?;
         if initial.account_binding() != &selected {
@@ -135,7 +136,9 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
             return Err(NativeCodexAuthError::Unavailable);
         }
 
-        self.flight = Some(self.manager.enter_flight(&initial).await?);
+        if self.flight.is_none() {
+            self.flight = Some(self.manager.enter_flight(&initial).await?);
+        }
         let current = self.manager.load_fence().await?;
         if current.account_binding() != &selected {
             return Err(NativeCodexAuthError::AccountChanged);
@@ -350,8 +353,8 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
         map_codex_claimed_http_error(error)
     }
 
-    fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {
-        NativeCodexAuthError::Store
+    fn map_store_error(&mut self, error: PrivateStoreError) -> Self::Error {
+        codex_store_error(error)
     }
 
     fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
@@ -494,8 +497,8 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
         map_codex_claimed_http_error(error)
     }
 
-    fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {
-        NativeCodexAuthError::Store
+    fn map_store_error(&mut self, error: PrivateStoreError) -> Self::Error {
+        codex_store_error(error)
     }
 
     fn output_from_revoked(
@@ -508,6 +511,13 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
 
     fn observer(&self) -> Option<&dyn CredentialRefreshObserver> {
         self.manager.refresh_observer.as_deref()
+    }
+}
+
+fn codex_store_error(error: PrivateStoreError) -> NativeCodexAuthError {
+    match error {
+        PrivateStoreError::StoreBusy => NativeCodexAuthError::StoreBusy,
+        _ => NativeCodexAuthError::Store,
     }
 }
 

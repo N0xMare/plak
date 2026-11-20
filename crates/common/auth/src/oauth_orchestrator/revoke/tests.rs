@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use plakous_http::{Client as HttpClient, ExchangeControl, Limits, Method, Origin, Request};
 use tempfile::TempDir;
 
+use crate::oauth_orchestrator::CLAIM_WAIT;
 use crate::oauth_orchestrator::hooks::{
     BuildRequestFailure, ClaimedRevokeHooks, CredentialRefreshEvent, CredentialRefreshFailureClass,
     CredentialRefreshObserver, CredentialRefreshPhase,
@@ -155,7 +156,7 @@ fn fixture_store()
     Ok((directory, store, fence))
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn revoke_with_a_ready_lease_refuses_without_a_claim()
 -> Result<(), Box<dyn std::error::Error>> {
     let (_dir, store, fence) = fixture_store()?;
@@ -170,12 +171,14 @@ async fn revoke_with_a_ready_lease_refuses_without_a_claim()
         accept: Ok(()),
     };
     let client = HttpClient::new_http1(Limits::default())?;
+    let started = tokio::time::Instant::now();
     let outcome = tokio::time::timeout(
-        Duration::from_secs(15),
+        CLAIM_WAIT + Duration::from_secs(1),
         run_claimed_revoke(&store, &client, &mut hooks),
     )
     .await?;
     assert_eq!(outcome, Err("busy"));
+    assert!(started.elapsed() >= CLAIM_WAIT);
     assert_eq!(store.load()?, Some(fence));
     assert_eq!(observer.phases(), [] as [CredentialRefreshPhase; 0]);
     Ok(())

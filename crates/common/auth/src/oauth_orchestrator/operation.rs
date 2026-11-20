@@ -59,7 +59,13 @@ pub(super) trait Operation {
     fn failure_detail(&mut self, _error: &Self::Error) -> CredentialRefreshDetail {
         CredentialRefreshDetail::default()
     }
-    fn after_post_start_failure(&mut self, _store: &PrivateCredentialStore, _error: &Self::Error) {}
+    fn after_post_start_failure(
+        &mut self,
+        _store: &PrivateCredentialStore,
+        _error: &Self::Error,
+    ) -> impl Future<Output = ()> + Send {
+        std::future::ready(())
+    }
 }
 
 // These hooks have identical contracts on both public dialect traits. Keep the
@@ -192,7 +198,7 @@ where
             )
             .await;
             let mapped = hooks.map_claimed_http_error(store, error).await;
-            hooks.after_post_start_failure(store, &mapped);
+            hooks.after_post_start_failure(store, &mapped).await;
             return Err(mapped);
         }
     };
@@ -229,7 +235,7 @@ where
                 transport_failure.map(plakous_http::Failure::phase),
                 detail,
             );
-            hooks.after_post_start_failure(store, &error);
+            hooks.after_post_start_failure(store, &error).await;
             return Err(error);
         }
     };
@@ -252,7 +258,7 @@ where
             http_status,
             None,
         );
-        hooks.after_post_start_failure(store, &error);
+        hooks.after_post_start_failure(store, &error).await;
         return Err(error);
     }
     match H::commit(store, response, record).await {
@@ -277,7 +283,7 @@ where
                 None,
             );
             let mapped = hooks.map_store_error(store_error);
-            hooks.after_post_start_failure(store, &mapped);
+            hooks.after_post_start_failure(store, &mapped).await;
             Err(mapped)
         }
     }

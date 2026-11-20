@@ -313,6 +313,66 @@ async fn successful_response_returns_exact_started_claim() -> ServerResult {
     Ok(())
 }
 
+#[test]
+fn cancelled_pre_dispatch_verification_restores_unstarted_claim() -> ServerResult {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()?
+        .block_on(async {
+            let fixture = HttpFixture::new()?;
+            let store = fixture.store()?;
+            let record = fixture.record(1, CredentialStatus::Ready, b"before")?;
+            store.initialize(&record)?;
+            let claim = store.begin_refresh(&record.fence())?;
+            let (release, held) = oneshot::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || held.blocking_recv());
+
+            let limits = Limits::default();
+            let client = Client::new_http1(limits.clone())?;
+            let origin = Origin::parse("https://127.0.0.1:1")?;
+            let mut exchange = Box::pin(store.execute_claimed_http(
+                claim,
+                &client,
+                request(origin, &limits, "/token")?,
+                control(),
+            ));
+            let pending = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(exchange.as_mut().poll(cx).is_pending())
+            })
+            .await;
+            drop(exchange);
+            release.send(()).map_err(|()| "lost blocking worker")?;
+            blocker.await??;
+            assert!(pending, "verification should have waited for its worker");
+
+            let restored = timeout(Duration::from_secs(5), async {
+                loop {
+                    let fence = store
+                        .on_disk(PrivateCredentialStore::load)
+                        .await?
+                        .ok_or("missing claimed record")?;
+                    if fence.status() == CredentialStatus::Ready {
+                        return Ok::<_, ServerError>(fence);
+                    }
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            })
+            .await??;
+            assert_eq!(
+                restored,
+                fixture
+                    .record(3, CredentialStatus::Ready, b"before")?
+                    .fence()
+            );
+            assert_eq!(
+                store.acquire_ready(&restored)?.payload().expose_secret(),
+                b"before"
+            );
+            Ok(())
+        })
+}
+
 #[tokio::test]
 async fn incomplete_success_response_cannot_complete_refresh() -> ServerResult {
     let fixture = HttpFixture::new()?;

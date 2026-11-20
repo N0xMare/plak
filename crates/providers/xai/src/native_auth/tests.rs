@@ -2298,7 +2298,9 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
         detail: CredentialRefreshDetail::default(),
     };
     hooks.cancel_guard.claimed(ours);
-    hooks.after_post_start_failure(core.local_store(), &XaiNativeAuthError::Transport(None));
+    hooks
+        .after_post_start_failure(core.local_store(), &XaiNativeAuthError::Transport(None))
+        .await;
     hooks.cancel_guard.finished();
     drop(hooks);
 

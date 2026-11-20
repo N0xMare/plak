@@ -208,6 +208,32 @@ async fn emit_claimed_http_failure(
 const RESTORE_POLL_INITIAL: Duration = Duration::from_millis(2);
 const RESTORE_POLL_MAX: Duration = Duration::from_millis(50);
 
+const CLAIM_WAIT: Duration = Duration::from_secs(30);
+
+struct ClaimBackoff {
+    deadline: tokio::time::Instant,
+    delay: Duration,
+}
+
+impl ClaimBackoff {
+    fn new() -> Self {
+        Self {
+            deadline: tokio::time::Instant::now() + CLAIM_WAIT,
+            delay: RESTORE_POLL_INITIAL,
+        }
+    }
+
+    async fn retry(&mut self) -> bool {
+        let now = tokio::time::Instant::now();
+        if now >= self.deadline {
+            return false;
+        }
+        tokio::time::sleep_until((now + self.delay).min(self.deadline)).await;
+        self.delay = self.delay.saturating_mul(2).min(RESTORE_POLL_MAX);
+        tokio::time::Instant::now() < self.deadline
+    }
+}
+
 /// Polls a non-blocking restore until success, a non-busy failure, or `deadline`.
 ///
 /// Returns `Ok(true)` when the pre-claim record was restored.

@@ -1604,11 +1604,12 @@ No pending-login/grant namespace survives host restart.
 
 Before any refresh network call, the store durably writes
 `RefreshOutcomeUnknown` at the next generation and mints a non-cloneable claim.
-The claim first takes an exclusive refresh execution lock (plus the private
-directory) without waiting; a store owned by another writer or an in-flight
-claim yields a local `StoreBusy` fact with nothing written, and the caller backs
-off until the peer finishes rather than treating contention as a provider
-outcome. Readers and Ready leases hold only the shared record lock, so a status
+The async claim ladder tries the exclusive execution lock (plus the private
+directory) and the exclusive record lock without waiting. Another writer,
+an in-flight claim, a reader or a Ready lease can yield retryable local
+`StoreBusy` with nothing written. Both refresh and remote revoke back off for
+up to 30 seconds before reporting contention, not a provider or unsafe-storage
+failure. Readers and Ready leases hold only the shared record lock, so a status
 read never waits behind a peer's provider round-trip. Only a *started* claim may
 reach the network, and a started claim has no restore path.
 

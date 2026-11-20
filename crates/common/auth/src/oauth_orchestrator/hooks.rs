@@ -418,8 +418,13 @@ pub trait ClaimedRefreshHooks {
     ///
     /// Default is a no-op. xAI restores retryable failures to Ready so the
     /// stored refresh token can be exchanged on the next claim.
-    fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, error: &Self::Error) {
+    fn after_post_start_failure(
+        &mut self,
+        store: &PrivateCredentialStore,
+        error: &Self::Error,
+    ) -> impl Future<Output = ()> + Send {
         let _ = (store, error);
+        std::future::ready(())
     }
 }
 

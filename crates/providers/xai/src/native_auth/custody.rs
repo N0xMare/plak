@@ -36,8 +36,15 @@ const FENCE_READS: usize = 2;
 const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
-fn store_error(_: XaiNativeAuthError) -> CustodyError {
-    CustodyError::Store
+fn store_error(error: XaiNativeAuthError) -> CustodyError {
+    match error {
+        XaiNativeAuthError::Store(plakous_auth::PrivateStoreError::StoreBusy) => {
+            CustodyError::Busy {
+                retry_after_ms: 100,
+            }
+        }
+        _ => CustodyError::Store,
+    }
 }
 
 /// The account and credential-authority bindings the SuperGrok route binds a
@@ -253,7 +260,7 @@ impl XaiNativeAuthManager {
             });
         }
         let authority = self.core.authority_id().map_err(store_error)?;
-        if let Err(XaiNativeAuthError::Store(_)) = self
+        if let Err(error @ XaiNativeAuthError::Store(_)) = self
             .core
             .refresh_with_force(
                 Some(fence.account_binding()),
@@ -263,7 +270,7 @@ impl XaiNativeAuthManager {
             )
             .await
         {
-            return Err(CustodyError::Store);
+            return Err(store_error(error));
         }
         Ok(self.settled_snapshot(slot).await?.0)
     }

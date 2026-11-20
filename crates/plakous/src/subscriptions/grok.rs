@@ -325,6 +325,9 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         | plakous_xai::XaiNativeAuthError::StoredCredentialWrittenByNewerBuild => {
             NativeSubscriptionError::CredentialWrittenByNewerBuild
         }
+        plakous_xai::XaiNativeAuthError::Store(plakous_auth::PrivateStoreError::StoreBusy) => {
+            NativeSubscriptionError::AccountBusy
+        }
         plakous_xai::XaiNativeAuthError::Store(_) => NativeSubscriptionError::UnsafeStorage,
         plakous_xai::XaiNativeAuthError::Custodied => NativeSubscriptionError::GatewayCustody,
         plakous_xai::XaiNativeAuthError::NotLoggedIn

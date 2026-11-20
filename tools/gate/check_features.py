@@ -720,8 +720,8 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-agent": "c0493a5d9f2387a4342ab95f9a02d0e87a5020ea2b7fd57423a77202ad2a5a86",
     "plakous-anthropic": "ba64c2d30c1997089e1750a23b63549ebcff8d77aad1db6c7c6bfd559b8c40e5",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
-    # Claimed credential store steps use the existing Tokio dependency's blocking pool.
-    "plakous-auth": "6d1bebea8d02d023a9147a28d2c50dd87ba95846578db505a70b6bed2a704109",
+    # Claimed store steps use Tokio's blocking pool; contention tests pause time.
+    "plakous-auth": "f55963ee9928ef7b776a30ae88ae1c3163ae268e1f2d021c8399ac322bef3332",
     "plakous-chat-completions": "50042cf4ad75c6d33639ad41cb6b9a88aa54f0b4ca78a22bd034942f35b4399b",
     "plakous-exchange": "ed8c03eea0972915fb7499a0b28bd4d3c9730738d5f705eac4a9edec62a5c1a9",
     "plakous-http": "c887fdf271fa9b459fc8f442f43b39aa4c528afc303c35a002f97079a4fb5516",

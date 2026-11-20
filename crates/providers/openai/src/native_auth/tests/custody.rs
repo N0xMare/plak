@@ -145,6 +145,37 @@ async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> Te
 }
 
 #[tokio::test]
+async fn rejection_refresh_returns_busy_while_an_exchange_holds_the_ready_lease() -> TestResult {
+    let (fixture, _peers, _server) = renew_fixture(
+        "custody-busy-account",
+        "custody-busy-subject",
+        now_unix_secs() + 3_600,
+        0,
+        Vec::new(),
+    )
+    .await?;
+    let slot = slot()?;
+    let facts = fixture.manager.custody_facts(&slot).await?;
+    let rejected = facts.expected_fence().ok_or("no fence")?;
+    let fields = fixture.manager.custody_fields(&slot, &rejected).await?;
+    tokio::time::pause();
+    let error = fixture
+        .manager
+        .custody_refresh_after_rejection(&slot, &rejected, facts.selection_epoch_digest)
+        .await;
+    assert!(matches!(
+        error,
+        Err(CustodyError::Busy {
+            retry_after_ms: 100
+        })
+    ));
+    let current = fixture.manager.custody_facts(&slot).await?;
+    assert_eq!(current.expected_fence(), Some(rejected));
+    drop(fields);
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_refresh_between_the_reads_moves_the_fence_with_the_current_facts() -> TestResult {
     let account = "custody-race-account";
     let (fixture, _peers, _server) = renew_fixture(

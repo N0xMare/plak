@@ -9,14 +9,15 @@ use super::{
     CredentialFence, CredentialGeneration, CredentialRefreshDetail, CredentialStatus, Duration,
     Endpoint, ExchangeControl, Failure, HEADER_ACCEPT, HEADER_AUTHORIZATION, HeaderValue, Instant,
     LoginHttpStage, MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore, Method, Ordering, Origin,
-    PkceS256, REQUEST_TIMEOUT, ReadyCredentialLease, Request, SecretString, SensitiveBytes,
-    StatusCode, StoredTokens, Timestamp, TokenResponse, XAI_GROK_COMPATIBILITY_PROFILE,
-    XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, XaiNativeCatalogReceipt, XaiRefreshCancelGuard,
-    XaiRefreshHooks, XaiRevokeHooks, XaiSubscriptionStatus, Zeroizing, access_needs_refresh,
-    authorization_code_token_form, bearer_header, catalog_subject_header, credential_record,
-    decode_json, fixed_headers, headers_are_json, insert_subscription_catalog_headers,
-    network_failure, remaining_until, run_claimed_refresh, run_claimed_revoke, status_error,
-    system_unix_elapsed, system_unix_seconds, urlencoded_form, valid_admitted_catalog_entries,
+    PkceS256, PrivateCredentialStore, REQUEST_TIMEOUT, ReadyCredentialLease, Request, SecretString,
+    SensitiveBytes, StatusCode, StoredTokens, Timestamp, TokenResponse,
+    XAI_GROK_COMPATIBILITY_PROFILE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError,
+    XaiNativeCatalogReceipt, XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks,
+    XaiSubscriptionStatus, Zeroizing, access_needs_refresh, authorization_code_token_form,
+    bearer_header, catalog_subject_header, credential_record, decode_json, fixed_headers,
+    headers_are_json, insert_subscription_catalog_headers, network_failure, remaining_until,
+    run_claimed_refresh, run_claimed_revoke, status_error, system_unix_elapsed,
+    system_unix_seconds, urlencoded_form, valid_admitted_catalog_entries,
     valid_login_selection_epoch, validate_acceptance_until,
 };
 use plakous_auth::oauth_orchestrator::pull_auth_body;
@@ -551,27 +552,18 @@ impl ManagerCore {
         Ok(())
     }
 
-    pub(super) fn needs_refresh(
-        &self,
-        fence: &CredentialFence,
-    ) -> Result<bool, XaiNativeAuthError> {
-        if fence.status() != CredentialStatus::Ready {
-            return Ok(true);
-        }
-        let stored = self.read_stored(fence)?;
-        let now = system_unix_seconds()?;
-        Ok(access_needs_refresh(
-            stored.expires_at,
-            now,
-            ACCESS_REFRESH_LEAD_SECONDS,
-        ))
-    }
-
     pub(super) fn read_stored(
         &self,
         fence: &CredentialFence,
     ) -> Result<StoredTokens, XaiNativeAuthError> {
-        let lease = self.store()?.acquire_ready(fence)?;
+        Self::read_stored_from(self.store()?, fence)
+    }
+
+    pub(super) fn read_stored_from(
+        store: &PrivateCredentialStore,
+        fence: &CredentialFence,
+    ) -> Result<StoredTokens, XaiNativeAuthError> {
+        let lease = store.acquire_ready(fence)?;
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(fence.account_binding())?;

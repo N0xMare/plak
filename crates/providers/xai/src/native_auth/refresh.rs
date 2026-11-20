@@ -1,17 +1,17 @@
 //! Claimed refresh and revoke hooks and their cancellation and restore helpers.
 
 use super::{
-    AccountBinding, BuildRequestFailure, ClaimedHttpDisposition, ClaimedHttpError,
-    ClaimedHttpResponse, ClaimedRefreshHooks, ClaimedRevokeHooks, CredentialFence,
-    CredentialGeneration, CredentialRecord, CredentialRefreshDetail, CredentialRefreshEvent,
-    CredentialRefreshFailureClass, CredentialRefreshFailureReason, CredentialRefreshObserver,
-    CredentialRefreshPhase, CredentialStatus, ExchangeControl, Instant, MAX_AUTH_BODY_BYTES,
-    MAX_STRING_BYTES, MAX_TOKEN_BYTES, ManagerCore, PrivateCredentialStore, PrivateStoreError,
-    PullBodyError, REQUEST_TIMEOUT, RefreshClaim, Request, RevokeResponse, StoredTokens,
-    SubscriptionRequestClass, SubscriptionRequestPermit, TokenResponse, XAI_PUBLIC_CLIENT_ID,
-    XaiNativeAuthError, Zeroizing, claimed_response_is_json, credential_record, decode_json,
-    network_failure, pull_claimed_body, refresh_token_form, retired_or_quarantined,
-    system_unix_seconds, urlencoded_form,
+    ACCESS_REFRESH_LEAD_SECONDS, AccountBinding, BuildRequestFailure, ClaimedHttpDisposition,
+    ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks, ClaimedRevokeHooks,
+    CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshDetail,
+    CredentialRefreshEvent, CredentialRefreshFailureClass, CredentialRefreshFailureReason,
+    CredentialRefreshObserver, CredentialRefreshPhase, CredentialStatus, ExchangeControl, Instant,
+    MAX_AUTH_BODY_BYTES, MAX_STRING_BYTES, MAX_TOKEN_BYTES, ManagerCore, PrivateCredentialStore,
+    PrivateStoreError, PullBodyError, REQUEST_TIMEOUT, RefreshClaim, Request, RevokeResponse,
+    StoredTokens, SubscriptionRequestClass, SubscriptionRequestPermit, TokenResponse,
+    XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, Zeroizing, access_needs_refresh,
+    claimed_response_is_json, credential_record, decode_json, network_failure, pull_claimed_body,
+    refresh_token_form, retired_or_quarantined, system_unix_seconds, urlencoded_form,
 };
 
 /// Prepared refresh state carried through form-body claimed refresh.
@@ -65,10 +65,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     }
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
-        let fence = self
-            .core
-            .store()?
-            .load()?
+        self.request_permit = None;
+        let store = self.core.store()?;
+        let fence = store
+            .on_disk(PrivateCredentialStore::load)
+            .await?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if self
             .expected_account
@@ -76,27 +77,37 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         {
             return Err(XaiNativeAuthError::AccountChanged);
         }
-        if fence.status() == CredentialStatus::Ready {
-            self.core.validate_expected_selection(
-                &fence,
-                self.expected_selection_epoch,
-                self.expected_authority,
-            )?;
-        }
         let forced = match self.force {
             RefreshForce::IfDue => false,
             RefreshForce::Always => true,
             RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
         };
-        if !forced && !self.core.needs_refresh(&fence)? {
-            return Ok(None);
-        }
         // Ready still pre-reads under a Ready lease. Unknown/RefreshRequired keep
         // the payload but cannot acquire_ready; epoch is checked from the claim
         // payload in build_refresh_request.
         match fence.status() {
             CredentialStatus::Ready => {
-                let _ = self.core.read_stored(&fence)?;
+                let expected = fence.clone();
+                let stored = store
+                    .on_disk(move |store| Ok(ManagerCore::read_stored_from(store, &expected)))
+                    .await??;
+                if self.expected_selection_epoch.is_some_and(|epoch| {
+                    epoch != stored.selection_epoch
+                        || !self
+                            .expected_authority
+                            .is_some_and(|expected| self.core.authority_is(expected))
+                }) {
+                    return Err(XaiNativeAuthError::SelectionChanged);
+                }
+                if !forced
+                    && !access_needs_refresh(
+                        stored.expires_at,
+                        system_unix_seconds()?,
+                        ACCESS_REFRESH_LEAD_SECONDS,
+                    )
+                {
+                    return Ok(None);
+                }
             }
             CredentialStatus::RefreshRequired | CredentialStatus::RefreshOutcomeUnknown => {}
             _ => return Err(XaiNativeAuthError::NotLoggedIn),
@@ -261,7 +272,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         self.detail.clone().with_reason(xai_failure_reason(error))
     }
 
-    fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, error: &Self::Error) {
+    async fn after_post_start_failure(
+        &mut self,
+        store: &PrivateCredentialStore,
+        error: &Self::Error,
+    ) {
         if !xai_refresh_failure_is_retryable(error) {
             return;
         }
@@ -291,7 +306,8 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 _ => None,
             },
             detail,
-        );
+        )
+        .await;
     }
 }
 
@@ -487,7 +503,7 @@ pub(super) fn http_phase(phase: plakous_model::ModelRetryPhase) -> plakous_http:
 /// observer, so `plak doctor`'s latest refresh row reflects the real last
 /// transition. A peer that reclaimed the record since owns it: the fence
 /// mismatch leaves it alone.
-pub(super) fn restore_xai_unknown_to_ready(
+async fn restore_xai_unknown_to_ready(
     store: &PrivateCredentialStore,
     claimed: &CredentialFence,
     observer: Option<&dyn CredentialRefreshObserver>,
@@ -496,10 +512,15 @@ pub(super) fn restore_xai_unknown_to_ready(
     transport_phase: Option<plakous_http::Phase>,
     detail: CredentialRefreshDetail,
 ) {
-    if store.restore_unknown_to_ready(claimed).is_err() {
+    let generation = claimed.generation().get();
+    let claimed = claimed.clone();
+    if store
+        .on_disk(move |store| store.restore_unknown_to_ready(&claimed))
+        .await
+        .is_err()
+    {
         return;
     }
-    let generation = claimed.generation().get();
     if let Some(observer) = observer {
         observer.observe(CredentialRefreshEvent {
             phase: CredentialRefreshPhase::Restored,

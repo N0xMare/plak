@@ -79,7 +79,7 @@ impl ClaimedRefreshHooks for ScriptedHooks<'_> {
     fn fence_needing_refresh(
         &mut self,
     ) -> impl Future<Output = Result<Option<CredentialFence>, Self::Error>> {
-        std::future::ready(Ok(self.fence.clone()))
+        std::future::ready(Ok(self.fence.take()))
     }
 
     fn fresh_output(&mut self) -> Result<Self::Output, Self::Error> {
@@ -252,6 +252,28 @@ async fn a_ready_lease_does_not_block_the_refresh_executor()
             CredentialRefreshPhase::Quarantined
         ]
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn moved_claim_fence_rechecks_whether_refresh_is_needed()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_dir, store, fence) = fixture_store()?;
+    let replacement = replacement_record(2)?;
+    store.replace(fence.generation(), &replacement)?;
+    let observer = RecordingObserver::new();
+    let mut hooks = ScriptedHooks {
+        observer: &observer,
+        fence: Some(fence),
+        build: BuildMode::LeaveQuarantined,
+        authorize: Ok(()),
+        validate: ValidateMode::Fail,
+        request: None,
+        control: Duration::from_secs(1),
+    };
+    run_claimed_refresh(&store, &client()?, &mut hooks).await?;
+    assert_eq!(store.load()?, Some(replacement.fence()));
+    assert_eq!(observer.phases(), [] as [CredentialRefreshPhase; 0]);
     Ok(())
 }
 

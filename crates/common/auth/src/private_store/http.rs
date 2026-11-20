@@ -22,6 +22,41 @@ impl Drop for AbortQueued {
     }
 }
 
+/// An unstarted claim in transit to or from a disk worker. The exact claim
+/// is the only authority for restoring it if the receiver disappears.
+struct UnstartedHandoff {
+    store: PrivateCredentialStore,
+    runtime: tokio::runtime::Handle,
+    claim: Option<RefreshClaim>,
+}
+
+impl UnstartedHandoff {
+    fn new(store: &PrivateCredentialStore, claim: RefreshClaim) -> Self {
+        Self {
+            store: store.disk_handle(),
+            runtime: tokio::runtime::Handle::current(),
+            claim: Some(claim),
+        }
+    }
+
+    fn into_claim(mut self) -> RefreshClaim {
+        self.claim
+            .take()
+            .unwrap_or_else(|| unreachable!("unstarted claim already taken"))
+    }
+}
+
+impl Drop for UnstartedHandoff {
+    fn drop(&mut self) {
+        if let Some(mut claim) = self.claim.take() {
+            let store = self.store.disk_handle();
+            drop(self.runtime.spawn_blocking(move || {
+                let _ = store.try_restore_refresh_definitely_not_started(&mut claim);
+            }));
+        }
+    }
+}
+
 #[cfg(feature = "http-refresh")]
 impl ClaimedHttpResponse {
     /// Returns the wire status without interpreting it.
@@ -160,14 +195,8 @@ impl fmt::Display for ClaimedHttpError {
 impl std::error::Error for ClaimedHttpError {}
 
 impl PrivateCredentialStore {
-    /// Run disk I/O on a worker with the same pinned directory authority.
-    /// An operation already started there owns its inputs through the exact
-    /// store transition; dropping the waiter never replays it or starts HTTP.
-    pub(crate) async fn on_disk<T: Send + 'static>(
-        &self,
-        operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError> + Send + 'static,
-    ) -> Result<T, PrivateStoreError> {
-        let store = Self {
+    fn disk_handle(&self) -> Self {
+        Self {
             path: self.path.clone(),
             record_name: self.record_name.clone(),
             lock_name: self.lock_name.clone(),
@@ -176,7 +205,24 @@ impl PrivateCredentialStore {
             slot_id: self.slot_id.clone(),
             authority: self.authority,
             directory: Arc::clone(&self.directory),
-        };
+        }
+    }
+
+    /// Run disk I/O on a worker with the same pinned directory authority.
+    /// An operation already started there owns its inputs through the exact
+    /// store transition; dropping the waiter never replays it or starts HTTP.
+    ///
+    /// Requires a Tokio runtime with its blocking pool enabled.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the store error, or [`PrivateStoreError::Io`] if the worker fails to join.
+    #[doc(hidden)]
+    pub async fn on_disk<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError> + Send + 'static,
+    ) -> Result<T, PrivateStoreError> {
+        let store = self.disk_handle();
         let task = tokio::task::spawn_blocking(move || operation(&store));
         let _abort_queued = AbortQueued(task.abort_handle());
         task.await.map_err(|_| PrivateStoreError::Io)?
@@ -188,8 +234,13 @@ impl PrivateCredentialStore {
         allow_unknown: bool,
     ) -> Result<RefreshClaim, PrivateStoreError> {
         let expected = expected.clone();
-        self.on_disk(move |store| store.begin_refresh_with_options(&expected, allow_unknown, true))
-            .await
+        let claim = self
+            .on_disk(move |store| {
+                let claim = store.begin_refresh_with_options(&expected, allow_unknown, true)?;
+                Ok(UnstartedHandoff::new(store, claim))
+            })
+            .await?;
+        Ok(claim.into_claim())
     }
 
     /// Executes one concrete HTTP exchange under an exact durable refresh claim.
@@ -215,6 +266,8 @@ impl PrivateCredentialStore {
     /// method consumes `claim`; callers retain the separate
     /// [`Self::restore_refresh_definitely_not_started`] path for those failures.
     ///
+    /// Requires a Tokio runtime with its blocking pool and time driver enabled.
+    ///
     /// # Errors
     ///
     /// Returns a redacted error if the claim is foreign, the concrete exchange
@@ -231,10 +284,15 @@ impl PrivateCredentialStore {
         request: HttpRequest,
         control: ExchangeControl,
     ) -> Result<ClaimedHttpResponse, ClaimedHttpError> {
-        let (claim, verified) = self
+        let handoff = UnstartedHandoff::new(self, claim);
+        let (handoff, verified) = self
             .on_disk(move |store| {
+                let claim = handoff
+                    .claim
+                    .as_ref()
+                    .unwrap_or_else(|| unreachable!("missing unstarted claim"));
                 let verified = store.verify_claimed_http_quarantine_under_lock(&claim.core);
-                Ok((claim, verified))
+                Ok((handoff, verified))
             })
             .await
             .map_err(|error| ClaimedHttpError {
@@ -243,6 +301,7 @@ impl PrivateCredentialStore {
                 store: Some(error),
                 unstarted_claim: None,
             })?;
+        let claim = handoff.into_claim();
         if let Err(error) = verified {
             return Err(ClaimedHttpError {
                 disposition: ClaimedHttpDisposition::ClaimRejected,
