@@ -12,14 +12,13 @@ dir = "target/nextest"
 native-auth-serial = { max-threads = 1 }
 cli-contract-serial = { max-threads = 1 }
 
-# Lanes. `default` runs everything nextest selects (ad-hoc runs); the three
-# lane profiles inherit its settings and overrides and partition the suite:
-#   offline     parallel lane: everything not in `serial` or `durability`
-#   serial      tests whose subject is a wall-clock budget, one at a time
-#   durability  crash matrices and the sqlite SIGKILL campaign, weighted pool
-# A test added to `serial` or `durability` must also be added to the
-# exclusion in `offline`; tests/tooling/test_nextest_lanes.py checks that the
-# three sets partition the suite and that every predicate names a real test.
+# The four lane profiles partition the default suite:
+#   offline     parallel lane: everything not assigned to another lane
+#   serial      wall-clock assertions
+#   durability  core crash-law witnesses in a weighted pool
+#   install     additional families in nextest-install.toml
+# Edit the owning filter and run python3 tools/gate/nextest_layout.py --sync.
+# tests/tooling/test_nextest_lanes.py checks the generated partition.
 # See docs/spec/05-testing-and-evidence.md section 2.3.
 
 [profile.default]
@@ -91,9 +90,10 @@ filter = 'test(a_crash_around_the_root_stop_record)'
 slow-timeout = { period = "300s", terminate-after = 2 }
 
 [profile.offline]
+# BEGIN generated offline (tools/gate/nextest_layout.py)
 default-filter = '''
 not (
-  test(service::delegation::tests::review::)
+(test(service::delegation::tests::review::)
   | test(service::retention::startup_tests::)
   | test(service::delegation::tests::live_move::)
   | test(retention_three_workers_delegate_directly_fence_old_control_and_count_once)
@@ -101,24 +101,13 @@ not (
   | test(retention_lifetime_never_expires_a_running_job_and_uses_original_terminal_time)
   |
   test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
-  | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
-  | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
-  | test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
-  | test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
-  | test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
-  | test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
-  | test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
   | test(operator_console_pty_wire_small_chunk_stall_keeps_stream_live_and_closes_admission)
   | test(operator_pty_signal_groups_rejects_forged_members_and_continues_valid_groups)
   | test(operator_stream_full_bulk_channel_gates_input_and_preserves_ack_sequence)
   | test(operator_stream_congested_read_gate_honors_read_deadline)
-  | test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
   | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)
-  | test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
-  | test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
-  | test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
   | test(operator_pty_fast_double_fork_escape_is_not_a_descendant_containment_claim)
   | test(operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_kill)
   | test(operator_pty_env_has_exact_curated_keys_without_inherited_secrets)
@@ -132,20 +121,7 @@ not (
   | test(operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup)
   | test(operator_pty_detached_terminal_alone_prevents_daemon_idle_exit)
   | test(operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines)
-  |
-  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
-  | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
-  | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
-  | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)
-  | test(placement_hold_cut_queued_nested_work_waits_without_executor_admission_and_runs_once)
-  | test(placement_hold_cut_submit_nudge_waits_and_stop_wins_without_release)
-  | test(placement_hold_cut_transient_instruction_drain_keeps_owner_loss_debt_without_result_mail)
-  | test(placement_hold_cut_yield_deadline_does_not_promote_on_rebind)
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
-  |
-  test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
-  | test(a_log_lock_without_a_host_retries_past_the_discovery_window)
-  | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
@@ -165,18 +141,10 @@ not (
   |
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
-  |
-  test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
-  | test(lifecycle_archive_refuses_running_process_without_a_turn)
-  | test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
-  | test(lifecycle_archive_refuses_expired_working_finished_child)
-  | test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses)
   | test(=foreground_owner_lease_expiry_stops_without_a_successor)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)
   | test(ledger_retirement_5000_direct_batch_calls)
-  | test(ledger_retirement_low_threshold_direct_batches)
-  | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
@@ -288,16 +256,15 @@ not (
   | test(a_recycling_waiter_is_an_owner_that_recovery_never_waits_on)
   | test(user_stop_grants_the_term_grace_without_blocking_the_caller)
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
-  | test(durability::)
-  | test(host_skeleton::root_wake::)
+  | test(offline_e2e::durability::))
+| (test(host_skeleton::root_wake::)
   |
   test(service::delegation::tests::loss::)
-  | test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
+  |
+  test(operator_host_loss_sigkill_cuts_retain_pins_and_first_bind_waits_for_proof)
   | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
-  |
-  test(host_skeleton::upgrade::)
   | test(host_skeleton::revision_cuts::)
   | test(web_endpoint::lifecycle::)
   | test(host_skeleton::continuation_identity::)
@@ -311,8 +278,7 @@ not (
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
-  | test(wire_host_restart)
-  | test(image_residency_crash_cuts_recover_without_redispatch)
+  | test(wire_host_restart::)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
@@ -322,16 +288,10 @@ not (
   | test(session_switch_drives_a_retained_approval_without_idle_or_ready)
   | test(crash_sweep::durability_subset)
   | test(crash_sweep::durability_twin_pilots)
-  | test(crash_sweep::durability_ledger_retirement_closed_cells)
   | test(crash_sweep::soak_ledger_retirement_closed_cells)
   | test(crash_sweep::soak_ledger_retirement_interrupted_batch)
   | test(crash_sweep::soak_ledger_retirement_live_child_process)
   | test(crash_sweep::soak_ledger_retirement_yielded_cell)
-  | test(crash_sweep::durability_ledger_retirement_live_child_process)
-  | test(crash_sweep::durability_ledger_retirement_yielded_cell)
-  | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
-  | test(crash_sweep::durability_ledger_retirement_pilots)
-  | test(crash_sweep::durability_ledger_retirement_early_relaunches)
   | test(host_crash_cuts_of_create_materialize_and_release_recover)
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
@@ -343,17 +303,11 @@ not (
   | test(=host_skeleton::runner::runner_job_survives_host_loss_and_is_readopted_before_attach)
   | test(=host_skeleton::runner::host_handoff_keeps_jobs_and_continues_the_busy_turn_once)
   | test(=host_skeleton::runner::an_idle_handoff_does_not_resurrect_a_previously_cancelled_root)
-  | test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
   | test(=host_skeleton::runner::an_embedded_open_refuses_an_idle_root_with_a_daemon_child_job)
   | test(=host_skeleton::runner::an_embedded_open_refuses_a_busy_root_with_a_daemon_child_job)
   | test(=host_skeleton::runner::recovery::a_startup_stop_never_takes_a_line_the_sweep_did_not_readopt)
-  | test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
-  | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
   | test(=host_skeleton::runner::recovery::an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal)
-  | test(=host_skeleton::runner::recovery::a_refusing_obsolete_daemon_does_not_block_host_startup)
-  | test(=host_skeleton::runner::recovery::a_slow_user_manager_is_started_once_without_a_detached_fallback)
   | test(=host_skeleton::runner::recovery::a_lost_daemon_is_redialed_while_the_host_serves)
-  | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
   | test(=host_skeleton::runner::recovery::journal::startup_acknowledges_answered_keys_and_empties_its_journal)
   | test(=host_skeleton::runner::recovery::journal::a_recorded_stop_of_a_predecessor_never_dispatches_on_its_successor_head)
   | test(=host_skeleton::runner::recovery::restored::a_sigterm_during_a_restored_admitted_turn_records_its_own_handoff)
@@ -403,12 +357,48 @@ not (
   | test(mcp_on_a_runner_ends_with_its_host)
   | test(gateway::durability::)
   | test(=deploy_requester_loss_does_not_repeat_surrender)
-  | test(subscriptions::custody::tests::durability::)
+  | test(subscriptions::custody::tests::durability::))
+| ((test(host_skeleton::upgrade::))
+| (test(crash_sweep::durability_ledger_retirement_closed_cells)
+| test(crash_sweep::durability_ledger_retirement_live_child_process)
+| test(crash_sweep::durability_ledger_retirement_yielded_cell)
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+| test(crash_sweep::durability_ledger_retirement_pilots)
+| test(crash_sweep::durability_ledger_retirement_early_relaunches))
+| (test(image_residency_crash_cuts_recover_without_redispatch))
+| (test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
+| test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
+| test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
+| test(=host_skeleton::runner::recovery::a_refusing_obsolete_daemon_does_not_block_host_startup)
+| test(=host_skeleton::runner::recovery::a_slow_user_manager_is_started_once_without_a_detached_fallback)
+| test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss))
+| (test(wire_host_restart_switch::))
+| (test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
+| test(a_log_lock_without_a_host_retries_past_ten_seconds)
+| test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed))
+| (test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+| test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
+| test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
+| test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
+| test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
+| test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
+| test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
+| test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
+| test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+| test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
+| test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive))
+| (test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
+| test(lifecycle_archive_refuses_running_process_without_a_turn)
+| test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
+| test(lifecycle_archive_refuses_expired_working_finished_child)
+| test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses))
+| (test(placement_hold_cut_)))
 )
 '''
+# END generated offline
 
 [profile.serial]
-test-threads = 1
+test-threads = 4
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
   test(service::delegation::tests::review::)
@@ -419,24 +409,13 @@ default-filter = '''
   | test(retention_lifetime_never_expires_a_running_job_and_uses_original_terminal_time)
   |
   test(retention_native_job_ack_keeps_running_and_consumes_terminal_once)
-  | test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
-  | test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
-  | test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
-  | test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
-  | test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
-  | test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
-  | test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
   | test(operator_console_pty_wire_small_chunk_stall_keeps_stream_live_and_closes_admission)
   | test(operator_pty_signal_groups_rejects_forged_members_and_continues_valid_groups)
   | test(operator_stream_full_bulk_channel_gates_input_and_preserves_ack_sequence)
   | test(operator_stream_congested_read_gate_honors_read_deadline)
-  | test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
   | test(operator_console_pty_wire_consent_takeover_disconnect_and_loss)
   | test(environment::backend::changes::tests::process_stops::)
   | test(operator_pty_exited_before_first_observation_retains_only_unreaped_anchor)
-  | test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
-  | test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
-  | test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
   | test(operator_pty_fast_double_fork_escape_is_not_a_descendant_containment_claim)
   | test(operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_kill)
   | test(operator_pty_env_has_exact_curated_keys_without_inherited_secrets)
@@ -450,20 +429,7 @@ default-filter = '''
   | test(operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup)
   | test(operator_pty_detached_terminal_alone_prevents_daemon_idle_exit)
   | test(operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines)
-  |
-  test(placement_hold_cut_nonrunnable_resident_is_retired_before_or_after_instruction_preparation)
-  | test(placement_hold_cut_nudge_drain_keeps_owner_loss_debt_without_result_mail)
-  | test(placement_hold_cut_parked_mail_and_late_reservation_wait_without_claim_or_turn)
-  | test(placement_hold_cut_prepared_wake_binding_withdraws_unread_batch_on_release_and_stop)
-  | test(placement_hold_cut_queued_nested_work_waits_without_executor_admission_and_runs_once)
-  | test(placement_hold_cut_submit_nudge_waits_and_stop_wins_without_release)
-  | test(placement_hold_cut_transient_instruction_drain_keeps_owner_loss_debt_without_result_mail)
-  | test(placement_hold_cut_yield_deadline_does_not_promote_on_rebind)
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
-  |
-  test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
-  | test(a_log_lock_without_a_host_retries_past_the_discovery_window)
-  | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
   |
@@ -483,18 +449,10 @@ default-filter = '''
   |
   test(a_dormant_directory_stop_never_opens_or_dispatches_its_continuation)
   | test(ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement)
-  |
-  test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
-  | test(lifecycle_archive_refuses_running_process_without_a_turn)
-  | test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
-  | test(lifecycle_archive_refuses_expired_working_finished_child)
-  | test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses)
   | test(=foreground_owner_lease_expiry_stops_without_a_successor)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_memory)
   | test(ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite)
   | test(ledger_retirement_5000_direct_batch_calls)
-  | test(ledger_retirement_low_threshold_direct_batches)
-  | test(ledger_retirement_low_threshold_closed_cells_reopen_both_stores)
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
@@ -606,7 +564,7 @@ default-filter = '''
   | test(a_recycling_waiter_is_an_owner_that_recovery_never_waits_on)
   | test(user_stop_grants_the_term_grace_without_blocking_the_caller)
   | test(jj_cli_doctor_bounds_output_wait_after_leader_exit)
-  | test(durability::)
+  | test(offline_e2e::durability::)
 '''
 
 # This is the reviewed 16-slot reference layout. The gate renders a copy for
@@ -624,8 +582,6 @@ default-filter = '''
   | test(operator_runner_loss_with_a_real_orphaned_shell_reports_lost_not_dead)
   | test(operator_runner_loss_pid_reuse_never_authorizes_a_signal)
   | test(operator_runner_loss_sigkill_does_not_recover_or_recreate_shell)
-  |
-  test(host_skeleton::upgrade::)
   | test(host_skeleton::revision_cuts::)
   | test(web_endpoint::lifecycle::)
   | test(host_skeleton::continuation_identity::)
@@ -639,8 +595,7 @@ default-filter = '''
   test(host_binding_request_crash_cuts_keep_one_owner_and_never_redispatch)
   | test(lifecycle_commit_crash_cuts_reopen_exactly_before_or_after)
   | test(lifecycle_deletion_crash_cuts_finish_without_recovery_or_cascade)
-  | test(wire_host_restart)
-  | test(image_residency_crash_cuts_recover_without_redispatch)
+  | test(wire_host_restart::)
   | test(released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority)
   | test(endpoint_fallback_receipt_cuts_recover_the_same_unpaid_target)
   | test(approval_resume::)
@@ -650,16 +605,10 @@ default-filter = '''
   | test(session_switch_drives_a_retained_approval_without_idle_or_ready)
   | test(crash_sweep::durability_subset)
   | test(crash_sweep::durability_twin_pilots)
-  | test(crash_sweep::durability_ledger_retirement_closed_cells)
   | test(crash_sweep::soak_ledger_retirement_closed_cells)
   | test(crash_sweep::soak_ledger_retirement_interrupted_batch)
   | test(crash_sweep::soak_ledger_retirement_live_child_process)
   | test(crash_sweep::soak_ledger_retirement_yielded_cell)
-  | test(crash_sweep::durability_ledger_retirement_live_child_process)
-  | test(crash_sweep::durability_ledger_retirement_yielded_cell)
-  | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
-  | test(crash_sweep::durability_ledger_retirement_pilots)
-  | test(crash_sweep::durability_ledger_retirement_early_relaunches)
   | test(host_crash_cuts_of_create_materialize_and_release_recover)
   | test(host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once)
   | test(host_crash_cuts_of_the_start_scan_continue_once_or_hold)
@@ -671,17 +620,11 @@ default-filter = '''
   | test(=host_skeleton::runner::runner_job_survives_host_loss_and_is_readopted_before_attach)
   | test(=host_skeleton::runner::host_handoff_keeps_jobs_and_continues_the_busy_turn_once)
   | test(=host_skeleton::runner::an_idle_handoff_does_not_resurrect_a_previously_cancelled_root)
-  | test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
   | test(=host_skeleton::runner::an_embedded_open_refuses_an_idle_root_with_a_daemon_child_job)
   | test(=host_skeleton::runner::an_embedded_open_refuses_a_busy_root_with_a_daemon_child_job)
   | test(=host_skeleton::runner::recovery::a_startup_stop_never_takes_a_line_the_sweep_did_not_readopt)
-  | test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
-  | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
   | test(=host_skeleton::runner::recovery::an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal)
-  | test(=host_skeleton::runner::recovery::a_refusing_obsolete_daemon_does_not_block_host_startup)
-  | test(=host_skeleton::runner::recovery::a_slow_user_manager_is_started_once_without_a_detached_fallback)
   | test(=host_skeleton::runner::recovery::a_lost_daemon_is_redialed_while_the_host_serves)
-  | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
   | test(=host_skeleton::runner::recovery::journal::startup_acknowledges_answered_keys_and_empties_its_journal)
   | test(=host_skeleton::runner::recovery::journal::a_recorded_stop_of_a_predecessor_never_dispatches_on_its_successor_head)
   | test(=host_skeleton::runner::recovery::restored::a_sigterm_during_a_restored_admitted_turn_records_its_own_handoff)
@@ -734,34 +677,107 @@ default-filter = '''
   | test(subscriptions::custody::tests::durability::)
 '''
 
-# Reserve the whole pool for the closed-cell twin-pilot campaign: its
-# per-store commit signature has previously diverged under competing load.
-# This precedes the general ledger rule because the first weight wins.
-[[profile.durability.overrides]]
-filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
-threads-required = "num-test-threads"
-priority = 100
-
-# These campaigns launch one worker per available slot. Run them only after
-# shared work, and reserve the whole pool so priority is also a phase barrier.
+# Whole-pool campaigns run after shared work and preserve their internal
+# worker reservations. Restart cuts retain their quarter-pool weights.
 [[profile.durability.overrides]]
 filter = '''
 test(=crash_sweep::durability_subset)
 | test(=crash_sweep::durability_twin_pilots)
-| test(image_residency_crash_cuts_recover_without_redispatch)
 '''
 threads-required = "num-test-threads"
 priority = -50
 
 [[profile.durability.overrides]]
+filter = 'test(/::wire_host_restart::(root|child)_[0-7]$/)'
+priority = 90
+threads-required = 4
+
+[profile.install]
+test-threads = 16
+slow-timeout = { period = "240s", terminate-after = 2 }
+# BEGIN generated install (tools/gate/nextest_layout.py)
+default-filter = '''
+(test(host_skeleton::upgrade::))
+| (test(crash_sweep::durability_ledger_retirement_closed_cells)
+| test(crash_sweep::durability_ledger_retirement_live_child_process)
+| test(crash_sweep::durability_ledger_retirement_yielded_cell)
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+| test(crash_sweep::durability_ledger_retirement_pilots)
+| test(crash_sweep::durability_ledger_retirement_early_relaunches))
+| (test(image_residency_crash_cuts_recover_without_redispatch))
+| (test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
+| test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
+| test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
+| test(=host_skeleton::runner::recovery::a_refusing_obsolete_daemon_does_not_block_host_startup)
+| test(=host_skeleton::runner::recovery::a_slow_user_manager_is_started_once_without_a_detached_fallback)
+| test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss))
+| (test(wire_host_restart_switch::))
+| (test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
+| test(a_log_lock_without_a_host_retries_past_ten_seconds)
+| test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed))
+| (test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+| test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
+| test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
+| test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
+| test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
+| test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
+| test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
+| test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
+| test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+| test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
+| test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive))
+| (test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
+| test(lifecycle_archive_refuses_running_process_without_a_turn)
+| test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
+| test(lifecycle_archive_refuses_expired_working_finished_child)
+| test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses))
+| (test(placement_hold_cut_))
+'''
+
+[[profile.install.overrides]]
+filter = '''
+(test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
+| test(a_log_lock_without_a_host_retries_past_ten_seconds)
+| test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed))
+| (test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+| test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
+| test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
+| test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
+| test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
+| test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
+| test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
+| test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
+| test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+| test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
+| test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive))
+| (test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
+| test(lifecycle_archive_refuses_running_process_without_a_turn)
+| test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
+| test(lifecycle_archive_refuses_expired_working_finished_child)
+| test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses))
+| (test(placement_hold_cut_))
+'''
+threads-required = "num-test-threads"
+priority = -50
+# END generated install
+
+[[profile.install.overrides]]
+filter = 'test(=crash_sweep::durability_ledger_retirement_closed_cells)'
+threads-required = "num-test-threads"
+priority = 100
+
+[[profile.install.overrides]]
+filter = 'test(image_residency_crash_cuts_recover_without_redispatch)'
+threads-required = "num-test-threads"
+priority = -50
+
+[[profile.install.overrides]]
 filter = 'test(/^crash_sweep::durability_ledger_retirement_/)'
 threads-required = 4
 
-# Start independent restart cuts and fixed absence windows early; pilot
-# parity checks are not restart cuts and keep the ordinary priority.
-[[profile.durability.overrides]]
+[[profile.install.overrides]]
 filter = '''
-test(/::(wire_host_restart|wire_host_restart_switch)::(root|child)_[0-7]$/)
+test(/::wire_host_restart_switch::(root|child)_[0-7]$/)
 | test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
 | test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
 '''
@@ -781,4 +797,7 @@ path = "junit.xml"
 path = "junit.xml"
 
 [profile.durability.junit]
+path = "junit.xml"
+
+[profile.install.junit]
 path = "junit.xml"

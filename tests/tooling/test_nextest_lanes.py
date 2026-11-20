@@ -1,10 +1,8 @@
 """The nextest lane profiles partition the offline suite.
 
-`.config/nextest.toml` names the serial (wall-clock budget) and durability
-members once each, as those profiles' `default-filter`, and the `offline`
-(parallel) profile excludes exactly their union. A predicate that drifts out
-of the exclusion would run a budget test under parallel load; one that only
-the exclusion names would never run at all.
+`.config/nextest.toml` defines the serial and core durability filters.
+The install families live in the install catalog. The generated offline
+filter excludes exactly their union.
 """
 
 from __future__ import annotations
@@ -25,8 +23,11 @@ SOURCE_ROOTS = ("crates", "bin", "tests")
 PREDICATE = re.compile(r"test\(([^)]+)\)")
 sys.path.insert(0, str(ROOT / "tools/gate"))
 from check_workspace import _inline_modules, all_rust_tokens  # noqa: E402
+from changed_packages import INSTALL_FAMILY_PATHS  # noqa: E402
+from nextest_layout import SPECIAL_LANES, install_catalog, sync_membership  # noqa: E402
 
 
+@cache
 def profiles() -> dict:
     with CONFIG.open("rb") as handle:
         return tomllib.load(handle)["profile"]
@@ -56,7 +57,7 @@ def predicate_is_defined(
         return name[:-2] in modules or any(path.startswith(name) for path in exact)
     if "::" in name:
         return name in qualified
-    return name in functions or name in modules
+    return name in functions or name in modules or any(test_match(name, path) for path in exact)
 
 
 def exact_test_paths(path: Path, text: str, prefix: tuple[str, ...] | None = None) -> set[str]:
@@ -217,23 +218,35 @@ class NextestLaneTests(unittest.TestCase):
             module_overmatches(predicates("serial") + predicates("durability"), modules), []
         )
 
-    def test_offline_excludes_exactly_the_serial_and_durability_lanes(self) -> None:
-        serial, durability = predicates("serial"), predicates("durability")
-        self.assertTrue(serial and durability)
-        self.assertEqual(set(serial) & set(durability), set())
-        for lane in (serial, durability):
-            self.assertEqual(len(lane), len(set(lane)), "duplicate lane predicate")
+    def test_generated_offline_exclusion_partitions_the_suite(self) -> None:
+        source, catalog = CONFIG.read_text(), install_catalog(CONFIG)
+        self.assertEqual(set(catalog), set(INSTALL_FAMILY_PATHS))
+        self.assertEqual(source, sync_membership(source, catalog), "run nextest_layout.py --sync")
+        selectors = {name: predicates(name) for name in SPECIAL_LANES}
         offline = profiles()["offline"]["default-filter"]
         self.assertRegex(offline, r"^\s*not \(")
-        self.assertEqual(predicates("offline"), serial + durability)
-        for name in ("serial", "durability"):
+        self.assertEqual(
+            predicates("offline"), [term for lane in selectors.values() for term in lane]
+        )
+        membership: dict[str, str] = {}
+        inventory = exact_inventory(ROOT)
+        for name, terms in selectors.items():
+            self.assertTrue(terms, name)
+            self.assertEqual(len(terms), len(set(terms)), f"duplicate {name} predicate")
             body = profiles()[name]["default-filter"]
-            self.assertEqual(PREDICATE.sub("", body).replace("|", "").split(), [], name)
+            self.assertEqual(re.sub(r"[|()]", "", PREDICATE.sub("", body)).split(), [], name)
+            matches = {test for test in inventory if any(test_match(term, test) for term in terms)}
+            self.assertFalse(
+                membership.keys() & matches,
+                f"{name} overlaps an earlier lane: {sorted(membership.keys() & matches)}",
+            )
+            membership.update(dict.fromkeys(matches, name))
 
     def test_lane_profiles_keep_reviewed_thread_counts_and_budget_timeout(self) -> None:
-        self.assertEqual(profiles()["serial"]["test-threads"], 1)
+        self.assertEqual(profiles()["serial"]["test-threads"], 4)
         self.assertEqual(profiles()["durability"]["test-threads"], 16)
-        for name in ("serial", "durability"):
+        self.assertEqual(profiles()["install"]["test-threads"], 16)
+        for name in SPECIAL_LANES:
             profile = profiles()[name]
             self.assertEqual(profile["slow-timeout"], {"period": "240s", "terminate-after": 2})
 
@@ -249,8 +262,10 @@ class NextestLaneTests(unittest.TestCase):
         no_retry_setting(tomllib.loads(CONFIG.read_text()))
 
     def test_durability_weights_protect_internal_workers_and_pilot_isolation(self) -> None:
-        overrides = profiles()["durability"]["overrides"]
-        isolated, heavy, ledger, first = overrides
+        heavy, first = profiles()["durability"]["overrides"]
+        former_serial, isolated, image, ledger, install_first = profiles()["install"]["overrides"]
+        self.assertEqual(former_serial["threads-required"], "num-test-threads")
+        self.assertEqual(former_serial["priority"], -50)
         self.assertEqual(
             isolated,
             {
@@ -264,21 +279,21 @@ class NextestLaneTests(unittest.TestCase):
         self.assertEqual(ledger["threads-required"], 4)
         self.assertIn("durability_subset", heavy["filter"])
         self.assertIn("durability_twin_pilots", heavy["filter"])
-        self.assertIn("image_residency_crash_cuts", heavy["filter"])
+        self.assertIn("image_residency_crash_cuts", image["filter"])
+        self.assertEqual(image["threads-required"], "num-test-threads")
         self.assertEqual(first["priority"], 90)
         self.assertEqual(first["threads-required"], 4)
-        for override in overrides:
+        for override in (heavy, first, former_serial, isolated, image, ledger, install_first):
             self.assertLessEqual(-100, override.get("priority", 0))
             self.assertLessEqual(override.get("priority", 0), 100)
-        pattern = (
-            r"::(wire_host_restart"
-            r"|wire_host_restart_switch)::(root|child)_[0-7]$"
-        )
-        self.assertIn(f"test(/{pattern}/)", first["filter"])
-        for family in (
-            "wire_host_restart",
-            "wire_host_restart_switch",
+        for family, rule in (
+            ("wire_host_restart", first),
+            ("wire_host_restart_switch", install_first),
         ):
+            pattern = rf"::{family}::(root|child)_[0-7]$"
+            self.assertIn(f"test(/{pattern}/)", rule["filter"])
+            self.assertEqual(rule["priority"], 90)
+            self.assertEqual(rule["threads-required"], 4)
             for role in ("root", "child"):
                 for group in range(8):
                     self.assertRegex(f"prefix::{family}::{role}_{group}", pattern)
@@ -295,11 +310,7 @@ class NextestLaneTests(unittest.TestCase):
         modules = (directory / "wire/cuts.rs").read_text()
         for family in ("wire_host_restart", "wire_host_restart_switch"):
             self.assertRegex(modules, rf"mod {family} \{{[^}}]*restart_matrix::matrix_tests!")
-            lane = (
-                "install"
-                if family.endswith("_switch") and "install" in profiles()
-                else "durability"
-            )
+            lane = "install" if family.endswith("_switch") else "durability"
             for group in expected:
                 name = f"host_skeleton::crash::wire::cuts::{family}::{group}"
                 self.assertTrue(any(test_match(term, name) for term in predicates(lane)), name)
@@ -335,7 +346,7 @@ class NextestLaneTests(unittest.TestCase):
                 )
 
     def test_every_lane_predicate_names_a_test_or_module_in_the_tree(self) -> None:
-        names = predicates("serial") + predicates("durability")
+        names = [term for lane in SPECIAL_LANES for term in predicates(lane)]
         functions: set[str] = set()
         modules: set[str] = set()
         qualified: set[str] = set()

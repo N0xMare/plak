@@ -2258,10 +2258,10 @@ tree passes the integration batch gate, with the Linux and Mac runs concurrent:
 - Linux x86_64 musl runs workspace and standalone lint, the test build, and
   the rdeps-scoped parallel, core serial and core durability lanes
   (`just musl native --batch`). The parallel lane includes runtime-binary
-  edges (chapter 05 §1). Direct changes to install-only families nominate
-  those families for additional batch evidence.
+  edges (chapter 05 §1). Direct changes to install-only families run a
+  separate pass over those families.
 - Shared formatting, workspace/feature structure, public compile contracts
-  and tooling run once per batch. The dependency audit runs when `Cargo.lock`
+  and path-scoped tooling run once per batch. The dependency audit runs when `Cargo.lock`
   or `.config/deny.toml` changes and at RC.
 - Apple Silicon macOS runs `just batch-mac`: workspace all-features clippy,
   the workspace test build, and three platform-sensitive passes, each
@@ -2305,8 +2305,9 @@ standalone rustdoc and archive verification, and runs the ignored 5,000-call
 and full indexed retirement soaks. `just soak` selects only that long test
 evidence (chapter 05 §2.3).
 
-The test lanes remain sequential. Serial uses one thread. The durability
-lane's host-scaled pool has `N = max(1, min(16, available_parallelism))`
+The test lanes remain sequential. Serial uses four threads on Linux and one
+on macOS. The durability and install pools have
+`N = max(1, min(16, available_parallelism))`
 slots, using Rust's host, affinity and quota count. Internally parallel crash
 campaigns reserve the whole pool at late priority -50; other tests cannot
 overlap that reservation. Ledger and restart/recovery groups reserve

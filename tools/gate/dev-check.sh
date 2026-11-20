@@ -3,7 +3,7 @@
 # Usage: tools/gate/dev-check.sh [--qual-container] [--fast [--rdeps] [PACKAGE...] |
 #                            --batch | --batch-mac | --install | --full | --soak |
 #                            --steps GROUP[,GROUP...]]
-# --steps selects exactly the named groups, in canonical order.
+# --steps selects named groups in order; PLAK_BATCH_BASE enables batch scoping.
 # --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -85,6 +85,8 @@ supported_packages=(plakous plakous-agent plakous-model plakous-tools plakd)
 scope=''
 mac_scope=''
 mac_serial_scope=''
+install_scope=''
+tooling_args=(-v)
 worker_clippy=()
 worker_features=()
 if [[ "$tier" == fast ]]; then
@@ -120,9 +122,19 @@ if [[ "$tier" == fast ]]; then
   fi
 fi
 
-# Explicit fan-out parallel steps can select the same committed batch base.
-if [[ "$tier" == batch || "$tier" == batch-mac ||
-      ( "$tier" == steps && ",$selection," == *",tests-parallel,"* && -n "${PLAK_BATCH_BASE:-}" ) ]]; then
+# Explicit fan-out steps with a batch base share named batch policy.
+batch_scoped=false
+if [[ "$tier" == batch || ( "$tier" == steps && -n "${PLAK_BATCH_BASE:-}" ) ]]; then
+  batch_scoped=true
+  tooling_args+=(--batch)
+  # The serial runner owns this extra pass even when the other lanes are
+  # fanned out. An explicit tests-install is always the complete profile.
+  if [[ ",$selection," == *",tests-serial,"* && ",$selection," != *",tests-install,"* ]]; then
+    install_scope="$(python3 tools/gate/changed_packages.py --install-filter)"
+    if [[ -n "$install_scope" ]]; then selection+=,tests-install; fi
+  fi
+fi
+if [[ "$tier" == batch-mac || ( "$batch_scoped" == true && ",$selection," == *",tests-parallel,"* ) ]]; then
   scope="$(python3 tools/gate/changed_packages.py --batch-filter)"
   echo "batch test scope: $scope"
 fi
@@ -508,6 +520,15 @@ run_lane() {
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
 
+run_weighted_lane() {
+  local profile=$1 config threads
+  shift
+  config="$TMPDIR/nextest-$profile.toml"
+  threads="$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$config" --profile "$profile")" || return
+  echo "-- $profile pool: $threads slots --"
+  run_lane "$profile" --config-file "$config" --test-threads="$threads" "$@"
+}
+
 # The rustc target for the portable-crate library check (spec 06 section 7.5).
 # Not inherited from CARGO_BUILD_TARGET: a musl lane must not redirect it.
 wasm_portability_target=wasm32-unknown-unknown
@@ -672,12 +693,13 @@ run_group() {
         run_lane offline
       fi ;;
     tests-serial)
-      echo "-- nextest: serial lane (profile serial, wall-clock budgets, one thread) --"
-      local serial_status=0
+      local serial_status=0 serial_threads=1
       if [[ "$tier" != soak ]]; then
+        if [[ "$(uname -s)" == Linux ]]; then serial_threads=4; fi
+        echo "-- nextest: serial lane (profile serial, wall-clock budgets, $serial_threads threads) --"
         local filter=()
         if [[ -n "$mac_serial_scope" ]]; then filter=(--no-tests=pass -E "$mac_serial_scope"); fi
-        run_lane serial --test-threads=1 ${filter[@]+"${filter[@]}"} || serial_status=$?
+        run_lane serial --test-threads="$serial_threads" ${filter[@]+"${filter[@]}"} || serial_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: long-turn retirement soak (ignored evidence, one thread) --"
@@ -689,12 +711,9 @@ run_group() {
       echo "-- nextest: durability lane (profile durability, host-scaled weighted crash matrices) --"
       local durability_status=0
       if [[ "$tier" != soak ]]; then
-        local durability_config="$TMPDIR/nextest-durability.toml" durability_threads
-        durability_threads=$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$durability_config") || return
-        echo "-- durability pool: $durability_threads slots --"
         local filter=()
         if [[ -n "$mac_scope" ]]; then filter=(--no-tests=pass -E "$mac_scope"); fi
-        run_lane durability --config-file "$durability_config" --test-threads="$durability_threads" ${filter[@]+"${filter[@]}"} || durability_status=$?
+        run_weighted_lane durability ${filter[@]+"${filter[@]}"} || durability_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: full indexed retirement soak (ignored evidence, one thread) --"
@@ -703,13 +722,13 @@ run_group() {
       fi
       return "$durability_status" ;;
     tests-install)
-      # Until the install partition is defined, its rows still run in the
-      # regular lanes at batch and install-checks.
-      if [[ ! -f .config/nextest.toml ]] || ! grep -q '^\[profile\.install\]$' .config/nextest.toml; then
-        echo "== no separate install test profile =="
-        return 0
+      if [[ -n "$install_scope" ]]; then
+        echo "-- nextest: install families triggered by changed paths --"
+        run_weighted_lane install -E "$install_scope"
+      else
+        run_weighted_lane install
       fi
-      run_lane install --test-threads=1 ;;
+      ;;
     contracts)
       echo "== positive/negative public compile contracts =="
       nice -n 5 python3 tools/gate/check_public_compile.py ;;
@@ -717,7 +736,7 @@ run_group() {
       echo "== structure: checker tests and real-host reference client =="
       PLAK_TOOLING_BINARY="$plak_host" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
         PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" \
-        python3 tools/gate/run_tooling_tests.py -v ;;
+        python3 tools/gate/run_tooling_tests.py "${tooling_args[@]}" ;;
     package)
       # Publication packages a git tree; the musl container mounts an export.
       if [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then

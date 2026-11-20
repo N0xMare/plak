@@ -18,6 +18,7 @@ assert SPEC and SPEC.loader
 CHANGED = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = CHANGED
 SPEC.loader.exec_module(CHANGED)
+from run_tooling_tests import TREE_READERS, selected_modules  # noqa: E402
 
 DIRS = {
     "bin/plakd": "plakd",
@@ -198,10 +199,31 @@ class TouchedPackagesTests(unittest.TestCase):
             ("bin/plakd/src/commands/runner/services.rs", "runner-startup"),
             ("crates/common/runner-dial/src/lib.rs", "runner-startup"),
             ("bin/plakd/tests/integration/host_skeleton/crash/wire/cuts.rs", "wire-restart-switch"),
+            ("bin/plakd/src/host/bridge.rs", "bridge"),
+            ("bin/plakd/src/terminal_registry/pins.rs", "operator-pins-rate"),
+            ("bin/plakd/src/commands/session/lifecycle/keepalive.rs", "lifecycle-deletion"),
+            ("crates/hosting/hosted/src/agent/park/tests.rs", "placement-hold"),
         ):
             with self.subTest(path=path):
                 self.assertEqual(CHANGED.install_families([path], {}), [name])
         self.assertEqual(CHANGED.install_families(["AGENTS.md"], {}), [])
+
+    def test_rust_only_batches_keep_tree_readers_and_inputs_trigger_full_tooling(self):
+        scoped = selected_modules(["bin/plakd/src/lib.rs", "toolshed/unrelated.py"])
+        self.assertEqual({module.stem for module in scoped}, TREE_READERS)
+        full = selected_modules(None)
+        self.assertGreater(len(full), len(scoped))
+        for path in (
+            "tools/gate/changed_packages.py",
+            "tests/tooling/test_changed_packages.py",
+            "tests/live/driver.py",
+            "eval/adapter.py",
+            "Justfile",
+            ".config/nextest.toml",
+            "tests/fixtures/config-scenarios/fixture.toml",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(selected_modules([path]), full)
 
     def test_the_real_workspace_maps_every_manifest_to_its_package(self):
         dirs = CHANGED.package_dirs()

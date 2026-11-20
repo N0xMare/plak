@@ -29,7 +29,7 @@ install-checks:
     tools/gate/dev-check.sh --steps tests-parallel,tests-serial,tests-durability,tests-install
 
 # Exactly these comma-separated groups, in canonical order (for independent lanes).
-[doc("exactly these comma-separated groups, in canonical order")]
+[doc("comma-separated groups in canonical order (PLAK_BATCH_BASE applies batch scope)")]
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 

@@ -270,6 +270,8 @@ if sys.argv[1].endswith('changed_packages.py'):
         print(os.environ.get('GATE_DEPENDENTS', '\n'.join(sys.argv[3:])), end='')
     elif '--batch-filter' in sys.argv:
         print(os.environ.get('GATE_BATCH_FILTER', 'all()'))
+    elif '--install-filter' in sys.argv:
+        print(os.environ.get('GATE_INSTALL_FILTER', ''))
     else:
         print(os.environ.get('GATE_CHANGED', ''), end='')
 if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv:
@@ -712,7 +714,18 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(self.filtersets(calls), [self.env['GATE_BATCH_FILTER'], None, None])
         for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py'):
             self.assertTrue(any(s[0].endswith(checker) for s in scripts))
-        self.assertEqual(sum(s[0].endswith('run_tooling_tests.py') for s in scripts), 1)
+        self.assertIn(['tools/gate/run_tooling_tests.py', '-v', '--batch'], scripts)
+
+    def test_a_batch_serial_runner_adds_only_the_triggered_install_families(self):
+        self.env['PLAK_BATCH_BASE'] = 'batch-base'
+        self.env['GATE_INSTALL_FILTER'] = 'test(host_skeleton::upgrade::)'
+        self.env['GATE_AVAILABLE_PARALLELISM'] = '8'
+        result, calls, scripts = self.run_gate('--steps', 'tests-serial')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.profiles(calls), ['serial', 'install'])
+        self.assertEqual(self.filtersets(calls), [None, self.env['GATE_INSTALL_FILTER']])
+        self.assertIn('--test-threads=8', self.lanes(calls)[1]['args'])
+        self.assertIn(['tools/gate/changed_packages.py', '--install-filter'], scripts)
 
     def test_feature_builds_deny_warnings_on_the_flags_cargo_will_use(self):
         self.env['RUSTFLAGS'] = '-C link-arg=-fuse-ld=mold'
@@ -1133,7 +1146,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         full, calls, _ = self.run_gate('--full')
         self.assertEqual(full.returncode, 0, full.stderr)
         self.assertEqual(
-            self.profiles(calls), ['offline', 'durability', 'durability', 'serial', 'serial']
+            self.profiles(calls),
+            ['offline', 'durability', 'durability', 'serial', 'serial', 'install'],
         )
         soaks = [call for call in calls if '--run-ignored' in call['args']]
         self.assertEqual(
@@ -1230,7 +1244,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--steps', 'tests-serial')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['serial'])
-        self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
+        width = 4 if os.uname().sysname == 'Linux' else 1
+        self.assertIn(f'--test-threads={width}', self.lanes(calls)[0]['args'])
         self.assertNotIn('--run-ignored', self.lanes(calls)[0]['args'])
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
 
@@ -1266,7 +1281,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--steps', 'tests-serial,tests-durability')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['durability', 'serial'])
-        self.assertIn('--test-threads=1', self.lanes(calls)[1]['args'])
+        width = 4 if os.uname().sysname == 'Linux' else 1
+        self.assertIn(f'--test-threads={width}', self.lanes(calls)[1]['args'])
         self.assertIn('--test-threads=10', self.lanes(calls)[0]['args'])
         self.assertIn('--config-file', self.lanes(calls)[0]['args'])
 

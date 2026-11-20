@@ -92,13 +92,14 @@ full Mac suite and strict crash sweep (spec 06 §8). Full adds release-only
 variants, standalone rustdoc, archive verification and ignored retirement
 soaks. A passing full run on a clean tree records the evidence publication
 requires. Inert documentation changes can reuse it; a `README.md` change
-needs new archive verification (spec 06 §6.5). Explicit groups do not imply
-other groups; test groups and tooling still prepare real worker binaries.
+needs new archive verification (spec 06 §6.5). With an explicit batch base,
+the serial runner also handles path-triggered install families.
 
-The nextest profiles in `.config/nextest.toml` partition the offline suite.
-Keep new budget and crash cases in the reviewed lane, out of the parallel
-profile. Public compile contracts keep their own persistent cache beside the
-gate target (override with `PLAK_PUBLIC_CONTRACTS_DIR`).
+The nextest profiles partition the offline suite. Edit the owning budget or
+crash filter (install families are in `.config/nextest-install.toml`), then
+run `python3 tools/gate/nextest_layout.py --sync`. Public compile contracts
+keep a persistent cache beside the gate target (`PLAK_PUBLIC_CONTRACTS_DIR`
+overrides it).
 Hand-run nextest is `just nextest`. It exports the isolated test environment
 from `tools/gate/test-env.sh`: per-checkout `TMPDIR` (`tools/gate/test-tmpdir.sh`,
 `PLAK_TEST_TMPDIR` overrides), `PLAK_HOME` under that directory (mode 0700), an

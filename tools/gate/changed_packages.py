@@ -18,6 +18,7 @@ Usage:
   changed_packages.py --dependents PACKAGE...  # conservative workspace rdeps
   changed_packages.py --batch-filter          # nextest filter, using PLAK_BATCH_BASE
   changed_packages.py --install-families [PATH...]  # triggered install test family names
+  changed_packages.py --install-filter        # filter for just the triggered install families
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import vcs_listing  # noqa: E402
+from nextest_layout import install_catalog, install_filter  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = "--workspace"
@@ -44,6 +46,7 @@ WORKSPACE_INPUTS = {
     ".clippy.toml",
     ".rustfmt.toml",
     ".config/nextest.toml",
+    ".config/nextest-install.toml",
 }
 WORKSPACE_PREFIXES = (".cargo/", "vendor/")
 # A fixture crate is a normal package input; loose shared fixtures are not.
@@ -82,6 +85,23 @@ INSTALL_FAMILY_PATHS = {
         r"/daemon(?:/|\.rs$)",
     ),
     "wire-restart-switch": (r"/[^/]*(?:switch|wire)[^/]*(?:/|\.rs$)",),
+    "bridge": (
+        r"^bin/plakd/src/(?:host/(?:bridge|starter)|commands/(?:stdio|host))(?:/|\.rs$)",
+        r"^bin/plakd/tests/integration/host_skeleton/bridge(?:/|\.rs$)",
+    ),
+    "operator-pins-rate": (
+        r"^bin/plakd/src/(?:terminal_registry|host/console)(?:/|\.rs$)",
+        r"^crates/runtimes/runner/src/operator(?:/|\.rs$)",
+    ),
+    "lifecycle-deletion": (
+        r"^bin/plakd/src/(?:commands/session/(?:delete|lifecycle)|host/(?:sessions/)?lifecycle|store/lifecycle)(?:/|\.rs$)",
+        r"^bin/plakd/src/commands/session_delete_tests\.rs$",
+    ),
+    "placement-hold": (
+        r"^crates/hosting/hosted/src/agent/(?:park|placement)(?:/|\.rs$)",
+        r"^crates/core/agent/src/runtime/(?:durable/tests/placement_hold|driver/placement_wait)(?:/|\.rs$)",
+        r"^bin/plakd/(?:src/host/sessions/placement|tests/integration/placement_hold_tests)(?:/|\.rs$)",
+    ),
 }
 
 
@@ -114,6 +134,14 @@ def batch_paths(root: Path, base: str | None) -> list[str]:
     # Previously generated regression seeds may remain in a persistent lane.
     # Only a tracked seed is an input to the committed batch diff.
     return vcs_listing.changed_paths(root, base, include_ignored_seeds=not base)
+
+
+def batch_changes(root: Path, base: str | None) -> list[str] | None:
+    """Return known changed paths or None when no comparison establishes a scope."""
+    if not base and vcs_listing.kind(root) == "export":
+        return None
+    paths = batch_paths(root, base)
+    return paths if paths or base else None
 
 
 def reverse_dependencies(names: list[str], packages: list[dict]) -> list[str]:
@@ -187,22 +215,26 @@ def main(argv: list[str]) -> int:
         return 0
     base = os.environ.get("PLAK_BATCH_BASE")
     if argv == ["--batch-filter"]:
-        if vcs_listing.kind(REPO_ROOT) == "export" and not base:
-            print("all()")
-            return 0
-        paths = batch_paths(REPO_ROOT, base)
-        if not paths and not base:
-            # A clean Git checkout without a supplied batch base must not
-            # report an empty selection for a previously committed batch.
+        paths = batch_changes(REPO_ROOT, base)
+        if paths is None:
             print("all()")
             return 0
         packages = workspace_packages()
         print(batch_filter(touched_packages(paths, package_dirs(packages=packages)), packages))
         return 0
-    if argv[:1] == ["--install-families"]:
-        paths = argv[1:] or batch_paths(REPO_ROOT, base)
-        for family in install_families(paths, package_dirs()):
-            print(family)
+    if argv[:1] == ["--install-families"] or argv == ["--install-filter"]:
+        paths = argv[1:] or batch_changes(REPO_ROOT, base)
+        names = (
+            sorted(INSTALL_FAMILY_PATHS)
+            if paths is None
+            else (install_families(paths, package_dirs()) if paths else [])
+        )
+        if argv[0] == "--install-filter":
+            if names:
+                print(install_filter(install_catalog(), names))
+        else:
+            for family in names:
+                print(family)
         return 0
     paths = argv or changed_paths()
     for name in touched_packages(paths, package_dirs()):

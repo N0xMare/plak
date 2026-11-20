@@ -129,7 +129,7 @@ test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that
 variable. `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION` alters only the destination
 capability probe under test-hooks to pin changed-triple foreground refusal;
-production ignores it and the source runner triple is untouched. The durability profile owns `host_skeleton::upgrade::`, excluded
+production ignores it and the source runner triple is untouched. The install profile owns `host_skeleton::upgrade::`, excluded
 from offline: named state and paused queue round trips, source reopen refusal,
 recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
 destination recovery, wait timeout and preflight failures. Receipt cuts cover
@@ -974,17 +974,17 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
 | `standalone` | Clippy each of the publish-plan crates alone in its default resolution (`--lib --bins`, `--bins` for the binary-only Python worker, or `--all-targets` for supported packages), warnings denied, in a dedicated target directory. Check portable wasm32 libraries there (chapter 06 §7.5), and package the staged publication cohort with `cargo package --locked --offline --no-verify` in a separate `package-lite` target. When archive verification is selected on a repository tree it already supplies the packaging witness, so no separate package-lite run is needed |
 | `contracts` | Positive and negative public compile contracts |
-| `tooling` | Python tooling self-tests, including a test-only socket driver and the user-guide hello/directory/attach transcript against an isolated real host with an offline script, requiring exact wire-version refusal |
+| `tooling` | Python tooling self-tests, including a test-only socket driver and the user-guide hello/directory/attach transcript against an isolated real host, requiring exact wire-version refusal. Batch always runs the tree readers and selects the rest by changed path |
 | `tests-parallel` | Nextest `offline` profile |
-| `tests-durability` | Nextest `durability` profile: crash matrices and the SQLite SIGKILL campaign in a host-scaled weighted pool |
-| `tests-serial` | Nextest `serial` profile: wall-clock budgets, one test thread |
-| `tests-install` | Additional `install` profile rows, one test thread, once defined separately from serial and durability |
+| `tests-durability` | Nextest `durability` profile: core crash-law rows and the SQLite SIGKILL campaign in a host-scaled weighted pool |
+| `tests-serial` | Nextest `serial` profile: wall-clock budgets, four threads on Linux and one on macOS |
+| `tests-install` | Additional install families in a host-scaled weighted pool; former serial families retain exclusive reservations |
 | `package` | `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, then package and verify the staged cohort strictly offline (chapter 06 §6.5); requires a repository tree |
 
 | Tier | Groups |
 | --- | --- |
 | fast | `static`, scoped `tests-parallel` if any package is touched |
-| batch | `static`, `standalone`, `contracts`, `tooling`, scoped `tests-parallel`, `tests-durability`, `tests-serial` |
+| batch | `static`, `standalone`, `contracts`, path-scoped `tooling`, scoped `tests-parallel`, core `tests-durability` and `tests-serial`; an install pass only for path-triggered families |
 | batch-mac | Workspace clippy, a shared test build and three platform-sensitive passes: parallel, durability, serial |
 | install | `builds`, `rustdoc`, full `tests-parallel`, `tests-install`; `just install-checks` runs the complete Mac offline suite without packaging |
 | full | Every group and both ignored retirement soaks |
@@ -1001,8 +1001,10 @@ A passing run that includes archive verification on an eligible tree
 skips a check names the skip in its final summary and writes neither file.
 Chapter 06 §6.5 specifies when evidence covers later trees.
 
-`--steps` runs exactly its named groups, rejects unknown or empty groups,
-and implies no other group. Test lanes and tooling still prepare the shared
+`--steps` runs its named groups and rejects unknown or empty groups. When
+given a batch base it shares the batch scoping policy: the runner owning
+`tests-serial` also runs any triggered install families unless
+`tests-install` was explicitly selected in full. Test lanes and tooling still prepare the shared
 test artifacts. Independent runners use separate checkout, target and scratch
 roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
@@ -1050,8 +1052,19 @@ The Mac intersects that same scope with the platform-sensitive predicates in
 `tools/gate/mac-selection.filter`: F for parallel and durability, F_SERIAL
 for serial. Nextest intersects each expression with the lane profile and an
 empty intersection passes. `changed_packages.py --install-families` identifies
-directly touched install-only test families; lane membership remains in the
-nextest profiles.
+directly touched install-only families. Linux batch runs the corresponding
+union from `.config/nextest-install.toml` in the `install` profile, separately
+from core serial and durability. If no batch comparison can establish scope,
+all families are eligible. Mac batch keeps its three passes; Mac install
+checks and full run the complete install profile.
+
+Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
+`test_pinned_callback_ports`, `test_configuration_placement`,
+`test_uuid_features`, `test_portability_fence` and `test_policy_validators`.
+Changing anything below `tools/`, `tests/tooling/`, `tests/live/`, `eval/`,
+`.config/`, or `tests/fixtures/`, or changing `Justfile`, selects the entire
+tooling suite. An unknown scope, full, or an explicit tooling step without
+a batch base also selects the entire suite.
 
 Public compile contracts isolate their feature graphs from workspace artifacts
 in a persistent `.public-contracts/<target-dir-name>/<target-triple>`
@@ -1176,7 +1189,7 @@ exports all four for the test process.
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
 | Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-hooks` |
-| Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
+| Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per selected `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
 uncaught JavaScript rejection, `Promise.allSettled`, retained earlier output,
@@ -1960,17 +1973,17 @@ evidence.
 
 ### 2.2 nextest profiles
 
-`.config/nextest.toml` defines the store directory, two test groups, and four
-profiles. Nextest layers every named profile over `default`, so the three lane
-profiles inherit its settings, test groups and overrides and add only their
-membership (`default-filter`), thread count and slow timeout.
+`.config/nextest.toml` defines the store directory, test groups and lane
+profiles. Nextest layers each lane over `default` and inherits its settings,
+groups and overrides. A lane supplies membership, scheduling and timeout.
 
 | Profile | Membership | Use |
 | --- | --- | --- |
 | `default` | Everything nextest selects | Ad-hoc runs |
-| `offline` | Everything except the `serial` and `durability` members | The parallel lane: `tests-parallel`, `just fast`, `just steps tests-parallel` |
+| `offline` | Everything not assigned to serial, durability or install | The parallel lane: `tests-parallel`, `just fast`, `just steps tests-parallel` |
 | `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just steps tests-serial` |
-| `durability` | Crash matrices and the sqlite SIGKILL campaign (§2.3) | The durability lane: `tests-durability`, `just steps tests-durability` |
+| `durability` | Core crash matrices and the SQLite SIGKILL campaign (§2.3) | Batch core durability and explicit `tests-durability` |
+| `install` | Additional upgrade, runner, restart, residency, retirement and timing families (§2.3) | Exact-tree install checks, full, and the subset triggered by direct changes in Linux batch |
 
 The three `ledger_retirement_5000_*` tests are ignored long-turn evidence, not
 routine serial work. `just soak` builds the real workers and selects those
@@ -1978,25 +1991,26 @@ ignored tests and the four full indexed retirement matrices, with one test
 thread and the normal isolated test environment.
 It runs the 100-cell × 50-leaf fixture against memory and SQLite, plus 5,000
 direct batch calls, at production retirement thresholds. `just full` runs the
-same long evidence after the ordinary serial and durability tests. Check,
-platform, fast and explicit test groups never opt into ignored tests. To qualify long-turn evidence
+same long evidence in the serial and durability groups. Batch, install,
+fast and explicit test groups never opt into ignored tests. To qualify long-turn evidence
 on demand, run:
 
 ```sh
 just soak
 ```
 
-Routine serial evidence keeps the low-threshold closed-cell/reopen fixtures for
-both stores, the small direct-batch fixture, and nested refusal/recovery cases.
+The parallel lane runs the low-threshold closed-cell/reopen fixtures for
+both stores and the small direct-batch fixture. The nested refusal/recovery
+fixture remains in serial.
 They still exercise retirement, charged headroom refusal and the authenticated
 counter without paying for 5,000 calls on every integration gate. Ignoring the
-large fixtures does not change the three profiles' membership partition; only
+large fixtures does not change the four lanes' membership partition; only
 the full tier and the soak recipe pass `--run-ignored only` with the narrow
 `test(ledger_retirement_5000_)` serial filter and
 `test(soak_ledger_retirement_)` durability filter. Other ignored measurements stay
 opt-in.
 
-Routine `durability_ledger_retirement_*` campaigns derive a deterministic set
+Install `durability_ledger_retirement_*` campaigns derive a deterministic set
 cover from twin-pilot publication metadata: every SQL signature, changed
 operation-kind/state class, and retained anchor kind/state and side of P must
 be covered. Anchor classes at authenticated counter increases are covered
@@ -2005,16 +2019,18 @@ publications. Each store's first and last publication is included. A campaign
 refuses a selection over 40 cuts instead of silently dropping coverage, and
 runs its selected cuts on four isolated workers. The ignored
 `soak_ledger_retirement_*` twins retain every indexed cut on one worker. Pilots,
-early relaunches, and the existing anchor/refusal/closure tests remain routine.
+early relaunches and the bounded campaigns run together in the install profile;
+the existing small anchor/refusal/closure tests remain routine.
 
 Every profile is hermetic: no test in the workspace reaches a network or reads a
-credential. Batch and full run the parallel, durability and serial lanes;
-Mac batch filters each to platform-sensitive tests. A `-E` filterset on the command line narrows a
+credential. Batch runs the parallel, durability and serial lanes and any
+triggered install families; full runs all four lanes. Mac batch filters the
+three core lanes to platform-sensitive tests. An `-E` filterset on the command line narrows a
 profile's membership (nextest intersects them), so
 `--profile offline -E 'rdeps(=<pkg>)'` runs a package's parallel-lane tests and
 never its serial ones. `fail-fast` is off. The workspace slow timeout is 60
-seconds with termination after the second period; `serial` and `durability`
-raise theirs to 240 seconds.
+seconds with termination after the second period; serial, durability and
+install raise theirs to 240 seconds.
 
 Each lane profile writes a JUnit report to `target/nextest/<profile>/junit.xml`
 (the store directory, gitignored), overwritten by the next run of that
@@ -2035,10 +2051,10 @@ On every run it writes
 `<target>/nextest-weighted.toml`: `.config/nextest.toml` plus `weighted-serial`
 and `weighted-durability` profiles with the `serial` and `durability`
 membership and settings, 4 and at most 16 threads by default. In `weighted-durability`
-the three campaigns that run cuts on their own workers (`durability_subset`,
-`durability_twin_pilots`, image residency) retain whole-pool reservations and
-priority -50. Ledger and restart/recovery reservations scale to
-one quarter rounded up. Long shared cases start early. The trial reuses the
+the two campaigns that run cuts on their own workers (`durability_subset`
+and `durability_twin_pilots`) retain whole-pool reservations and
+priority -50. Restart reservations scale to one quarter rounded up.
+The trial reuses the
 gate's scaling implementation and caps its width by the host. It refuses a
 weight filter that matches no test, builds the workers as the gate does, runs
 the lanes through `--config-file` in a scratch directory of its own (the
@@ -2093,8 +2109,8 @@ includes follow the module location; manifest-root fixture paths do not move.
 
 ### 2.3 Serial groups and the budget lane
 
-Placement-hold wall-clock admission and process-yield cuts (`placement_hold_cut_`)
-run in the serial lane. The cell deadline and recovery-notification cuts use
+Placement-hold admission and process-yield cuts (`placement_hold_cut_`)
+run in the install lane with exclusive reservations. The cell deadline and recovery-notification cuts use
 paused clocks. Offline tree cuts distinguish an unstarted seal reservation
 from its published dispatch stage, assert no candidate/mail/parent settlement
 while deferred, and let an unrelated sibling seal. Wake reservation/binding,
@@ -2129,7 +2145,8 @@ them relaxes an assertion to buy parallelism.
   `integration` binary, selected by package, binary and anchored module name,
   not the other modules sharing that binary.
 
-**The serial lane** is the `serial` profile: one test thread and a 240-second
+**The serial lane** is the `serial` profile: four test threads on Linux, one
+on macOS, and a 240-second
 slow timeout with termination after the second period. Its `default-filter`
 lists the tests whose subject is a wall-clock measurement rather than a scheduler
 outcome. The tables below group the members by kind; `.config/nextest.toml` is
@@ -2280,10 +2297,11 @@ assertions do not measure elapsed time and need no budget lane.
 | Auth lock/callback and HTTP closure deadlines | `expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded`, `busy_execution_lock_fails_without_waiting_or_accepting`, `an_early_response_to_an_unfinished_upload_is_not_kept`, `a_post_acceptance_deadline_is_definite_on_both_wires` |
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
+| Mail yield window | `unread_mail_yields_are_bounded_within_one_tool_batch` measures elapsed time and stays in serial |
 | Host quit, compaction and session round trips | `interactive_observation_timeout_releases_gate_and_joins_without_masking_failure`, `interrupt_then_quit_publishes_the_cancelled_terminal`, `quit_during_active_turn_waits_for_cancelled_terminal_projection`, `scheduled_compaction_failure_keeps_host_worker_alive`, `product_session_facade_create_turn_shutdown_and_reopen`, `retiring_a_live_child_advances_its_session_locator`, `real_session_late_start_ack_releases_after_deadline_without_redispatch` |
 | Wall-clock promptness bounds | `the_idle_wait_wakes_on_an_intent_and_not_before`, `host_service_ignoring_sigterm_is_killed_after_the_grace`, `an_exited_session_reports_its_joined_status_while_active_and_after_retirement`, `codex_observations_accumulate_one_bound_and_resume_exactly`, `the_whole_fetch_deadline_bounds_a_stalled_peer`, `deadline_bounds_the_wait_behind_an_in_flight_fetch`, the eight quit-grace scenarios (`disconnected_control_plane_*`, `ordinary_quit_*`, `process_exit_quit_with_settled_cancel_reports_a_stuck_child_release`, `quit_grace_*`), `a_recycling_waiter_is_an_owner_that_recovery_never_waits_on`, `user_stop_grants_the_term_grace_without_blocking_the_caller`, `jj_cli_doctor_bounds_output_wait_after_leader_exit`, `pending_wakes_return_the_wait_and_are_consumed` — each asserts that something returns within one to five real seconds instead of waiting out a longer grace or window, a real timing assertion that parallel load could trip |
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
-| Product durability scenarios | `durability::` — quit, resume and failure-wave tests. Not crash matrices; they stay in this lane |
+| Product durability scenarios | `offline_e2e::durability::` — quit, resume and failure-wave tests. The separate gateway and subscription custody durability modules run only in core durability |
 
 `join_all_terminates_a_running_free_child_and_retains_the_contended_child`
 runs in the parallel lane. It requires the running free child to be
@@ -2341,22 +2359,40 @@ a gate-local copy with N slots and proportionally scaled integer reservations.
 It verifies that every non-resource setting, including membership, watchdogs
 and priorities, remains identical. The gate pins the rendered width on the
 command line against environment overrides.
-The three internally parallel campaigns (`durability_subset`,
-`durability_twin_pilots`, image residency) reserve the whole pool at priority
+The two core internally parallel campaigns (`durability_subset` and
+`durability_twin_pilots`) reserve the whole pool at priority
 -50. They already fan out to N internal workers: full reservations prevent
 oversubscription, while their lower priority starts them after shared work.
 Priority alone is not a barrier; the whole-pool reservation also requires all
-earlier running work to finish. Ledger-retirement
-campaigns reserve `ceil(N/4)` slots. The closed-cell ledger twin-pilot campaign reserves
-the whole pool because competing load has changed its per-store signatures.
-It runs first at priority 100, avoiding a full-pool reservation waiting behind
-long shared tests. Its isolation rule precedes the general ledger weight.
-Other independent cuts use one slot. The 64 host-restart cut groups, the redial
-test and the busy-root absence test have priority 90 so long paths start early.
-They reserve `ceil(N/4)` slots each, limiting simultaneous real-process restart work
-to four cases without serializing the independent cuts.
+earlier running work to finish. Independent cuts normally use one slot. The
+sixteen non-switch restart cut groups have priority 90 and reserve
+`ceil(N/4)` slots each, limiting simultaneous real-process restarts
+without serializing them.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
+
+**The install lane** uses the same host-scaled width. The closed-cell ledger
+twin-pilot campaign reserves the whole pool at priority 100 because competing
+load changed its per-store signatures. Its isolation rule precedes the general
+quarter-pool ledger weight. Image residency and former serial families reserve
+the whole pool at priority -50. Switch restart groups, the redial test and the
+busy-root absence test reserve `ceil(N/4)` slots at priority 90.
+
+| Install family | Evidence | Batch trigger |
+| --- | --- | --- |
+| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices | Upgrade, carry, deploy, host move and revisions |
+| Ledger retirement | Six bounded retirement campaigns, including pilots and early relaunches | Ledger or retirement paths |
+| Image residency | Indexed image-residency recovery cuts | Image or residency paths |
+| Runner startup | Redial bound, broken or obsolete daemon, slow user manager, surviving busy-root child and surviving child daemon job | Runner or daemon paths |
+| Wire restart switch | All sixteen switch restart groups | Switch or wire paths |
+| Bridge | Auto-start idle exit, log-lock retry and typed readiness/stopping refusals | Bridge or host startup paths |
+| Operator pins and rate | Runner pin/control reconciliation and the real console-rate fixture | Terminal registry, console, or runner operator paths |
+| Lifecycle deletion | Lease keepalive and archive/delete admission | Session lifecycle/deletion paths |
+| Placement hold | Reservation, instruction-drain and rebind cuts (`placement_hold_cut_`) | Placement, park or placement-hold paths |
+
+`.config/nextest-install.toml` owns family membership;
+`tools/gate/changed_packages.py` owns their path triggers. The trigger pass
+selects only those families. Normal install and full run all of them.
 
 Fixed absence/liveness observation windows retain their lengths under this
 layout. `a_busy_roots_child_job_survives_attach_after_host_loss` observes a
@@ -2393,14 +2429,15 @@ Explicit steps may set
 `tests-parallel` and `tests-durability`. Each durability shard retains its
 host-scaled reservations. Gate evidence requires all N shards on the same
 tree, test target and selection; a single shard is not a passing
-lane. Serial tests, named tiers and ignored retirement soaks are not sharded.
+lane. Serial and install tests, named tiers and ignored retirement soaks are
+not sharded.
 
-Serial and durability remain sequential groups. Serial tests measure real
-deadlines, cancellation and PTY responsiveness; a separate durability process
-would bypass its slot reservations and add internally parallel crash workers
+Serial, durability and install remain sequential groups. Serial tests measure
+real deadlines, cancellation and PTY responsiveness; a separate lane would
+bypass its slot reservations and add internally parallel crash workers
 to those measurements. The weighted durability evidence is not evidence for
-overlapping the two pools. Serial therefore retains one thread, and ignored
-full-tier retirement soaks in both profiles still run alone.
+overlapping the pools. The gated serial width is four on Linux and one on
+macOS; ignored full-tier retirement soaks in both profiles still run alone.
 
 | Kind | Predicates |
 | --- | --- |
@@ -2431,7 +2468,7 @@ before startup and resumes the daemon before the successor transfers
 ownership. Only the source uses the deliberately short link windows that
 induce the hold.
 
-`durability::` stays in the serial lane, as that lane's table says.
+`offline_e2e::durability::` stays in the serial lane, as that lane's table says.
 Every product and tree revision step ships with before- and after-commit crash
 cuts, reopen and older-build unchanged-byte refusal tests, and a test that the
 fresh and upgraded databases have the same pinned schema fingerprint.
@@ -2439,20 +2476,15 @@ fresh and upgraded databases have the same pinned schema fingerprint.
 `real_binary_refuses_unsupported_runtime_without_moving_state` are not members
 of either lane; they run in the parallel lane.
 
-**One partition.** The `offline` profile's filter is
-`not (<serial members> | <durability members>)`, so the three profiles
-partition the suite and a run of all three executes every test once. A new
-serial test goes into the `serial` or `durability` filter and into the `offline`
-exclusion. `tests/tooling/test_nextest_lanes.py` proves that the exclusion lists
-exactly the two lanes' predicates in order, that the lanes are disjoint, that
-the serial profile has one slot and durability has a sixteen-slot reference with the 240-second
-timeout, that the weighted campaigns retain their reservations, that no
-profile carries `retries`, and that every predicate resolves to a definition
-under `crates/`, `bin/` or `tests/` -- an `fn <name>` for a bare name, a
-`mod <name>` for a `<module>::` predicate, or the named source module's
-`fn <name>` for a qualified `<module>::<name>` predicate. The gate passes
-the reviewed thread counts on the command line as well, because
-`NEXTEST_TEST_THREADS` in the environment would otherwise override the profile.
+**One partition.** The `offline` profile excludes the union of serial,
+durability and install. A run of all four lanes executes every non-ignored
+test once. Change the owning filter or install family once, then run
+`python3 tools/gate/nextest_layout.py --sync` to regenerate the offline and
+install filter blocks in the checked-in nextest config. Tooling verifies the
+blocks are current, proves their predicates resolve and do not overlap on
+test definitions, and checks that reviewed timeouts and reservations remain
+in force with no retries. The gate pins the reviewed widths against
+`NEXTEST_TEST_THREADS` overrides.
 
 The lane makes
 `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` quiet,

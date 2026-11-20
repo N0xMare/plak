@@ -1,0 +1,69 @@
+# Install-profile membership. tools/gate/nextest_layout.py renders the two
+# derived filter blocks in nextest.toml from these families.
+
+[upgrade]
+filter = "test(host_skeleton::upgrade::)"
+
+[ledger-retirement]
+filter = '''
+test(crash_sweep::durability_ledger_retirement_closed_cells)
+| test(crash_sweep::durability_ledger_retirement_live_child_process)
+| test(crash_sweep::durability_ledger_retirement_yielded_cell)
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
+| test(crash_sweep::durability_ledger_retirement_pilots)
+| test(crash_sweep::durability_ledger_retirement_early_relaunches)
+'''
+
+[image-residency]
+filter = "test(image_residency_crash_cuts_recover_without_redispatch)"
+
+[runner-startup]
+filter = '''
+test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
+| test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
+| test(=host_skeleton::runner::recovery::a_transient_daemon_failure_keeps_the_redial_bound)
+| test(=host_skeleton::runner::recovery::a_refusing_obsolete_daemon_does_not_block_host_startup)
+| test(=host_skeleton::runner::recovery::a_slow_user_manager_is_started_once_without_a_detached_fallback)
+| test(=host_skeleton::runner::recovery::a_busy_roots_child_job_survives_attach_after_host_loss)
+'''
+
+[wire-restart-switch]
+filter = "test(wire_host_restart_switch::)"
+
+[bridge]
+isolated = true
+filter = '''
+test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
+| test(a_log_lock_without_a_host_retries_past_ten_seconds)
+| test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
+'''
+
+[operator-pins-rate]
+isolated = true
+filter = '''
+test(operator_host_same_instance_inventory_repins_a_live_terminal_and_residency)
+| test(operator_host_acknowledged_unbound_loss_waits_for_deadline_and_resets_on_rebind)
+| test(operator_host_acknowledged_removed_runner_releases_pin_without_claiming_cleanup)
+| test(operator_host_inventory_import_ignores_receipt_fence_exhaustion)
+| test(operator_host_shutdown_cleans_healthy_runner_while_another_operation_stalls)
+| test(operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin)
+| test(operator_host_operation_locks_isolate_runners_and_principal_namespaces)
+| test(operator_host_runner_restart_retains_surviving_memory_pins_without_global_barrier)
+| test(operator_host_controller_principal_fences_disconnect_reattach_and_shutdown_join)
+| test(operator_host_same_generation_reconciliation_fences_old_stream_before_input)
+| test(operator_console_four_terminals_typing_tree_and_overrun_keep_connection_alive)
+'''
+
+[lifecycle-deletion]
+isolated = true
+filter = '''
+test(lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss)
+| test(lifecycle_archive_refuses_running_process_without_a_turn)
+| test(lifecycle_archive_refuses_expired_working_root_and_finished_child)
+| test(lifecycle_archive_refuses_expired_working_finished_child)
+| test(lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses)
+'''
+
+[placement-hold]
+isolated = true
+filter = "test(placement_hold_cut_)"
