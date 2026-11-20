@@ -152,7 +152,7 @@ async fn confirm_head(
     let loaded = store_call(
         StorePhase::LoadBranch,
         timeouts.operation,
-        store.load_branch(lease.session()),
+        store.load_branch(lease.session(), "line_head"),
     )
     .await
     .map_err(StoreCallError::into_agent)?;

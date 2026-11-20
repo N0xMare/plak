@@ -2149,7 +2149,10 @@ async fn coherent_v2_summary_input_rejects_recovery_and_abandonment_before_side_
         assert_eq!(model.recover_calls.load(Ordering::Acquire), 0);
         assert_eq!(model.starts.load(Ordering::Acquire), 0);
         assert_eq!(store.commit_calls.load(Ordering::Acquire), commits_before);
-        assert_eq!(store.load_branch(source.session()).await?.head(), head);
+        assert_eq!(
+            store.load_branch(source.session(), "test").await?.head(),
+            head
+        );
         assert_eq!(
             store
                 .load_checkpoint(source.checkpoint_id)

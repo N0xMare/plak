@@ -26,7 +26,9 @@ impl AgentSessions {
         };
         let branch = SessionBranchKey::new(request.locator.session_id, request.locator.branch_id);
         let Some(endpoint) = self.drivers.endpoint(branch) else {
-            let metadata = self.head_metadata(request.locator).await?;
+            let metadata = self
+                .head_metadata(request.locator, "detached_context_status")
+                .await?;
             let recovery = RecoveryRequiredReport::from_metadata(request.locator, metadata)?;
             return Ok(SessionContextStatus {
                 operation_id: request.operation_id,
@@ -146,7 +148,7 @@ impl AgentSessions {
             }
         }
 
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "compaction").await?;
         if let Some(recovery) = exact.recovery_report() {
             return Ok(CompactSessionOutcome::RecoveryRequired {
                 operation_id,

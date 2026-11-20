@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use plakous::sessions::feed::FeedTerminalOrigin;
+
 use crate::agent_tree::{TopologyError, TreeFeed, TreeProjection, TreeProjectorError};
 use crate::agent_tree_protocol::TopologyErrorCode;
 use crate::agent_tree_tools::TreeDriver;
@@ -13,6 +15,19 @@ use crate::topology_runtime::ProductTopologyRuntime;
 pub(crate) async fn retry_tree_feed<R, A, F>(
     sessions: &plakous::sessions::AgentSessions,
     feed: TreeFeed,
+    apply: A,
+) -> Result<(R, TreeFeed), TopologyError>
+where
+    A: FnMut(Arc<TreeFeed>) -> F,
+    F: Future<Output = Result<R, TreeProjectorError>>,
+{
+    retry_tree_feed_from(sessions, feed, FeedTerminalOrigin::Projection, apply).await
+}
+
+pub(crate) async fn retry_tree_feed_from<R, A, F>(
+    sessions: &plakous::sessions::AgentSessions,
+    feed: TreeFeed,
+    origin: FeedTerminalOrigin,
     mut apply: A,
 ) -> Result<(R, TreeFeed), TopologyError>
 where
@@ -31,7 +46,7 @@ where
             "feed session id is invalid",
         )
     })?;
-    let mut reread = super::read_tree_feed(sessions, session, 0)
+    let mut reread = super::read_tree_feed_from(sessions, session, 0, origin)
         .await
         .map_err(|failure| {
             TopologyError::new(TopologyErrorCode::OperationRecoveryRequired, failure)

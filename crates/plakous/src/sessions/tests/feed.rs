@@ -1185,7 +1185,7 @@ async fn abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspecti
         ))
         .await?;
     let source = session.release().await?;
-    let genesis_loaded = store.load_branch(source.session_ref()).await?;
+    let genesis_loaded = store.load_branch(source.session_ref(), "test").await?;
     let genesis = Arc::clone(genesis_loaded.checkpoint().checkpoint());
     let source_topology = genesis.manifest().topology();
     let lease = store

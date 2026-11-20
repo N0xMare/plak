@@ -55,7 +55,7 @@ async fn seed_terminal_debt(
 ) -> Result<SessionLocator, Box<dyn Error + Send + Sync>> {
     let store = SqliteSessionStore::open(database)?;
     let session_ref = SessionRef::new(source.session_id(), source.branch_id());
-    let loaded = store.load_branch(session_ref).await?;
+    let loaded = store.load_branch(session_ref, "test").await?;
     let prior = loaded.checkpoint().checkpoint().manifest();
     if !prior.ledger().operations().iter().any(|record| {
             matches!(record.kind(), DurableOperationKind::Command { turn_id: Some(id) } if *id == turn_id)
@@ -352,7 +352,10 @@ async fn seed_fence(
     use plakous_agent::internal::{DurableCommandDisposition, DurableCommandRecord};
     let store = SqliteSessionStore::open(database)?;
     let loaded = store
-        .load_branch(SessionRef::new(source.session_id(), source.branch_id()))
+        .load_branch(
+            SessionRef::new(source.session_id(), source.branch_id()),
+            "test",
+        )
         .await?;
     let prior = loaded.checkpoint().checkpoint().manifest();
     let lease = store

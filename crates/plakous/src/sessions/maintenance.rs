@@ -68,7 +68,7 @@ impl AgentSessions {
         abandon_jobs: bool,
     ) -> Result<ArchiveSessionReport, AgentSessionsError> {
         let _reservation = self.drivers.reserve_session(locator.session_id)?;
-        let source = self.load_exact(locator).await?;
+        let source = self.load_exact(locator, "archive_preflight").await?;
         let mut request = ArchiveSession::new(locator.session_id, source.session_revision);
         if abandon_jobs {
             request = request.abandoning_jobs();
@@ -162,7 +162,7 @@ impl AgentSessions {
         const OPERATION: &str = "session-history-prune";
         let _reservation = self.drivers.reserve_session(locator.session_id)?;
         let line = self
-            .load_exact(locator)
+            .load_exact(locator, "prune")
             .await?
             .checkpoint
             .manifest()

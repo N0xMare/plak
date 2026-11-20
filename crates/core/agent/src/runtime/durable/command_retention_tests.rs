@@ -89,7 +89,7 @@ async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestRes
             NonZeroU64::new(30).ok_or("lease")?,
         ))
         .await?;
-    let loaded = store.load_branch(session).await?;
+    let loaded = store.load_branch(session, "test").await?;
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0x96001))?;
     let branch_revision = topology.branch_revision + 1;
     let lifecycle = RuntimeLifecycle::Quiescent;

@@ -629,7 +629,7 @@ async fn assert_old_or_new_reopen(
         ),
         checkpoint: commit.checkpoint.clone(),
     };
-    let head = reopened.load_branch(seed.selector).await?.head();
+    let head = reopened.load_branch(seed.selector, "test").await?.head();
     let committed = if head.checkpoint().checkpoint_id() == checkpoint_id {
         assert_eq!(head.revision().get(), 1);
         let recovered = reopened.recover_commit(checkpoint_id).await?;
@@ -683,7 +683,7 @@ async fn assert_old_or_new_reopen(
         );
         assert_eq!(recovered.receipt(), receipt);
         assert_eq!(
-            reopened.load_branch(seed.selector).await?.head(),
+            reopened.load_branch(seed.selector, "test").await?.head(),
             receipt.head()
         );
         let loaded = reopened.load_checkpoint(checkpoint_id).await?;
@@ -1197,7 +1197,7 @@ async fn sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history() -> Test
         drop(SqliteSessionStore::open_verified(&database.path)?);
         let reopened = SqliteSessionStore::open(&database.path)?;
         let seed = crash_seed(60_000)?;
-        let head = reopened.load_branch(seed.selector).await?.head();
+        let head = reopened.load_branch(seed.selector, "test").await?.head();
         assert_eq!(
             head.checkpoint().checkpoint_id(),
             prune_crash_id(PRUNE_CRASH_COMMITS)?
@@ -1474,7 +1474,7 @@ async fn assert_one_line_head(
     let source_commit = reopened
         .commit(CommitCheckpoint::new(
             lease.clone(),
-            reopened.load_branch(seed.selector).await?.head(),
+            reopened.load_branch(seed.selector, "test").await?.head(),
             fixture::bundle(&next, Some(&seed.bundle))?,
         ))
         .await
@@ -1497,7 +1497,7 @@ async fn assert_one_line_head(
             "{stage:?}"
         );
         assert_eq!(
-            reopened.load_branch(target).await.map(|_| ()),
+            reopened.load_branch(target, "test").await.map(|_| ()),
             Err(SessionStoreError::NotFound),
             "{stage:?}"
         );

@@ -687,7 +687,10 @@ async fn sqlite_recovery_writes_into_the_reserve_and_an_over_limit_store_opens()
             NonZeroU64::new(30).ok_or("nonzero lease")?,
         ))
         .await?;
-    let head = store.load_branch(source.session_ref()).await?.head();
+    let head = store
+        .load_branch(source.session_ref(), "test")
+        .await?
+        .head();
     assert_eq!(
         store
             .prune(PruneBranch::new(lease.clone(), head, BTreeSet::new(), 1))

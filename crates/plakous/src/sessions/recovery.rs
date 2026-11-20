@@ -102,7 +102,7 @@ impl AgentSessions {
             self.load_recovery_required(SessionLocator::from_durable(address))
                 .await?;
         } else {
-            let exact = self.load_exact(locator).await?;
+            let exact = self.load_exact(locator, "recovery").await?;
             if matches!(
                 exact.checkpoint.manifest().lifecycle(),
                 RuntimeLifecycle::Working {

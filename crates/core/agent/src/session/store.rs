@@ -75,16 +75,22 @@ pub trait SessionStore: Send + Sync + 'static {
     fn recover_create(&self, request: CreateSession) -> StoreFuture<'_, CreateReceipt>;
 
     /// Loads the exact current branch head and materialized checkpoint.
-    fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch>;
+    /// The operation label is a content-free diagnostic, never session data.
+    fn load_branch(
+        &self,
+        session: SessionRef,
+        operation: &'static str,
+    ) -> StoreFuture<'_, LoadedBranch>;
 
     /// Observes the current head and its lifecycle and recovery obligations.
     /// This is not a validation of the full graph or authority to resume it.
     fn load_branch_metadata(
         &self,
         selector: SessionRef,
+        operation: &'static str,
     ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
         Box::pin(async move {
-            let loaded = self.load_branch(selector).await?;
+            let loaded = self.load_branch(selector, operation).await?;
             let session = loaded.session();
             let head = loaded.head();
             let checkpoint = loaded.checkpoint();

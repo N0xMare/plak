@@ -1711,6 +1711,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "sessions": {"FrozenSessionPresentation"},
         "tools": {"RegisteredToolIdentity", "ToolBindingError"},
     },
+    ("plakous-hosted", "src/agent/feed_projection.rs"): {"sessions": {"FeedTerminalOrigin"}},
+    ("plakous-hosted", "src/agent/recovery.rs"): {"sessions": {"FeedTerminalOrigin"}},
+    ("plakous-hosted", "src/runtime/projection.rs"): {"sessions": {"FeedTerminalOrigin"}},
     # Operator inspection uses only unkeyed, contained execution reads.
     ("plakd", "src/host/console/files.rs"): {
         "tools": {

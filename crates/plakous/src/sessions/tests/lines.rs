@@ -70,7 +70,7 @@ async fn a_carry_waits_for_the_attached_source_and_deletion_ends_the_line() -> T
     assert_eq!(head.session_id(), carried.locator().session_id());
     assert_eq!(head.generation(), 2);
     assert_eq!(sessions.line_head_of(before).await?, head);
-    let loaded = store.load_branch(before.session_ref()).await?;
+    let loaded = store.load_branch(before.session_ref(), "test").await?;
     assert_eq!(
         loaded.head().checkpoint().checkpoint_id(),
         before.checkpoint_id()

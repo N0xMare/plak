@@ -28,7 +28,7 @@ async fn facade_open_closes_finalization_debt_after_root_already_finalized() -> 
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     let turn_id = result.turn_id();
     let source = session.release().await?;
-    let loaded = store.load_branch(source.session_ref()).await?;
+    let loaded = store.load_branch(source.session_ref(), "test").await?;
     let prior = loaded.checkpoint().checkpoint().manifest();
     let lease = store
         .acquire(AcquireBranch::new(
@@ -134,7 +134,7 @@ async fn facade_open_closes_finalization_debt_after_root_already_finalized() -> 
     #[cfg(feature = "sessions-sqlite")]
     {
         let before = store.stats()?;
-        let report = rehearsal::inspect_exact(&sessions.load_exact(source).await?);
+        let report = rehearsal::inspect_exact(&sessions.load_exact(source, "test").await?);
         assert_eq!(
             report.outcome,
             rehearsal::OfflineReopenOutcome::RecoversSavedTerminal

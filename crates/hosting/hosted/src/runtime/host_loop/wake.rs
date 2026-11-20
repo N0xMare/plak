@@ -488,7 +488,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             &rows,
             &super::durable_tree_id(&rows, session),
             self.opened.locator().session_id(),
-            super::super::projection::RootTreePass::Admission,
+            super::super::projection::RootTreePass::WakeAdmission,
         )
         .await?;
         let ids = wake_ids(runtime.as_deref(), &notices)?;

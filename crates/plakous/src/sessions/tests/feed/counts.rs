@@ -1,10 +1,12 @@
 //! Count-based bounds for host read batches.
 use super::*;
+use crate::sessions::feed::FeedTerminalOrigin;
 use plakous_agent::internal as store_api;
 
 struct CountingReads {
     inner: MemorySessionStore,
     branches: AtomicUsize,
+    last_branch_operation: Mutex<Option<&'static str>>,
     checkpoints: AtomicUsize,
     receipts: AtomicUsize,
     pruned: AtomicBool,
@@ -16,6 +18,7 @@ impl CountingReads {
         Ok(Self {
             inner: MemorySessionStore::new(MemoryStoreLimits::default())?,
             branches: AtomicUsize::new(0),
+            last_branch_operation: Mutex::new(None),
             checkpoints: AtomicUsize::new(0),
             receipts: AtomicUsize::new(0),
             pruned: AtomicBool::new(false),
@@ -25,6 +28,7 @@ impl CountingReads {
 
     fn reset(&self) {
         self.branches.store(0, Ordering::SeqCst);
+        *test_lock(&self.last_branch_operation) = None;
         self.checkpoints.store(0, Ordering::SeqCst);
         self.receipts.store(0, Ordering::SeqCst);
     }
@@ -149,14 +153,17 @@ impl SessionStore for CountingReads {
     fn load_branch(
         &self,
         session: SessionRef,
+        operation: &'static str,
     ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
         self.branches.fetch_add(1, Ordering::SeqCst);
-        self.inner.load_branch(session)
+        *test_lock(&self.last_branch_operation) = Some(operation);
+        self.inner.load_branch(session, operation)
     }
 
     fn load_branch_metadata(
         &self,
         session: SessionRef,
+        operation: &'static str,
     ) -> store_api::StoreFuture<
         '_,
         (
@@ -164,7 +171,7 @@ impl SessionStore for CountingReads {
             store_api::RuntimeCheckpointInspection,
         ),
     > {
-        self.inner.load_branch_metadata(session)
+        self.inner.load_branch_metadata(session, operation)
     }
 
     fn load_checkpoint(
@@ -258,7 +265,10 @@ async fn terminal_batch_loads_each_checkpoint_and_pruned_head_once() -> TestResu
     store.reset();
     store.pruned.store(true, Ordering::SeqCst);
     let outcomes = sessions
-        .feed_terminals(vec![request, older, request, older])
+        .feed_terminals_from(
+            vec![request, older, request, older],
+            FeedTerminalOrigin::WakeAdmission,
+        )
         .await;
     assert!(
         outcomes
@@ -267,6 +277,10 @@ async fn terminal_batch_loads_each_checkpoint_and_pruned_head_once() -> TestResu
     );
     assert_eq!(store.checkpoints.load(Ordering::SeqCst), 2);
     assert_eq!(store.branches.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *test_lock(&store.last_branch_operation),
+        Some("wake_admission")
+    );
     Ok(())
 }
 
@@ -354,7 +368,10 @@ async fn prune_keeps_published_head_and_parent_without_store_loads() -> TestResu
         session.agent().prompt("one turn").await?.result().await?;
     }
     let locator = session.locator();
-    let loaded = store.inner.load_branch(locator.session_ref()).await?;
+    let loaded = store
+        .inner
+        .load_branch(locator.session_ref(), "test")
+        .await?;
     let parent = loaded
         .checkpoint()
         .checkpoint()

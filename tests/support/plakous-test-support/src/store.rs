@@ -24,7 +24,7 @@ macro_rules! session_store_methods {
     };
     (@method [$api:ident $($target:tt)+] load_branch) => {
         $crate::session_store_methods!(@future [$api $($target)+]
-            load_branch(session: $api::SessionRef) -> $api::LoadedBranch);
+            load_branch(session: $api::SessionRef, operation: &'static str) -> $api::LoadedBranch);
     };
     (@method [$api:ident $($target:tt)+] load_checkpoint) => {
         $crate::session_store_methods!(@future [$api $($target)+]

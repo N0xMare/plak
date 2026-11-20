@@ -516,10 +516,11 @@ impl AgentSessions {
     async fn load_exact(
         &self,
         requested: SessionLocator,
+        operation: &'static str,
     ) -> Result<ExactSource, AgentSessionsError> {
         let loaded = self
             .store
-            .load_branch(requested.session_ref())
+            .load_branch(requested.session_ref(), operation)
             .await
             .map_err(|error| store_error(error).for_session(requested.session_id))?;
         ExactSource::validate(requested, &loaded)
@@ -529,7 +530,7 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<RecoveryRequiredReport, AgentSessionsError> {
-        self.load_exact(locator)
+        self.load_exact(locator, "recovery")
             .await?
             .recovery_report()
             .ok_or_else(|| {
@@ -550,7 +551,7 @@ impl AgentSessions {
                 agent_store_origin(error),
                 Some(SessionStoreOrigin::NotFound | SessionStoreOrigin::Pruned)
             ))
-            && let Err(stale) = self.load_exact(source).await
+            && let Err(stale) = self.load_exact(source, "branch_error_check").await
         {
             return stale;
         }

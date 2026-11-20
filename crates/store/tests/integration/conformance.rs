@@ -522,7 +522,7 @@ where
     );
     assert_eq!(
         created.branch(),
-        store.load_branch(source_ref).await?.head()
+        store.load_branch(source_ref, "test").await?.head()
     );
     let loaded_genesis = store.load_checkpoint(genesis_id).await?;
     assert_eq!(loaded_genesis.checkpoint().as_ref(), &genesis_checkpoint);
@@ -569,7 +569,7 @@ where
         Err(SessionStoreError::IdentityConflict)
     );
     assert_eq!(
-        store.load_branch(source_ref).await?.head(),
+        store.load_branch(source_ref, "test").await?.head(),
         commit_receipt.head()
     );
     assert_eq!(
@@ -869,7 +869,7 @@ where
     assert_eq!(fork_receipt.source(), commit_receipt.head());
     assert_eq!(
         store
-            .load_branch(SessionRef::new(session_id, target_branch))
+            .load_branch(SessionRef::new(session_id, target_branch), "test")
             .await?
             .head(),
         fork_receipt.target()
@@ -1004,12 +1004,12 @@ where
     );
     store.release(rebind_receipt.lease().clone()).await?;
     assert_eq!(
-        store.load_branch(source_ref).await?.head(),
+        store.load_branch(source_ref, "test").await?.head(),
         commit_receipt.head()
     );
     assert_eq!(
         store
-            .load_branch(SessionRef::new(session_id, target_branch))
+            .load_branch(SessionRef::new(session_id, target_branch), "test")
             .await?
             .head(),
         fork_receipt.target()
@@ -1020,7 +1020,7 @@ where
     let acquired = store.acquire(acquisition).await?;
     assert_eq!(acquired, store.acquire(acquisition).await?);
     assert!(acquired.fence() > created.lease().fence());
-    let source_before_recovery = store.load_branch(source_ref).await?;
+    let source_before_recovery = store.load_branch(source_ref, "test").await?;
     let fork_recovery = RecoverFork::new(
         fork_workflow,
         fork_semantic_request,
@@ -1030,7 +1030,10 @@ where
     );
     let recovered_fork = store.recover_fork(fork_recovery.clone()).await?;
     assert_eq!(recovered_fork, fork_receipt);
-    assert_eq!(store.load_branch(source_ref).await?, source_before_recovery);
+    assert_eq!(
+        store.load_branch(source_ref, "test").await?,
+        source_before_recovery
+    );
     assert_eq!(
         source_before_recovery.session().revision(),
         rebind_receipt.session().revision(),
@@ -1074,7 +1077,7 @@ where
     );
     assert_eq!(
         store
-            .load_branch(SessionRef::new(session_id, target_branch))
+            .load_branch(SessionRef::new(session_id, target_branch), "test")
             .await?
             .head(),
         advanced_target.head()
@@ -1132,7 +1135,7 @@ where
     ] {
         assert_eq!(store.renew(token).await, Err(expected));
         assert_eq!(
-            store.load_branch(source_ref).await?.head(),
+            store.load_branch(source_ref, "test").await?.head(),
             commit_receipt.head()
         );
         assert_eq!(store.acquire(acquisition).await?, acquired);
@@ -1240,7 +1243,7 @@ where
         Err(SessionStoreError::FenceSuperseded)
     );
     assert_eq!(
-        store.load_branch(source_ref).await,
+        store.load_branch(source_ref, "test").await,
         Err(SessionStoreError::Shutdown)
     );
     assert_eq!(
@@ -1737,7 +1740,7 @@ async fn working_head_prune_does_not_regress_a_recorded_horizon(
     store.load_checkpoint(chain.ids[5]).await?;
     assert_eq!(
         store
-            .load_branch(chain.created.branch().session())
+            .load_branch(chain.created.branch().session(), "test")
             .await?
             .horizon(),
         Some(ordinary.horizon())
@@ -1845,7 +1848,7 @@ pub(crate) async fn run_prune_conformance(
         (0, receipt.horizon())
     );
     assert_eq!(store.usage().await?, after);
-    let loaded = store.load_branch(selector).await?;
+    let loaded = store.load_branch(selector, "test").await?;
     assert_eq!(loaded.head(), chain.head);
     assert_eq!(
         loaded.horizon(),
@@ -1943,10 +1946,17 @@ impl SessionStore for LostPruneAckStore {
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         self.inner.lease_now()
     }
+    fn load_branch(
+        &self,
+        session: SessionRef,
+        operation: &'static str,
+    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LoadedBranch> {
+        self.inner.load_branch(session, operation)
+    }
+
     forward_store_calls! {
         create(CreateSession) -> plakous_agent::internal::CreateReceipt;
         recover_create(CreateSession) -> plakous_agent::internal::CreateReceipt;
-        load_branch(SessionRef) -> plakous_agent::internal::LoadedBranch;
         branch_line(SessionRef) -> plakous_agent::internal::LineId;
         load_checkpoint(CheckpointId) -> plakous_agent::internal::StoredCheckpoint;
         acquire(AcquireBranch) -> BranchLease;
@@ -2077,7 +2087,8 @@ pub(crate) async fn run_reclaimed_address_conformance(
             SessionStoreError::Corrupt(plakous_agent::internal::StoreIntegrityReason::MissingChild,)
         );
         assert_eq!(store.usage().await?, before);
-        assert_eq!(store.load_branch(selector).await?.head(), chain.head);
+        let loaded = store.load_branch(selector, "test").await?;
+        assert_eq!(loaded.head(), chain.head);
         // Cold reconstruction of just the surviving head, not a backend reopen.
         // The owner's unconditional trim supplies this same reachable subset.
         chain.prior = store
@@ -2310,7 +2321,7 @@ pub(super) async fn memory_retains_only_head_bundle_metadata_across_long_history
     assert!(transferred_objects <= usize::try_from(TURNS)?.saturating_mul(12) + 32);
     assert_eq!(head.revision().get(), TURNS);
 
-    let loaded_head = store.load_branch(selector).await?;
+    let loaded_head = store.load_branch(selector, "test").await?;
     assert_eq!(loaded_head.head(), head);
     assert_eq!(
         loaded_head.checkpoint().bundle().base_root(),

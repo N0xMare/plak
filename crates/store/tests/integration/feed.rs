@@ -167,7 +167,7 @@ pub(crate) async fn run_feed_conformance(
         matches!(refused, Err(SessionStoreError::Capacity(capacity)) if capacity.bound == StoreCapacityBound::FeedRecordBytes),
         "{refused:?}"
     );
-    assert_eq!(store.load_branch(source).await?.head(), chain.head);
+    assert_eq!(store.load_branch(source, "test").await?.head(), chain.head);
     assert_eq!(tail(store, session_id).await?, 4);
 
     // A commit's record carries the facts the runtime supplied, verbatim.
@@ -197,7 +197,7 @@ pub(crate) async fn run_feed_conformance(
     }];
     let fork_chain = chain;
     let fork = {
-        let session = store.load_branch(source).await?.session();
+        let session = store.load_branch(source, "test").await?.session();
         let mut request = ordinary_fork(
             &fork_chain,
             ForkTarget {
@@ -279,7 +279,11 @@ pub(crate) async fn run_feed_conformance(
 
     // Archive appends one record naming the initial branch.
     store.release(owner).await?;
-    let revision = store.load_branch(source).await?.session().revision();
+    let revision = store
+        .load_branch(source, "test")
+        .await?
+        .session()
+        .revision();
     store
         .archive(ArchiveSession::new(session_id, revision))
         .await?;

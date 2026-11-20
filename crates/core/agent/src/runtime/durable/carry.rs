@@ -171,7 +171,7 @@ impl DurableSessionRuntime {
         store_call(
             StorePhase::LoadBranch,
             self.store_timeouts.operation,
-            self.store.load_branch(source),
+            self.store.load_branch(source, "carry"),
         )
         .await
         .map_err(StoreCallError::into_agent)

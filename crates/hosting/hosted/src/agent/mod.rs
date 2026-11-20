@@ -139,7 +139,7 @@ pub(crate) use recovery::TREE_FEED_READ_FAILED;
 pub(crate) use recovery::tests::Fixture as RecoveryFixture;
 pub(crate) use recovery::{
     TerminalExchange, TreeRecoveryStart, operator_child_recover, read_tree_feed,
-    start_tree_recovery, wait_evidence_in,
+    read_tree_feed_from, start_tree_recovery, wait_evidence_in,
 };
 pub use roots::TelemetryHealth;
 pub use roots::{ProcessJobs, ProductStateRoots};

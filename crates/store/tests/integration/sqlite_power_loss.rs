@@ -188,7 +188,7 @@ async fn power_loss_after_an_unsynced_renewal_retires_the_grant() -> TestResult 
         Arc::new(DomainLeaseClock::new(next_boot(), 1)?),
     )?;
     assert_eq!(
-        current.load_branch(initial.selector).await?.head(),
+        current.load_branch(initial.selector, "test").await?.head(),
         committed.head(),
         "the head is the last FULL commit"
     );
@@ -357,7 +357,7 @@ async fn same_boot_image_without_a_renewal_has_no_live_holder() -> TestResult {
     )?;
     let created = current.recover_create(initial.request.clone()).await?;
     assert_eq!(
-        current.load_branch(initial.selector).await?.head(),
+        current.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     // Both renewals are gone; the grant is the creation lease, still live.
@@ -484,7 +484,7 @@ async fn a_torn_or_corrupt_renewal_recovers_as_exactly_the_state_before_it() -> 
             "{name}"
         );
         assert_eq!(
-            current.load_branch(initial.selector).await?.head(),
+            current.load_branch(initial.selector, "test").await?.head(),
             created.branch(),
             "{name}"
         );

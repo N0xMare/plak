@@ -54,7 +54,7 @@ impl AgentSessions {
             }
             Ok(DurableRuntimeBranchOutcome::RecoveryRequired { .. }) => {
                 let recovery = self
-                    .load_exact(locator)
+                    .load_exact(locator, "fork")
                     .await?
                     .recovery_report()
                     .ok_or_else(|| {
@@ -119,7 +119,7 @@ impl AgentSessions {
                     ));
                 }
                 let target = SessionLocator::from_durable(publication.target());
-                let exact_target = self.load_exact(target).await?;
+                let exact_target = self.load_exact(target, "rebind").await?;
                 let binding = SessionBindingReport::from_checkpoint(&exact_target.checkpoint);
                 if binding.identity() != publication.binding().model_binding() {
                     return Err(AgentSessionsError::new(
@@ -138,7 +138,7 @@ impl AgentSessions {
             }
             Ok(DurableRuntimeBranchOutcome::RecoveryRequired { .. }) => {
                 let recovery = self
-                    .load_exact(locator)
+                    .load_exact(locator, "rebind")
                     .await?
                     .recovery_report()
                     .ok_or_else(|| {

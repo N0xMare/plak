@@ -160,10 +160,11 @@ impl AgentSessions {
     pub(super) async fn head_metadata(
         &self,
         locator: SessionLocator,
+        operation: &'static str,
     ) -> Result<plakous_agent::internal::RuntimeCheckpointInspection, AgentSessionsError> {
         let (head, metadata) = self
             .store
-            .load_branch_metadata(locator.session_ref())
+            .load_branch_metadata(locator.session_ref(), operation)
             .await
             .map_err(|error| store_error(error).for_session(locator.session_id))?;
         check_head_locator(locator, head)?;
@@ -186,7 +187,7 @@ impl AgentSessions {
         head: SessionLocator,
     ) -> Result<bool, AgentSessionsError> {
         Ok(matches!(
-            self.load_exact(head)
+            self.load_exact(head, "quiescence_check")
                 .await?
                 .checkpoint
                 .manifest()
@@ -204,13 +205,15 @@ impl AgentSessions {
         &self,
         head: SessionLocator,
     ) -> Result<Option<TurnId>, AgentSessionsError> {
-        Ok(match self.head_metadata(head).await?.lifecycle {
-            RuntimeLifecycle::Working {
-                root: RuntimeWorkingRoot::Turn { turn_id, .. },
-                ..
-            } => Some(turn_id),
-            _ => None,
-        })
+        Ok(
+            match self.head_metadata(head, "retention_seed").await?.lifecycle {
+                RuntimeLifecycle::Working {
+                    root: RuntimeWorkingRoot::Turn { turn_id, .. },
+                    ..
+                } => Some(turn_id),
+                _ => None,
+            },
+        )
     }
 
     /// The process budgets bound to the session's stored runtime environment.
@@ -225,7 +228,7 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<plakous_tools::JobConfig, AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "reopen_binding").await?;
         checkpoint_job_config(&exact.checkpoint)
             .map_err(|error| runtime_error(&error).for_session(locator.session_id))
     }
@@ -240,7 +243,7 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<super::FrozenSessionPresentation, AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "reopen_binding").await?;
         super::FrozenSessionPresentation::from_checkpoint(&exact.checkpoint)
     }
 
@@ -256,7 +259,7 @@ impl AgentSessions {
         locator: SessionLocator,
     ) -> Result<Option<crate::local_composition::LocalCompositionEngineArtifact>, AgentSessionsError>
     {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "reopen_binding").await?;
         plakous_agent::internal::facade_support::checkpoint_composition_artifact(&exact.checkpoint)
             .and_then(|stored| {
                 stored
@@ -277,7 +280,7 @@ impl AgentSessions {
         &self,
         locator: SessionLocator,
     ) -> Result<Vec<plakous_agent::ResolvedContextSourceFact>, AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "instruction_sources").await?;
         checkpoint_instruction_sources(&exact.checkpoint)
             .map_err(|error| runtime_error(&error).for_session(locator.session_id))
     }
@@ -296,7 +299,7 @@ impl AgentSessions {
         locator: SessionLocator,
         name: &plakous_model::ToolName,
     ) -> Result<(bool, Vec<plakous_agent::ResolvedContextSourceFact>), AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "reopen_binding").await?;
         let registered = checkpoint_registers_tool(&exact.checkpoint, name)
             .map_err(|error| runtime_error(&error).for_session(locator.session_id))?;
         let sources = checkpoint_instruction_sources(&exact.checkpoint)
@@ -329,7 +332,7 @@ impl AgentSessions {
         locator: SessionLocator,
     ) -> Result<OutputBoundDisposition, AgentSessionsError> {
         Ok(self
-            .load_exact(locator)
+            .load_exact(locator, "reopen_binding")
             .await?
             .checkpoint
             .manifest()
@@ -355,7 +358,7 @@ impl AgentSessions {
         locator: SessionLocator,
     ) -> Result<Vec<u8>, AgentSessionsError> {
         Ok(self
-            .load_exact(locator)
+            .load_exact(locator, "reopen_binding")
             .await?
             .checkpoint
             .manifest()
@@ -381,7 +384,7 @@ impl AgentSessions {
         if let Some(outcome) = history_page_preflight(&request)? {
             return Ok(outcome);
         }
-        let exact = self.load_exact(request.locator).await?;
+        let exact = self.load_exact(request.locator, "history_page").await?;
         Ok(project_history_page(
             exact.checkpoint.manifest().canonical().history(),
             &request,
@@ -406,7 +409,7 @@ impl AgentSessions {
         locator: SessionLocator,
         call_id: CallId,
     ) -> Result<SessionCallDetailOutcome, AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "call_detail").await?;
         Ok(call_detail::project_call_detail(
             exact.checkpoint.manifest().canonical().history(),
             call_id,
@@ -427,7 +430,7 @@ impl AgentSessions {
     ) -> Result<Vec<(CallId, bool)>, AgentSessionsError> {
         use plakous_model::{ContentBlock, ConversationItem, HistorySegment};
         use std::collections::BTreeMap;
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "wait_recovery_evidence").await?;
         let mut calls: BTreeMap<_, _> = ids.iter().map(|id| (*id, (false, false))).collect();
         for block in exact
             .checkpoint
@@ -477,7 +480,7 @@ impl AgentSessions {
     ) -> Result<SessionTranscriptSource, AgentSessionsError> {
         let loaded = self
             .store
-            .load_branch(locator.session_ref())
+            .load_branch(locator.session_ref(), "transcript_read")
             .await
             .map_err(|error| store_error(error).for_session(locator.session_id))?;
         let (current, exact) = match ExactSource::validate(locator, &loaded) {

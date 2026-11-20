@@ -102,7 +102,13 @@ impl ActorActivity {
         started
     }
 
-    pub(super) fn finish(&self, lane: &'static str, label: &'static str, started: Instant) {
+    pub(super) fn finish(
+        &self,
+        lane: &'static str,
+        label: &'static str,
+        operation: &'static str,
+        started: Instant,
+    ) {
         let elapsed = started.elapsed();
         *self
             .running
@@ -113,6 +119,7 @@ impl ActorActivity {
                 target: "plakous_store::sqlite_actor",
                 lane,
                 job = label,
+                operation,
                 elapsed_ms = elapsed.as_millis(),
                 critical_depth = self.depths[0].load(Ordering::Relaxed),
                 read_depth = self.depths[1].load(Ordering::Relaxed),
@@ -326,7 +333,7 @@ impl ActorReceiver {
         let started = self.activity.start("background_step");
         let pending = backend.background_step();
         self.activity
-            .finish("background", "background_step", started);
+            .finish("background", "background_step", "background_step", started);
         pending
     }
 

@@ -125,7 +125,7 @@ impl AgentSessions {
             runtime,
         } = request;
         let _reservation = self.drivers.reserve(&operation_id)?;
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "reopen").await?;
         // Use the runtime's exact closure scope: saved terminal evidence and
         // certified abandonment both recover here without redispatch.
         if let Some(report) = exact.recovery_report()
@@ -169,7 +169,7 @@ impl AgentSessions {
                 ..
             }) => {
                 let recovery = self
-                    .load_exact(locator)
+                    .load_exact(locator, "reopen")
                     .await?
                     .recovery_report()
                     .ok_or_else(|| {
@@ -186,7 +186,7 @@ impl AgentSessions {
             }
             Err(error) => {
                 if error.kind() == AgentErrorKind::Session && agent_store_origin(&error).is_none() {
-                    self.load_exact(locator).await?;
+                    self.load_exact(locator, "reopen").await?;
                 }
                 let line = exact.checkpoint.manifest().topology().line;
                 Err(self
@@ -216,7 +216,7 @@ impl AgentSessions {
         locator: SessionLocator,
         runtime: super::SessionRuntimeBinding,
     ) -> Result<OpenVerification, AgentSessionsError> {
-        let exact = self.load_exact(locator).await?;
+        let exact = self.load_exact(locator, "verify_reopen").await?;
         if exact.recovery_report().is_some() {
             return Ok(OpenVerification::UnsettledWork);
         }

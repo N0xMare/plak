@@ -1255,7 +1255,7 @@ async fn install_family_artifact(
     store: &dyn SessionStore,
     source: SessionLocator,
 ) -> TestResult<SessionLocator> {
-    let loaded = store.load_branch(source.session_ref()).await?;
+    let loaded = store.load_branch(source.session_ref(), "test").await?;
     let source_checkpoint = loaded.checkpoint().checkpoint();
     let source_manifest = source_checkpoint.manifest();
     let lease = store
@@ -1742,9 +1742,10 @@ impl SessionStore for CrashCutStore {
     fn load_branch(
         &self,
         session: SessionRef,
+        operation: &'static str,
     ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
         self.branch_loads.fetch_add(1, Ordering::AcqRel);
-        self.inner.load_branch(session)
+        self.inner.load_branch(session, operation)
     }
 
     fn revive(
@@ -2603,7 +2604,7 @@ async fn verify_paid_compaction_reopen(
     let source_stored = store.load_checkpoint(source.checkpoint_id()).await?;
     let source_checkpoint = source_stored.checkpoint();
     assert!(source_checkpoint.manifest().family_artifact().is_some());
-    let before = store.load_branch(source.session_ref()).await?;
+    let before = store.load_branch(source.session_ref(), "test").await?;
     if cut == CompactionCrashCut::SuccessReceiptLost {
         assert_complete_compaction_success(source_checkpoint, before.checkpoint().checkpoint())?;
     } else {
@@ -2639,7 +2640,7 @@ async fn verify_paid_compaction_reopen(
         }
         other => return Err(format!("compaction did not recover success: {other:?}").into()),
     };
-    let after = store.load_branch(source.session_ref()).await?;
+    let after = store.load_branch(source.session_ref(), "test").await?;
     assert_eq!(
         after.head().checkpoint().checkpoint_id(),
         target.checkpoint_id()
@@ -2734,7 +2735,7 @@ async fn verify_no_locator_reopen(
     let source_stored = store.load_checkpoint(source.checkpoint_id()).await?;
     let source_checkpoint = source_stored.checkpoint();
     assert!(source_checkpoint.manifest().family_artifact().is_some());
-    let before = store.load_branch(source.session_ref()).await?;
+    let before = store.load_branch(source.session_ref(), "test").await?;
     assert_eq!(
         before
             .checkpoint()
@@ -2771,7 +2772,7 @@ async fn verify_no_locator_reopen(
             assert_eq!(recovered_operation, operation_id);
             assert_eq!(recovery.locator().session_ref(), source.session_ref());
             assert_ne!(recovery.locator(), source);
-            let working = store.load_branch(source.session_ref()).await?;
+            let working = store.load_branch(source.session_ref(), "test").await?;
             let (_, compaction, provider) =
                 compaction_workflow_states(working.checkpoint().checkpoint().manifest())?;
             let expected_working_state =
@@ -3715,7 +3716,7 @@ async fn facade_open_restores_hosted_working_turn_and_cleans_driver_registration
     let working = session.locator();
     assert!(matches!(
         store
-            .load_branch(working.session_ref())
+            .load_branch(working.session_ref(), "test")
             .await?
             .checkpoint()
             .bundle()
@@ -3912,7 +3913,7 @@ async fn context_status_current_and_pending_are_exact_and_read_only() -> TestRes
     let locator = session.locator();
     let checkpoint = agent_checkpoint(session.agent());
     let history_identity = checkpoint.manifest().canonical().history().identity();
-    let before = store.load_branch(locator.session_ref()).await?;
+    let before = store.load_branch(locator.session_ref(), "test").await?;
     let before_stats = store.stats()?;
 
     let current = sessions
@@ -3948,7 +3949,7 @@ async fn context_status_current_and_pending_are_exact_and_read_only() -> TestRes
         after_checkpoint.manifest().canonical().history().identity(),
         history_identity
     );
-    let after = store.load_branch(locator.session_ref()).await?;
+    let after = store.load_branch(locator.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -3981,7 +3982,7 @@ async fn context_status_turn_scoped_inspect_is_available_without_operation_root(
         ))
         .await?;
     let locator = session.locator();
-    let before = store.load_branch(locator.session_ref()).await?;
+    let before = store.load_branch(locator.session_ref(), "test").await?;
     let before_stats = store.stats()?;
 
     let current = sessions
@@ -4011,7 +4012,7 @@ async fn context_status_turn_scoped_inspect_is_available_without_operation_root(
         pending.model_input_identity()
     );
     assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
-    let after = store.load_branch(locator.session_ref()).await?;
+    let after = store.load_branch(locator.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -4094,7 +4095,7 @@ async fn context_status_missing_contract_is_available_unavailable_without_start(
         ))
         .await?;
     let locator = session.locator();
-    let before = store.load_branch(locator.session_ref()).await?;
+    let before = store.load_branch(locator.session_ref(), "test").await?;
     let before_stats = store.stats()?;
     let status = sessions
         .context_status(ContextStatusRequest::new(
@@ -4109,7 +4110,7 @@ async fn context_status_missing_contract_is_available_unavailable_without_start(
             if matches!(status.kind(), ContextStatusKind::Unavailable(_))
     ));
     assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
-    let after = store.load_branch(locator.session_ref()).await?;
+    let after = store.load_branch(locator.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -4232,7 +4233,7 @@ async fn exact_open_rejects_auth_and_model_drift_and_releases_failed_leases() ->
 #[tokio::test]
 async fn unavailable_compaction_leaves_exact_source_unchanged_and_retries_stable() -> TestResult {
     let (_directory, workspace, sessions, store, locator) = Box::pin(seeded_service()).await?;
-    let before = store.load_branch(locator.session_ref()).await?;
+    let before = store.load_branch(locator.session_ref(), "test").await?;
     let before_stats = store.stats()?;
 
     let context = sessions
@@ -4280,7 +4281,7 @@ async fn unavailable_compaction_leaves_exact_source_unchanged_and_retries_stable
         RecoverSessionOutcome::NotRequired { source, .. } if source == locator
     ));
 
-    let after = store.load_branch(locator.session_ref()).await?;
+    let after = store.load_branch(locator.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -4462,7 +4463,7 @@ async fn ordinary_fork_is_exact_source_preserving_and_clears_unproved_state() ->
         .await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     let source = install_family_artifact(&store, session.release().await?).await?;
-    let before = store.load_branch(source.session_ref()).await?;
+    let before = store.load_branch(source.session_ref(), "test").await?;
     let before_stats = store.stats()?;
     assert!(
         before
@@ -4490,14 +4491,14 @@ async fn ordinary_fork_is_exact_source_preserving_and_clears_unproved_state() ->
     assert_eq!(reported_source, source);
     assert_eq!(portability, ArtifactPortability::ClearedUnproved);
     assert_ne!(target.branch_id(), source.branch_id());
-    let source_after = store.load_branch(source.session_ref()).await?;
+    let source_after = store.load_branch(source.session_ref(), "test").await?;
     assert_eq!(source_after.head(), before.head());
     assert_eq!(
         source_after.checkpoint().reference(),
         before.checkpoint().reference()
     );
 
-    let target_loaded = store.load_branch(target.session_ref()).await?;
+    let target_loaded = store.load_branch(target.session_ref(), "test").await?;
     assert_eq!(
         target_loaded.checkpoint().bundle().base_root(),
         Some(before.checkpoint().reference().root())
@@ -5000,7 +5001,7 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     let current_artifact = artifact(&current)?;
     #[cfg(feature = "sessions-sqlite")]
     {
-        let inspection = rehearsal::inspect_exact(&sessions.load_exact(head).await?);
+        let inspection = rehearsal::inspect_exact(&sessions.load_exact(head, "test").await?);
         assert_eq!(
             inspection.outcome,
             rehearsal::OfflineReopenOutcome::OpensQuiescent
@@ -5068,7 +5069,9 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     );
     std::fs::write(&historical, b"changed evaluator")?;
     #[cfg(feature = "sessions-sqlite")]
-    assert!(!rehearsal::inspect_exact(&sessions.load_exact(head).await?).evaluator_verified);
+    assert!(
+        !rehearsal::inspect_exact(&sessions.load_exact(head, "test").await?).evaluator_verified
+    );
     assert_eq!(
         sessions
             .created_composition_artifact(head)
@@ -5079,7 +5082,9 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
     );
     std::fs::remove_file(&historical)?;
     #[cfg(feature = "sessions-sqlite")]
-    assert!(!rehearsal::inspect_exact(&sessions.load_exact(head).await?).evaluator_verified);
+    assert!(
+        !rehearsal::inspect_exact(&sessions.load_exact(head, "test").await?).evaluator_verified
+    );
     assert_eq!(
         sessions
             .created_composition_artifact(head)
@@ -5258,7 +5263,7 @@ async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() 
         .await?;
     assert!(matches!(outcome.outcome(), TurnResultOutcome::Completed(_)));
     let source = session.release().await?;
-    let source_loaded = store.load_branch(source.session_ref()).await?;
+    let source_loaded = store.load_branch(source.session_ref(), "test").await?;
     let source_reference = source_loaded.checkpoint().reference();
     let source_manifest = source_loaded.checkpoint().checkpoint().manifest();
     let target_descriptor =
@@ -5300,10 +5305,10 @@ async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() 
     );
     assert_eq!(binding.profile_reference(), "target.adapter");
 
-    let source_after = store.load_branch(source.session_ref()).await?;
+    let source_after = store.load_branch(source.session_ref(), "test").await?;
     assert_eq!(source_after.head(), source_loaded.head());
     assert_eq!(source_after.checkpoint().reference(), source_reference);
-    let target_loaded = store.load_branch(target.session_ref()).await?;
+    let target_loaded = store.load_branch(target.session_ref(), "test").await?;
     let target_manifest = target_loaded.checkpoint().checkpoint().manifest();
     assert_eq!(target_loaded.head().revision().get(), 0);
     assert_eq!(
@@ -5525,7 +5530,9 @@ async fn rebind_requires_fresh_matching_authority_and_recovers_without_reauth() 
     else {
         return Err("exact target tool presentation did not publish a rebind".into());
     };
-    let tool_branch = store.load_branch(tool_locator.session_ref()).await?;
+    let tool_branch = store
+        .load_branch(tool_locator.session_ref(), "test")
+        .await?;
     assert_ne!(
         tool_branch.checkpoint().checkpoint().manifest().tools(),
         source_manifest.tools()
@@ -5581,7 +5588,10 @@ async fn recompiling_rebind_rereads_changed_instruction_sources() -> TestResult 
     let outcome = session.agent().prompt("work").await?.result().await?;
     assert!(matches!(outcome.outcome(), TurnResultOutcome::Completed(_)));
     let source = session.release().await?;
-    let source_head = store.load_branch(source.session_ref()).await?.head();
+    let source_head = store
+        .load_branch(source.session_ref(), "test")
+        .await?
+        .head();
     let target_descriptor =
         descriptor_for_adapter("target.route", "target.model", "target.adapter")?;
     let edited = || {
@@ -5610,7 +5620,10 @@ async fn recompiling_rebind_rereads_changed_instruction_sources() -> TestResult 
         "{refused}"
     );
     assert_eq!(
-        store.load_branch(source.session_ref()).await?.head(),
+        store
+            .load_branch(source.session_ref(), "test")
+            .await?
+            .head(),
         source_head
     );
 
@@ -5652,7 +5665,10 @@ async fn recompiling_rebind_rereads_changed_instruction_sources() -> TestResult 
     assert_eq!(contents, ["instructions after the file was edited"]);
     session.release().await?;
     assert_eq!(
-        store.load_branch(source.session_ref()).await?.head(),
+        store
+            .load_branch(source.session_ref(), "test")
+            .await?
+            .head(),
         source_head,
         "the source branch is never rewritten"
     );
@@ -5692,13 +5708,16 @@ async fn recompiling_fork_rereads_changed_instruction_sources() -> TestResult {
     let outcome = session.agent().prompt("work").await?.result().await?;
     assert!(matches!(outcome.outcome(), TurnResultOutcome::Completed(_)));
     let source = session.release().await?;
-    let source_head = store.load_branch(source.session_ref()).await?.head();
+    let source_head = store
+        .load_branch(source.session_ref(), "test")
+        .await?
+        .head();
     let opened_sources = |locator: SessionLocator, operation: &'static str| {
         let sessions = &sessions;
         let workspace = Arc::clone(&workspace);
         async move {
             let history = sessions
-                .load_exact(locator)
+                .load_exact(locator, "test")
                 .await?
                 .checkpoint
                 .manifest()
@@ -5728,7 +5747,7 @@ async fn recompiling_fork_rereads_changed_instruction_sources() -> TestResult {
         }
     };
     let source_history = sessions
-        .load_exact(source)
+        .load_exact(source, "test")
         .await?
         .checkpoint
         .manifest()
@@ -5828,7 +5847,10 @@ async fn recompiling_fork_rereads_changed_instruction_sources() -> TestResult {
     assert!(refused.to_string().contains("rebind"), "{refused}");
 
     assert_eq!(
-        store.load_branch(source.session_ref()).await?.head(),
+        store
+            .load_branch(source.session_ref(), "test")
+            .await?
+            .head(),
         source_head,
         "the source branch is never rewritten"
     );
@@ -5946,7 +5968,7 @@ async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation
         ))
         .await?;
     let source = session.release().await?;
-    let genesis_loaded = store.load_branch(source.session_ref()).await?;
+    let genesis_loaded = store.load_branch(source.session_ref(), "test").await?;
     assert_eq!(
         AgentSessions::inspect_recovery_sqlite(&database, source)?,
         RecoveryRequiredReport::from_checkpoint(source, genesis_loaded.checkpoint().checkpoint())
@@ -6161,7 +6183,7 @@ async fn sqlite_recovery_inspection_is_exact_and_does_not_change_authority() -> 
         .await?;
     let source = session.release().await?;
     let current = install_family_artifact(&store, source).await?;
-    let before = store.load_branch(current.session_ref()).await?;
+    let before = store.load_branch(current.session_ref(), "test").await?;
     let before_stats = store.stats().await?;
     let connection = rusqlite::Connection::open_with_flags(
         &database,
@@ -6191,7 +6213,7 @@ async fn sqlite_recovery_inspection_is_exact_and_does_not_change_authority() -> 
         None
     );
 
-    let after = store.load_branch(current.session_ref()).await?;
+    let after = store.load_branch(current.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -6427,7 +6449,7 @@ async fn sqlite_terminal_capacity_failure_recovers_exactly_within_the_reserve() 
         AgentSessions::inspect_recovery_sqlite(&database, target)?,
         None
     );
-    let recovered = store.load_branch(target.session_ref()).await?;
+    let recovered = store.load_branch(target.session_ref(), "test").await?;
     assert!(
         recovered
             .checkpoint()
@@ -6514,7 +6536,9 @@ async fn sqlite_terminal_capacity_failure_recovers_exactly_within_the_reserve() 
     assert!(matches!(next.outcome(), TurnResultOutcome::Completed(_)));
     assert!(test_lock(&next_model).is_some());
     let final_locator = session.release().await?;
-    let final_checkpoint = store.load_branch(final_locator.session_ref()).await?;
+    let final_checkpoint = store
+        .load_branch(final_locator.session_ref(), "test")
+        .await?;
     let final_history = final_checkpoint
         .checkpoint()
         .checkpoint()
@@ -6634,7 +6658,7 @@ async fn exact_open_reports_stale_head_and_never_substitutes_current() -> TestRe
         current.branch_id(),
         CheckpointId::try_from(Uuid::from_u128(999))?,
     );
-    let before = store.load_branch(current.session_ref()).await?;
+    let before = store.load_branch(current.session_ref(), "test").await?;
     let status_error = sessions
         .context_status(ContextStatusRequest::new(
             SessionOperationId::new("status:stale")?,
@@ -6669,7 +6693,7 @@ async fn exact_open_reports_stale_head_and_never_substitutes_current() -> TestRe
         .expect_err("a stale selector published a fork");
     assert_eq!(fork_error.kind(), AgentSessionsErrorKind::StaleLocator);
     assert_eq!(fork_error.current_locator(), Some(current));
-    let after = store.load_branch(current.session_ref()).await?;
+    let after = store.load_branch(current.session_ref(), "test").await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -6734,7 +6758,7 @@ async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> Tes
         .await?;
     let source = session.locator();
     session.release().await?;
-    let loaded_genesis = store.load_branch(source.session_ref()).await?;
+    let loaded_genesis = store.load_branch(source.session_ref(), "test").await?;
     let genesis = Arc::clone(loaded_genesis.checkpoint().checkpoint());
     let topology = genesis.manifest().topology();
     let genesis_bundle = loaded_genesis.checkpoint().bundle().clone();
@@ -6864,7 +6888,9 @@ async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> Tes
         committed_head.session().branch_id(),
         committed_head.checkpoint().checkpoint_id(),
     );
-    let before = store.load_branch(working_locator.session_ref()).await?;
+    let before = store
+        .load_branch(working_locator.session_ref(), "test")
+        .await?;
     let before_stats = store.stats()?;
     let (_, runtime) = runtime_binding()?;
     // Reopening is the one verb this checkpoint is no longer recovery-only for.
@@ -6946,7 +6972,9 @@ async fn scripted_working_checkpoint_is_recovery_only_and_never_mutated() -> Tes
         } if operation_id.as_str() == "working:rebind"
             && recovery.locator() == working_locator
     ));
-    let after = store.load_branch(working_locator.session_ref()).await?;
+    let after = store
+        .load_branch(working_locator.session_ref(), "test")
+        .await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
         after.checkpoint().reference(),
@@ -7755,7 +7783,7 @@ async fn attached_context_status_revives_expired_but_refuses_taken_over_and_arch
             ))
             .await?;
         let locator = session.locator();
-        let loaded = store.load_branch(locator.session_ref()).await?;
+        let loaded = store.load_branch(locator.session_ref(), "test").await?;
         clock.0.store(10_000, Ordering::Release);
         if disposition == "archive" {
             store

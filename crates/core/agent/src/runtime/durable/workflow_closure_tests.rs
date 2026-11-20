@@ -130,7 +130,7 @@ async fn open_closes_each_workflow_row_in_one_commit_without_redispatch() -> Tes
         let _ = agent.shutdown().await;
         store.resume_commits();
         store.expire_active_lease();
-        let head = store.load_branch(source.session()).await?;
+        let head = store.load_branch(source.session(), "test").await?;
         assert_eq!(head.checkpoint().checkpoint().id(), cut, "{label}");
         // The test store records a halted commit's facts too, so only
         // records appended by the open count.

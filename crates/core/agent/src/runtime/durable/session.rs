@@ -343,7 +343,7 @@ impl DurableSessionRuntime {
         let loaded = store_call(
             StorePhase::LoadBranch,
             self.store_timeouts.operation,
-            self.store.load_branch(address.session()),
+            self.store.load_branch(address.session(), "reopen"),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -456,7 +456,7 @@ impl DurableSessionRuntime {
         let loaded = store_call(
             StorePhase::LoadBranch,
             self.store_timeouts.operation,
-            self.store.load_branch(address.session()),
+            self.store.load_branch(address.session(), "verify_reopen"),
         )
         .await
         .map_err(StoreCallError::into_agent)?;

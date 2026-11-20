@@ -414,7 +414,7 @@ pub(super) async fn historical_code_cell_continuation_recovery(
             NonZeroU64::new(30).ok_or("nonzero lease")?,
         ))
         .await?;
-    let loaded = store.load_branch(address.session()).await?;
+    let loaded = store.load_branch(address.session(), "test").await?;
     let prior = historical.manifest();
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0xc0de_4011))?;
     let topology = prior.topology();
@@ -486,7 +486,7 @@ pub(super) async fn historical_code_cell_continuation_recovery(
     ));
     assert_eq!(
         store
-            .load_branch(address.session())
+            .load_branch(address.session(), "test")
             .await?
             .checkpoint()
             .checkpoint()
@@ -820,7 +820,7 @@ async fn code_cell_abandonment_recovers_lost_final_ack_reopens_and_is_idempotent
             .abandon_code_cell(request.clone())
             .await
             .map_err(|error| {
-                let head = futures::executor::block_on(store.load_branch(source.session()))
+                let head = futures::executor::block_on(store.load_branch(source.session(), "test"))
                     .ok()
                     .map(|loaded| loaded.checkpoint().checkpoint().id());
                 format!(
@@ -984,7 +984,7 @@ async fn code_cell_abandonment_retries_from_evidence_crash_cut_without_replay() 
     assert!(first.is_err(), "unexpected crash-cut outcome: {first:?}");
     assert_eq!(
         store
-            .load_branch(source.session())
+            .load_branch(source.session(), "test")
             .await?
             .checkpoint()
             .checkpoint()

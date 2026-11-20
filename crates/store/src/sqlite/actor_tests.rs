@@ -621,7 +621,7 @@ async fn traced_branch_load(
             Ok(())
         })
         .await?;
-    let loaded = store.load_branch(selector).await?;
+    let loaded = store.load_branch(selector, "test").await?;
     let (count, read_objects) = store
         .dispatch_read("traced_branch_load", |b| {
             b.connection
@@ -875,7 +875,9 @@ async fn validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal() -> 
                 },
             )
             .await?;
-        store.load_branch(created.branch().session()).await?;
+        store
+            .load_branch(created.branch().session(), "test")
+            .await?;
         let head_id = created.branch().checkpoint().checkpoint_id();
         assert!(
             store
@@ -897,7 +899,10 @@ async fn validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal() -> 
             )
             .await?;
         assert_eq!(
-            store.load_branch(created.branch().session()).await.err(),
+            store
+                .load_branch(created.branch().session(), "test")
+                .await
+                .err(),
             Some(SessionStoreError::corrupt())
         );
     }
@@ -1229,14 +1234,14 @@ async fn commit_cache_seed_is_lazy_and_first_hit_equals_cold() -> TestResult {
         .await?;
     assert!(!objects, "post-commit load must not decode object payloads");
     assert!(statements <= 4, "{statements}");
-    let warm = store.load_branch(receipt.head().session()).await?;
+    let warm = store.load_branch(receipt.head().session(), "test").await?;
     store
         .dispatch("clear_cache", |b| {
             b.checkpoints.clear();
             Ok(())
         })
         .await?;
-    let cold = store.load_branch(receipt.head().session()).await?;
+    let cold = store.load_branch(receipt.head().session(), "test").await?;
     assert_eq!(warm.checkpoint(), cold.checkpoint());
     assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
     Ok(())
@@ -1476,12 +1481,13 @@ fn slow_actor_jobs_warn_with_content_free_labels_and_depths() -> TestResult {
         .checked_sub(SLOW_JOB_THRESHOLD)
         .ok_or("monotonic clock")?;
     tracing::subscriber::with_default(warnings.clone(), || {
-        activity.finish("read", "load_branch", started);
+        activity.finish("read", "load_branch", "transcript_read", started);
     });
     let logged = warnings.lines();
     assert_eq!(logged.len(), 1, "{logged:?}");
     assert!(
         logged[0].contains("job=\"load_branch\"")
+            && logged[0].contains("operation=\"transcript_read\"")
             && logged[0].contains("elapsed_ms=")
             && logged[0].contains("critical_depth=0")
             && logged[0].contains("read_depth=0"),
@@ -1560,7 +1566,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
         })
         .await?;
     let started = Instant::now();
-    let warm = store.load_branch(head.session()).await?;
+    let warm = store.load_branch(head.session(), "test").await?;
     let current_objects = warm.checkpoint().bundle().stats().object_count();
     let warm_us = started.elapsed().as_micros();
     let after = store
@@ -1576,7 +1582,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
         })
         .await?;
     let started = Instant::now();
-    store.load_branch(head.session()).await?;
+    store.load_branch(head.session(), "test").await?;
     let cold_us = started.elapsed().as_micros();
     let cold_decodes = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
@@ -1586,7 +1592,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     assert_eq!(cold_decodes, after + 1);
     let (parked, release) = park(&store);
     let mut reads: Vec<_> = (0..READS)
-        .map(|_| store.load_branch(head.session()))
+        .map(|_| store.load_branch(head.session(), "test"))
         .collect();
     for read in &mut reads {
         assert!(
@@ -1817,7 +1823,7 @@ async fn prune_drops_pending_seed_without_normalizing_it() -> TestResult {
             Ok(())
         })
         .await?;
-    let cold = store.load_branch(head.session()).await?;
+    let cold = store.load_branch(head.session(), "test").await?;
     assert_eq!(cold.head(), head);
     Ok(())
 }
@@ -1947,7 +1953,7 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                     Ok(())
                 })
                 .await?;
-            store.load_branch(head.session()).await?;
+            store.load_branch(head.session(), "test").await?;
             store
                 .dispatch("reset_measure_counters", |b| {
                     b.checkpoints.decodes = 0;
@@ -1997,7 +2003,7 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                 );
                 commits.push(commit_us);
                 let started = Instant::now();
-                let loaded = store.load_branch(head.session()).await?;
+                let loaded = store.load_branch(head.session(), "test").await?;
                 let read_us = started.elapsed().as_micros();
                 reads.push(read_us);
                 eprintln!(
@@ -2013,14 +2019,14 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                 commits[20], commits[35], reads[20], reads[35]
             );
             let started = Instant::now();
-            let first = store.load_branch(head.session()).await?;
+            let first = store.load_branch(head.session(), "test").await?;
             eprintln!(
                 "f11 first rep={rep} enabled={enabled} us={}",
                 started.elapsed().as_micros()
             );
             for index in 0..40 {
                 let started = Instant::now();
-                let warm = store.load_branch(head.session()).await?;
+                let warm = store.load_branch(head.session(), "test").await?;
                 let us = started.elapsed().as_micros();
                 assert_eq!(warm.checkpoint(), first.checkpoint());
                 eprintln!("f11 warm rep={rep} enabled={enabled} index={index} us={us}");
@@ -2100,7 +2106,7 @@ async fn diagnostic_metadata_does_not_materialize_or_certify_history() -> TestRe
         metadata.topology.checkpoint_id,
         head.checkpoint().checkpoint_id()
     );
-    let (live_head, live_metadata) = store.load_branch_metadata(selector).await?;
+    let (live_head, live_metadata) = store.load_branch_metadata(selector, "test").await?;
     assert_eq!(live_head, head);
     assert_eq!(live_metadata.lifecycle, metadata.lifecycle);
     store
@@ -2115,7 +2121,7 @@ async fn diagnostic_metadata_does_not_materialize_or_certify_history() -> TestRe
         "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id=(SELECT id FROM runtime_objects WHERE kind=1 LIMIT 1)", [],
     )?, 1);
     assert!(SqliteSessionStore::inspect_branch_metadata(&path, selector).is_err());
-    assert!(store.load_branch_metadata(selector).await.is_err());
+    assert!(store.load_branch_metadata(selector, "test").await.is_err());
     store.shutdown().await?;
     Ok(())
 }

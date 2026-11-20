@@ -127,6 +127,7 @@ fn a_refused_read_leaves_the_receipt_and_the_next_pass_retires_it_once() {
                 &tree_id,
                 host.opened.locator().session_id(),
                 TreePass::RunningTurn { through: u64::MAX },
+                plakous::sessions::feed::FeedTerminalOrigin::Projection,
             ))
             .unwrap();
         assert!(refused.is_err(), "the injected read refusal must surface");

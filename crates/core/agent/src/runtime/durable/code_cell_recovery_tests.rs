@@ -530,7 +530,7 @@ async fn seed_mixed_debt(
             NonZeroU64::new(30).ok_or("lease")?,
         ))
         .await?;
-    let head = store.load_branch(session).await?.head();
+    let head = store.load_branch(session, "test").await?.head();
     let branch_revision = topology.branch_revision + 1;
     let context = prior.canonical().context().retained_for_exact_resume();
     let commit_identity = checkpoint_commit_identity(CheckpointCommitFacts {
@@ -1255,7 +1255,7 @@ async fn explicit_code_cell_abandonment_refuses_an_uncertain_nested_effect() -> 
             NonZeroU64::new(30).ok_or("lease")?,
         ))
         .await?;
-    let head = store.load_branch(session).await?.head();
+    let head = store.load_branch(session, "test").await?.head();
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0xc0de_1602))?;
     let branch_revision = topology
         .branch_revision
@@ -1316,7 +1316,7 @@ async fn explicit_code_cell_abandonment_refuses_an_uncertain_nested_effect() -> 
     store.release(lease).await?;
     let address =
         DurableSessionAddress::new(topology.session_id, topology.branch_id, checkpoint_id);
-    let before = store.load_branch(session).await?.head();
+    let before = store.load_branch(session, "test").await?.head();
     let commits_before = lock_mutex(&store.state).commits.len();
     let error = sessions
         .abandon_code_cell(DurableCodeCellAbandonmentRequest::new(
@@ -1333,7 +1333,7 @@ async fn explicit_code_cell_abandonment_refuses_an_uncertain_nested_effect() -> 
         "{}",
         error.message()
     );
-    assert_eq!(store.load_branch(session).await?.head(), before);
+    assert_eq!(store.load_branch(session, "test").await?.head(), before);
     assert_eq!(lock_mutex(&store.state).commits.len(), commits_before);
     assert_eq!(
         store

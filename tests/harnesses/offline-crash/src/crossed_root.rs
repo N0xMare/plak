@@ -28,7 +28,7 @@ pub async fn seed_crossed_root(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let store = SqliteSessionStore::open(database)?;
     let session = SessionRef::new(source.session_id(), source.branch_id());
-    let loaded = store.load_branch(session).await?;
+    let loaded = store.load_branch(session, "test").await?;
     let prior = loaded.checkpoint().checkpoint().manifest();
     let accepted = prior
         .ledger()

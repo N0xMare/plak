@@ -277,15 +277,20 @@ impl SessionStore for NotifyingStore {
         self.inner.recover_create(request)
     }
 
-    fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch> {
-        self.inner.load_branch(session)
+    fn load_branch(
+        &self,
+        session: SessionRef,
+        operation: &'static str,
+    ) -> StoreFuture<'_, LoadedBranch> {
+        self.inner.load_branch(session, operation)
     }
 
     fn load_branch_metadata(
         &self,
         session: SessionRef,
+        operation: &'static str,
     ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
-        self.inner.load_branch_metadata(session)
+        self.inner.load_branch_metadata(session, operation)
     }
 
     fn load_checkpoint(&self, checkpoint: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {

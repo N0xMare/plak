@@ -63,7 +63,7 @@ pub(super) async fn run() -> BenchResult<()> {
     let store = SqliteSessionStore::open(&db.path)?;
     let root = selectors[0];
     let started = Instant::now();
-    let branch = store.load_branch(root).await?;
+    let branch = store.load_branch(root, "benchmark").await?;
     let cold_actor_load_ns = elapsed_ns(started);
     println!(
         "{}",
@@ -84,9 +84,9 @@ pub(super) async fn run() -> BenchResult<()> {
         for _ in 0..repetitions {
             for &target in targets {
                 if metadata_only {
-                    std::hint::black_box(store.load_branch_metadata(target).await?);
+                    std::hint::black_box(store.load_branch_metadata(target, "benchmark").await?);
                 } else {
-                    std::hint::black_box(store.load_branch(target).await?);
+                    std::hint::black_box(store.load_branch(target, "benchmark").await?);
                 }
             }
         }

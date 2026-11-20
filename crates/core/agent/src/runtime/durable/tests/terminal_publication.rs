@@ -984,7 +984,7 @@ async fn completed_process_evidence_reopen_preserves_settled_work_and_abandons_o
             NonZeroU64::new(30).ok_or("nonzero lease")?,
         ))
         .await?;
-    let loaded = store.load_branch(session).await?;
+    let loaded = store.load_branch(session, "test").await?;
     let checkpoint_id = CheckpointId::try_from(uuid::Uuid::from_u128(0x93002))?;
     let branch_revision = topology.branch_revision.saturating_add(1);
     let commit_identity = checkpoint_commit_identity(CheckpointCommitFacts {

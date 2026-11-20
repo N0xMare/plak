@@ -723,7 +723,7 @@ impl SqliteSessionStore {
         T: Send + 'static,
         F: FnOnce(&mut Backend) -> Result<T, SessionStoreError> + Send + 'static,
     {
-        self.dispatch_lane(Lane::Critical, label, operation)
+        self.dispatch_lane(Lane::Critical, label, label, operation)
     }
 
     fn dispatch_read<T, F>(&self, label: &'static str, operation: F) -> StoreFuture<'_, T>
@@ -731,13 +731,14 @@ impl SqliteSessionStore {
         T: Send + 'static,
         F: FnOnce(&mut Backend) -> Result<T, SessionStoreError> + Send + 'static,
     {
-        self.dispatch_lane(Lane::Read, label, operation)
+        self.dispatch_lane(Lane::Read, label, label, operation)
     }
 
     fn dispatch_lane<T, F>(
         &self,
         lane: Lane,
         label: &'static str,
+        operation_label: &'static str,
         operation: F,
     ) -> StoreFuture<'_, T>
     where
@@ -820,7 +821,7 @@ impl SqliteSessionStore {
                     while backend.background_step() {}
                 }
             }
-            activity.finish(lane.label(), label, started);
+            activity.finish(lane.label(), label, operation_label, started);
             let _ = reply.send(result);
         });
         let queued = match lane {
@@ -1214,8 +1215,8 @@ impl SessionStore for SqliteSessionStore {
             recover_create(&b.connection, &r)
         })
     }
-    fn load_branch(&self, s: SessionRef) -> StoreFuture<'_, LoadedBranch> {
-        self.dispatch_read("load_branch", move |b| {
+    fn load_branch(&self, s: SessionRef, operation: &'static str) -> StoreFuture<'_, LoadedBranch> {
+        self.dispatch_lane(Lane::Read, "load_branch", operation, move |b| {
             #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("load_branch");
             b.require_open()?;
@@ -1225,8 +1226,9 @@ impl SessionStore for SqliteSessionStore {
     fn load_branch_metadata(
         &self,
         selector: SessionRef,
+        operation: &'static str,
     ) -> StoreFuture<'_, (BranchHead, RuntimeCheckpointInspection)> {
-        self.dispatch_read("load_branch_metadata", move |b| {
+        self.dispatch_lane(Lane::Read, "load_branch_metadata", operation, move |b| {
             b.require_open()?;
             let snapshot = b.connection.transaction().map_err(map_sqlite)?;
             inspection::branch_metadata(&snapshot, selector)

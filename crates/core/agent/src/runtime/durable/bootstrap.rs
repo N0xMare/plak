@@ -200,7 +200,7 @@ impl DurableRuntimeBootstrap {
         let loaded = store_call(
             StorePhase::LoadBranch,
             store_timeouts.operation,
-            store.load_branch(lease.session()),
+            store.load_branch(lease.session(), "reopen_owned"),
         )
         .await
         .map_err(StoreCallError::into_agent)?;
@@ -525,7 +525,12 @@ pub(super) async fn recover_persisted_create(
     genesis: CheckpointId,
     timeout: Duration,
 ) -> Result<Option<crate::CreateReceipt>, AgentError> {
-    let loaded = match store_call(StorePhase::LoadBranch, timeout, store.load_branch(session)).await
+    let loaded = match store_call(
+        StorePhase::LoadBranch,
+        timeout,
+        store.load_branch(session, "create_recovery"),
+    )
+    .await
     {
         Ok(loaded) => loaded,
         Err(error) if error.is(SessionStoreError::NotFound) => return Ok(None),

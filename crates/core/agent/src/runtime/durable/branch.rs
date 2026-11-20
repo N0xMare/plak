@@ -337,7 +337,7 @@ impl DurableSessionRuntime {
         let loaded = store_call(
             StorePhase::LoadBranch,
             self.store_timeouts.operation,
-            self.store.load_branch(source.session()),
+            self.store.load_branch(source.session(), "fork"),
         )
         .await
         .map_err(StoreCallError::into_agent)?;

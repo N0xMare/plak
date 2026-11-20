@@ -386,7 +386,7 @@ async fn responses_account_scope_survives_import_rebind_and_fork() -> TestResult
         return Err("fork did not publish".into());
     };
     for locator in [source, rebound, fork] {
-        let loaded = store.load_branch(locator.session_ref()).await?;
+        let loaded = store.load_branch(locator.session_ref(), "test").await?;
         let blocks = loaded
             .checkpoint()
             .checkpoint()

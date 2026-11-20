@@ -1209,7 +1209,7 @@ impl SessionStore for MemorySessionStore {
         Box::pin(async move { self.recover_create_sync(&request) })
     }
 
-    fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch> {
+    fn load_branch(&self, session: SessionRef, _: &'static str) -> StoreFuture<'_, LoadedBranch> {
         Box::pin(async move { self.load_branch_sync(session) })
     }
 

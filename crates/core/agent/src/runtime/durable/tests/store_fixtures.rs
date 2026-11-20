@@ -484,7 +484,11 @@ impl SessionStore for TestCreateStore {
         })
     }
 
-    fn load_branch(&self, session: SessionRef) -> crate::StoreFuture<'_, crate::LoadedBranch> {
+    fn load_branch(
+        &self,
+        session: SessionRef,
+        _: &'static str,
+    ) -> crate::StoreFuture<'_, crate::LoadedBranch> {
         self.record_admission_job("load_branch");
         Box::pin(async move {
             let loaded = lock_mutex(&self.state)

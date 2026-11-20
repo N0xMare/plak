@@ -1803,8 +1803,12 @@ WARN under target `plakous_store::sqlite_actor`: lane, capacity, both lane
 depths, the running job's static label and elapsed milliseconds, and overflows
 since the last such line (first refusal, then at most one per lane every 10 s).
 Only refused admissions count as overflows, not reads that wait successfully.
-Jobs taking at least 250 ms also log a WARN with static label, lane, elapsed
-milliseconds and both lane depths. A request the exited actor can no longer
+Jobs taking at least 250 ms also log a WARN with static `job` and `operation`
+labels, lane, elapsed milliseconds and both lane depths. A branch read's
+caller supplies the content-free operation (for example, `reopen`,
+`publication_fallback`, `wake_admission`, `transcript_read` or
+`retention_seed`). Other jobs use the job label as their operation.
+A request the exited actor can no longer
 take, or whose reply it dropped, returns `BackendUnavailable` and logs a WARN
 under the same target naming the lane and `reason=disconnected|reply_dropped`.
 Exact-head running-turn and detached context-status observations check the branch
@@ -3249,7 +3253,9 @@ the acknowledged receipt horizon is applied on success. A no-op or refused prune
 may discard optional ancestor cache entries, never the head or its parent.
 
 `feed_terminals` reads terminal evidence in request order with the same typed
-per-request outcomes as `feed_terminal`. It loads each distinct checkpoint at
+per-request outcomes as `feed_terminal`. The caller identifies ordinary
+projection or automatic wake admission solely to label slow fallback reads.
+It loads each distinct checkpoint at
 most once per batch, validates every request's session and branch independently,
 and loads each branch head at most once for pruned-checkpoint fallbacks. Neither
 memoization nor fallback makes a foreign checkpoint or an absent terminal valid.

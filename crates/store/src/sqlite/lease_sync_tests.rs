@@ -36,7 +36,10 @@ async fn actor_direct_io_capacity_refusals_preserve_the_head_and_exact_retry() -
         );
         assert!(store.storage_unavailable());
         assert_eq!(
-            store.load_branch(created.branch().session()).await?.head(),
+            store
+                .load_branch(created.branch().session(), "test")
+                .await?
+                .head(),
             created.branch()
         );
         assert!(
@@ -290,7 +293,10 @@ async fn a_connection_that_cannot_restore_full_refuses_further_work() -> TestRes
         store.revive(created.lease().clone()).await.map(|_| ()),
         unavailable
     );
-    assert_eq!(store.load_branch(selector).await.map(|_| ()), unavailable);
+    assert_eq!(
+        store.load_branch(selector, "test").await.map(|_| ()),
+        unavailable
+    );
     assert_eq!(store.usage().await.map(|_| ()), unavailable);
     assert_eq!(store.flush().await.map(|_| ()), unavailable);
     assert_eq!(store.shutdown().await.map(|_| ()), unavailable);
@@ -321,7 +327,7 @@ async fn a_connection_that_cannot_restore_full_refuses_further_work() -> TestRes
         .await?;
     assert_eq!(level, FULL);
     assert_eq!(
-        reopened.load_branch(selector).await?.head(),
+        reopened.load_branch(selector, "test").await?.head(),
         created.branch(),
         "the refused commit wrote nothing"
     );

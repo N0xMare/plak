@@ -530,7 +530,7 @@ async fn round_start_fold_commit_cuts_reopen_without_redispatch() -> TestResult 
         store.halt_after_accepted_commit.store(0, Ordering::Release);
         store.expire_active_lease();
         let head = store
-            .load_branch(address.session())
+            .load_branch(address.session(), "test")
             .await?
             .head()
             .checkpoint()

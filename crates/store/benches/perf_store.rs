@@ -342,7 +342,10 @@ async fn run_memory(turns: u64) -> BenchResult<Trace> {
     let recovery_ns = elapsed_ns(recovery_started);
     assert_eq!(loaded.reference(), trace.head.checkpoint());
     assert_eq!(recovered.receipt().head(), trace.head);
-    assert_eq!(store.load_branch(seed.selector).await?.head(), trace.head);
+    assert_eq!(
+        store.load_branch(seed.selector, "benchmark").await?.head(),
+        trace.head
+    );
     let stats = store.stats()?;
     assert_eq!(stats.sessions(), 1);
     assert_eq!(stats.branches(), 1);
@@ -401,7 +404,10 @@ async fn run_sqlite(turns: u64) -> BenchResult<Trace> {
     assert_eq!(loaded.reference(), trace.head.checkpoint());
     assert_eq!(recovered.receipt().head(), trace.head);
     assert_eq!(
-        reopened.load_branch(seed.selector).await?.head(),
+        reopened
+            .load_branch(seed.selector, "benchmark")
+            .await?
+            .head(),
         trace.head
     );
     reopened.shutdown().await?;
@@ -457,7 +463,7 @@ async fn run_sqlite_restart_probe(path: &Path, turns: u64) -> BenchResult<()> {
     let loaded = store.load_checkpoint(expected_checkpoint).await?;
     let load_ns = elapsed_ns(loaded_started);
     let recovered = store.recover_commit(expected_checkpoint).await?;
-    let branch = store.load_branch(seed.selector).await?;
+    let branch = store.load_branch(seed.selector, "benchmark").await?;
     assert_eq!(loaded.reference().checkpoint_id(), expected_checkpoint);
     assert_eq!(recovered.receipt().head(), branch.head());
     let stats = store.stats().await?;
@@ -770,7 +776,13 @@ async fn run_sqlite_instrumented_trace(turns: u64) -> BenchResult<()> {
     assert_eq!(loaded.reference().checkpoint_id(), parent);
     let rows_after_reopen = sqlite_row_counts(&database.path)?;
     assert_eq!(rows_before_reopen, rows_after_reopen);
-    assert_eq!(reopened.load_branch(seed.selector).await?.head(), head);
+    assert_eq!(
+        reopened
+            .load_branch(seed.selector, "benchmark")
+            .await?
+            .head(),
+        head
+    );
     reopened.shutdown().await?;
     println!(
         "{}",

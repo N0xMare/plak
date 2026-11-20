@@ -42,7 +42,7 @@ async fn retained_start_authority_rejects_elapsed_and_foreign_grants() -> TestRe
             NonZeroU64::new(20).unwrap(),
         ))
         .await?;
-    let loaded = store.load_branch(original.session()).await?;
+    let loaded = store.load_branch(original.session(), "test").await?;
     let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
     let facts = DurableBranchFacts::new(
         store.clone(),

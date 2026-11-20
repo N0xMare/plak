@@ -29,7 +29,7 @@ pub async fn seed_saturated_operation_ledger(
 ) -> FixtureResult<SessionLocator> {
     let store = SqliteSessionStore::open(database)?;
     let session = SessionRef::new(source.session_id(), source.branch_id());
-    let loaded = store.load_branch(session).await?;
+    let loaded = store.load_branch(session, "test").await?;
     let prior = loaded.checkpoint().checkpoint().manifest();
     let ledger = saturated_ledger(prior.ledger(), turn_id)?;
     let lease = store

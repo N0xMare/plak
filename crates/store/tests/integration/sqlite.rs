@@ -1250,7 +1250,7 @@ async fn lease_expiry_is_sampled_after_waiting_for_write_authority() -> Result<(
 
     assert_eq!(pending.await, Err(SessionStoreError::LeaseExpired));
     assert_eq!(
-        store.load_branch(initial.selector).await?.head(),
+        store.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     assert_eq!(
@@ -1482,7 +1482,7 @@ async fn ignored_receipt_insert_rolls_back_and_persistent_triggers_are_rejected(
         Err(SessionStoreError::corrupt())
     );
     assert_eq!(
-        store.load_branch(initial.selector).await?.head(),
+        store.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     assert_eq!(
@@ -1504,7 +1504,7 @@ async fn ignored_receipt_insert_rolls_back_and_persistent_triggers_are_rejected(
     drop(injector);
     let reopened = SqliteSessionStore::open(&db.path)?;
     assert_eq!(
-        reopened.load_branch(initial.selector).await?.head(),
+        reopened.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     Ok(())
@@ -1605,7 +1605,7 @@ async fn assert_commit_cut(base: u128, table: &str) -> Result<(), Box<dyn Error>
         Err(SessionStoreError::BackendUnavailable)
     );
     assert_eq!(
-        store.load_branch(initial.selector).await?.head(),
+        store.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     assert_eq!(
@@ -1624,7 +1624,7 @@ async fn assert_commit_cut(base: u128, table: &str) -> Result<(), Box<dyn Error>
     drop(injector);
     let reopened = SqliteSessionStore::open(&db.path)?;
     assert_eq!(
-        reopened.load_branch(initial.selector).await?.head(),
+        reopened.load_branch(initial.selector, "test").await?.head(),
         created.branch()
     );
     assert_eq!(
@@ -1637,7 +1637,7 @@ async fn assert_commit_cut(base: u128, table: &str) -> Result<(), Box<dyn Error>
     );
     let receipt = reopened.commit(commit).await?;
     assert_eq!(
-        reopened.load_branch(initial.selector).await?.head(),
+        reopened.load_branch(initial.selector, "test").await?.head(),
         receipt.head()
     );
     drop(reopened);
@@ -1647,7 +1647,10 @@ async fn assert_commit_cut(base: u128, table: &str) -> Result<(), Box<dyn Error>
         receipt
     );
     assert_eq!(
-        recovered.load_branch(initial.selector).await?.head(),
+        recovered
+            .load_branch(initial.selector, "test")
+            .await?
+            .head(),
         receipt.head()
     );
     Ok(())
@@ -1731,7 +1734,10 @@ async fn sustained_commits_publish_only_deltas_and_reopen_the_exact_head()
 
     let reopened = SqliteSessionStore::open(&db.path)?;
     assert_eq!(reopened.stats().await?.semantic_mutations(), TURNS + 1);
-    assert_eq!(reopened.load_branch(initial.selector).await?.head(), head);
+    assert_eq!(
+        reopened.load_branch(initial.selector, "test").await?.head(),
+        head
+    );
     assert_eq!(
         reopened.recover_commit(parent).await?.receipt().head(),
         head
@@ -1764,7 +1770,10 @@ async fn sustained_commits_publish_only_deltas_and_reopen_the_exact_head()
 
     let reopened_again = SqliteSessionStore::open(&db.path)?;
     assert_eq!(
-        reopened_again.load_branch(initial.selector).await?.head(),
+        reopened_again
+            .load_branch(initial.selector, "test")
+            .await?
+            .head(),
         reopened_head
     );
     assert_eq!(
@@ -1846,7 +1855,7 @@ async fn inspection_reads_without_recounting_retained_rows() -> Result<(), Box<d
             first.clone(),
         ))
         .await?;
-    let head = store.load_branch(initial.selector).await?.head();
+    let head = store.load_branch(initial.selector, "test").await?.head();
     let newest = conformance::id::<CheckpointId>(16_511)?;
     store
         .commit(CommitCheckpoint::new(
@@ -2813,7 +2822,7 @@ async fn sqlite_retains_large_operation_payloads_after_prune_and_cold_reopen()
     };
 
     let reopened = SqliteSessionStore::open_verified(&db.path)?;
-    assert_eq!(reopened.load_branch(selector).await?.head(), head);
+    assert_eq!(reopened.load_branch(selector, "test").await?.head(), head);
     assert_eq!(
         reopened.load_checkpoint(pruned_id).await.map(|_| ()),
         Err(SessionStoreError::Pruned)
@@ -2942,7 +2951,7 @@ async fn sqlite_reconstructs_reclaimed_addresses_across_prune_cycles_and_reopen(
         drop(store);
         SqliteSessionStore::open_verified(&db.path)?;
         store = SqliteSessionStore::open_with_clock(&db.path, clock.clone())?;
-        assert_eq!(store.load_branch(session).await?.head(), head);
+        assert_eq!(store.load_branch(session, "test").await?.head(), head);
         assert_eq!(
             store
                 .load_checkpoint(head.checkpoint().checkpoint_id())

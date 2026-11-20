@@ -800,8 +800,10 @@ pub(crate) enum RootTreePass {
     Round { through: u64 },
     /// The command acknowledgement: through its publication sequence.
     Acknowledged { through: u64 },
-    /// Before a root prompt (or host wake) is admitted: to the feed's tail.
+    /// Before a root prompt is admitted: to the feed's tail.
     Admission,
+    /// The admission pass for an automatic wake has its own diagnostic origin.
+    WakeAdmission,
     /// A settled turn, or idle entry (open, recovery, a workflow, release):
     /// to the feed's tail.
     Settled,
@@ -822,6 +824,8 @@ pub(crate) async fn root_tree_pass(
     runtime_session: SessionId,
     point: RootTreePass,
 ) -> Result<TreePassOutcome, ReadFailure> {
+    use plakous::sessions::feed::FeedTerminalOrigin;
+
     #[cfg(test)]
     if probe::root_tree_pass(tree_id, point) {
         return Err("the root tree pass was refused".to_owned().into());
@@ -830,9 +834,15 @@ pub(crate) async fn root_tree_pass(
         RootTreePass::Round { through } | RootTreePass::Acknowledged { through } => {
             TreePass::RunningTurn { through }
         }
-        RootTreePass::Admission | RootTreePass::Settled => TreePass::BetweenTurns,
+        RootTreePass::Admission | RootTreePass::WakeAdmission | RootTreePass::Settled => {
+            TreePass::BetweenTurns
+        }
     };
-    project_tree_as(sessions, rows, tree_id, runtime_session, pass).await
+    let origin = match point {
+        RootTreePass::WakeAdmission => FeedTerminalOrigin::WakeAdmission,
+        _ => FeedTerminalOrigin::Projection,
+    };
+    project_tree_as(sessions, rows, tree_id, runtime_session, pass, origin).await
 }
 
 /// When a tree pass runs, which decides how much work it may do.
@@ -883,6 +893,7 @@ pub(crate) async fn project_tree_as(
     tree_id: &str,
     runtime_session: SessionId,
     pass: TreePass,
+    origin: plakous::sessions::feed::FeedTerminalOrigin,
 ) -> Result<TreePassOutcome, ReadFailure> {
     let session_key = runtime_session.to_string();
     let runtime = crate::topology_runtime::lookup(tree_id);
@@ -897,12 +908,12 @@ pub(crate) async fn project_tree_as(
             None => return Ok(TreePassOutcome::Idle),
         },
     };
-    let feed = crate::agent::read_tree_feed(sessions, runtime_session, cursor).await?;
+    let feed = crate::agent::read_tree_feed_from(sessions, runtime_session, cursor, origin).await?;
     if let Some(runtime) = runtime {
         if let TreePass::RunningTurn { through } = pass {
             return Ok(apply_running_root_feed(&runtime, &feed, &root, through).await?);
         }
-        crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
+        crate::agent::feed_projection::retry_tree_feed_from(sessions, feed, origin, |feed| {
             crate::agent::feed_projection::apply_on_runtime(&runtime, feed, &root)
         })
         .await
@@ -913,7 +924,7 @@ pub(crate) async fn project_tree_as(
         return Ok(TreePassOutcome::Idle);
     };
     let before = tree.feed_cursor(&session_key);
-    crate::agent::feed_projection::retry_tree_feed(sessions, feed, |feed| {
+    crate::agent::feed_projection::retry_tree_feed_from(sessions, feed, origin, |feed| {
         std::future::ready(feed.apply_checked(&mut tree, &root))
     })
     .await

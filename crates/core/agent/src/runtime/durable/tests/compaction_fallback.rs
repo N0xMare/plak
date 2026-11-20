@@ -401,7 +401,7 @@ mod receipt_cuts {
             );
             assert_eq!(
                 store
-                    .load_branch(source.session())
+                    .load_branch(source.session(), "test")
                     .await?
                     .head()
                     .checkpoint()

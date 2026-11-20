@@ -285,7 +285,11 @@ async fn sqlite_feed_rows_are_deleted_with_their_session() -> TestResult {
     let chain = prune_chain(&store, DURABILITY, 1_200, 2, 8).await?;
     let selector = chain.created.branch().session();
     store.release(chain.created.lease().clone()).await?;
-    let revision = store.load_branch(selector).await?.session().revision();
+    let revision = store
+        .load_branch(selector, "test")
+        .await?
+        .session()
+        .revision();
     let archived = store
         .archive(plakous_agent::internal::ArchiveSession::new(
             selector.session_id(),

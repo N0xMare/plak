@@ -383,6 +383,25 @@ pub struct FeedTerminalRequest {
     pub turn_id: TurnId,
 }
 
+/// The operation a terminal batch serves, used only in slow-store diagnostics.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeedTerminalOrigin {
+    /// Projecting terminal evidence from the change feed.
+    Projection,
+    /// Projecting terminal evidence before admitting an automatic wake.
+    WakeAdmission,
+}
+
+impl FeedTerminalOrigin {
+    const fn load_label(self) -> &'static str {
+        match self {
+            Self::Projection => "tree_publication_fallback",
+            Self::WakeAdmission => "wake_admission",
+        }
+    }
+}
+
 /// A root turn's committed terminal record.
 #[derive(Clone, Debug)]
 pub struct FeedTerminal {
@@ -772,6 +791,17 @@ impl AgentSessions {
         &self,
         requests: Vec<FeedTerminalRequest>,
     ) -> Vec<Result<FeedTerminalOutcome, AgentSessionsError>> {
+        self.feed_terminals_from(requests, FeedTerminalOrigin::Projection)
+            .await
+    }
+
+    /// Reads a terminal batch with an explicit diagnostic origin.
+    #[doc(hidden)]
+    pub async fn feed_terminals_from(
+        &self,
+        requests: Vec<FeedTerminalRequest>,
+        origin: FeedTerminalOrigin,
+    ) -> Vec<Result<FeedTerminalOutcome, AgentSessionsError>> {
         use std::collections::BTreeMap;
         let mut checkpoints = BTreeMap::new();
         let mut heads = BTreeMap::new();
@@ -807,10 +837,13 @@ impl AgentSessions {
                         std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                         std::collections::btree_map::Entry::Vacant(entry) => entry.insert(
                             self.store
-                                .load_branch(plakous_agent::internal::SessionRef::new(
-                                    request.session,
-                                    request.branch,
-                                ))
+                                .load_branch(
+                                    plakous_agent::internal::SessionRef::new(
+                                        request.session,
+                                        request.branch,
+                                    ),
+                                    origin.load_label(),
+                                )
                                 .await
                                 .map(|head| Arc::clone(head.checkpoint().checkpoint()))
                                 .map_err(store_error),
@@ -879,7 +912,10 @@ impl AgentSessions {
             Err(SessionStoreError::Pruned) => {
                 let head = self
                     .store
-                    .load_branch(plakous_agent::internal::SessionRef::new(session, branch))
+                    .load_branch(
+                        plakous_agent::internal::SessionRef::new(session, branch),
+                        "publication_fallback",
+                    )
                     .await
                     .map_err(|error| store_error(error).for_session(session))?;
                 FeedSource::from_stored(head.checkpoint(), session, branch, false)

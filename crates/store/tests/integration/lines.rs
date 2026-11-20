@@ -129,7 +129,10 @@ async fn rebind(
         context,
         true,
     )?;
-    let session = store.load_branch(source.branch.session()).await?.session();
+    let session = store
+        .load_branch(source.branch.session(), "test")
+        .await?
+        .session();
     let request = ForkBranch::new(
         workflow(workflow_byte)?,
         semantic_request(&[workflow_byte])?,
@@ -390,7 +393,10 @@ async fn the_source_is_read_only(
     let line = LineId::started_by(id::<BranchId>(70_002)?);
     // The source's lease is still live, but the branch is read-only now:
     // a commit, a prune and a second rebind are all fenced.
-    let source_head_before = store.load_branch(source.branch.session()).await?.head();
+    let source_head_before = store
+        .load_branch(source.branch.session(), "test")
+        .await?
+        .head();
     assert_eq!(
         commit(store, source, id(70_013)?, Vec::new()).await?.err(),
         Some(SessionStoreError::NotLineHead)
@@ -426,7 +432,10 @@ async fn the_source_is_read_only(
         Some(SessionStoreError::NotLineHead)
     );
     assert_eq!(
-        store.load_branch(source.branch.session()).await?.head(),
+        store
+            .load_branch(source.branch.session(), "test")
+            .await?
+            .head(),
         source_head_before
     );
 
@@ -476,7 +485,7 @@ async fn a_fork_is_a_new_line(
             semantic_request(&[73])?,
             source.lease.clone(),
             store
-                .load_branch(source.branch.session())
+                .load_branch(source.branch.session(), "test")
                 .await?
                 .session()
                 .revision(),

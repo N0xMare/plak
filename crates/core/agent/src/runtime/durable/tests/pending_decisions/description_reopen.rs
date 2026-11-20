@@ -116,7 +116,7 @@ async fn base_sealed_file_descriptors_refuse_new_descriptions_without_rewriting_
     let checkpoint = original.checkpoint();
     let address =
         DurableSessionAddress::new(original.session_id(), original.branch_id(), checkpoint.id());
-    let head = store.load_branch(address.session()).await?.head();
+    let head = store.load_branch(address.session(), "test").await?.head();
     let record_count = lock_mutex(&store.feed_records).len();
     let result = sessions
         .open(
@@ -132,7 +132,10 @@ async fn base_sealed_file_descriptors_refuse_new_descriptions_without_rewriting_
         error.message(),
         "builder harness plan disagrees with durable semantics"
     );
-    assert_eq!(store.load_branch(address.session()).await?.head(), head);
+    assert_eq!(
+        store.load_branch(address.session(), "test").await?.head(),
+        head
+    );
     assert_eq!(lock_mutex(&store.feed_records).len(), record_count);
     let DurableRuntimeOpen::Opened(reopened) = sessions
         .open(

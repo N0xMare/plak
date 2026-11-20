@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use plakous::sessions::feed::FeedTerminalOrigin;
 use plakous::sessions::{
     AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionOperationId,
     SessionRecoveryAction, SessionRuntimeBinding,
@@ -553,6 +554,15 @@ pub(crate) async fn read_tree_feed(
     session_id: plakous::model::SessionId,
     cursor: u64,
 ) -> Result<TreeFeed, crate::error::ReadFailure> {
+    read_tree_feed_from(sessions, session_id, cursor, FeedTerminalOrigin::Projection).await
+}
+
+pub(crate) async fn read_tree_feed_from(
+    sessions: &AgentSessions,
+    session_id: plakous::model::SessionId,
+    cursor: u64,
+    origin: FeedTerminalOrigin,
+) -> Result<TreeFeed, crate::error::ReadFailure> {
     use crate::error::ReadFailure;
     use plakous::sessions::feed::{
         FeedCursor, FeedPageRequest, FeedSeq, FeedTerminalOutcome, FeedTerminalRequest,
@@ -593,7 +603,7 @@ pub(crate) async fn read_tree_feed(
             }, closure))
         }).collect();
     let outcomes = sessions
-        .feed_terminals(needed.iter().map(|(request, _)| *request).collect())
+        .feed_terminals_from(needed.iter().map(|(request, _)| *request).collect(), origin)
         .await;
     for ((request, closure_candidate), outcome) in needed.into_iter().zip(outcomes) {
         let turn_id = request.turn_id;

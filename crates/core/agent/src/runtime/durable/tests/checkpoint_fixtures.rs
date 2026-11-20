@@ -677,7 +677,7 @@ pub(super) async fn seed_code_cell_recovery_checkpoint(
             NonZeroU64::new(30).ok_or("nonzero lease")?,
         ))
         .await?;
-    let loaded = store.load_branch(session).await?;
+    let loaded = store.load_branch(session, "test").await?;
     let branch_revision = topology.branch_revision.saturating_add(1);
     let history = prior.canonical().history().clone();
     let context = prior.canonical().context().retained_for_exact_resume();
