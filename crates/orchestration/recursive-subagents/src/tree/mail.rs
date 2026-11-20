@@ -456,6 +456,7 @@ impl ProductAgentTree {
                     "recipient requires recovery",
                 ));
             }
+            self.require_fence_acknowledgement(&request.agent_id, None)?;
             if self
                 .current_attempt(&request.agent_id)
                 .is_some_and(|attempt| attempt.status.is_stopped())

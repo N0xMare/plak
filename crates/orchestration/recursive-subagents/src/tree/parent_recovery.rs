@@ -1,11 +1,39 @@
 //! Parent consent to settle one exact child attempt before a followup.
 
 use super::{
-    AttemptId, ProductAgentTree, SendAgentMessageRequest, SendMessageOutput, TopologyError,
-    TopologyErrorCode,
+    AttemptId, NodeStatus, ProductAgentTree, SendAgentMessageRequest, SendMessageOutput,
+    TopologyError, TopologyErrorCode,
 };
 
 impl ProductAgentTree {
+    /// The settled non-lease fence has an anchored, cause-free interrupt.
+    /// It carries no automated loss consent, and a new parent Start still
+    /// requires acknowledgment of the stopped attempt.
+    pub(super) fn require_fence_acknowledgement(
+        &self,
+        agent: &str,
+        acknowledged: Option<&AttemptId>,
+    ) -> Result<(), TopologyError> {
+        if let Some(node) = self.nodes.get(agent)
+            && node.status == NodeStatus::Interrupted
+            && let Some(attempt) = node.attempt_id.as_ref()
+            && acknowledged != Some(attempt)
+            && self
+                .latest_interrupt(agent, attempt)
+                .is_some_and(|(_, cause)| cause.is_none())
+        {
+            return Err(TopologyError::new(
+                TopologyErrorCode::FollowupNotIdle,
+                format!(
+                    "recipient has a recovered fence; its parent may send purpose=followup with \
+                     acknowledge_recovery={attempt} to admit a fresh attempt; a tool may have \
+                     changed this workspace"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn acknowledged_hold_is_settled(
         &self,
         agent: &str,

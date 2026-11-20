@@ -48,6 +48,7 @@ impl ProductAgentTree {
                 "recipient still owns an unfinished seal",
             ));
         }
+        self.require_fence_acknowledgement(agent_id, acknowledge_recovery)?;
         match status {
             NodeStatus::Failed
                 if self

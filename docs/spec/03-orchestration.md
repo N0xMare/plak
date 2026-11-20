@@ -1362,8 +1362,9 @@ An already-terminal root with only exact same-turn finalization debt closes
 quiescently on reopen (chapter 01 §5.5), without another result or
 abandonment report. The live waiter's successful recycle of a non-lease
 fence ends the attempt as `turn_abandoned`. When the waiter did not settle
-it, later recovery can keep the attempt open and interrupt it without an
-owner-loss cause; an explicit admission can then start work again. A fence
+it, later recovery can keep the attempt open and record an interrupt without
+an owner-loss cause. A new parent followup requires `acknowledge_recovery`;
+ordinary mail cannot start it. A fence
 whose reopen has not settled stays `recovery_required`. A proven lease
 fence instead uses the owner-loss path (§14.1).
 An abandonment report already proves a successful recycle; only a reopen
