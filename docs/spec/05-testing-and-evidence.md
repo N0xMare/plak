@@ -2412,11 +2412,15 @@ account-continue SIGKILL matrices, and 600 ms in runner link faults),
 delayed reconnection/readoption, lower-bound hold checks and polling sleeps
 are not absence windows and keep their existing scheduling.
 
-Before the routine durability invocation, the gate lists its actual rendered
-profile selection and refuses unless all four restart families contain all
-sixteen non-ignored root/child groups. This preserves the invocation-local
-union witness if a future lane filter changes; listing does not ignore the
-profile's default filter. The ignored soak invocation has no restart families.
+Before the routine durability invocation, the gate lists its rendered
+profile selection and refuses unless every checked restart family contains all
+sixteen non-ignored root/child groups. Listing honors the profile's default
+filter and is not partitioned. Explicit steps may set
+`PLAK_NEXTEST_PARTITION=count:K/N` (nextest's one-based partition syntax) for
+`tests-parallel` and `tests-durability`. Every shard checks the same durability
+inventory and retains its host-scaled reservations. Gate evidence requires all
+N shards on the same tree and test target; a single shard is not a passing
+lane. Serial tests, named tiers and ignored retirement soaks are not sharded.
 
 Serial and durability remain sequential groups. Serial tests measure real
 deadlines, cancellation and PTY responsiveness; a separate durability process

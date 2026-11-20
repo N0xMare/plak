@@ -56,6 +56,15 @@ for group in "${requested[@]}"; do
   if [[ "$known" != true ]]; then echo "unknown step group: $group" >&2; exit 2; fi
 done
 
+nextest_partition=()
+if [[ -n "${PLAK_NEXTEST_PARTITION:-}" ]]; then
+  case "$tier:,$selection," in
+    steps:*,tests-parallel,*|steps:*,tests-durability,*) ;;
+    *) echo 'PLAK_NEXTEST_PARTITION requires --steps with tests-parallel or tests-durability' >&2; exit 2 ;;
+  esac
+  nextest_partition=(--partition "$PLAK_NEXTEST_PARTITION")
+fi
+
 source "$root/tools/gate/dev-tools-prefix.sh"
 export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"
 bash tools/gate/dev-tools.sh check
@@ -472,6 +481,9 @@ run_build_denying_warnings() {
 run_lane() {
   local profile=$1
   shift
+  case "$profile" in
+    offline|durability) set -- ${nextest_partition[@]+"${nextest_partition[@]}"} "$@" ;;
+  esac
   prepare_tests
   PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
@@ -632,6 +644,8 @@ run_group() {
         local durability_config="$TMPDIR/nextest-durability.toml" durability_threads
         durability_threads=$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$durability_config") || return
         echo "-- durability pool: $durability_threads slots --"
+        # Check the full restart-family union before running a partition; a
+        # shard need not contain all groups.
         PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
           cargo nextest list --locked --workspace --all-features --profile durability \
           --config-file "$durability_config" ${target_args[@]+"${target_args[@]}"} --message-format json \

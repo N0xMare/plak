@@ -142,6 +142,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_JS_HOST', None)
         self.env.pop('PLAK_MCP_SERVER', None)
         self.env.pop('PLAK_TEST_BINARY', None)
+        self.env.pop('PLAK_NEXTEST_PARTITION', None)
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -1287,6 +1288,40 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             )
         self.assertNotIn('--ignore-default-filter', listing['args'])
         self.assertIn('both wire restart families contain all 16 groups', result.stdout)
+
+    def test_explicit_shards_keep_the_full_restart_inventory_and_weighted_layout(self):
+        self.env['PLAK_NEXTEST_PARTITION'] = 'count:2/3'
+        self.env['GATE_AVAILABLE_PARALLELISM'] = '12'
+        result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-serial,tests-durability')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        listing = next(call['args'] for call in calls if call['args'][:2] == ['nextest', 'list'])
+        offline, serial, durability = [call['args'] for call in self.lanes(calls)]
+        for args in (offline, durability):
+            i = args.index('--partition')
+            self.assertEqual(args[i + 1], 'count:2/3')
+        for args in (listing, serial):
+            self.assertNotIn('--partition', args)
+        self.assertIn('--test-threads=12', durability)
+        self.assertEqual(
+            listing[listing.index('--config-file') + 1],
+            durability[durability.index('--config-file') + 1],
+        )
+
+        self.log.unlink()
+        self.env['GATE_MISSING_RESTART_GROUP'] = '1'
+        result, calls, _ = self.run_gate('--steps', 'tests-durability')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('expected all 16 restart groups', result.stderr)
+        self.assertEqual(self.lanes(calls), [])
+
+    def test_partition_cannot_narrow_a_named_tier_or_a_nonshardable_selection(self):
+        self.env['PLAK_NEXTEST_PARTITION'] = 'count:1/2'
+        for args in ((), ('--full',), ('--soak',), ('--steps', 'tests-serial')):
+            with self.subTest(args=args):
+                result, calls, _ = self.run_gate(*args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('PLAK_NEXTEST_PARTITION requires --steps', result.stderr)
+                self.assertEqual(calls, [])
 
     def test_batch_mac_keeps_full_platform_clippy_but_no_wall_clock_lanes(self):
         result, calls, scripts = self.run_gate('--batch-mac')
