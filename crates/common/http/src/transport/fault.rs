@@ -54,11 +54,11 @@
 //! hop-1 rules to its own exchange. Hop-2 rules are selected by the gateway's
 //! upstream client.
 //!
-//! A gateway service process can use [`FaultPlan::parse_provider`]: today's grammar, with
+//! Provider-side tests use [`FaultPlan::parse_provider`] for a grammar with
 //! no `hop` field and no hop-1 fault. [`PLAK_TEST_GATEWAY`] tells the host plan
 //! which placement it is in (`in-process`, `external`, or unset for direct
-//! local custody). `provider` makes the host plan fail closed, because that
-//! process must use the provider grammar.
+//! local custody). `provider` rejects a host fault plan; it does not create
+//! a provider plan.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -83,8 +83,7 @@ pub const FAULTS_ENV: &str = "PLAK_TEST_FAULTS";
 ///
 /// Set [`PLAK_TEST_GATEWAY`] to `external` when `[gateway] address` names
 /// another process. Embedders can set `in-process` or leave it unset for a
-/// direct provider client. The separate gateway service sets `provider` and
-/// parses its own plan with [`FaultPlan::parse_provider`].
+/// direct provider client. The value `provider` rejects host fault plans.
 pub const PLAK_TEST_GATEWAY: &str = "PLAK_TEST_GATEWAY";
 
 /// Which hop a fault rule applies to.

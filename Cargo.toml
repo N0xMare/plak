@@ -224,7 +224,7 @@ plakous-recursive-subagents = ["plakous-host-protocol", "plakous-workspace"]
 # `plakous-image` is the one attachment normalizer, shared with clients that
 # do not link the facade.
 plakous-hosted = ["plakous-host-protocol", "plakous-image", "plakous-recursive-subagents", "plakous-workspace"]
-# The store edge is optional and pinned to the repository-only commit-trace gate.
+# The optional store edge is for repository test support.
 plakous-recursive-subagents-store = ["plakous-recursive-subagents", "plakous-store"]
 
 [workspace.metadata.plakous.layout]
