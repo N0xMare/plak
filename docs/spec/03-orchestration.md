@@ -5772,8 +5772,12 @@ A mutation retains the store-acknowledged revision from its explicit publish;
 settling an empty effect batch does not itself publish a mutation. Effects are
 drained after the tree mutex is released. If the initial publish fails, work
 that still has acknowledged authority can settle; a batch refused for lack of
-acknowledgment is requeued before returning the failure. Already dispatched
-effects are recorded, not run again.
+acknowledgment at admission is requeued before returning the failure. This
+requeue ends at stage recording: staging can leave a partial set of recorded
+operations, and a stage publication refusal does not roll those records back.
+Neither refusal dispatches the batch or blindly puts it back on the live
+queue. The existing stage and reservation recovery rules apply. Already
+dispatched effects are recorded, not run again.
 Raw tree handles are available only to test fixtures.
 
 Follow-up delivery snapshots an owned operation under the live-map lock and
