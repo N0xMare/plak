@@ -395,8 +395,10 @@ async fn spawn_account_receipt_replays_after_relaunch() {
     .await
     .unwrap();
     assert!(replay.succeeded, "{}", replay.detail);
+    let replayed: serde_json::Value = serde_json::from_str(&replay.detail).unwrap();
+    assert_eq!(replayed["runner"], "local");
     assert_eq!(
-        serde_json::from_str::<crate::agent_tree::SpawnAgentOutput>(&replay.detail).unwrap(),
+        serde_json::from_value::<crate::agent_tree::SpawnAgentOutput>(replayed).unwrap(),
         receipt
     );
     await_finished(&fixture, &receipt.agent_id).await;

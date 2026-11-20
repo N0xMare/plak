@@ -377,10 +377,19 @@ impl TopologyTool {
         })
     }
 
-    fn spawn_tool_receipt(output: &SpawnAgentOutput) -> Result<ToolOutcome, ToolRuntimeError> {
+    fn spawn_tool_receipt(
+        &self,
+        output: &SpawnAgentOutput,
+    ) -> Result<ToolOutcome, ToolRuntimeError> {
+        let runner = match self.driver.read(|tree| {
+            tree.node(&output.agent_id)
+                .map(|node| node.placement.runner_id.clone())
+        }) {
+            Ok(Ok(runner)) => runner,
+            Ok(Err(error)) | Err(error) => return Self::topology_failure(&error),
+        };
         let mut value = json!(output);
-        let id = output.runner.as_deref().unwrap_or("local");
-        value["runner"] = json!(id);
+        value["runner"] = json!(runner.as_deref().unwrap_or("local"));
         ToolOutcome::success_text(value.to_string())
     }
 
@@ -851,7 +860,7 @@ impl TopologyTool {
                     .await
                 }
                 BoundAfterFailure::FoldRefused(error) => Self::topology_failure(&error),
-                BoundAfterFailure::Folded => Self::spawn_tool_receipt(&output),
+                BoundAfterFailure::Folded => self.spawn_tool_receipt(&output),
             };
         }
         if let Some(binder) = self.binder() {
@@ -884,7 +893,7 @@ impl TopologyTool {
             match binder.bind(start).await {
                 Ok(bound) => {
                     if bound.durably_registered {
-                        return Self::spawn_tool_receipt(&output);
+                        return self.spawn_tool_receipt(&output);
                     }
                     let driver = self.driver.clone();
                     let agent_id = output.agent_id.clone();
@@ -955,7 +964,7 @@ impl TopologyTool {
                             "bound session allocation is invalid",
                         )),
                         BoundSession::ProjectionRefused(error) => Self::topology_failure(&error),
-                        BoundSession::Recorded => Self::spawn_tool_receipt(&output),
+                        BoundSession::Recorded => self.spawn_tool_receipt(&output),
                     };
                 }
                 Err(SpawnBindError::Refused(message)) => {
@@ -1035,7 +1044,7 @@ impl TopologyTool {
                 }
             }
         }
-        Self::spawn_tool_receipt(&output)
+        self.spawn_tool_receipt(&output)
     }
 }
 

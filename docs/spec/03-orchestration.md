@@ -747,7 +747,8 @@ Receipt:
 
 A `workspace=fork` receipt names `mode` `snapshot` (non-mutate) or `fork`
 (mutate) and includes `base` (the mint commit).
-The tool receipt names the saved runner identity, not the mutable alias.
+The tool receipt reads the saved runner identity from the node, not from the
+mutable alias or the recorded spawn response.
 `list_agents` uses the paired name if still configured and the saved id
 otherwise.
 

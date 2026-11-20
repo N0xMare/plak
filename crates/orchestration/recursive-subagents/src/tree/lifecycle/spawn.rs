@@ -434,13 +434,11 @@ impl ProductAgentTree {
         );
         self.inbound.entry(agent_id.clone()).or_default();
         self.bump();
-        let runner = self.node(&agent_id)?.placement.runner_id.clone();
         let output = SpawnAgentOutput {
             agent_id,
             attempt_id,
             status: NodeStatus::Running,
             tier,
-            runner,
             workspace: WorkspaceReceipt {
                 id: bound.workspace_id,
                 mode: bound.mode,

@@ -20,7 +20,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_spawn_description_template",
         PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE,
-        "36742dce3ea2ac81fbcdab9365ca8c694c0356a301bed4f208a9009b8ab4ccaa",
+        "a0f4d6a8ee8b968ca7af8e41e30a1666e73a3e3cac76cee439aae5d9568c97fe",
     ),
     PromptPin::new(
         "topology.topology_send_description",

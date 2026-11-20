@@ -64,6 +64,10 @@ delegation = "explicit"
 # type: string · default: (unset) · not validated at parse; runs in the copy's workspace
 # on_mint = "cargo fetch"
 
+# Default child placement when spawn_agent omits runner. Does not place a root.
+# type: string · default: (unset) · local or a runner name; pairing and readiness checked at spawn
+# runner = "build"
+
 # Put the model id on the spawn card next to the description.
 # type: bool · default: false
 show_model = true
