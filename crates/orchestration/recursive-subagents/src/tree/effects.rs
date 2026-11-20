@@ -59,6 +59,15 @@ impl ProductAgentTree {
         }
     }
 
+    // Only these tickets depend on stopping the reclaimed copies' jobs.
+    pub(crate) fn take_reclamation_effects(&mut self) -> Effects {
+        Effects {
+            dormancy: std::mem::take(&mut self.effects.dormancy),
+            launch_checkout: self.launch_checkout.clone(),
+            ..Effects::default()
+        }
+    }
+
     /// Whether `agent_id` owns a queued or already dispatched seal.
     pub(super) fn seal_pending(&self, agent_id: &str) -> bool {
         self.outstanding_seals.contains_key(agent_id)

@@ -251,11 +251,7 @@ impl ProductTopologyRuntime {
             .write_or_undo(
                 move |tree| {
                     tree.detach();
-                    let reserved = reserve(tree, admit, &agent);
-                    // As a plain mutation: anything queued is not this
-                    // reservation's to settle.
-                    drop(tree.take_effects());
-                    reserved
+                    reserve(tree, admit, &agent)
                 },
                 // A caller dropped before it holds the reservation releases it.
                 move |tree, reserved_owner| {
@@ -319,7 +315,7 @@ impl ProductTopologyRuntime {
         let agent = agent_id.clone();
         if self
             .driver
-            .mutate(move |tree| tree.bind_turn_owner(&agent, turn.to_string()))
+            .write(move |tree| tree.bind_turn_owner(&agent, turn.to_string()))
             .await
             .is_err()
         {
@@ -377,7 +373,8 @@ impl ProductTopologyRuntime {
                     (self.driver.clone(), agent_id.to_owned(), result.is_ok());
                 let _ = self
                     .driver
-                    .mutate(move |tree| {
+                    .write(move |tree| {
+                        tree.detach();
                         tree.release_turn_owner(&agent);
                         if released
                             && tree.node(&agent).is_ok_and(|node| {

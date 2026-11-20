@@ -156,6 +156,66 @@ fn placement_hold_unstarted_seal_reopens_as_debt_but_staged_seal_never_restarts(
     }
 }
 
+#[tokio::test]
+async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
+    use plakous::sessions::{AgentSessions, SessionBackend};
+
+    let (root, vcs, mut tree) = fake_tree();
+    let child = tree
+        .spawn_agent("root", &mint_req(), None)
+        .unwrap()
+        .agent_id;
+    let node = tree.nodes.get_mut(&child).unwrap();
+    node.placement.runner_id = Some("placed".into());
+    let path = node.path.clone();
+    let workspace = node.workspace_id.clone();
+    tree.workspaces.get_mut(&workspace).unwrap().base_commit = Some("a".repeat(40));
+    vcs.set_placement_ready(path.clone(), false);
+    tree.record_turn_completed(&child).unwrap();
+
+    let mut tree = ProductAgentTree::reopen(tree.to_persisted());
+    tree.set_vcs(vcs.clone());
+    let sibling = tree
+        .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+        .unwrap()
+        .agent_id;
+    let runtime = crate::hub::ProductTopologyRuntime::new(
+        tree,
+        Arc::new(MemoryTreeStore::new()),
+        vcs.clone(),
+        None,
+    );
+    let driver = runtime.driver();
+    driver.mutate_and_settle(|_| ()).await.unwrap();
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(root.path().join("runtime.sqlite3")).unwrap())
+            .unwrap();
+
+    vcs.set_placement_ready(path, true);
+    driver.collect_dormant_children(&sessions).await.unwrap();
+    driver.reclaim_dormant_checkouts().await.unwrap();
+    assert!(
+        runtime
+            .read(ProductAgentTree::has_ready_deferred_seals)
+            .unwrap()
+    );
+    let _startup = runtime.reserve_startup(&sibling).await.unwrap();
+    assert!(
+        runtime
+            .read(ProductAgentTree::has_ready_deferred_seals)
+            .unwrap()
+    );
+    assert!(vcs.calls_of(FakeOp::Seal).is_empty());
+
+    runtime.mutate_and_settle(|_| ()).await.unwrap();
+    assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
+    assert!(
+        !runtime
+            .read(ProductAgentTree::has_ready_deferred_seals)
+            .unwrap()
+    );
+}
+
 #[test]
 fn placement_hold_parked_wake_keeps_mail_unread_and_spends_no_turn_or_nudge() {
     let (_root, vcs, mut tree) = fake_tree();

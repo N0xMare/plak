@@ -305,7 +305,30 @@ fn unstarted_seal_survives_both_legs_and_reopen_with_the_child_runner_down() {
     secondary.resume();
     std::fs::remove_file(pair.cuts.join("refuse")).unwrap();
     pending_stop::ready(&mut client, &pair.secondary_id);
-    wait_for(|| tree(&pair, &node).candidates().len() == 1);
+    wait_for(|| {
+        let saved = recorded_tree(&pair, &node);
+        assert_ne!(
+            saved.node(&agent).unwrap().status,
+            NodeStatus::RecoveryRequired
+        );
+        saved.candidates().len() == 1
+    });
+    let saved = recorded_tree(&pair, &node);
+    assert_eq!(saved.node(&agent).unwrap().status, NodeStatus::Completed);
+    assert_eq!(
+        saved
+            .candidates()
+            .values()
+            .next()
+            .unwrap()
+            .producing_agent_id,
+        agent
+    );
+    assert!(saved.operations().values().any(|row| {
+        row.caller_agent_id == agent
+            && row.tool_name == "seal_effect"
+            && row.terminal_response.is_some()
+    }));
     stop(&mut host);
 }
 
@@ -329,6 +352,15 @@ fn assert_unstarted(pair: &Pair, node: &NodeAddress, agent: &str) {
     let saved = recorded_tree(pair, node);
     assert_eq!(saved.node(agent).unwrap().status, NodeStatus::Sealing);
     assert!(saved.candidates().is_empty());
+    assert!(
+        saved.operations().values().any(|row| {
+            row.caller_agent_id == agent
+                && row.tool_name == "seal_effect"
+                && row.terminal_response.is_none()
+                && row.terminal_code.is_none()
+        }),
+        "a durable unsent seal reservation must precede the hold"
+    );
     assert!(
         !saved
             .operations()

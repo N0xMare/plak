@@ -3787,7 +3787,9 @@ the pinned Git tree; it never snapshots the child again. It carries that
 same pinned candidate only if the destination candidate ref is absent.
 An in-process reservation has no such pre-dispatch proof and remains ambiguous.
 For a carried seal, an unstarted ticket waits for both the sealing runner and
-the runner that must take its bundle. The tree restores routes from saved node
+the runner that must take its bundle. Housekeeping and child ownership
+changes that do not settle VCS work leave queued tickets for the effect
+driver. The tree restores routes from saved node
 paths before recovering either runner; it does not infer a local path when a
 runner is unavailable. Hold state, elapsed time and waiters add no persisted
 fields or wire versions.

@@ -219,31 +219,28 @@ impl TreeDriver {
     ) -> Result<(), TopologyError> {
         let driver = self.clone();
         let (owners, effects) = self
-            .mutate(move |tree| {
-                let snapshot = tree.clone();
+            .write(move |tree| {
+                let snapshot = (**tree).clone();
                 match tree.reclaim_dormant(now, &sizes).and_then(|owners| {
                     if tree.revision != tree.stored_revision || !owners.is_empty() {
-                        driver.save(tree)?;
+                        driver.save_guarded(tree)?;
                     }
                     Ok(owners)
                 }) {
-                    Ok(owners) => Ok(owners),
+                    Ok(owners) => Ok((owners, tree.take_reclamation_effects())),
                     Err(error) => {
-                        *tree = snapshot;
+                        **tree = snapshot;
                         Err(error)
                     }
                 }
             })
-            .await?;
+            .await??;
         let effects = self.hold_effects(effects);
-        let owners = owners?;
         if let Err(error) = self.stop_agent_jobs(&owners).await {
             // No VCS effect was dispatched. Release only process-local
             // claims so the acknowledged intent survives for recovery.
             effects.abandon();
-            let _ = self
-                .mutate(ProductAgentTree::abandon_reclamation_dispatch)
-                .await;
+            let _ = self.write(|tree| tree.abandon_reclamation_dispatch()).await;
             return Err(error);
         }
         let settled = effects.settle().await?;
@@ -260,16 +257,16 @@ impl TreeDriver {
         sessions: &plakous::sessions::AgentSessions,
     ) -> Result<(), TopologyError> {
         let driver = self.clone();
-        let (tickets, _) = self
-            .mutate(move |tree| {
-                let snapshot = tree.clone();
+        let tickets = self
+            .write(move |tree| {
+                let snapshot = (**tree).clone();
                 match tree
                     .prepare_child_retention(plakous::model::now_unix_millis())
-                    .and_then(|tickets| driver.save(tree).map(|()| tickets))
+                    .and_then(|tickets| driver.save_guarded(tree).map(|()| tickets))
                 {
                     Ok(tickets) => Ok(tickets),
                     Err(error) => {
-                        *tree = snapshot;
+                        **tree = snapshot;
                         Err(error)
                     }
                 }
@@ -312,11 +309,12 @@ impl TreeDriver {
                 }
             }
             let driver = self.clone();
-            let (finished, _) = self
+            let (finished, effects) = self
                 .mutate(move |tree| {
                     driver.fold_and_commit(tree, |tree| tree.finish_child_retention(&ticket))
                 })
                 .await?;
+            self.settle(effects).await?;
             finished?;
         }
         self.cleanup_candidate_pins().await
@@ -357,11 +355,12 @@ impl TreeDriver {
                 ));
             }
             let driver = self.clone();
-            let (finished, _) = self
+            let (finished, effects) = self
                 .mutate(move |tree| {
                     driver.fold_and_commit(tree, |tree| tree.acknowledge_pin_cleanup(&ticket))
                 })
                 .await?;
+            self.settle(effects).await?;
             finished?;
         }
         Ok(())

@@ -540,7 +540,7 @@ impl ProductTopologyRuntime {
         let agent = agent_id.clone();
         if let Err(error) = self
             .driver
-            .mutate(move |tree| tree.bind_turn_owner(&agent, turn_id.to_string()))
+            .write(move |tree| tree.bind_turn_owner(&agent, turn_id.to_string()))
             .await
         {
             return Err((child, Some(error.message)));

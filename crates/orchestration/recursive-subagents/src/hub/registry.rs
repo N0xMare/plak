@@ -194,7 +194,8 @@ impl LiveChildTable {
                     let (writer, agent, released) =
                         (driver.clone(), worker_id.clone(), result.is_ok());
                     let _ = driver
-                        .mutate(move |tree| {
+                        .write(move |tree| {
+                            tree.detach();
                             tree.release_turn_owner(&agent);
                             if released
                                 && tree.node(&agent).is_ok_and(|node| {
