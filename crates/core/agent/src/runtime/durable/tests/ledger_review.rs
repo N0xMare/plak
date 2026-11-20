@@ -121,6 +121,7 @@ async fn reserved_agent(
         descriptor: composition.clone(),
         evidence: evidence.clone(),
         lifecycle: LocalCompositionLifecycle::RootTurnJoined,
+        projection: LocalCompositionResultProjection::TokensScriptV1,
     }));
     let builder = code_cell_agent_builder(
         model.as_ref(),

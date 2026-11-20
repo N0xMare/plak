@@ -222,15 +222,27 @@ impl LanguageModel for SdkModel {
 
 #[tokio::test]
 async fn real_python_sdk_driver_values_edits_state_and_quotas() -> TestResult {
-    Box::pin(sdk_driver(false)).await
+    Box::pin(sdk_driver(SdkScenario::Values)).await
 }
 
 #[tokio::test]
 async fn real_python_sdk_driver_foreground_stop() -> TestResult {
-    Box::pin(sdk_driver(true)).await
+    Box::pin(sdk_driver(SdkScenario::ForegroundStop)).await
 }
 
-async fn sdk_driver(foreground_stop: bool) -> TestResult {
+#[tokio::test]
+async fn real_python_sdk_pending_steer_stops_the_foreground_job() -> TestResult {
+    Box::pin(sdk_driver(SdkScenario::Steer)).await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SdkScenario {
+    Values,
+    ForegroundStop,
+    Steer,
+}
+
+async fn sdk_driver(scenario: SdkScenario) -> TestResult {
     let worker = std::env::var_os("PLAK_PY_HOST")
         .map(PathBuf::from)
         .ok_or("real Python worker prerequisite is missing")?;
@@ -257,10 +269,15 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
         None,
     )?;
     let model = Arc::new(SdkModel {
-        cells: if foreground_stop {
-            &[("while True:\n    pass", "cell stopped: ForegroundBudget")]
-        } else {
-            CELLS
+        cells: match scenario {
+            SdkScenario::Values => CELLS,
+            SdkScenario::ForegroundStop => {
+                &[("while True:\n    pass", "cell stopped: ForegroundBudget")]
+            }
+            SdkScenario::Steer => &[(
+                "result = await proc.run(['/bin/sleep', '60'], timeout_s=300)\nassert result.status == 'terminated', result.status\nprint('foreground job stopped for steer')",
+                "foreground job stopped for steer",
+            )],
         },
         scripted: Arc::new(
             plakous_test_support::ScriptedModel::new(facts.clone(), [])
@@ -332,16 +349,18 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
         .engine_artifact(artifact)
         .product_extension_evidence(evidence)
         .build()?;
-    let attachment = if foreground_stop {
+    let attachment = if scenario == SdkScenario::ForegroundStop {
         attachment.with_sdk_foreground_budget(Duration::from_millis(20))
     } else {
         attachment
     };
+    let promoted = (scenario == SdkScenario::Steer).then(|| Arc::new(tokio::sync::Notify::new()));
     let builder = crate::local_composition::attach_local_composition(
         AgentBuilder::new(configured, registry, workspace)
-            .job_host(Arc::new(SdkJobHost(plakous_tools::JobOutputRoot::open(
-                &directory.path().join("jobs"),
-            )?)))
+            .job_host(Arc::new(SdkJobHost {
+                outputs: plakous_tools::JobOutputRoot::open(&directory.path().join("jobs"))?,
+                promoted: promoted.clone(),
+            }))
             .tool_policy(Arc::new(AlwaysAllowPolicy))
             .harness_plan(plan)
             .request_policy(AgentRequestPolicy::new(
@@ -361,18 +380,36 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
             SessionRuntimeBinding::new(builder),
         ))
         .await?;
-    let result = session
-        .agent()
-        .prompt("exercise the SDK")
-        .await?
-        .result()
-        .await?;
+    let turn = session.agent().prompt("exercise the SDK").await?;
+    let result =
+        if let Some(promoted) = promoted {
+            tokio::time::timeout(Duration::from_secs(20), promoted.notified()).await?;
+            assert!(
+                session.agent().jobs().iter().any(|job| {
+                    job.number == 1 && job.status == plakous_tools::JobStatus::Running
+                })
+            );
+            turn.control()
+                .steer("stop waiting for the foreground job")
+                .await?;
+            let result = tokio::time::timeout(Duration::from_secs(20), turn.result()).await??;
+            assert!(
+                !session
+                    .agent()
+                    .jobs()
+                    .iter()
+                    .any(|job| { job.status == plakous_tools::JobStatus::Running })
+            );
+            result
+        } else {
+            turn.result().await?
+        };
     assert!(
         matches!(result.outcome(), TurnResultOutcome::Completed(_)),
         "{:?}",
         result.outcome()
     );
-    if !foreground_stop {
+    if scenario == SdkScenario::Values {
         assert_eq!(
             std::fs::read_to_string(directory.path().join("result"))?,
             "hello SDK\n"
@@ -388,18 +425,21 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
     let exported =
         AgentSessions::export_history_sqlite(directory.path().join("session.sqlite"), locator)?;
     let values = exported.named_state()?;
-    if foreground_stop {
-        assert!(values.is_empty());
-    } else {
+    if scenario == SdkScenario::Values {
         assert_eq!(
             values,
             BTreeMap::from([("answer".into(), serde_json::json!({"n":42}))])
         );
+    } else {
+        assert!(values.is_empty());
     }
     Ok(())
 }
 
-struct SdkJobHost(plakous_tools::JobOutputRoot);
+struct SdkJobHost {
+    outputs: plakous_tools::JobOutputRoot,
+    promoted: Option<Arc<tokio::sync::Notify>>,
+}
 impl plakous_tools::JobHost for SdkJobHost {
     fn service(&self, _: plakous_model::LineId) -> Option<plakous_tools::JoinedSessionsPort> {
         None
@@ -409,7 +449,18 @@ impl plakous_tools::JobHost for SdkJobHost {
         owner: plakous_tools::JobOwner,
         fresh: plakous_tools::JoinedSessionsPort,
     ) -> Result<plakous_tools::JoinedSessionsPort, plakous_tools::ExecutionBackendError> {
-        fresh.bind_job_outputs(self.0.clone(), owner.session_id, owner.branch_id);
+        fresh.bind_job_outputs(self.outputs.clone(), owner.session_id, owner.branch_id);
+        if let Some(promoted) = self.promoted.clone() {
+            fresh.observe_jobs(
+                move |job| {
+                    if job.status == plakous_tools::JobStatus::Running {
+                        promoted.notify_one();
+                    }
+                    true
+                },
+                || true,
+            );
+        }
         Ok(fresh)
     }
 }

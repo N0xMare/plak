@@ -8,7 +8,9 @@ use super::*;
 mod expedite;
 pub(super) mod terminal;
 
-pub(in crate::runtime) fn headroom_test_construction() -> TestResult<LocalCompositionConstruction> {
+pub(in crate::runtime) fn headroom_test_construction(
+    projection: LocalCompositionResultProjection,
+) -> TestResult<LocalCompositionConstruction> {
     let registry = neutral_composition_test_registry()?;
     let model_descriptor = neutral_composition_test_descriptor()?;
     let authority = artifact_authority(&model_descriptor, 1)?;
@@ -26,6 +28,7 @@ pub(in crate::runtime) fn headroom_test_construction() -> TestResult<LocalCompos
             descriptor: descriptor.clone(),
             evidence: Arc::default(),
             lifecycle: LocalCompositionLifecycle::RootTurnJoined,
+            projection,
         })),
         descriptor,
         attachment: LocalCompositionAttachmentIdentity {
@@ -258,6 +261,7 @@ pub(super) struct FakeCompositionIntegration {
     pub(super) descriptor: LocalCompositionDescriptor,
     pub(super) evidence: Arc<FakeCompositionEvidence>,
     pub(super) lifecycle: LocalCompositionLifecycle,
+    pub(super) projection: LocalCompositionResultProjection,
 }
 
 pub(super) fn neutral_composition_test_descriptor() -> TestResult<ResolvedModelDescriptor> {
@@ -490,6 +494,7 @@ pub(super) fn composition_test_builder(
             descriptor: composition_descriptor.clone(),
             evidence,
             lifecycle,
+            projection: LocalCompositionResultProjection::TokensScriptV1,
         }));
     code_cell_agent_builder(
         model.as_ref(),

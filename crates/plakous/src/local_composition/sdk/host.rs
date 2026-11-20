@@ -550,39 +550,9 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
     if background {
         return Ok(values::job(value.job_id));
     }
-    if let Some(id) = value.session_id {
-        if let Some(stdin) = input["stdin"].as_str() {
-            merge_process(
-                &mut value,
-                process(
-                    scope,
-                    "process_session_write",
-                    json!({"session_id":id,"input":stdin,"disposition":"close","yield_time_ms":0,"max_output_bytes":40000}),
-                    CallCharge::Continuation,
-                )
-                .await?,
-            );
-        }
-        if let Some(deadline) = deadline {
-            while value.session_id.is_some() && tokio::time::Instant::now() < deadline {
-                let remaining = u64::try_from(
-                    deadline
-                        .saturating_duration_since(tokio::time::Instant::now())
-                        .as_millis(),
-                )
-                .unwrap_or(Limits::FOREGROUND_MS);
-                merge_process(
-                    &mut value,
-                    process(
-                        scope,
-                        "process_session_poll",
-                        poll_args(id, remaining),
-                        CallCharge::Continuation,
-                    )
-                    .await?,
-                );
-            }
-        }
+    if let (Some(id), Some(deadline)) = (value.session_id, deadline) {
+        let observed =
+            settle_foreground(scope, &mut value, id, input["stdin"].as_str(), deadline).await;
         if value.session_id.is_some() {
             let stopped = process(
                 scope,
@@ -592,11 +562,65 @@ async fn start_process(scope: &Scope, name: &str, input: &Value) -> Result<V, V>
             )
             .await?;
             merge_process(&mut value, stopped);
-            value.status = "timed_out".into();
-            value.session_id = None;
+            if observed.as_ref().is_ok_and(|timed_out| *timed_out) {
+                value.status = "timed_out".into();
+            }
         }
+        observed?;
     }
     Ok(process_value(scope, value))
+}
+
+// A full wait can return a live handle once to report newly observed leftover
+// members. Allow one more full wait for that case. A live result before the
+// deadline otherwise yields to preemption; issuing the same wait again could
+// spin while the driver's Notice is still pending.
+async fn settle_foreground(
+    scope: &Scope,
+    value: &mut ProcessValue,
+    id: u64,
+    stdin: Option<&str>,
+    deadline: tokio::time::Instant,
+) -> Result<bool, V> {
+    if let Some(stdin) = stdin
+        && tokio::time::Instant::now() < deadline
+    {
+        merge_process(
+            value,
+            process(
+                scope,
+                "process_session_write",
+                json!({"session_id":id,"input":stdin,"disposition":"close","yield_time_ms":0,"max_output_bytes":40000}),
+                CallCharge::Continuation,
+            )
+            .await?,
+        );
+    }
+    for _ in 0..2 {
+        if value.session_id.is_none() {
+            return Ok(false);
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(true);
+        }
+        let millis = u64::try_from(remaining.as_nanos().div_ceil(1_000_000))
+            .unwrap_or(Limits::FOREGROUND_MS);
+        merge_process(
+            value,
+            process(
+                scope,
+                "process_session_poll",
+                poll_args(id, millis),
+                CallCharge::Continuation,
+            )
+            .await?,
+        );
+        if value.status != "leftover" {
+            break;
+        }
+    }
+    Ok(value.session_id.is_some() && tokio::time::Instant::now() >= deadline)
 }
 
 fn merge_process(value: &mut ProcessValue, observed: ProcessValue) {

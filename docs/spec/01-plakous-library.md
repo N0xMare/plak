@@ -10523,10 +10523,14 @@ the model-request timeout cannot shorten it.
 A Python-raised `MemoryError("memory limit exceeded")` remains an ordinary
 cell failure, never a typed stop. In-engine memory remains bounded at 256 MiB.
 `proc.start` is for long work; `proc.run` and `proc.shell` join within their
-`timeout_s` bound (0–300 s) and stop a job that exceeds it. The 100-call
-cell quota charges each model-issued nested call once. Host-only stdin
-delivery, completion polls, and timeout stops that finish an admitted
-`proc.run` or `proc.shell` do not charge that quota. They still pass ordinary
+`timeout_s` bound (0–300 s) and stop a job that exceeds it. A preempted
+foreground wait stops the job and reports termination instead of issuing
+another wait under the pending notice. An admitted foreground call may issue
+one stdin delivery, one completion wait (plus one more if it reported newly
+observed leftover group members), and one stop; a failed continuation also
+attempts to stop a known live session before reporting the failure. The
+100-call cell quota charges each model-issued nested call once. These
+host-only continuations do not charge that quota. They still pass ordinary
 admission, outstanding-work, and settlement limits and get their own
 canonical child records. Explicit `proc.stdin`, `proc.poll`, `proc.join`,
 and `proc.cancel` calls charge normally. `proc.stdin` writes

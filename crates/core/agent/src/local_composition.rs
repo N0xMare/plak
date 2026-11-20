@@ -292,6 +292,7 @@ pub struct LocalCompositionNotification {
 pub trait LocalCompositionNestedResponder: Send + Sync {
     /// Trusted adapter metadata, never supplied by a cell. An SDK
     /// continuation completes a host call that already paid the cell quota.
+    #[doc(hidden)]
     fn is_sdk_continuation(&self) -> bool {
         false
     }

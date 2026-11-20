@@ -65,9 +65,8 @@ impl LocalCompositionIntegration for FakeComposition {
     }
     fn result_projection(&self) -> LocalCompositionResultProjection {
         match self {
-            Self::Neutral(_) | Self::Scheduler(_) => {
-                LocalCompositionResultProjection::TokensScriptV1
-            }
+            Self::Neutral(fixture) => fixture.projection,
+            Self::Scheduler(_) => LocalCompositionResultProjection::TokensScriptV1,
             Self::Cancel(fixture) => {
                 if fixture.evidence.python_fixture.load(Ordering::Acquire) {
                     LocalCompositionResultProjection::BytesPythonPtcV1
