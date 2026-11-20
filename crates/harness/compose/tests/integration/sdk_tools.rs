@@ -5,7 +5,9 @@ use super::{
 use plakous_tool_files::FilesToolPack;
 use plakous_tool_process::ProcessSessionTools;
 use plakous_tool_search::SearchToolPack;
-use plakous_tools::{FrozenToolRegistry, ToolRegistryBuilder, WorkspaceContentIdentity};
+use plakous_tools::{
+    FrozenToolRegistry, ToolOutcome, ToolRegistryBuilder, WorkspaceContentIdentity,
+};
 use serde_json::{Value, json};
 
 fn sdk_registry() -> TestResult<FrozenToolRegistry> {
@@ -321,25 +323,33 @@ async fn process_exec_preserves_literal_argv_and_defaults_stdin_to_eof() -> Test
     let registry = sdk_registry()?;
     let environment = environment(root.path())?;
     let literal = "$(touch injected); * ' \" $HOME";
-    let result = execute(&registry, environment.clone(), ids(9)?, "process_session_exec", &json!({
-        "argv":["printf","%s",literal],"workdir":".","yield_time_ms":1000,"max_output_bytes":40000
-    }).to_string()).await?;
-    let value: Value = serde_json::from_str(&result.joined_text())?;
+    let result = execute(
+        &registry,
+        environment.clone(),
+        ids(9)?,
+        "process_session_exec",
+        &json!({
+            "argv":["printf","%s",literal],"workdir":".","yield_time_ms":0,"max_output_bytes":40000
+        })
+        .to_string(),
+    )
+    .await?;
+    let value = wait_for_process_exit(&registry, environment.clone(), &result, 30).await?;
     assert_eq!(value["output"], literal);
     assert_eq!(value["exit_code"], 0);
     assert!(!root.path().join("injected").exists());
     let result = execute(
         &registry,
-        environment,
+        environment.clone(),
         ids(10)?,
         "process_session_exec",
         &json!({
-            "argv":["/bin/cat"],"workdir":".","yield_time_ms":1000,"max_output_bytes":40000
+            "argv":["/bin/cat"],"workdir":".","yield_time_ms":0,"max_output_bytes":40000
         })
         .to_string(),
     )
     .await?;
-    let value: Value = serde_json::from_str(&result.joined_text())?;
+    let value = wait_for_process_exit(&registry, environment, &result, 31).await?;
     assert_eq!(value["exit_code"], 0);
     assert!(value["session_id"].is_null());
     Ok(())
@@ -359,19 +369,48 @@ async fn process_exec_keeps_non_tty_stdin_open_for_write_and_close() -> TestResu
         .ok_or("missing open-stdin session")?;
     let result = execute(
         &registry,
-        environment,
+        environment.clone(),
         ids(12)?,
         "process_session_write",
         &json!({
-            "session_id":handle,"input":"literal input\n","disposition":"close","yield_time_ms":1000
+            "session_id":handle,"input":"literal input\n","disposition":"close"
         })
         .to_string(),
     )
     .await?;
-    let value: Value = serde_json::from_str(&result.joined_text())?;
+    let value = wait_for_process_exit(&registry, environment, &result, 32).await?;
     assert_eq!(value["output"], "literal input\n");
     assert_eq!(value["exit_code"], 0);
     Ok(())
+}
+
+async fn wait_for_process_exit(
+    registry: &FrozenToolRegistry,
+    environment: Arc<ExecutionEnvironment>,
+    initial: &ToolOutcome,
+    call: u8,
+) -> TestResult<Value> {
+    assert_eq!(initial.kind(), ToolOutcomeKind::Success, "{initial:?}");
+    let value: Value = serde_json::from_str(&initial.joined_text())?;
+    let Some(handle) = value["session_id"].as_u64() else {
+        return Ok(value);
+    };
+    // A yield can return a live handle. The terminal poll returns the
+    // output tail, which contains all output of these short commands.
+    let result = execute(
+        registry,
+        environment,
+        ids(call)?,
+        "process_session_poll",
+        &json!({
+            "session_id": handle, "wait_for_exit": true, "yield_time_ms": 30_000,
+            "max_output_bytes": 40_000, "max_output_records": 256
+        })
+        .to_string(),
+    )
+    .await?;
+    assert_eq!(result.kind(), ToolOutcomeKind::Success, "{result:?}");
+    Ok(serde_json::from_str(&result.joined_text())?)
 }
 
 #[cfg(unix)]
