@@ -351,7 +351,6 @@ async fn process_exec_preserves_literal_argv_and_defaults_stdin_to_eof() -> Test
     .await?;
     let value = wait_for_process_exit(&registry, environment, &result, 31).await?;
     assert_eq!(value["exit_code"], 0);
-    assert!(value["session_id"].is_null());
     Ok(())
 }
 

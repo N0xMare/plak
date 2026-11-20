@@ -2309,6 +2309,11 @@ assertions do not measure elapsed time and need no budget lane.
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
 | Product durability scenarios | `durability::` — quit, resume and failure-wave tests. Not crash matrices; they stay in this lane |
 
+`join_all_terminates_a_running_free_child_and_retains_the_contended_child`
+runs in the parallel lane. It requires the running free child to be
+terminated and joined while the contended peer is retained for a retry;
+it does not assert wall-clock promptness.
+
 `native_ready_lease_is_held_through_head_and_released_before_stream_body` runs
 in the parallel lane. Its logout-start, response-head and response-body barriers
 prove exclusive store-lock contention before the head, then await successful

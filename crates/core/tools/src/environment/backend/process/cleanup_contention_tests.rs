@@ -505,6 +505,37 @@ fn join_all_handles_free_children_and_retains_contended_child_for_retry() -> Res
     Ok(())
 }
 
+#[test]
+fn join_all_terminates_a_running_free_child_and_retains_the_contended_child()
+-> Result<(), TestError> {
+    let (_workspace, sessions) = sessions_with_cleanup(93, Duration::from_secs(5))?;
+    let free = sleeping_child(&sessions)?;
+    let contended = sleeping_child(&sessions)?;
+    let session = sessions.session(contended)?;
+    let operation = session.enter()?;
+
+    assert_eq!(
+        sessions.poll(free, 4096, 16)?.status(),
+        JoinedProcessStatus::Running
+    );
+    let error = sessions
+        .join_all()
+        .err()
+        .ok_or("cleanup unexpectedly joined the contended child")?;
+    assert_eq!(error.kind(), ExecutionBackendErrorKind::CleanupUnresolved);
+    assert!(sessions.session(free).is_err());
+    assert_eq!(
+        sessions.joined_terminal_status(free),
+        Some(JoinedProcessStatus::Terminated)
+    );
+    assert_eq!(sessions.active_session_ids(), vec![contended]);
+
+    drop(operation);
+    join_all_with_bounded_retries(&sessions)?;
+    assert!(sessions.is_drained());
+    Ok(())
+}
+
 /// The session limit fits macOS's default soft open-file limit of 256: a
 /// session whose wake pipe would leave too little room polls instead, so no
 /// start is refused for want of descriptors. It lowers this process's limit,
