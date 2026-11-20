@@ -2,15 +2,19 @@ use std::sync::Arc;
 
 use crate::CliResult;
 
-pub(super) fn watch_scripted_placement<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn attached<P: plakous_host_protocol::ProtocolExtension>(
     config: &super::HostConfig<P>,
-    tree_id: &str,
+    opened: &mut super::AttachedCodingSession,
+    scripted_children: bool,
 ) {
+    let tree_id = super::super::rebind::durable_tree_id(&config.topology_rows(), &config.session);
+    opened.claim_registered_topology_owner(&tree_id);
     // Scripted bindings were compiled on a temporary executor. Attach runs
     // on the worker that owns the root and can actually service reconnects.
-    if config.state_roots.runner_services().is_some()
+    if scripted_children
+        && config.state_roots.runner_services().is_some()
         && config.state_roots.runner_registry().is_some()
-        && let Some(runtime) = crate::topology_runtime::lookup(tree_id)
+        && let Some(runtime) = crate::topology_runtime::lookup(&tree_id)
     {
         crate::agent::placement::watch_debt(&runtime);
     }

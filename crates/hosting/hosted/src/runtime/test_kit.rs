@@ -1237,11 +1237,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
             .with_child_runtime_factory(factory);
     }
     fn attached(&self, config: &HostConfig<P>, opened: &mut AttachedCodingSession) {
-        let tree_id = super::rebind::durable_tree_id(&config.topology_rows(), &config.session);
-        opened.claim_registered_topology_owner(&tree_id);
-        if self.child_runtime.is_some() {
-            tree_runner::watch_scripted_placement(config, &tree_id);
-        }
+        tree_runner::attached(config, opened, self.child_runtime.is_some());
     }
 }
 

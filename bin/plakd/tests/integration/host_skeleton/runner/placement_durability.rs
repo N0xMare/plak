@@ -253,7 +253,7 @@ fn unstarted_seal_survives_both_legs_and_reopen_with_the_child_runner_down() {
     let mut child: Value = serde_json::from_slice(&std::fs::read(&child_script).unwrap()).unwrap();
     let arguments = &mut child["steps"][0]["output"]["tool"]["arguments"];
     arguments["command"] = json!(
-        "printf 'placed\\n' > remote.txt; while [ ! -f finish-seal ]; do sleep 0.02; done; rm finish-seal"
+        "printf 'placed\\n' > remote.txt; n=0; while [ ! -f finish-seal ]; do n=$((n + 1)); [ \"$n\" -lt 1000 ] || exit 1; sleep 0.02; done; rm finish-seal"
     );
     arguments["timeout"] = json!(30);
     std::fs::write(child_script, serde_json::to_vec(&child).unwrap()).unwrap();
