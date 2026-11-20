@@ -98,7 +98,7 @@ class LookupRetryTests(unittest.TestCase):
     def test_jsonl_startup_exhaustion_scores_provider_and_can_observe_the_cap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            env = live.Env(root / "plakd", root / "home", root)
+            env = live.Env(root / "plakd", root / "home", root, owns_gateway=False)
             env.capture_segments.append(root / "capture")
             env.environ = Mock(return_value={})
             process = Mock()

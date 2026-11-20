@@ -1520,7 +1520,7 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
             home = live.scratch_home(artifacts, name)
             self.addCleanup(shutil.rmtree, home)
             (home / "skip-pages").write_text("1\n")
-        env = live.Env(self.binary, artifacts / "shared-home", artifacts)
+        env = live.Env(self.binary, artifacts / "shared-home", artifacts, owns_gateway=False)
         return long_session.play(live.ROUTES[route], env, name)
 
     def test_fake_binary_satisfies_each_codex_scenario_and_counts_its_pages(self):
@@ -1570,7 +1570,12 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
                 )
 
     def test_agent_home_override_is_the_child_plak_home(self):
-        env = live.Env(self.binary, self.capture_workspace / "shared", self.capture_workspace)
+        env = live.Env(
+            self.binary,
+            self.capture_workspace / "shared",
+            self.capture_workspace,
+            owns_gateway=False,
+        )
         private = live.scratch_home(self.capture_workspace, "private")
         self.addCleanup(shutil.rmtree, private)
 
