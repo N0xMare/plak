@@ -29,6 +29,11 @@ global disable still lets the local administrator run `enable`, `disable`,
 refreshes stay blocked for everyone until then.
 `drain` stops accepting and waits up to 30 seconds for in-flight relays and
 refresh claims; the service exits and only then releases the store.
+The CLI acknowledgement is not proof that the process exited. On Linux,
+check the unit with `systemctl --user show -p ActiveState -p Result -p MainPID
+plak-gateway.service` (use the legacy unit's name when migrating). Wait for
+`ActiveState=inactive`, `Result=success` and `MainPID=0` before starting its
+replacement or moving the old unit definition.
 
 `plakd gateway audit --since 2026-11-18T00:00:00Z` filters by an RFC 3339
 time. `plakd gateway status` shows how many audit lines failed to append.
@@ -89,18 +94,22 @@ On Linux, **before** running `plakd host upgrade`, change the existing host
 drop-in's `ExecStart` to point at the destination snapshot, preserving the
 existing environment and flags. Run `systemctl --user daemon-reload` without
 restarting the host.
-This keeps a crash during the carry window from relaunching the old build.
-Carry with `plakd host upgrade` while the old definition is still in place.
-After carry commits, run `systemctl --user disable --now plak-host.service`
-for the legacy unit (a planned handoff), then back up and remove its file
-and `plak-host.service.d/` drop-ins. If it already used the
+This keeps a crash during the upgrade window from relaunching the old build.
+Run `plakd host upgrade` while the old definition is still in place. A
+same-key handoff keeps the running host PID; a cross-key carry moves settled
+sessions to new successors.
+After the upgrade commits, run `systemctl --user disable --now plak-host.service`
+for the legacy unit. Confirm it is inactive with `Result=success` and
+`MainPID=0`, then back up and remove its file and `plak-host.service.d/`
+drop-ins. If it already used the
 `plakd-host.service` name, retire that definition and its drop-ins instead.
 Advance `~/.local/bin/plakd`, run `plakd host install` with the original
 web/UI flags, reload as needed, and run
-`systemctl --user enable --now plakd-host.service`. Do not run two host
-units for the same home.
+`systemctl --user enable --now plakd-host.service`. Starting the replacement
+unit launches a new process with a new PID. Do not run two host units for the
+same home.
 
-On macOS carry first, boot out the old host plist (including
+On macOS upgrade first, boot out the old host plist (including
 `com.plak.host.plist` if used) before backing it up and removing it, advance
 the host link, then install and bootstrap the new plist. Local macOS commands
 against a local product home also need a local gateway: run
@@ -118,7 +127,8 @@ dedicated links. Upgrade the gateway **before** carrying the host:
 2. Create a temporary link to the new immutable snapshot in the same
    directory as `~/.local/bin/plakd-gateway`, then rename it over that link.
    Leave the host link and the service definition alone.
-3. After the drain exits successfully, run `systemctl --user start plak-gateway.service` or
+3. After confirming the old service has exited successfully, run
+   `systemctl --user start plak-gateway.service` or
    `launchctl kickstart "gui/$(id -u)/com.plakd.gateway"`, then run
    `plakd gateway check`. Do not stop or restart the Linux unit in place of
    the drain and start. No service-definition reload is needed, and the

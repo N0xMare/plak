@@ -38,7 +38,11 @@ plakd host install --web "unix:$HOME/.plak/host/web/web.sock" \
 ```
 
 Dry run prints both service definitions and the default Unix
-`[gateway] address`, and creates nothing. Installation writes that address
+`[gateway] address`, and creates nothing. It refuses if a legacy definition
+or nonempty legacy drop-in directory remains. Even after these are removed,
+the rendered output does not prove that the real install will accept the
+existing definitions and overrides. Inspect effective drop-ins before
+migrating a service. Installation writes that address
 in the product home's `config.toml` without replacing a conflicting address.
 An identical re-install keeps both definitions unchanged. Edited or symlinked
 units are refused. For an existing install, follow the
@@ -148,10 +152,10 @@ Once the carry commits, recovery is fix-forward only; do not restart the old
 host as a rollback.
 If you still have pinned units, follow the [one-time migration](gateway.md#migrate-an-existing-service-once)
 instead. It moves paired runners first (they do not need a gateway), then the
-gateway while the old host keeps running, then carries the host before replacing
-its old unit and drop-ins. Before carry on Linux, repoint the active
+gateway while the old host keeps running, then upgrades the host before replacing
+its old unit and drop-ins. Before the upgrade on Linux, repoint the active
 `ExecStart` drop-in to the destination snapshot and daemon-reload without
-restarting. After carry commits, disable and stop the legacy
+restarting. After the upgrade commits, disable and stop the legacy
 `plak-host.service` before removing it and its drop-ins and enabling
 `plakd-host.service`, so two units do not contend for the home lock.
 Codex and SuperGrok refuse while the running host is still using protocol 1.
@@ -175,13 +179,26 @@ Use `just install release` instead for a qualified release-flavor source build.
 Keep the old and new snapshots, including sidecars, until the command confirms
 success. Installation does not itself replace the running host.
 
-Same-key upgrade uses planned handoff and the existing session identities.
+Same-key upgrade uses planned handoff and the existing session identities,
+not cross-key carry. On Linux it replaces the image in the running process:
+the unit's `MainPID` stays the same, but the host generation changes. If you
+then replace a legacy unit, stop it and start the new unit as a separate
+operation; the new unit has a new PID.
 An additive product or tree store revision can advance in place without
 changing the state key. The new host revises the stores after the old host
 stops. Before any restart, point the service's stable executable link or
 pinned `ExecStart` (on macOS, the executable in `ProgramArguments`) at the
 destination. If the old binary refuses after an interrupted upgrade, start
 the destination; it finishes any remaining steps.
+
+If the source build used Monty for Python cells, check Python-bound sessions
+before handoff, even if you skipped the release that changed the worker.
+The micro-monty worker cannot exactly
+reopen a Monty binding, even on a same-key upgrade. Settle live Python roots
+and children on the writing build. To keep working on an incompatible
+session, export it with that build and use an import format the destination
+accepts. An archived head remains available for inspection, but archiving
+does not make it reopenable.
 
 The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
 named `product.pre-revision-<source>.sqlite3` and

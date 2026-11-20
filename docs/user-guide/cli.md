@@ -70,9 +70,11 @@ target-host writes.
 
 Bare `plakd` prints help and exits 0 without starting a host or session.
 
-`plakd host install --web unix:<absolute-socket> --ui <absolute-directory>
-[--dry-run]` writes the host and gateway user units or LaunchAgents, and sets
-the default Unix gateway address.
+`plakd host install --web unix:<absolute-socket> --ui <absolute-directory>`
+writes the host and gateway user units or LaunchAgents, and sets the default
+Unix gateway address. Add `--dry-run` to render the definitions and address
+without writing them. It still refuses legacy definitions and does not run
+all the checks the real install runs.
 Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
