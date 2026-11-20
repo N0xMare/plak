@@ -136,9 +136,9 @@ pub(super) fn members(group: rustix::process::Pid, fresh_since: Instant) -> Opti
     use linux::{ProcSnapshot as Groups, snapshot as scan};
     #[cfg(target_os = "macos")]
     type Groups = BTreeMap<i32, usize>;
+    static SNAPSHOTS: OnceLock<Mutex<Snapshots<Groups>>> = OnceLock::new();
     #[cfg(target_os = "macos")]
     let scan = live_groups;
-    static SNAPSHOTS: OnceLock<Mutex<Snapshots<Groups>>> = OnceLock::new();
     // Hold the lock through collection so concurrent supervisors share one
     // complete scan of the host's processes rather than one per group: a scan
     // costs time in the host's process count, and per-group scans run in
