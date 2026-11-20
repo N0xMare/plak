@@ -164,6 +164,14 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         example: "\"cargo fetch\"",
     },
     TemplateFieldDoc {
+        key: "runner",
+        value_type: "string",
+        default: "(unset)",
+        constraint: "local or a runner name; pairing and readiness checked at spawn",
+        meaning: "Default child placement when spawn_agent omits runner. Does not place a root.",
+        example: "\"build\"",
+    },
+    TemplateFieldDoc {
         key: "show_model",
         value_type: "bool",
         default: "false",
@@ -281,6 +289,9 @@ pub(crate) fn render_template(template: &AgentTemplate) -> String {
     }
     if let Some(on_mint) = &template.on_mint {
         out.push_str(&format!("on_mint = {}\n", toml_text(on_mint)));
+    }
+    if let Some(runner) = &template.runner {
+        out.push_str(&format!("runner = {}\n", toml_text(runner)));
     }
     out.push_str(&format!("show_model = {}\n", template.show_model));
     if !template.env.is_empty() {

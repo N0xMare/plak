@@ -713,16 +713,17 @@ fn unpair(
     })?;
     let mut product = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    let sessions = product
-        .session_ids_for_runner(&pin.runner_id)
-        .map_err(CliFailure::new)?;
+    let sessions = product.session_ids().map_err(CliFailure::new)?;
     let mut blocked = Vec::new();
     for id in sessions {
         let labels = match product.load(&id) {
-            Ok(record) => {
-                crate::commands::session::running_job_labels(paths, &record, abandon_jobs)
-                    .map_err(|error| CliFailure::new(error.to_string()))?
-            }
+            Ok(record) => crate::commands::session::running_job_labels(
+                paths,
+                &record,
+                Some(&pin.runner_id),
+                abandon_jobs,
+            )
+            .map_err(|error| CliFailure::new(error.to_string()))?,
             Err(_) if abandon_jobs => vec!["unknown".to_owned()],
             Err(error) => return Err(CliFailure::new(error.clone())),
         };

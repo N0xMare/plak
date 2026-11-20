@@ -48,6 +48,10 @@ pub(super) fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Valu
                     "enum": ["inherit", "fork"],
                     "description": "Omit or inherit to share your checkout. fork mints an isolated copy."
                 },
+                "runner": {
+                    "type": "string",
+                    "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner."
+                },
                 "inputs": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -218,6 +222,15 @@ pub(super) struct SpawnDescription {
     pub(super) cards: String,
 }
 
+fn runner_names(controller: Option<&dyn ChildController>) -> String {
+    let names = controller.map_or_else(Vec::new, ChildController::paired_runner_names);
+    if names.is_empty() {
+        "none".to_owned()
+    } else {
+        names.join(", ")
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "one registration binds every collaborator the executor owns"
@@ -245,6 +258,7 @@ fn registration(
                 .replace("{nodes}", &spawn.nodes.to_string())
                 .replace("{children}", &spawn.children.to_string())
                 .replace("{cards}", &spawn.cards)
+                .replace("{runners}", &runner_names(controller.as_deref()))
         }
         (TopologyKind::TaskOutput, _) => PLAK_TOPOLOGY_TASK_OUTPUT_DESCRIPTION.to_owned(),
         (TopologyKind::TaskKill, _) => PLAK_TOPOLOGY_TASK_KILL_DESCRIPTION.to_owned(),

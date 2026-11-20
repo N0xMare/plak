@@ -4,12 +4,29 @@ use super::foreground::Paused;
 use super::*;
 
 pub(super) fn remote(fixture: &Fixture) -> (ChildRunner, String, String) {
+    remote_with_copies(fixture, None)
+}
+
+pub(super) fn remote_with_copies(
+    fixture: &Fixture,
+    copies: Option<&std::path::Path>,
+) -> (ChildRunner, String, String) {
     use std::fmt::Write as _;
     use std::io::Read as _;
     use std::os::unix::fs::PermissionsExt as _;
     let script = job_script(fixture, false);
     fixture.write_script(&script);
     let runner = ChildRunner::of(fixture);
+    if let Some(copies) = copies {
+        let file = runner.home.join("runner/runner.toml");
+        let original = std::fs::read_to_string(&file).unwrap();
+        std::fs::create_dir(copies).unwrap();
+        std::fs::write(
+            file,
+            format!("{original}copies = {:?}\n", copies.to_str().unwrap()),
+        )
+        .unwrap();
+    }
     let selected: serde_json::Value =
         serde_json::from_slice(&std::fs::read(fixture.script()).unwrap()).unwrap();
     let home = selected["child_runner"]["home"].as_str().unwrap();

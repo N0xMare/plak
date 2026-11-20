@@ -208,7 +208,8 @@ pub(crate) fn delete_session(
         .map_err(|error| cli_delete_error(&record.id, error))?;
     }
     let abandoned = if abandon_jobs {
-        running_job_labels(paths, &record, true).unwrap_or_else(|_| vec!["root unknown".to_owned()])
+        running_job_labels(paths, &record, None, true)
+            .unwrap_or_else(|_| vec!["root unknown".to_owned()])
     } else {
         Vec::new()
     };
@@ -572,16 +573,28 @@ fn refuse_running_jobs(
 pub(crate) fn running_job_labels(
     paths: &crate::home::paths::PlakPaths,
     record: &product_sessions::SessionRecord,
+    runner_id: Option<&str>,
     abandon_jobs: bool,
 ) -> Result<Vec<String>, LifecycleError> {
     let Some(locator) = record.plakous_locator else {
         return Ok(Vec::new());
     };
-    let mut locators = vec![("root".to_owned(), Some(locator))];
+    let mut locators = Vec::new();
+    let root_runner = record
+        .runner
+        .as_ref()
+        .map_or("local", |runner| runner.runner_id.as_str());
+    if runner_id.is_none_or(|id| id == root_runner) {
+        locators.push(("root".to_owned(), Some(locator)));
+    }
     match crate::topology_product::inspect_session_tree(paths, record) {
         Ok((tree_id, TreeInspection::Tree(tree))) if tree_id == record.id => {
             for node in tree.rows().nodes().values() {
-                if node.parent_agent_id.is_none() {
+                if node.parent_agent_id.is_none()
+                    || runner_id.is_some_and(|id| {
+                        node.placement.runner_id.as_deref().unwrap_or("local") != id
+                    })
+                {
                     continue;
                 }
                 let owner = format!("child agent {}", node.agent_id);

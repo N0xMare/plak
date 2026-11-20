@@ -192,6 +192,8 @@ pub struct SpawnIdentity {
     schema_digest: String,
     #[serde(default, skip_serializing_if = "SpawnWorkspace::is_inherit")]
     workspace: SpawnWorkspace,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runner: Option<String>,
     inputs: Vec<String>,
 }
 
@@ -204,6 +206,7 @@ impl SpawnIdentity {
             prompt: request.prompt.clone(),
             schema_digest,
             workspace: request.workspace,
+            runner: request.runner.clone(),
             inputs: request.input_ids().to_vec(),
         }
     }
@@ -422,6 +425,16 @@ pub struct SealTicket {
     /// The runners a candidate sealed on another runner than its parent's
     /// is carried back between, into the parent's checkout.
     pub(crate) carry: Option<cross_runner::SealCarry>,
+}
+
+impl SealTicket {
+    fn placement_ready(&self, vcs: &dyn VcsOps) -> bool {
+        vcs.placement_ready(&self.path).unwrap_or(true)
+            && self
+                .carry
+                .as_ref()
+                .is_none_or(|carry| vcs.placement_ready(&carry.dest).unwrap_or(true))
+    }
 }
 
 /// Whether a sealed snapshot carries anything beyond the copy's base:

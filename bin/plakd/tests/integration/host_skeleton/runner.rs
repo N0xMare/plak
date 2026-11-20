@@ -37,6 +37,7 @@ fn local_runner_status(client: &mut Client) -> plakous_host_protocol::wire::Runn
 mod foreground;
 mod hold;
 mod pending_stop;
+mod placement;
 mod recovery;
 
 fn write_cut_marker(path: &std::path::Path, contents: &[u8]) {

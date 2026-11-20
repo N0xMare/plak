@@ -17,7 +17,7 @@ use super::*;
 /// and [`Self::try_read`] read the live tree throughout.
 #[derive(Clone)]
 pub struct TreeDriver {
-    workspace_probe: Arc<Mutex<Arc<dyn plakous::tools::WorkspaceProbe>>>,
+    workspace_size: Arc<Mutex<Arc<workspaces::WorkspaceSizeReader>>>,
     /// The tree under its one mutex.
     ///
     /// `pub(super)` and not `pub`: the tree's own tools interleave locked and
@@ -138,7 +138,12 @@ impl TreeDriver {
             Arc::from(tree.root_agent_id.as_str())
         };
         Self {
-            workspace_probe: Arc::new(Mutex::new(Arc::new(plakous::tools::LocalWorkspaceProbe))),
+            workspace_size: Arc::new(Mutex::new(Arc::new(|path| {
+                plakous::tools::WorkspaceProbe::tree_bytes(
+                    &plakous::tools::LocalWorkspaceProbe,
+                    path,
+                )
+            }))),
             tree,
             store,
             vcs,
@@ -183,20 +188,19 @@ impl TreeDriver {
         let inventory = self.read(ProductAgentTree::checkout_size_probes)?;
         let cache = Arc::clone(&self.checkout_sizes);
         let probe = self
-            .workspace_probe
+            .workspace_size
             .lock()
             .map_err(|_| Self::lock_poisoned())?
             .clone();
         let sizes = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock().map_err(|_| Self::lock_poisoned())?;
-            let sizes =
-                probe_checkout_sizes(&mut cache, inventory, now, |path| probe.tree_bytes(path))
-                    .map_err(|error| {
-                        TopologyError::new(
-                            TopologyErrorCode::MintUnavailable,
-                            format!("copy sizes could not be probed: {error}"),
-                        )
-                    })?;
+            let sizes = probe_checkout_sizes(&mut cache, inventory, now, |path| probe(path))
+                .map_err(|error| {
+                    TopologyError::new(
+                        TopologyErrorCode::MintUnavailable,
+                        format!("copy sizes could not be probed: {error}"),
+                    )
+                })?;
             Ok::<_, TopologyError>(sizes)
         })
         .await

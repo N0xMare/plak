@@ -17,6 +17,8 @@ use plakous_host_protocol::views::ProviderSection;
 use crate::agent_tree::TreeStore as _;
 use crate::binding::CompositionSelection;
 use crate::session_store::SessionRecordStore as _;
+mod tree_runner;
+pub use tree_runner::scripted_tree_runner_port;
 
 use super::surface::{ReadinessRead, SurfaceEffect, SurfaceFacts};
 use super::{

@@ -1118,22 +1118,29 @@ impl ProductAgentTree {
         } else {
             child.path.clone()
         };
-        let target_path = self.node(caller_id)?.path.clone();
+        let caller = self.node(caller_id)?;
+        let target_path = caller.path.clone();
+        let on_target_runner = |record: &CandidateRecord| {
+            self.nodes
+                .get(&record.producing_agent_id)
+                .is_some_and(|node| node.placement.runner_id == caller.placement.runner_id)
+        };
         let base = source
             .as_ref()
             .filter(|_| candidate.kind == super::CandidateKind::Conflict)
             .unwrap_or(&candidate);
-        let advance_copy_base = !self.reclaimed(&candidate.workspace_id)
+        let advance_copy_base = on_target_runner(&candidate)
+            && !self.reclaimed(&candidate.workspace_id)
             && child.base_commit.as_deref() == Some(base.base_commit.as_str());
         let interrupted_adopt = self.workspace_has_vcs_fault(&candidate.workspace_id)
             || source
                 .as_ref()
                 .is_some_and(|source| self.workspace_has_vcs_fault(&source.workspace_id));
-        let conflict_pin = self.reserve_conflict_pin(&candidate, caller_id);
         let source_copy_agent = source
             .as_ref()
             .filter(|source| {
-                !self.reclaimed(&source.workspace_id)
+                on_target_runner(source)
+                    && !self.reclaimed(&source.workspace_id)
                     && self
                         .workspaces
                         .get(&source.workspace_id)
@@ -1142,6 +1149,7 @@ impl ProductAgentTree {
                         })
             })
             .map(|source| source.producing_agent_id.clone());
+        let conflict_pin = self.reserve_conflict_pin(&candidate, caller_id);
         if let Some(row) = source
             .as_ref()
             .and_then(|source| self.workspaces.get_mut(&source.workspace_id))

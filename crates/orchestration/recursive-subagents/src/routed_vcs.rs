@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use plakous_workspace::occupancy_vcs::{
     AdoptFailure, AdoptLanding, AdoptRequest, BundleFacts, MintRequest, MintedCopy,
@@ -19,17 +19,23 @@ use plakous_workspace::occupancy_vcs::{
 };
 
 /// One other runner's port and the tree's mirror on it.
+#[derive(Clone)]
 struct Route {
     runner: String,
     port: Arc<dyn VcsOps>,
     mirror: PathBuf,
 }
 
+type ResolveRunner = dyn Fn(&str) -> Arc<dyn VcsOps> + Send + Sync;
+
 /// The tree's port over its launch runner and the runners its copies may
 /// cross to.
 pub struct RoutedVcs {
     home: Arc<dyn VcsOps>,
-    routes: Vec<Route>,
+    routes: RwLock<Vec<Route>>,
+    resolver: Option<Box<ResolveRunner>>,
+    tree_id: String,
+    launch: Option<PathBuf>,
 }
 
 impl RoutedVcs {
@@ -43,9 +49,6 @@ impl RoutedVcs {
             let Some(runner) = port.stage_runner().map(str::to_owned) else {
                 continue;
             };
-            if home.stage_runner() == Some(runner.as_str()) {
-                continue;
-            }
             let Ok(mirror) = port.transfer_root(tree_id).await else {
                 continue;
             };
@@ -64,33 +67,124 @@ impl RoutedVcs {
                 mirror,
             });
         }
-        Self { home, routes }
+        Self {
+            home,
+            routes: RwLock::new(routes),
+            resolver: None,
+            tree_id: tree_id.to_owned(),
+            launch: None,
+        }
     }
 
-    fn route(&self, path: &Path) -> Option<&Route> {
+    /// Resolves transfer ports on demand through the host's paired services.
+    /// Saved places must be installed before exposing this port to recovery.
+    #[must_use]
+    pub fn with_resolver(
+        home: Arc<dyn VcsOps>,
+        tree_id: &str,
+        launch: PathBuf,
+        resolver: impl Fn(&str) -> Arc<dyn VcsOps> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            home,
+            routes: RwLock::default(),
+            resolver: Some(Box::new(resolver)),
+            tree_id: tree_id.to_owned(),
+            launch: Some(launch),
+        }
+    }
+
+    /// Retains the route for a saved cross-runner checkout without requiring
+    /// the runner to answer during root reopen.
+    ///
+    /// # Errors
+    /// Refuses a conflicting mirror or a path outside the recorded mirror layout.
+    pub fn restore_route(&self, runner: &str, path: &Path) -> Result<(), VcsError> {
+        let Some(resolver) = &self.resolver else {
+            return Err(VcsError::mint_unavailable("runner routing is unavailable"));
+        };
+        // A transferred copy is <mirror>/.plak/worktrees/<copy>. The
+        // runner and tree components distinguish it from the launch checkout.
+        let mirror = path.ancestors().nth(3).filter(|mirror| {
+            mirror.file_name().and_then(|name| name.to_str()) == Some(self.tree_id.as_str())
+                && mirror
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    == Some(runner)
+                && path
+                    .strip_prefix(mirror)
+                    .is_ok_and(|suffix| suffix.starts_with(".plak/worktrees"))
+        });
+        let Some(mirror) = mirror else {
+            if self.home.stage_runner() == Some(runner) {
+                return Ok(());
+            }
+            return Err(VcsError::mint_unavailable(
+                "saved copy is outside its runner's tree mirror",
+            ));
+        };
+        self.register_route(runner, resolver(runner), mirror.to_owned())
+    }
+
+    fn register_route(
+        &self,
+        runner: &str,
+        port: Arc<dyn VcsOps>,
+        mirror: PathBuf,
+    ) -> Result<(), VcsError> {
+        let overlaps = |other: &Path| mirror.starts_with(other) || other.starts_with(&mirror);
+        let mut routes = self.routes.write().unwrap_or_else(PoisonError::into_inner);
+        if self.launch.as_deref().is_some_and(overlaps)
+            || routes.iter().any(|route| {
+                (route.runner != runner || route.mirror != mirror) && overlaps(&route.mirror)
+            })
+        {
+            return Err(VcsError::mint_unavailable(
+                "runner mirror overlaps another checkout in this tree",
+            ));
+        }
+        if let Some(index) = routes
+            .iter()
+            .position(|route| route.runner == runner && route.mirror == mirror)
+        {
+            routes.remove(index);
+        }
+        routes.push(Route {
+            runner: runner.to_owned(),
+            port,
+            mirror,
+        });
+        Ok(())
+    }
+
+    fn route(&self, path: &Path) -> Option<Route> {
         self.routes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .find(|route| path.starts_with(&route.mirror))
+            .cloned()
     }
 
     /// The port that answers about `path`.
-    fn port(&self, path: &Path) -> &dyn VcsOps {
+    fn port(&self, path: &Path) -> Arc<dyn VcsOps> {
         self.route(path)
-            .map_or(self.home.as_ref(), |route| route.port.as_ref())
+            .map_or_else(|| Arc::clone(&self.home), |route| route.port)
     }
 
     /// The port that answers about `path`, and the launch checkout it
     /// takes there: `launch` on the launch runner, the mirror elsewhere.
-    fn port_launch<'a>(&'a self, path: &Path, launch: &'a Path) -> (&'a dyn VcsOps, &'a Path) {
-        self.route(path)
-            .map_or((self.home.as_ref(), launch), |route| {
-                (route.port.as_ref(), route.mirror.as_path())
-            })
+    fn port_launch(&self, path: &Path, launch: &Path) -> (Arc<dyn VcsOps>, PathBuf) {
+        self.route(path).map_or_else(
+            || (Arc::clone(&self.home), launch.to_owned()),
+            |route| (route.port, route.mirror),
+        )
     }
 
     /// Whether `a` and `b` are answered by the same port.
     fn same_port(&self, a: &Path, b: &Path) -> bool {
-        self.route(a).map(|route| &route.runner) == self.route(b).map(|route| &route.runner)
+        self.path_runner(a) == self.path_runner(b)
     }
 }
 
@@ -111,11 +205,43 @@ impl VcsOps for RoutedVcs {
         self.home.stage_runner()
     }
 
+    fn path_runner(&self, path: &Path) -> Option<String> {
+        self.route(path)
+            .map(|route| route.runner)
+            .or_else(|| self.stage_runner().map(str::to_owned))
+    }
+
+    fn prepare_transfer<'a>(&'a self, runner: &'a str) -> VcsFuture<'a, Result<(), VcsError>> {
+        Box::pin(async move {
+            if let Some(resolve) = &self.resolver {
+                let port = resolve(runner);
+                let mirror = port.transfer_root(&self.tree_id).await?;
+                return self.register_route(runner, port, mirror);
+            }
+            self.transfer_port(runner).map(|_| ()).ok_or_else(|| {
+                VcsError::mint_unavailable("the tree's port does not reach that runner")
+            })
+        })
+    }
+
     fn transfer_port(&self, runner: &str) -> Option<Arc<dyn VcsOps>> {
         self.routes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
+            .rev()
             .find(|route| route.runner == runner)
             .map(|route| Arc::clone(&route.port))
+    }
+
+    fn transfer_mirror(&self, runner: &str) -> Option<PathBuf> {
+        self.routes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .rev()
+            .find(|route| route.runner == runner)
+            .map(|route| route.mirror.clone())
     }
 
     fn transfer_root<'a>(&'a self, tree_id: &'a str) -> VcsFuture<'a, Result<PathBuf, VcsError>> {
@@ -128,8 +254,11 @@ impl VcsOps for RoutedVcs {
         namespace: &'a str,
         agent: &'a str,
     ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
-        self.port(parent_cwd)
-            .snapshot_base(parent_cwd, namespace, agent)
+        Box::pin(async move {
+            self.port(parent_cwd)
+                .snapshot_base(parent_cwd, namespace, agent)
+                .await
+        })
     }
 
     fn bundle_create<'a>(
@@ -138,7 +267,11 @@ impl VcsOps for RoutedVcs {
         reference: &'a str,
         exclude: &'a [String],
     ) -> VcsFuture<'a, Result<BundleFacts, VcsError>> {
-        self.port(repo).bundle_create(repo, reference, exclude)
+        Box::pin(async move {
+            self.port(repo)
+                .bundle_create(repo, reference, exclude)
+                .await
+        })
     }
 
     fn bundle_read<'a>(
@@ -148,7 +281,7 @@ impl VcsOps for RoutedVcs {
         offset: u64,
         len: u64,
     ) -> VcsFuture<'a, Result<Vec<u8>, VcsError>> {
-        self.port(repo).bundle_read(repo, id, offset, len)
+        Box::pin(async move { self.port(repo).bundle_read(repo, id, offset, len).await })
     }
 
     fn bundle_drop<'a>(
@@ -156,7 +289,7 @@ impl VcsOps for RoutedVcs {
         repo: &'a Path,
         id: &'a str,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(repo).bundle_drop(repo, id)
+        Box::pin(async move { self.port(repo).bundle_drop(repo, id).await })
     }
 
     fn bundle_write<'a>(
@@ -166,7 +299,7 @@ impl VcsOps for RoutedVcs {
         offset: u64,
         bytes: &'a [u8],
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(repo).bundle_write(repo, id, offset, bytes)
+        Box::pin(async move { self.port(repo).bundle_write(repo, id, offset, bytes).await })
     }
 
     fn bundle_apply<'a>(
@@ -178,8 +311,11 @@ impl VcsOps for RoutedVcs {
         fetch: &'a [(String, String)],
         pins: &'a [(String, String)],
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(repo)
-            .bundle_apply(repo, id, digest, namespace, fetch, pins)
+        Box::pin(async move {
+            self.port(repo)
+                .bundle_apply(repo, id, digest, namespace, fetch, pins)
+                .await
+        })
     }
 
     fn ref_commit<'a>(
@@ -187,7 +323,7 @@ impl VcsOps for RoutedVcs {
         repo: &'a Path,
         reference: &'a str,
     ) -> VcsFuture<'a, Result<Option<String>, VcsError>> {
-        self.port(repo).ref_commit(repo, reference)
+        Box::pin(async move { self.port(repo).ref_commit(repo, reference).await })
     }
 
     /// Sweeps `repo` on the launch runner and, for the launch checkout,
@@ -200,7 +336,15 @@ impl VcsOps for RoutedVcs {
         Box::pin(async move {
             let mut removed = self.port(repo).sweep_transfers(repo, max_age_secs).await?;
             if self.route(repo).is_none() {
-                for route in &self.routes {
+                let routes = self
+                    .routes
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
+                for route in routes {
+                    if route.port.placement_ready(&route.mirror) == Some(false) {
+                        continue;
+                    }
                     removed += route
                         .port
                         .sweep_transfers(&route.mirror, max_age_secs)
@@ -228,7 +372,11 @@ impl VcsOps for RoutedVcs {
         plan: &'a RefreshPlan,
         recover: bool,
     ) -> VcsFuture<'a, Result<RefreshApplied, VcsError>> {
-        self.port(&plan.request.child).apply_refresh(plan, recover)
+        Box::pin(async move {
+            self.port(&plan.request.child)
+                .apply_refresh(plan, recover)
+                .await
+        })
     }
 
     fn check_reclaimable<'a>(
@@ -236,25 +384,26 @@ impl VcsOps for RoutedVcs {
         path: &'a Path,
         sealed: Option<&'a VcsSnapshot>,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(path).check_reclaimable(path, sealed)
+        Box::pin(async move { self.port(path).check_reclaimable(path, sealed).await })
     }
 
     fn trim_disposable_target<'a>(
         &'a self,
         path: &'a Path,
     ) -> VcsFuture<'a, Result<bool, VcsError>> {
-        self.port(path).trim_disposable_target(path)
+        Box::pin(async move { self.port(path).trim_disposable_target(path).await })
     }
 
     fn path_exists<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Result<bool, VcsError>> {
-        self.port(path).path_exists(path)
+        Box::pin(async move { self.port(path).path_exists(path).await })
     }
 
     fn jj_copy_dirs<'a>(
         &'a self,
         launch: &'a Path,
     ) -> VcsFuture<'a, Result<BTreeSet<String>, VcsError>> {
-        self.home.jj_copy_dirs(launch)
+        let (port, launch) = self.port_launch(launch, launch);
+        Box::pin(async move { port.jj_copy_dirs(&launch).await })
     }
 
     fn mint_from<'a>(
@@ -264,7 +413,7 @@ impl VcsOps for RoutedVcs {
         let (port, launch) = self.port_launch(request.parent_cwd, request.launch);
         Box::pin(async move {
             port.mint_from(&MintRequest {
-                launch,
+                launch: &launch,
                 agent_id: request.agent_id,
                 namespace: request.namespace,
                 parent_cwd: request.parent_cwd,
@@ -281,7 +430,7 @@ impl VcsOps for RoutedVcs {
         base: &'a str,
         sealed: &'a str,
     ) -> VcsFuture<'a, Result<bool, VcsError>> {
-        self.port(path).history_left_base(path, base, sealed)
+        Box::pin(async move { self.port(path).history_left_base(path, base, sealed).await })
     }
 
     fn seal<'a>(
@@ -291,8 +440,11 @@ impl VcsOps for RoutedVcs {
         candidate_id: &'a str,
         base_commit: &'a str,
     ) -> VcsFuture<'a, Result<VcsSnapshot, VcsError>> {
-        self.port(child_path)
-            .seal(child_path, namespace, candidate_id, base_commit)
+        Box::pin(async move {
+            self.port(child_path)
+                .seal(child_path, namespace, candidate_id, base_commit)
+                .await
+        })
     }
 
     fn unpin<'a>(
@@ -301,8 +453,11 @@ impl VcsOps for RoutedVcs {
         namespace: &'a str,
         candidate_id: &'a str,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(child_path)
-            .unpin(child_path, namespace, candidate_id)
+        Box::pin(async move {
+            self.port(child_path)
+                .unpin(child_path, namespace, candidate_id)
+                .await
+        })
     }
 
     fn restore_copy_base<'a>(
@@ -312,15 +467,31 @@ impl VcsOps for RoutedVcs {
         agent: &'a str,
         base: &'a str,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(path)
-            .restore_copy_base(path, namespace, agent, base)
+        Box::pin(async move {
+            self.port(path)
+                .restore_copy_base(path, namespace, agent, base)
+                .await
+        })
     }
 
     fn adopt<'a>(
         &'a self,
         request: &'a AdoptRequest<'_>,
     ) -> VcsFuture<'a, Result<AdoptLanding, AdoptFailure>> {
-        self.port(request.target_path).adopt(request)
+        Box::pin(async move {
+            let port = self.port(request.target_path);
+            if self.same_port(request.child_path, request.target_path) {
+                return port.adopt(request).await;
+            }
+            // The candidate's objects and pins are already at the landing
+            // repository. Do not send another runner's path or advance its pin.
+            port.adopt(&AdoptRequest {
+                child_path: request.target_path,
+                source_agent_id: None,
+                ..*request
+            })
+            .await
+        })
     }
 
     fn run_mint_hook<'a>(
@@ -329,7 +500,7 @@ impl VcsOps for RoutedVcs {
         command: &'a str,
         env: &'a BTreeMap<String, String>,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
-        self.port(cwd).run_mint_hook(cwd, command, env)
+        Box::pin(async move { self.port(cwd).run_mint_hook(cwd, command, env).await })
     }
 
     fn unmint<'a>(
@@ -339,11 +510,11 @@ impl VcsOps for RoutedVcs {
         namespace: &'a str,
     ) -> VcsFuture<'a, Result<(), VcsError>> {
         let (port, launch) = self.port_launch(path, launch);
-        port.unmint(launch, path, namespace)
+        Box::pin(async move { port.unmint(&launch, path, namespace).await })
     }
 
     fn dirty<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, bool> {
-        self.port(path).dirty(path)
+        Box::pin(async move { self.port(path).dirty(path).await })
     }
 
     fn ahead_behind<'a>(
@@ -355,7 +526,7 @@ impl VcsOps for RoutedVcs {
         if !self.same_port(child, parent) {
             return ready(None);
         }
-        self.port(child).ahead_behind(child, parent, base)
+        Box::pin(async move { self.port(child).ahead_behind(child, parent, base).await })
     }
 
     fn ahead_behind_cached<'a>(
@@ -368,12 +539,15 @@ impl VcsOps for RoutedVcs {
         if !self.same_port(child, parent) {
             return ready(None);
         }
-        self.port(child)
-            .ahead_behind_cached(child, parent, base, cache)
+        Box::pin(async move {
+            self.port(child)
+                .ahead_behind_cached(child, parent, base, cache)
+                .await
+        })
     }
 
     fn label<'a>(&'a self, path: &'a Path) -> VcsFuture<'a, Option<String>> {
-        self.port(path).label(path)
+        Box::pin(async move { self.port(path).label(path).await })
     }
 
     fn diverged_from_base<'a>(
@@ -382,8 +556,11 @@ impl VcsOps for RoutedVcs {
         base_change_id: Option<&'a str>,
         base_commit: &'a str,
     ) -> VcsFuture<'a, Result<bool, VcsError>> {
-        self.port(path)
-            .diverged_from_base(path, base_change_id, base_commit)
+        Box::pin(async move {
+            self.port(path)
+                .diverged_from_base(path, base_change_id, base_commit)
+                .await
+        })
     }
 
     fn copy_is_over_candidate<'a>(

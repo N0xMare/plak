@@ -31,6 +31,7 @@ fn every_topology_request_kind_round_trips() {
             output_schema_json: "{}".into(),
             tier: Tier::ReadOnly,
             workspace: SpawnWorkspace::Inherit,
+            runner: Some("build".into()),
             inputs: Some(vec!["cand-1".into()]),
             request_key: Some("k1".into()),
         },
@@ -40,6 +41,7 @@ fn every_topology_request_kind_round_trips() {
             "prompt": "review the diff",
             "output_schema_json": "{}",
             "tier": "read_only",
+            "runner": "build",
             "inputs": ["cand-1"],
             "request_key": "k1",
         }),
@@ -289,6 +291,8 @@ fn every_error_code_has_a_distinct_snake_case_wire_form() {
         TopologyErrorCode::RecoverySessionUnavailable,
         TopologyErrorCode::RunnerMismatch,
         TopologyErrorCode::CrossRunnerCopyUnavailable,
+        TopologyErrorCode::RunnerNotConfigured,
+        TopologyErrorCode::RunnerUnreachable,
     ];
     let mut seen = std::collections::BTreeSet::new();
     for code in codes {

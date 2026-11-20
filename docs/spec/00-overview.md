@@ -208,7 +208,7 @@ directly. Older native state remains untouched for its matching build.
 
 Tree schema 10 adds the node's line, epoch and runner placement, successor
 epochs, fork provenance, runner ancestors and the tree custody record (chapter
-03 §14); today's flows write only their defaults.
+03 §14). Child placement and bundle stages use those existing records.
 Tree schema 9 records candidate `target_before` provenance and each workspace's
 `input_candidate_id`; retained snapshots have independent Git-backend pins.
 Candidate rows also record work/conflict kind, source and resolver lineage,

@@ -441,8 +441,29 @@ reconnection does not make an uncertain effect or seal safe to repeat.
 A host restart is different from a runner reconnect: a live hold is not durable.
 Ordinary unpaid recovery and the host's `resume_after_loss` policy apply, with
 hold as the default. Runner readiness alone is not consent for a paid
-continuation. The product still places a tree's children on its selected
-runner; these waits do not add a cross-runner spawn argument.
+continuation.
+
+#### Placing a child on another runner
+
+Start the root session on a paired runner in a Git checkout. Give the
+destination runner a separate `copies` directory in its `runner.toml`,
+pair it on the host, then ask the root to spawn a child with
+`runner = "build"` and `workspace = "fork"`. No SSH command or shared
+filesystem is needed in the agent's work. The spawn tool lists the paired
+names; `list_agents` and the spawn receipt show the actual placement.
+
+A template can set `runner = "build"` as its default. An explicit
+`runner = "local"` overrides the template and means the **parent's**
+runner, not necessarily the host. An inherit child must stay with the
+parent. An unknown or unready runner refuses without starting a child.
+A host-local root, a non-Git checkout, and a spawn with candidate inputs
+cannot transfer a copy to another runner.
+
+The target gets a copy of the parent's live Git state, including
+non-secret uncommitted work, under its `copies` directory. Tools run
+natively there. A mutate child's sealed candidate comes back to the
+parent runner; adopt it as usual, including the normal conflict workflow.
+An execute or read-only fork is a detached snapshot.
 
 ---
 

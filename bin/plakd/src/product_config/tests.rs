@@ -1633,6 +1633,7 @@ fn every_template_field_is_documented_once() {
         max_turns: Some(24),
         on_mint: Some("cargo fetch".to_owned()),
         show_model: true,
+        runner: Some("build".into()),
         env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
     };
     let rendered = render_template(&populated);
@@ -1662,6 +1663,12 @@ fn every_template_field_is_documented_once() {
     // The annotated form is still a template file: it parses back.
     let annotated = render_template_annotated("worker", &populated);
     assert_eq!(parse_template(&annotated, "worker").unwrap(), populated);
+    assert_eq!(
+        crate::roster_input::roster_binding_from_template("worker", &populated)
+            .runner
+            .as_deref(),
+        Some("build")
+    );
     // A field the template leaves unset prints as a commented example.
     let bare = AgentTemplate {
         account: "codex".to_owned(),

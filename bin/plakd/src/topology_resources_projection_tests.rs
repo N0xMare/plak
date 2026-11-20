@@ -50,6 +50,7 @@ fn request(template: &str, description: &str) -> SpawnAgentRequest {
         output_schema_json: SCHEMA.to_owned(),
         tier: Tier::ReadOnly,
         workspace: SpawnWorkspace::Inherit,
+        runner: None,
         inputs: None,
         request_key: None,
     }

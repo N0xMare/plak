@@ -180,6 +180,7 @@ struct TemplateFile {
     access: Entry,
     tools: Entry,
     spawns: Entry,
+    runner: Entry,
     may_adopt: Entry,
     delegation: Entry,
     cost_tier: Entry,
@@ -465,6 +466,7 @@ pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, St
             })?);
     }
     template.on_mint = string("on_mint", &file.on_mint)?;
+    template.runner = string("runner", &file.runner)?;
     if let Some(show_model) = boolean("show_model", &file.show_model)? {
         template.show_model = show_model;
     }

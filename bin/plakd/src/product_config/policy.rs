@@ -212,6 +212,8 @@ pub struct AgentTemplate {
     pub tools: TemplateToolSelection,
     /// The templates a copy of this one may spawn. Empty is a leaf.
     pub spawns: Vec<TemplateName>,
+    /// Default paired-runner name for children spawned from this card.
+    pub runner: Option<String>,
     pub may_adopt: bool,
     pub delegation: Delegation,
     /// Static, user-written label; never a measured cost.
@@ -238,6 +240,7 @@ impl Default for AgentTemplate {
             max_tier: Tier::Mutate,
             tools: TemplateToolSelection::default(),
             spawns: Vec::new(),
+            runner: None,
             may_adopt: false,
             delegation: Delegation::Explicit,
             cost_tier: None,
@@ -256,6 +259,10 @@ impl AgentTemplate {
     /// rendered, and `spawns` names only other files: [`ProductConfig::validate`]
     /// checks both.
     pub fn validate(&self, name: &str) -> Result<(), String> {
+        if let Some(runner) = self.runner.as_deref().filter(|runner| *runner != "local") {
+            super::validate_runner_name(runner)
+                .map_err(|error| format!("template {name}: runner: {error}"))?;
+        }
         if self.composition == Some(ProductCompositionSelection::PySdk) {
             return Err(format!(
                 "template {name}: py-sdk is root-only and has no child result channel; select it in [root] or --composition"

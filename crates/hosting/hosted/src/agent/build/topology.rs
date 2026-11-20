@@ -513,7 +513,6 @@ async fn topology_extensions_from_hub_with_owner(
         SpawnParent::Api(parent) => parent.root_profile.clone(),
     };
     let roots = parent.state_roots();
-    let runner = roots.runner_services().cloned();
     let roster_source = Arc::clone(roots.roster_source());
     let runtime = crate::topology_runtime::resolve_topology_runtime(
         &tree_id.clone(),
@@ -536,7 +535,7 @@ async fn topology_extensions_from_hub_with_owner(
                 must_exist,
                 roster_source.as_ref(),
                 root_profile.as_ref(),
-                runner.as_ref(),
+                roots,
             )
             .await
             .map(|mut tree| {
@@ -548,9 +547,12 @@ async fn topology_extensions_from_hub_with_owner(
     )
     .await?;
     // The resolver has acquired this lease; hub existence alone is not ownership.
-    runtime
-        .driver()
-        .set_workspace_probe(roots.workspace_probe());
+    if is_root {
+        set_tree_workspace_reader(runtime.driver(), roots);
+        if attach == crate::topology_runtime::TopologyHubAttach::AttachRoot {
+            probe_saved_child_runners(&runtime, roots);
+        }
+    }
     // Publish the marker before compiling extensions, which may still fail.
     if attach == crate::topology_runtime::TopologyHubAttach::AttachRoot {
         *acquired_owner = Some(spawn_parent_tree_id(parent).to_owned());
@@ -601,8 +603,9 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
     must_exist: bool,
     roster_source: &dyn crate::agent::RosterSource,
     root_profile: Option<&crate::sessions::RootProfile>,
-    runner: Option<&plakous::runner::RunnerServices>,
+    roots: &ProductStateRoots,
 ) -> CliResult<crate::agent_tree::ProductAgentTree> {
+    let runner = roots.runner_services();
     let roster = roster_source.roster(root_account, selected_tuple, root_effort, root_profile)?;
     let persisted = store.load(tree_id).map_err(|error| {
         if must_exist {
@@ -631,7 +634,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
                 "recorded root runner differs from selected node services",
             ));
         }
-        tree.set_vcs(node_vcs(tree_id, runner));
+        tree.set_vcs(tree_vcs(roots, tree_id, workspace_root, Some(&tree))?);
         if !tree.epoch_digests_match() {
             return Err(CliFailure::recovery_required(
                 "orchestration snapshot digest does not match persisted roster; RecoveryRequired",
@@ -656,7 +659,7 @@ pub(in crate::agent) async fn load_or_bootstrap_topology_tree(
         selected_tuple,
         root_account,
         roster,
-        runner,
+        roots,
     )
     .await?;
     let acknowledged = store
@@ -672,11 +675,11 @@ async fn genesis_tree(
     selected_tuple: &str,
     root_account: &str,
     roster: crate::orchestration::RosterInput,
-    runner: Option<&plakous::runner::RunnerServices>,
+    roots: &ProductStateRoots,
 ) -> CliResult<crate::agent_tree::ProductAgentTree> {
     let writer_mode = roster.writer_mode;
     let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_with(
-        node_vcs(tree_id, runner),
+        tree_vcs(roots, tree_id, workspace_root, None)?,
         tree_id,
         tree_id,
         "root",
@@ -686,7 +689,7 @@ async fn genesis_tree(
     )
     .await
     .map_err(|error| CliFailure::new(error.message))?;
-    if let Some(runner) = runner {
+    if let Some(runner) = roots.runner_services() {
         tree.place_genesis_root(plakous_recursive_subagents::tree::NodePlacement {
             runner_id: Some(runner.backend().runner_id().as_str().to_owned()),
             workspace: Some(plakous_recursive_subagents::tree::NodeWorkspace {
@@ -699,6 +702,111 @@ async fn genesis_tree(
     tree.install_snapshot(crate::orchestration::OrchestrationSnapshot::freeze(roster));
     stamp_root_account(&mut tree, root_account);
     Ok(tree)
+}
+
+pub(crate) fn tree_vcs(
+    roots: &ProductStateRoots,
+    tree_id: &str,
+    launch: &Path,
+    saved: Option<&crate::agent_tree::ProductAgentTree>,
+) -> CliResult<Arc<dyn plakous_workspace::occupancy_vcs::VcsOps>> {
+    use plakous_recursive_subagents::{remote_vcs::RemoteVcs, routed_vcs::RoutedVcs};
+    let home = node_vcs(tree_id, roots.runner_services());
+    let Some(registry) = roots.runner_registry().cloned() else {
+        return Ok(home);
+    };
+    let id = tree_id.to_owned();
+    let routed = RoutedVcs::with_resolver(home, tree_id, launch.to_owned(), move |runner| {
+        let registry = registry.clone();
+        let runner = runner.to_owned();
+        let hold = registry.retain_connection(&runner);
+        Arc::new(RemoteVcs::with_link(
+            {
+                let runner = runner.clone();
+                move || {
+                    let _hold = &hold;
+                    registry
+                        .reconciliation_services(&runner)
+                        .ok()
+                        .map(|services| services.backend().link())
+                }
+            },
+            runner,
+            id.clone(),
+        ))
+    });
+    if let Some(tree) = saved {
+        for node in tree.nodes().values().filter(|node| node.depth != 0) {
+            if let Some(runner) = &node.placement.runner_id {
+                routed
+                    .restore_route(runner, &node.path)
+                    .map_err(|error| CliFailure::recovery_required(error.detail))?;
+            }
+        }
+    }
+    Ok(Arc::new(routed))
+}
+
+fn probe_saved_child_runners(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    roots: &ProductStateRoots,
+) {
+    let Some(registry) = roots.runner_registry().cloned() else {
+        return;
+    };
+    let root = roots
+        .runner_services()
+        .map(plakous::runner::RunnerServices::backend);
+    let configured = registry
+        .rows()
+        .into_iter()
+        .map(|row| row.runner.runner_id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let ids = runtime
+        .read(|tree| {
+            tree.nodes()
+                .values()
+                .filter_map(|node| node.placement.runner_id.as_ref())
+                .filter(|id| {
+                    root.as_ref()
+                        .is_none_or(|root| root.runner_id().as_str() != id.as_str())
+                })
+                .filter(|id| configured.contains(*id))
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !ids.is_empty() {
+        runtime.driver().tasks().spawn(async move {
+            let _ = registry.refresh(Some(&ids)).await;
+        });
+    }
+}
+
+fn set_tree_workspace_reader(
+    driver: &crate::agent_tree_tools::TreeDriver,
+    roots: &ProductStateRoots,
+) {
+    let home = roots.workspace_probe();
+    let registry = roots.runner_registry().cloned();
+    let vcs = driver.vcs();
+    driver.set_workspace_size_reader(move |path| {
+        let runner = vcs.path_runner(path);
+        if let Some(id) = runner
+            .as_deref()
+            .filter(|id| Some(*id) != vcs.stage_runner())
+        {
+            let services = registry
+                .as_ref()
+                .ok_or(plakous::tools::ProbeError::Unavailable)?
+                .reconciliation_services(id)
+                .map_err(|_| plakous::tools::ProbeError::Unavailable)?;
+            return services.workspace_probe().tree_bytes(path);
+        }
+        home.tree_bytes(path)
+    });
 }
 
 fn node_vcs(
@@ -751,7 +859,7 @@ pub(crate) async fn seed_genesis_tree(
         selected_tuple,
         root_account,
         roster,
-        roots.runner_services(),
+        roots,
     )
     .await?;
     // This handle is dropped; the session's own open reloads the tree.

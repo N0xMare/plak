@@ -148,6 +148,9 @@ impl RosterBinding {
         if self.show_model && !self.tuple_id.is_empty() {
             line.push_str(&format!(" · model {}", self.tuple_id));
         }
+        if let Some(runner) = &self.runner {
+            line.push_str(&format!(" · runner {runner}"));
+        }
         if let Some(tools) = template_card_tools(&self.tools) {
             line.push_str(&format!(" · {tools}"));
         }

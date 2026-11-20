@@ -22,6 +22,52 @@ impl crate::agent_tree_tools::ChildController for ProductChildController {
         crate::agent_tree_tools::ChildServices::ALL
     }
 
+    fn paired_runner_names(&self) -> Vec<String> {
+        self.binder
+            .parent
+            .state_roots()
+            .runner_registry()
+            .map_or_else(Vec::new, |registry| {
+                let mut names = registry
+                    .rows()
+                    .into_iter()
+                    .filter(|row| row.runner.runner_id != "local")
+                    .flat_map(|row| row.runner.names)
+                    .collect::<Vec<_>>();
+                names.sort_unstable();
+                names
+            })
+    }
+
+    fn runner_name(&self, id: &str) -> String {
+        self.binder
+            .parent
+            .state_roots()
+            .runner_registry()
+            .and_then(|registry| {
+                registry
+                    .rows()
+                    .into_iter()
+                    .find(|row| row.runner.runner_id == id)
+            })
+            .and_then(|row| row.runner.names.into_iter().next())
+            .unwrap_or_else(|| id.to_owned())
+    }
+
+    fn admit_runner<'a>(
+        &'a self,
+        name: &'a str,
+        parent: Option<&'a str>,
+        inherit: bool,
+    ) -> Boxed<'a, Result<String, crate::agent_tree::TopologyError>> {
+        Box::pin(
+            self.binder
+                .parent
+                .state_roots()
+                .admit_spawn_runner(name, parent, inherit),
+        )
+    }
+
     fn admit_spawn(
         &self,
         caller_id: &str,

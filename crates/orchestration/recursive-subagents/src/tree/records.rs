@@ -394,6 +394,9 @@ pub struct SpawnAgentOutput {
     pub status: NodeStatus,
     /// Effective tier after the `max_tier` clip.
     pub tier: Tier,
+    /// The saved runner identity; absent for the host-local runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
     /// Which checkout the child got.
     pub workspace: WorkspaceReceipt,
 }

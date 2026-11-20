@@ -545,6 +545,10 @@ pub enum TopologyErrorCode {
     /// An `inherit` child shares its parent's checkout, so it runs on the
     /// parent's runner; the spawn named another.
     RunnerMismatch,
+    /// The requested runner name is not paired on this host.
+    RunnerNotConfigured,
+    /// The runner has not passed its current placement barrier.
+    RunnerUnreachable,
     /// A `fork` or `snapshot` copy on another runner than the parent's is
     /// not carried yet; nothing was minted.
     CrossRunnerCopyUnavailable,
@@ -1088,7 +1092,7 @@ pub enum MessagePriority {
 #[serde(deny_unknown_fields)]
 /// `spawn_agent` arguments.
 pub struct SpawnAgentRequest {
-    /// The template the child is bound to; the only thing a spawn names.
+    /// The template the child is bound to.
     pub template: TemplateName,
     #[serde(default)]
     /// One line naming the child's job, shown in the tree.
@@ -1102,6 +1106,9 @@ pub struct SpawnAgentRequest {
     /// Checkout: omit or `inherit` shares the parent cwd; `fork` isolates.
     #[serde(default, skip_serializing_if = "SpawnWorkspace::is_inherit")]
     pub workspace: SpawnWorkspace,
+    /// Paired runner name, or `local` to use the parent's runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
     /// Candidate or attempt ids the child starts from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inputs: Option<Vec<String>>,
@@ -1165,6 +1172,7 @@ impl SpawnAgentRequest {
             output_schema_json: Self::TEST_SCHEMA.into(),
             tier,
             workspace: SpawnWorkspace::Inherit,
+            runner: None,
             inputs: None,
             request_key: None,
         }

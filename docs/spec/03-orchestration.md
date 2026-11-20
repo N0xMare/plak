@@ -302,8 +302,8 @@ frozen value rather than the composition its parent runs now, so a switch of
 the parent never changes it. A template card may carry a `runner` name
 that places a child on that runner rather than its parent's. The field is
 frozen on the card inside the snapshot JSON and its digest only when set, so a
-card without one keeps its encoding and digest. No template file sets it yet,
-and every node is placed on the local runner.
+card without one keeps its encoding and digest. The field defaults the child's
+placement; an explicit spawn argument overrides it. It never places the root.
 
 The snapshot also freezes the product's **account roster** as two membership
 sets: which accounts a template card may pin at all, and which speak no native
@@ -362,7 +362,17 @@ The enforcement of "this node may change files" on `execute` is the
 `workspace=fork` snapshot is thrown away unless something seals a candidate
 and a parent adopts it.
 
-A child runs on its parent’s runner. Root genesis freezes explicit runner
+A child runs on its parent's runner unless placed elsewhere. `spawn_agent`
+accepts an optional `runner` alias; omission reads the frozen card default,
+then uses the parent's runner. Explicit `local` always uses the parent's
+runner, even when it is paired and remote. The host resolves other names
+against current paired configuration and checks the target's readiness before
+reserving anything. Unknown or unpaired names are `runner_not_configured`;
+a closed admission barrier is `runner_unreachable`. The spawn description
+lists paired names only (not paths, addresses or per-link state).
+`list_agents` and spawn receipts identify each node's own runner.
+
+Root genesis freezes explicit runner
 placement before publication; reopen verifies that saved identity against node
 services and installs its VCS port. Local remains recorded as none. Workspace
 stamp, mint-base and occupancy lookups are qualified by `(runner_id, path)`;
@@ -372,11 +382,10 @@ runner is `runner_mismatch`; a `fork` or `snapshot` copy on another runner is
 carried there as a git bundle of its parent's live state (§14) and the child
 is placed on that runner. Such a copy is `cross_runner_copy_unavailable` when
 the tree's VCS port reaches no such runner (`VcsOps::transfer_port`), the
-parent is on the local runner, or the spawn names candidate inputs. Both
-refusals reserve nothing. The library's `spawn_reserve_on` names the runner;
-no spawn tool argument or card field does yet, and the product's port
-reaches only the selected runner, so the product never places a child
-elsewhere.
+parent is on the local runner, the target has no `copies` root, or the spawn
+names candidate inputs. These refusals reserve nothing. The product connects
+the tree's VCS port to each paired, ready target on demand. Stage dispatch
+and child binding use the saved runner identity, not the original alias.
 
 Workspace process-shim requirements follow the actual workspace identity, not
 the tool tier. An inherited ordinary checkout needs no copy shim; an inherited
@@ -723,6 +732,7 @@ Arguments — required `template`, `prompt`, `output_schema_json`, `tier`:
 | `output_schema_json` | string | non-empty; object types only, no `$ref` and no combinators; `additionalProperties: true` is refused |
 | `tier` | `read_only \| execute \| mutate` | clipped to the template ceiling |
 | `workspace` | `inherit \| fork`, optional | omit or `inherit` shares the caller's checkout; `fork` mints an isolated copy |
+| `runner` | string, optional | paired name or `local` for the parent's placement; omitted uses the frozen card default, then the parent's runner |
 | `description` | string, optional | short label for the attempt; does not select bind |
 | `inputs` | array of strings, optional | schema cap `MAX_SPAWN_INPUTS` = 8; **exactly one** is admitted at dispatch; requires `workspace=fork` |
 | `request_key` | string, optional | caller-minted dedup key |
@@ -731,11 +741,15 @@ Receipt:
 
 ```json
 {"agent_id": "…", "attempt_id": "…-a1", "status": "running",
- "tier": "<effective>", "workspace": {"id": "…", "mode": "inherit"}}
+ "tier": "<effective>", "runner": "<saved runner id or local>",
+ "workspace": {"id": "…", "mode": "inherit"}}
 ```
 
 A `workspace=fork` receipt names `mode` `snapshot` (non-mutate) or `fork`
 (mutate) and includes `base` (the mint commit).
+The tool receipt names the saved runner identity, not the mutable alias.
+`list_agents` uses the paired name if still configured and the saved id
+otherwise.
 
 The workspace field is `mode`, matching the persisted `WorkspaceMode`. `tier`
 is the effective tier **after** the clip. **The receipt is not a result.**
@@ -1468,7 +1482,7 @@ The complete `TopologyErrorCode` set, in wire spelling:
 `no_pending_children`, `wait_caller_settled`, `recovery_lease_held`, `recovery_owner_live`,
 `recovery_storage_unavailable`, `recovery_effect_evidence_refused`,
 `recovery_vcs_ambiguous`, `recovery_session_unavailable`, `runner_mismatch`,
-`cross_runner_copy_unavailable`.
+`cross_runner_copy_unavailable`, `runner_not_configured`, `runner_unreachable`.
 
 `lease_saturated`, `class_not_pinned`, and `merge_not_owner` are not codes and
 MUST NOT deserialize.
@@ -3768,7 +3782,11 @@ under its actual runner, without inventing a local runner for unrelated effects.
 Once a stage exists an unresolved seal
 remains the existing explicit VCS recovery obligation, never an automatic retry.
 An in-process reservation has no such pre-dispatch proof and remains ambiguous.
-Hold state, elapsed time and waiters add no persisted fields or wire versions.
+For a carried seal, an unstarted ticket waits for both the sealing runner and
+the runner that must take its bundle. The tree restores routes from saved node
+paths before recovering either runner; it does not infer a local path when a
+runner is unavailable. Hold state, elapsed time and waiters add no persisted
+fields or wire versions.
 
 Root and child adapters share a small exact-retry state and reopened-turn
 classification. It permits one stale-head adoption and bounds child lease waits;
@@ -4718,7 +4736,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Node status | view | the current attempt's view, interrupt and close intents, and the seal and workspace records below; `pending` until the child session's `Created` record |
 | Node current attempt and schema | view | the `retry_of` chain root seeds the fold; `followup_opened` advances identity at its anchor. Node schema text and digest derive from that current attempt's immutable admitted schema, never a future opening |
 | Active-turn flag, attempt turn binding | view | `CommandAccepted` for an `agent_commands` intent of that attempt, with no `TurnTerminal` for that turn |
-| Attempt identity: turn token, `retry_of`, `request_key`, start stamp, brief, schema text and digest | intent | written once from the spawn request or `followup_opened` payload at attempt creation |
+| Attempt identity: turn token, `retry_of`, `request_key`, start stamp, brief, schema text and digest | intent | written once from the spawn request or `followup_opened` payload at attempt creation; the admitted keyed spawn identity includes an explicit runner argument when present |
 | Followup opening | intent, joined into views | anchored `agent_operations` of kind `followup_opened`, with previous and opened attempt identities, fixed supersession stamp and admitted schema; derives previous cancellation and the newly running node |
 | Transient-continuation count | view | immutable Resume decisions for the attempt, separate from submit-harness corrections |
 | Submit-harness nudge count | view | accepted corrective commands, including the round encoded in their immutable identity |
@@ -4750,7 +4768,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
-| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch, composition and runner; the root's runner is the one the tree's VCS port runs on (none for the local runner); written today as no line and no workspace override |
+| Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch and composition and the child's resolved runner; the root's runner is the tree's launch runner (none for the local runner); child placement uses the existing runner column |
 | Successor epochs, current epoch | intent | an epoch append: a profile switch's settlement of its pending epoch, or a roster apply (§1.2) |
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |
 | Runner ancestors | external-effect record | each bundle apply that completes adds its tip to its target runner's set, at most 8, a full set giving up its first commit; a lost record only makes a later bundle carry more |
@@ -5664,7 +5682,8 @@ the spawn's own stage, then mints the copy from the mirror over the
 snapshot, so the copy lives under the mirror's `.plak/worktrees`. The tree's
 port for several runners (`RoutedVcs`) answers every later call about a path
 under a runner's mirror from that runner's port, with the mirror as its
-launch checkout (two runners whose mirrors nest are both left out); a copy there is not refreshed, and its ahead/behind against
+launch checkout (an overlapping mirror cannot take another checkout's
+route); a copy there is not refreshed, and its ahead/behind against
 a parent on another runner is unknown. Its seal runs on its runner by the
 usual rules and is carried back the same way: bundle create of its candidate
 reference less the copy's base, relay, and a verifiable bundle apply into the
@@ -5679,7 +5698,10 @@ transfer files older than a day from the launch checkout and every mirror. A
 verifiable stage left unfinished stays recorded while its node is open, the
 next one for the same node, candidate and outcome replaces it, and the
 revision that records the seal settles it. Adoption runs on the parent's
-runner as before. A copy crosses only from a git checkout. A crash at any
+runner against the transferred pins, never using a child path on the wrong
+machine. A textual conflict pins a conflict candidate on the parent runner
+without changing the parent's checkout. A copy crosses only from a git
+checkout. A crash at any
 stage boundary leaves a reproducible or verifiable record and no fault: the
 reopened tree reruns the spawn or the seal, and both converge
 (`cross_runner_fork_stages`).

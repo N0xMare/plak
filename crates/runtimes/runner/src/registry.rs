@@ -363,6 +363,20 @@ impl RunnerRegistry {
             .collect()
     }
 
+    /// Resolve an alias against current configuration and pairing pins,
+    /// without dialing any runner. Returns none for an unpaired name.
+    ///
+    /// # Errors
+    /// The pairing catalog could not be read.
+    pub fn paired_id(&self, name: &str) -> Result<Option<String>, PlacementFailure> {
+        self.refresh_configuration()?;
+        Ok(self
+            .rows()
+            .into_iter()
+            .find(|row| row.runner.names.iter().any(|alias| alias == name))
+            .map(|row| row.runner.runner_id))
+    }
+
     /// Publishes a fully reconciled connection. The caller must complete
     /// sweep → recover → recorded stops → settled-foreground reconciliation
     /// first. A read timeout must not cancel that separately owned work.

@@ -38,14 +38,24 @@ impl GuardedVcs {
     }
 
     fn admit<'a>(&'a self, path: &'a Path) -> ReclamationFuture<'a> {
-        self.fence
-            .admit(self.inner.stage_runner().unwrap_or("local"), path)
+        Box::pin(async move {
+            let runner = self.inner.path_runner(path);
+            self.fence
+                .admit(runner.as_deref().unwrap_or("local"), path)
+                .await
+        })
     }
 }
 
 impl VcsOps for GuardedVcs {
     fn stage_runner(&self) -> Option<&str> {
         self.inner.stage_runner()
+    }
+    fn path_runner(&self, path: &Path) -> Option<String> {
+        self.inner.path_runner(path)
+    }
+    fn prepare_transfer<'a>(&'a self, runner: &'a str) -> VcsFuture<'a, Result<(), VcsError>> {
+        self.inner.prepare_transfer(runner)
     }
     fn placement_ready(&self, path: &Path) -> Option<bool> {
         self.inner.placement_ready(path)
@@ -57,6 +67,9 @@ impl VcsOps for GuardedVcs {
         self.inner
             .transfer_port(runner)
             .map(|inner| Self::wrap(inner, self.fence.clone()))
+    }
+    fn transfer_mirror(&self, runner: &str) -> Option<PathBuf> {
+        self.inner.transfer_mirror(runner)
     }
 
     fn check_reclaimable<'a>(

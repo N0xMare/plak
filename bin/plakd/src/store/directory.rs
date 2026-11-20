@@ -208,23 +208,6 @@ impl ProductStore {
             .map_err(|_| "a recent workspace row is invalid".to_owned())
     }
 
-    /// Sessions whose display runner is `runner_id`, including archived rows.
-    ///
-    /// # Errors
-    /// The read failed.
-    pub(crate) fn session_ids_for_runner(&self, runner_id: &str) -> Result<Vec<String>, String> {
-        self.connection
-            .prepare(
-                "SELECT id FROM sessions WHERE COALESCE(json_extract(runner_display,'$.runner_id'),'local')=?1 ORDER BY id",
-            )
-            .and_then(|mut statement| {
-                statement
-                    .query_map([runner_id], |row| row.get(0))?
-                    .collect()
-            })
-            .map_err(|error| format!("sessions for runner {runner_id} could not be read: {error}"))
-    }
-
     #[allow(
         dead_code,
         reason = "the optional hosting product reads the full directory"

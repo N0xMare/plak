@@ -781,10 +781,11 @@ impl HostSessions<PlakExtension> for ProductSessions {
             if record.archived {
                 return Ok(None);
             }
-            self.stop_roots(&record).map(Some)
+            self.stop_roots(&record)
+                .map(|roots| Some((roots, record.node.tree_id)))
         })();
         roots.map_or(true, |roots| {
-            roots.is_some_and(|roots| roots.runner_pending())
+            roots.is_some_and(|(roots, tree)| roots.tree_runner_stop_pending(&tree))
         })
     }
 
@@ -1184,10 +1185,13 @@ fn open_session(
     let session_id = host.session.id.clone();
     let state_roots = host.state_roots.clone();
     let pending_roots = state_roots.clone();
+    let pending_tree = host.session.node.tree_id.clone();
     let (actions, events, worker) = spawn_host_worker(host)?;
     eprintln!("plakd host: opened session {session}");
     Ok(OpenedSession {
-        runner_pending: Some(std::sync::Arc::new(move || pending_roots.runner_pending())),
+        runner_pending: Some(std::sync::Arc::new(move || {
+            pending_roots.tree_runner_stop_pending(&pending_tree)
+        })),
         root,
         session_id,
         actions,

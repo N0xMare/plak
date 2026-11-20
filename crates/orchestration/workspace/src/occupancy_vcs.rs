@@ -138,6 +138,7 @@ pub struct ConflictPin {
 }
 
 /// A resolution also accepts this source candidate and advances its copy.
+#[derive(Clone, Copy)]
 pub struct ResolvedSource<'a> {
     /// Original work candidate's identity.
     pub candidate_id: &'a str,

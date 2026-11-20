@@ -2,6 +2,9 @@
 
 use super::{Arc, TreeDriver};
 
+pub(super) type WorkspaceSizeReader =
+    dyn Fn(&std::path::Path) -> Result<Option<u64>, plakous::tools::ProbeError> + Send + Sync;
+
 pub(super) struct CheckoutSize {
     generation: u64,
     trim_epoch: u64,
@@ -64,10 +67,16 @@ pub(super) fn probe_checkout_sizes(
 
 impl TreeDriver {
     /// Installs the explicit reader used by periodic workspace-size probes.
-    pub fn set_workspace_probe(&self, probe: Arc<dyn plakous::tools::WorkspaceProbe>) {
+    pub fn set_workspace_size_reader(
+        &self,
+        probe: impl Fn(&std::path::Path) -> Result<Option<u64>, plakous::tools::ProbeError>
+        + Send
+        + Sync
+        + 'static,
+    ) {
         *self
-            .workspace_probe
+            .workspace_size
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = probe;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(probe);
     }
 }

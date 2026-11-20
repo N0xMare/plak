@@ -398,9 +398,9 @@ impl ProductStateRoots {
     }
 
     pub(crate) async fn finish_child_process_stops(&self, tree_id: &str) -> CliResult<()> {
-        let Some(client) = &self.daemon_client else {
+        if self.daemon_client.is_none() && self.runner_registry().is_none() {
             return Ok(());
-        };
+        }
         let stops = self
             .tree_store()?
             .load(tree_id)
@@ -409,28 +409,43 @@ impl ProductStateRoots {
                 let rows = tree.rows();
                 rows.recorded_process_stops()
                     .into_iter()
-                    .map(|(locator, intent)| {
-                        let agent = rows
-                            .nodes()
-                            .values()
-                            .find(|node| node.session_locator.as_deref() == Some(locator.as_str()))
-                            .map(|node| node.agent_id.clone());
-                        (agent, locator, intent)
+                    .filter_map(|(locator, intent)| {
+                        let node = rows.nodes().values().find(|node| {
+                            node.session_locator.as_deref() == Some(locator.as_str())
+                        })?;
+                        Some((
+                            node.agent_id.clone(),
+                            node.placement.runner_id.clone(),
+                            locator,
+                            intent,
+                        ))
                     })
                     .collect()
             });
         let sessions = self.runtime_sessions()?;
         let mut failures: Vec<String> = Vec::new();
-        for (agent, locator, intent) in stops {
+        for (agent, runner, locator, intent) in stops {
+            let current = self.runner_readiness.as_deref().map(|(_, id)| id.as_str());
+            let placed = runner.as_deref().unwrap_or("local");
+            let other = self
+                .runner_registry()
+                .filter(|_| current != Some(placed))
+                .map(|registry| self.clone().for_runner_stop(registry.clone(), placed));
+            let roots = other.as_ref().unwrap_or(self);
             let result = async {
-                if let Some(agent) = agent
-                    && let Some(runtime) = crate::topology_runtime::lookup(tree_id)
+                if let Some(runtime) = crate::topology_runtime::lookup(tree_id)
                     && runtime.is_recovering(&agent)
                 {
                     return Err(CliFailure::new(
                         "child recovery still owns the process-stop line",
                     ));
                 }
+                if other.is_some() && roots.runner_pending() {
+                    return Err(CliFailure::new("child process-stop runner is not ready"));
+                }
+                let Some(client) = &roots.daemon_client else {
+                    return Ok(());
+                };
                 let locator = locator
                     .parse::<plakous::sessions::SessionLocator>()
                     .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -440,7 +455,7 @@ impl ProductStateRoots {
                     .map_err(|error| CliFailure::new(error.to_string()))?;
                 let stopped = crate::runner_adoption::finish_recorded_stop(
                     client,
-                    self,
+                    roots,
                     head.line(),
                     &intent,
                 )
@@ -452,7 +467,9 @@ impl ProductStateRoots {
             .await;
             if let Err(error) = result {
                 tracing::warn!(target: "plak.runner", phase = "child_stop", locator = %locator, error = %error, "runner_recovery_failed");
-                failures.push(error.to_string());
+                if other.is_none() || !roots.failed_runner_stop_settlement() {
+                    failures.push(error.to_string());
+                }
             }
         }
         if failures.is_empty() {
@@ -505,6 +522,89 @@ impl ProductStateRoots {
     #[must_use]
     pub const fn runner_services(&self) -> Option<&plakous::runner::RunnerServices> {
         self.runner_services.as_ref()
+    }
+
+    pub(crate) fn runner_registry(&self) -> Option<&plakous::runner::RunnerRegistry> {
+        self.runner_readiness
+            .as_deref()
+            .map(|(registry, _)| registry)
+    }
+
+    pub(super) fn selected_runner_id(&self) -> Option<String> {
+        self.runner_services
+            .as_ref()
+            .map(|services| services.backend().runner_id().as_str().to_owned())
+    }
+
+    pub(super) async fn admit_spawn_runner(
+        &self,
+        name: &str,
+        parent: Option<&str>,
+        inherit: bool,
+    ) -> Result<String, crate::agent_tree::TopologyError> {
+        use crate::agent_tree::TopologyError;
+        use crate::agent_tree_protocol::TopologyErrorCode;
+
+        let unknown = || {
+            TopologyError::new(
+                TopologyErrorCode::RunnerNotConfigured,
+                format!("runner {name:?} is not paired on this host"),
+            )
+        };
+        let unready = || {
+            TopologyError::new(
+                TopologyErrorCode::RunnerUnreachable,
+                format!("runner {name:?} is not ready"),
+            )
+        };
+        let registry = self.runner_registry().ok_or_else(unknown)?;
+        let id = registry
+            .paired_id(name)
+            .map_err(|_| unready())?
+            .ok_or_else(unknown)?;
+        if inherit && parent != Some(id.as_str()) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RunnerMismatch,
+                "an inherit child works in its parent's checkout, so it runs on its parent's runner",
+            ));
+        }
+        if registry.services(&id).is_err() {
+            registry
+                .refresh(Some(std::slice::from_ref(&id)))
+                .await
+                .map_err(|_| unready())?;
+            registry.services(&id).map_err(|_| unready())?;
+        }
+        Ok(id)
+    }
+
+    pub(super) fn for_child_runner(&self, id: Option<&str>) -> CliResult<Self> {
+        if self.selected_runner_id().as_deref() == id {
+            if self.runner_pending() {
+                return Err(CliFailure::new("the child's saved runner is not ready"));
+            }
+            return Ok(self.clone());
+        }
+        let id = id.ok_or_else(|| {
+            CliFailure::new("the child's local placement differs from its parent")
+        })?;
+        let registry = self.runner_registry().ok_or_else(|| {
+            CliFailure::new("no paired runner registry for the child's saved placement")
+        })?;
+        let services = registry
+            .services(id)
+            .map_err(|failure| {
+                CliFailure::new(format!(
+                    "the child's saved runner is not ready: {failure:?}"
+                ))
+            })?
+            .ok_or_else(|| CliFailure::new("the child's saved runner is not remote"))?;
+        let mut roots = self
+            .clone()
+            .with_runner_services(services)
+            .with_runner_readiness(registry.clone(), id);
+        roots.daemon_client = registry.client(id);
+        Ok(roots)
     }
 
     /// Installs host terminal-pin admission without changing the frozen tool plan.
@@ -594,6 +694,37 @@ impl ProductStateRoots {
                 .daemon_client
                 .as_ref()
                 .is_some_and(|client| !client.is_connected())
+    }
+
+    /// Runner settlement for a tree's recorded Stops is pending on any
+    /// unavailable placement that still owes its process stop.
+    #[must_use]
+    pub fn tree_runner_stop_pending(&self, tree_id: &str) -> bool {
+        if self.runner_pending() {
+            return true;
+        }
+        let Some(registry) = self.runner_registry() else {
+            return false;
+        };
+        let Ok(tree) = self.tree_store().and_then(|store| {
+            store
+                .load(tree_id)
+                .map_err(|error| CliFailure::new(error.detail))
+        }) else {
+            return true;
+        };
+        tree.is_some_and(|tree| {
+            let rows = tree.rows();
+            rows.recorded_process_stops()
+                .into_iter()
+                .any(|(locator, _)| {
+                    rows.nodes()
+                        .values()
+                        .find(|node| node.session_locator.as_deref() == Some(locator.as_str()))
+                        .and_then(|node| node.placement.runner_id.as_deref())
+                        .is_some_and(|id| registry.services(id).is_err())
+                })
+        })
     }
 
     /// Retains the selected placement's live first-bind/reconnect barrier.

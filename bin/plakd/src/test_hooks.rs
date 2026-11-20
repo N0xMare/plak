@@ -500,7 +500,6 @@ fn prepare_scripted_tree(
     use plakous_hosted::agent_tree_protocol::WriterMode;
     use plakous_hosted::occupancy_vcs::VcsOps;
 
-    let vcs: Arc<dyn VcsOps> = scripted_tree_vcs(plan);
     // `plakd session show` looks the tree up by the product session id. The
     // in-memory canvas uses the hub key and can keep a private tree id; a
     // durable publish has to use the session id or show reports no tree.
@@ -509,15 +508,41 @@ fn prepare_scripted_tree(
     } else {
         "offline-scripted-tree"
     };
-    let mut tree = ProductAgentTree::bootstrap_root_for_test_with(
-        Arc::clone(&vcs),
-        bootstrap_id,
-        "root",
-        "owner",
-        workspace.to_path_buf(),
-        SELECTOR,
-        WriterMode::SingleLease,
-    )
+    let runner_port = |saved| {
+        if plan.product_child_script.is_some() {
+            plakous_hosted::runtime::test_kit::scripted_tree_runner_port(
+                &state_roots,
+                bootstrap_id,
+                workspace,
+                saved,
+            )
+        } else {
+            Ok(None)
+        }
+    };
+    let real_port = runner_port(None)?;
+    let vcs: Arc<dyn VcsOps> = real_port.clone().unwrap_or_else(|| scripted_tree_vcs(plan));
+    let mut tree = if let Some(port) = real_port {
+        run_to_end(ProductAgentTree::bootstrap_root_with(
+            port,
+            bootstrap_id,
+            "root",
+            "owner",
+            workspace.to_path_buf(),
+            SELECTOR,
+            WriterMode::SingleLease,
+        ))?
+    } else {
+        ProductAgentTree::bootstrap_root_for_test_with(
+            Arc::clone(&vcs),
+            bootstrap_id,
+            "root",
+            "owner",
+            workspace.to_path_buf(),
+            SELECTOR,
+            WriterMode::SingleLease,
+        )
+    }
     .map_err(|error| format!("offline scripted tree: {}", error.message))?;
     if let Some(runner) = state_roots.runner_services() {
         tree.place_genesis_root(plakous_hosted::agent_tree::NodePlacement {
@@ -555,9 +580,10 @@ fn prepare_scripted_tree(
         )
     })? {
         tree = ProductAgentTree::reopen(persisted);
-        tree.set_vcs(Arc::clone(&vcs));
+        tree.set_vcs(runner_port(Some(&tree))?.unwrap_or_else(|| Arc::clone(&vcs)));
     }
     let runtime = if detached {
+        let vcs = tree.vcs_port();
         Arc::new(
             plakous_hosted::topology_runtime::ProductTopologyRuntime::new(
                 tree,
@@ -643,7 +669,9 @@ fn product_child_binding(
 ) -> Arc<plakous_hosted::runtime::ScriptedChildBinding> {
     Arc::new(move |agent_id, path, roots| {
         let workspace = Path::new(path);
-        std::fs::create_dir_all(workspace).map_err(|error| error.to_string())?;
+        if roots.runner_services().is_none() {
+            std::fs::create_dir_all(workspace).map_err(|error| error.to_string())?;
+        }
         let grandchild = script.with_file_name("grandchild-script.json");
         let nested = grandchild.is_file() && agent_id != "c1";
         let script = if nested { grandchild } else { script.clone() };
@@ -659,7 +687,9 @@ fn product_child_binding(
         let plan = Arc::new(plan);
         // The product reopens a child only over a coding projection; the
         // pi pack is the one an `OpenRouter` parent's child compiles.
-        let mut binding = if !nested && script.with_file_name("grandchild-script.json").is_file() {
+        let mut binding = if roots.runner_services().is_some()
+            || !nested && script.with_file_name("grandchild-script.json").is_file()
+        {
             let tools = plakous_hosted::runtime::test_kit::scripted_caller_topology_tools(
                 Arc::clone(&runtime),
                 agent_id,

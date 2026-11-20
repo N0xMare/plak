@@ -260,6 +260,7 @@ impl ProductAgentTree {
             "tuple_id": node.tuple_id,
             "workspace_id": node.workspace_id,
             "path": node.path.display().to_string(),
+            "runner": node.placement.runner_id.as_deref().unwrap_or("local"),
             "tier": node.tier,
             "dirty": occupancy.dirty,
         });

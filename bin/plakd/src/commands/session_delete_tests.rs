@@ -1489,7 +1489,7 @@ fn abandon_jobs_deletes_with_an_unreadable_child_locator() -> TestResult {
     let mut f = fixture_without_child_locator()?;
     f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;
     crate::store::tree::save_tree(&f.paths, &mut f.tree).checked()?;
-    let labels = running_job_labels(&f.paths, &f.record, true)?;
+    let labels = running_job_labels(&f.paths, &f.record, None, true)?;
     assert!(
         labels
             .iter()
@@ -1530,7 +1530,7 @@ fn abandon_jobs_deletes_while_a_job_is_still_running() -> TestResult {
 }
 
 #[test]
-fn unpair_refuses_a_finished_child_job_on_the_runner() -> TestResult {
+fn unpair_refuses_a_finished_child_job_when_its_root_is_elsewhere() -> TestResult {
     use plakous::tools::JobHost as _;
     let mut f = fixture(false)?;
     let (host, session, _job_record) = open_session_with_a_running_job(&mut f)?;
@@ -1554,17 +1554,11 @@ fn unpair_refuses_a_finished_child_job_on_the_runner() -> TestResult {
     )
     .checked()?;
     std::fs::write(pin_dir.join("runner.toml"), "hosts = []\n").checked()?;
-    let display = plakous_hosted::sessions::RunnerDisplay {
-        name: "build".into(),
-        runner_id: "runner-1".into(),
-        workspace_root: f.paths.home().to_path_buf(),
-        workspace_cwd: f.paths.home().to_path_buf(),
-    };
-    rusqlite::Connection::open(f.paths.product_database())
+    rusqlite::Connection::open(f.paths.subagents_database())
         .checked()?
         .execute(
-            "UPDATE sessions SET runner_display=?1 WHERE id=?2",
-            rusqlite::params![display.encode().checked()?, f.record.id],
+            "UPDATE agent_nodes SET runner_id='runner-1' WHERE tree_id=?1 AND agent_id=?2",
+            rusqlite::params![f.record.id, child.agent_id],
         )
         .checked()?;
     let root = f.record.plakous_locator.ok_or("root locator")?;
@@ -1618,17 +1612,11 @@ fn unpair_abandon_jobs_continues_with_an_unreadable_child_locator() -> TestResul
     )
     .checked()?;
     std::fs::write(pin_dir.join("runner.toml"), "hosts = []\n").checked()?;
-    let display = plakous_hosted::sessions::RunnerDisplay {
-        name: "build".into(),
-        runner_id: "runner-1".into(),
-        workspace_root: f.paths.home().to_path_buf(),
-        workspace_cwd: f.paths.home().to_path_buf(),
-    };
-    rusqlite::Connection::open(f.paths.product_database())
+    rusqlite::Connection::open(f.paths.subagents_database())
         .checked()?
         .execute(
-            "UPDATE sessions SET runner_display=?1 WHERE id=?2",
-            rusqlite::params![display.encode().checked()?, f.record.id],
+            "UPDATE agent_nodes SET runner_id='runner-1' WHERE tree_id=?1 AND agent_id=?2",
+            rusqlite::params![f.record.id, f.child_id],
         )
         .checked()?;
     let mut output = Vec::new();

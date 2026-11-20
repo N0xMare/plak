@@ -37,6 +37,7 @@ pub struct MintRequest<'a> {
 }
 
 /// One three-way landing and the identity of its retained provenance.
+#[derive(Clone, Copy)]
 pub struct AdoptRequest<'a> {
     /// A spent resolution may be inspected for markers, but must never apply.
     pub resolution_refusal: Option<&'a str>,
@@ -112,10 +113,27 @@ pub trait VcsOps: Send + Sync {
         None
     }
 
+    /// Runner that owns this path (which need not be the launch runner).
+    fn path_runner(&self, _path: &Path) -> Option<String> {
+        self.stage_runner().map(str::to_owned)
+    }
+
+    /// Read the target's mirror and register it before a cross-runner mint.
+    fn prepare_transfer<'a>(&'a self, runner: &'a str) -> VcsFuture<'a, Result<(), VcsError>> {
+        ready(self.transfer_port(runner).map(|_| ()).ok_or_else(|| {
+            VcsError::mint_unavailable("the tree's port does not reach that runner")
+        }))
+    }
+
     /// The port of `runner`, another runner this tree's port reaches for a
     /// copy that crosses runners; `None` when it reaches no such runner.
     fn transfer_port(&self, runner: &str) -> Option<std::sync::Arc<dyn VcsOps>> {
         let _ = runner;
+        None
+    }
+
+    /// The target mirror already registered for this tree, without a runner call.
+    fn transfer_mirror(&self, _runner: &str) -> Option<PathBuf> {
         None
     }
 

@@ -63,6 +63,12 @@ impl ProductAgentTree {
             return Ok(SpawnAdmission::Replayed(receipt));
         }
         self.require_live()?;
+        if self.nodes.contains_key(caller_id) && !self.placement_ready(caller_id) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RunnerUnreachable,
+                "the parent's runner is not ready",
+            ));
+        }
         request.validate().map_err(|code| {
             TopologyError::new(
                 code,
@@ -428,11 +434,13 @@ impl ProductAgentTree {
         );
         self.inbound.entry(agent_id.clone()).or_default();
         self.bump();
+        let runner = self.node(&agent_id)?.placement.runner_id.clone();
         let output = SpawnAgentOutput {
             agent_id,
             attempt_id,
             status: NodeStatus::Running,
             tier,
+            runner,
             workspace: WorkspaceReceipt {
                 id: bound.workspace_id,
                 mode: bound.mode,
@@ -522,7 +530,7 @@ impl ProductAgentTree {
     /// The requested tier is not part of it — the receipt reports the
     /// effective tier after the template clip, so a second ask above the
     /// ceiling is the same spawn.
-    pub(in crate::tree) fn replay_request_key(
+    pub(crate) fn replay_request_key(
         &self,
         caller_id: &str,
         request: &SpawnAgentRequest,

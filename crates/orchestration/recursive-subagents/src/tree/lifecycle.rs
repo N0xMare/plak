@@ -518,6 +518,7 @@ impl ProductAgentTree {
                 .unwrap_or_else(|| AttemptId::new(agent_id, 1)),
             status: node.status,
             tier: node.tier,
+            runner: node.placement.runner_id.clone(),
             workspace: WorkspaceReceipt {
                 id: node.workspace_id.clone(),
                 mode: workspace.map_or(WorkspaceMode::Inherit, |row| row.mode),

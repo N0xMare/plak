@@ -70,6 +70,33 @@ pub trait ChildController: Send + Sync {
     /// controller's lifetime: a tool may consult it more than once per call.
     fn services(&self) -> ChildServices;
 
+    /// The configured paired names this host offers in the spawn description.
+    fn paired_runner_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The current display alias for a saved identity.
+    fn runner_name(&self, id: &str) -> String {
+        id.to_owned()
+    }
+
+    /// Resolve a paired name and, for a copy, check its current readiness.
+    ///
+    /// # Errors
+    /// Refuses unknown names, inherit on another runner, and unready placement.
+    fn admit_runner<'a>(
+        &'a self,
+        name: &'a str,
+        parent: Option<&'a str>,
+        inherit: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<String, TopologyError>> + Send + 'a>> {
+        let _ = (parent, inherit);
+        Box::pin(std::future::ready(Err(TopologyError::new(
+            TopologyErrorCode::RunnerNotConfigured,
+            format!("runner {name:?} is not paired on this host"),
+        ))))
+    }
+
     /// Product admission of `caller_id`'s spawn request itself, before the
     /// tree resolves its template. The default admits everything.
     ///

@@ -12,13 +12,13 @@ impl ProductAgentTree {
         self.effects
             .seals
             .iter()
-            .any(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true))
+            .any(|ticket| ticket.placement_ready(self.vcs.0.as_ref()))
     }
 
     pub(crate) fn defer_unavailable_seals(&mut self, effects: &mut Effects) {
         let (ready, deferred): (Vec<_>, Vec<_>) = std::mem::take(&mut effects.seals)
             .into_iter()
-            .partition(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true));
+            .partition(|ticket| ticket.placement_ready(self.vcs.0.as_ref()));
         effects.seals = ready;
         self.effects.seals.extend(deferred);
     }
@@ -30,7 +30,7 @@ impl ProductAgentTree {
     pub fn take_effects(&mut self) -> Effects {
         let (seals, deferred) = std::mem::take(&mut self.effects.seals)
             .into_iter()
-            .partition(|ticket| self.vcs.0.placement_ready(&ticket.path).unwrap_or(true));
+            .partition(|ticket| ticket.placement_ready(self.vcs.0.as_ref()));
         let base_pins = std::mem::take(&mut self.effects.base_pins);
         let (attach_refreshes, refreshes): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.effects.refreshes)

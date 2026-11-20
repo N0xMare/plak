@@ -822,6 +822,7 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 | `cost_tier` | integer | `(unset)` | 0..=255 | Static label a parent sees on the spawn card; never a measured cost. |
 | `max_turns` | integer | `(unset)` | 1 or more | Turn budget for a copy of this template. |
 | `on_mint` | string | `(unset)` | not validated at parse; runs in the copy's workspace | Command run once when a copy is minted, before its first turn. |
+| `runner` | string | `(unset)` | `local` or a runner name; pairing and readiness checked at spawn | Default child placement when `spawn_agent` omits `runner`. Does not place a root. |
 | `show_model` | bool | `false` | — | Put the model id on the spawn card next to the description. |
 | `env` | table of string | `{}` | keys are not validated; values are strings | Environment for on_mint only; not passed to the copy's tool calls. |
 

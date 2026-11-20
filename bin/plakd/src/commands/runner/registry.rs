@@ -244,8 +244,20 @@ pub(crate) fn prepare(
         if let Some(tree) =
             crate::store::tree::load_tree(paths, &record.node.tree_id).map_err(CliFailure::new)?
         {
-            if !tree.recorded_process_stops().is_empty() {
-                required.insert(runner_id);
+            for (locator, _) in tree.recorded_process_stops() {
+                if let Some(node) = tree
+                    .nodes()
+                    .values()
+                    .find(|node| node.session_locator.as_deref() == Some(locator.as_str()))
+                {
+                    required.insert(
+                        node.placement
+                            .runner_id
+                            .as_deref()
+                            .unwrap_or("local")
+                            .to_owned(),
+                    );
+                }
             }
         }
     }

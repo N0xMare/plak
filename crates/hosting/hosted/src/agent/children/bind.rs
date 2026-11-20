@@ -782,13 +782,39 @@ pub(in crate::agent) async fn child_session_runtime_binding(
 ) -> crate::CliResult<SessionRuntimeBinding> {
     // A new child uses current construction inputs, never a parent's reopen pin.
     let mut scoped_parent = parent.clone();
+    let parent_roots = parent.state_roots();
+    let placement =
+        crate::topology_runtime::lookup(spawn_parent_tree_id(parent)).and_then(|runtime| {
+            runtime
+                .read(|tree| {
+                    tree.nodes()
+                        .get(agent_id)
+                        .map(|node| node.placement.runner_id.clone())
+                })
+                .ok()
+                .flatten()
+        });
+    let mut roots = match placement {
+        Some(ref id) => parent_roots.for_child_runner(id.as_deref())?,
+        None => parent_roots.clone(),
+    };
     if !opening_durable_session {
-        match &mut scoped_parent {
-            SpawnParent::Native(spec) => {
-                spec.state_roots = spec.state_roots.clone().without_reopen_artifact();
+        roots = roots.without_reopen_artifact();
+    }
+    let crossed = placement
+        .as_ref()
+        .is_some_and(|id| *id != parent_roots.selected_runner_id());
+    match &mut scoped_parent {
+        SpawnParent::Native(spec) => {
+            spec.state_roots = roots;
+            if crossed {
+                spec.workspace_root = PathBuf::from(path);
             }
-            SpawnParent::Api(spec) => {
-                spec.state_roots = spec.state_roots.clone().without_reopen_artifact();
+        }
+        SpawnParent::Api(spec) => {
+            spec.state_roots = roots;
+            if crossed {
+                spec.workspace_root = PathBuf::from(path);
             }
         }
     }

@@ -597,12 +597,18 @@ impl TopologyTool {
         let vcs = self.driver.vcs();
         let occupancy = probe.run(vcs.as_ref()).await;
         let caller = caller.to_owned();
-        self.driver
-            .write(move |tree| {
-                tree.list_agents_with(&caller, &request, &occupancy)
-                    .map(|output| json!(output))
-            })
-            .await?
+        let mut output = self
+            .driver
+            .write(move |tree| tree.list_agents_with(&caller, &request, &occupancy))
+            .await??;
+        if let Some(binder) = self.binder() {
+            for row in &mut output.agents {
+                if let Some(id) = row["runner"].as_str() {
+                    row["runner"] = json!(binder.runner_name(id));
+                }
+            }
+        }
+        Ok(json!(output))
     }
 
     fn topology_failure(error: &TopologyError) -> Result<ToolOutcome, ToolRuntimeError> {

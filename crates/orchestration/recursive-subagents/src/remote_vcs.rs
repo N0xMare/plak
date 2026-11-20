@@ -205,7 +205,7 @@ impl VcsCall {
 /// The tree's port over a runner link: every answer comes from the runner
 /// that hosts the tree's workspaces.
 pub struct RemoteVcs {
-    link: Arc<dyn RunnerLink>,
+    link: Box<dyn Fn() -> Option<Arc<dyn RunnerLink>> + Send + Sync>,
     runner_id: String,
     tree_id: String,
 }
@@ -215,17 +215,31 @@ impl RemoteVcs {
     /// behind `link`.
     #[must_use]
     pub fn new(link: Arc<dyn RunnerLink>, runner_id: String, tree_id: String) -> Self {
+        Self::with_link(move || Some(Arc::clone(&link)), runner_id, tree_id)
+    }
+
+    /// A port for a saved identity whose registry connection can change.
+    #[must_use]
+    pub fn with_link(
+        link: impl Fn() -> Option<Arc<dyn RunnerLink>> + Send + Sync + 'static,
+        runner_id: String,
+        tree_id: String,
+    ) -> Self {
         Self {
-            link,
+            link: Box::new(link),
             runner_id,
             tree_id,
         }
     }
 
+    fn connected_link(&self) -> Result<Arc<dyn RunnerLink>, VcsError> {
+        (self.link)().ok_or_else(|| VcsError::mint_unavailable("the runner is not ready"))
+    }
+
     /// Asks one question; `Err` when the runner could not answer it.
     async fn read<T: DeserializeOwned>(&self, call: VcsCall) -> Result<T, VcsError> {
         let answer = self
-            .link
+            .connected_link()?
             .call(RunnerCall::unkeyed(RunnerVerb::VcsRead, encode(&call)?))
             .await
             .map_err(|failure| link_error(&failure, None))?;
@@ -235,6 +249,7 @@ impl RemoteVcs {
     /// Runs one effect as the next step of the current stage, or under a
     /// fresh key outside any stage.
     async fn effect<T: DeserializeOwned>(&self, call: VcsCall) -> Result<T, VcsError> {
+        let link = self.connected_link()?;
         let stage = stage::current();
         if stage.is_none() {
             let reason = stage::unstaged_reason();
@@ -254,7 +269,7 @@ impl RemoteVcs {
         );
         let payload = encode(&call)?;
         let send = |key: String| {
-            self.link.call(RunnerCall::tree(
+            link.call(RunnerCall::tree(
                 RunnerVerb::VcsEffect,
                 payload.clone(),
                 self.tree_id.clone(),
@@ -360,11 +375,16 @@ fn adopt_failure(error: VcsError) -> AdoptFailure {
 
 impl VcsOps for RemoteVcs {
     fn placement_ready(&self, _path: &Path) -> Option<bool> {
-        self.link.placement().map(|gate| gate.is_ready())
+        self.connected_link().ok().map_or(Some(false), |link| {
+            link.placement().map(|gate| gate.is_ready())
+        })
     }
 
     fn placement_held(&self, _path: &Path) -> bool {
-        self.link.placement().is_some_and(|gate| gate.is_held())
+        self.connected_link()
+            .ok()
+            .and_then(|link| link.placement())
+            .is_some_and(|gate| gate.is_held())
     }
 
     fn stage_runner(&self) -> Option<&str> {

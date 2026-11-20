@@ -317,7 +317,10 @@ impl ProductAgentTree {
                     || self.root_agent_id.clone(),
                     |row| row.owner_agent_id.clone(),
                 );
-            let on = placed(self, &agent_id);
+            let on = self
+                .vcs_port()
+                .path_runner(&ticket.path)
+                .unwrap_or_else(|| placed(self, &agent_id));
             let intent = local_stage(VcsStageKind::Unmint, reproducible, &agent_id, &on);
             stages.unmints.push(self.record_vcs_stage(&intent)?);
         }

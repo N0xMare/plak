@@ -307,6 +307,71 @@
   },
   "plak.topology.spawn_agent.executor.v1/e9a139c5d043db73ce4859b9bbec3e39e56e6273f9d47cda44140674c7e1a20c": {
     "accepted": {
+      "ae8f6e2101f8e9633f6aad85359c13bedbfc989585f2126d861ec6628d35fd98": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Short label for the attempt; does not select bind.",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "One candidate id, from a finished child's wait or list row, to start this child's copy from instead of your current state. Requires workspace=fork: inherit has no copy of its own.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "output_schema_json": {
+            "description": "JSON string holding the child's submit_result object schema. Property types are object, array, string, number, integer, or boolean; no $ref and no combinators.",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "Task brief for the child agent.",
+            "type": "string"
+          },
+          "request_key": {
+            "description": "Your own key for this spawn. A repeat with the same key and the same brief returns the same child instead of spawning a second one; the same key on a different brief is refused request_key_conflict.",
+            "type": "string"
+          },
+          "runner": {
+            "description": "Paired runner name; local uses your runner. Omit for the template default, otherwise your runner.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Template to spawn, from the cards below.",
+            "enum": [
+              "implementer",
+              "reviewer"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "read_only",
+              "execute",
+              "mutate"
+            ],
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Omit or inherit to share your checkout. fork mints an isolated copy.",
+            "enum": [
+              "inherit",
+              "fork"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "prompt",
+          "output_schema_json",
+          "tier"
+        ],
+        "type": "object"
+      },
       "f42541c3194550021bf79f4ed54095116f44969c100bc04e37f16a8e4a02407c": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,

@@ -85,6 +85,12 @@ enum SpawnPhase {
 struct SpawnBinding {
     parent_composition: Option<plakous_host_protocol::selection::CompositionSelection>,
     resolved_account: Option<String>,
+    runner: Option<String>,
+}
+
+struct SpawnPlacement {
+    runner: Option<String>,
+    jj_copy_dirs: Result<std::collections::BTreeSet<String>, VcsError>,
 }
 
 impl TopologyTool {
@@ -303,6 +309,81 @@ impl TopologyTool {
             .map_err(|_| lock_poisoned())?
     }
 
+    async fn spawn_target(
+        &self,
+        caller: &str,
+        request: &SpawnAgentRequest,
+    ) -> Result<Option<String>, TopologyError> {
+        let selection = self.driver.read(|tree| {
+            if tree.replay_request_key(caller, request)?.is_some() {
+                return Ok(None);
+            }
+            let node = tree.node(caller)?;
+            let card = tree.caller_epoch(caller)?.binding(&request.template);
+            let name = request.runner.as_ref().or_else(|| card?.runner.as_ref());
+            Ok::<_, TopologyError>(
+                name.filter(|name| name.as_str() != "local")
+                    .map(|name| (name.clone(), node.placement.runner_id.clone())),
+            )
+        })??;
+        let Some((name, parent)) = selection else {
+            return Ok(None);
+        };
+        let binder = self.binder().ok_or_else(|| {
+            TopologyError::new(
+                TopologyErrorCode::RunnerNotConfigured,
+                format!("runner {name:?} is not paired on this host"),
+            )
+        })?;
+        let id = binder
+            .admit_runner(&name, parent.as_deref(), request.workspace.is_inherit())
+            .await?;
+        if Some(id.as_str()) == parent.as_deref() {
+            return Ok(None);
+        }
+        self.driver
+            .vcs()
+            .prepare_transfer(&id)
+            .await
+            .map_err(|error| {
+                TopologyError::new(TopologyErrorCode::CrossRunnerCopyUnavailable, error.detail)
+            })?;
+        Ok(Some(id))
+    }
+
+    async fn spawn_placement(
+        &self,
+        caller: &str,
+        request: &SpawnAgentRequest,
+    ) -> Result<SpawnPlacement, TopologyError> {
+        let runner = self.spawn_target(caller, request).await?;
+        let (launch, path) = self.driver.read(|tree| {
+            tree.node(caller)
+                .map(|node| (tree.launch_checkout.clone(), node.path.clone()))
+        })??;
+        let vcs = self.driver.vcs();
+        // The copy root is listed before reservation so a crashed JJ mint's
+        // directory keeps its id. Transferred copies use Git only.
+        let jj_copy_dirs = if runner.is_some() {
+            Ok(std::collections::BTreeSet::new())
+        } else if vcs.path_runner(&path).as_deref() == vcs.stage_runner() {
+            vcs.jj_copy_dirs(&launch).await
+        } else {
+            vcs.jj_copy_dirs(&path).await
+        };
+        Ok(SpawnPlacement {
+            runner,
+            jj_copy_dirs,
+        })
+    }
+
+    fn spawn_tool_receipt(output: &SpawnAgentOutput) -> Result<ToolOutcome, ToolRuntimeError> {
+        let mut value = json!(output);
+        let id = output.runner.as_deref().unwrap_or("local");
+        value["runner"] = json!(id);
+        ToolOutcome::success_text(value.to_string())
+    }
+
     /// `spawn_agent` in three phases, the same shape the
     /// adopt uses: admission, the reserved child id, and the prepared
     /// operation under the lock; the mint — a `git worktree add` or a
@@ -322,21 +403,16 @@ impl TopologyTool {
         let tool = self.clone();
         let (caller, operation_id, request) =
             (caller.to_owned(), operation_id.to_owned(), request.clone());
-        // The copy root is listed outside the writer; the admission skips an
-        // id a crashed mint left behind, and refuses if the port could not
-        // answer.
-        let launch = self
-            .driver
-            .read(|tree| tree.launch_checkout.clone())
-            .map_err(|error| {
-                ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
-            })?;
-        let jj_copy_dirs = self.driver.vcs().jj_copy_dirs(&launch).await;
+        let placement = match self.spawn_placement(&caller, &request).await {
+            Ok(placement) => placement,
+            Err(error) => return Ok((Err(error), Effects::default())),
+        };
         let binding = SpawnBinding {
             parent_composition: self
                 .binder()
                 .and_then(|binder| binder.spawn_parent_composition(&caller)),
             resolved_account,
+            runner: placement.runner,
         };
         let (phase, effects) = self
             .driver
@@ -349,7 +425,7 @@ impl TopologyTool {
                         &caller,
                         &operation_id,
                         &request,
-                        &jj_copy_dirs,
+                        &placement.jj_copy_dirs,
                         binding,
                     )
                 }
@@ -449,7 +525,13 @@ impl TopologyTool {
             return Ok(SpawnPhase::Done(output, true));
         }
         self.driver.save(tree)?;
-        let admitted = tree.spawn_reserve(caller, request, Some(operation_id), jj_copy_dirs);
+        let admitted = tree.spawn_reserve_on(
+            caller,
+            request,
+            Some(operation_id),
+            jj_copy_dirs,
+            binding.runner.as_deref(),
+        );
         match admitted {
             Ok(SpawnAdmission::Replayed(output)) => {
                 self.driver.save(tree)?;
@@ -483,7 +565,8 @@ impl TopologyTool {
                 reservation.set_resolved_account(binding.resolved_account);
                 // On a runner the mint is a recorded stage, published before
                 // it runs (spec 03 §14).
-                let stage = match self.driver.vcs().stage_runner() {
+                let runner = tree.node(caller)?.placement.runner_id.clone();
+                let stage = match runner.as_deref() {
                     Some(runner) => {
                         let stage = tree.record_mint_stage(&ticket, None, runner)?;
                         self.driver.save(tree)?;
@@ -768,7 +851,7 @@ impl TopologyTool {
                     .await
                 }
                 BoundAfterFailure::FoldRefused(error) => Self::topology_failure(&error),
-                BoundAfterFailure::Folded => ToolOutcome::success_text(json!(output).to_string()),
+                BoundAfterFailure::Folded => Self::spawn_tool_receipt(&output),
             };
         }
         if let Some(binder) = self.binder() {
@@ -801,7 +884,7 @@ impl TopologyTool {
             match binder.bind(start).await {
                 Ok(bound) => {
                     if bound.durably_registered {
-                        return ToolOutcome::success_text(json!(output).to_string());
+                        return Self::spawn_tool_receipt(&output);
                     }
                     let driver = self.driver.clone();
                     let agent_id = output.agent_id.clone();
@@ -872,9 +955,7 @@ impl TopologyTool {
                             "bound session allocation is invalid",
                         )),
                         BoundSession::ProjectionRefused(error) => Self::topology_failure(&error),
-                        BoundSession::Recorded => {
-                            ToolOutcome::success_text(json!(output).to_string())
-                        }
+                        BoundSession::Recorded => Self::spawn_tool_receipt(&output),
                     };
                 }
                 Err(SpawnBindError::Refused(message)) => {
@@ -954,7 +1035,7 @@ impl TopologyTool {
                 }
             }
         }
-        ToolOutcome::success_text(json!(output).to_string())
+        Self::spawn_tool_receipt(&output)
     }
 }
 

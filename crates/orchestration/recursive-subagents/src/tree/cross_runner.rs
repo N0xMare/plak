@@ -40,6 +40,9 @@ pub struct Carry {
     pub target: String,
     /// The tree, whose mirror on the target holds the copy.
     pub tree_id: String,
+    /// The mirror admitted before reservation. A restarted daemon cannot
+    /// switch this mint to a path not routed by the tree.
+    pub target_mirror: Option<PathBuf>,
     /// What the target already holds ([`ProductAgentTree::tree_runner_ancestors`]).
     pub ancestors: Vec<String>,
 }
@@ -274,7 +277,10 @@ pub(super) async fn mint_across(
     let target = vcs.transfer_port(&carry.target).ok_or_else(|| {
         VcsError::mint_unavailable("the tree's port does not reach the copy's runner")
     })?;
-    let mirror = target.transfer_root(&carry.tree_id).await?;
+    let mirror = match &carry.target_mirror {
+        Some(mirror) => mirror.clone(),
+        None => target.transfer_root(&carry.tree_id).await?,
+    };
     let agent = ticket.agent_id.as_str();
     let head = vcs
         .ref_commit(&ticket.caller_path, "HEAD")
@@ -436,15 +442,22 @@ impl ProductAgentTree {
                 "a copy crosses runners only from its parent's live state, without candidate inputs",
             ));
         }
-        if self.vcs_port().transfer_port(runner).is_none() {
+        let Some(port) = self.vcs_port().transfer_port(runner) else {
             return Err(copy_unavailable(
                 "the tree's port does not reach that runner, so a copy cannot be carried there",
+            ));
+        };
+        if port.placement_ready(Path::new("")) == Some(false) {
+            return Err(TopologyError::new(
+                TopologyErrorCode::RunnerUnreachable,
+                "the copy's runner is not ready",
             ));
         }
         Ok(Some(Carry {
             source,
             target: runner.to_owned(),
             tree_id: self.tree_id.clone(),
+            target_mirror: self.vcs_port().transfer_mirror(runner),
             ancestors: self.tree_runner_ancestors(runner),
         }))
     }

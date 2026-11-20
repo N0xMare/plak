@@ -8061,7 +8061,10 @@ older than an age). Bundles and uploads
 live owner-only in the repository's `plak-transfer` directory, named by their
 SHA-256, and only from a git checkout. `routed_vcs::RoutedVcs` is the tree's
 port over the launch runner's port and other runners' ports, routing each
-call by the mirror its path lies under. `UnavailableVcs` remains the port that
+call by the mirror its path lies under. The product registers a paired target
+before mint and reconstructs saved mirror routes on reopen without requiring
+every runner to be Ready. The per-node backend, not the launch port, owns a
+placed child's execution and reopen. `UnavailableVcs` remains the port that
 refuses every effect.
 The run-stable workspace facts that plan compilation and the runtime
 environment component bind (`plakous-agent/workspace-environment-v2`) name the
