@@ -158,6 +158,7 @@ fn placement_hold_unstarted_seal_reopens_as_debt_but_staged_seal_never_restarts(
 
 #[tokio::test]
 async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
+    use crate::tree::TreeStore as _;
     use plakous::sessions::{AgentSessions, SessionBackend};
 
     let (root, vcs, mut tree) = fake_tree();
@@ -173,18 +174,19 @@ async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
     vcs.set_placement_ready(path.clone(), false);
     tree.record_turn_completed(&child).unwrap();
 
-    let mut tree = ProductAgentTree::reopen(tree.to_persisted());
+    let tree_id = tree.tree_id.clone();
+    let store = Arc::new(MemoryTreeStore::new());
+    let prior = crate::hub::ProductTopologyRuntime::new(tree, store.clone(), vcs.clone(), None);
+    prior.mutate_and_settle(|_| ()).await.unwrap();
+    drop(prior);
+
+    let mut tree = ProductAgentTree::reopen(store.load(&tree_id).unwrap().unwrap());
     tree.set_vcs(vcs.clone());
     let sibling = tree
         .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
         .unwrap()
         .agent_id;
-    let runtime = crate::hub::ProductTopologyRuntime::new(
-        tree,
-        Arc::new(MemoryTreeStore::new()),
-        vcs.clone(),
-        None,
-    );
+    let runtime = crate::hub::ProductTopologyRuntime::new(tree, store, vcs.clone(), None);
     let driver = runtime.driver();
     driver.mutate_and_settle(|_| ()).await.unwrap();
     let sessions =
