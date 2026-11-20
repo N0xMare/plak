@@ -609,31 +609,6 @@ impl RunnerClient {
         self.inner.unpromoted(&owner).await
     }
 
-    /// Keyed cleanup selected by terminal driver-operation state, never by
-    /// runner-key answer/Ack. Caller serializes selection with settlement.
-    /// Both call identity and PID are checked on the runner; promoted jobs
-    /// and unrelated calls cannot be stopped by this control.
-    ///
-    /// # Errors
-    /// Ordinary keyed-control recovery errors; retry uses the same identity.
-    pub async fn stop_settled_foreground(
-        &self,
-        owner: plakous_tools::LineOwner,
-        process: &plakous_runner_protocol::UnpromotedProcess,
-    ) -> Result<Vec<plakous_runner_protocol::StoppedForeground>, RunnerFailure> {
-        let key = format!("foreground-cleanup:{}:{}", owner.line(), process.call_key);
-        let answer = self
-            .call(RunnerCall::recorded_control(
-                RunnerVerb::ForegroundStop,
-                serde_json::json!({ "call_key": process.call_key, "pid": process.pid }),
-                owner,
-                key,
-            ))
-            .await?;
-        serde_json::from_value(answer.get("stopped").cloned().unwrap_or(Value::Null))
-            .map_err(|_| RunnerFailure::Unavailable("invalid foreground cleanup answer".into()))
-    }
-
     async fn attach<S>(&self, stream: S, again: bool) -> Result<Hello, ConnectError>
     where
         S: AsyncRead + AsyncWrite + Send + 'static,

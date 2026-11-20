@@ -2,4 +2,5 @@
 //! (the fold rows, `fold_rows.rs`).
 
 #[cfg(test)]
+#[path = "admission_compaction/tests.rs"]
 mod tests;

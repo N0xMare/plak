@@ -191,10 +191,10 @@ pub struct ProductStore {
     capacity_fault: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 struct SettleCommitTrace;
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 impl Drop for SettleCommitTrace {
     fn drop(&mut self) {
         plakous_offline_crash_harness::commit_trace::settle();
@@ -373,11 +373,11 @@ impl ProductStore {
                 .map_err(ProductStoreOpenError::unavailable)?;
         }
         let database = product_sqlite_path(paths)?;
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
         let connection = schema::schema().open_writer(&database, |connection| {
             let _ = connection;
-            #[cfg(feature = "test-hooks")]
+            #[cfg(feature = "test-support")]
             plakous_offline_crash_harness::commit_trace::install(connection, "product").map_err(
                 |_| AdmissionError::Unavailable("could not install commit trace".into()),
             )?;
@@ -463,7 +463,7 @@ impl ProductStore {
     ) -> Result<(), RecordStoreError> {
         #[cfg(test)]
         self.capacity_fault()?;
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
         let expected = session.store_revision;
         self.durability(true)?;
@@ -575,7 +575,7 @@ impl ProductStore {
     }
 
     pub fn load(&mut self, id: &str) -> Result<SessionRecord, String> {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
         let transaction = self
             .connection
@@ -831,7 +831,7 @@ impl ProductStore {
     /// the revision the caller checked. Identity bindings stay, so a replayed
     /// operation is refused rather than re-run.
     pub fn delete_session(&mut self, id: &str, expected_revision: u64) -> Result<(), String> {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
         self.durability(true)?;
         let transaction = self
@@ -883,7 +883,7 @@ impl ProductStore {
         workspace: &Path,
         include_archived: bool,
     ) -> Result<(Vec<SessionRecord>, usize), String> {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
         let identity = sessions::workspace_identity(workspace)
             .to_string_lossy()

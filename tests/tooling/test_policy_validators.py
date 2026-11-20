@@ -460,14 +460,20 @@ class CommitTraceEdgeTests(unittest.TestCase):
     def test_tree_trace_edge_requires_optional_dependency_and_exact_gate(self):
         tree = {
             "dependencies": {"plakous-store": {"optional": True}},
-            "features": {"commit-trace": ["dep:plakous-store", "plakous-store/commit-trace"]},
+            "features": {
+                "test-support": [
+                    "plakous-recursive-subagents/test-support",
+                    "dep:plakous-store",
+                    "plakous-store/test-support",
+                ]
+            },
         }
         manifests = {"plakous-recursive-subagents-store": tree}
         self.assertEqual(workspace_policy.validate_commit_trace_edge(manifests), [])
         tree["dependencies"]["plakous-store"]["optional"] = False
         self.assertTrue(workspace_policy.validate_commit_trace_edge(manifests))
         tree["dependencies"]["plakous-store"]["optional"] = True
-        tree["features"]["commit-trace"] = []
+        tree["features"]["test-support"] = []
         self.assertTrue(workspace_policy.validate_commit_trace_edge(manifests))
 
 
@@ -1684,7 +1690,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                     "plakous-host-protocol",
                     "plakous-hosted",
                     # The only `bin -> test` edge in the workspace, and it
-                    # resolves only under `plakd/test-hooks`. See the comment on
+                    # resolves only under `plakd/test-support`. See the comment on
                     # the row in the root manifest.
                     "plakous-offline-crash-harness",
                     "plakous-recursive-subagents",
@@ -2974,11 +2980,11 @@ class FeaturePolicyTests(unittest.TestCase):
     def test_host_bin_features_forward_only_to_the_facade_or_host(self) -> None:
         manifests = copy.deepcopy(self.manifests)
         manifests["plakd"]["dependencies"]["plakous-store"] = {"path": "x", "optional": True}
-        manifests["plakd"]["features"]["otel"].append("plakous-store/sqlite")
+        manifests["plakd"]["features"]["maintainer"].append("plakous-store/sqlite")
         errors = self.contracts(manifests)
         self.assertTrue(any("forwards below the facade" in error for error in errors), errors)
         manifests = copy.deepcopy(self.manifests)
-        manifests["plakd"]["features"]["otel"].append("plakous/xai")
+        manifests["plakd"]["features"]["maintainer"].append("plakous/xai")
         errors = self.contracts(manifests)
         self.assertFalse(any("forwards below the facade" in error for error in errors), errors)
 
@@ -3060,9 +3066,9 @@ class FeaturePolicyTests(unittest.TestCase):
             for package in packages
         }
         self.assertEqual(profile_counts["plakous"], 2 * 15 + 3)
-        # sqlite, perf-instrumentation, repository-only commit-trace.
-        self.assertEqual(profile_counts["plakous-store"], 2 * 3 + 3)
-        self.assertEqual(profile_counts["plakd"], 2 * 19 + 3)
+        # sqlite and the combined repository-only test seam.
+        self.assertEqual(profile_counts["plakous-store"], 2 * 2 + 3)
+        self.assertEqual(profile_counts["plakd"], 2 * 17 + 3)
         self.assertEqual(profile_counts["plakous-hosted"], 2 * 15 + 3)
         self.assertNotIn("plakous-cell", profile_counts)
         self.assertEqual(profile_counts["plakous-js-runtime"], 2 * 1 + 3)

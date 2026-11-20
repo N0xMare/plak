@@ -5,7 +5,7 @@
 //! A relaunch settles the write-ahead intent and must show exactly one
 //! carried record at the line's head, with the source redirecting to it.
 
-#![cfg(all(unix, feature = "test-hooks"))]
+#![cfg(all(unix, feature = "test-support"))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

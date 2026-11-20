@@ -12,7 +12,7 @@ pub(super) fn from_environment(
     let capture = CAPTURE
         .get_or_init(|| {
             let dir = std::env::var_os("PLAK_TEST_EXCHANGE_CAPTURE_DIR");
-            #[cfg(not(any(feature = "maintainer", feature = "test-hooks")))]
+            #[cfg(not(any(feature = "maintainer", feature = "test-support")))]
             {
                 let _ = home;
                 if dir.is_some() {
@@ -24,7 +24,7 @@ pub(super) fn from_environment(
                     Ok(None)
                 }
             }
-            #[cfg(any(feature = "maintainer", feature = "test-hooks"))]
+            #[cfg(any(feature = "maintainer", feature = "test-support"))]
             {
                 #[cfg(not(feature = "maintainer"))]
                 if dir.is_none() {
@@ -58,13 +58,9 @@ impl ExchangeObserver for LookupObserver {
         tracing::warn!(target: "plak.lookup", attempt, cause, "retrying model lookup");
         crate::lookup_status::retry(attempt, cause);
     }
-
-    fn lookup_finished(&self) {
-        crate::lookup_status::finished();
-    }
 }
 
-#[cfg(any(feature = "maintainer", feature = "test-hooks"))]
+#[cfg(any(feature = "maintainer", feature = "test-support"))]
 mod enabled {
     use plakous::exchange_observation::{
         ConnectionUse, ExchangeObservation, ExchangeObserver, ExchangeTerminal,

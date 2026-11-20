@@ -40,7 +40,7 @@ REBUILD = [
     str(live.ROOT / "tools/build/build-plakd.sh"),
     "--release",
     "--features",
-    "plakd/test-hooks",
+    "plakd/test-support",
     "--plakd-only",
 ]
 

@@ -1,4 +1,4 @@
-#[cfg(feature = "commit-trace")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_frameless_tree_helpers_release_for_another_thread()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +27,7 @@ fn commit_trace_frameless_tree_helpers_release_for_another_thread()
     Ok(())
 }
 
-#[cfg(feature = "commit-trace")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_frameless_tree_child() -> Result<(), Box<dyn std::error::Error>> {
     use super::{SqliteTreeStore, TreeStoreError};

@@ -1,21 +1,16 @@
-//! Optional file diagnostics (`PLAK_LOG`) and OTel export; never writes to protocol stdout.
+//! Optional file diagnostics (`PLAK_LOG`); never writes to protocol stdout.
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "otel")]
-use std::time::Duration;
 
 use crate::home::paths::PlakPaths;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
-
-#[cfg(feature = "otel")]
-use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
 
 /// Failure to install the optional diagnostics subscriber.
 #[derive(Debug, Eq, PartialEq)]
@@ -24,9 +19,6 @@ pub enum DiagnosticsError {
     Filter(String),
     /// Plak home layout or the diagnostics log file could not be opened.
     Io(String),
-    /// The optional OTel exporter could not be constructed.
-    #[cfg(feature = "otel")]
-    Otel(String),
 }
 
 impl fmt::Display for DiagnosticsError {
@@ -34,8 +26,6 @@ impl fmt::Display for DiagnosticsError {
         match self {
             Self::Filter(message) => write!(f, "invalid PLAK_LOG filter: {message}"),
             Self::Io(message) => write!(f, "{message}"),
-            #[cfg(feature = "otel")]
-            Self::Otel(message) => write!(f, "otel exporter unavailable: {message}"),
         }
     }
 }
@@ -43,24 +33,6 @@ impl fmt::Display for DiagnosticsError {
 /// Keeps the global diagnostics subscriber alive and flushes the log on drop.
 pub struct DiagnosticsGuard {
     log: Option<Arc<Mutex<OpenLog>>>,
-    #[cfg(feature = "otel")]
-    #[allow(dead_code, reason = "keeps the OTel provider alive until process exit")]
-    otel: Option<OtelShutdown>,
-}
-
-#[cfg(feature = "otel")]
-struct OtelShutdown {
-    provider: SdkTracerProvider,
-}
-
-#[cfg(feature = "otel")]
-impl Drop for OtelShutdown {
-    fn drop(&mut self) {
-        let provider = std::mem::replace(&mut self.provider, SdkTracerProvider::builder().build());
-        std::thread::spawn(move || {
-            let _ = provider.shutdown_with_timeout(Duration::from_millis(500));
-        });
-    }
 }
 
 impl Drop for DiagnosticsGuard {
@@ -143,21 +115,10 @@ pub fn requested_filter() -> Option<String> {
     Some(value.to_string_lossy().into_owned())
 }
 
-/// The OTLP endpoint when the `otel` feature is enabled; the only reader of that variable.
-#[cfg(feature = "otel")]
-pub fn otlp_endpoint() -> Option<String> {
-    let value = std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT")?;
-    if value.is_empty() {
-        return None;
-    }
-    Some(value.to_string_lossy().into_owned())
-}
-
-/// Install a composed `tracing` subscriber for optional file and OTel export layers.
+/// Install a composed `tracing` subscriber for the optional file log.
 pub fn install(
     paths: &PlakPaths,
     filter_text: Option<&str>,
-    #[cfg(feature = "otel")] otlp_endpoint: Option<&str>,
 ) -> Result<DiagnosticsGuard, DiagnosticsError> {
     let filter = match filter_text {
         Some(text) => {
@@ -195,81 +156,11 @@ pub fn install(
         None
     };
 
-    #[cfg(feature = "otel")]
-    let otel_shutdown = otlp_endpoint.map(build_otel_provider).transpose()?;
-
-    #[cfg(feature = "otel")]
-    return Ok({
-        use opentelemetry::trace::TracerProvider as _;
-        match (fmt_layer, otel_shutdown) {
-            (Some(fmt_layer), Some(otel)) => {
-                let tracer = otel.provider.tracer("plak");
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(fmt_layer)
-                    .with(tracing_opentelemetry::layer().with_tracer(tracer))
-                    .init();
-                DiagnosticsGuard {
-                    log,
-                    otel: Some(otel),
-                }
-            }
-            (Some(fmt_layer), None) => {
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(fmt_layer)
-                    .init();
-                DiagnosticsGuard { log, otel: None }
-            }
-            (None, Some(otel)) => {
-                let tracer = otel.provider.tracer("plak");
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(tracing_opentelemetry::layer().with_tracer(tracer))
-                    .init();
-                DiagnosticsGuard {
-                    log,
-                    otel: Some(otel),
-                }
-            }
-            (None, None) => unreachable!(
-                "install requires PLAK_LOG or OTEL_EXPORTER_OTLP_ENDPOINT when otel is enabled"
-            ),
-        }
-    });
-
-    #[cfg(not(feature = "otel"))]
-    {
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt_layer)
-            .init();
-        Ok(DiagnosticsGuard { log })
-    }
-}
-
-#[cfg(feature = "otel")]
-fn build_otel_provider(endpoint: &str) -> Result<OtelShutdown, DiagnosticsError> {
-    use opentelemetry::KeyValue;
-    use opentelemetry_otlp::WithExportConfig;
-    use opentelemetry_sdk::Resource;
-
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .with_endpoint(endpoint)
-        .with_timeout(Duration::from_millis(250))
-        .build()
-        .map_err(|error| DiagnosticsError::Otel(error.to_string()))?;
-    let resource = Resource::builder()
-        .with_service_name("plak")
-        .with_attribute(KeyValue::new("service.version", plakous::VERSION))
-        .build();
-    let processor = BatchSpanProcessor::builder(exporter).build();
-    let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_span_processor(processor)
-        .build();
-    Ok(OtelShutdown { provider })
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .init();
+    Ok(DiagnosticsGuard { log })
 }
 
 /// A log past this size is moved to `<name>.1` (replacing the previous one),

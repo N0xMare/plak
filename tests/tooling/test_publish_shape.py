@@ -1,4 +1,4 @@
-"""The published `plakd` manifest drops exactly `test-hooks` and its harness edge."""
+"""The published `plakd` manifest drops exactly `test-support` and its harness edge."""
 
 from __future__ import annotations
 
@@ -26,11 +26,11 @@ class PublishedPlakManifestTests(unittest.TestCase):
     def test_only_the_feature_and_its_harness_edge_are_removed(self) -> None:
         before = tomllib.loads(self.repository)
         after = tomllib.loads(publish_shape.published_plak_manifest(self.repository))
-        self.assertNotIn("test-hooks", after["features"])
+        self.assertNotIn("test-support", after["features"])
         self.assertNotIn(publish_shape.HARNESS, after["dependencies"])
         # The version-less dev-dependency stays; `cargo package` strips it.
         self.assertNotIn("version", after["dev-dependencies"][publish_shape.HARNESS])
-        before["features"].pop("test-hooks")
+        before["features"].pop("test-support")
         before["dependencies"].pop(publish_shape.HARNESS)
         self.assertEqual(after, before)
 

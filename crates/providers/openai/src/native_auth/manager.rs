@@ -60,7 +60,7 @@ impl CodexSubscriptionCredentialManager {
         )
     }
 
-    #[cfg(any(test, feature = "test-clock"))]
+    #[cfg(any(test, feature = "test-support"))]
     #[doc(hidden)]
     pub fn new_with_clock(
         slot_path: impl Into<PathBuf>,

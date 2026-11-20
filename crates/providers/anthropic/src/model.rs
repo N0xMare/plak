@@ -72,30 +72,6 @@ impl AnthropicLanguageModel {
         )
     }
 
-    /// Builds the exact-origin executor with an explicit exchange observer.
-    pub fn configured_with_exchange_observer(
-        source: Arc<AnthropicKeySource>,
-        account: &str,
-        model: &crate::AnthropicApiModel,
-        admitted_facts: &[u8],
-        behavior: ProviderBehaviorConfiguration,
-        maximum_projected_input: NonZeroU64,
-        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
-    ) -> Result<ConfiguredLanguageModel, AnthropicError> {
-        Self::configured_with_client(
-            source,
-            account,
-            model,
-            admitted_facts,
-            behavior,
-            maximum_projected_input,
-            Client::new_http1(Limits::for_streaming_inference())
-                .map_err(configuration_error)?
-                .pooled()
-                .with_observer(observer),
-        )
-    }
-
     /// The Platform route's client: the exact streaming HTTP/1.1 profile,
     /// pooled, observed by `observer`, taking `transport`.
     ///

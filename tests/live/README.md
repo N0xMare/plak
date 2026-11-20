@@ -71,11 +71,11 @@ completed durable turn and an independently checked file, and reports its
 session id and binary hash. It does not alter inference retry budgets.
 
 The Python drivers default to `target/release/plakd`. Build it with
-`tools/build/build-plakd.sh --release --features plakd/test-hooks` before a
+`tools/build/build-plakd.sh --release --features plakd/test-support` before a
 direct Python invocation; `--binary PATH` selects another capture-capable
-executable. A `test-hooks` binary only captures under the
+executable. A `test-support` binary only captures under the
 `tests/provider-authority` of the checkout that built it, so run the driver
-from that checkout: smoke refuses a binary built elsewhere before launching. `test-hooks` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
+from that checkout: smoke refuses a binary built elsewhere before launching. `test-support` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
 The drivers put ordinary artifacts under
 `target/live/<kind>-<route>-<stamp>/`: the repos the agent worked in, every
 JSONL transcript and stderr, and a `report.json`. Qualification retains these
@@ -133,7 +133,7 @@ These captures contain inference request bodies, not proof of transmission, and
 only response bytes delivered to the consumer, not every network byte. They do
 not capture HTTP headers (including auth), token refresh, or failures in
 unrelated provider paths.
-Use a `test-hooks` binary and a fresh directory for each process.
+Use a `test-support` binary and a fresh directory for each process.
 Read [spec 05 §3.5](../../docs/spec/05-testing-and-evidence.md#35-private-provider-wire-captures) before inspecting or retaining
 these sensitive raw bytes; never attach them to a public report.
 

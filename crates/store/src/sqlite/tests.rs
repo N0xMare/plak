@@ -864,7 +864,7 @@ async fn actor_dispatch_reports_full_and_failed_workers_without_waiting() {
         worker: Arc::new(Worker {
             join: Mutex::new(None),
         }),
-        #[cfg(feature = "perf-instrumentation")]
+        #[cfg(feature = "test-support")]
         trace: None,
     };
     assert_eq!(
@@ -892,7 +892,7 @@ async fn actor_dispatch_reports_full_and_failed_workers_without_waiting() {
         worker: Arc::new(Worker {
             join: Mutex::new(None),
         }),
-        #[cfg(feature = "perf-instrumentation")]
+        #[cfg(feature = "test-support")]
         trace: None,
     };
     assert_eq!(

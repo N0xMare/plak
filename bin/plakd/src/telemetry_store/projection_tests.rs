@@ -1,4 +1,4 @@
-//! Before/after pins for the complete SQLite and OTel observation surface.
+//! Parity pin for the complete SQLite observation projection.
 
 #![allow(
     clippy::unwrap_used,
@@ -8,30 +8,11 @@
 
 use super::tests::{TestResult, all_observations, fixture_context, fixture_timestamp};
 use super::*;
-use std::sync::{Arc, Mutex};
 
-use opentelemetry_sdk::trace::{SpanData, SpanProcessor};
 use plakous::agent::{
     DurabilityAttemptKind, DurabilityAttemptOutcome, JobHintSource, JobNoticeDelivery,
-    JobPreemption, JobTool, TelemetryContext, TelemetryObservationKind, TelemetrySink,
+    JobPreemption, JobTool, TelemetryContext, TelemetryObservationKind,
 };
-
-#[derive(Debug, Default)]
-struct Capture(Mutex<Vec<SpanData>>);
-
-impl SpanProcessor for Capture {
-    fn on_start(&self, _: &mut opentelemetry_sdk::trace::Span, _: &opentelemetry::Context) {}
-    fn on_end(&self, span: SpanData) {
-        self.0.lock().unwrap().push(span);
-    }
-    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        Ok(())
-    }
-    fn shutdown_with_timeout(&self, _: Duration) -> opentelemetry_sdk::error::OTelSdkResult {
-        Ok(())
-    }
-    fn set_resource(&mut self, _: &opentelemetry_sdk::Resource) {}
-}
 
 fn observations() -> TestResult<Vec<TelemetryObservation>> {
     let mut observations = all_observations()?;
@@ -138,38 +119,22 @@ fn rows(connection: &Connection) -> TestResult<serde_json::Value> {
 }
 
 #[test]
-fn every_observation_keeps_the_before_refactor_rows_and_spans() -> TestResult {
+fn every_observation_keeps_the_before_refactor_rows() -> TestResult {
     let (_guard, paths) = PlakPaths::isolated_test_home();
     let mut store = TelemetryStore::open(&paths)?;
-    let capture = Arc::new(Capture::default());
-    let processor = Arc::clone(&capture);
-    let bridge = Arc::new(
-        crate::otel_bridge::OtelBridge::with_processor(processor).expect("capture bridge"),
-    );
     let mut snapshots = Vec::new();
     for observation in observations()? {
         store.write_batch(&[TelemetryItem::Agent(observation)])?;
         snapshots.push(rows(&store.connection)?);
-        bridge.try_emit(observation)?;
     }
-    bridge.drain_for_test();
-    // SpanData's Debug covers identity, parents, timing, ordered typed attributes,
-    // events, status and instrumentation scope without wall-clock inputs.
-    let spans: Vec<_> = capture
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|span| format!("{span:?}"))
-        .collect();
-    let bytes = serde_json::to_vec(&(snapshots, spans))?;
+    let bytes = serde_json::to_vec(&snapshots)?;
     let digest: String = plakous::model::sha256_bytes(&[&bytes])
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
     assert_eq!(
         digest,
-        "959825181c64882f571b9e88f47d29e0dc730626991fd92208a84df0b5d597da"
+        "388cc34fde3b4887bebef1d3c035651070ebb5187993c5e24afcd262430fda0b"
     );
     Ok(())
 }

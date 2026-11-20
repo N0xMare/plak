@@ -87,22 +87,10 @@ impl ProductExtensionEvidence {
         )
     }
 
-    /// Returns the product issuer and qualification-candidate receipt identities.
-    #[must_use]
-    pub const fn product_authority_identities(&self) -> (Digest, Digest) {
-        (self.product_issuer, self.qualification_receipt)
-    }
-
     /// Returns the exact engine and truthful containment identities.
     #[must_use]
     pub const fn engine_identities(&self) -> (Digest, Digest) {
         (self.engine_contract, self.containment)
-    }
-
-    /// Product-extension evidence is explicitly product-owned and self-attested.
-    #[must_use]
-    pub const fn is_product_self_attested(&self) -> bool {
-        true
     }
 
     /// Returns the exact product-extension receipt identity.
@@ -148,12 +136,6 @@ impl ProductExtensionEvidence {
         EffectiveProviderConfigurationId,
     ) {
         (self.selected_configuration, self.effective_configuration)
-    }
-
-    /// Product-extension receipts never claim provider-native support.
-    #[must_use]
-    pub const fn makes_provider_native_claim(&self) -> bool {
-        false
     }
 }
 

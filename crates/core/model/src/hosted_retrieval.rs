@@ -43,10 +43,6 @@ impl HostedRetrievalSupport {
     pub const NOT_OFFERED: Self = Self::Unsupported {
         reason: HostedRetrievalUnsupported::NotOffered,
     };
-    /// The provider offers the tool; it is not yet qualified on this route.
-    pub const NOT_QUALIFIED: Self = Self::Unsupported {
-        reason: HostedRetrievalUnsupported::NotQualified,
-    };
 }
 
 /// One route's hosted retrieval support, one row per tool.

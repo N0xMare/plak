@@ -19,7 +19,7 @@ use super::*;
     feature = "codex",
     feature = "grok",
     feature = "claude",
-    feature = "test-hooks"
+    feature = "test-support"
 ))]
 mod catalog_gateway;
 

@@ -329,15 +329,6 @@ impl AgentEventKind {
         }
     }
 
-    /// Returns attempted identity evidence for a pre-validation terminal rejection.
-    #[must_use]
-    pub const fn tool_call_attempt_identity(&self) -> Option<&ToolCallAttemptIdentity> {
-        match self {
-            Self::ToolPreparationRejected { attempt, .. } => Some(attempt),
-            _ => None,
-        }
-    }
-
     #[allow(
         clippy::too_many_lines,
         reason = "Event projection exhaustively redacts each event variant under the fixed subscriber visibility"

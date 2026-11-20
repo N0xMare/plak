@@ -696,4 +696,5 @@ pub(crate) mod test_support {
 mod tests;
 
 #[cfg(all(test, feature = "web-fetch", feature = "js", feature = "python"))]
+#[path = "tools/executor_contracts_tests.rs"]
 mod executor_contracts;

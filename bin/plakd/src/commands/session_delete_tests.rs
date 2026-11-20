@@ -17,7 +17,7 @@ use plakous_offline_crash_harness::{BoundaryController, runtime_binding};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_keepalive_worker() {
     let Ok(home) = std::env::var("PLAK_LIFECYCLE_CRASH_HOME") else {
@@ -51,7 +51,7 @@ fn lifecycle_keepalive_worker() {
     );
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss() -> TestResult {
     for failure in [false, true] {
@@ -92,7 +92,7 @@ fn lifecycle_keepalive_scan_survives_expiry_and_refuses_renewal_loss() -> TestRe
     Ok(())
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_renewal_loss_before_metadata_write_and_during_commit_refuses() -> TestResult {
     for phase in ["scan", "commit"] {
@@ -308,7 +308,7 @@ fn lifecycle_delete_refuses_root_and_finished_child_owners() -> TestResult {
     Ok(())
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_working_worker() {
     let Ok(home) = std::env::var("PLAK_LIFECYCLE_WORKING_HOME") else {
@@ -355,19 +355,19 @@ fn lifecycle_working_worker() {
     }).unwrap();
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_archive_refuses_expired_working_root_and_finished_child() -> TestResult {
     archive_expired_working(false)
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn lifecycle_archive_refuses_expired_working_finished_child() -> TestResult {
     archive_expired_working(true)
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 fn archive_expired_working(child: bool) -> TestResult {
     let mut f = fixture(false)?;
     f.tree.abandon_recovery_for_delete(&f.child_id).checked()?;

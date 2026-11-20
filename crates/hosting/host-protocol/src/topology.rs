@@ -364,16 +364,6 @@ impl Tier {
         }
     }
 
-    /// Whether this tier can seal a candidate from its own copy.
-    ///
-    /// Process tools are allowed on every occupancy fence, including inherit
-    /// `read_only`. This predicate is the seal gate: `read_only` never owns a
-    /// copy that can produce a candidate.
-    #[must_use]
-    pub const fn allows_process_tools(self) -> bool {
-        !matches!(self, Self::ReadOnly)
-    }
-
     /// Plak file-tool writes are admitted on `mutate` only. `execute` keeps
     /// process tools and refuses file tools, on inherit or on a forked copy.
     #[must_use]

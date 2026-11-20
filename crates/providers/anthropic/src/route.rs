@@ -18,7 +18,7 @@ use plakous_model::{
 
 use crate::{
     AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicMessagesDialect,
-    FeatureMatrixEntry, dialect::MESSAGES_FEATURE_MATRIX_V1,
+    FeatureMatrixEntry,
 };
 
 /// The only HTTPS origin authorized by [`AnthropicPlatformRoute`].
@@ -1063,17 +1063,6 @@ impl ResolvedAnthropicMessages {
         self.descriptor
             .reported_model()
             .unwrap_or_else(|| self.descriptor.requested_model())
-    }
-
-    /// Returns codec evidence scoped to this exact route, model, and dialect.
-    #[must_use]
-    pub fn feature_evidence(&self) -> ScopedFeatureEvidence<'_> {
-        ScopedFeatureEvidence {
-            route: self.route.id(),
-            model: self.replay_target_model(),
-            dialect: &self.dialect,
-            entries: MESSAGES_FEATURE_MATRIX_V1,
-        }
     }
 }
 

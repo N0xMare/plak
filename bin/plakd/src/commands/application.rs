@@ -420,7 +420,7 @@ impl PlakousApplication {
         }
     }
     /// `state_home` is the XDG state home, `extra_telemetry_sink` the
-    /// binary's optional OTLP bridge and `custody` the process's latched
+    /// caller's telemetry observer and `custody` the process's latched
     /// credential custody; all come from the composition root.
     pub(crate) fn new(
         state_home: PathBuf,

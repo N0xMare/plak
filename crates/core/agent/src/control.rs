@@ -1062,19 +1062,6 @@ impl TurnControl {
         self.shared.is_settled()
     }
 
-    /// Requests cancellation under an exact caller identity.
-    ///
-    /// # Errors
-    ///
-    /// Returns a typed ingress or actor classification failure.
-    pub async fn cancel_with_id(&self, command_id: CommandId) -> Result<CommandAck, ControlError> {
-        self.submit_exact(TurnCommand::Cancel {
-            command_id,
-            turn_id: self.turn_id,
-        })
-        .await
-    }
-
     /// Allows one exact pending binding with a transient command identity.
     ///
     /// # Errors

@@ -13,6 +13,7 @@ use super::{
 };
 
 #[cfg(test)]
+#[path = "waiter/diagnostics_tests.rs"]
 mod diagnostics;
 mod instruction;
 #[cfg(test)]

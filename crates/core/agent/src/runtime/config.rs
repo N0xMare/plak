@@ -86,13 +86,6 @@ impl AgentConfig {
         self
     }
 
-    /// Replaces the control queue item bound.
-    #[must_use]
-    pub const fn with_control_queue_capacity(mut self, capacity: usize) -> Self {
-        self.control_queue_capacity = capacity;
-        self
-    }
-
     /// Replaces the steering queue item bound.
     #[must_use]
     pub const fn with_steering_queue_capacity(mut self, capacity: usize) -> Self {
@@ -142,13 +135,6 @@ impl AgentConfig {
     #[must_use]
     pub const fn with_observation_budget_cap_bytes(mut self, cap: Option<usize>) -> Self {
         self.observation_budget_cap_bytes = cap;
-        self
-    }
-
-    /// Replaces the per-tool progress queue item bound.
-    #[must_use]
-    pub const fn with_tool_progress_capacity(mut self, capacity: usize) -> Self {
-        self.tool_progress_capacity = capacity;
         self
     }
 

@@ -590,12 +590,6 @@ impl AbandonedTurnReport {
         self.cause
     }
 
-    /// Whether a tool was running when the turn stopped.
-    #[must_use]
-    pub const fn abandoned_a_tool(&self) -> bool {
-        matches!(self.claim, AbandonedTurnClaim::RunningTool)
-    }
-
     /// Whether exact evidence proves the harness-requested tool never started.
     #[must_use]
     pub const fn nothing_started(&self) -> bool {

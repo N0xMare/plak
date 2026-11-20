@@ -818,15 +818,6 @@ fn format_duration(value: Duration) -> String {
     }
 }
 
-/// Maps a native provider onto its Usage vertical.
-#[must_use]
-pub fn vertical_for_native(provider: NativeProvider) -> UsageVertical {
-    let Some(route) = crate::capabilities::for_native(provider) else {
-        unreachable!()
-    };
-    vertical_for_route(route)
-}
-
 /// Returns the operator-facing label for one native subscription vertical.
 #[must_use]
 pub const fn subscription_provider_label(provider: NativeProvider) -> &'static str {

@@ -125,7 +125,7 @@ def scenario_home_usage(artifacts: Path, name: str) -> TokenUsage:
 def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
     """Why `binary` cannot capture into this checkout's `tests/provider-authority`.
 
-    A `test-hooks` build accepts capture directories only under the
+    A `test-support` build accepts capture directories only under the
     `tests/provider-authority` of the checkout that compiled it (its
     `bin/plakd` manifest directory is baked in), so a driver must run from that
     checkout. Otherwise every launch fails before anything is sent.
@@ -1886,7 +1886,7 @@ def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
     return fields
 
 
-# The `test-hooks` capture's response cap (`MAX_RESPONSE_BYTES`). The capture is
+# The `test-support` capture's response cap (`MAX_RESPONSE_BYTES`). The capture is
 # required, so a response that outgrows it aborts the exchange in its body.
 CAPTURE_RESPONSE_CAP_BYTES = 8 * 1024 * 1024
 _RUNAWAY_TERMINAL = re.compile(

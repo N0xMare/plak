@@ -319,7 +319,7 @@ impl SubagentsDatabase {
         let database = resolved_path(database)?;
         let connection = schema().open_writer(&database, |connection| {
             let _ = connection;
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             plakous_store::commit_trace::install(connection, "tree").map_err(|_| {
                 AdmissionError::Unavailable("could not install commit trace".into())
             })?;

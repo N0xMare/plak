@@ -3,7 +3,7 @@
 mod revision;
 pub use revision::{BackedUpUpgrade, LockedUpgrade};
 
-#[cfg(any(test, feature = "commit-trace"))]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) mod test_registry;
 #[cfg(test)]
 mod tests;

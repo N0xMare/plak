@@ -480,7 +480,7 @@ fn expected_version_label() -> String {
     } else {
         "release"
     };
-    let hooks = if cfg!(feature = "test-hooks") {
+    let hooks = if cfg!(feature = "test-support") {
         "; test-hooks"
     } else {
         ""

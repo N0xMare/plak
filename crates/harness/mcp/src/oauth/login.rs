@@ -380,13 +380,6 @@ impl McpLogin {
         self.plan.scope.as_deref()
     }
 
-    /// Whether the authorization server offers the device grant, which a
-    /// remote login uses.
-    #[must_use]
-    pub const fn offers_device_grant(&self) -> bool {
-        self.plan.metadata.device_authorization_endpoint.is_some()
-    }
-
     /// Starts a login on this machine: binds the loopback callback (the
     /// configured port, else an ephemeral one), registers the client when
     /// needed, and returns the authorization URL to open.

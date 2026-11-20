@@ -54,7 +54,7 @@
 //! hop-1 rules to its own exchange. Hop-2 rules are selected by the gateway's
 //! upstream client.
 //!
-//! A gateway service process reads [`provider_from_env`]: today's grammar, with
+//! A gateway service process can use [`FaultPlan::parse_provider`]: today's grammar, with
 //! no `hop` field and no hop-1 fault. [`PLAK_TEST_GATEWAY`] tells the host plan
 //! which placement it is in (`in-process`, `external`, or unset for direct
 //! local custody). `provider` makes the host plan fail closed, because that
@@ -350,19 +350,6 @@ pub(super) fn from_env() -> Option<FaultPlan> {
     static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
     PLAN.get_or_init(|| plan_from_placement(read_env(FAULTS_ENV).as_deref(), placement_from_env()))
         .clone()
-}
-
-/// The gateway service's provider-hop plan, from [`FAULTS_ENV`], in today's
-/// grammar. A `plakd gateway serve` test-hooks build installs this on its
-/// upstream client instead of the host plan.
-#[must_use]
-pub fn provider_from_env() -> Option<FaultPlan> {
-    static PLAN: OnceLock<Option<FaultPlan>> = OnceLock::new();
-    PLAN.get_or_init(|| {
-        let spec = read_env(FAULTS_ENV)?;
-        Some(FaultPlan::parse_provider(&spec).unwrap_or_else(|_| invalid_plan()))
-    })
-    .clone()
 }
 
 pub(super) fn read_env(name: &str) -> Option<String> {

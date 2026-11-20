@@ -12,6 +12,7 @@ mod policy;
 mod publication;
 mod readiness;
 #[cfg(test)]
+#[path = "product_config/settings_tests.rs"]
 pub(crate) mod settings;
 mod templates;
 mod toml_file;

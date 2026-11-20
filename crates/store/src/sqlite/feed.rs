@@ -321,7 +321,7 @@ pub(super) fn totals(c: &Connection) -> Result<(u64, u64), SessionStoreError> {
 /// back under seven eighths of each exceeded bound. Best effort: a failed
 /// batch leaves the feed over its bound for the next publication to trim.
 pub(super) fn trim(b: &mut Backend, session_id: SessionId) {
-    #[cfg(feature = "commit-trace")]
+    #[cfg(feature = "test-support")]
     let _label = crate::commit_trace::label("feed_trim");
     let _ = trim_batches(b, session_id);
 }

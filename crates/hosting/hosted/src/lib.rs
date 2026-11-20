@@ -99,6 +99,7 @@ pub mod product_observation;
 pub mod prompt_inputs;
 pub mod request_slots;
 #[cfg(test)]
+#[path = "role_table_tests.rs"]
 pub(crate) mod role_table;
 pub mod runtime;
 pub mod skills;

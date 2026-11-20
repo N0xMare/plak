@@ -307,13 +307,6 @@ impl SuperGrokResponsesDialect {
         crate::oauth_pins::XAI_OAUTH
     }
 
-    /// Exact shared-auth compatibility table, available only with native auth.
-    #[cfg(feature = "native-auth")]
-    #[must_use]
-    pub const fn compatibility_pins(self) -> plakous_auth::oauth_pins::CompatibilityProfilePins {
-        crate::oauth_pins::XAI_PROFILE
-    }
-
     /// Exact official Grok Build source revision joined into model admission.
     #[cfg(feature = "native-auth")]
     #[must_use]

@@ -26,15 +26,6 @@ impl XaiDialect {
         }
     }
 
-    /// Returns the stream terminal convention for this exact grammar.
-    #[must_use]
-    pub const fn terminal_convention(self) -> XaiTerminalConvention {
-        match self {
-            Self::PlatformResponses2026_08 => XaiTerminalConvention::TypedResponseEvent,
-            Self::GrokSubscriptionResponses2026_07 => XaiTerminalConvention::TypedResponseEvent,
-        }
-    }
-
     /// Returns the exact Responses-family wire profile used by the adapter.
     /// Profiles parameterize shared sequence/terminal/BOM policy; deterministic
     /// adapter coverage does not constitute live provider qualification.

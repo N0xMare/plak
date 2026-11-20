@@ -546,7 +546,3 @@ impl ToolPolicy for AlwaysAllowPolicy {
         Box::pin(async move { Ok(decision) })
     }
 }
-
-/// Compile-time assertion that the public policy boundary remains object-safe.
-#[doc(hidden)]
-pub fn assert_tool_policy_object_safe(_: &dyn ToolPolicy) {}

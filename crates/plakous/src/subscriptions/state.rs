@@ -533,14 +533,14 @@ impl SubscriptionState {
 }
 
 impl SubscriptionState {
-    #[cfg(any(test, feature = "test-clock"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn clock(&self) -> Arc<dyn plakous_model::Clock> {
         self.clock
             .clone()
             .unwrap_or_else(|| Arc::new(plakous_model::SystemClock))
     }
 
-    #[cfg(any(test, feature = "test-clock"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {
         self.clock = Some(clock);
         self

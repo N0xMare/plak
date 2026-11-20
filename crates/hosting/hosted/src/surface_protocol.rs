@@ -19,9 +19,6 @@ pub type UserActionReceiver<P = Core> = plakous_host_protocol::IntentReceiver<P>
 /// delivery, or its extracted acknowledgement guard, releases duplicate protection
 /// for a non-repeatable intent.
 pub type UserActionDelivery<P = Core> = plakous_host_protocol::IntentDelivery<P>;
-/// A generation-bound guard that keeps a non-repeatable intent pending until
-/// dropped, without acknowledging a later generation of the same control.
-pub type UserActionAcknowledgement<P = Core> = plakous_host_protocol::IntentAcknowledgement<P>;
 /// A rejected submission retaining the unaccepted intent for the caller.
 /// Saturation, disconnection, duplication and attachment-role refusal are distinct.
 pub type UserActionSendError<P = Core> = plakous_host_protocol::IntentSendError<P>;

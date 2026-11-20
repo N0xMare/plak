@@ -23,18 +23,6 @@ impl LocalCompositionContainment {
     pub const fn identity(self) -> Digest {
         self.identity
     }
-
-    /// The evaluator is isolated in its own joined process.
-    #[must_use]
-    pub const fn is_process_isolated(self) -> bool {
-        true
-    }
-
-    /// The exact host makes no operating-system sandbox claim.
-    #[must_use]
-    pub const fn claims_os_sandbox(self) -> bool {
-        false
-    }
 }
 
 /// One verified out-of-process evaluator artifact.

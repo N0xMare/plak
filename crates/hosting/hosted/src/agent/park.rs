@@ -635,6 +635,7 @@ async fn start_wake_turn(
 /// Test seams: work a test runs inside the windows where an interrupt or new
 /// mail races a wake, so the race is forced instead of hoped for.
 #[cfg(test)]
+#[path = "park/hooks_tests.rs"]
 pub(super) mod hooks;
 
 #[cfg(test)]

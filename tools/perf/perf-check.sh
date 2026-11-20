@@ -59,7 +59,7 @@ run_jsonl perf-core \
 run_jsonl perf-project \
     cargo bench --locked --offline -p plakous --bench perf_project
 run_jsonl perf-store \
-    cargo bench --locked --offline -p plakous-store --features sqlite,perf-instrumentation \
+    cargo bench --locked --offline -p plakous-store --features sqlite,test-support \
     --bench perf_store -- "${PLAKOUS_PERF_STORE_ARGS[@]}"
 
 printf 'portable JSONL structure and invariants validated in %s\n' "$PLAKOUS_PERF_RUN_DIR"

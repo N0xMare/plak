@@ -7,7 +7,7 @@
 
 use super::*;
 
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 pub(super) fn elapsed_ns(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
 }

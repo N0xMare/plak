@@ -1,6 +1,6 @@
 //! Store integration contracts.
 
-#[cfg(feature = "commit-trace")]
+#[cfg(feature = "test-support")]
 mod commit_trace;
 mod conformance;
 mod feed;

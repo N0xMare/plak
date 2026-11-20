@@ -95,7 +95,7 @@ impl NativeSubscriptions {
             )
             .await?;
         }
-        #[cfg(any(test, feature = "test-clock"))]
+        #[cfg(any(test, feature = "test-support"))]
         let clock = self.state.clock();
         #[cfg(test)]
         let fixture_transport = self.codex_test_transport.clone();
@@ -121,7 +121,7 @@ impl NativeSubscriptions {
                 .as_ref()
                 .map_or(client, |(client, _)| client.clone());
             let legacy_path = gateway_v1_authority.then(|| path.clone());
-            #[cfg(any(test, feature = "test-clock"))]
+            #[cfg(any(test, feature = "test-support"))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new_with_clock(
                 path,
                 slot,
@@ -130,7 +130,7 @@ impl NativeSubscriptions {
                 clock,
             )
             .map_err(map_codex_error)?;
-            #[cfg(not(any(test, feature = "test-clock")))]
+            #[cfg(not(any(test, feature = "test-support")))]
             let manager = plakous_openai::CodexSubscriptionCredentialManager::new(
                 path,
                 slot,

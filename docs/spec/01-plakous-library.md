@@ -1617,7 +1617,7 @@ gone-holder proof's, and this one asks a lock found held again twice, 5 ms
 apart (another process may be probing it), so it never names a dead holder
 because another probe of the same lock held it that moment.
 
-The facade grants a 30 s session lease. `test-hooks` builds may set
+The facade grants a 30 s session lease. `test-support` builds may set
 `PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30, or
 override it on the current thread for synchronous fixture setup with
 `plakous::test_session_lease::with_test_session_lease_seconds`. Other builds
@@ -8178,8 +8178,7 @@ names runner secrets (`Unsupported`, no effect): the embedder resolves them
 itself there. `RunnerSessions` is the host handle on one line's process
 sessions on a runner: start, stdin writes, polls that wait for output or a
 yield, stops, promotion, the line's jobs, stopping them and disowning
-leftovers, each sent under the handle's owner (`RunnerSessions::transfer_to`
-hands the line to a newer head). It mirrors the jobs it has seen, so a
+leftovers, each sent under the handle's owner. It mirrors the jobs it has seen, so a
 runner restart reports them as of unknown outcome, and it starts each session
 past every number it has seen and its seed (`seed_job_numbers`,
 `next_job_number`), so a restarted runner reuses none (§8.4).
@@ -8229,7 +8228,7 @@ not depend on the protocol crate.
 Runner selection (unsupported). A process selects at most one runner, once,
 before its first session (`select_process_runner`); without one, every
 session runs on the local runner as before. Only two test-only routes select
-one, from an offline script in a `test-hooks` build: `loopback_runner`, a
+one, from an offline script in a `test-support` build: `loopback_runner`, a
 runner in the same process that registers every workspace a request names,
 reached only through the seam; and `child_runner`, a real runner daemon
 (`plakd runner serve` over the script's runner home) reached through
@@ -12203,6 +12202,9 @@ persists into its own disposable analytics storage, which is never merged into
 the runtime store.
 
 ## 12. The public facade
+
+`AgentConfig` fixes both the control-request queue and each tool-progress
+queue at 64 items; neither bound is configurable by callers.
 
 Complete-workflow embedders depend on the `plakous` facade crate, by version
 from the registry cohort or by path from a source checkout (chapter 06 §1). Narrow component embedders may use the

@@ -21,7 +21,7 @@ impl ProductStore {
         acknowledgement: &AgentAcknowledgement,
         acknowledged_at_unix: u64,
     ) -> Result<(), RecordStoreError> {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = super::SettleCommitTrace;
         self.durability(true)?;
         let ended = acknowledgement.ended_at.map(to_i64).transpose()?;
@@ -76,7 +76,7 @@ impl ProductStore {
     /// Deletes every acknowledgement of one tree. Repeating it is success:
     /// session gc runs the deletion again after a partial failure.
     pub fn delete_agent_acknowledgements(&mut self, tree_id: &str) -> Result<(), RecordStoreError> {
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         let _settle = super::SettleCommitTrace;
         self.durability(true)?;
         self.connection

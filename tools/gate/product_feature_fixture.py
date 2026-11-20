@@ -1,4 +1,4 @@
-"""Canonical stores created by a full test-hooks binary, opened by a reduced binary."""
+"""Canonical stores created by a full test-support binary, opened by a reduced binary."""
 
 from __future__ import annotations
 

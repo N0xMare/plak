@@ -92,7 +92,7 @@ fn doctor_reports_corrupt_pages_and_store_open_returns_an_error() {
     assert!(SubagentsDatabase::open(&tree).is_err());
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_frameless_product_ops_release_for_another_thread() {
     use plakous_offline_crash_harness::commit_trace::{KILL_ENV, TRACE_ENV};
@@ -125,7 +125,7 @@ fn commit_trace_frameless_product_ops_release_for_another_thread() {
     }
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_frameless_product_child() {
     let Some(root) = std::env::var_os("PLAK_SW1_PRODUCT_FRAMELESS_ROOT") else {
@@ -153,7 +153,7 @@ fn commit_trace_frameless_product_child() {
     .unwrap();
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_product_and_tree_share_one_process_sequence() {
     use plakous_offline_crash_harness::commit_trace::{KILL_ENV, TRACE_ENV};
@@ -190,7 +190,7 @@ fn commit_trace_product_and_tree_share_one_process_sequence() {
     }
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn commit_trace_product_and_tree_child() {
     let Some(root) = std::env::var_os("PLAK_SW1_PRODUCT_TRACE_ROOT") else {
@@ -905,7 +905,7 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
     );
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn real_product_registry_revisions_converge() {
     let directory = tempdir().unwrap();

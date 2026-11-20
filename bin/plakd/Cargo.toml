@@ -34,7 +34,7 @@ plakous-hosted = { workspace = true, default-features = false }
 plakous-recursive-subagents.workspace = true
 plakous-recursive-subagents-store.workspace = true
 plakous-host-protocol.workspace = true
-# `test-hooks` only. The optional edge is what keeps the deterministic offline
+# `test-support` only. The optional edge is what keeps the deterministic offline
 # model out of every build that does not explicitly ask for it.
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
@@ -72,14 +72,10 @@ hyper = { workspace = true, features = ["http1", "server"], optional = true }
 hyper-util = { workspace = true, features = ["tokio"], optional = true }
 ring = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
-opentelemetry = { workspace = true, optional = true }
-opentelemetry-otlp = { workspace = true, optional = true }
-opentelemetry_sdk = { workspace = true, optional = true }
-tracing-opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-plakous = { workspace = true, features = ["test-clock"] }
+plakous = { workspace = true, features = ["test-support"] }
 rustix = { workspace = true, features = ["pty", "termios", "net"] }
 plakous-hosted = { workspace = true, default-features = false, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
@@ -125,25 +121,13 @@ web = [
     "dep:ring",
     "dep:tokio-tungstenite",
 ]
-# The product fixtures the binary's own integration contracts drive: an
-# isolated product home and the state roots over plakd's real ports.
-test-support = []
-# Repository gate only: bind the deterministic offline model named by
-# `PLAK_TEST_SCRIPT` instead of a provider, so the spawned binary's own
-# lifecycles are testable. Never in `default`, never in a release build.
-test-hooks = [
-    "plakous/test-clock",
-    "plakous/test-hooks",
+# Repository gate only: isolated product fixtures and the offline model named
+# by `PLAK_TEST_SCRIPT`. Never in `default` or the published manifest.
+test-support = [
+    "plakous/test-support",
     "dep:plakous-offline-crash-harness",
     "plakous-hosted/test-support",
-    "plakous-recursive-subagents-store/commit-trace",
-]
-otel = [
-    "dep:opentelemetry",
-    "dep:opentelemetry-otlp",
-    "dep:opentelemetry_sdk",
-    "dep:tracing-opentelemetry",
-    "tracing-subscriber/registry",
+    "plakous-recursive-subagents-store/test-support",
 ]
 
 [lints]

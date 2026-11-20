@@ -11,7 +11,6 @@ use super::ledger::{
 use super::lifecycle::{
     ADMITTED, AttemptLifecycleError, DECODED, FAILED, PREPARED, TERMINAL, begin_decoding,
     claim_protocol_failure, is_active, mark_decoded, resume_after_interrupted_stream,
-    seal_service_attempt,
 };
 use super::terminal::TerminalFacts;
 
@@ -76,11 +75,6 @@ impl FamilyAttemptCore {
     }
 
     #[must_use]
-    pub fn lifecycle_ref(&self) -> &Arc<AtomicU8> {
-        &self.lifecycle
-    }
-
-    #[must_use]
     pub fn observations(&self) -> Arc<PhysicalRequestLedger> {
         Arc::clone(&self.observations)
     }
@@ -104,14 +98,6 @@ impl FamilyAttemptCore {
             }
             Err(ADMITTED) => Ok(()),
             Err(_) => Err(FamilyCoreError::InvalidAdmission),
-        }
-    }
-
-    pub fn ensure_admitted(&self) -> Result<(), FamilyCoreError> {
-        if self.lifecycle.load(Ordering::Acquire) == ADMITTED {
-            Ok(())
-        } else {
-            Err(FamilyCoreError::NotAdmitted)
         }
     }
 
@@ -182,14 +168,6 @@ impl FamilyAttemptCore {
         Ok(mark_decoded(&self.lifecycle)?)
     }
 
-    pub fn ensure_decoded(&self) -> Result<(), FamilyCoreError> {
-        if self.lifecycle.load(Ordering::Acquire) == DECODED {
-            Ok(())
-        } else {
-            Err(FamilyCoreError::InvalidTerminalState)
-        }
-    }
-
     pub fn mark_terminal(&self) -> Result<(), FamilyCoreError> {
         self.lifecycle
             .compare_exchange(DECODED, TERMINAL, Ordering::AcqRel, Ordering::Acquire)
@@ -209,11 +187,6 @@ impl FamilyAttemptCore {
         }
         self.observations.close_service();
         true
-    }
-
-    pub fn seal_service(&self) {
-        self.observations.close_service();
-        seal_service_attempt(&self.lifecycle);
     }
 
     pub fn abandon_active_request(&self) {

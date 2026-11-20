@@ -223,12 +223,6 @@ impl RunnerSessions {
         *lock(&self.owner)
     }
 
-    /// Hands the line to a newer head: its next call transfers the line on
-    /// the runner first, and the line's jobs stay there.
-    pub fn transfer_to(&self, owner: LineOwner) {
-        *lock(&self.owner) = owner;
-    }
-
     fn control(&self, control: &OperationContext) -> OperationContext {
         control.clone().with_owner(self.owner())
     }

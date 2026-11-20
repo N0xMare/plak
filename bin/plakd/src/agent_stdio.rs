@@ -132,7 +132,7 @@ fn run_agent_stdio_stopping_on(
     });
 
     let mut busy = false;
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     let (idle_gate, mut wait_for_idle, mut wait_for_input) =
         (crate::test_hooks::assistant_done_release(), false, false);
     let mut attached = false;
@@ -168,7 +168,7 @@ fn run_agent_stdio_stopping_on(
             loop {
                 match events.recv_timeout(EVENT_POLL) {
                     Ok(event) => {
-                        #[cfg(feature = "test-hooks")]
+                        #[cfg(feature = "test-support")]
                         if matches!(event, HostEvent::SetBusy(false)) {
                             wait_for_idle = false;
                         }
@@ -234,7 +234,7 @@ fn run_agent_stdio_stopping_on(
                         );
                         }
                         emit_lines(hello_sent, &mut pending_stdout, &mut stdout, lines)?;
-                        #[cfg(feature = "test-hooks")]
+                        #[cfg(feature = "test-support")]
                         if matches!(event, HostEvent::AssistantDone)
                             && let Some(gate) = &idle_gate
                         {
@@ -335,19 +335,19 @@ fn run_agent_stdio_stopping_on(
                     // Leave startup input in the bounded channel until the handshake.
                     continue;
                 }
-                #[cfg(feature = "test-hooks")]
+                #[cfg(feature = "test-support")]
                 if wait_for_idle {
                     continue;
                 }
 
-                #[cfg(feature = "test-hooks")]
+                #[cfg(feature = "test-support")]
                 let received = if wait_for_input {
                     wait_for_input = false;
                     stdin_rx.recv().map_err(|_| TryRecvError::Disconnected)
                 } else {
                     stdin_rx.try_recv()
                 };
-                #[cfg(not(feature = "test-hooks"))]
+                #[cfg(not(feature = "test-support"))]
                 let received = stdin_rx.try_recv();
                 let next_stdin = match received {
                     Ok(frame) => Some(
@@ -404,9 +404,9 @@ fn run_agent_stdio_stopping_on(
                                 quit_id = Some(cmd_id.clone());
                                 shutting_down = true;
                                 shutdown_started = Instant::now();
-                                #[cfg(feature = "test-hooks")]
+                                #[cfg(feature = "test-support")]
                                 let handoff = crate::test_hooks::quit_as_handoff();
-                                #[cfg(not(feature = "test-hooks"))]
+                                #[cfg(not(feature = "test-support"))]
                                 let handoff = false;
                                 if handoff {
                                     actions.request_handoff_and_release();

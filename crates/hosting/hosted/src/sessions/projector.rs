@@ -12,6 +12,7 @@ mod reads;
 mod views;
 
 #[cfg(test)]
+#[path = "projector/read_fault_tests.rs"]
 pub(crate) mod read_fault;
 
 #[cfg(test)]

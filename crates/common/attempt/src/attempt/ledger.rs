@@ -168,12 +168,6 @@ impl PhysicalRequestLedger {
         self.admitted.store(true, Ordering::Release);
     }
 
-    /// Reports whether codec or service admission has been observed.
-    #[must_use]
-    pub fn is_admitted(&self) -> bool {
-        self.admitted.load(Ordering::Acquire)
-    }
-
     /// Reports whether the service-admission boundary is currently open.
     #[must_use]
     pub fn is_service_admitted(&self) -> bool {
@@ -496,14 +490,6 @@ impl PhysicalRequestLedger {
     pub fn snapshot(&self) -> ObservationSnapshot {
         let state = self.lock_state();
         snapshot_from_state(&state)
-    }
-
-    /// Returns facts when codec/service admission has already occurred.
-    #[must_use]
-    pub fn cancellation_facts(&self) -> Option<ObservationSnapshot> {
-        self.admitted
-            .load(Ordering::Acquire)
-            .then(|| self.snapshot())
     }
 
     fn validate_slot_policy(&self, slot: AuthReservationMask) -> Result<(), AuthReservationError> {

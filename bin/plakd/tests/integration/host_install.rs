@@ -86,14 +86,14 @@ fn success(output: &Output) {
     );
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 impl Drop for Fixture {
     fn drop(&mut self) {
         super::offline_support::kill_home_local_runner(&self.product);
     }
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 fn wait_host_log(
     path: &Path,
     child: &mut super::offline_support::TestChild,
@@ -115,7 +115,7 @@ fn wait_host_log(
     }
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 fn host_argv(
     fixture: &mut Fixture,
     managed: bool,
@@ -186,7 +186,7 @@ fn host_argv(
     Ok(shell_words::split(&start)?)
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 fn running_manager(fixture: &Fixture) -> TestResult {
     let manager = fixture.home.join(".local/bin/systemctl");
     let script = std::fs::read_to_string(&manager)?.replace("offline", "running");
@@ -210,19 +210,19 @@ fn running_manager(fixture: &Fixture) -> TestResult {
     Ok(())
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn host_install_generated_command_serves_from_home_with_a_fake_manager() -> TestResult {
     host_lifecycle(false)
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[test]
 fn host_install_running_manager_places_the_daemon_outside_the_host_unit() -> TestResult {
     host_lifecycle(true)
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 fn host_lifecycle(managed: bool) -> TestResult {
     use super::offline_support::TestChild;
     use std::process::Stdio;

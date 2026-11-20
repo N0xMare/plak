@@ -99,12 +99,6 @@ impl fmt::Debug for SecretBytes {
     }
 }
 
-/// Converts a [`SecretString`] into zeroizing secret bytes.
-#[must_use]
-pub fn secret_string_into_bytes(secret: SecretString) -> SecretBytes {
-    secret.into_secret_bytes()
-}
-
 /// Extension helpers for call-site ergonomics around [`SecretString`].
 pub trait SecretStringExt {
     /// Moves the secret into a byte container.

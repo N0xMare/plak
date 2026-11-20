@@ -469,11 +469,6 @@ impl SessionRecord {
         }
     }
 
-    /// Records one committed compaction.
-    pub fn record_compaction(&mut self) {
-        self.compaction_count = self.compaction_count.saturating_add(1);
-    }
-
     /// Refresh the product mutation timestamp without advancing its store revision.
     pub fn touch(&mut self) {
         self.updated_at_unix = now_unix_secs();

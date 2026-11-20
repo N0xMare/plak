@@ -288,12 +288,6 @@ impl AnthropicPlatformModelConfig {
     pub const fn remote_id(&self) -> &ModelId {
         &self.remote_id
     }
-
-    /// Returns the selected crate-owned capability profile.
-    #[must_use]
-    pub const fn capability_profile(&self) -> AnthropicPlatformCapabilityProfile {
-        self.capabilities
-    }
 }
 
 /// Resolver for a single immutable credential-bearing Anthropic Platform route.

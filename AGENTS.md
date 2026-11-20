@@ -111,7 +111,7 @@ There is no CI: the only workflow,
 `.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
 (`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 
-Transport faults for smoke and soak runs: a `test-hooks` build of `plakd` reads
+Transport faults for smoke and soak runs: a `test-support` build of `plakd` reads
 `PLAK_TEST_FAULTS`, e.g.
 `host=api.x.ai,path=/v1/responses,nth=2,fault=429,retry-after=5;host=openrouter.ai,fault=stall,seconds=40,after-events=3`,
 and injects statuses, connect failures, and mid-stream resets, clean EOFs and

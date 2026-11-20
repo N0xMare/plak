@@ -51,7 +51,7 @@ with open(os.environ["FAKE_CARGO_LOG"], "a") as log:
         args=args, cwd=os.getcwd(), target_dir=os.environ.get("CARGO_TARGET_DIR"),
         offline=os.environ.get("CARGO_NET_OFFLINE"),
         token=os.environ.get("CARGO_REGISTRY_TOKEN"),
-        test_hooks="test-hooks" in manifest.read_text() if manifest.exists() else None,
+        test_hooks="test-support" in manifest.read_text() if manifest.exists() else None,
     )) + "\n")
 offline = "--offline" in args or os.environ.get("CARGO_NET_OFFLINE") == "true"
 refreshed = Path(os.environ["FAKE_CARGO_LOG"] + ".refreshed")
@@ -176,7 +176,7 @@ class PublishScriptTests(unittest.TestCase):
                 )
                 + '\n[dev-dependencies]\nplakous-zeta = { version = "0.0.2", path = "../../crates/zeta" }\n'
                 + "\n[features]\n"
-                + publish_shape.TEST_HOOKS_FEATURE
+                + publish_shape.TEST_SUPPORT_FEATURE
             ),
             "tests/harnesses/offline-crash/Cargo.toml": library(
                 publish_shape.HARNESS, publish=False

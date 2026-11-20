@@ -41,7 +41,7 @@ class PerfSmokeTargetTests(unittest.TestCase):
                 "import os, pathlib, sys\n"
                 "assert os.environ['CARGO_PROFILE_RELEASE_STRIP'] == 'debuginfo'\n"
                 "expected = [\n"
-                " ['build', '--locked', '-p', 'plakd', '--features', 'plakd/test-hooks,plakd/test-support', '--profile', 'release'],\n"
+                " ['build', '--locked', '-p', 'plakd', '--features', 'plakd/test-support', '--profile', 'release'],\n"
                 " ['build', '--locked', '-p', 'plakous-js-runtime', '-p', 'plakous-py-worker', '--profile', 'release'],\n"
                 "]\n"
                 "log = pathlib.Path(os.environ['CARGO_LOG'])\n"

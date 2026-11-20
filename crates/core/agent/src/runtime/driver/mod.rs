@@ -51,6 +51,7 @@ mod composition;
 mod context;
 mod effects;
 #[cfg(test)]
+#[path = "exit_probe_tests.rs"]
 pub(crate) mod exit_probe;
 mod model;
 pub(super) use model::completed_history_prefix;

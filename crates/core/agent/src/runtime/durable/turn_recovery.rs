@@ -13,6 +13,7 @@ mod closure_parity_tests;
 mod abandonment;
 mod abandonment_rows;
 #[cfg(test)]
+#[path = "turn_recovery/admission_compaction_tests.rs"]
 mod admission_compaction;
 pub(in crate::runtime) mod controls;
 mod fold_rows;

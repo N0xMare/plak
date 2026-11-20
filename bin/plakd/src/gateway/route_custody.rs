@@ -153,7 +153,7 @@ impl HostCustody {
         feature = "codex",
         feature = "grok",
         feature = "claude",
-        feature = "test-hooks",
+        feature = "test-support",
         feature = "web"
     ))]
     pub(crate) fn in_process_for_test(

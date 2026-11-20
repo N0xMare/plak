@@ -475,26 +475,6 @@ impl ToolRuntime {
         &self.scheduler
     }
 
-    /// Returns the status of dispatched work still owned by this runtime's supervisor.
-    #[must_use]
-    pub fn task_status(&self) -> ToolTaskOwnerStatus {
-        self.tasks.status()
-    }
-
-    /// Requests abort for all supervised tasks and returns the number targeted.
-    ///
-    /// This cannot forcibly preempt a hostile in-process future poll that blocks
-    /// its Tokio executor thread; abort takes effect when the runtime regains control.
-    #[must_use]
-    pub fn request_task_abort(&self) -> usize {
-        self.tasks.request_abort_all()
-    }
-
-    /// Returns a future completing when the runtime's task owner is drained.
-    pub fn drain_tasks(&self) -> ToolTaskDrain {
-        self.tasks.drain()
-    }
-
     /// Atomically closes task admission, requests abort, and joins to a stable
     /// drained boundary shared by every clone of this runtime.
     pub fn shutdown_tasks(&self) -> ToolTaskDrain {

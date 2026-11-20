@@ -7,13 +7,13 @@ set working-directory := '../..'
 default:
     @just --justfile "{{justfile()}}" --list live
 
-# test-hooks plakd plus the JavaScript and Monty workers, for PLAK_TEST_FAULTS.
-_test-hooks:
-    CARGO_INCREMENTAL=0 tools/build/build-plakd.sh --release --features plakd/test-hooks
+# test-support plakd plus the JavaScript and Monty workers, for PLAK_TEST_FAULTS.
+_test-support:
+    CARGO_INCREMENTAL=0 tools/build/build-plakd.sh --release --features plakd/test-support
 
 # Parent only. The MCP OAuth driver does not start workers.
-_test-hooks-plakd:
-    tools/build/build-plakd.sh --release --features plakd/test-hooks --plakd-only
+_test-support-plakd:
+    tools/build/build-plakd.sh --release --features plakd/test-support --plakd-only
 
 # Live smoke: a few minutes of short scenarios (coding task, resume, compaction,
 # cancel, injected faults, a 2-child wave) on Grok, OpenRouter,
@@ -21,7 +21,7 @@ _test-hooks-plakd:
 # (tests/live/long_session.py); they are not in the default set.
 # Paid, never in a gate. See tests/live/README.md. Artifacts under target/live/.
 [doc("short live scenarios on one route; paid, not a gate")]
-smoke *ARGS: _test-hooks
+smoke *ARGS: _test-support
     tests/live/smoke.py {{ARGS}}
 
 # Live soak: one long session of real tasks on a pinned more-itertools checkout,
@@ -30,20 +30,20 @@ smoke *ARGS: _test-hooks
 # `--long-session --only <names>` runs tests/live/long_session.py instead of
 # the hour loop. Paid, never in a gate.
 [doc("one long live session with faults and a rebuild; paid, not a gate")]
-soak *ARGS: _test-hooks
+soak *ARGS: _test-support
     CARGO_INCREMENTAL=0 tests/live/soak.py {{ARGS}}
 
 # Bounded live background-job scenarios (promotion, steer, notices, crash,
 # and child settle). Paid, never in a gate.
 # Usage: just live jobs grok --only promotion_budget
 [doc("bounded live background-job scenarios; paid, not a gate")]
-jobs *ARGS: _test-hooks
+jobs *ARGS: _test-support
     tests/live/jobs.py {{ARGS}}
 
 # Opt-in local authorization servers + browser. Builds plakd only (no workers).
 # No accounts or inference; no gate.
 [doc("local MCP OAuth servers and a browser; no accounts or inference")]
-mcp-oauth *ARGS: _test-hooks-plakd
+mcp-oauth *ARGS: _test-support-plakd
     tests/live/mcp_oauth/run.py {{ARGS}}
 
 # Opt-in census of the bundled API model tables. Networked, never a gate.

@@ -117,11 +117,7 @@ tokio-rustls = { version = "0.26", default-features = false }
 tokio-tungstenite = { version = "=0.29.0", default-features = false }
 tungstenite = { version = "=0.29.0", default-features = false }
 tracing = "=0.1.44"
-tracing-opentelemetry = "=0.33.0"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["env-filter", "fmt", "std"] }
-opentelemetry = { version = "=0.32.0", default-features = false, features = ["trace"] }
-opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["http-proto", "trace", "reqwest-client"] }
-opentelemetry_sdk = { version = "=0.32.0", default-features = false, features = ["trace", "rt-tokio"] }
 tower = { version = "0.5", default-features = false }
 tower-service = "0.3"
 unicode-general-category = "1.1"
@@ -272,10 +268,7 @@ plakd = [
     "hyper",
     "hyper-util",
     "jiff",
-    "opentelemetry",
-    "opentelemetry-otlp",
     "nix",
-    "opentelemetry_sdk",
     "plakous",
     "plakous-host-protocol",
     "plakous-hosted",
@@ -301,7 +294,6 @@ plakd = [
     "tokio",
     "tokio-tungstenite",
     "tracing",
-    "tracing-opentelemetry",
     "tracing-subscriber",
     "unicode-width",
     "url",
@@ -363,9 +355,9 @@ rust_2018_idioms = { level = "deny", priority = -1 }
 unsafe_code = "forbid"
 unused_lifetimes = "deny"
 unused_qualifications = "warn"
-# `plakd/test-hooks` is repository-only: the published `plakd` manifest drops the
+# `plakd/test-support` is repository-only: the published `plakd` manifest drops the
 # feature (tools/release/publish_shape.py), and its cfg sites still name it.
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("test-hooks"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("test-support"))'] }
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
@@ -448,14 +440,14 @@ feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs", "src/test_hooks.rs"]
 feature-ceiling = 104
 test-seam-ceiling = 41
-env-ceiling = 17
+env-ceiling = 16
 reason = "Capability registry, grouped interactive identity/carry helpers and host-upgrade ownership/probe guards preserve reduced products. Upgrade crash, capacity and state-key hooks are isolated at the composition root; native contract-drift errors exist only with their compiled route."
 
 [workspace.metadata.plakous.cfg.plakous]
 feature-ceiling = 63
-test-seam-ceiling = 1
+test-seam-ceiling = 8
 env-sites = ["src/test_session_lease.rs"]
-reason = "Existing placement debt plus the auth/native-only drift type, error formatting and Codex live-refusal summaries; reduced products must not link omitted auth. The store feature gates the sessions module at its one declaration. The test-hooks session lease override and retained-job builder seam are counted test-only placements; other builds do not compile either."
+reason = "Existing placement debt, including native route error formatting and Codex review time. The consolidated test-support gate counts the existing session seam and seven clock sites formerly gated by test-clock."
 
 [workspace.metadata.plakous.cfg.plakous-agent]
 feature-ceiling = 2
@@ -509,8 +501,8 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 
 [workspace.metadata.plakous.cfg.plakous-openai]
 feature-ceiling = 107
-test-seam-ceiling = 1
-reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+test-seam-ceiling = 3
+reason = "Existing placement debt. The consolidated test-support gate counts the two existing test-clock sites alongside the older login fixture seam."
 
 [workspace.metadata.plakous.cfg.plakous-openrouter]
 feature-ceiling = 1
@@ -559,5 +551,5 @@ env-sites = ["src/test_hooks.rs"]
 reason = "Only the test-hook module reads deterministic worker crash-cut controls."
 
 [workspace.metadata.plakous.cfg.plakous-xai]
-feature-ceiling = 82
+feature-ceiling = 81
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."

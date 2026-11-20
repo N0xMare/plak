@@ -213,27 +213,12 @@ impl NativeModelSelector {
             .map_err(|_| NativeModelSelectorError)
     }
 
-    /// Creates the named deterministic Codex catalog selector.
-    #[must_use]
-    pub const fn codex_first_compatible() -> Self {
-        Self::CodexFirstCompatible
-    }
-
     /// Returns the exact identifier carried by an exact selector.
     #[must_use]
     pub const fn exact_model(&self) -> Option<&ModelId> {
         match self {
             Self::Exact(model) => Some(model),
             Self::CodexFirstCompatible => None,
-        }
-    }
-
-    /// Returns whether this selector accepts `selected` after catalog resolution.
-    #[must_use]
-    pub fn admits_selected(&self, selected: &ModelId) -> bool {
-        match self {
-            Self::Exact(exact) => exact == selected,
-            Self::CodexFirstCompatible => true,
         }
     }
 

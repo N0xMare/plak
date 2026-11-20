@@ -218,7 +218,7 @@ impl SqliteTreeStore {
             .writer
             .lock()
             .map_err(|_| TreeStoreError::unavailable("tree store lock is poisoned"))?;
-        #[cfg(feature = "commit-trace")]
+        #[cfg(feature = "test-support")]
         let _settle = plakous_store::commit_trace::SettleGuard;
         work(&mut writer)
     }

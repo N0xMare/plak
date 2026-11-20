@@ -27,7 +27,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [features]
 default = []
 # Repository gate only: names an event publication a silent drop would
-# otherwise lose. Not in `default`; reached through `plakous/test-hooks`.
+# otherwise lose. Not in `default`; reached through `plakous/test-support`.
 test-hooks = []
 
 [dependencies]

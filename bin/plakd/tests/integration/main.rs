@@ -1,13 +1,13 @@
 //! Product integration contracts.
 
 mod cli_contract;
-#[cfg(not(feature = "test-hooks"))]
+#[cfg(not(feature = "test-support"))]
 mod client_fixture_contract;
-#[cfg(all(feature = "test-hooks", feature = "maintainer"))]
+#[cfg(all(feature = "test-support", feature = "maintainer"))]
 mod crash_sweep;
 mod diagnostics_contract;
 #[cfg(all(
-    feature = "test-hooks",
+    feature = "test-support",
     feature = "codex",
     feature = "claude",
     feature = "grok"
@@ -16,7 +16,7 @@ mod gateway_admin;
 #[path = "support/gateway_process.rs"]
 mod gateway_process;
 #[cfg(all(
-    feature = "test-hooks",
+    feature = "test-support",
     feature = "codex",
     feature = "claude",
     feature = "grok"
@@ -28,13 +28,13 @@ mod gateway_service;
 mod host_install;
 #[cfg(all(target_os = "macos", feature = "web"))]
 mod host_install_launchd;
-#[cfg(all(feature = "test-hooks", feature = "web"))]
+#[cfg(all(feature = "test-support", feature = "web"))]
 mod host_skeleton;
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 mod lingering_owner;
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 mod offline_e2e;
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[path = "support/offline.rs"]
 mod offline_support;
 mod product_config_fixtures;
@@ -45,7 +45,7 @@ mod reload_rehearsal;
 mod runner_contract;
 #[cfg(feature = "test-support")]
 mod telemetry_contract;
-#[cfg(all(feature = "test-hooks", feature = "web"))]
+#[cfg(all(feature = "test-support", feature = "web"))]
 mod web_endpoint;
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 mod wire_client;

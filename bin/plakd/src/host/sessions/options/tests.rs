@@ -178,7 +178,7 @@ fn cached_picker_rows_finish_once_profiles_stay_ungated_and_workspace_checks_sta
     feature = "anthropic",
     feature = "xai-api",
     feature = "openrouter",
-    feature = "test-hooks",
+    feature = "test-support",
     feature = "web"
 ))]
 #[test]
@@ -257,7 +257,7 @@ fn native_picker_uses_cached_models_inside_the_host_runtime() {
     feature = "anthropic",
     feature = "xai-api",
     feature = "openrouter",
-    feature = "test-hooks",
+    feature = "test-support",
     feature = "web"
 ))]
 fn assert_native_picker(

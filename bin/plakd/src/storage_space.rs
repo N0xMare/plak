@@ -27,7 +27,7 @@ pub(crate) fn outage_notice(home: &Path) -> String {
 }
 
 pub(crate) fn admission(home: &Path) -> StorageAdmission {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     if let Some(admission) = crate::test_hooks::storage_capacity_override() {
         return admission;
     }

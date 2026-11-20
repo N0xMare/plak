@@ -297,16 +297,6 @@ pub enum ActivityState {
     Cancelled,
 }
 
-/// Context and terminal usage remain observations with their qualifications.
-#[derive(
-    serde::Serialize, serde::Deserialize, Clone, Debug, Default, Eq, PartialEq, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct UsageView {
-    pub context: Option<ContextUsage>,
-    pub turn: Option<TurnUsage>,
-}
-
 #[derive(
     serde::Serialize, serde::Deserialize, Clone, Debug, Eq, PartialEq, schemars::JsonSchema,
 )]
@@ -423,11 +413,6 @@ impl PreparedInputUsage {
         match self {
             Self::Exact(tokens) | Self::UpperBound(tokens) => tokens,
         }
-    }
-
-    #[must_use]
-    pub const fn is_upper_bound(self) -> bool {
-        matches!(self, Self::UpperBound(_))
     }
 }
 

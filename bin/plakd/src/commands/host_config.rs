@@ -55,7 +55,7 @@ pub fn attach_eligibility(
     // binding alone, as an injected attacher is, and then prepares on the same
     // deferred path a provider launch takes. Only the selector's presence
     // decides it; reading and checking the script stays with the attach.
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     if crate::test_hooks::requested() {
         return if effort_explicit {
             AttachEligibility::Ready
@@ -143,7 +143,7 @@ pub(crate) fn build_host_config(
     // catalog authority is consulted, so a scripted lifecycle never touches a
     // provider, and a broken selector refuses the launch instead of silently
     // falling through to one.
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     if let Some(selection) = crate::test_hooks::selected() {
         return selection?.host_config(
             crate::test_hooks::OfflineFace::Attached,

@@ -212,7 +212,7 @@ impl NativeSubscriptions {
     }
 
     /// Test-only replacement for compatibility and credential time.
-    #[cfg(any(test, feature = "test-clock"))]
+    #[cfg(any(test, feature = "test-support"))]
     #[doc(hidden)]
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {

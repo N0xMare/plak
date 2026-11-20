@@ -43,8 +43,7 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 default = ["git-cli", "jj-lib"]
 git-cli = ["plakous-recursive-subagents/git-cli"]
 jj-lib = ["plakous-recursive-subagents/jj-lib"]
-test-support = ["plakous-recursive-subagents/test-support"]
-commit-trace = ["dep:plakous-store", "plakous-store/commit-trace"]
+test-support = ["plakous-recursive-subagents/test-support", "dep:plakous-store", "plakous-store/test-support"]
 
 [lints]
 workspace = true

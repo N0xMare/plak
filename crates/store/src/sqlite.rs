@@ -235,7 +235,7 @@ pub struct SqliteFeedUsage {
 /// One successful commit observed by an explicitly instrumented store.
 ///
 /// This is benchmark/test evidence, not semantic or recovery authority.
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SqliteCommitTrace {
@@ -248,7 +248,7 @@ pub struct SqliteCommitTrace {
     inserted_object_bytes: u64,
 }
 
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 impl SqliteCommitTrace {
     /// Returns time from successful enqueue until the actor began this job.
     #[must_use]
@@ -288,14 +288,14 @@ impl SqliteCommitTrace {
 }
 
 /// Drainable sink used only by explicitly instrumented store instances.
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 #[derive(Clone, Debug, Default)]
 pub struct SqliteTraceCollector {
     commits: Arc<Mutex<Vec<SqliteCommitTrace>>>,
 }
 
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 impl SqliteTraceCollector {
     /// Removes and returns all completed commit traces.
     #[must_use]
@@ -368,7 +368,7 @@ pub struct SqliteSessionStore {
     sender: ActorSender,
     usage_snapshot: Arc<Mutex<Result<StoreUsage, SessionStoreError>>>,
     worker: Arc<Worker>,
-    #[cfg(feature = "perf-instrumentation")]
+    #[cfg(feature = "test-support")]
     trace: Option<SqliteTraceCollector>,
 }
 
@@ -620,7 +620,7 @@ impl SqliteSessionStore {
             path,
             clock,
             options,
-            #[cfg(feature = "perf-instrumentation")]
+            #[cfg(feature = "test-support")]
             None,
         )
     }
@@ -628,7 +628,7 @@ impl SqliteSessionStore {
     /// Opens a store with commit-phase tracing for offline benchmarks/tests.
     ///
     /// Normal store construction does not allocate or record these traces.
-    #[cfg(feature = "perf-instrumentation")]
+    #[cfg(feature = "test-support")]
     #[doc(hidden)]
     pub fn open_instrumented(
         path: impl AsRef<Path>,
@@ -647,7 +647,7 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         clock: Arc<dyn LeaseClock>,
         options: SqliteStoreOptions,
-        #[cfg(feature = "perf-instrumentation")] trace: Option<SqliteTraceCollector>,
+        #[cfg(feature = "test-support")] trace: Option<SqliteTraceCollector>,
     ) -> Result<Self, SessionStoreError> {
         let domain = clock.now()?.domain();
         let path = path.as_ref().to_path_buf();
@@ -705,7 +705,7 @@ impl SqliteSessionStore {
             worker: Arc::new(Worker {
                 join: Mutex::new(Some(join)),
             }),
-            #[cfg(feature = "perf-instrumentation")]
+            #[cfg(feature = "test-support")]
             trace,
         })
     }
@@ -756,7 +756,7 @@ impl SqliteSessionStore {
                     Lane::Read => ExecutedJob::Read,
                 });
             }
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let settle = crate::commit_trace::SettleGuard;
             let changes_before = backend.connection.total_changes();
             #[cfg(test)]
@@ -813,7 +813,7 @@ impl SqliteSessionStore {
             // A traced gate run cuts at every commit and needs one commit
             // order per run: deferred reclamation this job left pending runs
             // right after it, before its reply, not whenever the actor idles.
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             {
                 drop(settle);
                 if crate::commit_trace::active() {
@@ -849,7 +849,7 @@ impl Clone for SqliteSessionStore {
             sender: self.sender.clone(),
             usage_snapshot: Arc::clone(&self.usage_snapshot),
             worker: Arc::clone(&self.worker),
-            #[cfg(feature = "perf-instrumentation")]
+            #[cfg(feature = "test-support")]
             trace: self.trace.clone(),
         }
     }
@@ -912,14 +912,14 @@ impl Backend {
             .pragma_query_value(None, "freelist_count", |row| row.get::<_, i64>(0))
             .map_err(map_sqlite)?
             > 0;
-        #[cfg(feature = "commit-trace")]
+        #[cfg(feature = "test-support")]
         let (connection, tracing) = {
             let mut connection = connection;
             let tracing =
                 crate::commit_trace::install(&mut connection, "runtime").map_err(map_sqlite)?;
             (connection, tracing)
         };
-        #[cfg(all(test, feature = "commit-trace"))]
+        #[cfg(all(test, feature = "test-support"))]
         let connection = {
             let mut connection = connection;
             if !tracing {
@@ -927,13 +927,13 @@ impl Backend {
             }
             connection
         };
-        #[cfg(all(test, not(feature = "commit-trace")))]
+        #[cfg(all(test, not(feature = "test-support")))]
         let connection = {
             let mut connection = connection;
             install_test_commit_hook(&mut connection);
             connection
         };
-        #[cfg(all(not(test), feature = "commit-trace"))]
+        #[cfg(all(not(test), feature = "test-support"))]
         let _ = tracing;
         let gc_pending = gc::pending(&connection)?;
         Ok(Self {
@@ -1200,7 +1200,7 @@ impl SessionStore for SqliteSessionStore {
 
     fn create(&self, r: CreateSession) -> StoreFuture<'_, CreateReceipt> {
         self.dispatch("create", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("create");
             let receipt = b.retry_after_reclaim(|b| create(b, &r))?;
             feed::trim(b, r.session().session_id());
@@ -1209,14 +1209,14 @@ impl SessionStore for SqliteSessionStore {
     }
     fn recover_create(&self, r: CreateSession) -> StoreFuture<'_, CreateReceipt> {
         self.dispatch("recover_create", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("recover_create");
             recover_create(&b.connection, &r)
         })
     }
     fn load_branch(&self, s: SessionRef) -> StoreFuture<'_, LoadedBranch> {
         self.dispatch_read("load_branch", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("load_branch");
             b.require_open()?;
             b.load_branch(s)
@@ -1224,35 +1224,35 @@ impl SessionStore for SqliteSessionStore {
     }
     fn load_checkpoint(&self, c: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {
         self.dispatch_read("load_checkpoint", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("load_checkpoint");
             b.load_checkpoint(c)
         })
     }
     fn acquire(&self, r: AcquireBranch) -> StoreFuture<'_, BranchLease> {
         self.dispatch("acquire", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("acquire");
             acquire(b, r)
         })
     }
     fn renew(&self, l: BranchLease) -> StoreFuture<'_, BranchLease> {
         self.dispatch("renew", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("renew");
             b.unsynced(|b| renew(b, &l))
         })
     }
     fn revive(&self, l: BranchLease) -> StoreFuture<'_, BranchLease> {
         self.dispatch("revive", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("revive");
             b.unsynced(|b| revive(b, &l))
         })
     }
     fn release(&self, l: BranchLease) -> StoreFuture<'_, ()> {
         self.dispatch("release", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("release");
             release(b, &l)?;
             feed::trim(b, l.session().session_id());
@@ -1261,17 +1261,17 @@ impl SessionStore for SqliteSessionStore {
     }
     fn release_many(&self, leases: Vec<BranchLease>) -> StoreFuture<'_, ()> {
         self.dispatch("release_many", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("release_many");
             release_many(b, &leases)
         })
     }
     fn commit(&self, r: CommitCheckpoint) -> StoreFuture<'_, CommitReceipt> {
-        #[cfg(feature = "perf-instrumentation")]
+        #[cfg(feature = "test-support")]
         if let Some(collector) = self.trace.clone() {
             let queued_at = Instant::now();
             return self.dispatch("commit", move |b| {
-                #[cfg(feature = "commit-trace")]
+                #[cfg(feature = "test-support")]
                 let (_label, _classes) = (
                     crate::commit_trace::label("commit"),
                     crate::commit_trace::checkpoint_classes(r.checkpoint())?,
@@ -1293,7 +1293,7 @@ impl SessionStore for SqliteSessionStore {
             });
         }
         self.dispatch("commit", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let (_label, _classes) = (
                 crate::commit_trace::label("commit"),
                 crate::commit_trace::checkpoint_classes(r.checkpoint())?,
@@ -1305,14 +1305,14 @@ impl SessionStore for SqliteSessionStore {
     }
     fn recover_commit(&self, c: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint> {
         self.dispatch("recover_commit", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("recover_commit");
             recover_commit(&b.connection, c)
         })
     }
     fn fork(&self, r: ForkBranch) -> StoreFuture<'_, ForkReceipt> {
         self.dispatch("fork", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("fork");
             let receipt = b.retry_after_reclaim(|b| fork(b, &r))?;
             feed::trim(b, r.source().session().session_id());
@@ -1321,14 +1321,14 @@ impl SessionStore for SqliteSessionStore {
     }
     fn recover_fork(&self, r: RecoverFork) -> StoreFuture<'_, ForkReceipt> {
         self.dispatch("recover_fork", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("recover_fork");
             recover_fork(b, &r)
         })
     }
     fn list(&self, q: SessionQuery) -> StoreFuture<'_, Page<SessionSummary>> {
         self.dispatch_read("list", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("list");
             b.require_open()?;
             list(&b.connection, b.limits, q)
@@ -1349,7 +1349,7 @@ impl SessionStore for SqliteSessionStore {
     }
     fn archive(&self, r: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt> {
         self.dispatch("archive", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("archive");
             let receipt = archive(b, r)?;
             feed::trim(b, r.session_id());
@@ -1358,7 +1358,7 @@ impl SessionStore for SqliteSessionStore {
     }
     fn delete(&self, r: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         self.dispatch("delete", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("delete");
             let result = delete(b, r);
             b.checkpoints.clear();
@@ -1367,14 +1367,14 @@ impl SessionStore for SqliteSessionStore {
     }
     fn recover_delete(&self, r: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         self.dispatch("recover_delete", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("recover_delete");
             load_delete(&b.connection, r)
         })
     }
     fn prune(&self, r: PruneBranch) -> StoreFuture<'_, PruneReceipt> {
         self.dispatch("prune", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("prune");
             let receipt = prune(b, &r);
             b.checkpoints.clear();
@@ -1390,7 +1390,7 @@ impl SessionStore for SqliteSessionStore {
         max_records: NonZeroUsize,
     ) -> StoreFuture<'_, FeedPage> {
         self.dispatch_read("read_feed", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("read_feed");
             let snapshot = b.connection.transaction().map_err(map_sqlite)?;
             feed::read(&snapshot, session_id, after, max_records)
@@ -1398,7 +1398,7 @@ impl SessionStore for SqliteSessionStore {
     }
     fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail> {
         self.dispatch_read("feed_tail", move |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("feed_tail");
             feed::tail(&b.connection, session_id)
         })
@@ -1442,7 +1442,7 @@ impl SessionStore for SqliteSessionStore {
     }
     fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
         self.dispatch("flush", |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("flush");
             b.require_open()?;
             checkpoint_wal(&b.connection, false)?;
@@ -1451,7 +1451,7 @@ impl SessionStore for SqliteSessionStore {
     }
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
         self.dispatch("shutdown", |b| {
-            #[cfg(feature = "commit-trace")]
+            #[cfg(feature = "test-support")]
             let _label = crate::commit_trace::label("shutdown");
             if let BackendState::Shutdown(r) = b.state {
                 return Ok(r);

@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 /// Repository-only, process-wide durable SQLite commit tracing.
-#[cfg(feature = "commit-trace")]
+#[cfg(feature = "test-support")]
 pub mod commit_trace;
 
 #[cfg(feature = "sqlite")]
@@ -21,7 +21,7 @@ pub use sqlite::{
     SqliteSessionRetention, SqliteSessionStore, SqliteStoreOptions, SqliteStoreStats,
     branch_holder,
 };
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub use sqlite::{SqliteCommitTrace, SqliteTraceCollector};
 

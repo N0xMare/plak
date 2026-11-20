@@ -67,18 +67,6 @@ impl OpenRouterRoutingPolicy {
     pub fn provider_name(&self) -> &str {
         &self.provider_name
     }
-
-    /// Reports that backup provider endpoints are forbidden.
-    #[must_use]
-    pub const fn allows_fallbacks(&self) -> bool {
-        false
-    }
-
-    /// Reports that every emitted parameter must be supported upstream.
-    #[must_use]
-    pub const fn requires_parameters(&self) -> bool {
-        true
-    }
 }
 
 fn valid_provider_name(value: &str) -> bool {
@@ -416,8 +404,20 @@ pub enum OpenRouterCredentialPurpose {
 
 #[derive(Debug)]
 enum OpenRouterCredentialProof<'a> {
-    Responses(&'a ResponsesPhysicalRequestBinding),
-    Chat(&'a ChatPhysicalRequestBinding),
+    Responses(
+        #[expect(
+            dead_code,
+            reason = "keeps the credential request borrowed from the admitted attempt"
+        )]
+        &'a ResponsesPhysicalRequestBinding,
+    ),
+    Chat(
+        #[expect(
+            dead_code,
+            reason = "keeps the credential request borrowed from the admitted attempt"
+        )]
+        &'a ChatPhysicalRequestBinding,
+    ),
     Messages(&'a MessagesPhysicalRequestBinding),
     Catalog(&'a Digest),
     Retrieval(&'a Digest),
@@ -466,22 +466,6 @@ impl<'a> OpenRouterCredentialRequest<'a> {
             OpenRouterCredentialProof::Messages(_) => OpenRouterCredentialPurpose::Messages,
             OpenRouterCredentialProof::Catalog(_) => OpenRouterCredentialPurpose::Catalog,
             OpenRouterCredentialProof::Retrieval(_) => OpenRouterCredentialPurpose::Retrieval,
-        }
-    }
-    /// Exact Responses physical binding, only for that wire.
-    #[must_use]
-    pub const fn responses_binding(&self) -> Option<&ResponsesPhysicalRequestBinding> {
-        match self.proof {
-            OpenRouterCredentialProof::Responses(binding) => Some(binding),
-            _ => None,
-        }
-    }
-    /// Exact Chat physical binding, only for that wire.
-    #[must_use]
-    pub const fn chat_binding(&self) -> Option<&ChatPhysicalRequestBinding> {
-        match self.proof {
-            OpenRouterCredentialProof::Chat(binding) => Some(binding),
-            _ => None,
         }
     }
     /// Exact Messages physical binding, only for that wire.

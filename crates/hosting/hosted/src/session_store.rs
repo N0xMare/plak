@@ -442,15 +442,6 @@ mod memory {
                 .remove(id);
         }
 
-        /// Replaces one session's intents.
-        pub fn set_intents(&self, id: &str, intents: ProductIntents) {
-            self.state
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .intents
-                .insert(id.to_owned(), intents);
-        }
-
         /// Every record the store holds, by id.
         #[must_use]
         pub fn records(&self) -> Vec<SessionRecord> {

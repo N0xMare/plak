@@ -175,6 +175,7 @@ async fn recover(agent: Option<&Agent>, turn: TurnId) -> Option<Source> {
 }
 
 #[cfg(test)]
+#[path = "child_projection/perf_tests.rs"]
 mod perf;
 #[cfg(test)]
 mod tests;

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """The published shape of the `plakd` manifest, and a staged tree that carries it.
 
-`plakd/test-hooks` binds the deterministic offline model from the
+`plakd/test-support` binds the deterministic offline model from the
 repository-only `plakous-offline-crash-harness`. Cargo cannot package a regular
 dependency that is not on the registry, optional or not, and it strips only
 version-less dev-dependencies. So the repository manifest keeps the feature
 and its optional harness edge, and the published manifest is that manifest with
-both removed: every `cfg(feature = "test-hooks")` site compiles out, and the
+both removed: every `cfg(feature = "test-support")` site compiles out, and the
 workspace lints declare the feature name to `check-cfg` so the packaged crate
 builds without an unexpected-cfg warning.
 
@@ -31,20 +31,18 @@ HARNESS = "plakous-offline-crash-harness"
 # Exact repository text the published shape drops. A manifest edit that moves
 # either block fails the transform instead of shipping the edge.
 HARNESS_DEPENDENCY = (
-    "# `test-hooks` only. The optional edge is what keeps the deterministic offline\n"
+    "# `test-support` only. The optional edge is what keeps the deterministic offline\n"
     "# model out of every build that does not explicitly ask for it.\n"
     f'{HARNESS} = {{ path = "../../tests/harnesses/offline-crash", optional = true }}\n'
 )
-TEST_HOOKS_FEATURE = (
-    "# Repository gate only: bind the deterministic offline model named by\n"
-    "# `PLAK_TEST_SCRIPT` instead of a provider, so the spawned binary's own\n"
-    "# lifecycles are testable. Never in `default`, never in a release build.\n"
-    "test-hooks = [\n"
-    '    "plakous/test-clock",\n'
-    '    "plakous/test-hooks",\n'
+TEST_SUPPORT_FEATURE = (
+    "# Repository gate only: isolated product fixtures and the offline model named\n"
+    "# by `PLAK_TEST_SCRIPT`. Never in `default` or the published manifest.\n"
+    "test-support = [\n"
+    '    "plakous/test-support",\n'
     f'    "dep:{HARNESS}",\n'
     '    "plakous-hosted/test-support",\n'
-    '    "plakous-recursive-subagents-store/commit-trace",\n'
+    '    "plakous-recursive-subagents-store/test-support",\n'
     "]\n"
 )
 
@@ -54,8 +52,8 @@ class ShapeError(Exception):
 
 
 def published_plak_manifest(text: str) -> str:
-    """Return the `plakd` manifest without `test-hooks` and its harness edge."""
-    for block in (HARNESS_DEPENDENCY, TEST_HOOKS_FEATURE):
+    """Return the `plakd` manifest without `test-support` and its harness edge."""
+    for block in (HARNESS_DEPENDENCY, TEST_SUPPORT_FEATURE):
         count = text.count(block)
         if count != 1:
             raise ShapeError(f"{PLAK_MANIFEST}: expected one exact block, found {count}:\n{block}")

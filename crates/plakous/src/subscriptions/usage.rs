@@ -10,9 +10,9 @@ use super::{
     SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp, run_blocking,
 };
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 pub(super) mod test_usage;
-#[cfg(not(feature = "test-hooks"))]
+#[cfg(not(feature = "test-support"))]
 pub(super) mod test_usage {
     #[derive(Clone)]
     pub(in crate::subscriptions) struct Fixture;

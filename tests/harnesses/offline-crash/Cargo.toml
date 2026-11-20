@@ -28,7 +28,7 @@ plakous-agent.workspace = true
 plakous-model.workspace = true
 plakous-runner.workspace = true
 plakous-runner-protocol.workspace = true
-plakous-store = { workspace = true, features = ["commit-trace"] }
+plakous-store = { workspace = true, features = ["test-support"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -41,7 +41,7 @@ uuid = { workspace = true, features = ["v4"] }
 # has to cross a layer boundary to arrive.
 plakous-compose = { workspace = true, features = ["scripted-code-mode-enrolment"] }
 # `PLAK_TEST_FAULTS` transport fault injection, for the same reason and in the
-# same way: `plakd/test-hooks` is the only product edge to this package.
+# same way: `plakd/test-support` is the only product edge to this package.
 plakous-http = { workspace = true, features = ["fault-injection"] }
 
 [dev-dependencies]

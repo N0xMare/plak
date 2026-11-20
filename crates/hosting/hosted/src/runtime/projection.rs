@@ -21,6 +21,7 @@ use crate::sessions::projector::{
 use super::topology_state::TopologyRows;
 
 #[cfg(test)]
+#[path = "projection/probe_tests.rs"]
 pub(crate) mod probe;
 
 /// Most pages one pass applies. A concurrent applier that keeps moving the

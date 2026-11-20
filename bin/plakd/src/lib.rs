@@ -127,8 +127,6 @@ mod host;
 #[path = "host_unavailable.rs"]
 mod host;
 mod observation_projection;
-#[cfg(feature = "otel")]
-mod otel_bridge;
 #[cfg(all(test, unix))]
 mod product_compaction_runtime_e2e_tests;
 #[cfg(test)]
@@ -141,7 +139,7 @@ mod product_onboarding;
 mod product_runtime_e2e_tests;
 mod product_subscription_usage;
 mod product_telemetry;
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(any(test, feature = "test-support"))]
 mod profile_test_catalog;
 mod reload_probe_latency;
 #[doc(hidden)]
@@ -150,10 +148,10 @@ pub mod shell;
 pub mod telemetry_sink;
 #[doc(hidden)]
 pub mod telemetry_store;
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_hooks;
-#[cfg(not(feature = "test-hooks"))]
+#[cfg(not(feature = "test-support"))]
 #[path = "test_hooks/disabled.rs"]
 mod test_hooks;
 #[cfg(test)]
@@ -161,15 +159,16 @@ mod test_support;
 #[doc(hidden)]
 pub mod topology_product;
 #[cfg(test)]
+#[path = "topology_resources_projection_tests.rs"]
 mod topology_resources_projection;
 #[cfg(feature = "web")]
 mod web;
-#[cfg(all(feature = "web", any(feature = "maintainer", feature = "test-hooks")))]
+#[cfg(all(feature = "web", any(feature = "maintainer", feature = "test-support")))]
 #[path = "web/dev_login.rs"]
 mod web_dev_login;
 #[cfg(all(
     feature = "web",
-    not(any(feature = "maintainer", feature = "test-hooks"))
+    not(any(feature = "maintainer", feature = "test-support"))
 ))]
 #[path = "web/dev_login_unavailable.rs"]
 mod web_dev_login;
@@ -208,8 +207,6 @@ use std::io::{self, Write as _};
 #[cfg(feature = "test-support")]
 use std::path::Path;
 use std::process::ExitCode;
-#[cfg(feature = "otel")]
-use std::sync::Arc;
 
 use crate::app_dispatch::execute_application_command;
 use crate::command::{Command, command_is_read_only, command_needs_product_state, runs_a_cli_turn};
@@ -273,26 +270,6 @@ pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode 
     }
 }
 
-/// The OTLP bridge the `otel` build attaches to every product state root.
-///
-/// The bridge lives in this binary, so the host is told how to build one and
-/// asks for it at each [`crate::commands::support::product_state_roots_from`].
-///
-/// `Services` holds this as a factory and calls it at the first state-root
-/// open, so `plakd --version` — which opens none — never spawns the exporter
-/// thread and never prints `otel bridge unavailable` for a bad endpoint.
-#[cfg(feature = "otel")]
-fn otel_extra_telemetry_sink() -> Option<Arc<dyn plakous_hosted::agent::ExtraTelemetrySink>> {
-    let endpoint = diagnostics::otlp_endpoint()?;
-    match otel_bridge::OtelBridge::from_endpoint(&endpoint) {
-        Ok(bridge) => Some(Arc::new(bridge)),
-        Err(error) => {
-            eprintln!("plakd: otel bridge unavailable: {error}");
-            None
-        }
-    }
-}
-
 fn log_start(binary: &str, command: &str) {
     if binary != "unavailable" {
         tracing::info!(
@@ -335,7 +312,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     // path against the process working directory.
     let launch = shell::home::launch_directory();
     let arguments: Vec<_> = arguments.into_iter().collect();
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     {
         if let Some(result) =
             test_hooks::client_fixtures::seed_request(&arguments, launch.as_deref())
@@ -405,13 +382,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         signals::install(signals::cli_announcement(), || {});
     }
 
-    // The composition root: `~/.plak`, the XDG state home and the build's
-    // extra telemetry sink are resolved exactly once here, and every command
+    // The composition root: `~/.plak` and the XDG state home are resolved
+    // exactly once here, and every command
     // borrows them. Nothing below reads the environment for a path again.
-    #[cfg(feature = "otel")]
-    let services = Services::from_env(Some(otel_extra_telemetry_sink), launch.as_deref());
-    #[cfg(not(feature = "otel"))]
-    let services = Services::from_env(None, launch.as_deref());
+    let services = Services::from_env(launch.as_deref());
     let services = match &command {
         Command::SessionCheckBinding {
             store_probe: Some(path),
@@ -540,25 +514,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         || "info,plak.capture=warn".to_owned(),
         |filter| format!("{filter},plak.capture=warn"),
     ));
-    #[cfg(feature = "otel")]
-    let otlp_endpoint = diagnostics::otlp_endpoint();
-    #[cfg(not(feature = "otel"))]
-    let otlp_endpoint: Option<String> = None;
-    let wants_diagnostics =
-        !command_is_read_only(&command) && (filter.is_some() || otlp_endpoint.is_some());
+    let wants_diagnostics = !command_is_read_only(&command) && filter.is_some();
     let diagnostics = if wants_diagnostics {
         match services
             .home()
             .paths_if_resolved()
             .ok_or_else(|| "could not resolve the product home".to_owned())
             .and_then(|paths| {
-                diagnostics::install(
-                    paths,
-                    filter.as_deref(),
-                    #[cfg(feature = "otel")]
-                    otlp_endpoint.as_deref(),
-                )
-                .map_err(|error| error.to_string())
+                diagnostics::install(paths, filter.as_deref()).map_err(|error| error.to_string())
             }) {
             Ok(guard) => Some(guard),
             Err(error) => {
@@ -800,11 +763,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
             }
             let mut backend = PlakousApplication::new(
                 services.home().state()?.to_path_buf(),
-                if read_only {
-                    None
-                } else {
-                    services.extra_telemetry_sink()
-                },
+                None,
                 if read_only {
                     None
                 } else {

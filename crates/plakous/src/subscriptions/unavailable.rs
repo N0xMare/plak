@@ -419,7 +419,7 @@ fn refused_selection(selected: SelectedProviderConfiguration) -> NativeModelReso
     )
 }
 
-#[cfg(any(test, feature = "test-clock"))]
+#[cfg(any(test, feature = "test-support"))]
 mod clock {
     use super::{Arc, NativeSubscriptions};
 

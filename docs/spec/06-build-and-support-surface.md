@@ -289,16 +289,16 @@ publication needs no file outside the package root:
 - No packaged manifest names a repository-only package outside
   dev-dependencies, and a dev-dependency on one is path-only, so `cargo
   package` strips it.
-- `plakd/test-hooks` is repository-only. Cargo packages no regular dependency
+- `plakd/test-support` is repository-only. Cargo packages no regular dependency
   that is not on the registry, optional or not, so the repository manifest
   keeps the feature with its optional `plakous-offline-crash-harness` edge and
   the published manifest is that manifest with both removed
   (`tools/release/publish_shape.py`; `stage DEST` copies the tree with that
-  manifest for `cargo package`). Every `cfg(feature = "test-hooks")` site
+  manifest for `cargo package`). Every `cfg(feature = "test-support")` site
   compiles out of the published crate, and the workspace lints declare the
   feature name to `check-cfg`, so it builds without an unexpected-cfg warning.
   Repository builds, the gate, and the live drivers keep
-  `--features plakd/test-hooks`.
+  `--features plakd/test-support`.
 - The Code Mode grammar snapshot under `vendor/codex-code-mode-protocol` is the
   package `plakous-codex-code-mode-protocol`: upstream `codex-code-mode-protocol`
   renamed, keeping the upstream version, `LICENSE`, `NOTICE` and
@@ -349,18 +349,18 @@ predicates must gate a module declaration (including disabled-module swaps).
 empty and lists reviewed environment-reading boundary files. plakd's boundary
 files are `environment.rs`, `home/paths.rs` and `home/secrets.rs`; the tools
 child-environment builder and workspace VCS environment files are reviewed
-library exceptions. Test-hooks-only deadline overrides are the same kind of
-exception: `plakous` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
-`test_session_lease.rs`, and `plakous-cell` reads `PLAK_TEST_CELL_HELLO_MS`
-only in `test_hooks.rs`. Only `test-hooks` builds compile those modules.
-`plakd/test-hooks` enables `plakous/test-hooks`, which enables
+library exceptions. Test-only deadline overrides are the same kind of
+exception: `plakous/test-support` reads `PLAK_TEST_SESSION_LEASE_SECONDS` only in
+`test_session_lease.rs`, and `plakous-cell/test-hooks` reads `PLAK_TEST_CELL_HELLO_MS`
+only in `test_hooks.rs`. Other builds do not compile those readers.
+`plakd/test-support` enables `plakous/test-support`, which enables
 `plakous-cell/test-hooks` when the cell client is already linked, and
 `plakous-agent/test-hooks`, whose `test_hooks.rs` names on stderr a
 credential-wait clear the event hub refused (a production build drops it
 silently, as before). The hello
 override accepts 1 through 30 000 milliseconds and no more.
-Those three `test-hooks` features are hidden from the 2n+3 closure witnesses,
-the same way `test-clock` is. `plakd/test-hooks` and
+Those three seams on the facade, cell and agent are hidden from the 2n+3
+closure witnesses, the same way `test-clock` is. `plakd/test-support` and
 `plakous-py-worker/test-hooks` stay in their package witnesses.
 Imported environment readers, including aliases and
 function items, are inventoried as well as direct calls. The process working
@@ -374,8 +374,8 @@ too, and the constructors that read the launch directory are pinned to the
 composition root: `Services::from_env` is called only in `lib.rs` and
 `Home::from_env` only by `Services`.
 
-Test-seam features (`test-support`, `test-hooks`, `commit-trace`,
-`fault-injection`, `perf-instrumentation`, `scripted-code-mode-enrolment`)
+Test-seam features (`test-support`, `test-hooks`,
+`fault-injection`, `scripted-code-mode-enrolment`)
 belong only on test-support module declarations in libraries and in plakd's
 `lib.rs`/`test_hooks.rs` composition root. Production control-flow seams are
 existing debt, not a precedent for new sites. The checker counts feature,
@@ -469,18 +469,17 @@ called out explicitly.
 | `plakous-mcp` | `client` | Internal runtime closure, default on for direct use. The facade disables this dependency's defaults and selects the client explicitly through `mcp`; without it only frozen record vocabulary, naming and errors remain |
 | `plakd`, `plakous-hosted`, `plakous` | `web-fetch` | Explicit local `fetch_url` implementation and HTML converter; default on in the product, independent of providers in the facade. Omitted tool selections refuse with the typed capability error before attach or tool construction; frozen limits remain readable |
 | `plakd` | `maintainer` | Empty feature gating only plakd's own cfg sites: maintainer verbs, the offline reload rehearsal and its test target, the explicit processing-tier selection, and automatic private inference capture (section 6.2) |
-| `plakd` | `otel` | OTLP export and the typed telemetry bridge. Default builds carry no `opentelemetry` dependency |
 | `plakd` | `test-support` | Isolated product fixtures and the internal rendering benchmark entry; required by `telemetry_contract`, whose target is skipped without it |
 | `plakous` | `composition`, `composition-python` | Code Mode and JavaScript through the engine-free cell client; Python profiles additionally require `composition-python`. Neither links credential, HTTP, subscription, or interpreter machinery |
 | `plakous-compose` | `scripted-code-mode-enrolment` | One extra enrolled local Code Mode target whose every field is a `scripted`/`offline` identifier, so the repository's offline harness can compile Code Mode against a scripted model. Off by default, reached only through the harness, and it leaves the enrolment gate's own conditions unchanged. See chapter 05 §2.6 |
-| `plakous`, `plakous-cell` | `test-hooks` | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` or the thread-scoped `plakous::test_session_lease::with_test_session_lease_seconds` (1 through 30 seconds; the scoped override also requires `store`), and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plakd/test-hooks` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads or the scoped override |
-| `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 section 2.8). Enabled only by the repository harness crate, so `plakd/test-hooks` is its one product edge; `check_features.py` refuses it in a default `plakd` |
+| `plakous` (`test-support`), `plakous-cell` | `test-hooks` on the cell | Deadline overrides for the repository gate: `PLAK_TEST_SESSION_LEASE_SECONDS` or the thread-scoped `plakous::test_session_lease::with_test_session_lease_seconds` (1 through 30 seconds; the scoped override also requires `store`), and `PLAK_TEST_CELL_HELLO_MS` (1 through 30 000 milliseconds). Absent from `default` and `full`. `plakd/test-support` enables the facade feature, which enables the cell feature only when the cell client is already linked. Other builds do not compile the environment reads or the scoped override |
+| `plakous-http` | `fault-injection` | `PLAK_TEST_FAULTS` transport fault injection (spec 05 section 2.8). Enabled only by the repository harness crate, so `plakd/test-support` is its one product edge; `check_features.py` refuses it in a default `plakd` |
 | `plakous-http` | `gateway-client`, `gateway-server` | The credential gateway relay client and the provider-blind relay server core (chapter 01 §7.5), each linking `plakous-gateway-protocol`; the server adds hyper's server half. Off by default; the facade's `gateway` enables both |
 | `plakous-auth` | `gateway` | The remote credential custodian over the relay client; implies `http-refresh` and `plakous-http/gateway-client` |
 | `plakous-py-worker` | `test-hooks` | Real-worker result-delivery crash cuts for the durability tests (spec 05 §2). Never enabled by a product dependency or ordinary worker build; without it the worker reads no cut environment and writes no sentinel. The interpreter and type checker remain worker-only. |
-| `plakous-store` | `commit-trace` | Repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-hooks` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` for all three stores. |
-| `plakous-recursive-subagents-store` | `commit-trace` | Optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plakd/test-hooks` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release plakd closures. |
-| `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder for ephemeral Codex browser-login callbacks and an explicit catalog fixture origin. A dev-dependency of `plakous`, never a production edge |
+| `plakous-store` | `test-support` | Benchmark instrumentation plus repository-only process-wide durable SQLite commit tracing and indexed `SIGKILL` cuts (spec 05 section 2.6, commit trace contract). Enables `sqlite`, `rusqlite/hooks`, `nix/signal`, and optional JSON encoding. Inert without `PLAK_TEST_COMMIT_TRACE`; reached by plakd through the offline-crash harness under `test-support` and through its harness dev-dependency in test builds, never a default or maintainer/release product build. The dev edge gives runtime-only tracing without `test-support`; a sweep must require `cfg(feature="test-support")` for all three stores. |
+| `plakous-recursive-subagents-store` | `test-support` | Tree fixtures plus an optional direct `plakous-store` edge solely to share that process-wide tracer. This explicit test-only host-to-store exception is pinned by the workspace checker; `plakd/test-support` directly forwards it over the existing product-to-tree dependency, avoiding a harness-to-tree dev-dependency cycle. No facade feature or API is added. Feature checks and tooling tests prove the edge absent from the tree's default direct dependencies and both tracing features absent from default and maintainer/release plakd closures. |
+| `plakous-openai` | `test-support` | Test clocks and, when `native-auth` is already linked, the doc-hidden ephemeral Codex callback and catalog origin fixtures. The seam does not activate `native-auth`. |
 | `plakous-hosted` | `test-support` | Test-only session doubles, host-loop drivers, scripted `RuntimeFactory` registrations, and the host crash cuts (`test_support_runner::HostCut`, spec 05 section 2.6); the construction port itself is always available. A dev-dependency of `plakd`, never a production edge |
 | `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plakd`, never a production edge |
 | `plakd` | `git-cli`, `jj` | Of the VCS features, defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plakd.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
@@ -579,8 +578,8 @@ doctor, CLI/JSONL refusals and canonical-store read/refusal byte preservation.
 The admission fixture checks that an unused Python template does not block
 either CLI entry point with an explicit root account, while an implicit root
 without a Ready account still requires a choice (chapter 02 §4.4.1).
-The group also builds a full test-hooks fixture writer and a reduced
-test-hooks/maintainer reader to exercise real canonical stores, genesis
+The group also builds a full test-support fixture writer and a reduced
+test-support/maintainer reader to exercise real canonical stores, genesis
 import rebind, attached maintainer actions and an image diagnostic during an
 in-flight JSONL turn. Full-created canonical native sessions remain readable
 through show/log/export in the API and minimal binaries, while attach/resume
@@ -1175,7 +1174,7 @@ just install maintainer # dogfood snapshot under ~/.local/lib/plak/maintainer
 `just build debug`, `just build release`, `just build maintainer` and
 `just install maintainer` pass `--features plakd/maintainer`. `just install release`
 does not, and `just build profiling` builds only `plakd` at its default features.
-Live `test-hooks` builds, the offline performance smoke, a soak rebuild and the
+Live `test-support` builds, the offline performance smoke, a soak rebuild and the
 reload rehearsal's offline maintainer build call the same script. `--features`
 replaces the parent feature set, `--plakd-only` skips workers and the linkage
 check, `--profiling` is the plakd-only profiling profile, and `--offline` passes
@@ -1398,7 +1397,7 @@ build is 90,227,472 bytes raw / 73,734,584 stripped: stripping and omitting JJ
 account for the reductions before LTO. No global or per-dependency size-oriented
 optimization level is selected.
 
-The deterministic offline `test-hooks` fixture, measured separately with seven
+The deterministic offline `test-support` fixture, measured separately with seven
 runs per variant, compares the original default build with Git-only, stripped
 thin LTO. Offline `run` medians are 54.84ms / 33.88ms and `session show` medians
 are 7.80ms / 5.03ms. Their `--version` medians (11 samples) are 59.38ms / 40.43ms.
@@ -1429,7 +1428,7 @@ passively into a fresh private run/process directory under
 including installed CLI and hosted use. The run is selected on
 the first inference transport, not at process startup; commands that send
 no inference create no capture directory. An explicit
-`PLAK_TEST_EXCHANGE_CAPTURE_DIR`, available with `maintainer` or `test-hooks`,
+`PLAK_TEST_EXCHANGE_CAPTURE_DIR`, available with `maintainer` or `test-support`,
 is the fail-closed qualification hook: it must name a private run directory
 under the checkout's ignored `tests/provider-authority/`, and a capture that
 cannot be written fails the exchange. Builds without either feature refuse
@@ -1587,9 +1586,8 @@ prints remaining days as a non-failing informational note instead. Neither
 `just batch` nor `just full` has a time-dependent review-window precondition.
 The hidden `test-clock` feature is excluded from supported feature closures
 and inventory, and checked absent from default, maintainer and release builds;
-only dev-dependencies or repository `test-hooks` enable it. The `plakous` and
-`plakous-cell` `test-hooks` features are excluded from those closures the same
-way.
+only dev-dependencies or repository test builds enable it. The facade
+`test-support` and cell/agent `test-hooks` features are excluded in the same way.
 
 On a colocated JJ root, `just full` records the Git tree of snapshotted `@`
 at start and end, refuses conflicted `@`, and requires equal trees. `@` need

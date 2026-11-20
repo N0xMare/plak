@@ -24,7 +24,7 @@ pub(in super::super) struct CommitExecution {
     pub(in super::super) inserted: InsertEvidence,
 }
 
-#[cfg(feature = "perf-instrumentation")]
+#[cfg(feature = "test-support")]
 pub(in super::super) fn commit_observed(
     backend: &mut Backend,
     request: &CommitCheckpoint,
@@ -41,12 +41,12 @@ fn commit_impl(
     request: &CommitCheckpoint,
     observed: bool,
 ) -> Result<(CommitReceipt, CommitExecution), SessionStoreError> {
-    #[cfg(not(feature = "perf-instrumentation"))]
+    #[cfg(not(feature = "test-support"))]
     let _ = observed;
     backend.require_open()?;
     let reference = bundle_ref(request.checkpoint());
     let candidate = candidate(request.checkpoint())?;
-    #[cfg(feature = "perf-instrumentation")]
+    #[cfg(feature = "test-support")]
     let transaction_started = observed.then(Instant::now);
     let tx = backend
         .connection
@@ -65,10 +65,10 @@ fn commit_impl(
         } else {
             Err(SessionStoreError::IdentityConflict)
         };
-        #[cfg(feature = "perf-instrumentation")]
+        #[cfg(feature = "test-support")]
         let commit_started = observed.then(Instant::now);
         tx.commit().map_err(map_sqlite)?;
-        #[cfg(feature = "perf-instrumentation")]
+        #[cfg(feature = "test-support")]
         let execution = CommitExecution {
             transaction_begin_count: 1,
             transaction_commit_count: 1,
@@ -76,7 +76,7 @@ fn commit_impl(
             commit_call_elapsed_ns: commit_started.map_or(0, elapsed_ns),
             inserted: InsertEvidence::default(),
         };
-        #[cfg(not(feature = "perf-instrumentation"))]
+        #[cfg(not(feature = "test-support"))]
         let execution = CommitExecution::default();
         return out.map(|receipt| (receipt, execution));
     }
@@ -193,7 +193,7 @@ fn commit_impl(
     test_crash_cut(CrashCut::BeforeCommit);
     #[cfg(test)]
     test_crash_signal(CrashCut::AsyncInCommit);
-    #[cfg(feature = "perf-instrumentation")]
+    #[cfg(feature = "test-support")]
     let commit_started = observed.then(Instant::now);
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
@@ -204,7 +204,7 @@ fn commit_impl(
         request.checkpoint(),
         Some(request.expected().checkpoint().checkpoint_id()),
     );
-    #[cfg(feature = "perf-instrumentation")]
+    #[cfg(feature = "test-support")]
     let execution = CommitExecution {
         transaction_begin_count: 1,
         transaction_commit_count: 1,
@@ -212,7 +212,7 @@ fn commit_impl(
         commit_call_elapsed_ns: commit_started.map_or(0, elapsed_ns),
         inserted,
     };
-    #[cfg(not(feature = "perf-instrumentation"))]
+    #[cfg(not(feature = "test-support"))]
     let execution = CommitExecution {
         inserted,
         ..CommitExecution::default()

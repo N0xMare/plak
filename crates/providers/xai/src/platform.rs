@@ -18,8 +18,6 @@ use crate::{XaiDialect, XaiRouteKind};
 pub(crate) const XAI_PLATFORM_API_KEY_ORIGIN: &str = "https://api.x.ai";
 /// Exact create-response resource path.
 pub(crate) const XAI_PLATFORM_RESPONSES_PATH: &str = "/v1/responses";
-/// Closed integration policy revision.
-pub(crate) const XAI_PLATFORM_POLICY_REVISION: &str = "plakous-xai-platform-2026-08-12-r1";
 /// Earlier model retained only as documentation reference.
 pub(crate) const XAI_PLATFORM_GROK_45_MODEL: &str = "grok-4.5";
 /// Documentation-reported context for the exact model, retained as reference evidence only.
@@ -165,27 +163,6 @@ pub struct XaiPlatformDocumentationWitness {
 }
 
 impl XaiPlatformDocumentationWitness {
-    /// Returns the reviewed, credential-free Grok 4.5 documentation witness.
-    pub fn reviewed_grok_45() -> Result<Self, XaiPlatformConfigurationError> {
-        let model = ModelId::new(XAI_PLATFORM_GROK_45_MODEL)?;
-        let witness_identity = Digest::sha256(
-            DigestDomain::ModelBinding,
-            1,
-            &[
-                b"plakous-xai-platform-catalog-witness-v1",
-                XAI_PLATFORM_GROK_45_MODEL.as_bytes(),
-                &XAI_PLATFORM_GROK_45_REFERENCE_CONTEXT_TOKENS.to_be_bytes(),
-                XAI_PLATFORM_POLICY_REVISION.as_bytes(),
-            ],
-        )?;
-        Ok(Self {
-            model,
-            context_tokens: XAI_PLATFORM_GROK_45_REFERENCE_CONTEXT_TOKENS,
-            source_revision: XAI_PLATFORM_POLICY_REVISION,
-            witness_identity,
-        })
-    }
-
     /// Exact requested/effective model attested by this closed row.
     #[must_use]
     pub const fn model(&self) -> &ModelId {
@@ -310,12 +287,6 @@ impl XaiPlatformRequestLoweringFacts {
     #[must_use]
     pub const fn reasoning_include(self) -> &'static str {
         XAI_PLATFORM_ENCRYPTED_REASONING_INCLUDE
-    }
-
-    /// Whether the documentation supports emitting a streaming request field.
-    #[must_use]
-    pub const fn stream_request(self) -> bool {
-        true
     }
 
     /// Documentation-reported context value, explicitly not admission authority.

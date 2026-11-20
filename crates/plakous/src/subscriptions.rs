@@ -61,7 +61,7 @@ mod status;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod telemetry;
 #[cfg(all(
-    feature = "test-clock",
+    feature = "test-support",
     any(feature = "codex", feature = "grok", feature = "claude")
 ))]
 #[doc(hidden)]

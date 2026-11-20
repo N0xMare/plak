@@ -172,7 +172,7 @@ def check_product_profiles(
 
 def product_builds(manifest: dict[str, object], target: str | None) -> list[str]:
     """Keep the full test-hooks writer separate from the reduced binaries opening its stores."""
-    command = cargo_command("build", ("test-hooks",), True, "plakd") + [
+    command = cargo_command("build", ("test-support",), True, "plakd") + [
         "--bin",
         "plakd",
         "--message-format=json",
@@ -229,7 +229,7 @@ def product_builds(manifest: dict[str, object], target: str | None) -> list[str]
         selected = tuple(
             sorted(
                 set(manifest["features"]["default"]) - ADMISSION_OMISSIONS
-                | {"maintainer", "test-hooks"}
+                | {"maintainer", "test-support"}
             )
         )
         command = cargo_command("build", selected, False, "plakd") + [
@@ -627,12 +627,11 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous-hosted", "mcp", "plakous/mcp"),
     ("plakous-hosted", "web-fetch", "plakous/web-fetch"),
     ("plakous", "mcp", "plakous-mcp/client"),
-    ("plakous", "test-clock", "plakous-openai?/test-clock"),
-    ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
-    ("plakous", "test-hooks", "plakous-cell?/test-hooks"),
-    ("plakous", "test-hooks", "plakous-agent/test-hooks"),
-    ("plakd", "test-hooks", "plakous/test-clock"),
-    ("plakd", "test-hooks", "plakous/test-hooks"),
+    ("plakous", "test-support", "plakous-openai?/test-support"),
+    ("plakous", "test-support", "plakous-openrouter?/test-clock"),
+    ("plakous", "test-support", "plakous-cell?/test-hooks"),
+    ("plakous", "test-support", "plakous-agent/test-hooks"),
+    ("plakd", "test-support", "plakous/test-support"),
     ("plakous", "claude", "plakous-anthropic/native-auth"),
     ("plakous", "codex", "plakous-auth/http-refresh"),
     ("plakous", "grok", "plakous-auth/http-refresh"),
@@ -666,14 +665,14 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     # `plakd`'s repository-gate offline model registers a scripted RuntimeFactory
     # through this edge; the production construction port is always available,
     # but the scripted factory belongs to the hosted test kit.
-    ("plakd", "test-hooks", "plakous-hosted/test-support"),
-    ("plakd", "test-hooks", "plakous-recursive-subagents-store/commit-trace"),
+    ("plakd", "test-support", "plakous-hosted/test-support"),
+    ("plakd", "test-support", "plakous-recursive-subagents-store/test-support"),
     # Content-free checkpoint classes are a repository-only tracing seam.
-    ("plakous-store", "commit-trace", "plakous-agent/test-hooks"),
+    ("plakous-store", "test-support", "plakous-agent/test-hooks"),
     (
         "plakous-recursive-subagents-store",
-        "commit-trace",
-        "plakous-store/commit-trace",
+        "test-support",
+        "plakous-store/test-support",
     ),
     # The repository harness's extra enrolled Code Mode target. Forwarded
     # unchanged through the facade; each hop is pinned so the enrolment cannot
@@ -716,7 +715,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-runner-dial": "c09c036c17a063b8cab99b89d81a7172d85026b1eddb4c81e852bd79ac4afc79",
     "plakous-py-worker": "69292766720fd343d9c1ce2701cee97bf9c89fccfd5b74618ebae180ba970e63",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
-    "plakous": "0dc929754774cac56e3cbf49ef90ee92ac5f9212986e8fa3bf596e893b7f7e88",
+    "plakous": "7f3b250a57a20bf9d7dc89d3944631db0163adf647ab86d08900052e019a4666",
     "plakous-agent": "c0493a5d9f2387a4342ab95f9a02d0e87a5020ea2b7fd57423a77202ad2a5a86",
     "plakous-anthropic": "ba64c2d30c1997089e1750a23b63549ebcff8d77aad1db6c7c6bfd559b8c40e5",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -729,7 +728,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "ad0a1ee24f44529a51628f2b64f08ccd8e01017d40ffb1e43f520bc9cc465bad",
     "plakous-messages": "eda37ac39bc49624c85e925cac644df7fd2944822aae4f62f4b5c7f8c70250dc",
     "plakous-model": "04297fb5135a6bec3b2b5838aa8a0f71620162cfa4166529f1e110702fd0a16f",
-    "plakous-openai": "d3218ce13e41bdddd4aa091e2fefb6a05d1040acd5c1310b4ddb12280bb06cdf",
+    "plakous-openai": "d3de19ef092d9a55fb523c70637339080815d944c5f1222544a1a694875458b1",
     "plakous-tool-files": "732413f348445ed8c325e4e8b2f41bcac69ffbeeff04a445b3e2db764a38601b",
     "plakous-tool-plan": "30d22953bc3dbbe899d5ffd8f17729f7a1177e38b7434b3845c1e74aa7dde37d",
     "plakous-tool-process": "18b6bb113b7688192f89888d2ce6f67910ae86cc4bd847f6ad3ce7539d5a0ddc",
@@ -740,7 +739,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-openrouter": "e05d8593e08795f279b61d8a3593e2fc61f09cc7eeed6d4936e2ebe6b20eef35",
     "plakous-responses": "dbce04e47efea124d598da1ea498148515aa41a0a0852d50f1c4853e3fe10b21",
     # SQLite's captured terminal envelope uses the existing JSON dependency.
-    "plakous-store": "fa9d581a92f6115d25f2b3fc32217f78c61ff401fd2f27e9ae7265087329e4d5",
+    "plakous-store": "7e9c37178c2bc5a89ec6bfcb9e0b03451cafb1e9ba5effb562898aaff5f03e6d",
     "plakous-tools": "b5cb29f4feba31566baa6de551d2511031754ea3eabba9e266e5e4da9e350d12",
     "plakous-xai": "6c24dec4fcb79689b8531e065dad57506b711b74b7f12d804c820fbf52eb5f99",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
@@ -850,18 +849,17 @@ NAMED_VARIANT_EXCLUSIONS = {
 # fault injection must be inert in every default and release `plakd`, and live
 # under `test-hooks`, where the live smoke depends on it.
 TEST_ONLY_DEPENDENCY_FEATURES = {
-    ("plakd", "test-hooks"): (
+    ("plakd", "test-support"): (
         ("plakous-http", "fault-injection"),
-        ("plakous", "test-clock"),
-        ("plakous", "test-hooks"),
+        ("plakous", "test-support"),
         ("plakous-agent", "test-hooks"),
-        ("plakous-openai", "test-clock"),
+        ("plakous-openai", "test-support"),
         ("plakous-openrouter", "test-clock"),
-        ("plakous-store", "commit-trace"),
-        ("plakous-recursive-subagents-store", "commit-trace"),
+        ("plakous-store", "test-support"),
+        ("plakous-recursive-subagents-store", "test-support"),
         ("plakous-hosted", "test-support"),
     ),
-    ("plakous-recursive-subagents-store", "commit-trace"): (("plakous-store", "commit-trace"),),
+    ("plakous-recursive-subagents-store", "test-support"): (("plakous-store", "test-support"),),
 }
 
 
@@ -897,20 +895,18 @@ def validate_test_only_dependency_features() -> list[str]:
             if feature not in resolved_dependency_features(package, (gate,), dependency):
                 errors.append(f"{package} [{gate}]: no longer enables {dependency}/{feature}")
     for package in (
-        "plakous",
         "plakous-anthropic",
-        "plakous-openai",
         "plakous-openrouter",
         "plakous-xai",
     ):
-        for profile in ((), ("full",)) if package == "plakous" else ((),):
-            if "test-clock" in resolved_dependency_features(package, profile, package):
+        if "test-clock" in resolved_dependency_features(package, (), package):
+            errors.append(f"{package} [default]: test-clock is test-only")
+    for package, profiles in (("plakous", ((), ("full",))), ("plakous-openai", ((),))):
+        for profile in profiles:
+            if "test-support" in resolved_dependency_features(package, profile, package):
                 errors.append(
-                    f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only"
+                    f"{package} [{','.join(profile) or 'default'}]: test-support is test-only"
                 )
-    for profile in ((), ("full",)):
-        if "test-hooks" in resolved_dependency_features("plakous", profile, "plakous"):
-            errors.append(f"plakous [{','.join(profile) or 'default'}]: test-hooks is test-only")
     for package in ("plakous-cell", "plakous-agent"):
         if "test-hooks" in resolved_dependency_features(package, (), package):
             errors.append(f"{package} [default]: test-hooks is test-only")
@@ -931,8 +927,8 @@ ANCHORED_CLOCK_PROVIDERS = ("plakous-anthropic", "plakous-xai")
 PLAK_PROFILES_WITHOUT_ANCHORED_CLOCKS = (
     (),
     ("maintainer",),
-    ("test-hooks",),
-    ("test-hooks", "maintainer"),
+    ("test-support",),
+    ("test-support", "maintainer"),
 )
 
 
@@ -1209,8 +1205,8 @@ def validate_feature_contracts(
             # process tracer; the manifest gate is pinned by check_workspace.
             if (package, feature, edge) == (
                 "plakous-recursive-subagents-store",
-                "commit-trace",
-                "plakous-store/commit-trace",
+                "test-support",
+                "plakous-store/test-support",
             ):
                 continue
             # The hosted attachment normalizer is the common image crate,
@@ -1235,12 +1231,13 @@ def optional_features(manifest: dict[str, object]) -> list[str]:
     if not isinstance(features, dict):
         return []
     hidden = {"default", "full", "test-clock"}
-    # The facade and cell deadline seams, and the agent's gate diagnostics, are
-    # hidden the same way as test-clock.
-    # plakd and plakous-py-worker keep a public test-hooks feature.
+    # The facade's test seam and the cell/agent deadline seams are hidden the
+    # same way as test-clock. Product and worker fixtures keep their witnesses.
     package = manifest.get("package")
     name = package.get("name") if isinstance(package, dict) else None
-    if name in {"plakous", "plakous-cell", "plakous-agent"}:
+    if name == "plakous":
+        hidden.add("test-support")
+    if name in {"plakous-cell", "plakous-agent"}:
         hidden.add("test-hooks")
     return sorted(feature for feature in features if feature not in hidden)
 
@@ -1685,16 +1682,16 @@ def main() -> int:
 def validate_test_hook_methods(root: Path) -> list[str]:
     """Keep internal job-retention test seams out of normal library builds."""
     checks = (
-        ("crates/core/agent/src/runtime/build.rs", "retain_jobs_for_test"),
-        ("crates/plakous/src/sessions.rs", "with_retained_jobs_for_test"),
+        ("crates/core/agent/src/runtime/build.rs", "retain_jobs_for_test", "test-hooks"),
+        ("crates/plakous/src/sessions.rs", "with_retained_jobs_for_test", "test-support"),
     )
     errors = []
-    for relative, method in checks:
+    for relative, method, feature in checks:
         source = (root / relative).read_text()
         declaration = source.find(f"pub fn {method}")
         attributes = source[:declaration].splitlines()[-8:] if declaration >= 0 else []
-        if not any(line.strip() == '#[cfg(feature = "test-hooks")]' for line in attributes):
-            errors.append(f"{relative}: {method} must be gated by the test-hooks feature")
+        if not any(line.strip() == f'#[cfg(feature = "{feature}")]' for line in attributes):
+            errors.append(f"{relative}: {method} must be gated by the {feature} feature")
     return errors
 
 

@@ -64,15 +64,6 @@ impl TranscriptRevision {
         self.revision
     }
 
-    /// Whether the newest canonical row is assistant prose, including when
-    /// a consumer's live view has since appended or discarded its text.
-    #[must_use]
-    pub fn last_row_is_assistant(&self) -> Option<bool> {
-        self.entries
-            .last_key_value()
-            .map(|(_, entry)| entry.assistant)
-    }
-
     /// Advances one exact patch, validating the resulting key/byte bounds
     /// before mutating anything. Row ownership stays with the caller.
     ///

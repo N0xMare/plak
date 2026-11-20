@@ -642,19 +642,6 @@ impl RuntimeOperationLedger {
                 )
             })
     }
-
-    /// Replaces the greatest operation identity as a compatibility convenience.
-    pub fn replace_last_operation(
-        &self,
-        record: DurableOperationRecord,
-    ) -> Result<Self, RuntimeManifestError> {
-        if operation_map_last(self.operation_root.as_deref())
-            .is_none_or(|last| last.operation_id != record.operation_id)
-        {
-            return Err(RuntimeManifestError::InvalidLedger);
-        }
-        self.replace_operation(record)
-    }
 }
 
 impl PartialEq for RuntimeOperationLedger {

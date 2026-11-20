@@ -24,7 +24,7 @@ pub use crate::observation_projection::labels::{
 use crate::observation_projection::labels::{
     durability_attempt_kind_text, durability_attempt_outcome_text,
 };
-use crate::observation_projection::{Output, project};
+use crate::observation_projection::project;
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
 pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 22;
@@ -38,7 +38,7 @@ pub(crate) mod files;
 mod model_failure;
 pub(crate) use model_failure::ModelFailureDiagnostic;
 mod observation;
-#[cfg(all(test, feature = "otel"))]
+#[cfg(test)]
 mod projection_tests;
 pub(crate) mod recorded_usage;
 
@@ -1416,7 +1416,7 @@ fn write_observation(
     transaction: &rusqlite::Transaction<'_>,
     observation: &TelemetryObservation,
 ) -> Result<(), rusqlite::Error> {
-    if let Some(row) = project(observation, Output::Rows).row {
+    if let Some(row) = project(observation) {
         observation::write(transaction, row)?;
     }
     Ok(())
@@ -1546,6 +1546,7 @@ pub(crate) const WRITER_BATCH_DRAIN: usize = BATCH_DRAIN;
     clippy::used_underscore_binding,
     reason = "unit tests"
 )]
+#[path = "telemetry_store/projected_usage_tests.rs"]
 mod projected_usage;
 
 #[cfg(test)]

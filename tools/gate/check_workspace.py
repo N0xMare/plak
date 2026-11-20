@@ -269,21 +269,6 @@ FORBIDDEN_NEUTRAL_DEPENDENCY_PARTS = (
     "xai",
 )
 
-# Retired packages that must never come back under any path.
-RETIRED_PACKAGES = ("plak", "plak-compose-host", "plakous-responses-dialect")
-
-# OpenRouter is a Responses dialect, never a peer protocol stack.
-RETIRED_SOURCES = {
-    "plakous-openrouter": (
-        "src/attempt.rs",
-        "src/client.rs",
-        "src/project.rs",
-        "src/request.rs",
-        "src/response.rs",
-        "src/stream.rs",
-    ),
-}
-
 # Capture the whole predicate, including nested parentheses; classify it below.
 _CFG_TEST_PREDICATE = r"cfg\s*\((?P<predicate>[^\]]*)\)"
 # Attribute bodies may span lines (e.g. multi-line `#[allow(..., reason = "...")]`).
@@ -424,7 +409,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ],
     ("plakd", "src/diagnostics.rs"): [
         ("var_os", (("string", "PLAK_LOG"),)),
-        ("var_os", (("string", "OTEL_EXPORTER_OTLP_ENDPOINT"),)),
     ],
     ("plakd", "src/commands/doctor.rs"): [
         ("var_os", (("string", "PATH"),)),
@@ -5608,10 +5592,14 @@ def validate_commit_trace_edge(manifests: dict[str, dict[str, Any]]) -> list[str
     if (
         dependency.get("optional") is not True
         or dependency.get("features", []) != []
-        or tree.get("features", {}).get("commit-trace")
-        != ["dep:plakous-store", "plakous-store/commit-trace"]
+        or sorted(tree.get("features", {}).get("test-support", []))
+        != [
+            "dep:plakous-store",
+            "plakous-recursive-subagents/test-support",
+            "plakous-store/test-support",
+        ]
     ):
-        return ["tree store's plakous-store edge must be optional and commit-trace-only"]
+        return ["tree store's plakous-store edge must be optional and test-support-only"]
     return []
 
 
@@ -6057,13 +6045,6 @@ def _check_workspace() -> int:
     supported_fixture_paths = {f"tests/fixtures/{fixture_name}" for fixture_name in fixtures}
     errors.extend(validate_workspace_excludes(root_workspace, supported_fixture_paths))
 
-    for retired in RETIRED_PACKAGES:
-        if retired in packages:
-            errors.append(f"{retired} must not exist")
-        for name, package in packages.items():
-            if retired in package.dependency_names():
-                errors.append(f"{name} must not depend on {retired}")
-
     errors.extend(validate_tracked_hygiene(ROOT))
     errors.extend(validate_local_production_lints(workspace_manifest_tables(workspace)))
     errors.extend(validate_commit_trace_edge(workspace_manifest_tables(workspace)))
@@ -6211,8 +6192,6 @@ def _check_workspace() -> int:
         if set(app_features) != {
             "default",
             "maintainer",
-            "otel",
-            "test-hooks",
             "test-support",
             "git-cli",
             "jj",
@@ -6231,7 +6210,7 @@ def _check_workspace() -> int:
             "web",
         }:
             errors.append(
-                "plakd may expose only default, maintainer, otel, test-hooks, test-support, web "
+                "plakd may expose only default, maintainer, test-support, web "
                 "workspace backend features and product build capabilities"
             )
         elif set(app_features.get("default", [])) != {
@@ -6253,24 +6232,19 @@ def _check_workspace() -> int:
             errors.append("plakd default must enable git-cli and all product capabilities")
         elif app_features.get("maintainer") != ["jj", "web"]:
             errors.append("plakd maintainer feature must enable jj and web")
-        elif "dep:opentelemetry" not in app_features.get("otel", []):
-            errors.append("plakd otel feature must enable the opentelemetry dependency")
-        elif sorted(app_features.get("test-hooks", [])) != [
+        elif sorted(app_features.get("test-support", [])) != [
             "dep:plakous-offline-crash-harness",
             "plakous-hosted/test-support",
-            "plakous-recursive-subagents-store/commit-trace",
-            "plakous/test-clock",
-            "plakous/test-hooks",
+            "plakous-recursive-subagents-store/test-support",
+            "plakous/test-support",
         ]:
             # The offline model selector must reach the binary through exactly
             # the harness and hosted injection edges. The third edge traces
             # the existing tree-store dependency without a harness -> tree ->
-            # recursive-subagents -> harness dev-dependency cycle. test-clock
-            # and test-hooks are the facade seams that edge enables.
+            # recursive-subagents -> harness dev-dependency cycle.
             errors.append(
-                "plakd test-hooks must enable exactly the offline crash harness, "
-                "plakous/test-clock, plakous/test-hooks, "
-                "plakous-hosted/test-support and tree-store/commit-trace"
+                "plakd test-support must enable exactly the offline crash harness "
+                "and the facade, hosted and tree-store test-support features"
             )
 
     host = packages.get("plakous-hosted")
@@ -6342,7 +6316,6 @@ def _check_workspace() -> int:
             "default",
             "full",
             "gateway",
-            "test-clock",
             "mcp",
             "codex",
             "grok",
@@ -6351,7 +6324,7 @@ def _check_workspace() -> int:
             "openrouter",
             "sessions-sqlite",
             "store",
-            "test-hooks",
+            "test-support",
             "web-fetch",
             "xai",
         }
@@ -6430,15 +6403,6 @@ def _check_workspace() -> int:
         for forbidden in ("tracing", "opentelemetry"):
             if package_tree_linked(neutral, forbidden):
                 errors.append(f"{neutral} must not link {forbidden}")
-    if package_tree_linked("plakd", "opentelemetry"):
-        default_plak = cargo_tree_output(
-            ROOT,
-            ["-p", "plakd", "--locked", "-e", "normal"],
-            errors,
-        )
-        if default_plak is not None and "opentelemetry" in default_plak:
-            errors.append("default plakd build must not link opentelemetry")
-
     adjacency: dict[str, set[str]] = {
         name: package.dependency_names() & set(packages) for name, package in packages.items()
     }
@@ -6458,17 +6422,6 @@ def _check_workspace() -> int:
     complete: set[str] = set()
     for package_name in adjacency:
         visit(package_name, set(), complete)
-
-    for package_name, retired_sources in RETIRED_SOURCES.items():
-        package = packages.get(package_name)
-        if package is None:
-            continue
-        for relative in retired_sources:
-            if (ROOT / package.relative(relative)).exists():
-                errors.append(
-                    f"{package.relative(relative)}: OpenRouter peer Responses stack is forbidden; "
-                    "use plakous-responses hosts"
-                )
 
     if errors:
         for error in errors:

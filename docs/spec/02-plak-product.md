@@ -3124,9 +3124,8 @@ diagnostics. They use product wording or the facade’s redaction-safe display,
 each followed by its repair (§3.3), never debug output or embedded details.
 
 Diagnostics are environment-gated rather than flag-gated. `PLAK_LOG` installs
-the content-free boundary-span log, and `OTEL_EXPORTER_OTLP_ENDPOINT`
-configures the OTLP exporter in a build that has the `otel` feature. A
-`maintainer` build always writes that log, at `info` when `PLAK_LOG` is unset.
+the content-free boundary-span log. A `maintainer` build always writes that
+log, at `info` when `PLAK_LOG` is unset.
 Installing the log creates the private home and `logs/` only. It does not create
 `state/<key>/`.
 
@@ -7905,19 +7904,11 @@ operator may still want.
 `PLAK_LOG` installs a content-free boundary-span log at `~/.plak/logs/plak.log`
 -- JSONL command, store open and resume, attach and rebind, provider
 request — carrying ids, counts, lengths, and durations, never prompt or
-tool content. The bounded `plak.model` failure event is described above. A build
-with the `otel` feature adds an OTLP exporter for the **finished** observations
-as spans with deterministic ids; started kinds stay in SQLite, and exit does
-not synchronously flush.
+tool content. The bounded `plak.model` failure event is described above.
 The live `turn` span contains only diagnostic timings, status and counts,
-never usage tokens or cost. Projector-owned product `TurnUsage` observations
-are exported as instantaneous `turn_usage` spans, parented to the turn span,
-with session, branch and turn ids but no invented run or agent identity. Their
-span id is keyed by the turn id, including when recovery, abandonment or a
-tree projection applies the terminal without any live diagnostics. Model and
-compaction spans retain their own diagnostic operation usage; they are not
-turn totals. The hosted extra-exporter port accepts both agent diagnostics and
-product observations without moving product vocabulary into the agent sink.
+never usage tokens or cost. Product turn totals come from the SQLite
+projection, not the diagnostic operation usage of individual model and
+compaction calls.
 
 ### 7.2 Usage and allowances
 

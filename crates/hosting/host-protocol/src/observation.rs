@@ -14,6 +14,7 @@ use crate::views::{
 mod vocabulary;
 mod class;
 #[cfg(test)]
+#[path = "observation/samples_tests.rs"]
 mod samples;
 #[cfg(test)]
 pub(crate) use samples::class_samples;

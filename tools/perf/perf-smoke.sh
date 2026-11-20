@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline performance smoke over the scripted model (`plakd/test-hooks`).
+# Offline performance smoke over the scripted model (`plakd/test-support`).
 #
 # Six product measurements, four worker timings and long-lineage samples,
 # each emitted as a JSON line carrying a
@@ -74,7 +74,7 @@ chmod 600 "$root/home/config.toml" "$root/home/agents/lead.toml"
 
 echo "== building the release scripted binary and sidecars ==" >&2
 # Same entry point as the product build, including the linkage check.
-tools/build/build-plakd.sh --release --features plakd/test-hooks,plakd/test-support >&2
+tools/build/build-plakd.sh --release --features plakd/test-support >&2
 # Keep the measured executable and its matching workers together, away from
 # later builds that could replace a configured target's artifacts.
 cargo_target_dir="${CARGO_TARGET_DIR:-$PWD/target}"

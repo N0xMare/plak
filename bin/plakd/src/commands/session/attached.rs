@@ -242,7 +242,7 @@ fn build_attached_host_config(
     let custody = services.custody()?;
     let cwd = record.workspace_root.clone();
     // The repository gate's offline model; see `crate::test_hooks`.
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     if let Some(selection) = crate::test_hooks::selected() {
         let state_roots = services.state_roots_on(
             paths,

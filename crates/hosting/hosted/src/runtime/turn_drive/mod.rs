@@ -208,8 +208,10 @@ pub(in crate::runtime) async fn drive_recovered_turn<
     driven
 }
 #[cfg(test)]
+#[path = "quit_trace_tests.rs"]
 pub(in crate::runtime) mod quit_trace;
 #[cfg(test)]
+#[path = "wake_trace_tests.rs"]
 pub(in crate::runtime) mod wake_trace;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {

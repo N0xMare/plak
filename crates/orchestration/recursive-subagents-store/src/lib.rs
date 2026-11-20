@@ -26,9 +26,9 @@ pub mod database;
 mod image;
 pub mod rows;
 pub mod store;
-#[cfg(feature = "commit-trace")]
+#[cfg(feature = "test-support")]
 pub mod test_support;
-#[cfg(not(feature = "commit-trace"))]
+#[cfg(not(feature = "test-support"))]
 mod test_support {
     pub(super) const fn schema(base: crate::admission::Schema) -> crate::admission::Schema {
         base

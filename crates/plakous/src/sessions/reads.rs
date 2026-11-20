@@ -157,26 +157,6 @@ impl AgentSessions {
 }
 
 impl AgentSessions {
-    /// Whether the head at this locator is an unfinished turn awaiting recovery.
-    ///
-    /// A caller that has just been refused for a stale locator uses this to say
-    /// something true about why. A head that is simply further along is one
-    /// thing; a head that is an unfinished turn this release cannot close is
-    /// another, and it will still be one after any amount of waiting. Saying so
-    /// is the difference between a caller that stops and a caller that spends
-    /// its whole patience on a refusal that cannot change.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same typed lookup, integrity or backend failure an open
-    /// would.
-    pub async fn head_requires_recovery(
-        &self,
-        head: SessionLocator,
-    ) -> Result<bool, AgentSessionsError> {
-        Ok(self.load_exact(head).await?.recovery_report().is_some())
-    }
-
     /// Whether the head at this locator is quiescent: no turn or session
     /// workflow is unsettled on it.
     ///

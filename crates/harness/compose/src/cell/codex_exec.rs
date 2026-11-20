@@ -41,9 +41,3 @@ pub use types::{
     MAX_RUNTIME_RESPONSE_BYTES, MAX_SOURCE_BYTES, MAX_TOOL_DESCRIPTION_BYTES, MAX_TOOL_NAME_BYTES,
     MAX_TOOL_SCHEMA_BYTES, MAX_YIELD_TIME_MS, V1_NESTED_TOOL_NAMES,
 };
-
-/// Pinned upstream release tag whose protocol this DTO layer translates.
-pub const CODEX_RELEASE: &str = "rust-v0.153.3";
-
-/// Exact upstream commit used by the code-mode protocol dependency.
-pub const CODEX_COMMIT: &str = "b1a547b1f73ce86205d9222ac19cff334b3b7a2e";

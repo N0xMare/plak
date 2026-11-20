@@ -36,6 +36,7 @@ pub mod skills;
 pub mod vocabulary;
 
 #[cfg(test)]
+#[path = "surface_fixture_tests.rs"]
 mod surface_fixture;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "test fixture")]

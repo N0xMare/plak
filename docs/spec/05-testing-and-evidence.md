@@ -63,14 +63,14 @@ runtime snapshot for list/load. Inactive refusals remain non-gating. An ignored,
 elapsed inspection time. Differential preflight
 contracts separate new live regressions from pre-existing failures, inactive
 rows and external availability. A real-binary same-key upgrade with an explicit
-`test-hooks`-only `PLAK_TEST_BINDING_CUT_IMAGE` metadata revision cut must print
+`test-support`-only `PLAK_TEST_BINDING_CUT_IMAGE` metadata revision cut must print
 the refused rows and leave its source serving. Production builds ignore that
 hook. The daemon-job upgrade still checks the ordinary exact-reopen probes and
 preserves processes. These contracts do not qualify credentials, runner or
 future remote-catalog availability.
 
 Same-key step-drain cases use the same isolated real-binary homes. A
-`test-hooks`-only `PLAK_TEST_FORCE_HOST_UPGRADE` bypasses the current-image no-op
+`test-support`-only `PLAK_TEST_FORCE_HOST_UPGRADE` bypasses the current-image no-op
 so the ordinary same-key planned handoff is exercised; it bypasses no image,
 source-instance, custody or binding check. Production ignores it. Durability
 cases cover zero-bound interruption/continuation, finite natural completion,
@@ -117,10 +117,10 @@ compaction data is boxed internally so its optional semantic facts do not grow
 the live driver's stack frame; nested settlement keeps its normal stack budget.
 
 Settled host-upgrade regressions use isolated real-binary homes and a
-test-hooks-only `PLAK_TEST_STATE_KEY` override to make producer and destination
+test-support-only `PLAK_TEST_STATE_KEY` override to make producer and destination
 keys differ without changing the v12 carrier. Production builds ignore that
 variable. `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION` alters only the destination
-capability probe under test-hooks to pin changed-triple foreground refusal;
+capability probe under test-support to pin changed-triple foreground refusal;
 production ignores it and the source runner triple is untouched. The install profile owns `host_skeleton::upgrade::`, excluded
 from offline: named state and paused queue round trips, source reopen refusal,
 recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
@@ -134,7 +134,7 @@ queues, destination-only receipt recovery and normal post-import readiness.
 Paired command mismatch must refuse before drain with an operator remedy; the
 configuration builder must not read a same-spelled host checkout. None authorizes prompt
 replay or proves live-tree/job migration. Dedicated input-limit/import-refusal
-hooks model unknown/smaller windows and unsupported readers only in test-hooks
+hooks model unknown/smaller windows and unsupported readers only in test-support
 probes. Runner qualification regressions independently pin the closed read
 allowlist, refusals for every other request/frame class, unchanged unpaired
 inspection and absence of persisted runner mutations after qualification.
@@ -156,7 +156,7 @@ not be redirected by Aborted history. A non-crash preparation-error hook proves
 immediate withdrawal while source authority remains held. Mixed local/remote
 outage fixtures keep remote successors withheld, admit a ready local successor,
 then restore the runner and require receipt completion without host restart,
-duplicate import or inference. Upgrade hooks live only in the test-hooks
+duplicate import or inference. Upgrade hooks live only in the test-support
 composition root; no release build reads their environment inputs.
 
 Retry regressions keep a real foreground call open on an already-Ready remote
@@ -780,7 +780,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 | --- | --- |
 | `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate `feature-check/` target directory. Full also audits the publication evidence allowlist (chapter 06 §6.5) |
 | `builds` | Link plakd in its release resolution and with maintainer features, build the two sidecars, and verify their linkage against the maintainer binary; rustc warnings denied |
-| `variants` | Reduced plakd resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): the default product is headless; api is default minus `codex`, `grok` and `claude`; minimal is exactly `openrouter` and `git-cli`; the admission fixture is default minus `images`, `python` and `mcp`. Helper builds (a full `test-hooks` fixture writer, the MCP fake server, a reduced `test-hooks`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plakd processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected at full/RC, not in the integration batch gate |
+| `variants` | Reduced plakd resolutions, each built (lib and bins) and clippy-linted with warnings denied (a linker warning that holds only Apple ld's compact-unwind size note for a large debug binary, which rustc forwards through the `linker_messages` lint outside `-D warnings`, is not a failure; any other linker line is), using the gate's target and rustflags, then smoke-checked (version, doctor build features, CLI/JSONL feature refusals): the default product is headless; api is default minus `codex`, `grok` and `claude`; minimal is exactly `openrouter` and `git-cli`; the admission fixture is default minus `images`, `python` and `mcp`. Helper builds (a full `test-support` fixture writer, the MCP fake server, a reduced `test-support`+`maintainer` reader) drive the feature-admission and JSONL contracts, the api and minimal route checks, the canonical Python/MCP store read/refusal and byte-preservation fixtures, and the image diagnostic. Those plakd processes use a private `HOME` and `XDG_*` directories inside the fixture temporary directory and accept the codex compatibility notice on stdin, so the fixture never reads or writes the operator subscription store. Selected at full/RC, not in the integration batch gate |
 | `rustdoc` | Workspace all-features documentation with warnings denied |
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
 | `standalone` | Clippy each of the publish-plan crates alone in its default resolution (`--lib --bins`, `--bins` for the binary-only Python worker, or `--all-targets` for supported packages), warnings denied, in a dedicated target directory. Check portable wasm32 libraries there (chapter 06 §7.5), and package the staged publication cohort with `cargo package --locked --offline --no-verify` in a separate `package-lite` target. When archive verification is selected on a repository tree it already supplies the packaging witness, so no separate package-lite run is needed |
@@ -1008,7 +1008,7 @@ exports all four for the test process.
 | Offline tests | `just steps tests-parallel,tests-durability,tests-serial,tests-install` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
-| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-hooks` |
+| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of seven profiles (facade none, `full`, `composition`, `claude` and `openai`; hosted none and all-features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per selected `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
@@ -1507,7 +1507,7 @@ after that crate's compiled review and advances with elapsed monotonic time.
 The facade enables `plakous-xai/test-clock` and `plakous-anthropic/test-clock`
 only as dev-dependencies. The feature checker proves that neither provider's
 default build enables its own `test-clock` and that no `plakd` build (default,
-`maintainer`, `test-hooks`, or `test-hooks` with `maintainer`) resolves either
+`maintainer`, `test-support`, or `test-support` with `maintainer`) resolves either
 one; an offline test build that unifies the facade's dev-dependencies does.
 SuperGrok id-token expiry is checked against that clock, not the JWT
 library's wall clock. Product commands inject a fixed clock (spec 02 §8.6)
@@ -1517,7 +1517,7 @@ otherwise independently renewing OpenAI future-dates Claude or xAI consent
 against those managers' deterministic clocks.
 The real gateway service fixture selects those review-relative clocks for
 its subscription admin operations with `PLAK_TEST_GATEWAY_REVIEW_CLOCK=1`
-in the test-hooks process; provider replies are injected before any upstream
+in the test-support process; provider replies are injected before any upstream
 dial.
 
 **A fixture process never outlives its test by more than its bound.** A test
@@ -1742,7 +1742,7 @@ The `tests/` tree holds the consumer packages:
 | Path | Package | Role |
 | --- | --- | --- |
 | `tests/support/plakous-test-support` | `plakous-test-support` | Scripted models and tools, scenario and barrier helpers, conformance drivers. Reachable only through the public `plakous-model` and `plakous-tools` contracts; never reexported by the facade |
-| `tests/harnesses/offline-crash` | `plakous-offline-crash-harness` | Public-facade SQLite `SIGKILL`/reopen matrices, and the declarative offline model script (section 2.6). Depends on `plakous` with `sessions-sqlite` and exports narrow loopback builders to `plakd` as a dev-dependency, and as a `test-hooks`-only optional dependency. Its finalization-debt fixture uses `plakous-agent` and `plakous-store` to commit a real debt-only checkpoint for hosted recovery tests without exposing checkpoint internals to the hosted crate |
+| `tests/harnesses/offline-crash` | `plakous-offline-crash-harness` | Public-facade SQLite `SIGKILL`/reopen matrices, and the declarative offline model script (section 2.6). Depends on `plakous` with `sessions-sqlite` and exports narrow loopback builders to `plakd` as a dev-dependency, and as a `test-support`-only optional dependency. Its finalization-debt fixture uses `plakous-agent` and `plakous-store` to commit a real debt-only checkpoint for hosted recovery tests without exposing checkpoint internals to the hosted crate |
 | `tests/fixtures/{agent,facade,model,tools}-consumer` | not workspace members for the first two | The supported external workflow inventories driven by `check_public_compile.py` |
 | `tests/fixtures/authority-negative` | — | The 28 compile-fail pins |
 | `tests/performance/baselines` | — | The perf-smoke seed rows and the allocation probe |
@@ -1922,7 +1922,7 @@ a module prefix. Store's
 `fixture.rs` is a library-test helper, not an integration target; the nested
 SQLite conformance module retains its independently inventoried tests.
 Product modules gate telemetry on `test-support`, offline end-to-end tests
-on `test-hooks`, and reload rehearsal on `maintainer`; store gates its
+on `test-support`, and reload rehearsal on `maintainer`; store gates its
 SQLite module on `sqlite`. Default-feature `cargo test` compiles the ungated
 modules, and the all-features gate includes every module. Relative fixture
 includes follow the module location; manifest-root fixture paths do not move.
@@ -2043,7 +2043,7 @@ no redispatch or abandonment), but remains explicitly ignored under
 `JSONL-APPROVAL-RESUME` until the production reopen hang is fixed. Its durability
 predicate enrolls the cell when it is enabled.
 The workspace/all-features prerequisite builds the
-test-hooks product and matching sidecars; the fixture uses `PLAK_TEST_BINARY`
+test-support product and matching sidecars; the fixture uses `PLAK_TEST_BINARY`
 from that build's Cargo artifact records, or an explicit executable override.
 All five are excluded from the parallel lane. Fixture-owned hosts are reaped
 on failure.
@@ -2411,7 +2411,7 @@ Explicit qualification/reference OAuth/API wire captures belong in gitignored
 §3.5 is the safe collection and sanitization procedure. Do not commit raw
 traffic or treat a local structural capture as live provider qualification.
 
-plakd's private exchange observer is available in `maintainer` or `test-hooks`
+plakd's private exchange observer is available in `maintainer` or `test-support`
 builds. Maintainer builds select fresh private capture automatically in the
 product home, including private scratch homes inside the checkout. Selection
 is lazy: the first inference or read-only model lookup exchange creates and logs
@@ -2550,10 +2550,10 @@ stream against a deterministic in-process model. There is no provider, no creden
 and no network.
 
 The model is selected by two environment variables the binary reads only under
-the `test-hooks` feature: `PLAK_TEST_MODEL`, which must name
+the `test-support` feature: `PLAK_TEST_MODEL`, which must name
 `offline-loopback-v1`, and `PLAK_TEST_SCRIPT`, which names a JSON document.
 With that exact offline model selected, capacity is injected as Available,
-independent of the fixture volume. A `test-hooks` build also accepts the exact
+independent of the fixture volume. A `test-support` build also accepts the exact
 `PLAK_TEST_STORAGE_CAPACITY=available|warning|refused` override, independently
 of model selection, so binary doctor tests never depend on actual free space.
 An invalid override refuses admission. Ordinary builds use the filesystem
@@ -2602,7 +2602,7 @@ subagents = true
 ```
 
 Launch a binary built with
-the default product features plus `test-hooks`, with `PLAK_TEST_MODEL=offline-loopback-v1` and
+the default product features plus `test-support`, with `PLAK_TEST_MODEL=offline-loopback-v1` and
 `PLAK_TEST_SCRIPT=/absolute/path/to/script.json`; a minimal script is
 `{"version":1,"repeat_last_step":true,"steps":[{"output":{"text":"offline answer"}}]}`.
 `PLAK_TEST_EVIDENCE=/absolute/path/to/evidence.jsonl` is optional. Isolated
@@ -2613,7 +2613,7 @@ unready-route/unsupported-effort refusals without changing the home default.
 These hooks and the scripted runtime factory are absent from the shipped
 default build; they add no persisted or wire vocabulary.
 
-Two explicit client-test producers also require `test-hooks`. The setup-only
+Two explicit client-test producers also require `test-support`. The setup-only
 `plakd --test-seed-abandoned-open without-submission|with-submission` command
 requires the offline selector/script, an explicit absolute `PLAK_HOME`, an
 unused runtime store and an isolated workspace. It settles `seed terminal`
@@ -2736,10 +2736,10 @@ the already-sent input frame before consuming another host event; release with
 through the actual busy-false observation before checking stdin. This
 deterministic scheduling hook never applies without the offline model.
 A script's `identity_hash_delay_ms` makes every process that reads it (the
-offline model selected, `test-hooks` only) hold each hash of the build's image
+offline model selected, `test-support` only) hold each hash of the build's image
 that long, so a test can make a manifest-less build's identity slow without
 loading the machine; it changes no identity and no bound.
-`PLAK_TEST_RUN_DEADLINE`, only with `test-hooks`, names a file. While that file
+`PLAK_TEST_RUN_DEADLINE`, only with `test-support`, names a file. While that file
 exists and a `--timeout` is configured, a non-interactive run is at its
 whole-run deadline: the same timeout bound and interrupt as an elapsed
 `--timeout`, including stopping owned processes. Without a configured deadline
@@ -2749,20 +2749,20 @@ failed child on the JSONL face, then sends another root prompt.
 It does not require root refusal while a child locator is unavailable: child recovery
 inspection and root admission are separate facts.
 
-`test-hooks` is not in `default`, is never enabled in a release build, and
+`test-support` is not in `default`, is never enabled in a release build, and
 carries exactly three edges: the harness that holds the model,
 `plakous-hosted/test-support`, the scripted factory registration, and
-`plakous-recursive-subagents-store/commit-trace`, tracing the already-present
+`plakous-recursive-subagents-store/test-support`, tracing the already-present
 tree-store dependency. The direct tree feature avoids a harness-to-tree normal
 edge cycling through the subagents crate's harness dev-dependency. All are
 pinned — `check_workspace.py` refuses any other contents for the feature, and
 `check_features.py` requires the forwarding edge, without which the scripted
 factory registration is unavailable. `check_features.py` also refuses a default
 or maintainer `plakd` that enables `plakous-hosted/test-support`; only
-`test-hooks` may. The sealed production construction port
+`test-support` may. The sealed production construction port
 remains available without test support. The default and release binaries
 contain none of the selector's strings. The harness also carries
-`plakous-http/fault-injection` (§2.8) unconditionally, so `test-hooks` is the
+`plakous-http/fault-injection` (§2.8) unconditionally, so `test-support` is the
 one product edge to transport fault injection as well.
 
 Hosted ledger equivalence tests `root_ledger_prechange_bytes`,
@@ -2834,7 +2834,7 @@ publication on demand and in the full tier;
 `_pilots` and `_early_relaunches` check the special fixtures and initial cuts.
 Their twin pilots compare final operation ids/states and tagged counter bytes,
 alpha-renaming only independently minted root UUIDs after checking their binding.
-A test-hooks build accepts `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048,
+A test-support build accepts `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048,
 default 2048) and `PLAK_TEST_LEDGER_HEADROOM_LIMIT` (default 3584) to trigger
 retirement/refusal in small serial fixtures. These change no persisted bounds.
 A pilot whose shape's live assertion fails preserves its fixture with the
@@ -3793,15 +3793,15 @@ second relaunch performs no inference or publication.
 The current scripted provider emits only local ToolCall blocks; a
 provider-hosted ToolCall final requires an additional output/owner dial.
 
-**Commit trace contract.** The repository-only `plakous-store/commit-trace`
+**Commit trace contract.** The repository-only `plakous-store/test-support`
 feature explicitly forwards `plakous-agent/test-hooks` for its read-only,
 content-free checkpoint classification bridge. The classifier is absent from
 default production builds. The
-feature is enabled by the offline-crash harness; `plakd/test-hooks` directly
-forwards the tree store's own `commit-trace` feature and carries four pinned
+feature is enabled by the offline-crash harness; `plakd/test-support` directly
+forwards the tree store's own `test-support` feature and carries four pinned
 edges; default and maintainer/release product builds contain no commit tracer.
 plakd's harness dev-dependency also enables runtime-only tracing in test builds
-without `test-hooks`; a sweep must require `cfg(feature="test-hooks")` to trace
+without `test-support`; a sweep must require `cfg(feature="test-support")` to trace
 the product and tree as well. The
 runtime, product and tree install it on their writable WAL connections, not the
 telemetry database or read-only inspection connections. Runtime installation is
@@ -3966,7 +3966,7 @@ successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
 The recipe builds only `plakd`, `plakous-js-runtime` and `plakous-py-worker` in
-the release profile, with the product's default features plus `plakd/test-hooks`.
+the release profile, with the product's default features plus `plakd/test-support`.
 It copies `plakd` and its matching JavaScript/Python workers aside before
 measuring. Product and
 worker timings measure optimized binaries; the row profile is `release`.
@@ -4049,7 +4049,7 @@ with `PLAKOUS_PERF_HOST_ID` set; ordinary gates never enforce its timings.
 
 ### 2.8 Transport fault injection
 
-With `test-hooks`, `PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS` (an unsigned integer
+With `test-support`, `PLAK_TEST_RELOAD_PROBE_LAUNCH_DELAY_MS` (an unsigned integer
 in milliseconds) delays the installed-build reload probe before launching the
 executable, outside the child's response budget. It models OS executable-launch
 latency without changing production timeouts or probe answers. Ordinary builds
@@ -4059,7 +4059,7 @@ do not read it.
 the network or a provider would, at the one place every provider's traffic
 passes: `Client::execute`. The classifiers above the transport then see the same
 `Failure` or response head they see in the field, so a fault exercises today's
-kernels rather than a parallel path. A `plakd` built with `test-hooks` reads a
+kernels rather than a parallel path. A `plakd` built with `test-support` reads a
 plan from `PLAK_TEST_FAULTS` once per process and applies it to every client,
 against real providers or local peers alike; tests attach a plan to one client
 with `Client::with_faults`.
@@ -4203,7 +4203,7 @@ workflows (including compaction) and turns carrying `x-should-retry: false`.
 Product tests pin the `plakd run` retry line, the JSONL `retry` frame and
 (in `plakous-hosted`)
 that a discarded response's sealed reasoning never reaches the session. `check_features.py` requires that a default `plakd`
-never enables the feature and that `test-hooks` does.
+never enables the feature and that `test-support` does.
 
 A host plan may set `hop=gateway` or `hop=upstream`. An absent hop means
 `upstream`. `hop=upstream` applies to the provider client; in a plakd deployment
@@ -4214,10 +4214,9 @@ upstream rule, so a plan that cannot reach a provider from this process is
 never silently fault-free. `PLAK_TEST_GATEWAY` selects that placement: unset
 or `in-process` is local (used by library fixtures), `external` refuses upstream rules, and any other
 value fails every exchange the way a mistyped plan does. `provider` is not a
-placement. A test-hooks `plakd gateway serve` reads
-`FaultPlan::parse_provider` through `Client::with_provider_faults_from_env`,
-which is today's grammar: no `hop`, `relay-lost`, `gateway-refusal`,
-`retry-after-ms`, `credential-status` or `supported`.
+placement. The separate provider-plan parser, `FaultPlan::parse_provider`,
+accepts no `hop`, `relay-lost`, `gateway-refusal`, `retry-after-ms`,
+`credential-status` or `supported`.
 
 `hop=gateway` matches the host and path of the exchange it is applied to.
 A relaying client applies its plan's hop-1 rules to every relay request it
@@ -4461,7 +4460,7 @@ keeps service discovery distinct from explicit workspace admission.
 
 `an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists`
 is a serial wall-clock fixture: it runs both hosts with a five-second window
-through the `test-hooks` override `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole
+through the `test-support` override `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole
 second from 1 through 300; anything else keeps 300 s, and other builds do not
 read it), waits that window for real, checks ordinary host persistence beside
 it, and owns both hosts' cleanup. A detached host start forwards the override;
@@ -4993,7 +4992,7 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   fetches itself. A route row that plakd refuses at bind or admission scores
   `refused`, which is the product's statement rather than a failure.
 
-All three build `plakd` with `test-hooks`; only the smoke and headless soak
+All three build `plakd` with `test-support`; only the smoke and headless soak
 inject faults. Each result is
 `pass`, `harness` (plakd's failure, including a dead end: a failed turn after
 which a plain follow-up also fails), `model` (a completed turn whose work
@@ -5177,7 +5176,7 @@ other segment must still be complete, so the cell is not relabeled `harness`
 solely because the killed process left that exchange pending. A report whose
 capture is incomplete names the scenarios, segments and exchanges at fault.
 
-The `test-hooks` capture is required and stops at its 8 MiB response cap; a
+The `test-support` capture is required and stops at its 8 MiB response cap; a
 response that outgrows it aborts its exchange in the body
 (`Failed(ResponseBody, Internal)`). An exchange whose capture stopped exactly
 there (HTTP 200, `recorded_bytes` 8,388,608 and equal to the body,
@@ -5236,7 +5235,7 @@ what daily use does not exercise (routes the operator does not run, crash and
 kill timings, overflow, jobs) rather than repeating long soaks that daily use
 covers.
 
-A qualification run binds one tuple. The `test-hooks` `plakd` named in the
+A qualification run binds one tuple. The `test-support` `plakd` named in the
 report was built from a clean checkout of one source revision, including the
 live drivers. The report names that revision, the host, and the target triple
 (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`). It names the SHA-256
@@ -6477,7 +6476,7 @@ interoperability lane, not a gate or a substitute for owner-account/provider
 qualification. Digest-pinned Compose images run Keycloak 26, strict
 node-oidc-provider RFC 8707 resource indicators, an official-SDK streamable
 HTTP MCP fixture, and pinned Playwright browser approval with disposable test
-users. plakd is built with `test-hooks` and driven by `PLAK_TEST_SCRIPT` in an
+users. plakd is built with `test-support` and driven by `PLAK_TEST_SCRIPT` in an
 isolated private home with a separate Unix-socket gateway per case; no
 operator subscription store is inherited. The JSON
 report binds the binary hash and source revision to per-scenario CLI/session
@@ -6485,7 +6484,7 @@ log assertions and independent AS dispatch/MCP audience and effect witnesses.
 Browser URLs, authorization codes, device codes, tokens and client secrets
 are not retained in the report. Teardown removes the home, test grants and
 Compose resources, including on failure. A state-key carry scenario requires
-an explicitly supplied second test-hooks binary with a different state key;
+an explicitly supplied second test-support binary with a different state key;
 missing evidence is reported as blocked, never a pass. Resource-matching
 expectations are external JSON data so the lane can follow the owning MCP
 specification without changing its fixture logic. A separate loopback origin

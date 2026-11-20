@@ -794,14 +794,6 @@ impl Client {
         }
         self
     }
-
-    /// Installs the gateway service's provider-hop plan. A test-hooks
-    /// `plakd gateway serve` uses this on its upstream client so that plan
-    /// keeps today's grammar.
-    #[must_use]
-    pub fn with_provider_faults_from_env(self) -> Self {
-        self.with_faults(fault::provider_from_env())
-    }
 }
 
 /// A bounded response head and pull-driven body.

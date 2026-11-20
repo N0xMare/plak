@@ -13,6 +13,7 @@
 mod canonical;
 mod grok;
 #[cfg(all(test, unix))]
+#[path = "jobs_tests.rs"]
 mod jobs;
 mod output;
 mod pack;
@@ -22,6 +23,7 @@ mod placement_hold_tests;
 mod program;
 mod projection;
 #[cfg(all(test, unix))]
+#[path = "quiet_poll_tests.rs"]
 mod quiet_poll;
 mod session;
 mod text;

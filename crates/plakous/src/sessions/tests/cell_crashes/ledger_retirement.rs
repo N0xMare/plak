@@ -455,7 +455,7 @@ async fn ledger_retirement_5000_real_leaf_calls_in_closed_cells_sqlite() -> Test
     closed_cells_case(true, CELLS).await
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[tokio::test]
 async fn ledger_retirement_low_threshold_closed_cells_reopen_both_stores() -> TestResult {
     if std::env::var_os("PLAK_TEST_LEDGER_LOW_CHILD").is_none() {
@@ -482,7 +482,7 @@ async fn ledger_retirement_low_threshold_closed_cells_reopen_both_stores() -> Te
     closed_cells_case(true, 4).await
 }
 
-#[cfg(feature = "test-hooks")]
+#[cfg(feature = "test-support")]
 #[tokio::test]
 async fn ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds() -> TestResult {
     if std::env::var_os("PLAK_TEST_LEDGER_REFUSAL_CHILD").is_none() {

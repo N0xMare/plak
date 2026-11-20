@@ -354,4 +354,5 @@ impl SessionRecordStore for SqliteSessionStore {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]
+#[path = "session_records/contract_tests.rs"]
 mod contract;

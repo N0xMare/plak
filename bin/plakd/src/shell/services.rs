@@ -9,17 +9,9 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::home::paths::PlakPaths;
-use plakous_hosted::agent::ExtraTelemetrySink;
 
 use crate::CliResult;
 use crate::shell::home::Home;
-
-/// How this build makes its extra telemetry sink, when it has one.
-///
-/// A plain `fn` pointer, not a value: constructing the OTLP bridge opens a
-/// socket and spawns an exporter thread, and most verbs (`--version`,
-/// `help`, `config *`, `doctor`) never emit telemetry at all.
-pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink>>;
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
@@ -39,8 +31,6 @@ pub(crate) struct Services {
     clock: Arc<dyn plakous::model::Clock>,
     home: Home,
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,
-    telemetry_sink_factory: Option<TelemetrySinkFactory>,
-    extra_telemetry_sink: OnceLock<Option<Arc<dyn ExtraTelemetrySink>>>,
     /// The process's one job bound, shared by every state root it opens.
     jobs: plakous_hosted::agent::ProcessJobs,
     /// Credential custody, latched by the first resolution and shared by
@@ -140,8 +130,6 @@ impl Services {
             clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths, state),
             session_records: OnceLock::new(),
-            telemetry_sink_factory: None,
-            extra_telemetry_sink: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
         }
@@ -160,16 +148,8 @@ impl Services {
             .map_or(0, |store| store.opened_connections())
     }
 
-    /// Resolves the home once and captures how this build makes its extra
-    /// telemetry sink.
-    ///
-    /// The composition root passes the sink explicitly to every state root.
-    /// It is built on first use rather than at CLI
-    /// entry, so a command that opens no state root pays nothing for it.
-    pub(crate) fn from_env(
-        telemetry_sink_factory: Option<TelemetrySinkFactory>,
-        launch: Option<&std::path::Path>,
-    ) -> Self {
+    /// Resolves the product home once.
+    pub(crate) fn from_env(launch: Option<&std::path::Path>) -> Self {
         let home = Home::from_env(launch);
         if let Some(paths) = home.paths_if_resolved() {
             crate::build_identity::install_identity_cache_home(paths.home().to_path_buf());
@@ -187,8 +167,6 @@ impl Services {
             clock: Arc::new(plakous::model::SystemClock),
             home,
             session_records: OnceLock::new(),
-            telemetry_sink_factory,
-            extra_telemetry_sink: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
         }
@@ -208,10 +186,6 @@ impl Clone for Services {
         if let Some(store) = self.session_records.get() {
             let _ = session_records.set(Arc::clone(store));
         }
-        let extra_telemetry_sink = OnceLock::new();
-        if let Some(sink) = self.extra_telemetry_sink.get() {
-            let _ = extra_telemetry_sink.set(sink.clone());
-        }
         Self {
             terminals: self.terminals.clone(),
             runner_ownership: self.runner_ownership.clone(),
@@ -222,8 +196,6 @@ impl Clone for Services {
             clock: Arc::clone(&self.clock),
             home: self.home.clone(),
             session_records,
-            telemetry_sink_factory: self.telemetry_sink_factory,
-            extra_telemetry_sink,
             jobs: self.jobs.clone(),
             custody: Arc::clone(&self.custody),
         }
@@ -343,14 +315,6 @@ impl Services {
         self.home.paths()
     }
 
-    /// The extra telemetry sink for a state root opened by this process,
-    /// built on the first call and shared by every later one.
-    pub(crate) fn extra_telemetry_sink(&self) -> Option<Arc<dyn ExtraTelemetrySink>> {
-        self.extra_telemetry_sink
-            .get_or_init(|| self.telemetry_sink_factory.and_then(|build| build()))
-            .clone()
-    }
-
     pub(crate) fn session_records(
         &self,
     ) -> CliResult<Arc<dyn crate::store::session_records::SessionRecordStore>> {
@@ -365,8 +329,7 @@ impl Services {
             .clone())
     }
 
-    /// Product state roots of the launch directory's context, with the
-    /// extra sink attached.
+    /// Product state roots of the launch directory's context.
     pub(crate) fn state_roots(&self) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
         self.state_roots_for(self.paths()?)
     }
@@ -381,7 +344,7 @@ impl Services {
         let roots = crate::commands::support::product_state_roots_from(
             context,
             self.home.state()?.to_path_buf(),
-            self.extra_telemetry_sink(),
+            None,
             self.session_records()?,
             &self.jobs,
             &self.custody()?,

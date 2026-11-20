@@ -2,7 +2,7 @@
 //!
 //! The uncut driver records exact rows and feed inputs before any cut runs.
 //! Freezing the sequence keeps host observation clocks identical across cuts.
-#![cfg(all(feature = "commit-trace", feature = "test-support", unix))]
+#![cfg(all(feature = "test-support", unix))]
 #![allow(clippy::unwrap_used, reason = "deterministic offline law fixtures")]
 
 use std::collections::BTreeSet;

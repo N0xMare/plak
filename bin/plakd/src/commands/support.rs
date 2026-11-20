@@ -35,8 +35,7 @@ pub const HOST_WORKER_JOIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// project's templates reach the session's genesis roster; everything else
 /// is the context's home.
 ///
-/// The binary owns the OTLP bridge. The composition root builds the sink once and
-/// passes it to every state root it opens, under the process's one job
+/// State roots open under the process's one job
 /// bound (`jobs`). This construction also captures HOME once to supply the
 /// conventional product-state protection paths. `custody` is the process's
 /// latched credential custody, never re-read from `context`.
@@ -133,7 +132,7 @@ pub fn config_set_failure(message: String) -> CliFailure {
 /// The gate's offline model has no catalog row; under the test hook it is the
 /// model the scripted lifecycle binds.
 pub(crate) fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
-    #[cfg(feature = "test-hooks")]
+    #[cfg(feature = "test-support")]
     if model == crate::test_hooks::SELECTOR && crate::test_hooks::selected().is_some() {
         return Ok(());
     }

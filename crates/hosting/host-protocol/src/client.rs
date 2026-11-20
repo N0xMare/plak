@@ -201,15 +201,6 @@ pub enum SendError<P: ProtocolExtension> {
 }
 
 impl<P: ProtocolExtension> SendError<P> {
-    /// The intent that was sent.
-    #[must_use]
-    pub fn into_intent(self) -> SessionIntent<P> {
-        match self {
-            Self::Refused(refused) => refused.into_action(),
-            Self::RefusedForRole { intent, .. } | Self::OutcomeUnknown { intent, .. } => intent,
-        }
-    }
-
     /// The host's refusal of `intent`, as the mailbox's.
     fn of(refusal: RequestRefusal, intent: SessionIntent<P>) -> Self {
         Self::Refused(match refusal {

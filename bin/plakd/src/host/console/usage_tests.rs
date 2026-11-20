@@ -1,6 +1,6 @@
 //! Host-level allowance failures preserve the independent retained usage view.
 
-#![cfg(feature = "test-hooks")]
+#![cfg(feature = "test-support")]
 
 use super::*;
 use crate::gateway::test_service::GatewayFixture;

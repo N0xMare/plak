@@ -1100,7 +1100,7 @@ fn invoke(
     let mut stdin = Cursor::new(input);
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let services = Services::from_env(None, shell::home::launch_directory().as_deref());
+    let services = Services::from_env(shell::home::launch_directory().as_deref());
     let result = execute_command(
         command,
         &services,

@@ -89,6 +89,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 }
 
 #[cfg(test)]
+#[path = "preparation/hooks_tests.rs"]
 mod hooks;
 #[cfg(test)]
 pub(in crate::runtime::host_loop) use hooks::Hooks;

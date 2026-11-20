@@ -23,9 +23,13 @@ large-file-ceiling = 0
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 
 [features]
-test-clock = ["plakous-openai?/test-clock", "plakous-openrouter?/test-clock"]
-# Deadline overrides for the repository gate. Not in `default` or `full`.
-test-hooks = ["plakous-cell?/test-hooks", "plakous-agent/test-hooks"]
+# Test clocks and deadline overrides; never in `default` or `full`.
+test-support = [
+    "plakous-openai?/test-support",
+    "plakous-openrouter?/test-clock",
+    "plakous-cell?/test-hooks",
+    "plakous-agent/test-hooks",
+]
 default = []
 # Provider protocol crates on the facade are provider internals (not TUI surface).
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
@@ -132,7 +136,7 @@ futures-core.workspace = true
 futures-util.workspace = true
 plakous-anthropic = { workspace = true, features = ["test-clock"] }
 plakous-http = { workspace = true, features = ["fault-injection"] }
-plakous-openai = { workspace = true, features = ["test-support", "test-clock"] }
+plakous-openai = { workspace = true, features = ["native-auth", "test-support"] }
 plakous-test-support = { path = "../../tests/support/plakous-test-support" }
 plakous-xai = { workspace = true, features = ["test-clock"] }
 rusqlite.workspace = true

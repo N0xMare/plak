@@ -190,24 +190,6 @@ impl PrivateCredentialStore {
         Ok(Some(restored))
     }
 
-    /// Consumes and verifies a claim while deliberately leaving it quarantined.
-    ///
-    /// Dropping a claim has the same durable safety property; this explicit
-    /// operation additionally proves that the exact Unknown record still exists.
-    ///
-    /// # Errors
-    ///
-    /// Rejects stale, wrong, or cross-store claims and unsafe storage.
-    pub fn leave_refresh_quarantined(
-        &self,
-        claim: StartedRefreshClaim,
-    ) -> Result<CredentialFence, PrivateStoreError> {
-        self.require_claim_scope(&claim.core)?;
-        let result = self.verify_claimed_http_quarantine_under_lock(&claim.core);
-        drop(claim);
-        result
-    }
-
     /// Persists refresh intent before provider-owned code sends a request.
     ///
     /// This is an exclusive generation-advancing CAS claim. The record moves

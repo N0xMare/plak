@@ -147,12 +147,6 @@ pub(crate) enum GatewayCommand {
 }
 
 pub(crate) const NATIVE_RUN_MAX_PROMPT_BYTES: usize = 64 * 1024;
-#[allow(
-    dead_code,
-    reason = "documented input ceiling reserved for future budget checks"
-)]
-const NATIVE_RUN_INPUT_UPPER_BOUND_TOTAL: u64 = 1024 * 1024;
-
 #[derive(Clone, Debug, PartialEq)]
 #[allow(
     clippy::enum_variant_names,

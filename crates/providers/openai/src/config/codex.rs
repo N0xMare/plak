@@ -20,15 +20,6 @@ impl CodexSubscriptionRouteConfig {
         Routability::NonRoutable
     }
 
-    /// Attempts to resolve without an injected OAuth source and fails closed.
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`ConfigError::SubscriptionOAuthRequired`].
-    pub fn resolve_disabled(&self) -> Result<OpenAiRoute, ConfigError> {
-        Err(ConfigError::SubscriptionOAuthRequired)
-    }
-
     /// Resolves an official-origin route with an account-bound Codex authority.
     ///
     /// # Errors

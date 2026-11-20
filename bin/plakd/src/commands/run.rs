@@ -106,7 +106,7 @@ impl PlakousApplication {
         // The repository gate's offline model; see `crate::test_hooks`. A
         // scripted lifecycle binds the requested tuple without a credential
         // refresh or a catalog row, because there is no provider to admit.
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         if crate::test_hooks::selected().is_some() {
             let cwd = self.workspace()?;
             let mut session = product_sessions::SessionRecord::new(cwd);
@@ -347,7 +347,7 @@ impl PlakousApplication {
         )?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // resume reopens the persisted record on the scripted binding.
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         if crate::test_hooks::selected().is_some() {
             return self.run_hosted(
                 config,
@@ -542,7 +542,7 @@ impl PlakousApplication {
         // The repository gate's offline model; see `crate::test_hooks`. The
         // one-shot face builds its own configuration, so it carries the hook
         // itself rather than reaching through the attached builder.
-        #[cfg(feature = "test-hooks")]
+        #[cfg(feature = "test-support")]
         if let Some(selection) = crate::test_hooks::selected() {
             let cwd = self.workspace()?;
             let config = selection.map_err(CliFailure::new).and_then(|selection| {

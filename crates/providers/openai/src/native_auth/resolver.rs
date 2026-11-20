@@ -108,7 +108,7 @@ impl CodexModelResolver {
 
     /// Replaces the clock used for catalog provenance and resolved-target expiry.
     #[must_use]
-    #[cfg(any(test, feature = "test-clock"))]
+    #[cfg(any(test, feature = "test-support"))]
     #[doc(hidden)]
     pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
