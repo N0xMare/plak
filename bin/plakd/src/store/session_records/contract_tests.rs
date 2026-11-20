@@ -1286,6 +1286,100 @@ fn host_controls_are_intents_not_session_flags() {
 }
 
 #[test]
+fn stop_retires_the_handoff_preparation_pause_but_not_an_independent_pause() {
+    use plakous_hosted::runtime::{ResumeAfterLoss, operator_attention::AttentionReason};
+    use plakous_hosted::sessions::projector::{
+        HostPauseCause, RootContinuation, RootContinuationCause, RootContinuationDecision,
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+    for independent in [false, true] {
+        each_store(|store, workspace| {
+            let mut session = record(workspace);
+            store.save(&mut session).unwrap();
+            let anchor = RootStopAnchor::Turn {
+                turn_id: "handoff-turn".to_owned(),
+            };
+            let interrupt = |cause| {
+                RootLossIntent::Interrupt(RootInterrupt {
+                    anchor: anchor.clone(),
+                    cause,
+                })
+            };
+            store
+                .write_root_loss(&session.id, interrupt(RootInterruptCause::Handoff))
+                .unwrap();
+            let command_id = "plak:resume-loss:root:4a0d0b5e21107cb62ab0fa624fa49fd7".to_owned();
+            store
+                .write_root_loss(
+                    &session.id,
+                    RootLossIntent::Continuation(RootContinuation {
+                        anchor: anchor.clone(),
+                        cause: RootContinuationCause::Handoff,
+                        host_generation: 1,
+                        round: 1,
+                        decided_at_ms: 1,
+                        decision: RootContinuationDecision::NewTurn {
+                            command_id: command_id.clone(),
+                            withdrawn: Vec::new(),
+                        },
+                    }),
+                )
+                .unwrap();
+            if independent {
+                store
+                    .write_host_controls(
+                        &session.id,
+                        false,
+                        Some(HostPauseCause::WakePreflightFailed {
+                            reason: "does not fit".to_owned(),
+                        }),
+                    )
+                    .unwrap();
+            }
+            store
+                .write_host_controls(
+                    &session.id,
+                    false,
+                    Some(HostPauseCause::UnrecordedRefusal {
+                        reason: format!("root continuation could not be prepared: {command_id}"),
+                    }),
+                )
+                .unwrap();
+            assert!(store.load_wake_controls(&session.id).unwrap().paused);
+            assert_eq!(
+                store
+                    .load_attention_reason(&session.id, ResumeAfterLoss::Hold)
+                    .unwrap(),
+                Some(AttentionReason::RootContinuationPreparationFailed)
+            );
+
+            store
+                .write_root_loss(&session.id, interrupt(RootInterruptCause::Stopped))
+                .unwrap();
+            assert_eq!(
+                store.load_wake_controls(&session.id).unwrap().paused,
+                independent
+            );
+            assert_eq!(
+                store
+                    .load_attention_reason(&session.id, ResumeAfterLoss::Hold)
+                    .unwrap(),
+                independent.then_some(AttentionReason::WakePreflightFailed)
+            );
+            let reopened = store.load(&session.id).unwrap();
+            assert_eq!(
+                reopened.queue_drain_state,
+                if independent {
+                    crate::store::sessions::QueueDrainState::RestoredPaused
+                } else {
+                    crate::store::sessions::QueueDrainState::LiveAutoDrain
+                }
+            );
+        });
+    }
+}
+
+#[test]
 fn restored_loads_pause_outstanding_work_without_publishing_the_projection() {
     use crate::store::sessions::QueueDrainState;
 

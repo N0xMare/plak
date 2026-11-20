@@ -465,6 +465,7 @@ impl SessionViews {
         let intent = intents
             .pause_causes
             .iter()
+            .filter(|intent| self.active_host_pause(intents, &intent.value))
             .map(|intent| {
                 (
                     (intent.anchor, 1_u8, intent.ordinal),
@@ -476,5 +477,21 @@ impl SessionViews {
             .chain(intent)
             .max_by_key(|(key, _)| *key)
             .and_then(|(_, cause)| cause)
+    }
+
+    pub(super) fn active_host_pause(
+        &self,
+        intents: &ProductIntents,
+        cause: &HostPauseCause,
+    ) -> bool {
+        cause
+            .root_preparation_refusal_command()
+            .is_none_or(|command| {
+                !self.state.deliveries.contains_key(command)
+                    && intents
+                        .latest_root_interrupt()
+                        .and_then(|interrupt| intents.loss_continuation(&interrupt.value))
+                        == Some(command)
+            })
     }
 }

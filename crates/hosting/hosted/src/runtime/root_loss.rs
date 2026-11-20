@@ -33,8 +33,6 @@ use crate::sessions::projector::{
 /// Prefix of the root's continuation command identity after a loss.
 pub(crate) const ROOT_LOSS_RESUME_PREFIX: &str = "plak:resume-loss:root:";
 
-const PREPARATION_REFUSAL: &str = "root continuation could not be prepared: ";
-
 /// The host instruction a root continuation after a loss runs.
 pub(crate) const ROOT_LOSS_RESUME_TEXT: &str = "Your previous turn was interrupted because the host running it lost authority or stopped. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions. Some tool effects may be uncertain; verify them before repeating any action.";
 
@@ -107,32 +105,13 @@ fn command_id(session_id: &str, identity: &str) -> String {
 }
 
 fn latest_loss(intents: &ProductIntents) -> Option<Loss> {
-    let latest = intents
-        .root_interrupts
-        .iter()
-        .max_by_key(|intent| (intent.anchor, intent.ordinal))?;
+    let latest = intents.latest_root_interrupt()?;
     let cause = match latest.value.cause {
         RootInterruptCause::OwnerLost => RootContinuationCause::OwnerLost,
         RootInterruptCause::Handoff => RootContinuationCause::Handoff,
         RootInterruptCause::Operator | RootInterruptCause::Stopped => return None,
     };
-    let decided = intents
-        .root_continuations
-        .iter()
-        .filter(|decision| {
-            decision.value.anchor == latest.value.anchor && decision.value.cause == cause
-        })
-        .filter(|decision| {
-            matches!(
-                decision.value.decision,
-                RootContinuationDecision::NewTurn { .. }
-            )
-        })
-        .max_by_key(|decision| (decision.value.round, decision.anchor, decision.ordinal))
-        .and_then(|decision| match &decision.value.decision {
-            RootContinuationDecision::NewTurn { command_id, .. } => Some(command_id.clone()),
-            _ => None,
-        });
+    let decided = intents.loss_continuation(&latest.value).map(str::to_owned);
     Some(Loss {
         identity: format!("{}:{}", latest.anchor, latest.ordinal),
         cursor: latest.anchor,
@@ -228,27 +207,13 @@ pub(super) fn record_preparation_refusal(
     let Some(RootLossState::Pending(command)) = state(&loss, &intents, &views) else {
         return Ok(());
     };
-    let cause = HostPauseCause::UnrecordedRefusal {
-        reason: format!("{PREPARATION_REFUSAL}{command}"),
-    };
+    let cause = HostPauseCause::root_preparation_refusal(&command);
     if views.pause_cause(&intents) == Some(PauseCause::Host(cause.clone())) {
         return Ok(());
     }
     store
         .write_host_controls(&session.id, false, Some(cause))
         .map_err(|error| error.to_string())
-}
-
-/// A refusal notice matters only while the same decision is still pending.
-pub(super) fn preparation_refusal_is_pending(
-    reason: &str,
-    intents: &ProductIntents,
-    views: &SessionViews,
-) -> Option<bool> {
-    let command = reason.strip_prefix(PREPARATION_REFUSAL)?;
-    Some(latest_loss(intents).is_some_and(|loss| {
-        loss.decided.as_deref() == Some(command) && !views.state.deliveries.contains_key(command)
-    }))
 }
 
 /// Where this open's scan for a lost root turn starts; `None` for a

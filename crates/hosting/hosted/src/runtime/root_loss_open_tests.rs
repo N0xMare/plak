@@ -12,8 +12,8 @@ use plakous_offline_crash_harness::script::{SCRIPT_VERSION, ScriptPlan};
 use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
 use crate::runtime::recover_tests::{script, scripted_host_with, turn_completed, wait_for};
 use crate::runtime::root_loss::{
-    ROOT_LOSS_RESUME_TEXT, RootLossState, is_root_loss_command, record_root_consent,
-    root_loss_state,
+    ROOT_LOSS_RESUME_TEXT, RootLossState, is_root_loss_command, record_preparation_refusal,
+    record_root_consent, root_loss_state,
 };
 use crate::runtime::spawn_host_worker;
 use crate::runtime::test_kit::TestExtension;
@@ -159,8 +159,45 @@ fn lease_fence_holds_then_reuses_consent_after_a_crash_before_dispatch() {
     let command = record_root_consent(lost.store.as_ref(), &record)
         .unwrap()
         .unwrap();
+    assert_preparation_refusal(&lost, &record);
     run_pending_continuation(root.path(), &lost, &command);
     assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
+    assert_eq!(attention_reason(&lost), None);
+}
+
+#[test]
+fn a_handoff_preparation_refusal_clears_on_admission() {
+    let root = tempfile::tempdir().unwrap();
+    let lost =
+        release_a_running_root_turn(root.path(), Release::Handoff, Cancel::Prompt, |config| {
+            config
+        });
+    let record = lost.store.load(&lost.id).unwrap();
+    let command = record_root_consent(lost.store.as_ref(), &record)
+        .unwrap()
+        .unwrap();
+    assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
+    assert_preparation_refusal(&lost, &record);
+    run_pending_continuation(root.path(), &lost, &command);
+    assert!(!lost.store.load_wake_controls(&lost.id).unwrap().paused);
+    assert_eq!(attention_reason(&lost), None);
+}
+
+fn assert_preparation_refusal(lost: &Lost, record: &crate::sessions::SessionRecord) {
+    record_preparation_refusal(lost.store.as_ref(), record).unwrap();
+    assert!(lost.store.load_wake_controls(&lost.id).unwrap().paused);
+    assert_eq!(
+        attention_reason(lost),
+        Some(
+            crate::runtime::operator_attention::AttentionReason::RootContinuationPreparationFailed
+        )
+    );
+}
+
+fn attention_reason(lost: &Lost) -> Option<crate::runtime::operator_attention::AttentionReason> {
+    lost.store
+        .load_attention_reason(&lost.id, crate::runtime::ResumeAfterLoss::Hold)
+        .unwrap()
 }
 
 #[test]

@@ -115,7 +115,9 @@ impl Applier<'_> {
                                 (RootStopAnchor::Turn { turn_id: lost },
                                  Some(PauseCause::RecoveryRequired { turn_id })) if lost == turn_id
                             ) && !self.intents.pause_causes.iter().any(|cause| {
-                                cause.anchor >= paused.anchor && cause.anchor < self.seq()
+                                cause.anchor >= paused.anchor
+                                    && cause.anchor < self.seq()
+                                    && self.views.active_host_pause(self.intents, &cause.value)
                             })
                         })
                 });

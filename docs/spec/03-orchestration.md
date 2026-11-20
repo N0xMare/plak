@@ -4164,7 +4164,15 @@ prepared; the turn is a host instruction (a host-wake submission under that
 id) to continue the current task from the last completed step and to check
 uncertain tool effects before repeating anything, never a replay. Accepting
 that continuation supersedes the recovery pause for its exact lost turn,
-not a later pause. A pending decision whose submission exists is that queued item, which
+not a later independent pause. A preparation refusal for a pending decision,
+including a handoff, uses the existing unrecorded-refusal intent with the
+reserved reason prefix `root continuation could not be prepared: ` followed
+by the exact command id. This diagnostic pauses ordinary wakes and can raise
+operator attention only while that command is the pending decision. It does
+not veto clearing the lost turn's recovery pause when its command is accepted.
+Admission, rejection, Stop, or replacing the decision retires the diagnostic
+without replacing an independent pause.
+A pending decision whose submission exists is that queued item, which
 a reopen keeps rather than discarding like an unadmitted wake (once the
 decision is no longer pending the reopen discards it like any other); one
 whose submission does not exist yet is prepared again under the same id; a
@@ -4174,7 +4182,9 @@ decision whose command was accepted is no longer pending.
 turn unfinished; after it, the turn's abandonment terminal, and the product
 store holds nothing new. The loss: before it the terminal is in the feed after
 the scan's start; after it, one root interrupt and nothing else. Consent: one
-decision and nothing else. The preparation: the submission with its queue
+decision and nothing else. A preparation refusal records only the optional
+pause diagnostic; it leaves the pending decision and its dispatch authority
+unchanged. Successful preparation records the submission with its queue
 item, in one record write. The dispatch: the runtime's command record under
 the decision's id. A crash between any two leaves rows the next open reads the
 same way, and the command id is the same, so the root's continuation runs

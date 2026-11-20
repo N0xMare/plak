@@ -241,6 +241,29 @@ pub enum HostPauseCause {
     },
 }
 
+impl HostPauseCause {
+    // A reserved prefix in the existing refusal encoding. This is a
+    // diagnostic for a command, not a new pause or continuation record kind.
+    const ROOT_PREPARATION_REFUSAL: &str = "root continuation could not be prepared: ";
+
+    pub(crate) fn root_preparation_refusal(command: &str) -> Self {
+        Self::UnrecordedRefusal {
+            reason: format!("{}{command}", Self::ROOT_PREPARATION_REFUSAL),
+        }
+    }
+
+    /// The root continuation named by a preparation-refusal diagnostic.
+    #[must_use]
+    pub fn root_preparation_refusal_command(&self) -> Option<&str> {
+        match self {
+            Self::UnrecordedRefusal { reason } => reason
+                .strip_prefix(Self::ROOT_PREPARATION_REFUSAL)
+                .filter(|command| crate::runtime::is_root_loss_command(command)),
+            Self::WakePreflightFailed { .. } => None,
+        }
+    }
+}
+
 /// What a root interrupt cause or continuation decision follows: the exact
 /// root turn that stopped, or, when no turn was admitted, the unfacted
 /// command it settles.
@@ -474,6 +497,34 @@ pub struct ProductIntents {
 }
 
 impl ProductIntents {
+    pub(crate) fn latest_root_interrupt(&self) -> Option<&AnchoredIntent<RootInterrupt>> {
+        self.root_interrupts
+            .iter()
+            .max_by_key(|intent| (intent.anchor, intent.ordinal))
+    }
+
+    /// Highest decision round for this owner loss or handoff.
+    pub(crate) fn loss_continuation(&self, interrupt: &RootInterrupt) -> Option<&str> {
+        let cause = match interrupt.cause {
+            RootInterruptCause::OwnerLost => RootContinuationCause::OwnerLost,
+            RootInterruptCause::Handoff => RootContinuationCause::Handoff,
+            RootInterruptCause::Operator | RootInterruptCause::Stopped => return None,
+        };
+        self.root_continuations
+            .iter()
+            .filter(|decision| {
+                decision.value.anchor == interrupt.anchor && decision.value.cause == cause
+            })
+            .filter_map(|decision| match &decision.value.decision {
+                RootContinuationDecision::NewTurn { command_id, .. } => {
+                    Some((decision, command_id.as_str()))
+                }
+                _ => None,
+            })
+            .max_by_key(|(decision, _)| (decision.value.round, decision.anchor, decision.ordinal))
+            .map(|(_, command)| command)
+    }
+
     /// The (anchor, ordinal) of every host intent: what the next host
     /// intent at an anchor is ordered after.
     pub fn host_intent_positions(&self) -> impl Iterator<Item = (u64, u32)> + '_ {

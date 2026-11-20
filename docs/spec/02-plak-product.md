@@ -4650,8 +4650,10 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   does not ask for operator attention before admission unless preparation of
   that pending continuation was refused. The host records that refusal
   against the exact continuation and the attention notice offers Resume after
-  loss to retry, or Stop to leave the turn interrupted. The pause still
-  blocks ordinary wakes until the continuation is admitted; the continuation
+  loss to retry, or Stop to leave the turn interrupted. The refusal pauses
+  ordinary wakes only while that decision is pending, including for a planned
+  handoff. Admission or Stop retires the refusal without hiding any independent
+  pause (chapter 03 §14.1). The continuation
   submission itself is not counted as a queued wake. This part can be read
   from durable facts even while the session is dormant. It does not count
   unrelated mail to runnable nodes, and it does not decide admission or

@@ -61,12 +61,14 @@ impl ProductStore {
             session_id,
             &mut intents,
         )?;
-        if views.pause_cause(&intents).is_none()
-            && views
-                .state
-                .last_root_turn
-                .as_ref()
-                .is_some_and(|turn| plakous_hosted::runtime::is_root_loss_command(&turn.command_id))
+        if intents
+            .pause_causes
+            .iter()
+            .any(|pause| pause.value.root_preparation_refusal_command().is_some())
+            || (views.pause_cause(&intents).is_none()
+                && views.state.last_root_turn.as_ref().is_some_and(|turn| {
+                    plakous_hosted::runtime::is_root_loss_command(&turn.command_id)
+                }))
         {
             read_host_intents(
                 &tx,

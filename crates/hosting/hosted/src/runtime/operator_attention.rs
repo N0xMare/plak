@@ -7,7 +7,7 @@ use plakous_recursive_subagents::tree::{ContinuationCause, LossContinuationState
 
 use super::root_loss::{
     RootLossState, RootStanding, is_root_loss_command, owner_loss_at_pause,
-    preparation_refusal_is_pending, root_standing_from_intents,
+    root_standing_from_intents,
 };
 
 /// Why the host is waiting for input. Contains no mail or provider text.
@@ -142,11 +142,11 @@ pub fn root_reason(
         PauseCause::ContextCapacity { .. } => AttentionReason::ContextCapacity,
         PauseCause::SessionRefusal { .. } => AttentionReason::SessionRefusal,
         PauseCause::CompactionNotApplied { .. } => AttentionReason::CompactionNotApplied,
-        PauseCause::Host(HostPauseCause::UnrecordedRefusal { reason }) => {
-            match preparation_refusal_is_pending(&reason, intents, views) {
-                Some(true) => AttentionReason::RootContinuationPreparationFailed,
-                Some(false) => return None,
-                None => AttentionReason::UnrecordedRefusal,
+        PauseCause::Host(cause @ HostPauseCause::UnrecordedRefusal { .. }) => {
+            if cause.root_preparation_refusal_command().is_some() {
+                AttentionReason::RootContinuationPreparationFailed
+            } else {
+                AttentionReason::UnrecordedRefusal
             }
         }
         PauseCause::Host(HostPauseCause::WakePreflightFailed { .. }) => {
