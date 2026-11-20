@@ -1392,6 +1392,11 @@ SQL, tables, transactions, connection handles, and backend paths are not
 consumer APIs. Event sequence allocation, presentation snapshots, and transient
 fanout are not store authority. In-memory and durable backends satisfy one
 behavioral conformance law.
+`SessionStore::load_branch_metadata` reads the current head of a session and
+branch with its authenticated topology, lifecycle, durability, and recovery
+obligation request identities. It needs no lease and does not certify
+non-metadata objects for reopen (§5.2).
+
 As defense-in-depth parity, both memory and SQLite require the exact
 `checkpoint_commit_identity` on create recovery/replay and commit replay,
 returning `IdentityConflict` for a mismatch even though checkpoint integrity
@@ -2267,11 +2272,11 @@ session/branch/checkpoint locator check without loading the persisted head.
 If store-clock expiry precedes the heartbeat after suspend, inspection renews
 the same owner under the lease gate before measuring. A failed heartbeat,
 shutdown, takeover or archive remains unavailable.
-Without an attached owner, context-status loads the exact checkpoint only to
-report recovery requirements or unavailability. High-level compact
-workflows also route through the owner; exact open, resume, recover, fork, and
-rebind remain facade workflows rather than caller-assembled store
-operations. The registry is a locator only: it holds no provider loop, history,
+Without an attached owner, context-status reads the exact head's authenticated
+lifecycle metadata (§5.2) only to report recovery requirements or unavailability.
+High-level compact workflows also route through the owner; exact open, resume,
+recover, fork, and rebind remain facade workflows rather than caller-assembled
+store operations. The registry is a locator only: it holds no provider loop, history,
 planner, or checkpoint authority, and its absence is a typed unavailable
 outcome, never permission for a facade or store fallback.
 One RAII operation reservation owns release on failure or caller abandonment;
@@ -3253,9 +3258,9 @@ the acknowledged receipt horizon is applied on success. A no-op or refused prune
 may discard optional ancestor cache entries, never the head or its parent.
 
 `feed_terminals` reads terminal evidence in request order with the same typed
-per-request outcomes as `feed_terminal`. The caller identifies ordinary
-projection or automatic wake admission solely to label slow fallback reads.
-It loads each distinct checkpoint at
+per-request outcomes as `feed_terminal`. The public batch uses a neutral
+fallback label; the host identifies tree projection or automatic wake admission
+solely to label slow fallback reads. It loads each distinct checkpoint at
 most once per batch, validates every request's session and branch independently,
 and loads each branch head at most once for pruned-checkpoint fallbacks. Neither
 memoization nor fallback makes a foreign checkpoint or an absent terminal valid.
@@ -3430,7 +3435,8 @@ runtime's answer to a recorded identity (a `Duplicate` whose `feed_seq` is below
 `feed_retained_from`, or `Reclaimed`) says it was already consumed.
 `AgentSessions::head_running_turn` reads the ordinary running turn from an
 exact head without a lease; quiescent and session-workflow heads return none,
-and a stale locator refuses rather than adopting a later head.
+and a stale locator refuses rather than adopting a later head. The metadata
+read does not check for corruption in non-metadata objects (§5.2).
 
 **Reads.** The port reads `read_feed(session, after, max_records)` and
 `feed_tail(session)` without a lease, a driver or a write, also after archive

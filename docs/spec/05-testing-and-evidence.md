@@ -6475,9 +6475,10 @@ informational and never determines gate success.
 
 The opt-in `perf_store --branch-reads` scenario compares cold and warm full
 head loads with history-free lifecycle observations over a synthetic store
-with 44 root sessions and 40 child sessions. Count-based facade and actor
-tests pin zero materialized loads for the observation path; the benchmark's
-timings are informational.
+with 44 root sessions and 40 additional independent sessions sized to model
+retained child histories; it does not create a tree. Count-based facade and
+actor tests pin zero materialized loads for the observation path; the
+benchmark's timings are informational.
 
 ### Opt-In MCP OAuth Interoperability
 

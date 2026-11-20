@@ -840,7 +840,7 @@ pub(crate) async fn root_tree_pass(
     };
     let origin = match point {
         RootTreePass::WakeAdmission => FeedTerminalOrigin::WakeAdmission,
-        _ => FeedTerminalOrigin::Projection,
+        _ => FeedTerminalOrigin::TreeProjection,
     };
     project_tree_as(sessions, rows, tree_id, runtime_session, pass, origin).await
 }

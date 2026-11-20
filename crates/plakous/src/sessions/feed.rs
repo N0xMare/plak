@@ -388,7 +388,7 @@ pub struct FeedTerminalRequest {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeedTerminalOrigin {
     /// Projecting terminal evidence from the change feed.
-    Projection,
+    TreeProjection,
     /// Projecting terminal evidence before admitting an automatic wake.
     WakeAdmission,
 }
@@ -396,7 +396,7 @@ pub enum FeedTerminalOrigin {
 impl FeedTerminalOrigin {
     const fn load_label(self) -> &'static str {
         match self {
-            Self::Projection => "tree_publication_fallback",
+            Self::TreeProjection => "tree_publication_fallback",
             Self::WakeAdmission => "wake_admission",
         }
     }
@@ -791,7 +791,7 @@ impl AgentSessions {
         &self,
         requests: Vec<FeedTerminalRequest>,
     ) -> Vec<Result<FeedTerminalOutcome, AgentSessionsError>> {
-        self.feed_terminals_from(requests, FeedTerminalOrigin::Projection)
+        self.read_terminal_batch(requests, "feed_terminals_fallback")
             .await
     }
 
@@ -801,6 +801,15 @@ impl AgentSessions {
         &self,
         requests: Vec<FeedTerminalRequest>,
         origin: FeedTerminalOrigin,
+    ) -> Vec<Result<FeedTerminalOutcome, AgentSessionsError>> {
+        self.read_terminal_batch(requests, origin.load_label())
+            .await
+    }
+
+    async fn read_terminal_batch(
+        &self,
+        requests: Vec<FeedTerminalRequest>,
+        operation: &'static str,
     ) -> Vec<Result<FeedTerminalOutcome, AgentSessionsError>> {
         use std::collections::BTreeMap;
         let mut checkpoints = BTreeMap::new();
@@ -842,7 +851,7 @@ impl AgentSessions {
                                         request.session,
                                         request.branch,
                                     ),
-                                    origin.load_label(),
+                                    operation,
                                 )
                                 .await
                                 .map(|head| Arc::clone(head.checkpoint().checkpoint()))

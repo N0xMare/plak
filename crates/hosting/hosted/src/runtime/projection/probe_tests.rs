@@ -12,6 +12,15 @@ pub(in crate::runtime) enum Caller {
 
 tokio::task_local! {
     pub(in crate::runtime) static CALLER: Caller;
+    pub(super) static TREE_FEED_READS: std::cell::RefCell<Vec<(u64, plakous::sessions::feed::FeedTerminalOrigin)>>;
+}
+
+pub(crate) fn observe_tree_feed_read(
+    cursor: u64,
+    origin: plakous::sessions::feed::FeedTerminalOrigin,
+) -> Option<crate::error::ReadFailure> {
+    let _ = TREE_FEED_READS.try_with(|reads| reads.borrow_mut().push((cursor, origin)));
+    crate::error::read_faults::take(crate::agent::TREE_FEED_READ_FAILED)
 }
 
 /// Product ids with a projector store call in flight, and how many: a view

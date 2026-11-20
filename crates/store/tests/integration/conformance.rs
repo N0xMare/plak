@@ -19,8 +19,8 @@ use plakous_agent::internal::{
     ReconstructiveComponent, RecoverFork, RevalidationFact, RuntimeCanonicalState,
     RuntimeCheckpoint, RuntimeCheckpointCodec, RuntimeComponentKind, RuntimeContextState,
     RuntimeDurability, RuntimeLifecycle, RuntimeManifest, RuntimeOperationLedger, RuntimeTopology,
-    SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreError, SessionWorkflowId,
-    StoreAdmission, StoreCapacityBound, StoreInvalidReason, ToolRuntimeManifest,
+    RuntimeWorkingRoot, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreError,
+    SessionWorkflowId, StoreAdmission, StoreCapacityBound, StoreInvalidReason, ToolRuntimeManifest,
 };
 use plakous_model::{
     Actor, BranchId, CachePolicy, CanonicalHistory, CapabilitySet, CheckpointId,
@@ -1542,12 +1542,6 @@ fn working_successor(
     revision: u64,
     durability: RuntimeDurability,
 ) -> TestResult<RuntimeCheckpoint> {
-    use plakous_agent::internal::{
-        DurableOperationKind, DurableOperationRecord, DurableOperationState,
-        DurableOperationTransition, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
-        RecoveryObligationKind, RuntimeComponentKind, RuntimeLifecycle, RuntimeManifest,
-        RuntimeOperationLedger, RuntimeOperationRoot, RuntimeWorkingRoot, WorkingRecoveryPhase,
-    };
     let selector = chain.created.branch().session();
     let index = usize::try_from(revision)?;
     let quiescent = checkpoint_with_payload(
@@ -1566,12 +1560,30 @@ fn working_successor(
         false,
         &chain_payload(revision, 512),
     )?;
-    let manifest = quiescent.manifest();
-    let turn_id = id(70_801)?;
+    working_checkpoint(
+        &quiescent,
+        RuntimeWorkingRoot::Turn {
+            turn_id: id(70_801)?,
+            next_round: 1,
+        },
+    )
+}
+
+/// A fixture with one prepared provider attempt for the specified Working root.
+pub(super) fn working_checkpoint(
+    checkpoint: &RuntimeCheckpoint,
+    root: RuntimeWorkingRoot,
+) -> TestResult<RuntimeCheckpoint> {
+    use plakous_agent::internal::{
+        DurableOperationKind, DurableOperationRecord, DurableOperationState,
+        DurableOperationTransition, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
+        RecoveryObligationKind, WorkingRecoveryPhase,
+    };
+    let manifest = checkpoint.manifest();
     let operation = DurableOperationRecord::new(
         7,
         DurableOperationKind::Provider {
-            root: RuntimeOperationRoot::Turn(turn_id),
+            root: root.operation_root(),
             attempt_id: id(70_802)?,
         },
         component(RuntimeComponentKind::Operation, b"provider-request-v1")?,
@@ -1584,10 +1596,7 @@ fn working_successor(
         manifest.provenance().clone(),
         manifest.topology(),
         RuntimeLifecycle::Working {
-            root: RuntimeWorkingRoot::Turn {
-                turn_id,
-                next_round: 1,
-            },
+            root,
             recovery_phase: WorkingRecoveryPhase::DispatchEvidence,
             obligations: vec![RecoveryObligation::new(
                 7,

@@ -21,7 +21,7 @@ where
     A: FnMut(Arc<TreeFeed>) -> F,
     F: Future<Output = Result<R, TreeProjectorError>>,
 {
-    retry_tree_feed_from(sessions, feed, FeedTerminalOrigin::Projection, apply).await
+    retry_tree_feed_from(sessions, feed, FeedTerminalOrigin::TreeProjection, apply).await
 }
 
 pub(crate) async fn retry_tree_feed_from<R, A, F>(

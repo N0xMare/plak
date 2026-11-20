@@ -41,6 +41,7 @@ mod storage_outage;
 
 #[cfg(test)]
 mod stored_only_tests;
+mod wake_origin;
 
 #[test]
 fn an_intent_written_during_the_feed_read_is_joined_to_that_page() {

@@ -7,6 +7,7 @@ struct CountingReads {
     inner: MemorySessionStore,
     branches: AtomicUsize,
     last_branch_operation: Mutex<Option<&'static str>>,
+    last_metadata_operation: Mutex<Option<&'static str>>,
     checkpoints: AtomicUsize,
     receipts: AtomicUsize,
     pruned: AtomicBool,
@@ -19,6 +20,7 @@ impl CountingReads {
             inner: MemorySessionStore::new(MemoryStoreLimits::default())?,
             branches: AtomicUsize::new(0),
             last_branch_operation: Mutex::new(None),
+            last_metadata_operation: Mutex::new(None),
             checkpoints: AtomicUsize::new(0),
             receipts: AtomicUsize::new(0),
             pruned: AtomicBool::new(false),
@@ -29,6 +31,7 @@ impl CountingReads {
     fn reset(&self) {
         self.branches.store(0, Ordering::SeqCst);
         *test_lock(&self.last_branch_operation) = None;
+        *test_lock(&self.last_metadata_operation) = None;
         self.checkpoints.store(0, Ordering::SeqCst);
         self.receipts.store(0, Ordering::SeqCst);
     }
@@ -66,6 +69,10 @@ async fn head_observations_do_not_request_materialized_branches() -> TestResult 
     store.reset();
 
     assert_eq!(sessions.head_running_turn(locator).await?, None);
+    assert_eq!(
+        *test_lock(&store.last_metadata_operation),
+        Some("retention_seed")
+    );
     let report = sessions
         .context_status(ContextStatusRequest::new(
             SessionOperationId::new("context:head-metadata")?,
@@ -77,6 +84,10 @@ async fn head_observations_do_not_request_materialized_branches() -> TestResult 
         report.kind(),
         SessionContextStatusKind::Unavailable(_)
     ));
+    assert_eq!(
+        *test_lock(&store.last_metadata_operation),
+        Some("detached_context_status")
+    );
 
     let stale = SessionLocator::new(
         locator.session_id(),
@@ -171,6 +182,7 @@ impl SessionStore for CountingReads {
             store_api::RuntimeCheckpointInspection,
         ),
     > {
+        *test_lock(&self.last_metadata_operation) = Some(operation);
         self.inner.load_branch_metadata(session, operation)
     }
 
@@ -262,25 +274,30 @@ async fn terminal_batch_loads_each_checkpoint_and_pruned_head_once() -> TestResu
     assert_eq!(store.checkpoints.load(Ordering::SeqCst), 1);
     let mut older = request;
     older.checkpoint = checkpoint_of(&records[0])?;
-    store.reset();
     store.pruned.store(true, Ordering::SeqCst);
-    let outcomes = sessions
-        .feed_terminals_from(
-            vec![request, older, request, older],
-            FeedTerminalOrigin::WakeAdmission,
-        )
-        .await;
-    assert!(
-        outcomes
-            .iter()
-            .all(|outcome| matches!(outcome, Ok(FeedTerminalOutcome::Terminal(_))))
-    );
-    assert_eq!(store.checkpoints.load(Ordering::SeqCst), 2);
-    assert_eq!(store.branches.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        *test_lock(&store.last_branch_operation),
-        Some("wake_admission")
-    );
+    for (origin, operation) in [
+        (None, "feed_terminals_fallback"),
+        (
+            Some(FeedTerminalOrigin::TreeProjection),
+            "tree_publication_fallback",
+        ),
+        (Some(FeedTerminalOrigin::WakeAdmission), "wake_admission"),
+    ] {
+        store.reset();
+        let requests = vec![request, older, request, older];
+        let outcomes = match origin {
+            None => sessions.feed_terminals(requests).await,
+            Some(origin) => sessions.feed_terminals_from(requests, origin).await,
+        };
+        assert!(
+            outcomes
+                .iter()
+                .all(|outcome| matches!(outcome, Ok(FeedTerminalOutcome::Terminal(_))))
+        );
+        assert_eq!(store.checkpoints.load(Ordering::SeqCst), 2);
+        assert_eq!(store.branches.load(Ordering::SeqCst), 1);
+        assert_eq!(*test_lock(&store.last_branch_operation), Some(operation));
+    }
     Ok(())
 }
 

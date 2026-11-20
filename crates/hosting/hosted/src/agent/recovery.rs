@@ -554,7 +554,13 @@ pub(crate) async fn read_tree_feed(
     session_id: plakous::model::SessionId,
     cursor: u64,
 ) -> Result<TreeFeed, crate::error::ReadFailure> {
-    read_tree_feed_from(sessions, session_id, cursor, FeedTerminalOrigin::Projection).await
+    read_tree_feed_from(
+        sessions,
+        session_id,
+        cursor,
+        FeedTerminalOrigin::TreeProjection,
+    )
+    .await
 }
 
 pub(crate) async fn read_tree_feed_from(
@@ -569,7 +575,7 @@ pub(crate) async fn read_tree_feed_from(
     };
     let mut feed = read_tree_feed_pages(session_id, cursor, |after| async move {
         #[cfg(test)]
-        if let Some(failure) = crate::error::read_faults::take(TREE_FEED_READ_FAILED) {
+        if let Some(failure) = crate::runtime::observe_tree_feed_read(after, origin) {
             return Err(failure);
         }
         sessions
