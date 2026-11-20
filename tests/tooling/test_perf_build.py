@@ -115,7 +115,7 @@ class PerfBuildProfileTests(unittest.TestCase):
             perf_build.INTERNAL_TOPOLOGY_BUILD_PROFILES,
             {
                 **perf_build.COMPONENT_BUILD_PROFILES,
-                "attempt": ("plakous-attempt", ("--lib",), ()),
+                "attempt": ("plakous-exchange", ("--lib",), ()),
                 "responses": ("plakous-responses", ("--lib",), ()),
                 "messages": ("plakous-messages", ("--lib",), ()),
             },

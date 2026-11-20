@@ -25,9 +25,7 @@ plakous-codex-code-mode-protocol.workspace = true
 thiserror.workspace = true
 plakous-model.workspace = true
 plakous-tool-files.workspace = true
-plakous-tool-plan.workspace = true
 plakous-tool-process.workspace = true
-plakous-tool-search.workspace = true
 plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

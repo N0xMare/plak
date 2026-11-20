@@ -5,18 +5,20 @@
 //! failures to the same neutral `plakous-model` network facts, read error
 //! bodies under the same bound and cancellation race, and decline a turn retry
 //! with one precedence (spec 01 §13.1). This crate owns those pieces once.
-//! It also shares bounded catalog transport and ordered row projection.
+//! It also owns the family-agnostic attempt lifecycle, observation ledger,
+//! retry decision table and admitted await core, plus bounded catalog
+//! transport and ordered row projection.
 //! Chat and Messages share the admitted attempt and HTTP/SSE host here;
 //! their wire grammars and terminal projections remain in the family kernels.
 //!
 //! ## Not in this crate
 //!
 //! - Wire grammar, SSE framing, or family event machines
-//! - Core lifecycle decision tables and observation ledgers (`plakous-attempt`)
 //! - Provider credentials or route identities
 
 #![forbid(unsafe_code)]
 
+pub mod attempt;
 pub mod catalog;
 pub mod family;
 pub mod lookup;
@@ -25,10 +27,10 @@ pub mod side_request;
 use std::future::Future;
 use std::time::Duration;
 
-use futures_util::future::{Either, select};
-use plakous_attempt::{
+use crate::attempt::{
     FailurePoint, LongStreamReplayBudget, ProviderRefusal, ReplaySafety, TerminalFacts,
 };
+use futures_util::future::{Either, select};
 use plakous_http::{
     CancellationToken as HttpCancellationToken, ErrorKind, Failure, Phase, ResponseBody,
     TransmissionFact,

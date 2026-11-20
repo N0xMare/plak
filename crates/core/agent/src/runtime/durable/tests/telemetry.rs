@@ -551,8 +551,8 @@ async fn runtime_telemetry_turn_compaction_finished_carries_turn_context() -> Te
 fn real_measured_registry() -> TestResult<FrozenToolRegistry> {
     use plakous_tools::ToolPack as _;
     let mut registrations = plakous_tool_files::FilesToolPack::default().registrations()?;
-    registrations.extend(plakous_tool_search::SearchToolPack.registrations()?);
-    registrations.push(plakous_tool_search::SearchToolPack::list_entries_registration()?);
+    registrations.extend(plakous_tool_files::SearchToolPack.registrations()?);
+    registrations.push(plakous_tool_files::SearchToolPack::list_entries_registration()?);
     registrations.extend(Arc::new(ProcessSessionTools::posix_sh()?).registrations()?);
     // The Direct exposure lists tools by name; the configured tools must match.
     registrations.sort_by(|left, right| left.name().cmp(right.name()));

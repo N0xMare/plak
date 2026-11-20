@@ -109,9 +109,7 @@ plakous-compose.workspace = true
 plakous-mcp.workspace = true
 plakous-model.workspace = true
 plakous-tool-files.workspace = true
-plakous-tool-plan.workspace = true
 plakous-tool-process.workspace = true
-plakous-tool-search.workspace = true
 plakous-tool-web.workspace = true
 plakous-prompts.workspace = true
 plakous-openai = { workspace = true, optional = true }

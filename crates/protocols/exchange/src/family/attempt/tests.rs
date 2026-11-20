@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::super::test_wire::TestWire;
 use super::*;
-use plakous_attempt::ProviderRefusal;
+use crate::attempt::ProviderRefusal;
 type ChatAttempt = FamilyAttempt<TestWire>;
 type ChatAttemptError = FamilyAttemptError<TestWire>;
 type ChatOperationBinding = FamilyOperationBinding;
@@ -56,12 +56,12 @@ fn an_in_band_deadline_after_a_hosted_effect_never_replays()
             ProviderRefusal::from_http_status(status),
             Some(ProviderRefusal::Deadline)
         );
-        let delay = plakous_attempt::RetryPolicy::TURN.next_delay(
+        let delay = crate::attempt::RetryPolicy::TURN.next_delay(
             facts,
-            plakous_attempt::FailurePoint::MidStream,
+            crate::attempt::FailurePoint::MidStream,
             None,
             std::time::Duration::ZERO,
-            plakous_attempt::Jitter::SHORTEST,
+            crate::attempt::Jitter::SHORTEST,
         );
         assert_eq!(delay, None);
         let reason = crate::retry_decline(
@@ -73,13 +73,13 @@ fn an_in_band_deadline_after_a_hosted_effect_never_replays()
                 cause: plakous_model::ModelRetryCause::StreamInterrupted {
                     fault: plakous_model::ModelTransportFault::Timeout,
                 },
-                point: plakous_attempt::FailurePoint::MidStream,
+                point: crate::attempt::FailurePoint::MidStream,
                 facts,
                 elapsed: std::time::Duration::ZERO,
                 delay,
                 advice_beyond_budget: false,
             },
-            &mut plakous_attempt::LongStreamReplayBudget::default(),
+            &mut crate::attempt::LongStreamReplayBudget::default(),
         );
         assert_eq!(
             reason,
@@ -158,7 +158,7 @@ fn admitted_exact_acceptance_is_preserved_in_terminal_facts()
     assert_eq!(facts.provider_acceptance(), ProviderAcceptance::Accepted);
     assert_ne!(
         facts.retry_class(),
-        plakous_attempt::RetryClass::BeforeAcceptance
+        crate::attempt::RetryClass::BeforeAcceptance
     );
     Ok(())
 }

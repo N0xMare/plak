@@ -1,6 +1,6 @@
 [package]
 name = "plakous-tool-files"
-description = "One workspace-path rule and one patch preflight: bounded reads, exact-content patching, image inspection, and every provider lowering of them"
+description = "Bounded file reads, patching, image inspection, repository search, and revisioned planning tools"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,7 +17,7 @@ layer = "harness"
 class = "published-internal"
 
 [package.metadata.plakous-lint]
-too-many-lines-ceiling = 2
+too-many-lines-ceiling = 3
 large-file-ceiling = 0
 reason = "Existing lint and size debt, frozen at the counts on main; ratchet down as the splits land."
 
@@ -32,6 +32,7 @@ serde_json.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid.workspace = true
 
 [lints]
 workspace = true

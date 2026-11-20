@@ -287,7 +287,7 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, ResponsesRetrievalError> {
 ///
 /// Returns the request's failure; only an untransmitted request, a
 /// rate-limit refusal, and an opted-in wrapped-503 401 are retried, under
-/// [`plakous_attempt::RetryPolicy::TURN`].
+/// [`plakous_exchange::attempt::RetryPolicy::TURN`].
 pub async fn run_responses_image(
     client: &Client,
     transport: &dyn ResponsesImageTransport,

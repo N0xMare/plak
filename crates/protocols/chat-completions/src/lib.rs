@@ -29,7 +29,7 @@ pub use http::{
     ChatHttpAttemptService, ChatHttpErrorHead, ChatHttpHooks, ChatHttpResponseHead, ChatHttpSafety,
     PreparedChatHttpOperation,
 };
-pub use plakous_attempt::ReplaySafety;
+pub use plakous_exchange::attempt::ReplaySafety;
 pub use request::{
     CHAT_REPLAY_SCHEMA_REVISION, ChatDisabledReasoningWire, ChatOutputLimitField,
     ChatReasoningDetailReplayV1, ChatReasoningReplay, ChatReplayTargetV1, ChatRequestError,

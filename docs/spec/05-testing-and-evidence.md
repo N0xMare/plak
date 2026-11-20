@@ -4132,7 +4132,7 @@ their responses and failures name no `ConnectionUse`; stream faults ride a real
 connection, name it, and never return it to a pool.
 
 The turn retry policy (spec 01 §13.1) is pinned at three levels. Unit tests in
-`plakous-attempt` (`retry.rs`) cover every decision row, the budget,
+`plakous-exchange` (`attempt/retry.rs`) cover every decision row, the budget,
 `Retry-After` clamping and equal jitter through an injected sample. Loopback
 tests pin each family:
 

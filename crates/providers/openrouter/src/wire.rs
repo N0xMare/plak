@@ -11,7 +11,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures_util::Stream;
-use plakous_attempt::{ExchangeBreak, FailureRisk, PhysicalRequestOutcome, TerminalFacts};
+use plakous_exchange::attempt::{
+    ExchangeBreak, FailureRisk, PhysicalRequestOutcome, TerminalFacts,
+};
 use plakous_http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use plakous_model::{
     CompiledProviderConfiguration, CountObservation, Digest, DigestDomain, ModelDiagnostic,
@@ -205,7 +207,7 @@ pub(crate) fn classify_response_head<W: plakous_exchange::family::FamilyWire>(
                     .headers()
                     .get(&HeaderName::from_static("retry-after"))
                     .and_then(|value| value.to_str().ok())
-                    .and_then(plakous_attempt::retry_after_seconds),
+                    .and_then(plakous_exchange::attempt::retry_after_seconds),
             },
             outcome: post_send_status_outcome(status),
             provider_accepted: false,
@@ -245,7 +247,7 @@ impl WireProjection {
         target: Digest,
         plan: &ValidatedRequestPlan,
         operation: Digest,
-        replay: plakous_attempt::ReplaySafety,
+        replay: plakous_exchange::attempt::ReplaySafety,
         body: &[u8],
         stream: W::StreamBinding,
     ) -> plakous_exchange::family::PreparedFamilyHttpOperation<W> {
@@ -587,16 +589,16 @@ pub(crate) fn operation_error(
 /// `None` means this failure names no refusal, and the caller's own reading
 /// stands.
 pub(crate) fn named_refusal_kind(
-    refusal: Option<plakous_attempt::ProviderRefusal>,
+    refusal: Option<plakous_exchange::attempt::ProviderRefusal>,
     facts: Option<TerminalFacts>,
 ) -> Option<ModelErrorKind> {
     if facts.is_some_and(TerminalFacts::hosted_effects_possible) {
         return None;
     }
     match refusal? {
-        plakous_attempt::ProviderRefusal::RateLimit => Some(ModelErrorKind::RateLimited),
-        plakous_attempt::ProviderRefusal::Overloaded => Some(ModelErrorKind::Unavailable),
-        plakous_attempt::ProviderRefusal::Deadline => Some(ModelErrorKind::Timeout),
+        plakous_exchange::attempt::ProviderRefusal::RateLimit => Some(ModelErrorKind::RateLimited),
+        plakous_exchange::attempt::ProviderRefusal::Overloaded => Some(ModelErrorKind::Unavailable),
+        plakous_exchange::attempt::ProviderRefusal::Deadline => Some(ModelErrorKind::Timeout),
     }
 }
 

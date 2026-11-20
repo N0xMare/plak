@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use plakous_attempt::ReplaySafety;
+use plakous_exchange::attempt::ReplaySafety;
 use plakous_model::{
     CallId, Digest, EffectiveProviderConfigurationId, ModelDiagnostic, ModelId, ProtocolId,
     SelectedProviderConfigurationId, ToolCallerDisposition, ToolExecutionOwner, ToolName,

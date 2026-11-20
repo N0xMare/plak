@@ -51,7 +51,7 @@ impl PythonHarnessSdkV1 {
     ) -> Result<(), ToolRuntimeError> {
         plakous_tools::register_python_sdk_marker_into(registry)?;
         registry.register(plakous_tool_files::FilesToolPack::edit_files_registration()?)?;
-        registry.register(plakous_tool_search::SearchToolPack::list_entries_registration()?)?;
+        registry.register(plakous_tool_files::SearchToolPack::list_entries_registration()?)?;
         registry.register(process.exec_registration()?)
     }
 

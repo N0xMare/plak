@@ -1,7 +1,7 @@
 use super::*;
 use crate::wire::{JoinedStream, is_sse_content_type, post_send_status_outcome};
-use plakous_attempt::{PhysicalRequestOutcome, TerminalFacts};
 use plakous_chat_completions::ChatOperationBinding;
+use plakous_exchange::attempt::{PhysicalRequestOutcome, TerminalFacts};
 use plakous_http::StatusCode;
 use plakous_model::ModelHttpStatus;
 use plakous_model::{ModelErrorContext, ModelEvent, ModelRetryRisk, ModelRetryability};
@@ -629,7 +629,7 @@ fn admission_projection_pins_every_envelope_and_derivation_input()
 
 #[test]
 fn an_openrouter_context_overflow_body_is_classified_as_its_own_kind() {
-    use plakous_attempt::TerminalFacts;
+    use plakous_exchange::attempt::TerminalFacts;
     assert!(body_reports_context_overflow(
         br#"{"error":{"code":400,"message":"This endpoint's maximum context length is 131072 tokens. However, you requested about 140000 tokens (139000 of text input, 1000 in the output)."}}"#
     ));
@@ -652,7 +652,7 @@ fn an_openrouter_context_overflow_body_is_classified_as_its_own_kind() {
 async fn joined_error_follows_prefix_queued_by_the_same_operation_poll()
 -> Result<(), Box<dyn std::error::Error>> {
     use futures_util::StreamExt as _;
-    use plakous_attempt::{ObservationSnapshot, ProviderAcceptance, TerminalFacts};
+    use plakous_exchange::attempt::{ObservationSnapshot, ProviderAcceptance, TerminalFacts};
     use plakous_model::{AttemptId, CancellationToken, ModelCallContext, ResponseStarted};
     use std::str::FromStr as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -661,7 +661,7 @@ async fn joined_error_follows_prefix_queued_by_the_same_operation_poll()
         Digest::sha256(DigestDomain::ModelBinding, 1, &[b"target"])?,
         Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"])?,
         Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"operation"])?,
-        plakous_attempt::ReplaySafety::CostOnly,
+        plakous_exchange::attempt::ReplaySafety::CostOnly,
     );
     let prefix = ModelEvent::ResponseStarted(ResponseStarted::new(None, binding.plan()));
     let context = ModelCallContext::new(
@@ -681,7 +681,7 @@ async fn joined_error_follows_prefix_queued_by_the_same_operation_poll()
             physical_attempts: 1,
             provider_acceptance: ProviderAcceptance::Accepted,
             visible_output: false,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: false,
             logical_success: false,
         });
@@ -809,7 +809,7 @@ fn initial_policy_and_rate_limits_reject_while_other_statuses_fail_closed() {
 /// them.
 #[test]
 fn the_openrouter_chat_row_of_the_provider_failure_matrix_is_definite() {
-    use plakous_attempt::ProviderRefusal as Refusal;
+    use plakous_exchange::attempt::ProviderRefusal as Refusal;
 
     for (name, refusal, expected) in [
         (
@@ -891,11 +891,11 @@ fn an_initial_401_is_authentication_only_without_acceptance_or_hosted_effects()
 
 /// Terminal facts for an accepted exchange with a hosted effect in flight.
 fn hosted_effect_facts() -> TerminalFacts {
-    TerminalFacts::from_snapshot(plakous_attempt::ObservationSnapshot {
+    TerminalFacts::from_snapshot(plakous_exchange::attempt::ObservationSnapshot {
         physical_attempts: 1,
-        provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+        provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
         visible_output: true,
-        replay_safety: plakous_attempt::ReplaySafety::ServerEffect,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::ServerEffect,
         hosted_effects_possible: true,
         logical_success: false,
     })

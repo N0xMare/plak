@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ObservationSnapshot, ProviderAcceptance};
+use crate::attempt::{ObservationSnapshot, ProviderAcceptance};
 
 #[test]
 fn terminal_usage_labels_do_not_include_ordinary_rate_limits() {
@@ -509,7 +509,7 @@ fn retry_after_accepts_seconds_or_http_date() {
 
 #[test]
 fn failure_risk_reads_acceptance_and_hosted_effects_only() {
-    use crate::FailureRisk;
+    use crate::attempt::FailureRisk;
     assert_eq!(Facts::refused(1).build().failure_risk(), FailureRisk::None);
     for acceptance in [
         ProviderAcceptance::PossiblyAccepted,

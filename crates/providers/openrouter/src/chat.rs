@@ -5,7 +5,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use plakous_attempt::FailureRisk;
 use plakous_chat_completions::{
     ChatAttempt, ChatAttemptError, ChatAttemptProtocolError, ChatDisabledReasoningWire,
     ChatHttpHooks, ChatHttpResponseHead, ChatHttpSafety, ChatOutputLimitField,
@@ -13,6 +12,7 @@ use plakous_chat_completions::{
     ChatStreamError, ChatStreamExtensions, ChatStreamLimits, PreparedChatHttpOperation,
     PreparedChatStreamBinding, ReasoningAliasPolicy, lower_request,
 };
+use plakous_exchange::attempt::FailureRisk;
 use plakous_http::{
     Client, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
     Response, SensitiveBytes, sensitive_header_value,
@@ -1139,7 +1139,7 @@ impl ChatHttpHooks<plakous_chat_completions::ChatWire> for OpenRouterChatHooks {
         // The status and the disposition above are diagnostic text. Carry the
         // classification itself forward so nothing upstream has to parse a
         // message to learn what the provider said.
-        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status()) {
+        match plakous_exchange::attempt::ProviderRefusal::from_http_status(metadata.status()) {
             Some(refusal) => error.with_refusal(refusal),
             None => error,
         }
@@ -1189,7 +1189,7 @@ impl ChatHttpHooks<plakous_chat_completions::ChatWire> for OpenRouterChatHooks {
             Ok(status) => protocol.with_http_status(status),
             Err(_) => protocol,
         };
-        match plakous_attempt::ProviderRefusal::from_http_status(status) {
+        match plakous_exchange::attempt::ProviderRefusal::from_http_status(status) {
             Some(refusal) => protocol.with_refusal(refusal),
             None => protocol,
         }
@@ -1202,9 +1202,9 @@ impl ChatHttpHooks<plakous_chat_completions::ChatWire> for OpenRouterChatHooks {
 /// waiting. That is a definite end to this attempt, and saying so is what keeps
 /// a post-acceptance timeout from escalating as an unknown outcome. Every other
 /// transport failure leaves the question open and is deliberately unnamed here.
-fn transport_refusal(failure: HttpFailure) -> Option<plakous_attempt::ProviderRefusal> {
+fn transport_refusal(failure: HttpFailure) -> Option<plakous_exchange::attempt::ProviderRefusal> {
     matches!(failure.kind(), plakous_http::ErrorKind::DeadlineExceeded)
-        .then_some(plakous_attempt::ProviderRefusal::Deadline)
+        .then_some(plakous_exchange::attempt::ProviderRefusal::Deadline)
 }
 
 fn openrouter_request_id<'a>(

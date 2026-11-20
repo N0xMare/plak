@@ -66,7 +66,7 @@ fn descriptor() -> Result<CodexNativeLocalCodeModeDescriptorV1, TestError> {
 #[test]
 fn cell_descriptor_v3_identities_pin_every_presentation() -> Result<(), TestError> {
     use plakous_compose::{ProductJavaScriptCompositionV1, PythonPtcPresentationV1, PythonPtcV1};
-    use plakous_tool_plan::InMemoryPlanState;
+    use plakous_tool_files::InMemoryPlanState;
     use plakous_tools::PlanStateIdentity;
 
     let mut builder = ToolRegistryBuilder::default();
@@ -698,15 +698,15 @@ fn nested_text_capabilities_raise_the_raw_string_without_a_result_envelope() -> 
 #[test]
 fn compile_rejects_a_present_but_direct_only_nested_capability() -> Result<(), TestError> {
     let mut builder = ToolRegistryBuilder::default();
-    let plan_state: Arc<dyn plakous_tool_plan::PlanState> =
-        Arc::new(plakous_tool_plan::InMemoryPlanState::new());
+    let plan_state: Arc<dyn plakous_tool_files::PlanState> =
+        Arc::new(plakous_tool_files::InMemoryPlanState::new());
     let process = Arc::new(ProcessSessionTools::posix_sh()?);
     // Every pack but the process pack, whose first operation is re-registered
     // Direct-only below so the nested compile has a present but ineligible name.
     for pack in [
         Arc::new(plakous_tool_files::FilesToolPack::default()) as Arc<dyn plakous_tools::ToolPack>,
-        Arc::new(plakous_tool_search::SearchToolPack),
-        Arc::new(plakous_tool_plan::PlanToolPack::new(plan_state)),
+        Arc::new(plakous_tool_files::SearchToolPack),
+        Arc::new(plakous_tool_files::PlanToolPack::new(plan_state)),
     ] {
         register_packs(&[pack], &mut builder)?;
     }

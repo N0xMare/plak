@@ -4,12 +4,6 @@
 //! `PlanState` port, its in-memory implementation, the replacement tool, and
 //! the id-merge `todo_write` lowering.
 
-#![forbid(unsafe_code)]
-#![allow(
-    clippy::doc_markdown,
-    reason = "doc comments name exact provider tool identifiers"
-)]
-
 mod restore;
 mod text;
 

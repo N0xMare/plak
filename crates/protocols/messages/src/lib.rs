@@ -43,7 +43,7 @@ pub use http::{
     MessagesHttpHooks, MessagesHttpResponseHead, MessagesHttpSafety, MessagesRedispatchFn,
     PreparedMessagesHttpOperation,
 };
-pub use plakous_attempt::{
+pub use plakous_exchange::attempt::{
     ExchangeBreak, FailureRisk, PhysicalRequestOutcome, ProviderAcceptance, ReplaySafety,
     RetryClass, TerminalFacts,
 };

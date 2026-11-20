@@ -326,12 +326,12 @@ pub(crate) async fn codex_side_request(
     .map_err(|_| "Codex side request id could not be generated")?;
     let operation = plakous_responses::ResponsesOperationBinding::retrieval_side_request(
         body,
-        plakous_attempt::LedgerPolicy::OPENAI_STRICT,
+        plakous_exchange::attempt::LedgerPolicy::OPENAI_STRICT,
         plakous_responses::ResponsesAuthSlots::Secondary,
     )
     .map_err(|_| "Codex side request binding could not be built")?;
-    let physical = plakous_attempt::PhysicalRequestBinding::new(
-        plakous_attempt::AttemptBinding::new(operation, attempt),
+    let physical = plakous_exchange::attempt::PhysicalRequestBinding::new(
+        plakous_exchange::attempt::AttemptBinding::new(operation, attempt),
         1,
     );
     let input_liability = u64::try_from(body.len())

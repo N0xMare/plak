@@ -27,7 +27,7 @@ use plakous_model::{
     Digest, DigestDomain, EffectiveProviderConfigurationId, IntegrationClass, ToolConcurrency,
     ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
 };
-use plakous_tool_plan::InMemoryPlanState;
+use plakous_tool_files::InMemoryPlanState;
 use plakous_tool_process::ProcessSessionTools;
 use plakous_tools::{
     CodingPresentation, FrozenToolProjectionDescriptorV2, FrozenToolRegistry,

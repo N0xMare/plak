@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
-use plakous_attempt::ReplaySafety;
+use plakous_exchange::attempt::ReplaySafety;
 use plakous_model::{
     Actor, CachePolicy, CallId, ContentBlock, DataClassification, Digest, DigestDomain,
     EffectiveProviderConfigurationId, InstructionSource, ModelId, OpaqueFallback, OutputFormat,

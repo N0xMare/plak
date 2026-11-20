@@ -79,7 +79,7 @@ COMPONENT_BUILD_PROFILES = {
 # retained implementation package boundaries named by the crate-boundary handoff.
 INTERNAL_TOPOLOGY_BUILD_PROFILES = {
     **COMPONENT_BUILD_PROFILES,
-    "attempt": ("plakous-attempt", ("--lib",), ()),
+    "attempt": ("plakous-exchange", ("--lib",), ()),
     "responses": ("plakous-responses", ("--lib",), ()),
     "messages": ("plakous-messages", ("--lib",), ()),
 }

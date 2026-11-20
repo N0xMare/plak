@@ -9,7 +9,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use plakous_attempt::LedgerPolicy;
+use crate::attempt::LedgerPolicy;
 use plakous_model::{Clock, IdGenerator, ModelEvent, ModelProviderRequestId, ModelResponse};
 
 mod attempt;

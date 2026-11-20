@@ -56,7 +56,7 @@ const PRE_DISPATCH_DEADLINE: Duration = Duration::from_millis(400);
 
 #[test]
 fn pre_dispatch_deadline_excludes_even_the_shortest_jittered_retry() -> TestResult {
-    use plakous_attempt::{
+    use plakous_exchange::attempt::{
         FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
         TerminalFacts,
     };

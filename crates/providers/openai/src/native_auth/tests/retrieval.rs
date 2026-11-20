@@ -1,8 +1,8 @@
 //! The Codex search side request over loopback TLS: path, headers, permit
 //! and authorization order, and refusal before the socket.
 
-use plakous_attempt::ReplaySafety;
 use plakous_auth::subscription_limit::SubscriptionRequestClass;
+use plakous_exchange::attempt::ReplaySafety;
 use plakous_responses::{ResponsesRetrievalErrorKind, ResponsesRetrievalQuery};
 
 use super::*;

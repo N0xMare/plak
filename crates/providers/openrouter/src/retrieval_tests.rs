@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use plakous_attempt::Jitter;
+use plakous_exchange::attempt::Jitter;
 use plakous_http::Limits;
 use plakous_model::{ModelId, Timestamp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

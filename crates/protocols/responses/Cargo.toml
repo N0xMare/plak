@@ -26,7 +26,6 @@ reason = "Existing item-local protocol debt; tool starts and terminal lifecycle 
 base64.workspace = true
 futures-core.workspace = true
 httpdate.workspace = true
-plakous-attempt.workspace = true
 plakous-auth.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true

@@ -24,7 +24,6 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 
 [dependencies]
 base64.workspace = true
-plakous-attempt.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true

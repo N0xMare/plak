@@ -89,7 +89,7 @@ pub(crate) async fn lines_around_hits(
         return Ok(lines);
     };
     // A UTF-8 character cut at the cap ends past the bound the row keeps.
-    let cap = crate::STANDARD_SEARCH_MATCH_BYTES + 4;
+    let cap = super::STANDARD_SEARCH_MATCH_BYTES + 4;
     let keep = |partial: &mut Vec<u8>, bytes: &[u8]| {
         let room = cap.saturating_sub(partial.len());
         partial.extend_from_slice(&bytes[..bytes.len().min(room)]);

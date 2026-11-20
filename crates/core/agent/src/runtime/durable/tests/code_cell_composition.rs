@@ -310,7 +310,7 @@ pub(super) fn neutral_composition_registry_with_tools(
     let mut builder = ToolRegistryBuilder::default();
     // A fixed plan authority, as a product binds a durable one: the
     // process-local default would make every reopen see a different registry.
-    let plan_state = plakous_tool_plan::InMemoryPlanState::with_identity(
+    let plan_state = plakous_tool_files::InMemoryPlanState::with_identity(
         plakous_tools::PlanStateIdentity::new("test.neutral-composition.plan", 1)?,
     );
     plakous_tools::register_packs(

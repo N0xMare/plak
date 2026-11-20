@@ -1371,7 +1371,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 43)
+        self.assertEqual(len(workspace.packages), 39)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1437,16 +1437,13 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-host-protocol",
                 "plakous-hosted",
                 "plakous-tool-files",
-                "plakous-tool-plan",
                 "plakous-tool-process",
-                "plakous-tool-search",
                 "plakous-tool-web",
                 "plakous-prompts",
                 "plakous-workspace",
                 "plakous-recursive-subagents",
                 "plakous-recursive-subagents-store",
                 "plakous-anthropic",
-                "plakous-attempt",
                 "plakous-auth",
                 "plakous-chat-completions",
                 "plakous-codex-code-mode-protocol",
@@ -1463,7 +1460,6 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-responses",
                 "plakous-store",
                 "plakous-runner-protocol",
-                "plakous-runner-dial",
                 "plakous-gateway-protocol",
                 "plakous-runner",
                 "plakous-xai",
@@ -1476,7 +1472,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 43)
+        self.assertEqual(sum(map(len, actual.values())), 39)
 
     def test_the_image_leaf_has_no_workspace_dependency_and_l0_takes_it_bare(self) -> None:
         self.assertEqual(workspace_policy.validate_image_leaf(self.workspace), [])
@@ -1562,9 +1558,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-mcp",
                 "plakous-prompts",
                 "plakous-tool-files",
-                "plakous-tool-plan",
                 "plakous-tool-process",
-                "plakous-tool-search",
                 "plakous-tool-web",
             },
         )
@@ -2939,9 +2933,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-runner",
                 "plakous-runner-protocol",
                 "plakous-tool-files",
-                "plakous-tool-plan",
                 "plakous-tool-process",
-                "plakous-tool-search",
                 "plakous-tool-web",
                 "plakous-tools",
             },
@@ -3091,9 +3083,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-runner",
                 "plakous-runner-protocol",
                 "plakous-tool-files",
-                "plakous-tool-plan",
                 "plakous-tool-process",
-                "plakous-tool-search",
                 "plakous-tool-web",
                 "plakous-tools",
             },

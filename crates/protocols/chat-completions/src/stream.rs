@@ -529,7 +529,7 @@ impl ChatStreamProjector {
         }
         if let Some(error) = chunk.error.as_ref() {
             let status = in_band_error_status(error);
-            let usage_limit = plakous_attempt::value_reports_usage_limit(error);
+            let usage_limit = plakous_exchange::attempt::value_reports_usage_limit(error);
             let detail = SafeDiagnostic::new(in_band_error_summary(
                 error,
                 status,

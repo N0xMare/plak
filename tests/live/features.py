@@ -82,7 +82,7 @@ IMAGE_LIMIT = 3_932_160  # 3.75 MiB, the product's per-image cap
 
 PUBLIC_REPO = "N0xMare/plak"
 # A small tracked file that records one SHA-256 no model can guess.
-MARKER_PATH = "crates/common/runner-dial/tests/fixtures/README.md"
+MARKER_PATH = "tests/live/fetch-marker.txt"
 SHA256_HEX = re.compile(r"\b[0-9a-f]{64}\b")
 
 EVERYTHING_PACKAGE = "@modelcontextprotocol/server-everything"

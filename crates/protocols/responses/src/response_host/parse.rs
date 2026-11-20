@@ -422,15 +422,15 @@ pub(crate) fn parse_provider_error_with_canonical_type(
         .map(str::to_owned);
     let native_usage_limit = native_kind
         .as_deref()
-        .is_some_and(plakous_attempt::terminal_usage_error);
+        .is_some_and(plakous_exchange::attempt::terminal_usage_error);
     let kind = canonical_error_type.map(str::to_owned).or(native_kind);
     let class = if payment_required
         || code
             .as_deref()
-            .is_some_and(plakous_attempt::terminal_usage_error)
+            .is_some_and(plakous_exchange::attempt::terminal_usage_error)
         || kind
             .as_deref()
-            .is_some_and(plakous_attempt::terminal_usage_error)
+            .is_some_and(plakous_exchange::attempt::terminal_usage_error)
         || native_usage_limit
     {
         ResponsesProviderErrorClass::Quota

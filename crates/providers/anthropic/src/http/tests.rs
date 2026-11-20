@@ -616,11 +616,11 @@ fn context_overflow_is_a_typed_model_error() {
         CapabilitySet::new(BTreeMap::new(), BTreeMap::new()),
     );
     let facts = |hosted: bool| {
-        TerminalFacts::from_snapshot(plakous_attempt::ObservationSnapshot {
+        TerminalFacts::from_snapshot(plakous_exchange::attempt::ObservationSnapshot {
             physical_attempts: 1,
             provider_acceptance: ProviderAcceptance::Accepted,
             visible_output: true,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: hosted,
             logical_success: false,
         })
@@ -650,7 +650,7 @@ fn context_overflow_is_a_typed_model_error() {
 /// leaves a hand-built protocol error green and fails this test.
 #[test]
 fn a_context_window_stream_reaches_context_limit_through_the_hook() {
-    use plakous_attempt::ObservationSnapshot;
+    use plakous_exchange::attempt::ObservationSnapshot;
 
     let stream = context_window_stream_error();
     assert!(stream.context_overflow(), "{stream}");
@@ -663,7 +663,7 @@ fn a_context_window_stream_reaches_context_limit_through_the_hook() {
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });

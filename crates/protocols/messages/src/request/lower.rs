@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use plakous_attempt::ReplaySafety;
+use plakous_exchange::attempt::ReplaySafety;
 use plakous_model::{
     ActiveFamilyArtifact, Actor, CachePolicy, CapabilityRequirement, Digest, DigestDomain,
     HostedTool, InstructionSource, OutputFormat, ReasoningPolicy, ToolCallerDisposition,

@@ -1002,7 +1002,7 @@ fn retry_after_millis(headers: &plakous_http::Headers) -> Option<u64> {
 }
 
 fn retry_after_advice_millis(value: &str) -> Option<u64> {
-    let advice = plakous_attempt::retry_after_seconds(value)?;
+    let advice = plakous_exchange::attempt::retry_after_seconds(value)?;
     Some(
         u64::try_from(advice.as_millis()).map_or(ModelRetryDelay::MAX_MILLIS, |millis| {
             millis.min(ModelRetryDelay::MAX_MILLIS)

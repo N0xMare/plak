@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use crate::{CanonicalIdSources, ResponsesArtifactBinding};
 use futures_core::Stream;
-use plakous_attempt::{FailureRisk, RetryClass, TerminalFacts};
+use plakous_exchange::attempt::{FailureRisk, RetryClass, TerminalFacts};
 use plakous_exchange::network_failure;
 use plakous_model::{
     CanonicalItemPrefixIdentity, Clock, ModelCallContext, ModelDispatchRejection,

@@ -2,9 +2,8 @@ use super::{
     Arc, ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, TestResult,
     ToolOutcomeKind, execute, fs, ids,
 };
-use plakous_tool_files::FilesToolPack;
+use plakous_tool_files::{FilesToolPack, SearchToolPack};
 use plakous_tool_process::ProcessSessionTools;
-use plakous_tool_search::SearchToolPack;
 use plakous_tools::{
     FrozenToolRegistry, ToolOutcome, ToolRegistryBuilder, WorkspaceContentIdentity,
 };
@@ -69,7 +68,7 @@ async fn existing_paths_only_glob_keeps_offset_paging_past_nine_hundred() -> Tes
     for index in 0..1100 {
         fs::write(root.path().join(format!("file{index:04}.txt")), "")?;
     }
-    let registry = super::registry(Arc::new(plakous_tool_plan::InMemoryPlanState::new()))?;
+    let registry = super::registry(Arc::new(plakous_tool_files::InMemoryPlanState::new()))?;
     let result = execute(&registry, environment(root.path())?, ids(20)?, "search_repository", &json!({
         "path":".", "query":"", "filename_glob":"*.txt", "paths_only":true, "offset":900, "head_limit":20
     }).to_string()).await?;
@@ -89,7 +88,7 @@ async fn apply_patch_edits_hardlinked_entries_independently() -> TestResult {
     let root = tempfile::tempdir()?;
     fs::write(root.path().join("a"), "old\n")?;
     fs::hard_link(root.path().join("a"), root.path().join("b"))?;
-    let registry = super::registry(Arc::new(plakous_tool_plan::InMemoryPlanState::new()))?;
+    let registry = super::registry(Arc::new(plakous_tool_files::InMemoryPlanState::new()))?;
     let result = execute(&registry, environment(root.path())?, ids(24)?, "apply_patch", &json!({
         "patch":"*** Begin Patch\n*** Update File: a\n@@\n-old\n+first\n*** Update File: b\n@@\n-old\n+second\n*** End Patch\n"
     }).to_string()).await?;

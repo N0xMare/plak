@@ -33,7 +33,7 @@ use identity::{
     lowered_replay_safety, physical_request_digest, prepared_wire_digest, request_body_digest,
     target_identity,
 };
-use plakous_attempt::{
+use plakous_exchange::attempt::{
     AdmissionFirstFuture, AttemptBinding, AuthReservationMask, FailurePoint, FailureRisk,
     FamilyAttemptCore, FamilyCoreError, Jitter, LedgerPolicy, LifecycleLedgerAdmission,
     PhysicalRequestBinding, PhysicalRequestOutcome, ReplaySafety, RetryPolicy, TerminalFacts,
@@ -583,8 +583,8 @@ pub struct ResponsesAttempt {
     dispatch_timeout: Duration,
     next_dispatch_started: Option<Instant>,
     hard_deadline: Option<Instant>,
-    long_stream_replays: plakous_attempt::LongStreamReplayBudget,
-    unreachable: plakous_attempt::UnreachableRideOut,
+    long_stream_replays: plakous_exchange::attempt::LongStreamReplayBudget,
+    unreachable: plakous_exchange::attempt::UnreachableRideOut,
     observations: Option<mpsc::Sender<ResponsesObservation>>,
     physical: Option<ResponsesPhysicalDispatchBinding>,
     stream: StreamProgress,
@@ -630,8 +630,8 @@ impl ResponsesAttempt {
             dispatch_timeout: deadline.saturating_duration_since(monotonic_now()),
             hard_deadline: None,
             next_dispatch_started: None,
-            long_stream_replays: plakous_attempt::LongStreamReplayBudget::default(),
-            unreachable: plakous_attempt::UnreachableRideOut::default(),
+            long_stream_replays: plakous_exchange::attempt::LongStreamReplayBudget::default(),
+            unreachable: plakous_exchange::attempt::UnreachableRideOut::default(),
             observations: None,
             physical: None,
             stream: StreamProgress::default(),

@@ -1,0 +1,2 @@
+Plakous live fetch marker: SHA-256 of sample-01.png.
+36dc77247663fe27fffdbdb51dd03251127c97fdbf2e8c2f93d52387f3c9b3ad

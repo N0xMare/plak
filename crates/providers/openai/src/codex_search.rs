@@ -15,7 +15,7 @@ use std::fmt;
 #[cfg(feature = "native-auth")]
 use std::sync::Arc;
 
-use plakous_attempt::ReplaySafety;
+use plakous_exchange::attempt::ReplaySafety;
 #[cfg(feature = "native-auth")]
 use plakous_model::CancellationToken;
 use plakous_responses::{

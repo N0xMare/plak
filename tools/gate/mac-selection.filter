@@ -2,10 +2,8 @@
 package(=plakous-tools)
 package(=plakous-tool-process)
 package(=plakous-tool-files)
-package(=plakous-tool-search)
 # Includes the daemon's socket path limit test.
 package(=plakous-runner)
-package(=plakous-runner-dial)
 package(=plakous-host-protocol)
 package(=plakous-http)
 package(=plakous-cell)

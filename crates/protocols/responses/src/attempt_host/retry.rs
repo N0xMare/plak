@@ -41,7 +41,7 @@ pub(super) fn refused_connection(source: HttpFailure) -> bool {
 /// generation was possibly accepted and no hosted effect is possible.
 pub(super) fn credential_rejection_retry_eligible(
     error: &ResponsesAttemptError,
-    unreachable: &plakous_attempt::UnreachableRideOut,
+    unreachable: &plakous_exchange::attempt::UnreachableRideOut,
 ) -> bool {
     matches!(
         error,
@@ -253,7 +253,7 @@ pub(super) async fn wait_to_retry(
         Jitter::random(),
     );
     let delay = wait.delay();
-    let advice_beyond_budget = wait == plakous_attempt::RetryWait::AdviceBeyondBudget;
+    let advice_beyond_budget = wait == plakous_exchange::attempt::RetryWait::AdviceBeyondBudget;
     let reason = retry_decline(
         &RetryDeclineInput {
             deadline_remaining: attempt

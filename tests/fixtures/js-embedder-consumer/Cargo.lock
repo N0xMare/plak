@@ -456,9 +456,7 @@ dependencies = [
  "plakous-runner-protocol",
  "plakous-store",
  "plakous-tool-files",
- "plakous-tool-plan",
  "plakous-tool-process",
- "plakous-tool-search",
  "plakous-tool-web",
  "plakous-tools",
  "serde",
@@ -511,9 +509,7 @@ dependencies = [
  "plakous-codex-code-mode-protocol",
  "plakous-model",
  "plakous-tool-files",
- "plakous-tool-plan",
  "plakous-tool-process",
- "plakous-tool-search",
  "plakous-tools",
  "serde",
  "serde_json",
@@ -626,16 +622,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plakous-tool-plan"
-version = "0.0.4"
-dependencies = [
- "plakous-model",
- "plakous-tools",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "plakous-tool-process"
 version = "0.0.4"
 dependencies = [
@@ -647,16 +633,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "plakous-tool-search"
-version = "0.0.4"
-dependencies = [
- "plakous-model",
- "plakous-tools",
- "serde",
- "serde_json",
 ]
 
 [[package]]

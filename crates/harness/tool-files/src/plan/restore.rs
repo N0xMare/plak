@@ -15,7 +15,7 @@ use plakous_model::{
 use plakous_tools::MERGE_PLAN_CAPABILITY_NAME;
 use serde_json::Value;
 
-use crate::text::PLAKOUS_PLAN_RESTORED_NOTE_HEADER;
+use super::text::PLAKOUS_PLAN_RESTORED_NOTE_HEADER;
 
 /// Largest note, in bytes. Completed items go first when a plan is larger.
 const MAX_PLAN_NOTE_BYTES: usize = 2 * 1024;

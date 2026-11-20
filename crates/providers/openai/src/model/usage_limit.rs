@@ -55,16 +55,25 @@ mod tests {
         )?
         .with_request_id(Some("req_usage_limit_fixture"))?;
         for (provider_acceptance, hosted_effects_possible) in [
-            (plakous_attempt::ProviderAcceptance::NotAccepted, false),
-            (plakous_attempt::ProviderAcceptance::PossiblyAccepted, false),
-            (plakous_attempt::ProviderAcceptance::PossiblyAccepted, true),
+            (
+                plakous_exchange::attempt::ProviderAcceptance::NotAccepted,
+                false,
+            ),
+            (
+                plakous_exchange::attempt::ProviderAcceptance::PossiblyAccepted,
+                false,
+            ),
+            (
+                plakous_exchange::attempt::ProviderAcceptance::PossiblyAccepted,
+                true,
+            ),
         ] {
-            let facts = plakous_attempt::TerminalFacts::from_snapshot(
-                plakous_attempt::ObservationSnapshot {
+            let facts = plakous_exchange::attempt::TerminalFacts::from_snapshot(
+                plakous_exchange::attempt::ObservationSnapshot {
                     physical_attempts: 1,
                     provider_acceptance,
                     visible_output: false,
-                    replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+                    replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
                     hosted_effects_possible,
                     logical_success: false,
                 },
@@ -85,7 +94,7 @@ mod tests {
             assert_eq!(mapped.kind(), ModelErrorKind::QuotaExceeded);
             assert_eq!(mapped.kind(), default.kind());
             assert_eq!(mapped.context(), default.context());
-            if provider_acceptance == plakous_attempt::ProviderAcceptance::NotAccepted {
+            if provider_acceptance == plakous_exchange::attempt::ProviderAcceptance::NotAccepted {
                 assert_eq!(
                     mapped.context().map(ModelErrorContext::retryability),
                     Some(ModelRetryability::Permanent)

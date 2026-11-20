@@ -69,7 +69,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 43 packages: five supported, 35 published internal
+The workspace contains 39 packages: five supported, 31 published internal
 (the vendored `plakous-codex-code-mode-protocol` among them), and three
 repository-only. The supported and published-internal packages are publishable
 to crates.io as one exact cohort; the repository-only packages set
@@ -114,11 +114,9 @@ classes and directory policy.
 | `plakous-model` | `crates/core/model` | `core` | Provider-neutral model contracts: the object-safe `LanguageModel` boundary, validated descriptors and capabilities, canonical tool definitions and schemas, deterministic response assembly |
 | `plakous-tools` | `crates/core/tools` | `core` | Portable tool contracts, registries, exposure maps, execution environments and policy, the `ToolPack` seam and its compiler, durable composition markers and the standard identity vocabulary |
 | `plakous-agent` | `crates/core/agent` | `core` | The single-agent runtime: private single-owner driver, canonical history, checkpoints, tool/effect scheduling, compaction, telemetry sink. Implementation lives in the unsupported `internal` tier of the same package |
-| `plakous-attempt` | `crates/common/attempt` | `common` | Family-agnostic attempt lifecycle: phase transitions, observation ledger, pure acceptance outcomes |
 | `plakous-http` | `crates/common/http` | `common` | Provider-blind bounded HTTP transport and SSE framing. One fresh connection per execute unless the client is explicitly pooled; no redirect, proxy, retry, or auth semantics |
 | `plakous-auth` | `crates/common/auth` | `common` | Provider-neutral auth foundations: secret containers, OAuth pins and workflow, callback binding, credential metadata, durable private storage |
 | `plakous-runner-protocol` | `crates/common/runner-protocol` | `common` | Runner protocol (chapter 01 §8.4): length-prefixed JSON frames, the hello, bind and paired read-only qualification handshake, request classes, owner transfer, fixed Changes reads, separate operator-terminal control and answers |
-| `plakous-runner-dial` | `crates/common/runner-dial` | `common` | Portable Noise IK, pairing proofs, offers, fingerprint confirmation and transport framing; no product caller or I/O |
 | `plakous-gateway-protocol` | `crates/common/gateway-protocol` | `common` | Portable credential gateway protocol (chapter 01 §7.5): relay envelope, response frames and their bounded decoder, refusals, account facts, admin calls, caller keys and scopes; no product caller or I/O |
 | `plakous-image` | `crates/common/image` | `common` | The one image sniffer (re-exported by `plakous-tools`), the attachment count and per-message byte budget, and, under `normalize`, the one attachment and tool-result normalizer and image-file reader: decode, bound, downscale and re-encode, clipboard RGBA, the 64 MiB unread refusal; no runtime, and it reads only a caller-named file |
 | `plakous-cell` | `crates/runtimes/cell` | `engine` | Cell protocol (`plakous-cell-protocol.v2`), worker client and session for isolated interpreter workers; never links an interpreter |
@@ -128,7 +126,7 @@ classes and directory policy.
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family wire grammar, stream lifecycle, projection and shared dialect hosts |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
 | `plakous-chat-completions` | `crates/protocols/chat-completions` | `protocol` | Chat Completions kernel: message lowering, one-choice streaming lifecycle, indexed function calls, exact usage, SSE `[DONE]` |
-| `plakous-exchange` | `crates/protocols/exchange` | `protocol` | The shared admitted Chat/Messages family host, bounded catalog transport, isolated side-request executor, and physical-exchange plumbing: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |
+| `plakous-exchange` | `crates/protocols/exchange` | `protocol` | Family-agnostic attempt lifecycle, observation ledger and retry policy; the shared admitted Chat/Messages family host, bounded catalog transport, isolated side requests, and physical-exchange plumbing: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |
 | `plakous-openai` | `crates/providers/openai` | `provider` | OpenAI route/catalog/authz dialect plus Codex OAuth subscription execution |
 | `plakous-anthropic` | `crates/providers/anthropic` | `provider` | Anthropic Messages dialect: route, authz, catalog, error hooks, Claude OAuth costume |
 | `plakous-xai` | `crates/providers/xai` | `provider` | xAI Responses provider facts and SuperGrok subscription auth |
@@ -136,12 +134,10 @@ classes and directory policy.
 | `plakous-store` | `crates/store` | `store` | `SessionStore` backends: bounded in-memory by default, SQLite behind the `sqlite` feature |
 | `plakous-prompts` | `crates/harness/prompts` | `harness` | Model-visible instruction text, the first-turn assembler, the recommended profiles, and `AGENTS.md` and Agent Skills discovery. Depends on no pack |
 | `plakous-compose` | `crates/harness/compose` | `harness` | Cell presentations and their single compiler, the host-API descriptor and TypeScript/Python generators, Codex exec parsing/DTO helpers, nested catalogs, and the `SidecarLocator` port |
-| `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
-| `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |
+| `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching and image inspection; separate repository search and revisioned `PlanState` packs |
 | `plakous-tool-web` | `crates/harness/tool-web` | `harness` | Local wrapper tools for provider-hosted web search, page fetch and X search over a `RetrievalPort`, behind `ToolPack` |
 | `plakous-tool-process` | `crates/harness/tool-process` | `harness` | Joined process sessions and the per-vocabulary shell tool, behind `ToolPack` |
 | `plakous-mcp` | `crates/harness/mcp` | `harness` | The MCP client: the process-wide stdio and streamable HTTP server pool, frozen tool listings, input-schema lowering, `mcp__<server>__<tool>` naming, the serial-mutating MCP tool pack and its `read_resource` tool, resource and prompt operations, and MCP OAuth over `plakous-auth` |
-| `plakous-tool-plan` | `crates/harness/tool-plan` | `harness` | The `PlanState` port, `update_plan`, and the id-merge `todo_write` lowering, behind `ToolPack` |
 | `plakous` | `crates/plakous` | `facade` | Public facade: curated re-exports, session workflows, feature closures. The only dependency a complete-workflow embedder needs, and the only L0 complete-workflow surface |
 | `plakous-host-protocol` | `crates/hosting/host-protocol` | `host` | Provider-neutral host wire types shared by the hosted session and the product: session intents and observations, their bounded channels, the typed views, the topology wire vocabulary, the presentation limits, and the JSONL projection |
 | `plakd-wire-types` | `crates/hosting/plakd-wire-types` | `host` | Serialized product DTOs and extension classification over the host protocol; no settings, store, probe or mailbox authority |

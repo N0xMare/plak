@@ -90,7 +90,7 @@ INSTALL_FAMILY_PATHS = {
     ),
     "image-residency": (r"/[^/]*(?:image|residency)[^/]*(?:/|\.rs$)",),
     "runner-startup": (
-        r"^crates/(?:runtimes/runner|common/runner-(?:dial|protocol))/",
+        r"^crates/(?:runtimes/runner|common/runner-protocol)/",
         r"^bin/plakd/(?:src/(?:commands/)?runner|tests/integration/host_skeleton/runner)(?:/|\.rs$)",
         r"/daemon(?:/|\.rs$)",
     ),

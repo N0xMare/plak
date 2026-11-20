@@ -264,8 +264,9 @@ V10_BUILD_PROFILE_CONTRACTS = {
     **{
         profile: contract
         for profile, contract in V9_BUILD_PROFILE_CONTRACTS.items()
-        if profile not in {"responses-kernel", "responses-host"}
+        if profile not in {"attempt", "responses-kernel", "responses-host"}
     },
+    "attempt": ("internal-topology-baseline", "plakous-exchange", ["--lib"], []),
     "responses": ("internal-topology-baseline", "plakous-responses", ["--lib"], []),
 }
 CURRENT_BUILD_SCHEMAS = {
@@ -497,6 +498,12 @@ def validate_build(rows: list[dict[str, Any]]) -> None:
         if contract is None:
             fail(f"{schema} profile is unknown")
         expected_scope, expected_package, expected_target, expected_features = contract
+        if (
+            schema == "plakous.perf-build.v10"
+            and profile == "attempt"
+            and package == "plakous-attempt"
+        ):
+            expected_package = "plakous-attempt"
         if (scope, package, target_selection, requested_features) != (
             expected_scope,
             expected_package,

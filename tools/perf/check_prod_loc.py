@@ -67,7 +67,6 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "auth",
         (
             ("plakous-auth", "src/"),
-            ("plakous-runner-dial", "src/"),
             ("plakous-gateway-protocol", "src/"),
         ),
     ),
@@ -140,9 +139,7 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         (
             ("plakous-mcp", "src/"),
             ("plakous-tool-files", "src/"),
-            ("plakous-tool-plan", "src/"),
             ("plakous-tool-process", "src/"),
-            ("plakous-tool-search", "src/"),
             ("plakous-tool-web", "src/"),
         ),
     ),
@@ -150,7 +147,6 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "runtime",
         (
             ("plakous-agent", "src/"),
-            ("plakous-attempt", "src/"),
             ("plakous-cell", "src/"),
             ("plakous-js-runtime", "src/"),
             ("plakous-py-worker", "src/"),

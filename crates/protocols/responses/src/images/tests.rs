@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
-use plakous_attempt::Jitter;
+use plakous_exchange::attempt::Jitter;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 

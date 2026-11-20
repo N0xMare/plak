@@ -78,7 +78,7 @@ pub(super) fn in_band_error_summary(
         };
     };
     let mut summary = format!("HTTP {status}");
-    if let Some(refusal) = plakous_attempt::ProviderRefusal::from_http_status(status)
+    if let Some(refusal) = plakous_exchange::attempt::ProviderRefusal::from_http_status(status)
         && !usage_limit
     {
         summary = format!("{summary} ({})", refusal.label());

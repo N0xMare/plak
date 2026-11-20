@@ -4,7 +4,8 @@
 //! provider lowering of them: `Write`, `write` and `search_replace` are
 //! lowerings of `apply_patch`, not separate capabilities (spec 02 §6.3), so
 //! they live here with the preflight that makes them exact, and the Codex
-//! freeform patch envelope with the executor it shares.
+//! freeform patch envelope with the executor it shares. Bounded search and
+//! revisioned planning remain independent packs in this crate.
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -17,10 +18,23 @@ mod edit_files;
 mod image;
 mod mutation;
 mod patch;
+mod plan;
 mod read;
+mod search;
 mod text;
 mod visual;
 
+pub use plan::{
+    InMemoryPlanState, PLAKOUS_CODEX_UPDATE_PLAN_DESCRIPTION, PLAKOUS_GROK_TODO_DESCRIPTION,
+    PLAKOUS_MERGE_PLAN_DESCRIPTION, PLAKOUS_PLAN_RESTORED_NOTE_HEADER,
+    PLAKOUS_TOOL_MERGE_PLAN_COLD_MAP, PlanItem, PlanItemStatus, PlanReplacement, PlanSnapshot,
+    PlanState, PlanStateFuture, PlanToolPack, plan_restoration_note,
+};
+pub use search::{
+    PLAKOUS_GROK_GREP_DESCRIPTION, PLAKOUS_GROK_LIST_DIR_DESCRIPTION,
+    PLAKOUS_TOOL_SEARCH_REPOSITORY_DESCRIPTION, PLAKOUS_TOOL_SEARCH_REQUIRES_GLOB,
+    PLAKOUS_TOOL_SEARCH_REQUIRES_QUERY, PLAKOUS_TOOL_SEARCH_RESULT_BOUND, SearchToolPack,
+};
 pub use text::{
     PLAKOUS_CODEX_APPLY_PATCH_FREEFORM_DESCRIPTION, PLAKOUS_GROK_READ_CELL_DESCRIPTION,
     PLAKOUS_GROK_READ_DESCRIPTION, PLAKOUS_GROK_SEARCH_REPLACE_DESCRIPTION,

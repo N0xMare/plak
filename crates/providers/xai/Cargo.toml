@@ -47,7 +47,6 @@ jsonwebtoken = { workspace = true, optional = true }
 plakous-auth.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true
-plakous-attempt.workspace = true
 plakous-model.workspace = true
 plakous-responses.workspace = true
 serde = { workspace = true, features = ["derive"] }

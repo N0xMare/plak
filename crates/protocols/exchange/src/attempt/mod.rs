@@ -1,6 +1,17 @@
 //! Family-agnostic attempt lifecycle, observation ledger, and await core.
-//!
-//! Hosted at the `plakous-attempt` crate root; see crate-level docs.
+
+// Product names (OpenAI, OpenRouter, SuperGrok) appear in ownership docs.
+// Ledger/policy structs intentionally use small bool policy tables.
+#![allow(
+    clippy::doc_markdown,
+    clippy::missing_errors_doc,
+    clippy::struct_excessive_bools,
+    clippy::must_use_candidate,
+    clippy::manual_let_else,
+    clippy::single_match_else,
+    clippy::type_complexity,
+    reason = "product names; ledger helpers; policy bool tables; trait await hooks; panic-containment match arms; boxed futures"
+)]
 
 mod admission;
 mod admission_first;

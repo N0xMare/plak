@@ -1346,7 +1346,8 @@ pub mod tools {
         validate_process_presentation_candidate_v2,
     };
     pub use plakous_tool_files::FilesToolPack;
-    pub use plakous_tool_plan::{
+    pub use plakous_tool_files::SearchToolPack;
+    pub use plakous_tool_files::{
         InMemoryPlanState, PlanItem, PlanItemStatus, PlanReplacement, PlanSnapshot, PlanState,
         PlanStateFuture, PlanToolPack, plan_restoration_note,
     };
@@ -1354,7 +1355,6 @@ pub mod tools {
         PROCESS_PROJECTION_FAMILY, ProcessPackConfig, ProcessSessionTools, ProcessToolPack,
         ProcessToolProjectionKind,
     };
-    pub use plakous_tool_search::SearchToolPack;
 
     /// Hosted retrieval: the neutral port a route implements and the local
     /// wrapper tools that call it, one isolated side request per call.

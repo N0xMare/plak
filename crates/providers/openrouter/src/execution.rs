@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use plakous_attempt::LedgerPolicy;
+use plakous_exchange::attempt::LedgerPolicy;
 use plakous_http::{Client, HeaderName, Origin, sensitive_header_value};
 use plakous_model::{
     CapabilityRequirement, Clock, CompiledProviderConfiguration, ConfiguredLanguageModel,

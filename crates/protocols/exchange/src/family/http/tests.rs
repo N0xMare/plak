@@ -64,7 +64,7 @@ async fn assert_decline(
         digest(DigestDomain::ModelBinding)?,
         digest(DigestDomain::RequestPlan)?,
         digest(DigestDomain::ProviderOperation)?,
-        plakous_attempt::ReplaySafety::CostOnly,
+        crate::attempt::ReplaySafety::CostOnly,
     );
     let context = ModelCallContext::new(
         AttemptId::try_from(uuid::Uuid::from_u128(100))?,
@@ -100,8 +100,8 @@ async fn assert_decline(
         failure,
         RetryProgress {
             waited: &mut waited,
-            long_stream_replays: &mut plakous_attempt::LongStreamReplayBudget::default(),
-            unreachable: &mut plakous_attempt::UnreachableRideOut::default(),
+            long_stream_replays: &mut crate::attempt::LongStreamReplayBudget::default(),
+            unreachable: &mut crate::attempt::UnreachableRideOut::default(),
         },
         Duration::from_secs(1),
     )

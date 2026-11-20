@@ -1,7 +1,8 @@
 # plakous-exchange
 
-Shared physical-exchange plumbing for Plakous protocol-family kernels and
-providers. This crate is part of [Plak](https://github.com/N0xMare/plak), an
+Shared attempt lifecycle, observation ledger, retry policy and physical-exchange
+plumbing for Plakous protocol-family kernels and providers. This crate is part
+of [Plak](https://github.com/N0xMare/plak), an
 embeddable single-agent multi-provider harness library (Plakous) and the
 command-line and terminal product built on it. It is a published-internal
 package: it releases in the exact version cohort of the `plakous` facade and

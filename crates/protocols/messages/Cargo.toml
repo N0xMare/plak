@@ -24,7 +24,6 @@ reason = "Existing item-local protocol debt; request-policy construction uses a 
 
 [dependencies]
 base64.workspace = true
-plakous-attempt.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true

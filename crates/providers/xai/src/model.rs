@@ -375,7 +375,7 @@ mod shared_host_model {
     use std::time::{Duration, Instant};
 
     use futures_util::lock::Mutex as AsyncMutex;
-    use plakous_attempt::LedgerPolicy;
+    use plakous_exchange::attempt::LedgerPolicy;
     #[cfg(test)]
     use plakous_model::{
         CapacityCertificate, CapacityRule, ContextContract, ContextEvidenceSource,

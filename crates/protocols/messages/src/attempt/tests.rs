@@ -7,7 +7,9 @@ use tower_service::Service;
 use uuid::Uuid;
 
 use super::*;
-use plakous_attempt::{PhysicalRequestOutcome, ProviderAcceptance, ReplaySafety, TerminalFacts};
+use plakous_exchange::attempt::{
+    PhysicalRequestOutcome, ProviderAcceptance, ReplaySafety, TerminalFacts,
+};
 use plakous_model::{
     AttemptId, CancellationToken, Digest, ModelCallContext, ModelEvent, ModelHttpStatus,
     ModelRetryDelay,
@@ -201,7 +203,7 @@ fn admitted_ambiguous_send_never_claims_safe_rejection() -> Result<(), Box<dyn s
     );
     assert_ne!(
         facts.retry_class(),
-        plakous_attempt::RetryClass::BeforeAcceptance
+        plakous_exchange::attempt::RetryClass::BeforeAcceptance
     );
     Ok(())
 }
@@ -219,7 +221,10 @@ fn hosted_capability_records_possible_effect_after_ambiguous_send()
     let facts = error.facts().ok_or("admitted facts")?;
     assert_eq!(facts.replay_safety(), ReplaySafety::ServerEffect);
     assert!(facts.hosted_effects_possible());
-    assert_eq!(facts.retry_class(), plakous_attempt::RetryClass::Never);
+    assert_eq!(
+        facts.retry_class(),
+        plakous_exchange::attempt::RetryClass::Never
+    );
     Ok(())
 }
 
@@ -262,7 +267,10 @@ fn hosted_capability_survives_cancellation_after_acceptance()
     assert_eq!(facts.provider_acceptance(), ProviderAcceptance::Accepted);
     assert_eq!(facts.replay_safety(), ReplaySafety::ServerEffect);
     assert!(facts.hosted_effects_possible());
-    assert_eq!(facts.retry_class(), plakous_attempt::RetryClass::Never);
+    assert_eq!(
+        facts.retry_class(),
+        plakous_exchange::attempt::RetryClass::Never
+    );
     Ok(())
 }
 

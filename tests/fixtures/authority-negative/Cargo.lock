@@ -1034,9 +1034,7 @@ dependencies = [
  "plakous-runner-protocol",
  "plakous-store",
  "plakous-tool-files",
- "plakous-tool-plan",
  "plakous-tool-process",
- "plakous-tool-search",
  "plakous-tool-web",
  "plakous-tools",
  "plakous-xai",
@@ -1072,7 +1070,6 @@ version = "0.0.4"
 dependencies = [
  "futures-util",
  "httpdate",
- "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
  "plakous-http",
@@ -1087,17 +1084,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "zeroize",
-]
-
-[[package]]
-name = "plakous-attempt"
-version = "0.0.4"
-dependencies = [
- "getrandom 0.4.3",
- "httpdate",
- "serde_json",
- "thiserror 2.0.21",
- "tower",
 ]
 
 [[package]]
@@ -1149,7 +1135,6 @@ name = "plakous-chat-completions"
 version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
- "plakous-attempt",
  "plakous-exchange",
  "plakous-http",
  "plakous-model",
@@ -1173,9 +1158,7 @@ dependencies = [
  "plakous-codex-code-mode-protocol",
  "plakous-model",
  "plakous-tool-files",
- "plakous-tool-plan",
  "plakous-tool-process",
- "plakous-tool-search",
  "plakous-tools",
  "serde",
  "serde_json",
@@ -1189,10 +1172,13 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "getrandom 0.4.3",
- "plakous-attempt",
+ "httpdate",
  "plakous-http",
  "plakous-model",
+ "serde_json",
+ "thiserror 2.0.21",
  "tokio",
+ "tower",
  "tower-service",
  "zeroize",
 ]
@@ -1291,7 +1277,6 @@ name = "plakous-messages"
 version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
- "plakous-attempt",
  "plakous-exchange",
  "plakous-http",
  "plakous-model",
@@ -1321,7 +1306,6 @@ version = "0.0.4"
 dependencies = [
  "base64 0.22.1",
  "jsonwebtoken",
- "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
  "plakous-http",
@@ -1342,7 +1326,6 @@ name = "plakous-openrouter"
 version = "0.0.4"
 dependencies = [
  "futures-util",
- "plakous-attempt",
  "plakous-auth",
  "plakous-chat-completions",
  "plakous-exchange",
@@ -1390,7 +1373,6 @@ dependencies = [
  "base64 0.22.1",
  "futures-core",
  "httpdate",
- "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
  "plakous-http",
@@ -1460,16 +1442,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plakous-tool-plan"
-version = "0.0.4"
-dependencies = [
- "plakous-model",
- "plakous-tools",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "plakous-tool-process"
 version = "0.0.4"
 dependencies = [
@@ -1481,16 +1453,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "plakous-tool-search"
-version = "0.0.4"
-dependencies = [
- "plakous-model",
- "plakous-tools",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1547,7 +1509,6 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "jsonwebtoken",
- "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
  "plakous-http",

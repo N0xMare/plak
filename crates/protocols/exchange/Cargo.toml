@@ -1,6 +1,6 @@
 [package]
 name = "plakous-exchange"
-description = "Shared physical-exchange plumbing for Plakous protocol-family kernels and providers"
+description = "Shared attempt lifecycle and physical-exchange plumbing for Plakous protocol kernels and providers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -26,10 +26,13 @@ reason = "One physical family host replaces the Chat and Messages copies; phase 
 futures-channel = { workspace = true, features = ["sink"] }
 futures-util = { workspace = true, features = ["sink", "std"] }
 getrandom.workspace = true
-plakous-attempt.workspace = true
+httpdate.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }
+tower.workspace = true
 tower-service.workspace = true
 zeroize.workspace = true
 

@@ -281,7 +281,7 @@ where
                     .headers
                     .get(&HeaderName::from_static("retry-after"))
                     .and_then(|v| v.to_str().ok())
-                    .and_then(plakous_attempt::retry_after_seconds);
+                    .and_then(crate::attempt::retry_after_seconds);
                 (LookupCause::Status(reply.status.as_u16()), delay)
             }
             Err(LookupError::Transport(failure)) if LookupCause::Transport(failure).retryable() => {

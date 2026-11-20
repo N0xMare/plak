@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
-use plakous_attempt::Jitter;
+use plakous_exchange::attempt::Jitter;
 use plakous_http::{Failure as HttpFailure, Request as HttpRequest};
 use std::time::Duration;
 

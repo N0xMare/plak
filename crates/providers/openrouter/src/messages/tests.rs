@@ -24,19 +24,19 @@ fn long_retry_after_advice_saturates_instead_of_dropping() {
 /// the same defect and both needed the same fix.
 #[test]
 fn the_openrouter_messages_row_of_the_provider_failure_matrix_is_definite() {
-    use plakous_attempt::ObservationSnapshot;
-    use plakous_attempt::ProviderRefusal as Refusal;
+    use plakous_exchange::attempt::ObservationSnapshot;
+    use plakous_exchange::attempt::ProviderRefusal as Refusal;
     use plakous_messages::{MessagesAttemptProtocolError, TerminalFacts};
 
     let facts = |hosted: bool| {
         TerminalFacts::from_snapshot(ObservationSnapshot {
             physical_attempts: 1,
-            provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+            provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
             visible_output: true,
             replay_safety: if hosted {
-                plakous_attempt::ReplaySafety::ServerEffect
+                plakous_exchange::attempt::ReplaySafety::ServerEffect
             } else {
-                plakous_attempt::ReplaySafety::CostOnly
+                plakous_exchange::attempt::ReplaySafety::CostOnly
             },
             hosted_effects_possible: hosted,
             logical_success: false,
@@ -110,15 +110,15 @@ fn the_openrouter_messages_row_of_the_provider_failure_matrix_is_definite() {
 
 #[test]
 fn messages_context_overflow_is_typed() {
-    use plakous_attempt::ObservationSnapshot;
+    use plakous_exchange::attempt::ObservationSnapshot;
     use plakous_messages::{MessagesAttemptProtocolError, TerminalFacts};
 
     let facts = |hosted: bool| {
         TerminalFacts::from_snapshot(ObservationSnapshot {
             physical_attempts: 1,
-            provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+            provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
             visible_output: false,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: hosted,
             logical_success: false,
         })
@@ -159,9 +159,9 @@ fn a_context_window_stream_reaches_context_limit_through_the_hook()
     assert!(classified.context_overflow(), "{classified}");
     let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
         physical_attempts: 1,
-        provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+        provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -183,7 +183,7 @@ use std::sync::{
 use std::task::Poll;
 
 use futures_util::{FutureExt, StreamExt};
-use plakous_attempt::{ObservationSnapshot, TerminalFacts};
+use plakous_exchange::attempt::{ObservationSnapshot, TerminalFacts};
 use plakous_model::{
     AttemptId, CancellationToken, CapacityCertificate, CapacityRule, ContextEvidenceSource,
     CountCertificateKind, EvidenceFreshness, IntegrationClass, MeasurementCertificate,
@@ -467,7 +467,7 @@ async fn joined_stream_prefers_fact_bearing_post_acceptance_error()
         Digest::sha256(DigestDomain::ModelBinding, 1, &[b"target"])?,
         Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"])?,
         Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"operation"])?,
-        plakous_attempt::ReplaySafety::CostOnly,
+        plakous_exchange::attempt::ReplaySafety::CostOnly,
     );
     let context = ModelCallContext::new(
         AttemptId::from_str("00000000-0000-4000-8000-000000000044")?,
@@ -483,9 +483,9 @@ async fn joined_stream_prefers_fact_bearing_post_acceptance_error()
     attempt.events_mut().send_error(observation.clone()).await?;
     let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
         physical_attempts: 1,
-        provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+        provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
         visible_output: true,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -517,7 +517,7 @@ async fn joined_error_follows_prefix_queued_by_the_same_operation_poll()
         Digest::sha256(DigestDomain::ModelBinding, 1, &[b"target"])?,
         Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"])?,
         Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"operation"])?,
-        plakous_attempt::ReplaySafety::CostOnly,
+        plakous_exchange::attempt::ReplaySafety::CostOnly,
     );
     let prefix = ModelEvent::ResponseStarted(ResponseStarted::new(None, binding.plan()));
     let context = ModelCallContext::new(
@@ -538,9 +538,9 @@ async fn joined_error_follows_prefix_queued_by_the_same_operation_poll()
         attempt.events_mut().send_error(observation.clone()).await?;
         let facts = TerminalFacts::from_snapshot(ObservationSnapshot {
             physical_attempts: 1,
-            provider_acceptance: plakous_attempt::ProviderAcceptance::Accepted,
+            provider_acceptance: plakous_exchange::attempt::ProviderAcceptance::Accepted,
             visible_output: false,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: false,
             logical_success: false,
         });
@@ -580,7 +580,7 @@ async fn replay_strip_diagnostic_precedes_physical_operation_poll()
             1,
             &[b"operation-diagnostic"],
         )?,
-        plakous_attempt::ReplaySafety::CostOnly,
+        plakous_exchange::attempt::ReplaySafety::CostOnly,
     );
     let context = ModelCallContext::new(
         AttemptId::from_str("00000000-0000-4000-8000-000000000045")?,

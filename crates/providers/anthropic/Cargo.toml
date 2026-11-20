@@ -34,7 +34,6 @@ native-auth = [
 ]
 [dependencies]
 plakous-auth.workspace = true
-plakous-attempt.workspace = true
 plakous-exchange.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true

@@ -243,7 +243,7 @@ class TouchedPackagesTests(unittest.TestCase):
             ("crates/common/image/src/lib.rs", "image-residency"),
             ("crates/hosting/hosted/src/runtime/host_loop/residency.rs", "image-residency"),
             ("bin/plakd/src/commands/runner/services.rs", "runner-startup"),
-            ("crates/common/runner-dial/src/lib.rs", "runner-startup"),
+            ("crates/common/runner-protocol/src/lib.rs", "runner-startup"),
             ("bin/plakd/tests/integration/host_skeleton/crash/wire/cuts.rs", "wire-restart-switch"),
             ("bin/plakd/src/host/bridge.rs", "bridge"),
             ("bin/plakd/src/terminal_registry/pins.rs", "operator-pins-rate"),

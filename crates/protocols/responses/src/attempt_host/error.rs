@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use plakous_attempt::{FamilyCoreError, RetryClass, TerminalFacts};
+use plakous_exchange::attempt::{FamilyCoreError, RetryClass, TerminalFacts};
 use plakous_http::{ErrorKind as HttpErrorKind, Failure as HttpFailure, StatusCode};
 
 use crate::project_host::ResponsesProjectError;
@@ -214,7 +214,10 @@ pub enum ResponsesAttemptError {
 }
 
 impl ResponsesAttemptError {
-    pub(super) fn with_summary(mut self, summary: plakous_attempt::AttemptSummary) -> Self {
+    pub(super) fn with_summary(
+        mut self,
+        summary: plakous_exchange::attempt::AttemptSummary,
+    ) -> Self {
         match &mut self {
             Self::Binding { facts, .. }
             | Self::Observation { facts, .. }

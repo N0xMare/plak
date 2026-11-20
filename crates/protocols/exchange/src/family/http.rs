@@ -8,11 +8,11 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time::Instant;
 
+use crate::attempt::{ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy};
 use crate::{
     RetryDeclineInput, cancellable, read_bounded_body, retry_cause_refusal, retry_decline,
     retry_phase, time_until,
 };
-use plakous_attempt::{ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy};
 use plakous_http::{
     CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
     Origin, Request as HttpRequest, Response, ResponseBody, StatusCode,
@@ -333,8 +333,8 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
     let mut credential_retry = credential_rejected;
     let mut provider_deadline_replayed = false;
     let mut waited = Duration::ZERO;
-    let mut long_stream_replays = plakous_attempt::LongStreamReplayBudget::default();
-    let mut unreachable = plakous_attempt::UnreachableRideOut::default();
+    let mut long_stream_replays = crate::attempt::LongStreamReplayBudget::default();
+    let mut unreachable = crate::attempt::UnreachableRideOut::default();
     let timeout = attempt
         .context()
         .dispatch_timeout()
@@ -489,7 +489,7 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
             .headers()
             .get(&plakous_http::HeaderName::from_static("retry-after"))
             .and_then(|value| value.to_str().ok())
-            .and_then(plakous_attempt::retry_after_seconds);
+            .and_then(crate::attempt::retry_after_seconds);
         let retry_disabled = plakous_http::retry_disabled(response.headers());
         match hooks.classify_response_head(&response) {
             Err(error) => {
@@ -524,7 +524,7 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                 };
                 let outcome = head.outcome;
                 let error = hooks.classify_error_response(head.metadata, &body, safety(attempt));
-                let usage_limit = plakous_attempt::body_reports_usage_limit(&body);
+                let usage_limit = crate::attempt::body_reports_usage_limit(&body);
                 let error = if usage_limit {
                     error.with_usage_limit()
                 } else {
@@ -664,9 +664,9 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                         Some(408 | 504)
                     )
                     && interrupted.error.refusal()
-                        == Some(plakous_attempt::ProviderRefusal::Deadline)
+                        == Some(crate::attempt::ProviderRefusal::Deadline)
                 {
-                    retryable.provider_refusal = Some(plakous_attempt::ProviderRefusal::Deadline);
+                    retryable.provider_refusal = Some(crate::attempt::ProviderRefusal::Deadline);
                     if provider_deadline_replayed {
                         retryable.loss.declined_reason = Some(Decline::Budget);
                     }
@@ -737,7 +737,7 @@ struct Retryable {
     output_discarded: bool,
     detail: String,
     loss: plakous_model::ModelRetryLoss,
-    provider_refusal: Option<plakous_attempt::ProviderRefusal>,
+    provider_refusal: Option<crate::attempt::ProviderRefusal>,
 }
 
 impl Retryable {
@@ -802,8 +802,8 @@ struct RetryContext<'a, W: FamilyWire, H: FamilyHttpHooks<W>> {
 
 struct RetryProgress<'a> {
     waited: &'a mut Duration,
-    long_stream_replays: &'a mut plakous_attempt::LongStreamReplayBudget,
-    unreachable: &'a mut plakous_attempt::UnreachableRideOut,
+    long_stream_replays: &'a mut crate::attempt::LongStreamReplayBudget,
+    unreachable: &'a mut crate::attempt::UnreachableRideOut,
 }
 
 /// Applies [`RetryPolicy::TURN`] to a failed generation: announces the retry
@@ -840,7 +840,7 @@ async fn retry_step<W: FamilyWire, H: FamilyHttpHooks<W>>(
         Jitter::random(),
     );
     let delay = wait.delay();
-    let advice_beyond_budget = wait == plakous_attempt::RetryWait::AdviceBeyondBudget;
+    let advice_beyond_budget = wait == crate::attempt::RetryWait::AdviceBeyondBudget;
     let reason = retry_decline(
         &RetryDeclineInput {
             deadline_remaining: hard_deadline
@@ -888,7 +888,7 @@ async fn retry_step<W: FamilyWire, H: FamilyHttpHooks<W>>(
     )
     .with_loss(plakous_model::ModelRetryLoss {
         elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
-        server_effect: facts.replay_safety() == plakous_attempt::ReplaySafety::ServerEffect,
+        server_effect: facts.replay_safety() == crate::attempt::ReplaySafety::ServerEffect,
         declined_reason: reason,
         ..failure.loss
     })
@@ -920,11 +920,11 @@ async fn renew_credential<W: FamilyWire, H: FamilyHttpHooks<W>>(
     attempt: &FamilyAttempt<W>,
     clock: &Arc<dyn Clock>,
     hook_budget: Duration,
-    unreachable: &plakous_attempt::UnreachableRideOut,
+    unreachable: &crate::attempt::UnreachableRideOut,
 ) -> RetryStep<H> {
     let facts = attempt.terminal_facts();
-    if facts.failure_risk() != plakous_attempt::FailureRisk::None
-        || facts.replay_safety() == plakous_attempt::ReplaySafety::ServerEffect
+    if facts.failure_risk() != crate::attempt::FailureRisk::None
+        || facts.replay_safety() == crate::attempt::ReplaySafety::ServerEffect
         || unreachable.ordinary_physical(facts) >= RetryPolicy::TURN.max_physical()
     {
         return RetryStep::End;
@@ -1067,9 +1067,9 @@ const fn stream_refusal_fault<W: FamilyWire>(
     error: &FamilyAttemptProtocolError<W>,
 ) -> Option<ModelTransportFault> {
     match error.refusal() {
-        Some(plakous_attempt::ProviderRefusal::Overloaded) => Some(ModelTransportFault::Overloaded),
-        Some(plakous_attempt::ProviderRefusal::RateLimit) => Some(ModelTransportFault::RateLimited),
-        Some(plakous_attempt::ProviderRefusal::Deadline)
+        Some(crate::attempt::ProviderRefusal::Overloaded) => Some(ModelTransportFault::Overloaded),
+        Some(crate::attempt::ProviderRefusal::RateLimit) => Some(ModelTransportFault::RateLimited),
+        Some(crate::attempt::ProviderRefusal::Deadline)
             if W::PROVIDER_DEADLINE_REPLAY_ONCE
                 && match error.http_status() {
                     Some(status) => matches!(status.get(), 408 | 504),
@@ -1315,7 +1315,7 @@ fn safety<W: FamilyWire>(attempt: &FamilyAttempt<W>) -> FamilyHttpSafety {
     let facts = attempt.terminal_facts();
     FamilyHttpSafety {
         provider_accepted: facts.provider_acceptance()
-            != plakous_attempt::ProviderAcceptance::NotAccepted,
+            != crate::attempt::ProviderAcceptance::NotAccepted,
         visible_output: facts.visible_output(),
         hosted_effects_possible: facts.hosted_effects_possible(),
     }

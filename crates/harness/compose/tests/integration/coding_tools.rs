@@ -18,7 +18,7 @@ use plakous_model::{
     AttemptId, CallId, CancellationToken, Clock, Digest, DigestDomain, FixedClock, RunId,
     Timestamp, ToolCorrelation, ToolEffect, ToolInputContract, ToolName, ToolResultPart, TurnId,
 };
-use plakous_tool_plan::{InMemoryPlanState, PlanItem, PlanItemStatus, PlanState, PlanToolPack};
+use plakous_tool_files::{InMemoryPlanState, PlanItem, PlanItemStatus, PlanState, PlanToolPack};
 use plakous_tools::{
     DeterministicExecutionBackend, DeterministicProcessPolicy, EffectAuthorizationGrantSource,
     ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
@@ -91,7 +91,7 @@ fn ids(call: u8) -> TestResult<Ids> {
 fn registry(plan: Arc<dyn PlanState>) -> TestResult<plakous_tools::FrozenToolRegistry> {
     let packs: Vec<Arc<dyn ToolPack>> = vec![
         Arc::new(plakous_tool_files::FilesToolPack::default()),
-        Arc::new(plakous_tool_search::SearchToolPack),
+        Arc::new(plakous_tool_files::SearchToolPack),
         Arc::new(PlanToolPack::new(plan)),
     ];
     let mut builder = ToolRegistryBuilder::default();

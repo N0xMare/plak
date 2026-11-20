@@ -11,7 +11,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use plakous_attempt::{
+use crate::attempt::{
     FailurePoint, Jitter, ObservationSnapshot, ProviderAcceptance, ReplaySafety, RetryPolicy,
     TerminalFacts,
 };
@@ -442,7 +442,7 @@ async fn exchange_once<R: ResponseReader>(
             .headers()
             .get(&plakous_http::HeaderName::from_static("retry-after"))
             .and_then(|value| value.to_str().ok())
-            .and_then(plakous_attempt::retry_after_seconds);
+            .and_then(crate::attempt::retry_after_seconds);
         let body = read_bounded_body(
             response.into_body(),
             cancellation,

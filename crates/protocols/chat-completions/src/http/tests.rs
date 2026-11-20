@@ -3,7 +3,7 @@ use crate::{
     ChatAttempt, ChatAttemptError, ChatAttemptProtocolError, ChatOperationBinding,
     ChatPhysicalRequestBinding, ChatStreamError, LoweredChatRequest, PreparedChatStreamBinding,
 };
-use plakous_attempt::{ExchangeBreak, PhysicalRequestOutcome};
+use plakous_exchange::attempt::{ExchangeBreak, PhysicalRequestOutcome};
 use plakous_http::{Client, Failure as HttpFailure, Origin, Request as HttpRequest, Response};
 use plakous_model::ModelRetryDeclineReason as Decline;
 use plakous_model::{
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use plakous_attempt::LedgerPolicy;
+use plakous_exchange::attempt::LedgerPolicy;
 use plakous_http::{Bytes, HeaderMap, Limits, Method, Request, StatusCode, Version};
 use plakous_model::{
     AttemptId, CancellationToken, Digest, DigestDomain, EffectiveProviderConfigurationId,
@@ -45,7 +45,7 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 fn chat_protocol_errors_keep_typed_retry_advice_and_terminal_acceptance() -> TestResult {
     let status = plakous_model::ModelHttpStatus::new(429)?;
     let delay = plakous_model::ModelRetryDelay::from_millis(2_000)?;
-    let facts = plakous_attempt::TerminalFacts::preacceptance_test();
+    let facts = plakous_exchange::attempt::TerminalFacts::preacceptance_test();
     let error = ChatAttemptError::protocol(
         ChatAttemptProtocolError::new("opaque rejection")
             .with_http_status(status)
@@ -145,7 +145,7 @@ impl ChatHttpHooks<ChatWire> for FakeHooks {
         let protocol = protocol.with_http_status(
             plakous_model::ModelHttpStatus::new(status).expect("valid HTTP status"),
         );
-        match plakous_attempt::ProviderRefusal::from_http_status(status) {
+        match plakous_exchange::attempt::ProviderRefusal::from_http_status(status) {
             Some(refusal) => protocol.with_refusal(refusal),
             None => protocol,
         }
@@ -388,7 +388,7 @@ async fn a_second_in_band_deadline_stops_before_a_third_scripted_reply() -> Test
     assert_eq!(error.facts().ok_or("facts")?.physical_attempts(), 2);
     assert_eq!(
         error.facts().ok_or("facts")?.summary().decline,
-        Some(plakous_attempt::AttemptRetryDecline::Budget)
+        Some(plakous_exchange::attempt::AttemptRetryDecline::Budget)
     );
     Ok(())
 }
@@ -474,7 +474,7 @@ async fn a_server_effect_chat_body_never_replays_an_in_band_deadline() -> TestRe
     )?;
     assert_eq!(
         operation.binding().replay_safety(),
-        plakous_attempt::ReplaySafety::ServerEffect
+        plakous_exchange::attempt::ReplaySafety::ServerEffect
     );
     let (attempt, mut receiver) = fixture_attempt(operation.binding().clone())?;
     let (client, origin, dispatches) = loopback_responses(vec![
@@ -876,7 +876,7 @@ async fn loopback_success_seals_exact_head_metadata_before_one_terminal() -> Tes
     assert!(response.facts().provider_accepted());
     assert_eq!(
         response.facts().retry_class(),
-        plakous_attempt::RetryClass::Never
+        plakous_exchange::attempt::RetryClass::Never
     );
     assert!(events.iter().all(Result::is_ok));
     let started = events
@@ -1012,7 +1012,7 @@ async fn accepted_malformed_stream_error_retains_outcome_unknown_facts() -> Test
         .expect_err("malformed accepted stream");
     assert_eq!(
         operation_error.provider_acceptance(),
-        Some(plakous_attempt::ProviderAcceptance::Accepted)
+        Some(plakous_exchange::attempt::ProviderAcceptance::Accepted)
     );
     let observation_error = receiver
         .next()
@@ -1021,7 +1021,7 @@ async fn accepted_malformed_stream_error_retains_outcome_unknown_facts() -> Test
         .expect_err("protocol error observation");
     assert_eq!(
         observation_error.provider_acceptance(),
-        Some(plakous_attempt::ProviderAcceptance::Accepted)
+        Some(plakous_exchange::attempt::ProviderAcceptance::Accepted)
     );
     assert!(receiver.next().await.is_none());
     Ok(())

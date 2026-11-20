@@ -227,7 +227,7 @@ async fn sdk_driver(foreground_stop: bool) -> TestResult {
     let process = Arc::new(plakous_tool_process::ProcessSessionTools::posix_sh()?);
     let mut registry = ToolRegistryBuilder::default();
     let packs = plakous_compose::standard_coding_packs(
-        Arc::new(plakous_tool_plan::InMemoryPlanState::default()),
+        Arc::new(plakous_tool_files::InMemoryPlanState::default()),
         Arc::clone(&process),
     );
     plakous_tools::register_packs(&packs, &mut registry)?;

@@ -7,7 +7,7 @@ use crate::{
     platform_binding::{self, ACCOUNTING, PROJECTION},
     xai_platform_selection, xai_platform_selection_for,
 };
-use plakous_attempt::LedgerPolicy;
+use plakous_exchange::attempt::LedgerPolicy;
 use plakous_http::{
     Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
 };

@@ -10,7 +10,7 @@ use std::time::Duration;
 use std::num::NonZeroU32;
 
 #[cfg(feature = "native-auth")]
-use plakous_attempt::LedgerPolicy;
+use plakous_exchange::attempt::LedgerPolicy;
 use plakous_model::RuntimeModelAuthorityError as PlatformRuntimeAuthorityError;
 #[cfg(feature = "native-auth")]
 use plakous_model::{

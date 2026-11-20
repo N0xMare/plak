@@ -88,7 +88,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages, kept outside the production dependency closure entirely and never published |
 
-The workspace holds 43 packages: five supported, 35 published internal, three
+The workspace holds 39 packages: five supported, 31 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -104,18 +104,18 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 use the same name. The `plak` package is retired; this tree provides no
 package alias or executable shim.
 
-**Published internal (35)**
+**Published internal (31)**
 
 `plakd-wire-types`, `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
-`plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
+`plakous-anthropic`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-codex-code-mode-protocol`,
 `plakous-compose`, `plakous-exchange`, `plakous-gateway-protocol`,
 `plakous-http`, `plakous-image`, `plakous-cell`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`,
-`plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-runner-dial`, `plakous-store`,
-`plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
-`plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
+`plakous-responses`, `plakous-runner`, `plakous-runner-protocol`, `plakous-store`,
+`plakous-tool-files`, `plakous-tool-process`,
+`plakous-tool-web`, `plakous-xai`.
 
 A retired package stops at its last published version; that version is not yanked.
 
@@ -153,12 +153,12 @@ explicit metadata. Directory placement never grants dependency permission.
 | Directory | Contents | Layer |
 | --- | --- | --- |
 | `crates/core/` | model, tools, agent | core |
-| `crates/common/` | attempt, http, auth, runner-protocol, runner-dial, gateway-protocol, image | common |
+| `crates/common/` | http, auth, runner-protocol, gateway-protocol, image | common |
 | `crates/runtimes/` | cell, js-runtime, py-worker, runner | engine |
-| `crates/protocols/` | Responses (with its shared dialect hosts), exchange, Messages, Chat | protocol |
+| `crates/protocols/` | Responses (with its shared dialect hosts), exchange (including the attempt lifecycle), Messages, Chat | protocol |
 | `crates/providers/` | OpenAI, Anthropic, xAI, OpenRouter | provider |
 | `crates/store/` | session-store implementations | store |
-| `crates/harness/` | prompts, compose, coding tool packs | harness |
+| `crates/harness/` | prompts, compose, files/search/plan packs, and other tool packs | harness |
 | `crates/plakous/` | complete-workflow public entrypoint | facade |
 | `crates/hosting/` | host protocol and hosted runtime | host |
 | `crates/orchestration/` | workspace, recursive subagents and their store | host |
@@ -1508,8 +1508,8 @@ the tracked tree with the published `plakd` manifest (section 3.3), derives the 
 from `cargo metadata` there (`tools/release/publish_plan.py`: every member
 whose `publish` is not `false`, dependencies first, where normal, build and
 versioned dev-dependencies order the cohort because crates.io resolves each at
-upload; a cycle is an error), and runs one `cargo package --locked` over that
-selection. Cargo packages the members against a local overlay of the archives
+upload; a cycle is an error). The cohort has 36 members. The script runs one
+`cargo package --locked` over that selection. Cargo packages the members against a local overlay of the archives
 it has just written, so unpublished siblings resolve, and verifies each by
 building it from its archive, with `CARGO_TARGET_DIR` at
 `<target>/package`. The vendor snapshot is a workspace member (§3) precisely so
@@ -2088,8 +2088,8 @@ micro-monty at `=0.0.2`.
 
 `PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
 list: `plakous-model` and `plakous-runner-protocol` (closure `serde` and
-`serde_json`), then `plakous-runner-dial`, `plakous-gateway-protocol`, `plakous-image`, `plakous-tools` and `plakous-agent`. All seven have
-portable defaults. `plakous-image`'s default `normalize` closure is the
+`serde_json`), `plakous-gateway-protocol`, `plakous-image`, `plakous-tools`
+and `plakous-agent`. All six have portable defaults. `plakous-image`'s default `normalize` closure is the
 pure-Rust `image` crate with its png, jpeg, gif and webp codecs; it is checked
 for the target with those defaults, and `plakous-tools` reaches it without
 features. A crate joins that tuple only in the change that makes its normal dependency
@@ -2201,21 +2201,6 @@ sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
 not link `wasm-bindgen`. The target-dependency table is part of the reviewed
 manifest security-surface digest.
 
-`plakous-runner-dial` is a published-internal common crate with empty defaults,
-no I/O and no product caller. Its sole `test-hooks` feature admits `ws` offers;
-it does not change the cryptographic suite. Both native and wasm use exactly
-`snow =0.10.0` with default features disabled and a local resolver over
-`x25519-dalek =2.0.1`, `curve25519-dalek =4.1.3`,
-`chacha20poly1305 =0.10.1`, `poly1305 =0.8.0` and the existing
-`blake2 =0.11.0` with its `zeroize` feature enabled for hash and MAC state.
-Direct exact constraints on the two transitive primitives
-keep their reviewed versions fixed. No snow built-in resolver or second blake2
-is linked. The curve pin includes RUSTSEC-2024-0344's fix; the snow pin includes
-RUSTSEC-2024-0011's stateful nonce fix. The additions are checked by cargo-deny.
-The resolver uses only getrandom 0.4 for entropy; snow adds no RNG dependency
-or backend. Its fallible RNG interface propagates failures. The official IK
-vector and negative tests pin the chosen suite's behavior.
-
 `plakous-gateway-protocol` is a published-internal common crate with empty
 defaults, no I/O and no product caller yet. Its normal closure is `base64`,
 `serde`, `serde_json` and `zeroize`; it draws no randomness (a gateway mints
@@ -2228,10 +2213,7 @@ compile there, so `plakous-agent` enables `getrandom`'s `wasm_js` feature as a
 target dependency for that cfg only. In 0.4 the feature alone selects the
 WebCrypto backend; no `getrandom_backend` cfg is set. Native resolutions do not
 enable it. A call fails at run time in a host without `globalThis.crypto`, and
-each caller already handles that failure. `plakous-runner-dial` uses the same
-target-specific `wasm_js` declaration for static and ephemeral keys, offer ids,
-pairing secrets and confirmation challenges; every entropy failure is returned
-without a fallback.
+each caller already handles that failure.
 
 The target is not listed in `rust-toolchain.toml`. Listing it would make rustup
 try to download it whenever the toolchain is selected, including inside the

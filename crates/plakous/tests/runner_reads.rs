@@ -106,7 +106,7 @@ impl Placed {
         let mut builder = ToolRegistryBuilder::default();
         for pack in [
             Arc::new(plakous_tool_files::FilesToolPack::default()) as Arc<dyn ToolPack>,
-            Arc::new(plakous_tool_search::SearchToolPack),
+            Arc::new(plakous_tool_files::SearchToolPack),
         ] {
             for registration in pack.registrations()? {
                 builder.register(registration)?;

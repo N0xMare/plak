@@ -6,15 +6,15 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use futures_channel::mpsc;
-use futures_util::SinkExt;
-use plakous_attempt::{
+use crate::attempt::{
     AdmittedAwaitHooks, AdmittedAwaitPolicy, AdmittedCallDriver, AttemptBinding, ExchangeBreak,
     FamilyAttemptCore, FamilyCoreError, LedgerOnlyAdmission, PhysicalRequestBinding,
     PhysicalRequestOutcome, ProviderAcceptance, ProviderRefusal, ReplaySafety,
     ServiceAdmissionSeal, SinkDeliveryError, TerminalFacts, call_admitted_operation,
     race_sink_delivery,
 };
+use futures_channel::mpsc;
+use futures_util::SinkExt;
 use plakous_model::{
     AttemptId, BlockStart, CancellationToken, ContentBlock, Digest, ModelCallContext, ModelEvent,
     ModelHttpStatus, ModelProviderCode, ModelProviderRequestId, ModelResponse, ModelRetryDelay,
@@ -26,7 +26,7 @@ use super::FamilyWire;
 use std::marker::PhantomData;
 
 /// Maximum service polls permitted after admitted cancellation is observed.
-use plakous_attempt::MAX_ADMITTED_CLEANUP_POLLS;
+use crate::attempt::MAX_ADMITTED_CLEANUP_POLLS;
 
 /// Exact immutable authority for one credential-free family operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -460,7 +460,7 @@ enum DeliveryFailure {
     Panicked,
 }
 
-impl plakous_attempt::PanicAsError for DeliveryFailure {
+impl crate::attempt::PanicAsError for DeliveryFailure {
     fn panicked() -> Self {
         Self::Panicked
     }
@@ -667,7 +667,7 @@ impl<W: FamilyWire> FamilyAttempt<W> {
     /// Records transient retry diagnostics alongside the physical-request ledger.
     pub(super) fn record_failure(
         &self,
-        point: plakous_attempt::FailurePoint,
+        point: crate::attempt::FailurePoint,
         phase: Option<&'static str>,
         refusal: Option<ProviderRefusal>,
         proven_unsent: bool,

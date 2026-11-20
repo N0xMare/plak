@@ -1,8 +1,9 @@
 # plakous-tool-files
 
 One workspace-path rule and one patch preflight: bounded reads, exact-content
-patching, image inspection, and every provider lowering of them. This crate is
-part of [Plak](https://github.com/N0xMare/plak), an embeddable single-agent
+patching, image inspection, and their provider lowerings. This crate also
+owns the separate bounded repository search and revisioned task plan packs.
+It is part of [Plak](https://github.com/N0xMare/plak), an embeddable single-agent
 multi-provider harness library (Plakous) and the command-line and terminal
 product built on it. It is a published-internal package: it releases in the
 exact version cohort of the `plakous` facade and carries no direct-use

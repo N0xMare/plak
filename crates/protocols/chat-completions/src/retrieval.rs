@@ -11,7 +11,7 @@
 
 use std::collections::BTreeSet;
 
-use plakous_attempt::ReplaySafety;
+use plakous_exchange::attempt::ReplaySafety;
 use plakous_http::{Client, Failure as HttpFailure, SseDecoder, SseLimits};
 use plakous_model::CancellationToken;
 use serde::Serialize;
@@ -260,7 +260,7 @@ pub use plakous_exchange::side_request::{
 };
 
 /// Runs one side request to its answer under the bounded retry of
-/// [`plakous_attempt::RetryPolicy::TURN`].
+/// [`plakous_exchange::attempt::RetryPolicy::TURN`].
 ///
 /// # Errors
 ///

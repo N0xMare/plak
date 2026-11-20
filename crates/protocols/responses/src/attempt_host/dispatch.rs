@@ -310,7 +310,7 @@ where
             Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
             (class != ResponsesHttpStatusClass::Quota)
                 .then(|| {
-                    plakous_attempt::ProviderRefusal::from_http_status(
+                    plakous_exchange::attempt::ProviderRefusal::from_http_status(
                         refusal_status(status, class).as_u16(),
                     )
                 })

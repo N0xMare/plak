@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ChatWire;
 
-pub use plakous_attempt::MAX_ADMITTED_CLEANUP_POLLS as MAX_CHAT_ADMITTED_CLEANUP_POLLS;
+pub use plakous_exchange::attempt::MAX_ADMITTED_CLEANUP_POLLS as MAX_CHAT_ADMITTED_CLEANUP_POLLS;
 pub use plakous_exchange::family::{
     FamilyAttemptBinding as ChatAttemptBinding, FamilyOperationBinding as ChatOperationBinding,
     FamilyPhysicalRequestBinding as ChatPhysicalRequestBinding,
@@ -32,8 +32,8 @@ pub type ChatAttemptEventSink = plakous_exchange::family::FamilyAttemptEventSink
 pub type ChatAttemptResponse = plakous_exchange::family::FamilyAttemptResponse<ChatWire>;
 
 /// Chat forbids hosted effects and requires a complete sealed aggregate.
-pub const CHAT_FAMILY_LEDGER_POLICY: plakous_attempt::LedgerPolicy =
-    plakous_attempt::LedgerPolicy {
+pub const CHAT_FAMILY_LEDGER_POLICY: plakous_exchange::attempt::LedgerPolicy =
+    plakous_exchange::attempt::LedgerPolicy {
         require_service_admitted_for_dispatch: true,
         require_active_request_always: false,
         dual_auth_slots: false,
@@ -42,7 +42,7 @@ pub const CHAT_FAMILY_LEDGER_POLICY: plakous_attempt::LedgerPolicy =
 
 impl FamilyWire for ChatWire {
     const NAME: &'static str = "Chat";
-    const LEDGER_POLICY: plakous_attempt::LedgerPolicy = CHAT_FAMILY_LEDGER_POLICY;
+    const LEDGER_POLICY: plakous_exchange::attempt::LedgerPolicy = CHAT_FAMILY_LEDGER_POLICY;
     const HOSTED_EFFECTS: bool = false;
     const PROJECTOR_TERMINAL: bool = false;
     const PROVIDER_DEADLINE_REPLAY_ONCE: bool = true;

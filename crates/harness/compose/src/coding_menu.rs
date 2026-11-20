@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use plakous_model::{ProjectedToolPresentationV2, ToolName};
 use plakous_tool_files::FilesToolPack;
-use plakous_tool_plan::{InMemoryPlanState, PlanState, PlanToolPack};
+use plakous_tool_files::SearchToolPack;
+use plakous_tool_files::{InMemoryPlanState, PlanState, PlanToolPack};
 use plakous_tool_process::{ProcessSessionTools, ProcessToolPack};
-use plakous_tool_search::SearchToolPack;
 use plakous_tools::{
     CodingPresentation, CompiledSurface, FrozenToolRegistry, NestedToolEligibility,
     PassthroughPack, PortableToolSchemaV2, ProviderModelProjectionIdentityV2, ToolPack,

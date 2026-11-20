@@ -14,7 +14,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MessagesWire;
 
-pub use plakous_attempt::MAX_ADMITTED_CLEANUP_POLLS as MAX_MESSAGES_ADMITTED_CLEANUP_POLLS;
+pub use plakous_exchange::attempt::MAX_ADMITTED_CLEANUP_POLLS as MAX_MESSAGES_ADMITTED_CLEANUP_POLLS;
 pub use plakous_exchange::family::{
     FamilyAttemptBinding as MessagesAttemptBinding,
     FamilyOperationBinding as MessagesOperationBinding,
@@ -36,11 +36,11 @@ pub type MessagesAttemptEventSink = plakous_exchange::family::FamilyAttemptEvent
 /// MessagesAttemptResponse over the shared family host.
 pub type MessagesAttemptResponse = plakous_exchange::family::FamilyAttemptResponse<MessagesWire>;
 
-pub use plakous_attempt::ProviderRefusal as MessagesProviderRefusal;
+pub use plakous_exchange::attempt::ProviderRefusal as MessagesProviderRefusal;
 impl FamilyWire for MessagesWire {
     const NAME: &'static str = "Messages";
-    const LEDGER_POLICY: plakous_attempt::LedgerPolicy =
-        plakous_attempt::LedgerPolicy::MESSAGES_FAMILY;
+    const LEDGER_POLICY: plakous_exchange::attempt::LedgerPolicy =
+        plakous_exchange::attempt::LedgerPolicy::MESSAGES_FAMILY;
     const HOSTED_EFFECTS: bool = true;
     const PROJECTOR_TERMINAL: bool = true;
     const PROVIDER_DEADLINE_REPLAY_ONCE: bool = false;
@@ -83,7 +83,7 @@ impl FamilyWire for MessagesWire {
     fn usage_limit(error: &Self::StreamError) -> bool {
         error
             .provider_payload()
-            .is_some_and(plakous_attempt::body_reports_usage_limit)
+            .is_some_and(plakous_exchange::attempt::body_reports_usage_limit)
     }
     fn into_parts(projection: Self::Projection) -> (ModelResponse, Self::Stop) {
         let (response, _, stop) = projection.into_parts();

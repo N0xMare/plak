@@ -53,9 +53,7 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 # it, so only its tests name them.
 plakous-compose.workspace = true
 plakous-tool-files.workspace = true
-plakous-tool-plan.workspace = true
 plakous-tool-process.workspace = true
-plakous-tool-search.workspace = true
 futures = { workspace = true, features = ["async-await", "executor", "std"] }
 plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 proptest = { workspace = true, features = ["std"] }

@@ -2,7 +2,7 @@
 //!
 //! Commercial integrations select closed policy data and supply exact route,
 //! credential and model authority. This crate owns framing, parsing and the
-//! shared request, response and attempt hosts; `plakous-attempt` owns the
+//! shared request, response and attempt hosts; `plakous_exchange::attempt` owns the
 //! family-independent dispatch ledger. Messages remains a separate wire family.
 
 #![forbid(unsafe_code)]

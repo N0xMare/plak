@@ -3,12 +3,6 @@
 //! Its own bound table and its own walker: search changes independently of
 //! edit semantics, so it is its own pack.
 
-#![forbid(unsafe_code)]
-#![allow(
-    clippy::doc_markdown,
-    reason = "doc comments name exact provider tool identifiers"
-)]
-
 mod issued;
 mod list_entries;
 mod text;

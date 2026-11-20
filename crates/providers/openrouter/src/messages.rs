@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use plakous_attempt::PhysicalRequestBinding;
+use plakous_exchange::attempt::PhysicalRequestBinding;
 use plakous_http::{
     Client, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
     Response, SensitiveBytes, sensitive_header_value,
@@ -625,7 +625,7 @@ impl MessagesHttpHooks<plakous_messages::MessagesWire> for OpenRouterMessagesHoo
             error
         };
         // Carry the classification, not just the number in a sentence.
-        match plakous_attempt::ProviderRefusal::from_http_status(metadata.status()) {
+        match plakous_exchange::attempt::ProviderRefusal::from_http_status(metadata.status()) {
             Some(refusal) => error.with_refusal(refusal),
             None => error,
         }

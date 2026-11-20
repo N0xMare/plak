@@ -1,5 +1,5 @@
 use super::*;
-use plakous_attempt::RetryClass;
+use plakous_exchange::attempt::RetryClass;
 
 mod incomplete_retry;
 
@@ -114,7 +114,7 @@ use crate::{
     CanonicalIdSources, LifecycleDialectPolicy, ResponsesDialectProfile,
     ResponsesSemanticRevisions, ResponsesStreamLimits,
 };
-use plakous_attempt::ProviderAcceptance;
+use plakous_exchange::attempt::ProviderAcceptance;
 use plakous_http::{HeaderMap, HeaderValue, Limits, Method, Origin, TlsConfigIdentity};
 use plakous_model::{
     Actor, AttemptId, Capability, CapabilityConstraints, CapabilitySet, ContentBlock,
@@ -5567,7 +5567,10 @@ async fn unreplayed_in_band_refusals_finalize_workflows_and_retry_disabled_turns
             let service = ResponsesAttemptService::new(client, dialect, data, authorization)?;
             let response = service.execute(attempt).await?;
             assert!(!response.terminal().is_completed());
-            assert_eq!(lifecycle.load(Ordering::Acquire), plakous_attempt::FAILED);
+            assert_eq!(
+                lifecycle.load(Ordering::Acquire),
+                plakous_exchange::attempt::FAILED
+            );
             assert!(ledger.is_logically_terminal());
             assert_eq!(
                 response.facts(),

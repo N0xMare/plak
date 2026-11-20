@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use plakous_attempt::{ObservationSnapshot, ProviderAcceptance};
+use plakous_exchange::attempt::{ObservationSnapshot, ProviderAcceptance};
 use plakous_http::StatusCode;
 use plakous_model::{
     CapabilitySet, ModelAdapterProfileId, ModelId, ProtocolId, RouteId,
@@ -105,7 +105,7 @@ fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
             physical_attempts: 1,
             provider_acceptance: ProviderAcceptance::NotAccepted,
             visible_output: false,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: false,
             logical_success: false,
         });
@@ -178,7 +178,7 @@ fn the_responses_row_of_the_provider_failure_matrix_is_definite()
             physical_attempts: 1,
             provider_acceptance: ProviderAcceptance::Accepted,
             visible_output: true,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: false,
             logical_success: false,
         })
@@ -188,7 +188,7 @@ fn the_responses_row_of_the_provider_failure_matrix_is_definite()
             physical_attempts: 1,
             provider_acceptance: ProviderAcceptance::NotAccepted,
             visible_output: false,
-            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
             hosted_effects_possible: false,
             logical_success: false,
         })
@@ -283,9 +283,9 @@ fn hosted_effect_escalates_retry_risk() {
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: true,
         replay_safety: if hosted {
-            plakous_attempt::ReplaySafety::ServerEffect
+            plakous_exchange::attempt::ReplaySafety::ServerEffect
         } else {
-            plakous_attempt::ReplaySafety::CostOnly
+            plakous_exchange::attempt::ReplaySafety::CostOnly
         },
         hosted_effects_possible: hosted,
         logical_success: false,
@@ -326,7 +326,7 @@ fn provider_terminal_cyber_policy_invalid_request_is_a_refusal()
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -350,7 +350,7 @@ fn xai_pre_generation_refusal_is_policy_not_authorization() -> Result<(), Box<dy
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::NotAccepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -435,7 +435,7 @@ fn provider_terminal_content_policy_never_retries() -> Result<(), Box<dyn std::e
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -512,7 +512,7 @@ fn provider_terminal_error_preserves_class_and_code() -> Result<(), Box<dyn std:
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::CostOnly,
         hosted_effects_possible: false,
         logical_success: false,
     });
@@ -733,7 +733,7 @@ fn accepted_hosted_effect_capability_suppresses_automatic_retry() {
         physical_attempts: 1,
         provider_acceptance: ProviderAcceptance::Accepted,
         visible_output: false,
-        replay_safety: plakous_attempt::ReplaySafety::ServerEffect,
+        replay_safety: plakous_exchange::attempt::ReplaySafety::ServerEffect,
         hosted_effects_possible: true,
         logical_success: false,
     });

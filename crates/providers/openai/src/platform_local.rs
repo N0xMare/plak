@@ -3,7 +3,7 @@
 use plakous_auth::custody::CredentialField;
 use std::sync::Arc;
 
-use plakous_attempt::LedgerPolicy;
+use plakous_exchange::attempt::LedgerPolicy;
 use plakous_http::{
     Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
     sensitive_header_value,
