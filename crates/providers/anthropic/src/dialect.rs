@@ -1,8 +1,6 @@
-//! Versioned Anthropic Messages dialect and declared feature matrix.
+//! Versioned Anthropic Messages dialect and its selectable beta features.
 
 use std::collections::BTreeSet;
-
-use serde::{Deserialize, Serialize};
 
 /// The stable Anthropic Messages API version implemented by this codec.
 pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
