@@ -212,9 +212,8 @@ async fn connect(
     journaled: bool,
 ) -> (RunnerClient, ExecutionEnvironment, Arc<RunnerBackend>) {
     let stream = connect_socket(directory).await;
-    let journal: Option<Arc<dyn plakous_runner::CallJournal>> = journaled.then(|| {
-        Arc::new(FileCallJournal::open(directory.join("journal")).unwrap())
-            as Arc<dyn plakous_runner::CallJournal>
+    let journal: Option<Arc<dyn CallJournal>> = journaled.then(|| {
+        Arc::new(FileCallJournal::open(directory.join("journal")).unwrap()) as Arc<dyn CallJournal>
     });
     let (client, hello) = RunnerClient::connect_journaled(
         stream,

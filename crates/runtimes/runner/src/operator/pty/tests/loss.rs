@@ -152,7 +152,7 @@ fn operator_orphaned_shell_runner() {
         ))
         .unwrap();
     until_output(&mut worker, b"ORPHAN-READY\r\n");
-    let ready = std::path::PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
+    let ready = PathBuf::from(std::env::var_os("PLAK_OPERATOR_LOSS_HANDSHAKE").unwrap());
     let pending = ready.with_extension("pending");
     std::fs::write(&pending, worker.identity.as_ref().unwrap().pid.to_string()).unwrap();
     std::fs::rename(pending, ready).unwrap();

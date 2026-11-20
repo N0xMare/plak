@@ -883,7 +883,7 @@ fn running_job_script() -> Arc<ScriptPlan> {
             "stall_ignores_cancellation": true,
             "steps": [
                 {"output": {"tool": {"name": "process_session_start", "arguments": {
-                    "command": "sleep 60", "workdir": ".", "login": false,
+                    "command": "exec sleep 60", "workdir": ".", "login": false,
                     "tty": false, "keep_stdin_open": false, "yield_time_ms": 0,
                     "max_output_bytes": 8192
                 }}}, "finish": "tool_calls"},

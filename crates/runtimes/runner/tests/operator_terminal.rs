@@ -156,7 +156,7 @@ async fn operator_pty_wire_and_home_local_have_no_agent_jobs_or_lines() {
         loop {
             let event = tokio::time::timeout_at(deadline, stream.next())
                 .await
-                .expect("runner did not publish terminal cleanup proof")
+                .unwrap_or_else(|_| panic!("runner did not publish terminal cleanup proof"))
                 .unwrap();
             if let TerminalEvent::Exit { status, .. } = event {
                 if status == TerminalStatus::Exited {
@@ -239,6 +239,6 @@ async fn operator_pty_detached_terminal_alone_prevents_daemon_idle_exit() {
         }
     })
     .await
-    .expect("detached shell cleanup not proven");
+    .unwrap_or_else(|_| panic!("detached shell cleanup not proven"));
     assert!(runner.is_idle());
 }
