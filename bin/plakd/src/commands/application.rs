@@ -471,7 +471,7 @@ impl PlakousApplication {
         state_home: PathBuf,
         custody: crate::gateway::HostCustody,
     ) -> CliResult<Self> {
-        Self::new(state_home, None, None, custody)
+        Self::new(state_home, None, custody)
     }
 
     #[cfg(test)]
