@@ -17,6 +17,37 @@ use crate::{
 const PINNED_VERSION: u32 = 9;
 const PINNED: &str = include_str!("pinned/v9.jsonl");
 
+#[test]
+fn obsolete_runner_frames_still_decode_for_inspection() {
+    let mut frames = include_str!("pinned/obsolete-inspection.jsonl").lines();
+    let RunnerFrame::Hello(hello) =
+        crate::frame::decode(frames.next().unwrap().as_bytes()).unwrap()
+    else {
+        panic!("expected obsolete Hello");
+    };
+    assert_eq!(hello.version.protocol, 1);
+    assert_eq!(hello.machine_id, None);
+    assert!(
+        frames.clone().count() >= 2,
+        "pin both obsolete Lines shapes"
+    );
+    for frame in frames {
+        let pinned: Value = serde_json::from_str(frame).unwrap();
+        let RunnerFrame::Lines { request_id, lines } =
+            crate::frame::decode(frame.as_bytes()).unwrap()
+        else {
+            panic!("expected obsolete Lines answer");
+        };
+        assert_eq!(pinned["request_id"], request_id);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].foreground,
+            pinned["lines"][0]["foreground"].as_bool().unwrap_or(false)
+        );
+        assert_eq!(pinned["lines"][0]["line"], lines[0].line);
+    }
+}
+
 fn owner() -> LineOwner {
     LineOwner {
         line: "line".into(),

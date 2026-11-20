@@ -99,6 +99,15 @@ fn map_canonical_bytes(
     Ok(())
 }
 
+fn compact_canonical_bytes(value: &mut Value) -> TestResult {
+    let bytes = serde_json::from_value::<Vec<u8>>(value.take())?;
+    *value = match String::from_utf8(bytes) {
+        Ok(text) => Value::String(text),
+        Err(error) => json!({"hex": plakous::model::hex_lower(error.as_bytes())}),
+    };
+    Ok(())
+}
+
 fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
     for row in matrix.as_object_mut().unwrap().values_mut() {
         let config = &mut row["configuration"];
@@ -109,14 +118,7 @@ fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
                 .remove("behavior");
         }
     }
-    map_canonical_bytes(&mut matrix, |value| {
-        let bytes = serde_json::from_value::<Vec<u8>>(value.take())?;
-        *value = match String::from_utf8(bytes) {
-            Ok(text) => Value::String(text),
-            Err(error) => json!({"hex": plakous::model::hex_lower(error.as_bytes())}),
-        };
-        Ok(())
-    })?;
+    map_canonical_bytes(&mut matrix, compact_canonical_bytes)?;
     Ok(matrix)
 }
 
@@ -262,6 +264,24 @@ fn diff(expected: &Value, actual: &Value, path: &str, output: &mut Vec<String>) 
     if expected == actual || output.len() >= 20 {
         return;
     }
+    if path.ends_with(".canonical_bytes") {
+        let before = expected.to_string();
+        let after = actual.to_string();
+        let shared = before
+            .chars()
+            .zip(after.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let start = shared.saturating_sub(60);
+        let preview = |value: &str| value.chars().skip(start).take(240).collect::<String>();
+        let prefix = if start == 0 { "" } else { "…" };
+        output.push(format!(
+            "{path}: {prefix}{} -> {prefix}{}",
+            preview(&before),
+            preview(&after)
+        ));
+        return;
+    }
     match (expected, actual) {
         (Value::Object(before), Value::Object(after)) => {
             let keys = before.keys().chain(after.keys()).collect::<BTreeSet<_>>();
@@ -363,13 +383,22 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
             normalized_facts(facts, &workspace)?,
         );
     }
-    let actual = Value::Object(output);
+    let mut actual = Value::Object(output);
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/binding-contracts.json");
     if std::env::var("PLAK_UPDATE_BINDING_CONTRACTS").is_ok_and(|value| value == "1") {
         let fixture = compact_fixture(actual.clone())?;
         std::fs::write(&path, serde_json::to_vec_pretty(&fixture)?)?;
     }
-    let expected = expand_fixture(serde_json::from_slice(&std::fs::read(&path)?)?)?;
+    let raw: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+    let mut expected = expand_fixture(raw.clone())?;
+    assert!(
+        compact_fixture(expected.clone())? == raw,
+        "binding fixture is not in the canonical shape emitted by its writer"
+    );
+    // Expand behavior defaults for field-level comparison, but render a
+    // canonical byte field as one value rather than one diff per shifted byte.
+    map_canonical_bytes(&mut expected, compact_canonical_bytes)?;
+    map_canonical_bytes(&mut actual, compact_canonical_bytes)?;
     let mut changes = Vec::new();
     let routes = expected
         .as_object()

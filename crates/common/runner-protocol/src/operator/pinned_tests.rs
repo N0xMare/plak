@@ -16,15 +16,12 @@ fn roundtrip<T: DeserializeOwned + Serialize>(value: &Value) -> T {
 
 #[test]
 fn operator_payloads_are_pinned_to_the_exact_runner_protocol() {
-    let pins = [
-        (7, include_str!("../pinned/operator-v7.jsonl")),
-        (8, include_str!("../pinned/operator-v8.jsonl")),
-        (9, include_str!("../pinned/operator-v9.jsonl")),
-    ];
-    let (_, text) = pins
-        .iter()
-        .find(|(version, _)| *version == crate::PROTOCOL_VERSION)
-        .expect("pin operator payloads for the new runner protocol");
+    assert_eq!(
+        crate::PROTOCOL_VERSION,
+        9,
+        "pin operator payloads for the new runner protocol"
+    );
+    let text = include_str!("../pinned/operator-v9.jsonl");
     let (mut operations, mut events, mut answers, mut statuses, mut refusals) = (
         BTreeSet::new(),
         BTreeSet::new(),

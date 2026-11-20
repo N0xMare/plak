@@ -1,0 +1,3 @@
+{"binary_id":"binary","boot_id":"boot","capabilities":["capability"],"descriptor":{"descriptor":true},"home":"/home","instance":"instance","job_bound":10,"kind":"hello","path":"/bin","runner_id":"runner","version":{"flavor":"flavor","protocol":1,"source_revision":"revision"}}
+{"kind":"lines","lines":[{"adopted":true,"host_id":"host","jobs":{"jobs":[]},"line":"line","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"}}],"request_id":"request"}
+{"kind":"lines","lines":[{"adopted":true,"foreground":true,"host_id":"host","jobs":{"jobs":[]},"line":"line","owner":{"branch":"branch","fence":3,"generation":2,"line":"line"}}],"request_id":"request"}

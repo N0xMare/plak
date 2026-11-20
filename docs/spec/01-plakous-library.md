@@ -7366,8 +7366,10 @@ the normal recovery-required path before Ready. The driver's placement parking
 - **Line table.** Each current `Lines` entry reports `foreground`: true while
   an unpromoted process is live, independent of retained job snapshots.
   Older protocol directories remain inspection-only; a line without a
-  `foreground` field reports no foreground evidence. Only current general
-  protocol frames are pinned; retention has its own version and pins.
+  `foreground` field reports no foreground evidence. Pins cover current general
+  and operator frames plus the minimal obsolete-inspection fixture. On a
+  protocol bump, add the outgoing version's `Lines` answer if its shape differs
+  from the existing obsolete answers. Retention has its own version and pins.
   `Lines` lists the lines the runner holds processes for: on
   a host's connection its own lines; on an inspecting one bound under the
   runner machine's own host identity (a local `plakd runner ps`) every host's;
