@@ -2284,7 +2284,7 @@ tree and does not require it. Only a matching cohort verification receipt
 Commits inside a batch are not gated individually. A production install
 requires the batch gate **and** the install tier on the exact tree: the
 complete macOS suite (`just install-checks`), the full Linux parallel lane,
-the install-tier serial and durability rows, workspace rustdoc, the
+the install-tier serial and durability rows, full tooling, workspace rustdoc, the
 release-resolution and maintainer builds with the linkage check, and the
 strict crash sweep. Run the Linux install groups with `just install` or
 `just musl native --install` for the shipped target; strict crash sweep is a

@@ -92,8 +92,8 @@ full Mac suite and strict crash sweep (spec 06 §8). Full adds release-only
 variants, standalone rustdoc, archive verification and ignored retirement
 soaks. A passing full run on a clean tree records the evidence publication
 requires. Inert documentation changes can reuse it; a `README.md` change
-needs new archive verification (spec 06 §6.5). With an explicit batch base,
-the serial runner also handles path-triggered install families.
+needs new archive verification (spec 06 §6.5). Linux batch runs install
+families triggered by its base diff, or all families when no base is set.
 
 The nextest profiles partition the offline suite. Edit the owning budget or
 crash filter (install families are in `.config/nextest-install.toml`), then

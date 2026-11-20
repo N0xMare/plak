@@ -1,11 +1,13 @@
 """`just fast` maps working-tree paths to the packages it lints and tests."""
 
 import importlib.util
+import io
 import sys
 import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -75,9 +77,43 @@ class TouchedPackagesTests(unittest.TestCase):
             paths = CHANGED.changed_paths(root)
             self.assertEqual(paths, [regression])
             self.assertEqual(CHANGED.touched_packages(paths, DIRS), ["plakous-model"])
-            self.assertEqual(CHANGED.batch_paths(root, "HEAD"), [])
+            self.assertEqual(CHANGED.batch_changes(root, "HEAD"), [])
             git("add", "-f", regression)
-            self.assertEqual(CHANGED.batch_paths(root, "HEAD"), [regression])
+            self.assertEqual(CHANGED.batch_changes(root, "HEAD"), [regression])
+
+    def test_unbased_batches_ignore_dirt_and_never_fall_back_to_fast_base(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=True),
+        ):
+            root = Path(temporary)
+
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, text=True)
+
+            git("init", "-q")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            (root / ".gitignore").write_text("proptest-regressions/\n")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            seed = root / "crates/core/model/proptest-regressions/seed.txt"
+            seed.parent.mkdir(parents=True)
+            seed.write_text("ignored seed")
+            (root / "notes.txt").write_text("untracked note")
+            for fast_env in ({}, {"PLAK_FAST_BASE": "nonexistent-revision"}):
+                with (
+                    self.subTest(fast_env=fast_env),
+                    patch.dict(os.environ, fast_env),
+                    patch.object(CHANGED, "REPO_ROOT", root),
+                    redirect_stdout(io.StringIO()) as output,
+                ):
+                    self.assertEqual(CHANGED.main(["--batch-filter"]), 0)
+                    self.assertEqual(output.getvalue().strip(), "all()")
+                    self.assertEqual(CHANGED.batch_changes(root, "HEAD"), ["notes.txt"])
+            with patch.dict(os.environ, {"PLAK_FAST_BASE": "nonexistent-revision"}):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    CHANGED.changed_paths(root)
 
     def touched(self, *paths):
         return CHANGED.touched_packages(list(paths), DIRS)
@@ -133,6 +169,10 @@ class TouchedPackagesTests(unittest.TestCase):
             "rust-toolchain.toml",
             ".clippy.toml",
             ".rustfmt.toml",
+            "tools/gate/test-env.sh",
+            "tools/gate/test-processes.py",
+            "tools/gate/test-tmpdir.sh",
+            "tools/gate/dev-tools.pins",
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.touched("bin/plakd/src/lib.rs", path), ["--workspace"])
@@ -167,15 +207,19 @@ class TouchedPackagesTests(unittest.TestCase):
                 )
             ),
         ]
-        cell_consumers = "package(=plakd) | package(=plakous) | package(=plakous-hosted)"
+        crash_harness = "package(=plakous-offline-crash-harness)"
+        cell_consumers = (
+            f"package(=plakd) | package(=plakous) | package(=plakous-hosted) | {crash_harness}"
+        )
         for producer, consumers in (
             ("dependency", cell_consumers),
+            ("plakous-js-runtime", cell_consumers),
             ("plakous-py-worker", cell_consumers),
             ("plakous-cell", cell_consumers),
-            ("plakd", "package(=plakous-offline-crash-harness)"),
+            ("plakd", crash_harness),
             (
                 "plakous-mcp-fake-server",
-                "package(=plakd) | package(=plakous-hosted) | package(=plakous-mcp)",
+                f"package(=plakd) | package(=plakous-hosted) | package(=plakous-mcp) | {crash_harness}",
             ),
         ):
             with self.subTest(producer=producer):
@@ -210,6 +254,22 @@ class TouchedPackagesTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(CHANGED.install_families([path], {}), [name])
         self.assertEqual(CHANGED.install_families(["AGENTS.md"], {}), [])
+        for path, family in (
+            ("bin/plakd/src/gateway/mod.rs", "upgrade"),
+            ("bin/plakd/src/host/gateway_startup.rs", "upgrade"),
+            ("crates/runtimes/runner/src/retention/codec.rs", "upgrade"),
+            ("crates/common/runner-protocol/src/retention.rs", "upgrade"),
+            ("crates/common/runner-protocol/src/pinned/retention-v1-invalid.jsonl", "upgrade"),
+            (
+                "bin/plakd/tests/fixtures/client-traces/host-control-switch-root.json",
+                "wire-restart-switch",
+            ),
+            ("bin/plakd/src/host/sessions.rs", "wire-restart-switch"),
+            ("crates/hosting/hosted/src/runtime/clear.rs", "wire-restart-switch"),
+            ("bin/plakd/src/host/idle.rs", "bridge"),
+        ):
+            with self.subTest(path=path):
+                self.assertIn(family, CHANGED.install_families([path], {}))
 
     def test_rust_only_batches_keep_tree_readers_and_inputs_trigger_full_tooling(self):
         scoped = selected_modules(["bin/plakd/src/lib.rs", "toolshed/unrelated.py"])

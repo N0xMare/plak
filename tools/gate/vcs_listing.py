@@ -69,7 +69,6 @@ def changed_paths(
     backend = kind(root)
     if backend == 'export':
         raise RuntimeError('changed paths require a repository; pass packages explicitly')
-    base = base or os.environ.get('PLAK_FAST_BASE')
     if backend == 'git':
         revision = run(
             root, 'git', 'rev-parse', '--verify', '--end-of-options', f'{base or "HEAD"}^{{commit}}'

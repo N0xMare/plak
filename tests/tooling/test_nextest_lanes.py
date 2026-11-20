@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools/gate"))
 from check_workspace import _inline_modules, all_rust_tokens  # noqa: E402
 from changed_packages import INSTALL_FAMILY_PATHS  # noqa: E402
 from nextest_layout import SPECIAL_LANES, install_catalog, sync_membership  # noqa: E402
+import vcs_listing  # noqa: E402
 
 
 @cache
@@ -241,6 +242,18 @@ class NextestLaneTests(unittest.TestCase):
                 f"{name} overlaps an earlier lane: {sorted(membership.keys() & matches)}",
             )
             membership.update(dict.fromkeys(matches, name))
+
+    def test_each_install_trigger_matches_a_tracked_path(self) -> None:
+        # Source exports contain only staged source files and have no Git index.
+        if vcs_listing.kind(ROOT) == "git":
+            paths = vcs_listing.run(ROOT, "git", "ls-files", "-z", "--cached").split("\0")
+        else:
+            paths = vcs_listing.listed_files(ROOT)
+        for family, patterns in INSTALL_FAMILY_PATHS.items():
+            for pattern in patterns:
+                with self.subTest(family=family, pattern=pattern):
+                    matches = re.compile(pattern).search
+                    self.assertTrue(any(matches(path) for path in paths))
 
     def test_lane_profiles_keep_reviewed_thread_counts_and_budget_timeout(self) -> None:
         self.assertEqual(profiles()["serial"]["test-threads"], 4)

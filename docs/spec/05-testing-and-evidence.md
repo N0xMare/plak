@@ -961,6 +961,7 @@ tools/gate/dev-check.sh --fast [--rdeps] [PKG...] # just fast
 tools/gate/dev-check.sh --batch          # just batch (also the script default)
 tools/gate/dev-check.sh --batch-mac      # just batch-mac
 tools/gate/dev-check.sh --install        # just install (without a snapshot flavor)
+tools/gate/dev-check.sh --install-checks # just install-checks: unscoped Mac tests
 tools/gate/dev-check.sh --full           # just full
 tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 ```
@@ -986,7 +987,7 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 | fast | `static`, scoped `tests-parallel` if any package is touched |
 | batch | `static`, `standalone`, `contracts`, path-scoped `tooling`, scoped `tests-parallel`, core `tests-durability` and `tests-serial`; an install pass only for path-triggered families |
 | batch-mac | Workspace clippy, a shared test build and three platform-sensitive passes: parallel, durability, serial |
-| install | `builds`, `rustdoc`, full `tests-parallel`, `tests-install`; `just install-checks` runs the complete Mac offline suite without packaging |
+| install | `builds`, `rustdoc`, full `tooling`, full `tests-parallel`, `tests-install`. The named `just install-checks` supplement runs all four Mac test lanes, without packaging or batch scoping |
 | full | Every group and both ignored retirement soaks |
 
 The tiers are not nested. Integration, exact-tree installation and release
@@ -1032,22 +1033,25 @@ includes reverse dependencies. Format, static structure and feature-closure
 checks stay global; fast narrows the facade and hosted profile compilations.
 
 Batch runners set `PLAK_BATCH_BASE` to the commit immediately before the batch.
-The gate maps its diff to longest-prefix package owners, including untracked
-non-ignored files. Local discovery without a batch base also sees ignored
-proptest regression seeds; an explicit batch base excludes ignored seeds
-left on persistent runners. A root Cargo input,
-`vendor/` or a shared test fixture selects the workspace. The MCP fixture
-server is a package, not a loose fixture. Configuration reference inputs
-outside the workspace select plakd. A clean checkout without an explicit
-batch base conservatively selects the workspace; an explicit diff with no
-Rust inputs selects no parallel tests. Change discovery does not silently
-use an ancestor repository. A source export may use the unscoped batch.
+With that base, the gate maps the working-tree diff, including non-ignored
+untracked files, to the longest-prefix package owners. Ignored proptest
+seeds on persistent runners are not batch inputs. Root Cargo and nextest
+configuration, shared test-environment tools and pins, `vendor/`, and loose
+shared test fixtures select the workspace. The MCP fixture server is a
+package, not a loose fixture. Configuration reference inputs outside the
+workspace select plakd. An explicit diff with no Rust inputs selects no
+parallel tests. Without `PLAK_BATCH_BASE`, both named batch modes use
+`all()` as their package scope, even on a dirty checkout or source export.
+Batch never consults `PLAK_FAST_BASE` or silently uses an ancestor repository.
+The named install modes and default `just musl native` ignore batch scoping.
 
 The batch parallel lane uses `-E 'rdeps(=<pkg>) | ...'` with extra consumers
 of changed runtime binaries or protocols: cell and the Python and JavaScript
 workers select the facade, hosted and plakd; plakd selects the standalone
-crash harness; the MCP fake server selects MCP, hosted and plakd. A direct
-or transitive Cargo input to those binaries can also select their consumers.
+crash harness; the MCP fake server selects MCP, hosted and plakd. The runtime
+edges are transitive, so both cell workers and the MCP fixture also select the
+crash harness. A direct or transitive Cargo input to those binaries can
+select their consumers too.
 The Mac intersects that same scope with the platform-sensitive predicates in
 `tools/gate/mac-selection.filter`: F for parallel and durability, F_SERIAL
 for serial. Nextest intersects each expression with the lane profile and an
@@ -1060,11 +1064,13 @@ checks and full run the complete install profile.
 
 Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
 `test_pinned_callback_ports`, `test_configuration_placement`,
-`test_uuid_features`, `test_portability_fence` and `test_policy_validators`.
+`test_uuid_features`, `test_portability_fence`, `test_policy_validators`,
+`test_agent_kind_docs`, `test_artifact_linkage`, `test_review_expiry`,
+`test_live_jobs` and `test_check_prod_loc`.
 Changing anything below `tools/`, `tests/tooling/`, `tests/live/`, `eval/`,
 `.config/`, or `tests/fixtures/`, or changing `Justfile`, selects the entire
-tooling suite. An unknown scope, full, or an explicit tooling step without
-a batch base also selects the entire suite.
+tooling suite. An unknown scope, install, full, or an explicit tooling step
+without a batch base also selects the entire suite.
 
 Public compile contracts isolate their feature graphs from workspace artifacts
 in a persistent `.public-contracts/<target-dir-name>/<target-triple>`
@@ -2380,12 +2386,12 @@ busy-root absence test reserve `ceil(N/4)` slots at priority 90.
 
 | Install family | Evidence | Batch trigger |
 | --- | --- | --- |
-| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices | Upgrade, carry, deploy, host move and revisions |
+| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices | Upgrade, carry, deploy, host move, revisions, credential gateway and runner-retention protocol paths |
 | Ledger retirement | Six bounded retirement campaigns, including pilots and early relaunches | Ledger or retirement paths |
 | Image residency | Indexed image-residency recovery cuts | Image or residency paths |
 | Runner startup | Redial bound, broken or obsolete daemon, slow user manager, surviving busy-root child and surviving child daemon job | Runner or daemon paths |
-| Wire restart switch | All sixteen switch restart groups | Switch or wire paths |
-| Bridge | Auto-start idle exit, log-lock retry and typed readiness/stopping refusals | Bridge or host startup paths |
+| Wire restart switch | All sixteen switch restart groups | Switch and wire code, session switch code and switch client-trace fixtures |
+| Bridge | Auto-start idle exit, log-lock retry and typed readiness/stopping refusals | Bridge, host startup and host idle paths |
 | Operator pins and rate | Runner pin/control reconciliation and the real console-rate fixture | Terminal registry, console, or runner operator paths |
 | Lifecycle deletion | Lease keepalive and archive/delete admission | Session lifecycle/deletion paths |
 | Placement hold | Reservation, instruction-drain and rebind cuts (`placement_hold_cut_`) | Placement, park or placement-hold paths |

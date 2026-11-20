@@ -35,7 +35,7 @@ BATCH_GROUPS = (
     'tests-durability',
     'tests-serial',
 )
-INSTALL_GROUPS = ('builds', 'rustdoc', 'tests-parallel', 'tests-install')
+INSTALL_GROUPS = ('builds', 'rustdoc', 'tooling', 'tests-parallel', 'tests-install')
 SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plakd')
 CLIPPIES = ['clippy']
 BUILDS = [
@@ -269,7 +269,7 @@ if sys.argv[1].endswith('changed_packages.py'):
     if '--dependents' in sys.argv:
         print(os.environ.get('GATE_DEPENDENTS', '\n'.join(sys.argv[3:])), end='')
     elif '--batch-filter' in sys.argv:
-        print(os.environ.get('GATE_BATCH_FILTER', 'all()'))
+        print(os.environ.get('GATE_BATCH_FILTER', 'all()') if os.environ.get('PLAK_BATCH_BASE') else 'all()')
     elif '--install-filter' in sys.argv:
         print(os.environ.get('GATE_INSTALL_FILTER', ''))
     else:
@@ -671,6 +671,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('gate passed', result.stdout)
 
     def test_batch_uses_scope_and_keeps_builds_and_verification_out(self):
+        self.env['PLAK_BATCH_BASE'] = 'test-base'
         self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd) | package(=plakous-offline-crash-harness)'
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -884,17 +885,30 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual([doc['args'][2] for doc in docs[1:]], list(SUPPORTED))
         self.assertTrue(all(doc['target_dir'].endswith('/rustdoc-alone') for doc in docs[1:]))
 
-    def test_install_runs_full_parallel_and_the_install_profile_only(self):
+    def test_install_runs_full_parallel_install_and_tooling_despite_a_batch_base(self):
         (self.root / '.config').mkdir()
         (self.root / '.config/nextest.toml').write_text('[profile.install]\n')
         self.env['GATE_BATCH_FILTER'] = 'none()'
-        result, calls, _ = self.run_gate('--install')
+        self.env['PLAK_BATCH_BASE'] = 'unused-batch-base'
+        result, calls, scripts = self.run_gate('--install')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.profiles(calls), ['offline', 'install'])
         self.assertEqual(self.filtersets(calls), [None, None])
         self.assertEqual([call['args'] for call in calls if call['args'][0] == 'build'], BUILDS)
         self.assertNotIn('clippy', [call['args'][0] for call in calls])
         self.assertEqual(self.publish_calls(), [])
+        self.assertIn(['tools/gate/run_tooling_tests.py', '-v'], scripts)
+
+    def test_install_checks_runs_all_four_lanes_without_batch_scoping(self):
+        self.env['PLAK_BATCH_BASE'] = 'unused-batch-base'
+        self.env['GATE_BATCH_FILTER'] = 'none()'
+        result, calls, scripts = self.run_gate('--install-checks')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.profiles(calls), ['offline', 'durability', 'serial', 'install'])
+        self.assertEqual(self.filtersets(calls), [None] * 4)
+        self.assertFalse(
+            any(s[0].endswith(('run_tooling_tests.py', 'changed_packages.py')) for s in scripts)
+        )
 
     def test_full_tier_checks_default_and_maintainer_feature_sets(self):
         result, calls, _ = self.run_gate('--full')
@@ -1197,6 +1211,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertEqual(calls, [])
 
     def test_mac_batch_runs_only_platform_clippy_and_filtered_lanes(self):
+        self.env['PLAK_BATCH_BASE'] = 'test-base'
         self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd)'
         result, calls, scripts = self.run_gate('--batch-mac')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -1212,6 +1227,25 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ['clippy', 'test'],
         )
         self.assertFalse(any(Path(script[0]).name.startswith('check_') for script in scripts))
+
+    def test_named_batches_without_a_base_keep_all_packages(self):
+        self.env['PLAK_FAST_BASE'] = 'unused-fast-base'
+        self.env['GATE_BATCH_FILTER'] = 'none()'
+        for tier in ('--batch', '--batch-mac'):
+            with self.subTest(tier=tier):
+                self.log.unlink(missing_ok=True)
+                result, calls, _ = self.run_gate(tier)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                parallel = self.filtersets(calls)[0]
+                if tier == '--batch':
+                    self.assertEqual(parallel, 'all()')
+                else:
+                    self.assertTrue(
+                        all(
+                            expression.endswith(' & (all())')
+                            for expression in self.filtersets(calls)
+                        )
+                    )
 
     def test_removed_tier_and_static_scope_are_rejected_before_building(self):
         for args in (('--static-scope', 'shared', '--steps', 'static'), ('--platform',)):

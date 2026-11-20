@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Developer gate: batch (default), fast iteration, Mac batch, install, full.
 # Usage: tools/gate/dev-check.sh [--qual-container] [--fast [--rdeps] [PACKAGE...] |
-#                            --batch | --batch-mac | --install | --full | --soak |
+#                            --batch | --batch-mac | --install | --install-checks | --full | --soak |
 #                            --steps GROUP[,GROUP...]]
 # --steps selects named groups in order; PLAK_BATCH_BASE enables batch scoping.
 # --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
@@ -28,7 +28,8 @@ case "${1:-}" in
     packages=("$@"); set -- ;;
   --batch) shift ;;
   --batch-mac) tier=batch-mac; selection=static,tests-parallel,tests-durability,tests-serial; shift ;;
-  --install) tier=install; selection=builds,rustdoc,tests-parallel,tests-install; shift ;;
+  --install) tier=install; selection=builds,rustdoc,tooling,tests-parallel,tests-install; shift ;;
+  --install-checks) tier=install-checks; selection=tests-parallel,tests-durability,tests-serial,tests-install; shift ;;
   --full) tier=full; selection="$(IFS=,; echo "${all_groups[*]}")"; shift ;;
   --soak) tier=soak; selection=tests-serial,tests-durability; shift ;;
   --steps)

@@ -47,6 +47,10 @@ WORKSPACE_INPUTS = {
     ".rustfmt.toml",
     ".config/nextest.toml",
     ".config/nextest-install.toml",
+    "tools/gate/test-env.sh",
+    "tools/gate/test-processes.py",
+    "tools/gate/test-tmpdir.sh",
+    "tools/gate/dev-tools.pins",
 }
 WORKSPACE_PREFIXES = (".cargo/", "vendor/")
 # A fixture crate is a normal package input; loose shared fixtures are not.
@@ -74,9 +78,11 @@ RUNTIME_EDGES = {
 # families for a batch. Prefixes include file stems for flat Rust modules.
 INSTALL_FAMILY_PATHS = {
     "upgrade": (
-        r"^bin/plakd/src/(?:host/(?:upgrade|store_revisions)|carry|deploy|store/revisions)(?:/|\.rs$)",
+        r"^bin/plakd/src/(?:host/(?:upgrade|store_revisions|gateway_startup[^/]*)|carry|deploy|gateway|store/revisions)(?:/|\.rs$)",
         r"^bin/plakd/tests/integration/host_skeleton/upgrade(?:/|\.rs$)",
         r"/(?:host_move|[^/]*revisions?)(?:/|[_.])",
+        r"^crates/runtimes/runner/src/retention[^/]*(?:/|\.rs$)",
+        r"^crates/common/runner-protocol/src/(?:retention\.rs|pinned/retention-v1[^/]*\.jsonl)$",
     ),
     "ledger-retirement": (
         r"/[^/]*(?:ledger|retirement)[^/]*(?:/|\.rs$)",
@@ -88,9 +94,14 @@ INSTALL_FAMILY_PATHS = {
         r"^bin/plakd/(?:src/(?:commands/)?runner|tests/integration/host_skeleton/runner)(?:/|\.rs$)",
         r"/daemon(?:/|\.rs$)",
     ),
-    "wire-restart-switch": (r"/[^/]*(?:switch|wire)[^/]*(?:/|\.rs$)",),
+    "wire-restart-switch": (
+        r"/[^/]*(?:switch|wire)[^/]*(?:/|\.rs$)",
+        r"^bin/plakd/tests/fixtures/client-traces/host-control-switch-[^/]+\.json$",
+        r"^bin/plakd/src/(?:host/sessions(?:/|\.rs$)|carry/intent\.rs$)",
+        r"^crates/hosting/hosted/src/runtime/(?:clear|rebind|topology_state)(?:/|\.rs$)",
+    ),
     "bridge": (
-        r"^bin/plakd/src/(?:host/(?:bridge|starter)|commands/(?:stdio|host))(?:/|\.rs$)",
+        r"^bin/plakd/src/(?:host/(?:bridge|starter|idle)|commands/application/host)(?:/|\.rs$)",
         r"^bin/plakd/tests/integration/host_skeleton/bridge(?:/|\.rs$)",
     ),
     "operator-pins-rate": (
@@ -132,21 +143,15 @@ def package_dirs(root: Path = REPO_ROOT, packages: list[dict] | None = None) -> 
 
 
 def changed_paths(root: Path = REPO_ROOT, base: str | None = None) -> list[str]:
-    return vcs_listing.changed_paths(root, base)
-
-
-def batch_paths(root: Path, base: str | None) -> list[str]:
-    # Previously generated regression seeds may remain in a persistent lane.
-    # Only a tracked seed is an input to the committed batch diff.
-    return vcs_listing.changed_paths(root, base, include_ignored_seeds=not base)
+    return vcs_listing.changed_paths(root, base or os.environ.get("PLAK_FAST_BASE"))
 
 
 def batch_changes(root: Path, base: str | None) -> list[str] | None:
     """Return known changed paths or None when no comparison establishes a scope."""
-    if not base and vcs_listing.kind(root) == "export":
+    if not base:
         return None
-    paths = batch_paths(root, base)
-    return paths if paths or base else None
+    # Ignored regression seeds left by previous runs are not batch inputs.
+    return vcs_listing.changed_paths(root, base, include_ignored_seeds=False)
 
 
 def reverse_dependencies(names: list[str], packages: list[dict]) -> list[str]:
@@ -194,7 +199,13 @@ def batch_filter(touched: list[str], packages: list[dict]) -> str:
     if touched == [WORKSPACE]:
         return "all()"
     cargo_scope = reverse_dependencies(touched, packages)
-    runtime_scope = {consumer for name in cargo_scope for consumer in RUNTIME_EDGES.get(name, ())}
+    runtime_scope: set[str] = set()
+    pending = list(cargo_scope)
+    while pending:
+        for consumer in RUNTIME_EDGES.get(pending.pop(), ()):
+            if consumer not in runtime_scope:
+                runtime_scope.add(consumer)
+                pending.append(consumer)
     extra = sorted(runtime_scope.difference(touched))
     terms = [f"rdeps(={name})" for name in touched] + [f"package(={name})" for name in extra]
     return " | ".join(terms) or "none()"

@@ -26,7 +26,7 @@ batch-mac:
 
 [doc("exact-tree macOS install supplement: complete offline test suite")]
 install-checks:
-    tools/gate/dev-check.sh --steps tests-parallel,tests-serial,tests-durability,tests-install
+    tools/gate/dev-check.sh --install-checks
 
 # Exactly these comma-separated groups, in canonical order (for independent lanes).
 [doc("comma-separated groups in canonical order (PLAK_BATCH_BASE applies batch scope)")]

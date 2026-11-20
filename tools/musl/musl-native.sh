@@ -4,5 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 source tools/musl/musl-toolchain.sh
-[[ $# -gt 0 ]] || set -- --steps static,builds,tests-parallel,tests-durability,tests-serial,tests-install
+if [[ $# -eq 0 ]]; then
+  unset PLAK_BATCH_BASE
+  set -- --steps static,builds,tests-parallel,tests-durability,tests-serial,tests-install
+fi
 exec bash tools/gate/dev-check.sh "$@"

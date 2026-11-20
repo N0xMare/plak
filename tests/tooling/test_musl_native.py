@@ -25,6 +25,7 @@ class MuslNativeTests(unittest.TestCase):
 python3 - "$@" <<'PY'
 import json, os, sys
 print(json.dumps(dict(args=sys.argv[1:], target=os.environ.get('CARGO_BUILD_TARGET'),
+                     batch_base=os.environ.get('PLAK_BATCH_BASE'),
                      cc=os.environ.get('CC_x86_64_unknown_linux_musl'),
                      flags=os.environ.get('CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS'),
                      linker=os.environ.get('CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER'))))
@@ -68,6 +69,7 @@ exit "${NATIVE_EXIT:-0}"
         )
 
     def test_defaults_to_complete_native_groups_with_explicit_target(self):
+        self.env['PLAK_BATCH_BASE'] = 'unused-batch-base'
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
@@ -78,6 +80,7 @@ exit "${NATIVE_EXIT:-0}"
                     'static,builds,tests-parallel,tests-durability,tests-serial,tests-install',
                 ],
                 target='x86_64-unknown-linux-musl',
+                batch_base=None,
                 cc='musl-gcc',
                 linker='rust-lld',
                 flags=None,
@@ -98,6 +101,12 @@ exit "${NATIVE_EXIT:-0}"
         self.assertEqual(call['args'], ['--fast', 'plakd'])
         self.assertEqual((call['cc'], call['linker']), (cc, linker))
         self.assertEqual(call['flags'], '-C opt-level=1')
+
+    def test_explicit_musl_steps_keep_the_caller_batch_base(self):
+        self.env['PLAK_BATCH_BASE'] = 'batch-base'
+        result = self.run_gate('--steps', 'tests-parallel')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['batch_base'], 'batch-base')
 
     def test_linker_defaults_to_toolchain_lld_and_failure_propagates(self):
         self.env['CC_x86_64_unknown_linux_musl'] = self.executable('custom-cc', 'pass\n')

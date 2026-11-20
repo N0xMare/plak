@@ -1,7 +1,6 @@
 # nextest profiles for Plak / Plakous
 #
-# `just steps tests-parallel,tests-serial,tests-durability` runs the offline, serial and durability profiles in turn:
-#   cargo nextest run --locked --workspace --all-features --profile <lane>
+# `just install-checks` runs the four offline test lanes without batch scoping.
 
 [store]
 dir = "target/nextest"
