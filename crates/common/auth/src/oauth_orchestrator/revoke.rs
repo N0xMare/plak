@@ -38,13 +38,13 @@ where
     let claim = loop {
         match store.try_begin_claim(&fence, false).await {
             Ok(claim) => break claim,
-            Err(PrivateStoreError::FenceMismatch) if !reread => {
+            Err(PrivateStoreError::FenceMismatch) if !reread && hooks.can_reread_revoke_fence() => {
                 if !backoff.retry().await {
                     return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
                 }
                 let next = hooks.fence_to_revoke().await?;
                 if next.account_binding() != fence.account_binding() {
-                    return Err(hooks.map_store_error(PrivateStoreError::StoreBusy));
+                    return Err(hooks.map_store_error(PrivateStoreError::ForeignAccount));
                 }
                 fence = next;
                 reread = true;

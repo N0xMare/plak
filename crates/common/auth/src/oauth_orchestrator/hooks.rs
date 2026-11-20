@@ -442,8 +442,9 @@ pub trait ClaimedRevokeHooks {
     /// Returns a dialect error when the compatibility profile is inactive.
     fn check_profile(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
-    /// Fence to revoke after flight / account checks. On a claim fence
-    /// mismatch this can be called once more under the same flight.
+    /// Fence to revoke after flight / account checks. If
+    /// [`Self::can_reread_revoke_fence`] is true, this can be called once more
+    /// under the same flight and must return a fresh read.
     ///
     /// # Errors
     ///
@@ -451,6 +452,13 @@ pub trait ClaimedRevokeHooks {
     fn fence_to_revoke(
         &mut self,
     ) -> impl Future<Output = Result<CredentialFence, Self::Error>> + Send;
+
+    /// Whether a new fence can be read without invalidating revoke
+    /// preflight. Hooks bound to a captured fence return false; a move then
+    /// reports contention so the caller can rerun preflight.
+    fn can_reread_revoke_fence(&self) -> bool {
+        true
+    }
 
     /// Build the provider revoke request from the unstarted claim payload.
     ///

@@ -292,6 +292,9 @@ pub(super) fn map_claude_error(
         plakous_anthropic::ClaudeNativeAuthError::Store(
             plakous_auth::PrivateStoreError::StoreBusy,
         ) => NativeSubscriptionError::AccountBusy,
+        plakous_anthropic::ClaudeNativeAuthError::Store(
+            plakous_auth::PrivateStoreError::ForeignAccount,
+        ) => NativeSubscriptionError::AuthenticationAccountChanged,
         plakous_anthropic::ClaudeNativeAuthError::Store(_) => {
             NativeSubscriptionError::UnsafeStorage
         }

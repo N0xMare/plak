@@ -5742,9 +5742,13 @@ from a writer, in-flight claim, reader or Ready lease leaves the record
 unchanged. Refresh and remote revoke both back off asynchronously for up to 30
 seconds before reporting retryable account busy. If the exact fence moves,
 refresh asks the dialect again whether the current credential needs a refresh.
-Revoke re-reads the fence once within the same backoff, and can only claim the
-exact generation it read for the same account. A second move reports retryable
-account busy without dispatching revoke.
+Revoke re-reads the fence once within the same backoff and claims the same
+account's exact current generation, including a same-account re-login in that
+window. If the re-read names a different account, revoke refuses without
+retrying; a second fence move reports retryable account busy. Neither case
+dispatches revoke. MCP revocation preflight is pinned to the captured login
+and endpoint: its fence move reports contention immediately so the caller can
+rerun preflight.
 Claude's local-only revoke follows the same one-re-read rule for its generation
 compare-and-swap, without an HTTP claim.
 Claimed HTTP store reads, restoration and terminal writes run on blocking

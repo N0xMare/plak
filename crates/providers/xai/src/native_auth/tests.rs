@@ -2894,6 +2894,81 @@ async fn a_rejected_grant_still_ends_not_ready() -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn xai_revoke_rereads_once_then_leaves_a_second_peer_refresh_busy() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    for peer_moves in 1..=2 {
+        let temp = tempdir()?;
+        let endpoint = mock_peer().await?;
+        let manager = manager(&temp, &endpoint)?;
+        let expires = system_unix_seconds()? + 3600;
+        let subject = "revoke-race-subject";
+        install_stored(
+            &manager,
+            subject,
+            "revoke-access",
+            "revoke-refresh",
+            expires,
+        )?;
+        let store = manager.core.store()?;
+        let peer = PrivateCredentialStore::open_slot(
+            store.path(),
+            store.profile_id().clone(),
+            store.slot_id().clone(),
+        )?;
+        let before = required(peer.load()?, "initial login")?;
+        let mut moves = peer_moves;
+        let mut after_read = |fence: &CredentialFence| {
+            if moves > 0 {
+                let claim = peer.begin_refresh(fence).expect("peer refresh claim");
+                let generation = claim.fence().generation().next().expect("next generation");
+                let record = stored_record(
+                    subject,
+                    "peer-access",
+                    "peer-refresh-xai",
+                    expires,
+                    generation,
+                )
+                .expect("refreshed record");
+                peer.complete_refresh(claim.start(), record)
+                    .expect("peer refresh commits");
+                moves -= 1;
+            }
+        };
+        let mut hooks = super::refresh::XaiRevokeHooks {
+            core: &manager.core,
+            _flight: manager.core.refresh_flight.lock().await,
+            after_fence_read: Some(&mut after_read),
+        };
+        endpoint.responses.send(response(&json!({}))).await?;
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_claimed_revoke(store, &manager.core.client, &mut hooks),
+        )
+        .await?;
+        let current = required(peer.load()?, "settled credential")?;
+        assert_eq!(current.generation().get(), before.generation().get() + 4);
+        if peer_moves == 1 {
+            assert_eq!(outcome?, current.generation());
+            assert_eq!(current.status(), CredentialStatus::Revoked);
+            wait_for_requests(&endpoint, 1).await?;
+            assert!(
+                String::from_utf8_lossy(&endpoint.requests.lock().await[0])
+                    .contains("token=peer-refresh-xai")
+            );
+        } else {
+            assert!(matches!(
+                outcome,
+                Err(XaiNativeAuthError::Store(PrivateStoreError::StoreBusy))
+            ));
+            assert_eq!(current.status(), CredentialStatus::Ready);
+            assert_eq!(endpoint.requests.lock().await.len(), 0);
+        }
+        endpoint.shutdown().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn revoke_is_fixed_remote_then_tombstone_and_logout_is_local() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let revoke_temp = tempdir()?;

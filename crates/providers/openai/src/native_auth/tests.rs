@@ -6292,6 +6292,63 @@ async fn claimed_remote_revoke_consumes_tombstone_terminal() -> TestResult {
 }
 
 #[tokio::test]
+async fn codex_revoke_rereads_after_peer_refresh_without_reentering_the_flight() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    seed_ready_credential(
+        &slot,
+        "revoke-flight-account",
+        "revoke-flight-subject",
+        now_unix_secs() + 3600,
+    )?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let store = manager.store()?;
+    let peer = PrivateCredentialStore::open_slot(
+        slot,
+        store.profile_id().clone(),
+        store.slot_id().clone(),
+    )?;
+    let start = peer.load()?.ok_or("missing login")?;
+    let mut credential = {
+        let lease = peer.acquire_ready(&start)?;
+        parse_stored(lease.payload())?
+    };
+    credential.refresh_token = "peer-refreshed-codex".to_owned();
+    let replacement = stored_record(&credential, start.generation().next()?.next()?)?;
+    let mut replacement = Some(replacement);
+    let mut after_read = |fence: &CredentialFence| {
+        if let Some(record) = replacement.take() {
+            let claim = peer
+                .begin_refresh(fence)
+                .expect("peer takes the refresh claim");
+            peer.complete_refresh(claim.start(), record)
+                .expect("peer completes refresh");
+        }
+    };
+    let mut hooks = super::refresh::CodexRevokeHooks {
+        manager: &manager,
+        flight: None,
+        after_fence_read: Some(&mut after_read),
+    };
+    let server = spawn_sequence(
+        endpoint,
+        vec![response("204 No Content", "application/json", b"", "")],
+    );
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(10),
+        run_claimed_revoke(store, &manager.client, &mut hooks),
+    )
+    .await??;
+    assert_eq!(outcome, CodexCredentialStatus::Revoked);
+    let revoked = peer.load()?.ok_or("missing tombstone")?;
+    assert_eq!(revoked.generation().get(), start.generation().get() + 4);
+    let requests = server.await??;
+    assert_eq!(requests.len(), 1);
+    assert!(std::str::from_utf8(&requests[0])?.contains("\"token\":\"peer-refreshed-codex\""));
+    Ok(())
+}
+
+#[tokio::test]
 async fn claimed_refresh_store_busy_restores_without_send_and_responses_do_not_mix() -> TestResult {
     let target = test_endpoint().await?;
     let held = test_endpoint().await?;

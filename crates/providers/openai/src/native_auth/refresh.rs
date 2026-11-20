@@ -390,6 +390,8 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
 pub(super) struct CodexRevokeHooks<'a> {
     pub(super) manager: &'a CodexSubscriptionCredentialManager,
     pub(super) flight: Option<AuthSingleFlightGuard>,
+    #[cfg(test)]
+    pub(super) after_fence_read: Option<&'a mut (dyn FnMut(&CredentialFence) + Send)>,
 }
 
 #[allow(
@@ -415,6 +417,10 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
         let current = self.manager.load_fence().await?;
         if current.account_binding() != &self.manager.selected_account()? {
             return Err(NativeCodexAuthError::AccountChanged);
+        }
+        #[cfg(test)]
+        if let Some(after_read) = &mut self.after_fence_read {
+            after_read(&current);
         }
         Ok(current)
     }
@@ -500,7 +506,10 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
     }
 
     fn map_store_error(&mut self, error: PrivateStoreError) -> Self::Error {
-        codex_store_error(error)
+        match error {
+            PrivateStoreError::ForeignAccount => NativeCodexAuthError::AccountChanged,
+            _ => codex_store_error(error),
+        }
     }
 
     fn output_from_revoked(
@@ -688,6 +697,8 @@ impl CodexSubscriptionCredentialManager {
         let mut hooks = CodexRevokeHooks {
             manager: self,
             flight: None,
+            #[cfg(test)]
+            after_fence_read: None,
         };
         run_claimed_revoke(self.store()?, &self.client, &mut hooks).await
     }

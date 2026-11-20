@@ -46,6 +46,9 @@ fn store_error(error: ClaudeNativeAuthError) -> CustodyError {
                 retry_after_ms: 100,
             }
         }
+        ClaudeNativeAuthError::Store(plakous_auth::PrivateStoreError::ForeignAccount) => {
+            CustodyError::AccountChanged
+        }
         _ => CustodyError::Store,
     }
 }
@@ -53,6 +56,10 @@ fn store_error(error: ClaudeNativeAuthError) -> CustodyError {
 fn identity(digest: plakous_model::Digest) -> IdentityDigest {
     IdentityDigest::from_bytes(*digest.bytes())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "fixture-controlled credential stores")]
+mod revoke_tests;
 
 impl ClaudeNativeAuthManager {
     /// Non-secret facts of the stored login, reported for `slot`.

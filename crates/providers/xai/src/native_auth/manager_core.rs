@@ -641,6 +641,8 @@ impl ManagerCore {
         let mut hooks = XaiRevokeHooks {
             core: self,
             _flight: flight,
+            #[cfg(test)]
+            after_fence_read: None,
         };
         run_claimed_revoke(self.store()?, &self.client, &mut hooks).await
     }

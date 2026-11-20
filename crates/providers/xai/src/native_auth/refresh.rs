@@ -343,6 +343,8 @@ pub(super) fn xai_failure_reason(
 pub(super) struct XaiRevokeHooks<'a> {
     pub(super) core: &'a ManagerCore,
     pub(super) _flight: futures_util::lock::MutexGuard<'a, ()>,
+    #[cfg(test)]
+    pub(super) after_fence_read: Option<&'a mut (dyn FnMut(&CredentialFence) + Send)>,
 }
 
 #[allow(
@@ -358,10 +360,16 @@ impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
     }
 
     async fn fence_to_revoke(&mut self) -> Result<CredentialFence, Self::Error> {
-        self.core
+        let current = self
+            .core
             .store()?
             .load()?
-            .ok_or(XaiNativeAuthError::NotLoggedIn)
+            .ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        #[cfg(test)]
+        if let Some(after_read) = &mut self.after_fence_read {
+            after_read(&current);
+        }
+        Ok(current)
     }
 
     fn build_revoke_request(
@@ -433,6 +441,7 @@ impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
             | PrivateStoreError::FenceMismatch
             | PrivateStoreError::StoreBusy
             | PrivateStoreError::LockFailed => XaiNativeAuthError::Store(error),
+            PrivateStoreError::ForeignAccount => XaiNativeAuthError::AccountChanged,
             _ => XaiNativeAuthError::RefreshQuarantined,
         }
     }

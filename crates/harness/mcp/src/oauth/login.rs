@@ -1315,6 +1315,11 @@ impl ClaimedRevokeHooks for RevokeHooks<'_> {
         Ok(self.fence.clone())
     }
 
+    fn can_reread_revoke_fence(&self) -> bool {
+        // The claim must match the record used for issuer and endpoint preflight.
+        false
+    }
+
     fn build_revoke_request(
         &mut self,
         claim: &RefreshClaim,

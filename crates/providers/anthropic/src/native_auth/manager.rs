@@ -6,7 +6,7 @@ use super::{
     AccountBinding, Arc, AsyncMutex, AuthBodyError, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID,
     CLAUDE_OAUTH_TOKEN_ORIGIN, CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_PATH,
     ClaudeCompatibilityAcceptance, ClaudeEnrolledModel, ClaudeNativeAuthError, ClaudeOAuthLogin,
-    ClaudeRefreshHooks, ClaudeSubscriptionStatus, Client, CredentialGeneration,
+    ClaudeRefreshHooks, ClaudeSubscriptionStatus, Client, CredentialFence, CredentialGeneration,
     CredentialRefreshDetail, CredentialRefreshObserver, CredentialSlotId, CredentialStatus,
     LOGIN_TIMEOUT, ManagerCore, PathBuf, PkceS256, PrivateCredentialStore, PrivateStoreError,
     StoredTokens, SubscriptionRequestGate, SubscriptionUsageCredentialState, SubscriptionUsageRead,
@@ -585,13 +585,21 @@ impl ClaudeNativeAuthManager {
     /// again after one re-read, returns retryable store contention.
     pub fn revoke(&self) -> Result<CredentialGeneration, ClaudeNativeAuthError> {
         let store = self.core.store()?;
-        let load = || store.load()?.ok_or(ClaudeNativeAuthError::NotLoggedIn);
+        Self::revoke_from_store(store, || {
+            store.load()?.ok_or(ClaudeNativeAuthError::NotLoggedIn)
+        })
+    }
+
+    pub(super) fn revoke_from_store(
+        store: &PrivateCredentialStore,
+        mut load: impl FnMut() -> Result<CredentialFence, ClaudeNativeAuthError>,
+    ) -> Result<CredentialGeneration, ClaudeNativeAuthError> {
         let fence = load()?;
         match store.logout(fence.generation()) {
             Err(PrivateStoreError::StaleWriter) => {
                 let next = load()?;
                 if next.account_binding() != fence.account_binding() {
-                    return Err(PrivateStoreError::StoreBusy.into());
+                    return Err(PrivateStoreError::ForeignAccount.into());
                 }
                 store.logout(next.generation()).map_err(|error| {
                     if error == PrivateStoreError::StaleWriter {
