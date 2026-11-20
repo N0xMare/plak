@@ -24,6 +24,7 @@ pub(super) enum Step {
     StageClients,
     StageRunners,
     RunnerLinks,
+    Gateway,
     HostUpgrade,
     HostLink,
     ClientLinks,
@@ -56,15 +57,18 @@ impl Plan {
         let desired = artifacts.candidate();
         let sidecars = desired_sidecars(artifacts);
         let host_change = observed.sha256 != desired.sha256;
+        let gateway_change = observed.gateway.link.sha256 != desired.sha256;
         let host_link =
             observed.link_sha256 != desired.sha256 || observed.link_sidecars != sidecars;
         let client_change = !clients.is_empty();
         let runner_change = !targets.runner_changes.is_empty();
         let mut steps = Vec::new();
-        if resume.is_none() && (host_change || host_link || client_change || runner_change) {
+        if resume.is_none()
+            && (host_change || gateway_change || host_link || client_change || runner_change)
+        {
             steps.push(Step::Baseline);
         }
-        if host_change && resume.is_none() {
+        if (host_change || gateway_change) && resume.is_none() {
             steps.push(Step::StageHost);
         }
         if client_change {
@@ -75,6 +79,9 @@ impl Plan {
         }
         if runner_change {
             steps.push(Step::RunnerLinks);
+        }
+        if gateway_change {
+            steps.push(Step::Gateway);
         }
         if host_change {
             steps.push(Step::HostUpgrade);
@@ -93,6 +100,8 @@ impl Plan {
         let source_transition = resume.as_ref().map_or_else(
             || {
                 let mut transition = observed.source_transition();
+                transition.host_changed = host_change;
+                transition.gateway_changed = gateway_change;
                 transition.runners = configuration
                     .runners
                     .iter()
@@ -198,22 +207,39 @@ pub(super) fn qualify(
         "coordinator/receipt change: enroll a compatible incumbent first",
     )?;
     let active = routes(observed, configuration)?;
-    let minimum = if active
-        .iter()
-        .any(|route| matches!(route.kind(), "codex" | "grok"))
-    {
-        2
-    } else {
-        1
-    };
+    let minimum = gateway_minimum(&active);
     check(
         observed
-            .gateway_versions
+            .gateway
+            .holder
+            .versions
             .iter()
             .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
-        &format!("in-use accounts require unchanged gateway protocol v{minimum} or newer"),
+        &format!("in-use accounts require gateway protocol v{minimum} or newer"),
     )?;
     let candidate = artifacts.candidate();
+    let gateway = &observed.gateway;
+    let destination = super::fleet::deployed(&configuration.host.node, artifacts.host());
+    check(
+        if gateway.link.sha256 == candidate.sha256 {
+            gateway.link.path == destination
+        } else {
+            gateway.link.sha256 == configuration.host.gateway_sha256
+        },
+        "unexpected gateway image or dedicated link; inspect and re-enroll source",
+    )?;
+    if gateway.link.sha256 != candidate.sha256 {
+        check(
+            want.gateway.served.iter().any(|version| {
+                *version >= minimum && observed.facts.gateway_spoken.contains(version)
+            }) && want
+                .gateway
+                .served
+                .iter()
+                .any(|version| *version >= minimum && want.gateway.spoken.contains(version)),
+            &format!("the new gateway cannot negotiate protocol v{minimum} with both hosts"),
+        )?;
+    }
     let source = &configuration.host.source_sha256;
     check(
         [source, &candidate.sha256].contains(&&observed.sha256),
@@ -242,6 +268,17 @@ pub(super) fn qualify(
         artifacts.check_ancestor(&triple.source_revision)?;
     }
     Ok(active)
+}
+
+pub(super) fn gateway_minimum(routes: &[Route]) -> u32 {
+    if routes
+        .iter()
+        .any(|route| matches!(route.kind(), "codex" | "grok"))
+    {
+        2
+    } else {
+        1
+    }
 }
 
 fn routes(observed: &Observed, configuration: &Selected<'_>) -> CliResult<Vec<Route>> {
@@ -284,10 +321,13 @@ pub(super) fn verify_resume(
     prior: &Pending,
     candidate: &str,
 ) -> super::Result<()> {
-    let identity = if prior.host_upgrade {
+    let identity = if prior.host_upgrade && prior.cohort != super::evidence::Cohort::GatewayReady {
         observed.instance != prior.instance && observed.sha256 == candidate
     } else {
-        observed.instance == prior.instance && observed.sha256 == prior.source_sha256
+        observed.instance == prior.instance
+            && observed.sha256 == prior.source_sha256
+            && (prior.cohort != super::evidence::Cohort::GatewayReady
+                || observed.link_sha256 == prior.source_sha256)
     };
     if identity && observed.dependencies() == prior.dependencies {
         Ok(())

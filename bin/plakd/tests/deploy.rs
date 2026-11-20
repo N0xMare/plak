@@ -243,8 +243,17 @@ source_sha256 = "{source}"
         self.change(|data| data["paired_fleet"] = json!(true));
     }
 
+    fn old_gateway(&self) {
+        self.change(|data| {
+            data["host"]["gateway"]["link"] = json!({
+                "path":"/srv/example/.local/lib/plak/release/retained/plakd", "sha256":"2".repeat(64),
+            });
+        });
+    }
+
     fn reset(&self) {
         let source = "1".repeat(64);
+        let node = json!({"home":"/srv/example", "platform":PLATFORM});
         write(
             &self.path("fleet.json"),
             &json!({
@@ -252,8 +261,13 @@ source_sha256 = "{source}"
                 "host":{
                     "sha256":source, "link_sha256":source, "instance":"100-0000000000000000",
                     "link_sidecars":{(NAMES[1]):source,(NAMES[2]):source},
-                    "unit_sha256":source, "custody_sha256":"2".repeat(64),
-                    "gateway_instance":"unchanged", "gateway_versions":[1,2],
+                    "unit_sha256":source,
+                    "gateway":{
+                        "command":"/srv/example/.local/bin/plakd-gateway",
+                        "link":{"path":deployed(self.temp.path(), &node), "sha256":hash(b"plakd")},
+                        "custody_sha256":"2".repeat(64),
+                        "holder":{"instance":"old-gateway","pid":"101","socket_identity":[1,2],"versions":[1,2],"negotiated":2}
+                    },
                     "stage_identity":{"machine_sha256":"0".repeat(64),"platform":PLATFORM,"uid":1000,"home":"/srv/example","product_home":"/srv/example/.plak"},
                     "paired":{}, "canary":["claude","grok"],
                     "accounts":{"grok":"ready","openai":"not_enrolled"}, "upgrade_idle":true,
@@ -261,6 +275,7 @@ source_sha256 = "{source}"
                     "facts":{
                         "source":"build_info", "binary_id":&source[..12], "state_key":KEY,
                         "host_upgrade":upgrade(), "wire":wire(), "export":{"read":[7,8],"write":8},
+                        "gateway_spoken":[1,2],
                         "runner_triple":{"protocol":9,"source_revision":"b".repeat(40),"flavor":"release"}
                     }
                 }
@@ -332,7 +347,11 @@ fn deploy_fake_fleet_refuses_without_mutation() {
             json!({"other":{"ssh":"example@other","command":"/example/link"}}),
             "paired runner placements",
         ),
-        ("/host/gateway_versions", json!([1]), "gateway protocol v2"),
+        (
+            "/host/gateway/holder/versions",
+            json!([1]),
+            "gateway protocol v2",
+        ),
         (
             "/host/production_history",
             json!(true),
@@ -581,6 +600,8 @@ effort = "low"
     f.change(|data| {
         data["glibc"] = json!("glibc 2.9");
         data["host"]["stage_identity"]["platform"] = json!(GNU);
+        data["host"]["gateway"]["link"]["path"] =
+            json!(deployed(f.temp.path(), &data["host"]["stage_identity"]));
         data["host"]["facts"]["runner_triple"]["flavor"] = json!("maintainer release");
         data["no_clients"] = json!(true);
     });
@@ -684,6 +705,7 @@ fn production(f: &Fleet, green: &Value) {
         ("/completed_at", json!(1)),
         ("/verification/canaries", json!({"claude":"bounded_cli_v1"})),
         ("/source_transition/runner_protocol", json!(10)),
+        ("/gateway_transition", json!(true)),
         ("/canary_models/0/1", json!("other-model")),
         ("/stage_identity/machine_sha256", json!("9".repeat(64))),
     ] {
@@ -1104,6 +1126,194 @@ fn deploy_requester_loss_does_not_repeat_surrender() {
     paired_host_loss();
 }
 
+#[test]
+fn deploy_gateway_only_converges_without_handing_off_the_host() {
+    let f = Fleet::new();
+    f.old_gateway();
+    f.change(|data| {
+        let wanted = file_facts(b"plakd");
+        let host = &mut data["host"];
+        host["sha256"] = wanted["sha256"].clone();
+        host["link_sha256"] = wanted["sha256"].clone();
+        host["facts"]["binary_id"] = wanted["display_id"].clone();
+        host["facts"]["runner_triple"]["source_revision"] = json!("a".repeat(40));
+        for name in &NAMES[1..] {
+            host["link_sidecars"][name] = json!(hash(name));
+        }
+        data["client"] = json!("current");
+    });
+    let plan = f.staging("plan", "ready", "");
+    assert_eq!(
+        plan["plan"],
+        json!(["baseline", "stage_host", "gateway", "verify"])
+    );
+    let report = f.staging("apply", "green", "");
+    assert_eq!(report["gateway_transition"], true);
+    assert_eq!(report["host_transition"], false);
+    assert_eq!(report["gateway_ready"]["holder"]["negotiated"], 2);
+    assert_eq!(
+        read(&f.path("fleet.json"))["canary_gateways"],
+        json!(["old-gateway", "new-gateway"])
+    );
+    let evidence = fs::read_to_string(f.path("staging.jsonl")).unwrap();
+    assert!(!evidence.contains("upgrade_intent"));
+    assert!(f.path("receipt.json").exists());
+    f.staging("apply", "no_op", "");
+    assert_eq!(
+        f.events()
+            .iter()
+            .filter(|event| *event == "gateway_drain")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn deploy_gateway_orders_runner_then_gateway_then_host_and_pins_custody() {
+    let f = Fleet::new();
+    f.paired();
+    f.old_gateway();
+    let report = f.staging("apply", "green", "");
+    assert_eq!(report["gateway_transition"], true);
+    assert_eq!(report["host_transition"], true);
+    let events = f.events();
+    let positions = [
+        "canary",
+        "runner_advance",
+        "gateway_drain",
+        "gateway_flip",
+        "gateway_start",
+        "upgrade",
+        "client_link",
+    ]
+    .map(|event| events.iter().position(|actual| actual == event).unwrap());
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    let evidence = fs::read_to_string(f.path("staging.jsonl")).unwrap();
+    let intents = [
+        "runner_intent",
+        "gateway_intent",
+        "gateway_ready",
+        "upgrade_intent",
+        "client_intent",
+    ]
+    .map(|phase| evidence.find(&format!("\"phase\":\"{phase}\"")).unwrap());
+    assert!(intents.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(
+        read(&f.path("fleet.json"))["canary_gateways"],
+        json!(["old-gateway", "new-gateway"])
+    );
+
+    let f = Fleet::new();
+    f.old_gateway();
+    f.change(|data| data["gateway_custody_drift"] = json!(true));
+    f.staging("apply", "needs_reconcile", "dependencies did not converge");
+    assert!(!f.events().iter().any(|event| event == "upgrade"));
+    assert!(!f.path("receipt.json").exists());
+}
+
+#[test]
+fn deploy_gateway_drain_refusal_withdraws_the_runner_before_host_intent() {
+    let f = Fleet::new();
+    f.paired();
+    f.old_gateway();
+    f.change(|data| data["gateway_refuse"] = json!(true));
+    assert_eq!(
+        f.staging("apply", "blocked", "gateway drain refused")["withdrawn"],
+        true
+    );
+    assert!(
+        f.events()
+            .ends_with(&["gateway_drain".into(), "runner_restore".into()])
+    );
+    let found = read(&f.path("fleet.json"));
+    assert_eq!(found["runner"], "source");
+    assert_eq!(found["host"]["gateway"]["link"]["sha256"], "2".repeat(64));
+    let evidence = fs::read_to_string(f.path("staging.jsonl")).unwrap();
+    assert!(!evidence.contains("upgrade_intent"));
+    f.change(|data| data["gateway_refuse"] = json!(false));
+    f.staging("apply", "green", "");
+}
+
+#[test]
+fn deploy_gateway_requester_loss_reconciles_each_cohort_boundary() {
+    for cut in ["before_drain", "after_drain", "after_flip", "after_start"] {
+        let f = Fleet::new();
+        f.paired();
+        f.old_gateway();
+        f.change(|data| data["gateway_cut"] = json!(cut));
+        f.staging("apply", "needs_reconcile", "recorded gateway cohort");
+        assert_eq!(read(&f.path("fleet.json"))["runner"], "source", "{cut}");
+        assert!(!f.events().iter().any(|event| event == "upgrade"), "{cut}");
+        if cut == "after_flip" {
+            f.change(|data| data["gateway_unresolved"] = json!(true));
+            f.staging("status", "needs_reconcile", "gateway status unavailable");
+            assert_eq!(read(&f.path("fleet.json"))["runner"], "source");
+        }
+        f.change(|data| {
+            data["gateway_cut"] = Value::Null;
+            data["gateway_unresolved"] = Value::Null;
+        });
+        let status = f.staging("status", "ready", "");
+        if cut == "before_drain" {
+            assert_eq!(status["withdrawn"], true);
+        } else {
+            assert_eq!(status["gateway_ready"]["holder"]["instance"], "new-gateway");
+        }
+        if cut == "after_start" {
+            // At this boundary a later gateway failure must not prevent
+            // restoration of runner links advanced before gateway_ready.
+            f.change(|data| {
+                data["runner"] = json!("current");
+                data["refusal"] = json!("credential gateway is not running");
+            });
+            f.staging("status", "needs_reconcile", "gateway is not running");
+            assert_eq!(read(&f.path("fleet.json"))["runner"], "source");
+            f.change(|data| data["refusal"] = Value::Null);
+        }
+        f.staging("apply", "green", "");
+        f.staging("apply", "no_op", "");
+        for once in ["gateway_drain", "gateway_flip", "gateway_start", "upgrade"] {
+            assert_eq!(
+                f.events().iter().filter(|event| *event == once).count(),
+                1,
+                "{cut}: {once}"
+            );
+        }
+    }
+    for cut in ["old_idle", "upgrade", "client_link"] {
+        let f = Fleet::new();
+        f.paired();
+        f.old_gateway();
+        f.change(|data| data["lose_reply"] = json!(cut));
+        let result = if cut == "old_idle" {
+            "blocked"
+        } else {
+            "needs_reconcile"
+        };
+        f.staging("apply", result, "");
+        f.change(|data| data["lose_reply"] = Value::Null);
+        let ready = f.staging("apply", "green", "");
+        assert_eq!(ready["gateway_transition"], true);
+        assert_eq!(ready["host_transition"], true);
+        assert_eq!(
+            f.events()
+                .iter()
+                .filter(|event| *event == "gateway_drain")
+                .count(),
+            1,
+            "{cut}"
+        );
+        assert_eq!(
+            f.events()
+                .iter()
+                .filter(|event| *event == "upgrade")
+                .count(),
+            if cut == "old_idle" { 2 } else { 1 },
+            "{cut}"
+        );
+    }
+}
+
 fn paired_host_loss() {
     for fault in ["old_idle", "upgrade", "old", "old_unknown"] {
         let f = Fleet::new();
@@ -1155,7 +1365,7 @@ fn deploy_pending_runner_withdraws_even_if_source_restarted_and_prepare_would_fa
             d["transport_loss"] = json!(false);
             d["host"]["instance"] = json!("102-0000000000000002");
             d["host"]["upgrade_idle"] = json!(false);
-            d["host"]["gateway_versions"] = json!([1]);
+            d["host"]["gateway"]["holder"]["versions"] = json!([1]);
             d["refusal"] = json!("full host observation unavailable");
             d["refuse_preparation"] = json!(true);
         });
@@ -1282,7 +1492,7 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
     assert!(script.contains("/usr/bin/shasum -a 256"));
     let image = read_candidate(input, transferred);
     let call: Value = serde_json::from_str(&next(input)).unwrap();
-    assert_eq!(call["deploy_protocol"], 4);
+    assert_eq!(call["deploy_protocol"], 5);
     let request = &call["call"]["request"];
     let op = &request["op"];
     let mut name = op["op"].as_str().unwrap().to_owned();
@@ -1300,7 +1510,7 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
             name = format!("runner_{name}");
             &request["runner"]["node"]
         }
-        "host" => {
+        "host" | "gateway" => {
             assert_host_loader(root, &data, &name, transferred);
             &request["host"]["node"]
         }
@@ -1328,6 +1538,9 @@ fn fake_ssh(root: &Path, args: &[&str], input: &mut impl BufRead) -> (Vec<u8>, i
     }
     if data["paired_fleet"] == true {
         observed["paired"] = paired_placements(stage);
+    }
+    if role == "gateway" {
+        return gateway_ssh(root, &path, &mut data, &observed, node, &name, op);
     }
     if matches!(name.as_str(), "observe" | "runner_withdrawal_proof") {
         return observed_reply(&data, &name, &observed);
@@ -1379,6 +1592,12 @@ fn observed_reply(data: &Value, name: &str, observed: &Value) -> (Vec<u8>, i32) 
     {
         return (encoded(&json!({"error":reason})), 0);
     }
+    if name == "observe" && matches!(data["gateway_state"].as_str(), Some("drained" | "flipped")) {
+        return (
+            encoded(&json!({"error":"credential gateway is not running"})),
+            0,
+        );
+    }
     if name == "runner_withdrawal_proof" {
         return (
             encoded(&json!({"ok":{
@@ -1389,6 +1608,93 @@ fn observed_reply(data: &Value, name: &str, observed: &Value) -> (Vec<u8>, i32) 
         );
     }
     (encoded(&json!({"ok":observed})), 0)
+}
+
+fn gateway_ssh(
+    root: &Path,
+    path: &Path,
+    data: &mut Value,
+    observed: &Value,
+    node: &Value,
+    name: &str,
+    op: &Value,
+) -> (Vec<u8>, i32) {
+    if name == "observe" {
+        return (encoded(&json!({"ok":observed["gateway"]})), 0);
+    }
+    let intent = &op["intent"];
+    assert_eq!(intent["source_host"], observed["sha256"]);
+    assert_eq!(intent["source_instance"], observed["instance"]);
+    assert_eq!(intent["target"], observed["stage_identity"]);
+    assert_eq!(intent["candidate"]["sha256"], data["candidate"]);
+    let evidence = fs::read_to_string(root.join("staging.jsonl")).unwrap();
+    assert!(evidence.lines().any(|line| {
+        let row: Value = serde_json::from_str(line).unwrap();
+        row["phase"] == "gateway_intent" && row["gateway"] == *intent
+    }));
+    let remember =
+        |data: &mut Value, event| data["events"].as_array_mut().unwrap().push(json!(event));
+    let lost = |data: &Value| {
+        write(path, data);
+        (Vec::new(), 255)
+    };
+    if name == "switch" {
+        assert_eq!(intent["source"], observed["gateway"]);
+        assert!(data["gateway_state"].is_null());
+        if data["gateway_cut"] == "before_drain" {
+            return lost(data);
+        }
+        remember(data, "gateway_drain");
+        if data["gateway_refuse"] == true {
+            write(path, data);
+            return (encoded(&json!({"ok":{"result":"withdrawn"}})), 0);
+        }
+        data["gateway_state"] = json!("drained");
+        if data["gateway_cut"] == "after_drain" {
+            return lost(data);
+        }
+    } else {
+        assert_eq!(name, "reconcile");
+        remember(data, "gateway_reconcile");
+        if data["gateway_unresolved"] == true {
+            write(path, data);
+            return (encoded(&json!({"error":"gateway status unavailable"})), 0);
+        }
+        if data["gateway_state"].is_null() {
+            write(path, data);
+            return (encoded(&json!({"ok":{"result":"withdrawn"}})), 0);
+        }
+    }
+    if data["gateway_state"] == "drained" {
+        remember(data, "gateway_flip");
+        data["host"]["gateway"]["link"] = json!({
+            "path":deployed(root, node), "sha256":intent["candidate"]["sha256"],
+        });
+        data["gateway_state"] = json!("flipped");
+        if name == "switch" && data["gateway_cut"] == "after_flip" {
+            return lost(data);
+        }
+    }
+    if data["gateway_state"] == "flipped" {
+        remember(data, "gateway_start");
+        data["host"]["gateway"]["holder"] = json!({
+            "instance":"new-gateway","pid":"103","socket_identity":[1,3],
+            "versions":intent["served"],"negotiated":2,
+        });
+        data["gateway_state"] = json!("ready");
+        if name == "switch" && data["gateway_cut"] == "after_start" {
+            return lost(data);
+        }
+    }
+    assert_eq!(data["gateway_state"], "ready");
+    if data["gateway_custody_drift"] == true {
+        data["host"]["gateway"]["custody_sha256"] = json!("8".repeat(64));
+    }
+    write(path, data);
+    (
+        encoded(&json!({"ok":{"result":"ready","observed":data["host"]["gateway"]}})),
+        0,
+    )
 }
 
 fn read_candidate(input: &mut impl BufRead, transferred: bool) -> (String, Vec<u8>) {
@@ -1523,7 +1829,8 @@ fn runner_ssh(
             let evidence = fs::read_to_string(root.join("staging.jsonl")).unwrap();
             assert!(evidence.lines().rev().any(|line| {
                 let row: Value = serde_json::from_str(line).unwrap();
-                row["phase"] == "runner_withdrawal" && row["ticket"] == op["ticket"]
+                (row["phase"] == "runner_withdrawal" || row["gateway_runner_withdrawal"] == true)
+                    && row["ticket"] == op["ticket"]
             }));
             assert_eq!(op["source"], source);
             data["runner_withdrawn_ticket"] = op["ticket"].clone();
@@ -1650,6 +1957,14 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
                 6
             };
             let account = op["route"]["account"].as_str().unwrap();
+            let instance = data["host"]["gateway"]["holder"]["instance"].clone();
+            if data["canary_gateways"].is_null() {
+                data["canary_gateways"] = json!([]);
+            }
+            data["canary_gateways"]
+                .as_array_mut()
+                .unwrap()
+                .push(instance);
             let class = fake_canary_class(account);
             json!({"adapter":class,"generation_before":fake_canary_generation(account, 5),"generation_after":fake_canary_generation(account, generation)})
         }
@@ -1677,6 +1992,7 @@ fn simulate_upgrade(data: &mut Value, op: &Value, want: &Value) -> Value {
         assert_eq!(data["client"], "staged");
     }
     assert_eq!(op["previous"]["instance"], data["host"]["instance"]);
+    assert_eq!(op["previous"]["gateway"], data["host"]["gateway"]);
     if data["paired_fleet"] == true {
         assert_eq!(data["runner"], "current");
     }

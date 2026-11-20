@@ -126,6 +126,11 @@ step before enrolling it. If you have a pinned ExecStart drop-in,
 first verify that the stable `~/.local/bin/plakd` link resolves to the
 running snapshot; move the drop-in aside and run `systemctl --user
 daemon-reload` without restarting. Plan requires the exact generated unit.
+The gateway also needs the generated service with a dedicated
+`~/.local/bin/plakd-gateway` command link. Migrate older units using the
+gateway service procedure before enrollment. Plan checks the incumbent
+holder, service and command image, and requires a gateway replacement to
+support both the old and new host's negotiated protocol.
 
 ```sh
 plakd deploy plan --inventory "$inventory" --stage staging
@@ -134,16 +139,19 @@ plakd deploy status --inventory "$inventory" --stage staging
 ```
 
 Review the JSON plan before applying. Apply runs the old image's health and
-paid canaries before staging. It stages immutable bits, advances dedicated
-runner links, upgrades and links the host, then switches exact-wire clients
-and verifies. The
+paid canaries against the old gateway before staging. It stages immutable
+bits, advances dedicated runner links, drains a changing gateway, flips its
+dedicated link, and starts the inactive service. It proves the new holder
+with the old host before requesting host upgrade. Then it links the Ready
+host, switches exact-wire clients, and verifies. A gateway-only change leaves
+the host running without requesting a handoff. The
 candidate's generated unit must match the on-disk bytes before it can request
 handoff; use the manual same-key procedure if the template differs.
 A green staging transition writes the JSON receipt at the configured path.
 An unchanged, verified re-apply is a no-op and never refreshes that receipt.
 For production use the exact staging platform and client manifest digests,
-equivalent runner transition classes and route coverage, and an unexpired
-green staging receipt. Resuming a recorded production handoff
+equivalent runner, gateway and host transition classes and route coverage,
+and an unexpired green staging receipt. Resuming a recorded production handoff
 does not re-check the receipt that already qualified it. Keep the evidence and receipt in an
 operator-owned directory.
 
@@ -162,3 +170,13 @@ withdrawal. For any runner link already advanced, verify source custody and
 restore the recorded source-compatible link manually. Do not discard the
 evidence log or race a manual handoff against an open intent. There is no
 automatic host rollback after surrender.
+
+If a gateway action lost its reply, status reconciles the recorded drain,
+link and holder. It never repeats the drain; it can cancel a request that
+never started, start from a proven clean exit, or record an already Ready
+replacement. Runner links can be restored before host handoff even when
+gateway health is unknown. If status cannot prove a clean exit or the
+recorded replacement, inspect the generated gateway service and holder of
+the credential-store lock before continuing; deploy does not switch back
+an already Ready gateway. Archive older schema logs only after settling
+their open intents; production promotion needs a fresh schema-5 receipt.

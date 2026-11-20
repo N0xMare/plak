@@ -1823,7 +1823,8 @@ under `~/.local/bin`, replaces only links already pointing into plakd's
 snapshot or sidecar roots, and updates existing owned Cargo links without
 creating new Cargo entries. Use this installer to stage the image first:
 its link command cannot relink pre-port snapshots. Neither local step
-starts or changes a service or moves a dedicated paired-runner command link.
+starts or changes a service or moves a dedicated paired-runner or gateway
+command link.
 
 The hidden `plakd deploy` operator tool (chapter 02 §4.6) is not a supported
 product surface and does not widen the shipping or supported platform policy.

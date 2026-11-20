@@ -14,7 +14,7 @@ use super::inventory::{self, Node, Route, Stage};
 use super::probe::{self, Target, UNIT_DRIFT};
 use super::protocol::{
     AccountIdentity, Call, Canary, Candidate, ClientObserved, ClientOp, ClientSpec, Connection,
-    Health, HostOp, Observed, Reply, Request, VERSION,
+    GatewayOp, Health, HostOp, Observed, Reply, Request, VERSION,
 };
 use super::timing;
 
@@ -77,6 +77,22 @@ fn execute(request: Request, body: &mut dyn Read) -> CliResult<serde_json::Value
                 eof(body)?;
             }
             execute_host(&target, op, body)
+        }
+        Call::Gateway { host, op } => {
+            let target = Target::new(&host, request.operator_machine.as_deref())?;
+            eof(body)?;
+            if !matches!(op, GatewayOp::Observe) {
+                guard_account(&host.node, request.stage)?;
+                check(
+                    request.stage != Stage::Production || target.production_history(),
+                    "production target has no deployment marker",
+                )?;
+            }
+            match op {
+                GatewayOp::Observe => data(&target.gateway_observation()?),
+                GatewayOp::Switch { intent } => data(&target.switch_gateway(&intent, true)?),
+                GatewayOp::Reconcile { intent } => data(&target.switch_gateway(&intent, false)?),
+            }
         }
         Call::Client { node, client, op } => {
             let account = probe::validate_node(&node, request.operator_machine.as_deref())?;

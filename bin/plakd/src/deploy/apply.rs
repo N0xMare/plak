@@ -16,6 +16,8 @@ use super::protocol::{
 };
 use super::{Halt, Report, Result};
 
+mod gateway;
+
 pub(super) struct Deploy<'a, F> {
     pub(super) artifacts: &'a Artifacts,
     pub(super) config: &'a Selected<'a>,
@@ -32,27 +34,25 @@ impl<F: Fleet> Deploy<'_, F> {
         log: Option<&mut Log>,
         report: &mut Report,
     ) -> Result<Option<Plan>> {
-        let prior = evidence::pending(rows)?;
+        let mut prior = evidence::pending(rows)?;
         let mut log = log;
-        if let Some((intent, prior)) = &prior {
+        if let Some((intent, pending)) = &mut prior {
             if *intent != self.intent {
                 return Err(Halt::reconcile(
                     "a different recorded deployment intent still needs reconciliation",
                 ));
             }
-            if matches!(prior.cohort, Cohort::Runner | Cohort::RunnerWithdrawal) {
-                let Some(log) = log else {
-                    return Err(Halt::reconcile(
-                        "withdraw the recorded runner cohort with deploy status before another handoff",
-                    ));
-                };
-                self.withdraw_runner(&mut prior.clone(), log, report)?;
+            if !self.settle_pre_host(pending, log.as_deref_mut(), report)? {
                 return Ok(None);
+            }
+            if let Some(gateway) = &pending.gateway_successor {
+                report.put("gateway_ready", gateway)?;
             }
         }
         let observed = match fleet::observed(&self.fleet) {
             Ok(observed) => observed,
             Err(error) if prior.is_some() => {
+                self.restore_ready_runners(&mut prior, log.as_deref_mut(), report)?;
                 return Err(Halt::reconcile(&format!(
                     "recorded cohort outcome is unresolved: {}",
                     error.message()
@@ -60,6 +60,17 @@ impl<F: Fleet> Deploy<'_, F> {
             }
             Err(error) => return Err(error.into()),
         };
+        if let Some((_, pending)) = &prior
+            && pending.cohort == Cohort::GatewayReady
+            && (!Self::same_active_accounts(&observed, pending)
+                || plan::verify_resume(&observed, pending, &self.artifacts.candidate().sha256)
+                    .is_err())
+        {
+            self.restore_ready_runners(&mut prior, log.as_deref_mut(), report)?;
+            return Err(Halt::reconcile(
+                "recorded gateway successor or incumbent host changed before handoff",
+            ));
+        }
         report.put("observed", &observed)?;
         report.put("stage_identity", &observed.stage_identity)?;
         if let Some(log) = &mut log {
@@ -78,8 +89,38 @@ impl<F: Fleet> Deploy<'_, F> {
             report.put("legacy_facts", &observed.facts)?;
         }
         let routes = plan::qualify(&observed, self.config, self.artifacts, self.stage)?;
+        let (targets, clients) = self.observe_targets(&observed.stage_identity, report)?;
+        let resume =
+            self.resolve_pending(&observed, &targets, prior.map(|(_, pending)| pending))?;
+        let plan = Plan::new(
+            observed,
+            targets,
+            self.artifacts,
+            self.config,
+            clients,
+            routes,
+            resume,
+        );
+        check(
+            plan.has(Step::HostUpgrade) || plan.runner_changes.is_empty(),
+            "runner link differs after host handoff; inspect and fix forward",
+        )?;
+        if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
+            self.runner_preflight(&plan.observed)?;
+        }
+        report.put("plan", &plan.steps)?;
+        report.put("source_transition", &plan.source_transition)?;
+        report.put("canary_models", &super::receipt::models(&plan.routes))?;
+        Ok(Some(plan))
+    }
+
+    fn observe_targets(
+        &self,
+        host: &StageIdentity,
+        report: &mut Report,
+    ) -> Result<(Targets, BTreeSet<String>)> {
         let mut targets = Targets {
-            accounts: BTreeSet::from([observed.stage_identity.account()]),
+            accounts: BTreeSet::from([host.account()]),
             runners: BTreeMap::new(),
             runner_changes: BTreeSet::new(),
         };
@@ -108,28 +149,54 @@ impl<F: Fleet> Deploy<'_, F> {
         report.put("target_accounts", &targets.accounts)?;
         report.put("runner_links", &targets.runners)?;
         self.stage_isolation(&targets.accounts)?;
-        let resume =
-            self.resolve_pending(&observed, &targets, prior.map(|(_, pending)| pending))?;
-        let plan = Plan::new(
-            observed,
-            targets,
-            self.artifacts,
-            self.config,
-            clients,
-            routes,
-            resume,
-        );
-        check(
-            plan.has(Step::HostUpgrade) || plan.runner_changes.is_empty(),
-            "runner link differs after host handoff; inspect and fix forward",
-        )?;
-        if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
-            self.runner_preflight(&plan.observed)?;
+        Ok((targets, clients))
+    }
+
+    fn settle_pre_host(
+        &self,
+        pending: &mut Pending,
+        log: Option<&mut Log>,
+        report: &mut Report,
+    ) -> Result<bool> {
+        match pending.cohort {
+            Cohort::Runner | Cohort::RunnerWithdrawal => {
+                let log = log.ok_or_else(|| Halt::reconcile(
+                    "withdraw the recorded runner cohort with deploy status before another handoff",
+                ))?;
+                self.withdraw_runner(pending, log, report)?;
+                Ok(false)
+            }
+            Cohort::Gateway => {
+                let log = log.ok_or_else(|| {
+                    Halt::reconcile("reconcile the recorded gateway cohort with deploy status")
+                })?;
+                self.reconcile_gateway(pending, log, report)
+            }
+            Cohort::GatewayReady if pending.gateway_runner_withdrawal => {
+                let log = log.ok_or_else(|| {
+                    Halt::reconcile("finish restoring runner links with deploy status")
+                })?;
+                self.runner_withdrawal_proof(pending, log, report)?;
+                self.finish_gateway_runner_withdrawal(pending, log, report)?;
+                Ok(false)
+            }
+            _ => Ok(true),
         }
-        report.put("plan", &plan.steps)?;
-        report.put("source_transition", &plan.source_transition)?;
-        report.put("canary_models", &super::receipt::models(&plan.routes))?;
-        Ok(Some(plan))
+    }
+
+    fn restore_ready_runners(
+        &self,
+        prior: &mut Option<(&str, Pending)>,
+        log: Option<&mut Log>,
+        report: &mut Report,
+    ) -> Result<()> {
+        if let (Some((_, pending)), Some(log)) = (prior, log)
+            && pending.cohort == Cohort::GatewayReady
+            && self.has_runner_advance(pending)
+        {
+            self.withdraw_runner(pending, log, report)?;
+        }
+        Ok(())
     }
 
     fn resolve_pending(
@@ -140,7 +207,8 @@ impl<F: Fleet> Deploy<'_, F> {
     ) -> Result<Option<Pending>> {
         match prior {
             Some(prior) => {
-                if targets.accounts != prior.accounts
+                if !Self::same_active_accounts(observed, &prior)
+                    || targets.accounts != prior.accounts
                     || self.config.runners.iter().any(|runner| {
                         let found = &targets.runners[&runner.id];
                         prior.runners.get(&runner.id).is_none_or(|old| {
@@ -172,6 +240,17 @@ impl<F: Fleet> Deploy<'_, F> {
         }
     }
 
+    fn same_active_accounts(observed: &Observed, prior: &Pending) -> bool {
+        prior.baseline.canaries.as_ref().is_some_and(|checked| {
+            observed
+                .accounts
+                .iter()
+                .filter(|(_, status)| *status != "not_enrolled")
+                .map(|(account, _)| account)
+                .eq(checked.keys())
+        })
+    }
+
     pub(super) fn apply(&self, log: &mut Log, report: &mut Report) -> Result<()> {
         let rows = log.rows.clone();
         let Some(mut plan) = self.plan(&rows, Some(log), report)? else {
@@ -185,11 +264,16 @@ impl<F: Fleet> Deploy<'_, F> {
         }
         self.stage(&plan, log, report)?;
         let mut pending = Self::intent_for(&plan, baseline.as_ref());
+        if plan.has(Step::HostUpgrade) || plan.has(Step::Gateway) {
+            let intent = pending
+                .as_mut()
+                .ok_or_else(|| fail("host cannot proceed without BASELINE"))?;
+            self.before_upgrade(&mut plan, intent, log, report)?;
+        }
         let instance = if plan.has(Step::HostUpgrade) {
             let intent = pending
                 .as_mut()
                 .ok_or_else(|| fail("host cannot proceed without BASELINE"))?;
-            self.before_upgrade(&plan, intent, log, report)?;
             self.upgrade(&plan, intent, log, report)?
         } else {
             if let Some(intent) = &mut pending
@@ -327,43 +411,64 @@ impl<F: Fleet> Deploy<'_, F> {
             accounts: plan.accounts.clone(),
             runners: plan.runners.clone(),
             host_upgrade: plan.has(Step::HostUpgrade),
+            gateway: None,
+            gateway_successor: None,
+            gateway_runner_withdrawal: false,
         })
     }
 
     fn cohort(&self, log: &mut Log, pending: &mut Pending, cohort: Cohort) -> CliResult<()> {
+        let mut row = pending.clone();
+        row.cohort = cohort;
+        log.record(&self.intent, cohort.phase(), &row)?;
         pending.cohort = cohort;
-        log.record(&self.intent, cohort.phase(), pending)
+        Ok(())
     }
 
     fn before_upgrade(
         &self,
-        plan: &Plan,
+        plan: &mut Plan,
         pending: &mut Pending,
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
-        let mut runner_started = false;
+        let mut runner_started =
+            pending.cohort == Cohort::GatewayReady && self.has_runner_advance(pending);
         let preparation: Result<()> = (|| {
             self.preflight_destination(plan, report)?;
             check(
                 self.observe(report)? == plan.observed,
                 "serving facts changed after BASELINE; replan",
             )?;
-            if !self.config.runners.is_empty() {
+            if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
                 self.runner_preflight(&plan.observed)?;
             }
             if plan.has(Step::RunnerLinks) {
-                self.cohort(log, pending, Cohort::Runner)?;
+                if pending.cohort != Cohort::GatewayReady {
+                    self.cohort(log, pending, Cohort::Runner)?;
+                }
                 runner_started = true;
                 self.advance_runners(plan, pending, report)?;
             }
-            // A gateway cohort belongs here, after runner links and before host intent.
             self.verify_runners(plan)?;
-            report.put("step", &"host_upgrade")?;
-            self.cohort(log, pending, Cohort::Host)?;
+            if plan.has(Step::Gateway) {
+                self.advance_gateway(plan, pending, log, report)?;
+                self.verify_runners(plan)?;
+            }
+            if plan.has(Step::HostUpgrade) {
+                report.put("step", &"host_upgrade")?;
+                self.cohort(log, pending, Cohort::Host)?;
+            }
             Ok(())
         })();
         if let Err(error) = preparation {
+            if pending.cohort == Cohort::Gateway {
+                self.withdraw_gateway_runners(pending, log, report)?;
+                return Err(error);
+            }
+            if pending.cohort == Cohort::RunnerWithdrawal {
+                return Err(error);
+            }
             if runner_started {
                 self.withdraw_runner(pending, log, report)?;
                 return Err(Halt::blocked(&error.message));
@@ -452,6 +557,20 @@ impl<F: Fleet> Deploy<'_, F> {
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
+        self.runner_withdrawal_proof(pending, log, report)?;
+        if pending.cohort == Cohort::RunnerWithdrawal {
+            self.restore_and_record(pending, log, report)
+        } else {
+            self.begin_runner_withdrawal(pending, log, report)
+        }
+    }
+
+    fn runner_withdrawal_proof(
+        &self,
+        pending: &Pending,
+        log: &mut Log,
+        report: &mut Report,
+    ) -> Result<()> {
         let observed: HostImages =
             fleet::evidence_decode(self.fleet.host(HostOp::RunnerWithdrawalProof).map_err(
                 |_| {
@@ -469,16 +588,15 @@ impl<F: Fleet> Deploy<'_, F> {
                 "cannot restore runner links without the recorded source image and stable link",
             ));
         }
+        check(
+            observed.stage_identity == pending.dependencies.stage_identity,
+            "cannot restore runner links on a different target account",
+        )?;
         self.stage_allowed_to_withdraw(
             &observed.stage_identity,
             observed.production_history,
             pending,
-        )?;
-        if pending.cohort == Cohort::RunnerWithdrawal {
-            self.restore_and_record(pending, log, report)
-        } else {
-            self.begin_runner_withdrawal(pending, log, report)
-        }
+        )
     }
 
     fn withdraw_host(
@@ -528,6 +646,13 @@ impl<F: Fleet> Deploy<'_, F> {
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
+        if pending.gateway.as_ref().is_some_and(|intent| {
+            pending.dependencies.gateway.link.sha256 == intent.candidate.sha256
+        }) {
+            pending.gateway_runner_withdrawal = true;
+            self.cohort(log, pending, Cohort::GatewayReady)?;
+            return self.finish_gateway_runner_withdrawal(pending, log, report);
+        }
         self.cohort(log, pending, Cohort::RunnerWithdrawal)?;
         self.restore_and_record(pending, log, report)
     }
@@ -538,6 +663,19 @@ impl<F: Fleet> Deploy<'_, F> {
         log: &mut Log,
         report: &mut Report,
     ) -> Result<()> {
+        self.restore_runners(pending, report)?;
+        log.record(
+            &self.intent,
+            "withdrawn",
+            &Instance {
+                instance: &pending.instance,
+            },
+        )?;
+        report.put("withdrawn", &true)?;
+        Ok(())
+    }
+
+    fn restore_runners(&self, pending: &Pending, report: &mut Report) -> Result<()> {
         let mut refusal = None;
         for runner in self.config.runners {
             let old = &pending.runners[&runner.id].link;
@@ -550,14 +688,6 @@ impl<F: Fleet> Deploy<'_, F> {
         if let Some(error) = refusal {
             return Err(error);
         }
-        log.record(
-            &self.intent,
-            "withdrawn",
-            &Instance {
-                instance: &pending.instance,
-            },
-        )?;
-        report.put("withdrawn", &true)?;
         Ok(())
     }
 
@@ -729,10 +859,12 @@ impl<F: Fleet> Deploy<'_, F> {
                 .is_some_and(|intent| intent.host_upgrade);
         let result = if paid { "green" } else { "no_op" };
         report.put("host_transition", &transitioned)?;
+        let gateway_transition = plan.source_transition.gateway_changed && paid;
+        report.put("gateway_transition", &gateway_transition)?;
         report.put("result", &result)?;
         report.put("completed_at", &evidence::now())?;
         report.remove("step");
-        if self.stage == Stage::Staging && transitioned {
+        if self.stage == Stage::Staging && (transitioned || gateway_transition) {
             super::receipt::publish(self.config.receipt, report.value())?;
         }
         log.record(&self.intent, "verified", &Verified { result })?;

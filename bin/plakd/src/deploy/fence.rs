@@ -49,6 +49,10 @@ impl Fence {
         )
     }
 
+    pub(super) fn untouched(&self) -> CliResult<bool> {
+        Ok(self.file.metadata().map_err(io)?.len() == 0)
+    }
+
     pub(super) fn requester_input(&self) -> CliResult<File> {
         // The requester does not read stdin. Keep the same locked file
         // description in the child even if its target wrapper dies.
@@ -56,7 +60,16 @@ impl Fence {
     }
 
     pub(super) fn cancel(&mut self) -> CliResult<()> {
-        self.file.write_all(b"withdrawn\n").map_err(io)?;
+        self.seal(b"withdrawn\n")
+    }
+
+    pub(super) fn claim_once(&mut self) -> CliResult<()> {
+        self.active()?;
+        self.seal(b"started\n")
+    }
+
+    fn seal(&mut self, record: &[u8]) -> CliResult<()> {
+        self.file.write_all(record).map_err(io)?;
         self.file.sync_all().map_err(io)?;
         File::open(&self.dir)
             .and_then(|dir| dir.sync_all())

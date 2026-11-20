@@ -5,12 +5,15 @@ use crate::shipping_artifact::{NAMES, fail};
 
 use super::artifacts::{Artifacts, ProductArtifact};
 use super::inventory::{Client, Host, Node, Runner, Stage};
-use super::protocol::{Call, ClientObserved, ClientOp, HostOp, Observed, RunnerObserved, RunnerOp};
+use super::protocol::{
+    Call, ClientObserved, ClientOp, GatewayOp, HostOp, Observed, RunnerObserved, RunnerOp,
+};
 use super::ssh::{Blob, Image, Ssh};
 use super::timing;
 
 pub(super) trait Fleet {
     fn host(&self, op: HostOp) -> CliResult<serde_json::Value>;
+    fn gateway(&self, op: GatewayOp) -> CliResult<serde_json::Value>;
     fn runner(&self, runner: &Runner, op: RunnerOp) -> CliResult<serde_json::Value>;
     fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value>;
     fn use_installed_candidate(&self);
@@ -114,6 +117,20 @@ impl Fleet for Remote<'_> {
             },
             staging,
             installed,
+            timeout,
+        )
+    }
+
+    fn gateway(&self, op: GatewayOp) -> CliResult<serde_json::Value> {
+        let timeout = timing::gateway(&op);
+        self.product(
+            &self.host.node,
+            Call::Gateway {
+                host: self.host.clone(),
+                op,
+            },
+            false,
+            self.staged.get(),
             timeout,
         )
     }

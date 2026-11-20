@@ -6316,7 +6316,7 @@ as described in chapter 06 §6.6. Before bootstrapping a GNU Linux candidate,
 the operator compares its pinned GLIBC ceiling for all three executables
 with the target's read-only libc report; unavailable or too-old libc
 refuses. The target refuses an operator whose deploy protocol number
-differs (currently v4).
+differs (currently v5).
 Neither deployment endpoint needs Python. A pinned systemd ExecStart drop-in refuses:
 verify that the stable link resolves to the running snapshot, move the
 pinned drop-in aside, then run `systemctl --user daemon-reload` without restarting.
@@ -6325,16 +6325,21 @@ must agree with the plist on disk, and the service PID must prove its
 executable vnode. Deploy compares launchd's effective GUI-domain exit timeout
 (the plist value capped at 60 seconds) and verifies `KeepAlive.SuccessfulExit`
 in the reported semaphores. The host plist must match the product renderer.
-Unloaded, edited or stale services
-need manual enrollment; deploy does not bootstrap or kickstart them.
+Unloaded, edited or stale services need manual enrollment. Deploy does not
+bootstrap services; it starts an already enrolled gateway after clean drain.
 
 Plan compares the service process image, upgrade coordinator instance, state
 key, exact wire schema, local runner protocol, gateway image and holder, and
 enrolled command links. A candidate must descend from the serving revision.
-The unchanged gateway must admit the minimum of every active family (v2
-for Codex and Grok). A state-key change requires the manual settled upgrade
-runbook; a gateway image or holder change still refuses, and a custody
-change is a separate manual leg. Paired runner IDs, literal `login@host`
+The incumbent gateway must admit the minimum of every active family (v2
+for Codex and Grok). A changing gateway uses the same pinned product
+artifact as the host. Its served versions must negotiate that minimum
+with both the old and new host. Plan proves the loaded gateway command is
+the dedicated `~/.local/bin/plakd-gateway` link to an owned immutable image,
+that its target matches the process executable, and that the enrolled Unix
+socket answers for the credential-store holder. Unknown images, service
+drift and custody changes refuse. A state-key change requires the manual
+settled upgrade runbook. Paired runner IDs, literal `login@host`
 destinations and dedicated command paths must match the serving host's
 configured placements. Legacy versions use
 the existing host upgrade, state-key, export-version and wire-schema probes;
@@ -6410,7 +6415,16 @@ installer, and stage client blobs before switching anything. Verify the candidat
 unit against the unit bytes on disk before recording surrender intent;
 template drift requires the manual procedure. Atomically advance paired
 runner links to the destination snapshot for their platform before requesting
-host upgrade. Recheck the candidate's
+host upgrade. After the runner links and before the host request, a changed
+gateway drains the recorded credential holder once, waits for a clean service
+exit and release of its holder lock, atomically advances its dedicated link,
+then starts the inactive service with `systemctl --user start` or
+`launchctl kickstart` without `-k`. It never stops or restarts the service
+with dependents. Linux's generated host unit has `Wants=`, so this does not
+stop the host. The incumbent CLI proves the new holder and negotiates against
+it before host handoff; service and configuration custody, socket path,
+state root and account roster must not change. A gateway-only transition
+does not request a host upgrade. Recheck the candidate's
 state key immediately before invoking the staged destination's
 `host upgrade --expect-binary <id> --drain <duration>` and verify its Ready
 instance before moving the host command link. Then check the clients against
@@ -6420,10 +6434,19 @@ unchanged dependencies and repeat BASELINE health and canary checks. An exact
 healthy no-op performs only read-only verification and does not mint a
 promotion receipt.
 
-Apply appends an intent before each mutating cohort (runner links → host →
-client links), halts on error, and emits the exact status command. A missing
+Apply appends and syncs an intent before each mutating cohort (runner links →
+gateway → host → client links), halts on error, and emits the exact status command. A missing
 acknowledgement is reconciled by observing exact links and service/process
 identity, not by reissuing surrender or repeating a completed link change.
+Gateway reconciliation never resends a recorded drain. It cancels an
+unattempted request when the old holder still serves, or resumes forward
+from a proven clean exit or candidate link/holder. An unknown drain, failed
+start, or unrelated holder stops for inspection. The gateway successor
+generation is separately recorded before any host intent; later
+observations must match it. A pre-host refusal restores runner links using
+source image/link evidence even when the gateway is unavailable. An
+unresolved gateway intent remains open; a proven gateway successor is
+retained across a pre-surrender host withdrawal.
 An error before recording and sending the host request, or a pending
 runner-only cohort on re-entry, withdraws the runner cohort if the recorded
 source image and stable link are still serving, even if that source
@@ -6442,8 +6465,9 @@ image under a new instance with unchanged non-transitioning dependencies.
 Evidence and receipts identify accounts by platform, machine digest, UID
 and home, and record the host product home. A production history marker in
 each mutated target login's installation root fences staging.
-The green schema-4 staging JSON
-report is a receipt for production apply, not a store or custody authority.
+The green schema-5 staging JSON report records whether the host and
+gateway transitioned and qualifies the same transition classes in
+production. It is not a store or custody authority.
 
 ### 4.7 `plakd gateway`
 

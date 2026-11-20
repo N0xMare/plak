@@ -23,6 +23,7 @@ struct Receipt {
     stage: Stage,
     result: String,
     host_transition: bool,
+    gateway_transition: bool,
     completed_at: u64,
     manifests: Pins,
     stage_identity: StageIdentity,
@@ -67,7 +68,9 @@ pub(super) fn verify(
         receipt.schema == SCHEMA
             && receipt.stage == Stage::Staging
             && receipt.result == "green"
-            && receipt.host_transition
+            && (receipt.host_transition || receipt.gateway_transition)
+            && receipt.host_transition == transition.host_changed
+            && receipt.gateway_transition == transition.gateway_changed
             && receipt.manifests.same_digests(pins)
             && evidence::now()
                 .checked_sub(receipt.completed_at)

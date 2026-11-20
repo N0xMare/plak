@@ -11,11 +11,12 @@ use crate::CliResult;
 use crate::shipping_artifact::{self as shipping, check, io};
 
 use super::protocol::{
-    AccountIdentity, Dependencies, Health, RunnerObserved, SourceTransition, StageIdentity,
+    AccountIdentity, Dependencies, GatewayIntent, GatewayObserved, Health, RunnerObserved,
+    SourceTransition, StageIdentity,
 };
 use super::{Halt, Result};
 
-pub(super) const SCHEMA: u32 = 4;
+pub(super) const SCHEMA: u32 = 5;
 
 pub(super) fn isolate_staging(
     targets: &BTreeSet<AccountIdentity>,
@@ -96,6 +97,8 @@ fn history(path: &Path, bound: u64) -> Result<String> {
 pub(super) enum Cohort {
     Runner,
     RunnerWithdrawal,
+    Gateway,
+    GatewayReady,
     Host,
     Clients,
 }
@@ -105,6 +108,8 @@ impl Cohort {
         match self {
             Self::Runner => "runner_intent",
             Self::RunnerWithdrawal => "runner_withdrawal",
+            Self::Gateway => "gateway_intent",
+            Self::GatewayReady => "gateway_ready",
             Self::Host => "upgrade_intent",
             Self::Clients => "client_intent",
         }
@@ -136,6 +141,9 @@ pub(super) struct Pending {
     pub(super) accounts: BTreeSet<AccountIdentity>,
     pub(super) runners: BTreeMap<String, RunnerObserved>,
     pub(super) host_upgrade: bool,
+    pub(super) gateway: Option<GatewayIntent>,
+    pub(super) gateway_successor: Option<GatewayObserved>,
+    pub(super) gateway_runner_withdrawal: bool,
 }
 
 pub(super) struct Log {
@@ -237,7 +245,8 @@ pub(super) fn pending(rows: &[Row]) -> Result<Option<(&str, Pending)>> {
     for row in rows.iter().rev() {
         match row.phase.as_str() {
             "verified" | "withdrawn" => return Ok(None),
-            "runner_intent" | "runner_withdrawal" | "upgrade_intent" | "client_intent" => {
+            "runner_intent" | "runner_withdrawal" | "gateway_intent" | "gateway_ready"
+            | "upgrade_intent" | "client_intent" => {
                 let pending: Pending = serde_json::from_value(serde_json::Value::Object(
                     row.fields.clone(),
                 ))

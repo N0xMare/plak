@@ -28,8 +28,9 @@ const UNIT: &str = "plakd-host.service";
 const HOST_AGENT: &str = "com.plakd.host";
 pub(super) const NORMALIZE: &str = "host unit is not the generated stable-link unit: verify ~/.local/bin/plakd resolves to the running snapshot, move the pinned ExecStart drop-in aside, then run systemctl --user daemon-reload; do not restart";
 pub(super) const UNIT_DRIFT: &str = "candidate unit template differs: review the candidate's host install --dry-run output and normalize the unit using the manual same-key procedure before retrying";
-const GATEWAY_IMAGE: &str = "gateway image change: restore the enrolled gateway or use the manual gateway upgrade procedure";
 const CUSTODY: &str = "custody change: restore the enrolled local gateway; use the custody runbook";
+
+mod gateway;
 
 pub(super) struct Target<'a> {
     pub(super) host: &'a Host,
@@ -58,13 +59,6 @@ struct Identity {
     binary: String,
     #[serde(default)]
     deploy_idle: Option<bool>,
-}
-
-struct Gateway {
-    instance: String,
-    versions: Vec<u32>,
-    custody: String,
-    accounts: Vec<String>,
 }
 
 pub(super) fn validate_node(node: &Node, operator: Option<&str>) -> CliResult<AccountIdentity> {
@@ -189,7 +183,9 @@ impl<'a> Target<'a> {
 
     fn host_pid(&self) -> CliResult<String> {
         if self.host.node.platform == Platform::Mac {
-            return Ok(super::launchd::observe(self, HOST_AGENT, &self.unit_path())?.pid);
+            return super::launchd::observe_service(self, HOST_AGENT, &self.unit_path())?
+                .pid
+                .ok_or_else(|| fail("expected an active LaunchAgent"));
         }
         let unit = self.unit_path();
         let host_props = self.properties(
@@ -253,8 +249,8 @@ impl<'a> Target<'a> {
             "service process image and coordinator identity differ",
         )?;
         self.welcome(&facts)?;
-        let gateway = self.gateway(&binary)?;
-        let accounts = self.accounts(&binary, &gateway.accounts)?;
+        let (gateway, listed) = self.observe_gateway(&binary, &facts.gateway_spoken)?;
+        let accounts = self.accounts(&binary, &listed)?;
         let paired = self.paired()?;
         let canary = self.canary_routes(&binary)?;
         check(
@@ -272,9 +268,7 @@ impl<'a> Target<'a> {
                 instance: identity.instance,
                 facts,
                 unit_sha256: shipping::digest(&unit),
-                custody_sha256: gateway.custody,
-                gateway_instance: gateway.instance,
-                gateway_versions: gateway.versions,
+                gateway,
                 stage_identity: self.stage_identity(),
                 paired,
                 canary,
@@ -356,6 +350,7 @@ impl<'a> Target<'a> {
                 "build-info disagrees with independent product probes",
             )?;
             facts.source = "build_info".to_owned();
+            facts.gateway_spoken = info.gateway.spoken;
         }
         Ok(facts)
     }
@@ -417,86 +412,6 @@ impl<'a> Target<'a> {
                 Ok((key.to_owned(), value.to_owned()))
             })
             .collect()
-    }
-
-    fn gateway(&self, binary: &Path) -> CliResult<Gateway> {
-        let expected = format!("via gateway unix:{}", self.host.gateway_socket.display());
-        let status = self
-            .product(binary, ["gateway", "status"], timing::PROBE)
-            .map_err(|_| fail(CUSTODY))?;
-        let status = text(&status)?;
-        check(status.lines().any(|line| line == expected), CUSTODY)?;
-        let instance = status
-            .lines()
-            .find_map(|line| line.strip_prefix("instance "))
-            .filter(|instance| uuid::Uuid::parse_str(instance).is_ok())
-            .ok_or_else(|| fail("gateway instance is unavailable"))?;
-        let raw = self.product(binary, ["gateway", "check"], timing::PROBE)?;
-        let (versions, accounts) = gateway_reply(text(&raw)?, &expected, instance)?;
-        let (pid, start) = self.gateway_service()?;
-        let process = self.process_image(&pid)?;
-        check(
-            FileFacts::read(&process)?.sha256 == self.host.gateway_sha256,
-            GATEWAY_IMAGE,
-        )?;
-        check(
-            start.canonicalize().ok().as_ref() == Some(&process),
-            match self.host.node.platform {
-                Platform::Linux | Platform::LinuxGnu => {
-                    "gateway image change: ExecStart does not resolve to the running image; restore the enrolled gateway"
-                }
-                Platform::Mac => {
-                    "gateway image change: LaunchAgent program does not resolve to the running image; restore the enrolled gateway"
-                }
-            },
-        )?;
-        let socket = fs::metadata(&self.host.gateway_socket).map_err(|_| fail(CUSTODY))?;
-        check(socket.file_type().is_socket(), CUSTODY)?;
-        let configs = ["config.toml", "gateway.toml"]
-            .into_iter()
-            .map(|name| {
-                let file = self.host.product_home.join(name);
-                file.exists()
-                    .then(|| {
-                        shipping::read(&file, shipping::LIMIT).map(|bytes| shipping::digest(&bytes))
-                    })
-                    .transpose()
-            })
-            .collect::<CliResult<Vec<_>>>()?;
-        let mut custody = shipping::canonical(&(configs, socket.dev(), socket.ino(), pid))?;
-        custody.pop();
-        Ok(Gateway {
-            instance: instance.to_owned(),
-            versions,
-            custody: shipping::digest(&custody),
-            accounts,
-        })
-    }
-
-    fn gateway_service(&self) -> CliResult<(String, PathBuf)> {
-        if self.host.node.platform == Platform::Mac {
-            let label = &self.host.gateway_unit;
-            let agent = super::launchd::observe(self, label, &self.plist(label))?;
-            return Ok((agent.pid, agent.program));
-        }
-        let props = self.properties(
-            &self.host.gateway_unit,
-            &["ActiveState", "MainPID", "ExecStart", "NeedDaemonReload"],
-        )?;
-        let start = props
-            .get("ExecStart")
-            .and_then(|row| row.strip_prefix("{ path="))
-            .and_then(|row| row.split_once(" ; argv[]="))
-            .map(|row| Path::new(row.0))
-            .filter(|path| path.is_absolute())
-            .ok_or_else(|| fail("cannot inspect the enrolled gateway command"))?;
-        check(
-            props
-                .get("NeedDaemonReload")
-                .is_some_and(|value| value == "no"),
-            "gateway service has pending unit changes; reconcile its loaded unit without restarting the gateway",
-        )?;
-        Ok((active_pid(&props)?.to_owned(), start.into()))
     }
 
     fn accounts(&self, binary: &Path, listed: &[String]) -> CliResult<BTreeMap<String, String>> {
@@ -634,6 +549,7 @@ fn facts_from_probes(
             read: probe.export_versions,
             write: release,
         },
+        gateway_spoken: Vec::new(),
     })
 }
 

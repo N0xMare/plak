@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use crate::shipping_artifact::{Upgrade, Wire};
 
 use super::inventory::{Host, Node, Platform, Route, Runner, Stage};
 
-pub(super) const VERSION: u32 = 4;
+pub(super) const VERSION: u32 = 5;
 pub(crate) const RUNNER_INSPECTION_REFUSAL: &str = "deploy_runner_inspection:";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -53,6 +53,10 @@ pub(super) enum Call {
     Host {
         host: Host,
         op: HostOp,
+    },
+    Gateway {
+        host: Host,
+        op: GatewayOp,
     },
     Runner {
         runner: Runner,
@@ -158,6 +162,54 @@ pub(super) struct Candidate {
     pub(super) flavor: crate::snapshot_install::Flavor,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum GatewayOp {
+    Observe,
+    Switch { intent: Box<GatewayIntent> },
+    Reconcile { intent: Box<GatewayIntent> },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GatewayIntent {
+    pub(super) ticket: uuid::Uuid,
+    pub(super) source: GatewayObserved,
+    pub(super) candidate: Candidate,
+    pub(super) source_host: String,
+    pub(super) source_instance: String,
+    pub(super) target: StageIdentity,
+    pub(super) minimum: u32,
+    pub(super) served: Vec<u32>,
+    pub(super) accounts: BTreeSet<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum GatewayOutcome {
+    Ready { observed: GatewayObserved },
+    Withdrawn,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GatewayObserved {
+    pub(super) command: PathBuf,
+    pub(super) link: RunnerLink,
+    pub(super) custody_sha256: String,
+    pub(super) holder: GatewayHolder,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct GatewayHolder {
+    pub(super) instance: String,
+    pub(super) pid: String,
+    pub(super) socket_identity: (u64, u64),
+    pub(super) versions: Vec<u32>,
+    pub(super) negotiated: Option<u32>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct StageIdentity {
@@ -248,6 +300,7 @@ pub(super) struct Facts {
     pub(super) runner_triple: RunnerTriple,
     pub(super) wire: Wire,
     pub(super) export: Export,
+    pub(super) gateway_spoken: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -274,9 +327,7 @@ pub(super) struct Observed {
     pub(super) instance: String,
     pub(super) facts: Facts,
     pub(super) unit_sha256: String,
-    pub(super) custody_sha256: String,
-    pub(super) gateway_instance: String,
-    pub(super) gateway_versions: Vec<u32>,
+    pub(super) gateway: GatewayObserved,
     pub(super) stage_identity: StageIdentity,
     pub(super) paired: BTreeMap<String, RunnerPlacement>,
     pub(super) canary: Option<Vec<String>>,
@@ -287,11 +338,12 @@ pub(super) struct Observed {
 
 impl Observed {
     pub(super) fn dependencies(&self) -> Dependencies {
+        let mut gateway = self.gateway.clone();
+        // Negotiation is a caller fact and can change when the host image does.
+        gateway.holder.negotiated = None;
         Dependencies {
             unit_sha256: self.unit_sha256.clone(),
-            custody_sha256: self.custody_sha256.clone(),
-            gateway_instance: self.gateway_instance.clone(),
-            gateway_versions: self.gateway_versions.clone(),
+            gateway,
             stage_identity: self.stage_identity.clone(),
         }
     }
@@ -302,7 +354,9 @@ impl Observed {
             coordinator: self.facts.host_upgrade.clone(),
             runner_protocol: self.facts.runner_triple.protocol,
             runners: Vec::new(),
-            gateway_versions: self.gateway_versions.clone(),
+            gateway_versions: self.gateway.holder.versions.clone(),
+            gateway_changed: false,
+            host_changed: false,
         }
     }
 }
@@ -311,9 +365,7 @@ impl Observed {
 #[serde(deny_unknown_fields)]
 pub(super) struct Dependencies {
     pub(super) unit_sha256: String,
-    pub(super) custody_sha256: String,
-    pub(super) gateway_instance: String,
-    pub(super) gateway_versions: Vec<u32>,
+    pub(super) gateway: GatewayObserved,
     pub(super) stage_identity: StageIdentity,
 }
 
@@ -325,6 +377,8 @@ pub(super) struct SourceTransition {
     pub(super) runner_protocol: u32,
     pub(super) runners: Vec<(Platform, RunnerTransition)>,
     pub(super) gateway_versions: Vec<u32>,
+    pub(super) gateway_changed: bool,
+    pub(super) host_changed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]

@@ -11,12 +11,14 @@ use crate::shipping_artifact::{check, fail, io};
 use super::probe::{self, Target};
 use super::timing;
 
-pub(super) struct Agent {
-    pub(super) pid: String,
+pub(super) struct Service {
+    pub(super) pid: Option<String>,
     pub(super) program: PathBuf,
+    pub(super) arguments: Vec<String>,
+    pub(super) clean_exit: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Plist {
     program_arguments: Vec<String>,
@@ -29,16 +31,22 @@ struct Plist {
     run_at_load: Option<bool>,
     abandon_process_group: Option<bool>,
     keep_alive: Option<serde_json::Value>,
+    #[serde(default)]
+    environment_variables: BTreeMap<String, String>,
 }
 
-pub(super) fn observe(target: &Target<'_>, label: &str, plist: &Path) -> CliResult<Agent> {
+pub(super) fn observe_service(
+    target: &Target<'_>,
+    label: &str,
+    plist: &Path,
+) -> CliResult<Service> {
     let node = &target.host.node;
     crate::snapshot_install::require_owned(crate::snapshot_install::parent(plist)?)?;
     let (service, loaded) = print(target, label)?;
     let mut tool = probe::command("/usr/bin/plutil".as_ref(), node, &target.host.product_home);
     tool.args(["-convert", "json", "-o", "-", "--"]).arg(plist);
     let config = probe::decode(&probe::capture(tool, timing::PROBE)?)?;
-    parse(probe::text(&loaded)?, &service, plist, &config)
+    parse_service(probe::text(&loaded)?, &service, plist, config)
 }
 
 pub(super) fn running_pid(target: &Target<'_>, label: &str) -> CliResult<String> {
@@ -87,16 +95,17 @@ fn active_pid<'a>(props: &BTreeMap<&str, &'a str>) -> CliResult<&'a str> {
         .ok_or_else(|| fail("missing launchd PID"))
 }
 
-fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult<Agent> {
+fn parse_service(output: &str, service: &str, plist: &Path, config: Plist) -> CliResult<Service> {
     let mut lines = service_lines(output, service)?;
     let mut props = BTreeMap::new();
     let mut arguments = None;
     let mut semaphores = None;
+    let mut environment = None;
     while let Some(line) = lines.next() {
         let Some(line) = top_level(line) else {
             continue;
         };
-        if matches!(line, "arguments = {" | "semaphores = {") {
+        if matches!(line, "arguments = {" | "semaphores = {" | "environment = {") {
             let values = lines
                 .by_ref()
                 .take_while(|line| *line != "\t}")
@@ -106,10 +115,10 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
                 })
                 .collect::<CliResult<Vec<_>>>()?;
             check(
-                if line == "arguments = {" {
-                    arguments.replace(values).is_none()
-                } else {
-                    semaphores.replace(values).is_none()
+                match line {
+                    "arguments = {" => arguments.replace(values).is_none(),
+                    "semaphores = {" => semaphores.replace(values).is_none(),
+                    _ => environment.replace(values).is_none(),
                 },
                 "duplicate LaunchAgent block",
             )?;
@@ -127,6 +136,7 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
                     | "exit timeout"
                     | "umask"
                     | "properties"
+                    | "last exit code"
             )
         {
             check(
@@ -145,7 +155,17 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
             }),
         "expected the running LaunchAgent and its on-disk arguments; check launchctl print without restarting",
     )?;
-    check_loaded(&props, semaphores.as_deref().unwrap_or_default(), config)?;
+    check_loaded(&props, semaphores.as_deref().unwrap_or_default(), &config)?;
+    check(
+        config.environment_variables.iter().all(|(key, value)| {
+            let mut loaded = environment.iter().flatten().filter_map(|row| {
+                let (name, loaded) = row.split_once(" =>")?;
+                (name == key).then_some(loaded.strip_prefix(' ').unwrap_or(loaded))
+            });
+            loaded.next() == Some(value.as_str()) && loaded.next().is_none()
+        }),
+        "loaded LaunchAgent environment differs from the plist",
+    )?;
     let expected_program = config
         .program
         .as_deref()
@@ -158,10 +178,19 @@ fn parse(output: &str, service: &str, plist: &Path, config: &Plist) -> CliResult
         "loaded LaunchAgent program differs from the plist",
     )?;
     super::inventory::absolute(expected_program)?;
-    let pid = active_pid(&props)?;
-    Ok(Agent {
-        pid: pid.to_owned(),
+    let pid = if props.get("type") == Some(&"LaunchAgent")
+        && props.get("state") == Some(&"not running")
+        && !props.contains_key("pid")
+    {
+        None
+    } else {
+        Some(active_pid(&props)?.to_owned())
+    };
+    Ok(Service {
+        pid,
         program: expected_program.into(),
+        arguments: config.program_arguments,
+        clean_exit: props.get("last exit code") == Some(&"0"),
     })
 }
 
@@ -288,15 +317,16 @@ mod tests {
         let service = "gui/500/com.example.probe";
         let plist = Path::new("/D/com.example.probe.plist");
         let loaded = include_str!("launchd/macos27.print");
-        let mut config = serde_json::from_value(serde_json::json!({
+        let mut config: Plist = serde_json::from_value(serde_json::json!({
             "ProgramArguments": ["/bin/sh","-c","exec /bin/sleep 600"], "WorkingDirectory": "/D",
             "StandardOutPath": "/D/out", "StandardErrorPath": "/D/err",
             "ExitTimeOut": 90, "Umask": 63, "RunAtLoad": true, "AbandonProcessGroup": true,
             "KeepAlive": {"SuccessfulExit": false}
+            ,"EnvironmentVariables": {"XPC_SERVICE_NAME": "com.example.probe"}
         }))
         .unwrap();
-        let agent = parse(loaded, service, plist, &config).unwrap();
-        assert_eq!(agent.pid, "42");
+        let agent = parse_service(loaded, service, plist, config.clone()).unwrap();
+        assert_eq!(agent.pid.as_deref(), Some("42"));
         assert_eq!(agent.program, Path::new("/bin/sh"));
         for (before, after) in [
             ("exec /bin/sleep 600", "exec /bin/sleep 599"),
@@ -306,6 +336,10 @@ mod tests {
             ("exit timeout = 60", "exit timeout = 61"),
             ("exit timeout = 60", "exit timeout = 59"),
             ("umask = 77", "umask = 22"),
+            (
+                "XPC_SERVICE_NAME => com.example.probe",
+                "XPC_SERVICE_NAME => com.example.other",
+            ),
             ("successful exit => 0", "successful exit => 1"),
             ("\tsemaphores = {\n\t\tsuccessful exit => 0\n\t}\n", ""),
             (
@@ -320,18 +354,38 @@ mod tests {
             ),
         ] {
             assert!(
-                parse(&loaded.replace(before, after), service, plist, &config).is_err(),
+                parse_service(
+                    &loaded.replace(before, after),
+                    service,
+                    plist,
+                    config.clone()
+                )
+                .is_err(),
                 "{before}"
             );
         }
+        let inactive = loaded
+            .replace("state = running", "state = not running")
+            .replace("\tpid = 42\n", "")
+            .replace("last exit code = (never exited)", "last exit code = 0");
+        let stopped = parse_service(&inactive, service, plist, config.clone()).unwrap();
+        assert!(stopped.pid.is_none() && stopped.clean_exit);
+        let failed = parse_service(
+            &inactive.replace("last exit code = 0", "last exit code = 1"),
+            service,
+            plist,
+            config.clone(),
+        )
+        .unwrap();
+        assert!(failed.pid.is_none() && !failed.clean_exit);
         config.exit_time_out = Some(59);
-        assert!(parse(loaded, service, plist, &config).is_err());
+        assert!(parse_service(loaded, service, plist, config.clone()).is_err());
         assert!(
-            parse(
+            parse_service(
                 &loaded.replace("exit timeout = 60", "exit timeout = 59"),
                 service,
                 plist,
-                &config
+                config
             )
             .is_ok()
         );

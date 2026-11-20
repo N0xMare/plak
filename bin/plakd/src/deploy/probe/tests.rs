@@ -91,6 +91,8 @@ case "$*" in
     id=$(cat "$PLAK_HOME/id")
     printf '{{"binary_id":"%s","wire_version":11}}\n' "$id" ;;
   'deploy-canary --capabilities') printf 'plakd-deploy-canary-v1\nclaude\ngrok\n' ;;
+  'gateway install --dry-run') printf '# %s/.config/systemd/user/gateway.service\ngenerated gateway\n' "$HOME" ;;
+  'gateway status --dry-run') printf 'state_root %s/state\nsocket %s/gateway.sock\n' "$HOME" "$PLAK_HOME" ;;
   'gateway status') printf 'via gateway unix:%s/gateway.sock\ninstance {GATEWAY}\n' "$PLAK_HOME" ;;
   'gateway check') printf 'via gateway unix:%s/gateway.sock\ngateway {GATEWAY} protocol 1,2\naccount claude/work\naccount claude/spare\n' "$PLAK_HOME" ;;
   'status') printf 'via gateway unix:%s/gateway.sock\nclaude/work: credential=ready\nclaude/spare: credential=signed-out\n' "$PLAK_HOME" ;;
@@ -118,7 +120,7 @@ case "$3" in
   plakd-host.service)
     printf 'ActiveState=active\nMainPID=100\nFragmentPath=%s\nDropInPaths=%s\nNeedDaemonReload=no\n' '{host}' '{dropin}' ;;
   gateway.service)
-    printf 'ActiveState=active\nMainPID=101\nNeedDaemonReload=no\nExecStart={{ path=%s ; argv[]=%s gateway serve ; }}\n' '{exec}' '{exec}' ;;
+    printf 'LoadState=loaded\nActiveState=active\nMainPID=101\nNeedDaemonReload=no\nDropInPaths=\nFragmentPath=%s/.config/systemd/user/gateway.service\nExecStart={{ path=%s ; argv[]=%s gateway serve ; }}\n' "$HOME" '{exec}' '{exec}' ;;
   *) exit 8 ;;
 esac
 "#,
@@ -139,15 +141,24 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
     let source = image(&home, "source", KEY, "generated");
     let drifting = image(&home, "drift", KEY, "different");
     let cross = image(&home, "cross", "r99.e39.p39.t11", "generated");
-    let gateway = home.join("gateway");
+    let gateway = home.join(".local/lib/plak/release/gateway/plakd");
+    fs::create_dir_all(gateway.parent().unwrap()).unwrap();
     fs::write(&gateway, "test gateway image").unwrap();
+    fs::set_permissions(&gateway, fs::Permissions::from_mode(0o555)).unwrap();
     let gateway_facts = FileFacts::read(&gateway).unwrap();
     let source_facts = FileFacts::read(&source).unwrap();
     let unit = home.join(".config/systemd/user/plakd-host.service");
     fs::create_dir_all(unit.parent().unwrap()).unwrap();
     fs::write(&unit, "generated\n").unwrap();
-    manager(&home, &unit, &gateway, "");
+    fs::write(
+        unit.with_file_name("gateway.service"),
+        "generated gateway\n",
+    )
+    .unwrap();
+    let gateway_link = home.join(".local/bin/plakd-gateway");
+    manager(&home, &unit, &gateway_link, "");
     symlink(&source, home.join(".local/bin/plakd")).unwrap();
+    symlink(&gateway, &gateway_link).unwrap();
     let proc_root = home.join("proc");
     for (pid, image) in [("100", &source), ("101", &gateway)] {
         let proc = proc_root.join(pid);
@@ -176,7 +187,7 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
             ssh: "example".into(),
             login: "example".into(),
             home: home.clone(),
-            uid: 1000,
+            uid: rustix::process::geteuid().as_raw(),
             platform: super::Platform::Linux,
         },
         web_socket: product.join("web.sock"),
@@ -215,9 +226,9 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
             .observe()
             .unwrap_err()
             .message()
-            .contains("ExecStart does not resolve")
+            .contains("generated dedicated")
     );
-    manager(&home, &unit, &gateway, "pinned.conf");
+    manager(&home, &unit, &gateway_link, "pinned.conf");
     assert_eq!(target.observe().unwrap_err().message(), NORMALIZE);
 }
 

@@ -279,6 +279,24 @@ pub(crate) fn drain(address: &GatewayAddress) -> crate::CliResult<()> {
     }
 }
 
+pub(crate) fn deploy_drain(socket: &std::path::Path, expected: &str) -> crate::CliResult<bool> {
+    let address = GatewayAddress::Unix(socket.into());
+    if client::versions(&address, None)?.instance.as_str() != expected {
+        return Err("gateway holder changed before drain".into());
+    }
+    match client::admin::<AdminResponse>(&address, None, &AdminRequest::Drain {})? {
+        AdminResponse::Draining {} => Ok(true),
+        AdminResponse::Refused { .. } => Ok(false),
+        _ => Err("gateway drain returned an unexpected response".into()),
+    }
+}
+
+pub(crate) fn deploy_holder_released(state_root: &std::path::Path) -> crate::CliResult<bool> {
+    holder::advertised_socket(&holder::lock_path(state_root))
+        .map(|socket| socket.is_none())
+        .map_err(|_| "cannot prove the credential holder released its lock".into())
+}
+
 pub(crate) fn check(
     address: &GatewayAddress,
     key: Option<&str>,

@@ -1,4 +1,4 @@
-use super::protocol::{ClientOp, HostOp, RunnerOp};
+use super::protocol::{ClientOp, GatewayOp, HostOp, RunnerOp};
 
 pub(super) const LOGIN: u64 = 5;
 pub(super) const SOCKET: u64 = 5;
@@ -8,11 +8,12 @@ pub(super) const BINDINGS: u64 = 75;
 pub(super) const CANARY: u64 = 105;
 pub(super) const UPGRADE: u64 = 720;
 pub(super) const RUNNER_INSPECTION: u64 = 60;
+pub(super) const GATEWAY_WAIT: u64 = 60;
 
 const MARGIN: u64 = 60; // SSH startup, image/hash and local filesystem work.
 // Two unit commands, a rendered unit, five build probes, three gateway/account
 // commands and the canary probe; two identity reads plus Welcome read/write.
-const OBSERVE: u64 = 17 * PROBE + 4 * SOCKET;
+const OBSERVE: u64 = 25 * PROBE + 4 * SOCKET;
 const GENERATION: u64 = 2 * PROBE;
 const PREFLIGHT: u64 = 2 * PROBE;
 const TRANSFER: u64 = 240;
@@ -65,5 +66,15 @@ pub(super) fn runner(op: &RunnerOp) -> u64 {
             TRANSFER
         } else {
             PROBE
+        }
+}
+
+pub(super) fn gateway(op: &GatewayOp) -> u64 {
+    LOGIN
+        + MARGIN
+        + if matches!(op, GatewayOp::Observe) {
+            OBSERVE
+        } else {
+            2 * OBSERVE + 2 * GATEWAY_WAIT
         }
 }
