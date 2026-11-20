@@ -341,9 +341,12 @@ fn run_api(
     let gateway = custody
         .gateway()
         .ok_or_else(|| CliFailure::new("deploy requires an enrolled gateway"))?;
-    custody
-        .verify_holder(services.home().state()?)
-        .map_err(|error| CliFailure::new(error.into_message()))?;
+    let address = custody
+        .address()
+        .ok_or_else(|| CliFailure::new("deploy requires an enrolled gateway"))?;
+    if !crate::gateway::verify_holder(address, services.home().state()?)? {
+        return Err(crate::gateway::GatewayUnavailable::Unreachable(address).failure());
+    }
     executor
         .block_on(async {
             let preparation = gateway.prepare_api_canary(
