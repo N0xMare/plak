@@ -490,10 +490,8 @@ enum TopCommand {
         action: Option<TelemetryAction>,
     },
     Version {
-        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_reopen", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service", "host_upgrade_finish_source"])]
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_reopen", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service"])]
         build_info: bool,
-        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_probe", "host_upgrade_capacity", "host_upgrade_service"])]
-        host_upgrade_finish_source: Option<uuid::Uuid>,
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest", "carry_probe", "reopen_probe", "host_upgrade_capacity"])]
         host_upgrade_probe: bool,
         #[arg(long, hide = true, requires = "host_upgrade_probe")]
@@ -997,11 +995,9 @@ enum SessionAction {
     CheckBinding {
         #[arg(long)]
         all: bool,
-        #[arg(long, hide = true, requires = "all", conflicts_with = "inspection")]
+        #[arg(long, hide = true, requires = "all")]
         summary: bool,
         #[arg(long, hide = true, requires = "all")]
-        inspection: Option<std::path::PathBuf>,
-        #[arg(long, hide = true, requires = "all", conflicts_with = "inspection")]
         store_probe: Option<std::path::PathBuf>,
     },
     /// List sessions for the current workspace.
@@ -1096,11 +1092,9 @@ impl SessionAction {
             Self::CheckBinding {
                 all: true,
                 summary,
-                inspection,
                 store_probe,
             } => Ok(Command::SessionCheckBinding {
                 summary,
-                inspection,
                 store_probe,
             }),
             Self::CheckBinding { all: false, .. } => Ok(Command::CommandHelp {

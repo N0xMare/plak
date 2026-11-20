@@ -96,13 +96,6 @@ pub(super) fn archive_sources(
 }
 
 pub(super) fn withdraw(paths: &PlakPaths, receipt: &mut Receipt) -> CliResult<()> {
-    if !receipt.groups.is_empty() {
-        crate::carry::host_move::source::withdraw(paths, receipt)?;
-    }
-    withdraw_settled(paths, receipt)
-}
-
-fn withdraw_settled(paths: &PlakPaths, receipt: &mut Receipt) -> CliResult<()> {
     let restored = archive_sources(paths, receipt, false);
     if restored.is_ok() {
         receipt.source_archival_pending = false;

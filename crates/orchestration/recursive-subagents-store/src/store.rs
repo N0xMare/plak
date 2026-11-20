@@ -51,7 +51,7 @@ impl SqliteTreeStore {
     /// # Errors
     /// Refuses unsupported native shape, unreadable rows or a tree missing its floor.
     #[doc(hidden)]
-    pub fn inspect_move_tree(
+    pub fn inspect_tree_with_custody(
         database: &Path,
         tree_id: &str,
     ) -> Result<
@@ -61,7 +61,7 @@ impl SqliteTreeStore {
         )>,
         OpenError,
     > {
-        SubagentsDatabase::inspect_move_tree(database, tree_id)
+        SubagentsDatabase::inspect_tree_with_custody(database, tree_id)
     }
 
     /// Content-free node binding locators, without loading tree images or custody.
@@ -305,15 +305,6 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
-    fn install_move_seed(
-        &self,
-        operation: &str,
-        digest: &str,
-        seed: &plakous_recursive_subagents::tree::host_move::DormantTree,
-        source: &plakous_recursive_subagents::tree::CustodyRecord,
-    ) -> Result<(), TreeStoreError> {
-        crate::move_seed::install(self, operation, digest, seed, source)
-    }
     fn delete(
         &self,
         tree_id: &str,

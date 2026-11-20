@@ -10,8 +10,6 @@
 mod document;
 mod export;
 mod history;
-#[cfg(feature = "web")]
-pub(crate) mod host_move;
 mod import;
 mod installed;
 pub(crate) mod intent;

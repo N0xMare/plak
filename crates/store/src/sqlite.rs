@@ -54,15 +54,12 @@ mod feed;
 mod gc;
 #[cfg(test)]
 mod gc_tests;
-mod host_move;
 #[cfg(test)]
 mod index_tests;
 mod inspection;
 #[cfg(test)]
 mod lease_sync_tests;
 mod lines;
-mod move_preflight;
-mod move_source;
 mod objects;
 mod open;
 mod ops;
@@ -94,7 +91,6 @@ use ops::{
     acquire, archive, commit, create, delete, fork, incremental_vacuum, load_delete, prune,
     recover_commit, recover_create, recover_fork, release, release_many, renew, revive,
 };
-use plakous_agent::internal::host_move::{MoveDisposition, MoveInstall, PrepareMove};
 use plakous_agent::internal::{StoreReclaimMode, StoreReclaimReport};
 use reads::*;
 use rows::*;
@@ -1167,46 +1163,6 @@ impl Backend {
 }
 
 impl SessionStore for SqliteSessionStore {
-    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
-        self.dispatch("record_execution_open", move |backend| {
-            host_move::record_execution_open(backend, &lease)
-        })
-    }
-    fn abandon_unopened_move(
-        &self,
-        request: plakous_agent::internal::host_move::AbandonUnopenedMove,
-    ) -> StoreFuture<'_, ()> {
-        self.dispatch("abandon_unopened_move", move |backend| {
-            host_move::abandon_unopened(backend, &request)
-        })
-    }
-    fn recover_move(&self, operation: SessionWorkflowId) -> StoreFuture<'_, MoveInstall> {
-        self.dispatch_read("recover_move", move |b| {
-            host_move::recover_backend(b, operation)
-        })
-    }
-    fn prepare_move(&self, request: PrepareMove) -> StoreFuture<'_, MoveInstall> {
-        self.dispatch("prepare_move", move |b| host_move::prepare(b, &request))
-    }
-    fn stage_move(
-        &self,
-        operation: SessionWorkflowId,
-        install: MoveInstall,
-    ) -> StoreFuture<'_, ()> {
-        self.dispatch("stage_move", move |b| {
-            host_move::stage(b, operation, &install)
-        })
-    }
-    fn finish_move(
-        &self,
-        operation: SessionWorkflowId,
-        digest: Digest,
-        disposition: MoveDisposition,
-    ) -> StoreFuture<'_, ()> {
-        self.dispatch("finish_move", move |b| {
-            host_move::finish(b, operation, digest, disposition)
-        })
-    }
     fn recover_storage(&self) -> StoreFuture<'_, ()> {
         Box::pin(async move {
             if let Some(probe) = self.storage_probe.clone()

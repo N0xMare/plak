@@ -269,9 +269,7 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         | SessionStoreError::LeaseExpired
         | SessionStoreError::LeaseDomainMismatch
         | SessionStoreError::FenceSuperseded => SessionStoreOrigin::Ownership,
-        SessionStoreError::NotLineHead | SessionStoreError::OwnershipMoved => {
-            SessionStoreOrigin::NotLineHead
-        }
+        SessionStoreError::NotLineHead => SessionStoreOrigin::NotLineHead,
         SessionStoreError::Capacity(capacity) => SessionStoreOrigin::Capacity(capacity),
         SessionStoreError::StorageFull => SessionStoreOrigin::StorageFull,
         SessionStoreError::BackendBusy => SessionStoreOrigin::Busy,

@@ -280,8 +280,7 @@ job-retention endpoint (chapter 01 §8.4), without weakening exact native runner
 matching. Home-local retention endpoints use `<home>/builds/<triple>/` to keep
 Unix socket paths short; the protocol-local `host/runner/v<N>/run/runner.sock`
 attach path is unchanged. The new daemon is the sole native peer; original daemons retain their
-own processes and expose only fixed job controls. This does not itself enable
-a live cross-key host move. Connection-bound services and operator terminals
+own processes and expose only fixed job controls. Connection-bound services and operator terminals
 retain their existing rebuild/closure laws. A downgraded or reinstalled drainer
 never re-promotes its retention-only host/line; the remedy is to finish, consume
 or disown its jobs through a compatible retained build. Source foreground work
@@ -617,18 +616,6 @@ line by node.
 Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
-
-Runtime schema 28's move journal records exact batch membership and the
-immutable terminal set in `runtime_move_members`. Later lease-only terminal
-observations remain in `line_job_terminals`; they cannot alter recovery of the
-batch fingerprint or mark output consumed (chapter 01 §5.2).
-
-Product schema 39 additionally holds `session_move_seeds`: the immutable semantic
-ownership-move base (intent, keyed by product session), including its view seed,
-original projection floor and acknowledged agent-attention occurrences. Views
-rebuild from this base and subsequent feed facts; the seed is not a synthetic
-historical feed. Attention acknowledgements retain their original occurrence
-and acknowledgement timestamps so a move does not resurface acknowledged work.
 
 Product schema 39 holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
@@ -1399,28 +1386,9 @@ The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
 writes **version 13** and imports **13 and 12**, never older documents.
-The host-upgrade binding family includes semantic frozen tool schemas, names,
-descriptions and exposure, with per-head source configuration and the original
-named-state namespace. The interpreter observation carries only the generation
-floor and affected cell, reconstructed as reset on reopen; no kernel state or
-source is replayed and no generation number is reused. Original ForkLineage is imported provenance, not a
-request to recreate old checkpoint bytes or compile a historical fork point.
-A continued line cannot silently inherit its current head's newer binding.
-Native tool registry bytes and cached plan grants are
-never a carrier. Reconstruction applies the existing presentation-override and
-current-executor compatibility path before fresh checkpoint compilation.
-
-Version 13 requires a closed `kind`: `portable_session` or `host_upgrade`. Ordinary file
-import accepts only `portable_session` and rejects an ownership-move document
-before creating any state. Version 12 has no kind. Dormant identity-preserving
-host moves remain unavailable pending runtime and whole-tree installation.
-The reserved ownership-move contract preserves public product/runtime session,
-branch, line, node, tree, queue/mail and continuation-command identities. An
-internal checkpoint head is not one of those identities: reconstruction mints a
-deterministic new checkpoint/revision from the move operation, with the source
-checkpoint retained as provenance, rather than overwriting immutable content.
-Runtime feed floors and explicit product/tree anchors survive without replaying
-old admissions or dropping pending accepted input.
+Version 13 requires a closed `kind`: `portable_session` or reserved
+`host_upgrade`. Import accepts only `portable_session` before creating any
+state. Version 12 has no kind.
 Canonical format epochs are not export versions: the carrier uses a neutral
 conversation encoding, not canonical segment bytes, digests, checkpoints, or
 runtime serde representations.
@@ -5385,11 +5353,6 @@ never submits it. A continue whose rebind published but whose root-start could
 not be queued answers the choice (the root moved) with that same warning. A queued or written root-start is
 restored paused like any other queued prompt.
 
-**Dormant host move.** The export v13 capsule carries neither the session's stored
-choices nor the `last_root_turn` view, so the document is unchanged: a moved
-session starts with no stored choices (spawns fill each kind best effort, then
-fail closed) and can continue only after its next failed root turn.
-
 **Wire.** `TurnLifecycle.usage_limit {kind, account, resets_at?,
 alternatives}` is set on a failed turn whose provider reported exhausted quota;
 `alternatives` are the other Ready accounts of that kind and `resets_at` is
@@ -5698,120 +5661,6 @@ runner placements too, not just each root's runner. This temporary gate does not
 weaken the home-local protocol-only admission rule
 or any remote exact-triple rule. Cross-key live trees/jobs remain outside this
 settled carrier.
-
-The unsupported dormant-move capability uses a separate v13 `host_upgrade`
-capsule and version-1 group journal; normal builds do not advertise it yet.
-It preserves public/addressable IDs and moves ownership, not a duplicate copy.
-Preflight reports the connected composition, verifies every retained branch's
-binding/presentation and current placement, and reserves readiness-journal space
-before surrender.
-A bound child's configuration comes from its own frozen node/template epoch,
-not its parent's account, target, effort or root profile. The source completes
-its detached tree projection from real final feed facts before checking the
-exact native floor; conflicts or newly owed effects refuse before surrender. The 16 MiB receipt bound includes conservative space for all
-future exact-CAS intents; each semantic capsule is bounded to 256 MiB.
-Prepared source cleanup is reversible; a durable global Committed decision is
-not. Source native retirement completes through the exact retained producer,
-with retryable acknowledgements, before any target group is installed.
-Every source-key startup withdraws the native preparations of Aborted group
-receipts, even when no source archive was attempted. A recovered preparation
-digest is recorded before withdrawal so repeated cleanup stays exact. A foreign-key
-startup may mark a native-prepared attempt Aborted without opening the source
-store: its lines remain frozen until the source key runs again and withdraws
-them. That own-key startup is the rollback path; marking the receipt Aborted
-alone does not restore native source availability. An
-uncertain Committed publication stops the paused source and lets startup resolve
-the durable decision; it never replies with a precommit refusal or reopens
-admissions. A retirement failure after a known durable decision is deferred to
-the retained producer, not treated as rollback.
-The requesting command reports "decision pending startup reconciliation; check
-`plakd status`" when publication is uncertain, even if startup later withdraws
-an unpublished attempt and the command exits unsuccessfully.
-Target stages stay invisible until every product/tree seed commits. Publication
-alone is insufficient: receipt-aware execution, metadata mutation and ordinary
-runner readoption remain blocked for the entire group until a fresh exact-owner
-reconciliation saves whole-group Ready. Registry-owned connections are reused.
-Source preparation holds scoped connection demand for capsule-named runners,
-refreshes them through the source host's existing reconciliation path, and keeps
-that demand across all group probes. A cached picker Ready row is not a live
-bind; idle retirement or replacement cannot drop a later group's required link.
-The hold itself grants no effect, lease or new-call admission. Unavailable
-runners still refuse before surrender; unrelated runner failures do not block.
-All exact transfers finish before the final observational sweep of every
-runner, followed by hold renewal and the Ready publication.
-An unrelated group may become Ready while a missing runner withholds another.
-The guarded `--abandon <group-id>` path can dispose an unexecuted, never-Ready
-published group under exact holds and unchanged heads; an idle execution open
-already prevents it. Multi-tree groups require the explicit group ID, not a
-member ID. Abandoned reservations remain invisible forever. Failed abandonment
-retains its bounded guard error in the receipt, visible in `plakd status` and
-`plakd doctor`. Automatic retries back off for three minutes; an explicit retry
-still rechecks the same guards immediately. Retained ordinary
-portable-session backups can be copied and imported under new identities;
-`host_upgrade` capsules cannot be used as ordinary imports. Outgoing committed
-copies are excluded from cross-key uniqueness checks; Aborted receipts are inert.
-No public switch enables this capability in a normal build. The joined-cut
-construction contract distinguishes terminal-only `settled` jobs from `retained`
-promoted allocations in v13. Retained rows carry allocation identity and optional
-terminal evidence, not a PID, output cursor or permission to replay a call. This
-contract alone does not admit live cross-key moves: fresh original-worker
-retention reconciliation and a complete joined source handoff remain required.
-The private live-source qualification path first inspects membership while actors
-run, without constructing a capsule. Destination-image inspection checks every
-selected active head's frozen binding/configuration from a bounded source-owned
-semantic inspection report, outside v13. Missing heads, known binding cuts and new availability regressions refuse
-before the drain. An unrelated pre-existing external availability unknown cannot
-hide a definite binding cut. Active child runner placements join the service preflight.
-It then closes external admissions, resolves reserved drafts, and uses the same
-host-wide step boundaries as same-key draining: paid workflows and effects must
-join; a model generation may reach its natural boundary or planned interruption.
-Durable root/child handoff recording must succeed before guarded source export.
-A failed handoff write is reported after lease/task cleanup; it cannot authorize
-source surrender or an invented continuation. Final group membership and the
-exact joined v13 capsule are rebuilt/re-probed under tree and branch guards;
-failed final compilation remains a clean Prepared rollback. After rollback
-releases its guards and admission pause, the ordinary continuation scan reopens
-handed-off residents unattended, using the original root/child continuation IDs.
-An absent private live capability is omitted from the closed destination probe,
-preserving the previous settled probe shape and its bootstrap upgrade path.
-The source adapter selects the explicit retained-job cut without treating
-metadata as liveness.
-Public live capability remains disabled. The private live move path replaces
-the changed-triple process refusal with the joined cut and retention proof;
-ordinary settled and same-key qualification keep that refusal unchanged.
-Destination readiness joins every carried promoted allocation by job number,
-allocation ID and allocation generation through continued-line ownership.
-Only the current head's unconsumed ledger owes live observations; historical
-rows already consumed by that head do not resurrect jobs.
-Missing nonterminal allocations, duplicate numbers, foreign allocations,
-unknown outcomes or contradictory terminal evidence withhold the group. A real
-terminal arriving during transfer is accepted without inventing another job or
-changing the runtime's imported number floor. Only the original worker owns its
-handles, output, controls and deadlines; semantic seeds are not counted again
-against job capacity. All transfers finish before a fresh sweep of native and
-original owners and runner work; Ready is saved for the whole dependency group
-only after that sweep and lease renewal. Exact terminal observations are
-recorded under the held lease before Ready, without consuming or acknowledging
-the original job; the next ordinary commit folds that first evidence.
-An offline original retains its cached
-occupancy and withholds dependent groups, not unrelated Ready groups. Existing
-continuation decisions, queue/mail IDs and one-time admission rules then resume
-through the ordinary startup scan, never by replaying source requests.
-Ready and Abandoned groups release their instance-scoped ephemeral runner
-witnesses. Cleanup attempts every disposed group and runner, logging each failure
-and returning their aggregate without skipping independent releases.
-Failed sends are logged and the native client retries only that
-idempotent release on its existing reconciliation tick, until acknowledged,
-definitively refused or the connection ends. Neither group Ready nor completion
-acknowledgement waits
-for cleanup; durable ownership/job obligations are unchanged. A host crash
-clears its obsolete instance's observations at the runner bind boundary only
-after that instance loses its live connection. Rebinding the same instance
-replaces its previous connection's observations; another still-connected
-instance of the same home retains its cache and independent per-instance bounds.
-Existing product/tree semantic cuts preserve the original handoff decisions,
-attempts and accepted command IDs; open turns, unreported process calls and
-unjoined effect journals still refuse construction.
 
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with

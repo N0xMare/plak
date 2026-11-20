@@ -105,14 +105,6 @@ The verdict barrier pins cancellation and its ten-second finite-budget floor;
 its client delivery promise remains an attempted write, not receipt. A hold itself changes no persisted format: before a durable planned
 handoff a crash is owner loss, not an upgrade receipt or permission to replay.
 
-Dormant-move contracts exercise memory and SQLite semantic bases at an
-exported feed-tail floor: owed inputs remain owed, consumed decisions stay
-consumed, projection-cache loss rebuilds the same data, and destination facts
-start strictly above the cut. Native reconstruction preserves public IDs but
-uses a deterministic new checkpoint with original fork provenance. An absent
-source fork point remains imported/pruned provenance; no source checkpoint is
-recreated. Read-only target preflight checks identity conflicts and ordinary
-logical store capacity without creating a database, execution lease or driver.
 Semantic tool-presentation tests preserve old schemas/descriptions against
 current capability/executor compatibility and reject a different capability
 sharing the executor. Constructor/export tests assert no model dispatch.
@@ -418,162 +410,12 @@ release, including abandonment of a Working provider turn, with terminal rows
 and the number counter preserved. A release receipt alone still yields an
 unknown process outcome. Reload admission reads a process-local host count and
 refuses without closing the terminal.
-Runtime move authority is tested against memory and SQLite with the same semantic
-contract: exact holds and operation/digest binding, prepared abort, irreversible
-retirement, hidden staging, higher destination fences, abandoned re-open refusal,
-identity conflicts, exhausted floors, higher-generation retired-branch refusal,
-old-batch disposition after partial supersession, and normal archive/delete of
-an installed session. SQLite closes/reopens both prepared and
-staged stores as well as retired/abandoned stores; historical inspection must stay
-available without enabling execution. `host_move_tests::` and
-`host_move_review_tests::` own these contracts. Retained-job cut cases pin
-terminal-only default refusal, allocation identity without invented terminal
-facts, cut-bound fingerprints and memory/SQLite stage/recovery/prepare behavior,
-including SQLite restart. `live_cut_` cases pin closed v13 job encodings,
-terminal-allocation conflicts, target compilation without dispatch, and joined
-product/tree handoff attempts, command IDs and accepted input without carrying
-open turns, unreported processes or effect journals. These qualify construction
-seams only; they do not enable the public live ownership-move capability. Continued-line cases prepare only
-the current head, recover the exact batch and exercise commit and abort in both
-stores. Regressions reject a second preparation, hide create/fork recovery on
-source and destination, reject insufficient fence floors and post-publication
-abandonment, and verify that commit removes predecessor leases and host claims.
-The existing real-process `host_skeleton::upgrade::` cases still qualify the
-settled successor path. The private test-capability `upgrade::dormant::` cases
-exercise the separate connected-group coordinator without enabling its public
-capability. Receipt tests pin atomic membership/readiness, permanent abandoned
-reservations, three-key surrendered-copy exclusion and inert aborted receipts.
-Passive-install tests cut between native staging and its acknowledgement,
-recover the frozen stage rather than recompile it, and exercise guarded
-Published abandonment. Source and target native-store ports separately pin
-continued-line recovery, imported feed floors and execution-open refusal.
-Review regressions additionally exercise cleanup-intent and group-export cuts,
-a foreign startup aborting with an unverifiable producer, repeated native
-withdrawal, and both outcomes of uncertain decision publication. A committed
-retirement failure must retry forward. Direct native phase and line-head checks
-pin retirement before its receipt acknowledgement. Before-stage receipt checks
-pin the target digest before native staging. Post-prepare line and runner
-divergence must refuse before writing a group capsule, withdraw native
-preparation and restore source admissions. Uncertain-publication cases also
-require the requester to receive the startup-reconciliation remedy.
-Exact-transfer mismatch and final
-owner-sweep fault hooks withhold Published groups; explicit CLI abandonment
-disposes them without opening a driver. These are test-only response-boundary
-faults, not substitutes for the separate remote-runner outage rehearsal.
-The bound-child case uses the real spawn/session binder, interrupts its admitted
-turn and moves both native sessions. It checks immutable allocation-marker
-agreement, the child's own frozen account/target, rebuilt child head, unchanged
-public IDs and no repeated parent dispatch. Unit cuts reject mismatched markers
-and unrelated unanchored operations. Source tree projection consumes the actual
-final close facts to the native cut; it never advances a cursor by assertion.
-The separate finished-child case uses the real child session, a successful
-`submit_result`, an idle-parent result wake and a clean source restart. Its
-scripted compiler reads the supplied detached semantic tree rather than the
-empty destination tree captured when the fixture factory was created. A native
-production-builder pin compiles the same finished policy without registering a
-runtime, opening a driver, changing the stored node or adding a grant.
-The same bound-child tree is cut after its real semantic seed and recovered
-without parent or child redispatch. Published CLI abandonment is also exercised
-after lease-only reconciliation: transfer intents exist while the durable
-execution-open bit stays clear. Cuts before native abandonment and after its
-commit require an Abandoning receipt, the corresponding native phase, and two
-restarts plus repeated operator requests converging on the same permanent
-Abandoned reservation without opening a driver.
-Real remote-witness cases alter the runner's durable floor and require its
-normal OwnerFloors endpoint to expose the changed tuple.
-Terminal-proof cases separately pin complete multi-page original-worker reads,
-owner mismatch and interrupted/partial-page refusal, with no journal claims or
-acknowledgements. Normal process-output reads still work after proof sampling.
-A real promoted shell job exits while its agent notice remains unconsumed; the
-move carries its exact allocation, number floor and output tail. Ordinary
-handoff can record this terminal, so that case is not prepare-time proof
-evidence. A separate real-binary case kills the source host while the promoted
-job runs, restarts it, and lets the original exit while its session stays
-dormant. Before upgrade no native terminal exists; the move hold must write
-the original tail and exactly one LineJobTerminalRecorded fact. Response faults
-drop the sampled proof before native preparation and before surrender; each
-refuses precommit and restores source admissions. Matching job numbers with
-foreign allocation IDs or owner generations also refuse. None infers terminal
-authority from process-list idleness. Foreign-branch, lower
-and higher witnesses withhold both trees in a connected group across two host
-starts, with no native branch-fence advance or partial visibility. A daemon
-outage after publication must leave only its group withheld while an unrelated
-local group becomes Ready; reconnection completes the same receipt. Direct
-source line-head and lease probes refuse after the global Committed decision.
-An ordinary idle native driver open, unlike lease-only reconciliation, records
-execution-open even without a new checkpoint and permanently prevents guarded
-Published abandonment.
-
-The opt-in Linux `tools/dev/upgrade_rehearsal.py` driver builds two exact
-maintainer images with `test-hooks`, including matching sidecars, without
-installing or moving any operator link. Cargo target directories are keyed by
-the exact source commit, never shared between revisions. Each revision's
-`bin/plak` or `bin/plakd` manifest selects its own build script, package feature
-prefix and image basename; readiness accepts that revision's host banner.
-The default source is the pinned pre-S4 r27 image, and the default destination
-is the S4 r28 daemon image. A pre-S4 r28 build cannot substitute for the literal
-r27 source in the cross-key bootstrap cases. Its explicit
-`build`, `run`, `all` and `cleanup` subcommands require a dedicated owner-only `--root`; nothing
-runs by default. `all` removes owned build artifacts on completion or refusal
-unless `--keep-builds` was explicit. Every case removes its runtime homes and
-owned processes, retaining only synthetic evidence and logs. Runtime HOME,
-PLAK_HOME, XDG directories and TMPDIR are below the scratch root, with an
-empty Git configuration and no inherited provider credentials. Empty local
-project boundaries prevent discovery of an operator ancestor. A root lock
-prevents concurrent rehearsals from sharing mutable fixtures.
-
-The driver labels **BOOTSTRAP** separately from **DORMANT**. Bootstrap runs
-literal source and destination revisions through the settled successor path.
-`--source` and `--destination` select the exact revisions. Before starting a
-host, a cheap check compares the destination's `version --host-upgrade-probe`
-JSON with the source's strict field/type shape, including nested runner
-identity. This catches an unknown capability field before the actual source
-performs its authoritative upgrade admission; it is not a parser substitute.
-It checks exact canonical export history, named state and paused text queues,
-opens the successors, verifies old-source refusal, and reports which tree,
-child and job state is not restored. Active-child and live-job refusals retain
-their actual operator remedies. Terminal exit notices may be joined into
-history during bootstrap; that is not transfer of a retained job ledger.
-An unconsumed terminal notice can instead refuse settled export with its
-prompt-to-deliver remedy. Refusal observations also prove source admission
-reopens without surrender by accepting a new dormant session without inference.
-Dormant uses the candidate binary as a capable source under the existing
-`PLAK_TEST_STATE_KEY` override, then at its natural destination key. Both keys
-therefore use candidate codecs: this is ownership-move evidence, not old-codec
-compatibility. `PLAK_TEST_HOST_UPGRADE_DORMANT=1` enables only the private
-test capability; ordinary builds do not read these hooks.
-
-The dormant bound-child cases preserve product, tree, child, native session,
-branch and line identities, frozen product tool definitions and child history.
-The mixed fixture stops its source host before releasing its promoted process,
-so ordinary idle-driver delivery cannot consume the terminal during inspection;
-its move capsule must retain the complete output and job-number floor.
-Canonical root histories compare as complete export values. Child history
-inspection ignores only checkpoint-derived presentation-entry keys, retaining
-content, order, multiplicity and tool-call/result counts. Prepared, Committed,
-tree-seed and Published process cuts exercise abort or forward recovery through
-the ordinary CLI. Separate minimal terminal-job and result-submitting-child
-cases remain strict: a refusal is a failed case, never a successful
-qualification. If admitted, the former checks the retained job number floor,
-full small-fixture output and published group digest. It also reads the frozen
-retention-v1 `Lines` inventory twice after publication, verifying that the same
-original-worker job remains unconsumed with unchanged output and number floor.
-Those observations never bind native ownership or send consumption/control
-verbs. The latter case invokes the granted topology tool with explicit
-`purpose=followup` to retask the completed child, then checks that its result
-wakes the moved idle root once. `report.json` and
-`operator-summary.md` distinguish passed selections from omitted coverage and
-mark any failure **NOT QUALIFIED**. The empty `INCREMENT4_CASES` registration
-point is reserved for later live/parked-tree cases; neither they nor a remote
-paired-runner outage are claimed by the current driver. Reproduction commands
-and fixed-image observations are in
-`tools/dev/fixtures/upgrade-rehearsal-repros.md`. This scratch-only rehearsal is
-not a gate tier and never authorizes production enablement.
+Real-process `host_skeleton::upgrade::` cases qualify the settled successor path.
 
 Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
 opaque replay, native compaction bindings and turn counts), retain only the v12
 reader and refuse v11, and reject malformed or oversized input. Closed-kind
-tests reject missing/unknown/mismatched tags and ownership moves at ordinary import.
+tests reject missing/unknown/mismatched tags and the reserved host kind at ordinary import.
 Explicit account/protocol
 loopback bindings pin same-binding equality and cross-provider replay stripping.
 The scripted `history_report` output reports the text actually present in a
@@ -893,46 +735,7 @@ and capacity and workflow cuts share immutable seed/pilot fixtures, never the
 mutated cut workspace. Busy and quiescent child-timeout fixtures overlap their
 unchanged real timeout windows but assert each terminal and exact reopen.
 
-Source live-move qualification covers selected-head inspection while actors run,
-missing-branch refusal, semantic binding checks without a foreign native reader,
-durable handoff-write refusal after release, and a joined busy-root cut before
-guarded surrender. Real-process cases use the upgrade durability lane; pure
-binding and inspection-codec checks remain offline. Live execution stays disabled
-until destination retention/readiness and the remaining crash cuts qualify.
-
-Live ownership-move readiness qualifies promoted allocation identity, concurrent
-terminal observations, unknown/missing/duplicate allocation refusal, original
-worker witness freshness, pending receiver-intent recovery and disconnected
-occupancy. The real bound-child source cut and a promoted process through group
-Ready run in upgrade durability. Runner endpoint/process tests run in serial;
-pure inventory/receipt and codec tests remain offline. Public live cross-key
-capability remains disabled pending the remaining end-to-end crash cuts.
-
-`host_skeleton::upgrade::live::qualification::` cuts actual host processes
-after pre-drain inspection, joined step gates and durable handoff, then after
-fresh owner witnesses, persisted transfer intent, individual/all transfers,
-terminal recording and whole-group Ready. Before surrender, the source remains
-openable under its original IDs with no destination runtime or move receipt.
-After surrender, repeated destination restarts preserve the promoted allocation
-and its PID without another start, or retain exactly one concurrent terminal.
-The running-child case also pins the original attempt, line and continuation
-command identities. An offline dependency remains withheld across repeated
-destination restarts while the independent group stays Ready. These cases are
-already partitioned into durability by the owning upgrade module, not offline;
-they do not enable the public capability or substitute synthetic keys for a
-real native-version transition rehearsal.
-
-Live review contracts pin the default settled probe's pre-live bytes, a
-source-written seventeen-head inspection-v1 fixture including compiled provider
-configuration serde, and job-owner fences not exceeding their recorded floor.
-Unattended root/child rollback and destination handoffs admit each original
-continuation once; live paid-compaction refusal joins its one existing summary
-without cancellation or redispatch. Observation-cache tests cover more than 256
-discovered lines with only a few requested, exact bound-instance release,
-independent groups/hosts, reconnect fencing and restored job-bound headroom.
-The real child-result cases distinguish detached move compilation from ordinary
-frozen-presentation reopen: submitted results must commit through the live tree
-writer, while passive finished-child compilation leaves custody and grants alone.
+The settled destination probe has a byte-for-byte fixture.
 
 Offline compaction regressions use synthetic native-reasoning envelopes only.
 They check that a retained tool exchange loses invalidated reasoning but keeps
@@ -2084,7 +1887,7 @@ Standalone runner fixture requirements are:
 | `dev jj-compat` (`jj-tools.py`) | The `test(jj)` selection exercises repository/JJ and doctor probes, not cell, MCP or product-crash fixtures |
 | `generate_binding_fixture.py`, `fixtures/current_bindings.py`, `fixtures/bootstrap_bindings.py` | Binding/export generators use explicit synthetic, never-invoked worker artifacts, not test-build executables |
 | `dev test-timing`, `dev crash-compare` (`compare_crash_sweeps.py`) | Read existing reports only; no executable fixtures |
-| Reload and upgrade rehearsals | Execute staged product/sidecar snapshots, not Rust test harnesses; no MCP-server or crash-harness fixture variables |
+| Reload rehearsal | Execute staged product/sidecar snapshots, not Rust test harnesses; no MCP-server or crash-harness fixture variables |
 | Performance smoke and cell timings | Execute the product and matching copied workers, or workers by explicit paths; no MCP-server or crash-harness fixtures |
 | Performance checks, allocations and build probes | Run pure core/project/store benchmarks or compile-only measurements; no worker/MCP/product-crash fixtures |
 | Live drivers | Execute built product/sidecar images; MCP OAuth uses its own HTTP server, not `mcp-fake-server` |

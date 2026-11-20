@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 mod dispositions;
-#[cfg(feature = "web")]
-pub(crate) mod inspection;
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct Report {

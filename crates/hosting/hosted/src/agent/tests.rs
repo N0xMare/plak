@@ -19,7 +19,6 @@ use super::*;
 mod binding_contracts;
 pub(super) mod frozen_presentation;
 mod native_fixture;
-mod passive_finished;
 mod previous_release;
 #[cfg(target_os = "linux")]
 mod production_predecessor;

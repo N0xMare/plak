@@ -33,8 +33,6 @@ pub use registry::{
     RunnerProbeFuture, RunnerProgress, RunnerRegistry, RunnerRow, RunnerStatus,
 };
 mod service;
-#[doc(hidden)]
-pub use registry::RunnerConnectionHold;
 mod state;
 mod streams;
 mod workspace;

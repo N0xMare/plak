@@ -13,28 +13,6 @@ use crate::{CliFailure, CliResult};
 
 pub(crate) const MAX_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) const VERSION: u32 = 1;
-mod groups;
-#[cfg(feature = "web")]
-pub(crate) use groups::OwnerTransfer;
-pub(crate) use groups::{Group, GroupPhase};
-
-pub(crate) fn abandoning(paths: &PlakPaths) -> CliResult<Vec<String>> {
-    Ok(all(paths)?
-        .into_iter()
-        .flat_map(|receipt| receipt.groups)
-        .filter(|group| group.phase == GroupPhase::Abandoning)
-        .map(|group| {
-            format!(
-                "{}: {}",
-                group.id,
-                group
-                    .abandon_error
-                    .as_deref()
-                    .unwrap_or("abandonment pending")
-            )
-        })
-        .collect())
-}
 
 #[cfg(any(test, feature = "web"))]
 pub(crate) mod publication;
@@ -77,8 +55,6 @@ pub(crate) struct Receipt {
     pub(crate) phase: Phase,
     pub(crate) source_archival_pending: bool,
     pub(crate) mappings: Vec<Mapping>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) groups: Vec<Group>,
 }
 
 impl Receipt {
@@ -107,7 +83,7 @@ impl Receipt {
                 ((mapping.ready || mapping.abandoned)
                     && matches!(self.phase, Phase::Prepared | Phase::Aborted))
                     || (mapping.ready && mapping.abandoned)
-                    || (mapping.abandoned && mapping.runner == "local" && self.groups.is_empty())
+                    || (mapping.abandoned && mapping.runner == "local")
                     || mapping.runner.is_empty()
                     || mapping.runner.len() > 256
                     || (self.phase == Phase::Acknowledged && !mapping.ready && !mapping.abandoned)
@@ -131,7 +107,6 @@ impl Receipt {
                 "host_upgrade_receipt_invalid: upgrade authority cannot be verified",
             ));
         }
-        self.validate_groups()?;
         Ok(())
     }
 }
@@ -299,36 +274,10 @@ pub(crate) fn withheld_targets(paths: &PlakPaths) -> CliResult<std::collections:
         .collect())
 }
 
-/// Native sweeps must not mint a fence for a surrendered source or a pending group.
-pub(crate) fn withheld_lines(
-    paths: &PlakPaths,
-) -> CliResult<std::collections::BTreeSet<plakous::model::LineId>> {
-    let own = crate::home::state::state_key();
-    let mut withheld = std::collections::BTreeSet::new();
-    for receipt in all(paths)? {
-        if receipt.phase == Phase::Aborted {
-            continue;
-        }
-        for group in receipt.groups {
-            if (receipt.source_key == own
-                && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged))
-                || (receipt.destination_key == own && group.phase != GroupPhase::Ready)
-            {
-                for line in group.lines {
-                    withheld.insert(line.parse().map_err(|_| {
-                        CliFailure::new("invalid native line in ownership-move receipt")
-                    })?);
-                }
-            }
-        }
-    }
-    Ok(withheld)
-}
-
 pub(crate) fn ensure_metadata_available(paths: &PlakPaths, session: &str) -> CliResult<()> {
     if withheld_targets(paths)?.contains(session) {
         return Err(CliFailure::new(
-            "host_upgrade_target_pending: reserved move state cannot be renamed, archived or deleted before Ready; resolve its group receipt instead",
+            "host_upgrade_target_pending: reserved successor cannot be renamed, archived or deleted before Ready; resolve its upgrade receipt instead",
         ));
     }
     Ok(())

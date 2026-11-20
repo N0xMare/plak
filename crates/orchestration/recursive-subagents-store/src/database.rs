@@ -203,7 +203,7 @@ pub struct SubagentsDatabase {
 }
 
 impl SubagentsDatabase {
-    pub(crate) fn inspect_move_tree(
+    pub(crate) fn inspect_tree_with_custody(
         database: &Path,
         tree_id: &str,
     ) -> Result<

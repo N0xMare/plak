@@ -3,7 +3,7 @@
 use crate::commands::session::check_binding::{Report, Row};
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult};
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 // The explicit 200-head / 28.5 MB retained-state measurement emits 49 KB in
 // about 14 seconds. Leave headroom without making a pre-surrender probe unbounded.
@@ -76,73 +76,6 @@ pub(super) fn preflight(
         ))
     })?;
     finish(baseline.as_ref(), &destination)
-}
-
-/// Busy-safe source-store inspection, not a capsule or runtime reopen.
-pub(super) fn preflight_selected(
-    paths: &PlakPaths,
-    destination: &Path,
-    sessions: &BTreeSet<String>,
-) -> CliResult<()> {
-    let inspection = crate::commands::session::check_binding::inspection::capture(paths, sessions)?;
-    crate::commands::runner::private_directory(&paths.home().join("run"))?;
-    let mut file = tempfile::NamedTempFile::new_in(paths.home().join("run"))
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    std::io::Write::write_all(&mut file, &inspection.bytes()?)
-        .map_err(|error| CliFailure::new(error.to_string()))?;
-    let baseline = inspection.check()?;
-    let mut command =
-        super::process::command(destination, paths.home(), &crate::home::state::state_key());
-    command
-        .args(["session", "check-binding", "--all", "--inspection"])
-        .arg(file.path());
-    let output = super::process::run_output(command, INSPECTION_TIME, OUTPUT_BYTES)?;
-    let destination = serde_json::from_slice(&output.stdout).map_err(|_| {
-        CliFailure::new("host_upgrade_binding_preflight_invalid: source remains running; selected-head inspection did not answer")
-    })?;
-    qualify_selected(baseline, destination, sessions)
-}
-
-fn qualify_selected(
-    mut source: Report,
-    mut destination: Report,
-    sessions: &BTreeSet<String>,
-) -> CliResult<()> {
-    source
-        .sessions
-        .retain(|row| sessions.contains(&row.session));
-    destination
-        .sessions
-        .retain(|row| sessions.contains(&row.session));
-    if sessions
-        .iter()
-        .any(|id| !source.sessions.iter().any(|row| &row.session == id))
-        || source
-            .sessions
-            .iter()
-            .filter(|row| !row.archived && !row.superseded)
-            .any(|old| {
-                !destination.sessions.iter().any(|row| {
-                    row.session == old.session
-                        && row.branch == old.branch
-                        && !row.archived
-                        && !row.superseded
-                })
-            })
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_binding_preflight_incomplete: selected active heads were omitted; source remains running",
-        ));
-    }
-    let cuts = destination
-        .sessions
-        .iter()
-        .filter(|row| !row.archived && !row.superseded && row.binding_change.is_some())
-        .collect::<Vec<_>>();
-    if !cuts.is_empty() {
-        return refusal(true, &cuts);
-    }
-    finish(Some(&source), &destination)
 }
 
 fn finish(baseline: Option<&Report>, destination: &Report) -> CliResult<()> {

@@ -1,15 +1,9 @@
 use std::sync::Arc;
 
-pub(crate) use super::quiet_telemetry::NoTelemetry;
+use super::{ExtraTelemetrySink, ProductTelemetry, TelemetryHealth, TelemetrySinkFactory};
 use super::{RosterSource, TreeStoreFactory};
 use crate::CliResult;
 use crate::agent_tree::{MemoryTreeStore, TreeStore};
-
-impl super::ProductStateRoots {
-    pub(crate) const fn is_move_compilation(&self) -> bool {
-        self.move_compilation
-    }
-}
 
 /// The conformance-tested in-memory tree store, opened once per factory.
 #[derive(Debug)]
@@ -75,3 +69,28 @@ mod openrouter;
 #[cfg(not(feature = "openrouter"))]
 #[path = "doubles/openrouter_unavailable.rs"]
 mod openrouter;
+
+pub(crate) struct NoTelemetry;
+
+impl TelemetrySinkFactory for NoTelemetry {
+    fn open(&self, _extra_sink: Option<Arc<dyn ExtraTelemetrySink>>) -> Arc<dyn ProductTelemetry> {
+        Arc::new(Self)
+    }
+    fn log_unavailable(&self, _session_id: &str, _reason: &str) {}
+}
+
+impl ProductTelemetry for NoTelemetry {
+    fn agent_emitter(&self) -> Option<Arc<plakous::agent::TelemetryEmitter>> {
+        None
+    }
+    fn topology_observer(&self) -> Option<Arc<dyn crate::agent_tree::TopologyObserver>> {
+        None
+    }
+    fn emit(&self, _observation: crate::product_observation::ProductObservation) {}
+    fn health(&self) -> TelemetryHealth {
+        TelemetryHealth::Missing
+    }
+    fn unavailable_reason(&self) -> Option<String> {
+        None
+    }
+}

@@ -154,27 +154,6 @@ impl SqliteSessionStore {
 }
 
 impl SessionRecordStore for SqliteSessionStore {
-    fn move_identity_claims(
-        &self,
-        id: &str,
-    ) -> Result<Vec<plakous_hosted::sessions::host_move::MoveIdentityClaim>, String> {
-        self.with_store(|store| store.move_identity_claims(id))
-    }
-    fn install_move_seed(
-        &self,
-        operation: &str,
-        digest: &str,
-        seed: &plakous_hosted::sessions::host_move::DormantSession,
-    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
-        self.with_write(|store| store.install_move_seed(operation, digest, seed))
-    }
-
-    fn move_projection_base(&self, id: &str) -> Result<Option<SessionViews>, String> {
-        self.with_store(|store| store.move_projection_base(id))
-    }
-    fn move_plan_authority(&self, id: &str) -> Result<Option<String>, String> {
-        self.with_store(|store| store.move_plan_authority(id))
-    }
     fn with_storage_interrupt(
         self: Arc<Self>,
         probe: Arc<dyn Fn() -> bool + Send + Sync>,

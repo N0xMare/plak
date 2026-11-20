@@ -24,7 +24,6 @@ pub(super) fn receipt(record: &SessionRecord, destination: bool) -> Receipt {
         destination: PathBuf::from("/fixture/bin/plakd"),
         phase: Phase::Prepared,
         source_archival_pending: false,
-        groups: Vec::new(),
         mappings: vec![Mapping {
             ready: false,
             abandoned: false,
@@ -73,6 +72,16 @@ fn source_surrender_precedes_target_execution_admission() {
             assert_eq!(read(&receipt.path(&paths)).unwrap().phase, phase);
         }
     }
+}
+
+#[test]
+fn settled_receipt_cannot_admit_a_group_reservation() {
+    let home = tempfile::tempdir().unwrap();
+    let record = SessionRecord::new(home.path().join("workspace"));
+    let mut document = serde_json::to_value(receipt(&record, true)).unwrap();
+    assert!(document.get("groups").is_none());
+    document["groups"] = serde_json::json!([{"id": "unavailable"}]);
+    assert!(serde_json::from_value::<Receipt>(document).is_err());
 }
 
 #[test]

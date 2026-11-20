@@ -51,12 +51,7 @@ impl TreeFeed {
         let mut next = tree.clone();
         next.join_child_session(agent_id, &self.session_id)?;
         let mut refused = Vec::new();
-        if let Some(below) = self.below_retained.filter(|below| {
-            next.move_base
-                .as_ref()
-                .and_then(|base| base.feed_floors().get(&self.session_id))
-                .is_none_or(|floor| below > floor)
-        }) {
+        if let Some(below) = self.below_retained {
             next.mark_commands_behind_retention(agent_id)?;
             if next.node(agent_id)?.fold_order.is_none()
                 || next.feed_cursor(&self.session_id) < below

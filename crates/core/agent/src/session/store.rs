@@ -26,64 +26,6 @@ pub type StoreFuture<'a, T> =
 /// revival, acquisition, refused mutations and `recover_*` append nothing,
 /// and an exact recovery returns the sequence the record already holds.
 pub trait SessionStore: Send + Sync + 'static {
-    /// Unsupported move extension: persist execution-open before returning an ordinary
-    /// durable driver. A store implementing move installation must override this atomically.
-    /// Stores without that optional extension have no imported rows to mark.
-    #[doc(hidden)]
-    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
-        let _ = lease;
-        Box::pin(async { Ok(()) })
-    }
-
-    /// Withdraw a Published batch only under exact current holds and unchanged heads,
-    /// with no execution-open bit ever set. The caller owns the never-Ready receipt lock.
-    #[doc(hidden)]
-    fn abandon_unopened_move(
-        &self,
-        request: super::host_move::AbandonUnopenedMove,
-    ) -> StoreFuture<'_, ()> {
-        let _ = request;
-        Box::pin(async { Err(super::host_move::blocked()) })
-    }
-    /// Unsupported historical recovery of an exact prepared/staged move; grants no lease.
-    #[doc(hidden)]
-    fn recover_move(
-        &self,
-        operation: super::SessionWorkflowId,
-    ) -> StoreFuture<'_, super::host_move::MoveInstall> {
-        let _ = operation;
-        Box::pin(async { Err(super::host_move::blocked()) })
-    }
-    /// Unsupported host-only freeze and semantic snapshot under exact branch holds.
-    #[doc(hidden)]
-    fn prepare_move(
-        &self,
-        request: super::host_move::PrepareMove,
-    ) -> StoreFuture<'_, super::host_move::MoveInstall> {
-        let _ = request;
-        Box::pin(async { Err(super::host_move::blocked()) })
-    }
-    /// Unsupported host-only, identity-preserving semantic staging. Never grants a lease.
-    #[doc(hidden)]
-    fn stage_move(
-        &self,
-        operation: super::SessionWorkflowId,
-        install: super::host_move::MoveInstall,
-    ) -> StoreFuture<'_, ()> {
-        let _ = (operation, install);
-        Box::pin(async { Err(super::host_move::blocked()) })
-    }
-    /// Unsupported host-only exact-operation retirement/installation disposition.
-    #[doc(hidden)]
-    fn finish_move(
-        &self,
-        operation: super::SessionWorkflowId,
-        digest: super::Digest,
-        disposition: super::host_move::MoveDisposition,
-    ) -> StoreFuture<'_, ()> {
-        let _ = (operation, digest, disposition);
-        Box::pin(async { Err(super::host_move::blocked()) })
-    }
     /// Retry capacity-blocked colocated stores and the backend's own writer.
     /// This is not permission to bypass a branch lease or checkpoint CAS.
     fn recover_storage(&self) -> StoreFuture<'_, ()> {

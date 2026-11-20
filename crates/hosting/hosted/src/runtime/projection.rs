@@ -562,22 +562,7 @@ async fn load_views(
     #[cfg(test)]
     probe::view_read(product_id);
     blocking(store, product_id, |store, id| {
-        if let Some(views) = store.load_views(id)? {
-            return Ok(views);
-        }
-        let Some(base) = store.move_projection_base(id)? else {
-            return Ok(SessionViews::empty());
-        };
-        let writes = ViewWrites::between(&SessionViews::empty(), &base);
-        match store
-            .commit_projection_views(id, &writes, &base.state)
-            .map_err(String::from)?
-        {
-            ProjectionCommit::Applied => Ok(base),
-            ProjectionCommit::CursorMoved => store.load_views(id)?.ok_or_else(|| {
-                ReadFailure::from("semantic move projection restore lost its cursor".to_owned())
-            }),
-        }
+        Ok(store.load_views(id)?.unwrap_or_else(SessionViews::empty))
     })
     .await
     .map_err(String::from)

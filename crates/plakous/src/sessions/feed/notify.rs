@@ -236,16 +236,6 @@ impl NotifyingStore {
 }
 
 impl SessionStore for NotifyingStore {
-    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
-        self.inner.record_execution_open(lease)
-    }
-
-    fn abandon_unopened_move(
-        &self,
-        request: plakous_agent::internal::host_move::AbandonUnopenedMove,
-    ) -> StoreFuture<'_, ()> {
-        self.inner.abandon_unopened_move(request)
-    }
     fn storage_unavailable(&self) -> bool {
         self.inner.storage_unavailable()
     }

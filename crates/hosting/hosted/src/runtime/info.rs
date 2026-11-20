@@ -525,12 +525,6 @@ pub(super) fn plan_state_authority(
                 "fork plan authority has cyclic lineage",
             ));
         }
-        if let Some(authority) = store
-            .move_plan_authority(&current.id)
-            .map_err(crate::CliFailure::new)?
-        {
-            return Ok(authority);
-        }
         let (Some(source), Some(operation)) = (
             current.source_product_session_id.as_deref(),
             current.source_workflow_operation_id.as_deref(),

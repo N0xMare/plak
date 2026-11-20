@@ -452,7 +452,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
         ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
-        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
         ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
@@ -804,11 +803,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
     ("plakd", "src/store/mod.rs"): {"params"},
     ("plakd", "src/store/views.rs"): {"params", "debug_assert"},
-    ("plakd", "src/store/host_move.rs"): {"params"},
     ("plakd", "src/store/tree.rs"): {"params", "warn"},
     ("plakous-recursive-subagents-store", "src/admission.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},
-    ("plakous-recursive-subagents-store", "src/move_seed.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows/codec.rs"): {"params"},
     ("plakous-recursive-subagents", "src/epoch.rs"): {"json"},
     ("plakous-recursive-subagents", "src/hub.rs"): {"error"},
@@ -1724,120 +1721,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakd", "src/gateway/bridge.rs"): {"agent": {"RUNTIME_EXECUTOR_STACK_BYTES"}},
     # Route admission reads non-secret key facts through gateway custody.
     ("plakd", "src/gateway/route_custody.rs"): {"gateway": {"custody::CredentialCustodian"}},
-    # Unsupported host-only semantic reconstruction seams (spec 01 sec. 5).
-    ("plakd", "src/carry/host_move.rs"): {
-        'sessions': {
-            'MoveDurability',
-            'MoveOperation',
-            'MoveBinding',
-            'MoveHeadRequest',
-            'host_move',
-        }
-    },
-    ("plakd", "src/carry/host_move/admission.rs"): {'sessions': {'host_move'}},
-    ("plakd", "src/carry/host_move/context.rs"): {
-        'sessions': {'ImportedCompactionFacts', 'MoveCompactionStrategy', 'host_move'}
-    },
-    ("plakd", "src/carry/host_move/jobs.rs"): {
-        'sessions': {
-            'MoveJobCut',
-            'MoveJobStatus',
-            'MoveJobTerminal',
-            'MoveJob',
-            'MoveProcessId',
-            'MoveProcessGeneration',
-            'host_move',
-            'MoveJobs',
-            'MoveLineTerminal',
-        }
-    },
-    ("plakd", "src/carry/host_move/presentation.rs"): {
-        'sessions': {
-            'SemanticSessionPresentation',
-            'MoveToolNesting',
-            'host_move',
-            'FrozenSessionPresentation',
-        },
-        'tools': {'SemanticToolRegistration'},
-    },
-    ("plakd", "src/carry/host_move/presentation/definition.rs"): {
-        'model': {'ToolResourceKey', 'McpServerId', 'ToolExecutionOwner'}
-    },
-    ("plakd", "src/carry/host_move/disposition.rs"): {
-        'sessions': {'host_move', 'MoveDisposition', 'MoveOperation'},
-    },
-    ("plakd", "src/carry/host_move/installation.rs"): {
-        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveOperation'},
-    },
-    ("plakd", "src/carry/host_move/producer.rs"): {
-        'sessions': {
-            'host_move',
-            'MoveDurability',
-            'MoveHeadFacts',
-            'MoveInstall',
-            'MoveLineOrigin',
-        },
-    },
-    ("plakd", "src/carry/host_move/reconciliation.rs"): {
-        'runner': {'protocol', 'LineOwner', 'ExactOwnerTransfer'},
-        'sessions': {'LeaseOnlyHead'},
-        'tools': {'LineOwner'},
-    },
-    ("plakd", "src/carry/host_move/source.rs"): {
-        'sessions': {'host_move', 'MoveDisposition', 'MoveInstall', 'MoveJobCut', 'MoveOperation'},
-    },
-    ("plakd", "src/carry/host_move/source/terminals.rs"): {
-        'runner': {
-            'protocol',
-            'retention',
-            'LineOwner',
-            'RunnerClient',
-            'Job',
-            'Status',
-            'StopReason',
-        },
-        'sessions': {
-            'host_move',
-            'MoveSource',
-            'MoveLineTerminal',
-            'MoveJobStatus',
-            'MoveJobTerminal',
-            'MoveProcessGeneration',
-            'MoveProcessId',
-        },
-        'tools': {'runner::hex', 'runner::unhex', 'JobStopReason'},
-    },
-    ("plakd", "src/carry/upgrade/receipt/groups.rs"): {
-        'runner': {'protocol', 'LineOwner'},
-    },
-    ("plakd", "src/host/upgrade/moves.rs"): {
-        'sessions': {'host_move', 'MoveOperation'},
-        'runner': {'RunnerConnectionHold'},
-    },
-    ("plakd", "src/host/upgrade/moves/source.rs"): {
-        'sessions': {'host_move', 'MoveJobCut'},
-        'runner': {'RunnerConnectionHold'},
-    },
-    ("plakd", "src/carry/host_move/source/selection.rs"): {
-        'sessions': {'host_move', 'MoveJobCut'},
-    },
-    ("plakd", "src/carry/host_move/reconstruction.rs"): {
-        'runner': {'protocol'},
-        'tools': {'runner::decode_jobs_snapshot'},
-        'sessions': {
-            'MoveLineRecord',
-            'MoveLine',
-            'MoveSessionRevision',
-            'MoveSessionHeader',
-            'MoveSessionRef',
-            'host_move',
-            'MoveLineOrigin',
-        },
-    },
-    ("plakd", "src/carry/host_move/validation.rs"): {'tools': {'RunnerId'}},
     # Frozen construction data and pure metadata checks, not runtime authority.
     ("plakd", "src/commands/session/check_binding.rs"): {"sessions": {"rehearsal"}},
-    ("plakd", "src/commands/session/check_binding/inspection.rs"): {"sessions": {"rehearsal"}},
     ("plakous-hosted", "src/agent/binding_inspection.rs"): {
         "sessions": {"FrozenSessionPresentation"},
         "tools": {"RegisteredToolIdentity", "ToolBindingError"},

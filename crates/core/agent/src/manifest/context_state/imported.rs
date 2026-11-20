@@ -2,8 +2,7 @@
 use super::{
     CanonicalHistory, CheckpointId, Digest, DigestDomain, EntryId, HistorySegment,
     HistorySegmentKind, MAX_RUNTIME_RECORDS, Reader, RuntimeCompactionStrategy,
-    RuntimeContextState, RuntimeManifestError, Writer, runtime_context_state_identity,
-    validate_digest,
+    RuntimeContextState, RuntimeManifestError, Writer, validate_digest,
 };
 
 /// Unsupported host-move selection, expressed without native canonical hashes.
@@ -244,6 +243,7 @@ impl RuntimeContextState {
 
     /// Reconstructs only committed selection facts; never source cache/admission grants.
     #[doc(hidden)]
+    #[cfg(test)]
     pub(crate) fn with_imported_compaction(
         &self,
         facts: ImportedCompactionFacts,
@@ -260,7 +260,7 @@ impl RuntimeContextState {
         state.request_anchor = None;
         state.imported_compaction =
             Some(Box::new(ImportedCompactionSelection::new(facts, history)?));
-        state.identity = runtime_context_state_identity(&state)?;
+        state.identity = super::runtime_context_state_identity(&state)?;
         Ok(state)
     }
 

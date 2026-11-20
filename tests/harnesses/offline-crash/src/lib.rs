@@ -19,8 +19,6 @@ pub mod gate;
 pub mod ledger_signature;
 /// The test-only route that runs sessions on a loopback runner.
 pub mod loopback;
-/// Rich semantic source checkpoints for ownership-move fidelity tests; never dispatches.
-pub mod move_fixture;
 /// Versioned parent/child control protocol.
 pub mod protocol;
 mod saturated_ledger;

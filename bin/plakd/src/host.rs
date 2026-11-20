@@ -24,24 +24,13 @@ mod socket;
 mod starter;
 mod store_revisions;
 mod upgrade;
-pub(crate) use crate::carry::host_move::live_protocol as live_move_protocol;
 
-pub(crate) fn inspect_binding(
-    path: &std::path::Path,
-    output: &mut dyn std::io::Write,
-) -> CliResult<ProcessOutcome> {
-    crate::commands::session::check_binding::inspection::run(path, output)
-}
 use crate::terminal_registry as terminals;
 
 #[cfg(test)]
 mod scan_tests;
 
 pub(crate) const AVAILABLE: bool = true;
-
-pub(crate) fn finish_move_source(services: &Services, id: uuid::Uuid) -> CliResult<()> {
-    crate::carry::host_move::source::finish_source(services, id)
-}
 
 pub(crate) fn preflight_upgrade_service(
     services: &Services,
@@ -346,13 +335,7 @@ fn startup_scan(
     owed: Vec<String>,
     scanning: &Arc<std::sync::atomic::AtomicUsize>,
 ) -> upgrade::Recovery {
-    let recovery = upgrade::start_retry(
-        services,
-        host,
-        runtime.handle(),
-        &owed,
-        Arc::clone(scanning),
-    );
+    let recovery = upgrade::start_retry(services, host, runtime.handle());
     scan(
         host,
         owed,

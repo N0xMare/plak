@@ -309,7 +309,6 @@ fn log_command_start(command: &Command) {
         Command::StateKey
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. }
-        | Command::HostUpgradeFinishSource { .. }
         | Command::ReloadProbe
         | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
@@ -424,24 +423,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         } => services.with_store_probe(path)?,
         _ => services,
     };
-    if let Command::SessionCheckBinding {
-        inspection,
-        summary,
-        ..
-    } = &command
-    {
-        if let Some(path) = inspection {
-            return host::inspect_binding(path, &mut io::stdout().lock());
-        }
+    if let Command::SessionCheckBinding { summary, .. } = &command {
         return commands::session::check_binding::run(
             services.paths()?,
             *summary,
             &mut io::stdout().lock(),
         );
-    }
-    if let Command::HostUpgradeFinishSource { receipt } = command {
-        host::finish_move_source(&services, receipt)?;
-        return Ok(ProcessOutcome::Success);
     }
     if matches!(
         command,
@@ -697,9 +684,6 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         | Command::WriteBinaryManifest { .. }
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. } => {
-            Err(CliFailure::new("internal command dispatch error"))
-        }
-        Command::HostUpgradeFinishSource { .. } => {
             Err(CliFailure::new("internal command dispatch error"))
         }
         Command::StateKey => {
@@ -1277,7 +1261,6 @@ fn execute_command<Backend: AccountOps>(
         | Command::ReloadProbe
         | Command::HostUpgradeProbe { .. }
         | Command::HostUpgradeCapacity { .. }
-        | Command::HostUpgradeFinishSource { .. }
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion

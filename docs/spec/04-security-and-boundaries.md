@@ -806,13 +806,6 @@ inode, or an absent socket with the original native process lock proven free.
 The endpoint's private hard link to that lock is only a process-liveness witness,
 not native-store data or a new authority. Known terminal facts remain precise.
 Immutable historical binaries are not pruned at host Ready or receipt ack.
-Ownership-move floor reads join native floors with bounded, fresh original-worker
-witnesses; neither an empty new native table nor a cached receiver snapshot is
-proof of free authority. The coordinator admits only the imported source tuple
-or its own durable intent and sweeps every required runner again before Ready.
-An unavailable witness withholds its connected group without weakening the CAS,
-replaying effects, declaring a terminal or removing retained job occupancy.
-
 Operator terminals have separate principal-private, host-generation namespaces,
 with no line owner, agent job, promotion, accounting, history or line fence. Only
 the paired host asserts a principal; inspecting connections have no terminal
@@ -953,20 +946,11 @@ The normally bound `OwnerFloors` read (native runner protocol 9) is scoped to
 that authenticated host and to at most 256 explicitly named lines. It returns
 only exact persisted owners or absence, including floor-only lines, without
 new environments, effects, leases, transfers or adoption. Neither inspection
-mode admits it. A host ownership move uses exact-CAS transfer and treats any
-owner other than its imported source tuple or its own recorded intended tuple
-as an integrity failure, not permission to raise a fence over that witness.
+mode admits it.
 The protocol-9 `JobTerminals` read likewise requires a normally bound host and
 one exact accepted owner. It exposes bounded original-worker terminal proof
 and retained output only; it grants no effects, adoption, leases or consumption.
 Unknown, incomplete or owner-mismatched reads cannot settle a source job.
-
-Binding inspection v1 is an ephemeral source-owned semantic report, not an
-export carrier or an ownership, replay or admission authority. It travels in a
-private `NamedTempFile` under the private home/run directory and is bounded to
-32 MiB. Its decoder uses `deny_unknown_fields` and accepts version 1 only.
-The destination checks this report before drain; it never opens the source
-key's native stores or treats the report as permission to execute them.
 
 Runner placement uses pin-backed stable machine identity and effective canonical
 roots even while a runner is offline. Same-machine pin/root admission and local
@@ -2200,7 +2184,7 @@ or turn an abandoned reservation into authority.
 
 An explicit cross-build conversation import is construction, not recovery
 repair (chapter 02 §2.5.1). Ordinary import refuses the closed `host_upgrade` document kind before any state
-is admitted; its spelling cannot grant ownership-move authority. Export v13 carries full canonical content and
+is admitted. Export v13 carries full canonical content and
 session-owned named values in a
 plakd-owned neutral encoding, including original message roles; it is sensitive
 conversation data, not a sanitized transcript. Exports are as sensitive as
@@ -2465,19 +2449,6 @@ no new placement: a copied retained export goes through ordinary import
 admission. Retry and disposition serialize receipt publication under a private
 owned kernel-held file lock so neither can overwrite the other's terminal state.
 Embedded daemon-held-process refusals remain in force.
-
-The unsupported dormant-move preparation seams do not relax those authorities.
-The export-v13 host kind contains semantic history, binding/presentation facts,
-identity floors and product/tree cuts, never opaque native checkpoint, registry
-or resolved-plan bytes. Its private target probe compiles only against current
-exact route/account credentials, current executor enrollment, existing workspace
-placement and strict capacity. It uses detached semantic tree data and opens no
-execution driver, owner lease, recovery sweep or VCS hook. Runtime identity and
-logical-capacity inspection reads only the destination's own current-key store;
-a missing store is not created. Ordinary session import cannot open this kind,
-and these preparation seams alone do not advertise move installation support.
-Native source fork checkpoints remain provenance through an explicit imported
-branch/pruned-point marker, not a reason to read or recreate foreign objects.
 
 Protocol-7 console writes trust transport-verified same-user socket peers by
 default, independently of `web.*`; they still enforce consent, exact targets,

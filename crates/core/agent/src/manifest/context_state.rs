@@ -8,7 +8,7 @@
 
 mod codec;
 mod imported;
-pub use imported::{ImportedCompactionFacts, ImportedCompactionSelection};
+use imported::ImportedCompactionSelection;
 mod provenance;
 mod state;
 pub(super) use codec::compaction_provenance_identity;

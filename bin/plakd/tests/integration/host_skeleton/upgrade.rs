@@ -8,11 +8,9 @@ mod bootstrap;
 
 const DESTINATION: &str = "r999.e999.p999.t999";
 
-mod dormant;
 mod drain;
 mod gateway;
 mod lifecycle;
-mod live;
 mod recovery;
 mod remote;
 mod reopen;

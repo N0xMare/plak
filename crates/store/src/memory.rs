@@ -36,7 +36,6 @@ use receipts::{
     commit_matches, fork_matches, recover_fork_matches, validate_commit, validate_fork,
     validate_fork_semantic_request, validate_genesis, validate_materialized_fork_receipt,
 };
-mod host_move;
 mod lines;
 mod reads;
 use reads::{branch, stored_checkpoint};
@@ -775,7 +774,6 @@ impl MemorySessionStore {
         );
         let mut state = self.lock()?;
         require_open(&state)?;
-        host_move::require_branch(&state, request.source().session())?;
         validate_fork_semantic_request(request)?;
         let candidate = publication_candidate(request.target())?;
         if let Some(receipt) = state.forks.get(&request.workflow_id()) {
@@ -946,7 +944,6 @@ impl MemorySessionStore {
 
     fn recover_fork_sync(&self, request: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {
         let state = self.lock()?;
-        host_move::require_branch(&state, request.source().session())?;
         let receipt = state
             .forks
             .get(&request.workflow_id())
@@ -1196,42 +1193,6 @@ impl MemorySessionStore {
 }
 
 impl SessionStore for MemorySessionStore {
-    fn record_execution_open(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
-        Box::pin(async move { self.record_execution_open_sync(&lease) })
-    }
-    fn abandon_unopened_move(
-        &self,
-        request: plakous_agent::internal::host_move::AbandonUnopenedMove,
-    ) -> StoreFuture<'_, ()> {
-        Box::pin(async move { self.abandon_unopened_move_sync(&request) })
-    }
-    fn recover_move(
-        &self,
-        operation: SessionWorkflowId,
-    ) -> StoreFuture<'_, plakous_agent::internal::host_move::MoveInstall> {
-        Box::pin(async move { self.recover_move_sync(operation) })
-    }
-    fn prepare_move(
-        &self,
-        request: plakous_agent::internal::host_move::PrepareMove,
-    ) -> StoreFuture<'_, plakous_agent::internal::host_move::MoveInstall> {
-        Box::pin(async move { self.prepare_move_sync(&request) })
-    }
-    fn stage_move(
-        &self,
-        operation: SessionWorkflowId,
-        install: plakous_agent::internal::host_move::MoveInstall,
-    ) -> StoreFuture<'_, ()> {
-        Box::pin(async move { self.stage_move_sync(operation, install) })
-    }
-    fn finish_move(
-        &self,
-        operation: SessionWorkflowId,
-        digest: plakous_agent::internal::Digest,
-        disposition: plakous_agent::internal::host_move::MoveDisposition,
-    ) -> StoreFuture<'_, ()> {
-        Box::pin(async move { self.finish_move_sync(operation, digest, disposition) })
-    }
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         sample_clock(self.clock.as_ref(), self.domain)
     }
@@ -1425,9 +1386,6 @@ impl SessionStore for MemorySessionStore {
 
 #[derive(Clone, Default)]
 struct StoreState {
-    moves: BTreeMap<SessionWorkflowId, host_move::Receipt>,
-    move_lines: BTreeMap<plakous_agent::internal::LineId, SessionWorkflowId>,
-    move_execution_open: BTreeSet<SessionId>,
     sessions: BTreeMap<SessionId, SessionRecord>,
     checkpoints: BTreeMap<CheckpointId, CheckpointRecord>,
     objects: BTreeMap<RuntimeObjectAddress, RuntimeObject>,
@@ -1485,7 +1443,6 @@ fn mutable_branch(
     state: &mut StoreState,
     selector: SessionRef,
 ) -> Result<&mut BranchRecord, SessionStoreError> {
-    host_move::require_branch(state, selector)?;
     let session = state
         .sessions
         .get_mut(&selector.session_id())

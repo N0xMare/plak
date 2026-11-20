@@ -23,9 +23,9 @@ mod operations;
 mod state;
 pub(crate) use context_state::ResidencySelectionAudit;
 pub use context_state::{
-    CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit, ImportedCompactionFacts,
-    ImportedCompactionSelection, RuntimeCompactionStrategy, RuntimeContextState,
-    RuntimeContextTransition, RuntimeContextTransitionKind, SemanticCompactionPublication,
+    CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit,
+    RuntimeCompactionStrategy, RuntimeContextState, RuntimeContextTransition,
+    RuntimeContextTransitionKind, SemanticCompactionPublication,
 };
 #[allow(
     clippy::wildcard_imports,

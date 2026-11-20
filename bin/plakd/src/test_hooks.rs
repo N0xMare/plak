@@ -159,10 +159,6 @@ pub(crate) fn upgrade_crash_cut(name: &str) {
     }
 }
 
-pub(crate) fn upgrade_move_failure(name: &str) -> bool {
-    std::env::var("PLAK_TEST_HOST_UPGRADE_FAILURE").as_deref() == Ok(name)
-}
-
 pub(crate) fn upgrade_preparation_refused(name: &str) -> bool {
     if name == "step-drain-gate" {
         return std::env::var_os("PLAK_TEST_HOST_UPGRADE_DRAIN_GATE")

@@ -28,25 +28,9 @@ pub(super) fn branch_row_with_checkpoint(
     c: &Connection,
     s: SessionRef,
 ) -> Result<Option<(BranchRow, CheckpointRow)>, SessionStoreError> {
-    branch_row_with_checkpoint_gated(c, s, true)
-}
-
-pub(super) fn branch_row_unchecked(
-    c: &Connection,
-    s: SessionRef,
-) -> Result<Option<BranchRow>, SessionStoreError> {
-    branch_row_with_checkpoint_gated(c, s, false).map(|row| row.map(|(branch, _)| branch))
-}
-
-fn branch_row_with_checkpoint_gated(
-    c: &Connection,
-    s: SessionRef,
-    gated: bool,
-) -> Result<Option<(BranchRow, CheckpointRow)>, SessionStoreError> {
     c.query_row("SELECT revision,checkpoint_id,last_fence,fork_session,fork_branch,fork_checkpoint,
         fork_revision,active_owner,active_fence,active_time,active_ns,active_duration,
-        previous_time,previous_ns,released_owner,released_fence,released_time,released_ns,released_duration,
-        (SELECT m.phase FROM runtime_move_lines l JOIN runtime_moves m USING(operation) WHERE l.line_id=branches.line_id)
+        previous_time,previous_ns,released_owner,released_fence,released_time,released_ns,released_duration
         FROM branches WHERE session_id=?1 AND branch_id=?2",params![id(s.session_id()),id(s.branch_id())],|r|Ok((
         r.get::<_,Vec<u8>>(0)?,r.get::<_,String>(1)?,r.get::<_,Vec<u8>>(2)?,
         r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,Option<String>>(5)?,
@@ -54,9 +38,8 @@ fn branch_row_with_checkpoint_gated(
         r.get::<_,Option<Vec<u8>>>(9)?,r.get::<_,Option<i64>>(10)?,r.get::<_,Option<Vec<u8>>>(11)?,
         r.get::<_,Option<Vec<u8>>>(12)?,r.get::<_,Option<i64>>(13)?,r.get::<_,Option<String>>(14)?,
         r.get::<_,Option<Vec<u8>>>(15)?,r.get::<_,Option<Vec<u8>>>(16)?,
-        r.get::<_,Option<i64>>(17)?,r.get::<_,Option<Vec<u8>>>(18)?,r.get::<_,Option<i64>>(19)?)))
+        r.get::<_,Option<i64>>(17)?,r.get::<_,Option<Vec<u8>>>(18)?)))
     .optional().map_err(map_sqlite)?.map(|v|{
-        if gated { host_move::require_visible(v.19)?; }
         let cp=checkpoint_row(c,parse(&v.1)?)?.ok_or(SessionStoreError::corrupt())?;
         let active=lease(s,v.7.as_deref(),v.8.as_deref(),v.9.as_deref(),v.10,v.11.as_deref())?;
         let previous=match(&v.12,v.13,&active){(None,None,_)=>None,(Some(sec),Some(ns),Some(a))=>

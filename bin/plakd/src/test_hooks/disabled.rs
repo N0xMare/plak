@@ -57,13 +57,6 @@ pub(crate) const fn force_host_upgrade() -> bool {
 }
 #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
 pub(crate) fn upgrade_crash_cut(_name: &str) {}
-#[allow(
-    dead_code,
-    reason = "only the optional host coordinates ownership moves"
-)]
-pub(crate) const fn upgrade_move_failure(_name: &str) -> bool {
-    false
-}
 #[allow(dead_code, reason = "only the optional host prepares upgrades")]
 pub(crate) const fn upgrade_preparation_refused(_name: &str) -> bool {
     false

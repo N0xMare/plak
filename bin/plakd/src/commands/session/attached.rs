@@ -215,21 +215,6 @@ pub(super) fn rebind_host_config(
     build_attached_host_config(services, record, AttachedPurpose::Rebind)
 }
 
-#[cfg(feature = "web")]
-pub(crate) fn move_host_config(
-    services: &crate::shell::services::Services,
-    record: product_sessions::SessionRecord,
-) -> CliResult<product_host::HostConfig<crate::surface_protocol::PlakExtension>> {
-    build_attached_host_config(services, record, AttachedPurpose::Verify).map_err(|error| {
-        match error {
-            AttachedConfigError::Answered(verdict) => CliFailure::new(format!(
-                "host_upgrade_credentials: destination cannot verify credentials: {verdict:?}"
-            )),
-            error => error.into(),
-        }
-    })
-}
-
 fn build_attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,

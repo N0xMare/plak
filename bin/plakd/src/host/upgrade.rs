@@ -2,7 +2,6 @@
 
 mod abandon;
 mod bindings;
-mod moves;
 mod preparation;
 mod process_safety;
 mod requester;
@@ -97,7 +96,6 @@ impl From<&crate::carry::ExportRefusal> for BlockerKind {
 }
 
 pub(super) struct Ready {
-    move_guard: Option<moves::Frozen>,
     step_drain: Option<plakous_hosted::host_service::wire::HostStepDrain>,
     pub(super) executable: PathBuf,
     pub(super) key: String,
@@ -270,19 +268,11 @@ pub(super) fn startup_replacement(services: &Services) -> CliResult<Option<Start
     let own = crate::home::state::state_key();
     let mut receipts = receipt::all(paths)?;
     for receipt in &mut receipts {
-        if receipt.source_key == own
-            && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
-            && receipt.groups.iter().any(|group| !group.source_retired)
+        if receipt.phase == Phase::Aborted
+            && receipt.source_key == own
+            && receipt.source_archival_pending
         {
-            // The old-key executable, not the destination, understands these native rows.
-            crate::carry::host_move::source::finish_source(services, receipt.id)?;
-        }
-        if receipt.phase == Phase::Aborted && receipt.source_key == own {
-            if receipt.source_archival_pending {
-                preparation::withdraw(paths, receipt)?;
-            } else if !receipt.groups.is_empty() {
-                crate::carry::host_move::source::withdraw(paths, receipt)?;
-            }
+            preparation::withdraw(paths, receipt)?;
         }
     }
     let Some(mut receipt) = receipts.pop() else {
@@ -816,20 +806,7 @@ fn handle(
             runtime.block_on(super::lifecycle::restarting(host));
             caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
-            let decision_pending = ready
-                .move_guard
-                .as_ref()
-                .is_some_and(moves::Frozen::decision_pending);
             publish_ready(pending, ready, host);
-            if decision_pending {
-                write(
-                    &mut stream,
-                    &Answer::Progress {
-                        detail: "decision pending startup reconciliation; check `plakd status`"
-                            .into(),
-                    },
-                )?;
-            }
             write(&mut stream, &Answer::Ready { receipt })
         }
         Err(failure) => {
@@ -933,17 +910,7 @@ fn prepare(
             "deploy runner inspection requires a same-key upgrade",
         ));
     }
-    if cross_key && crate::carry::host_move::live_protocol().is_some() {
-        return moves::prepare(
-            host, services, request, cancelled, arguments, runtime, progress,
-        );
-    }
     request.check_processes(services, &destination_version, runtime)?;
-    if cross_key && crate::carry::host_move::install_protocol().is_some() {
-        return moves::prepare(
-            host, services, request, cancelled, arguments, runtime, progress,
-        );
-    }
     if cross_key {
         match settled_roots(services) {
             Ok(roots) => preflight_capacities(services, &request, &roots)?,
@@ -972,7 +939,6 @@ fn prepare(
         }
     }
     let ready = Ready {
-        move_guard: None,
         step_drain: None,
         executable: request.destination.clone(),
         key: request.destination_key.clone(),
@@ -1082,14 +1048,6 @@ fn qualify_destination(
                 .unwrap_or("identity, import version or host capability does not match")
         )));
     }
-    if request.source_key != request.destination_key
-        && let Some(protocol) = crate::carry::host_move::live_protocol()
-        && probe.live_move_protocol != Some(protocol)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_destination_unsupported: joined live-move capability is unavailable; source remains running",
-        ));
-    }
     if request.source_key == request.destination_key {
         if probe.runner_protocol != crate::commands::runner::version().protocol {
             return Err(CliFailure::new(
@@ -1124,7 +1082,6 @@ fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> C
         phase: Phase::Prepared,
         source_archival_pending: false,
         mappings: Vec::new(),
-        groups: Vec::new(),
     })
 }
 
@@ -1199,7 +1156,7 @@ fn probe_placements(paths: &PlakPaths) -> CliResult<Vec<crate::carry::upgrade::P
             seen.insert((runner.runner_id.clone(), record.workspace_root.clone()));
         }
         if let Some((tree, _)) =
-            plakous_recursive_subagents_store::SqliteTreeStore::inspect_move_tree(
+            plakous_recursive_subagents_store::SqliteTreeStore::inspect_tree_with_custody(
                 &paths.subagents_database(),
                 &record.node.tree_id,
             )

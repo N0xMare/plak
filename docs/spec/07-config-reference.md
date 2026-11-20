@@ -51,8 +51,7 @@ The current state directory is `state/r28.e39.p39.t11/`: runtime SQLite
 schema 28, runtime format epoch 39, product schema 39, and tree schema 11.
 These are format identities, not configuration keys. Client wire protocol 12
 and runner protocol 9 require separate exact matches, with no negotiation.
-Product schema 39 adds `sessions.account_choices` and retains the semantic
-`session_move_seeds` base. Tree schema 11 adds `agent_move_seeds`. Runtime
+Product schema 39 adds `sessions.account_choices`. Runtime
 epoch 39 removes the credential-store path from Codex and SuperGrok
 credential-authority digests and retains context codec 4, with imported
 compaction strategy/count facts and no stale execution grants. Session export stays

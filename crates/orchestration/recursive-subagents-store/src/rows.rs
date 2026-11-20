@@ -339,7 +339,7 @@ pub fn load_agent_tree(
     )
     .with_feed_rows(commands, feed_cursors)
     .with_lineage_rows(epochs, forked_from, runner_ancestors);
-    Ok(Some(crate::move_seed::attach(tx, tree_id, tree)?))
+    Ok(Some(tree))
 }
 
 fn load_nodes(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<String, NodeRecord>, String> {

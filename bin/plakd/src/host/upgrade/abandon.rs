@@ -95,22 +95,6 @@ pub(super) fn apply(services: &Services, request: &Request) -> CliResult<Vec<Aba
             && receipt.destination_binary == crate::build_identity::binary_id()
             && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
     }) {
-        if !receipt.groups.is_empty() {
-            let Some(index) = crate::carry::host_move::disposition::select(&receipt, target)?
-            else {
-                continue;
-            };
-            crate::carry::host_move::disposition::abandon(services, &mut receipt, index)?;
-            for product in &receipt.groups[index].products {
-                abandoned.push(Abandoned {
-                    successor: product.clone(),
-                    export: receipt
-                        .path(paths)
-                        .with_file_name(format!("{product}.json")),
-                });
-            }
-            continue;
-        }
         abandon_mappings(paths, &mut receipt, target, &mut abandoned)?;
     }
     if abandoned.is_empty() {

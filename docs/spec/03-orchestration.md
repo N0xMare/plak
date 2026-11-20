@@ -4256,38 +4256,6 @@ records never reopen. Source archival is durable before surrender, and the
 Prepared receipt owns its rollback if startup or preparation fails.
 Runner transfer rules and the embedded daemon-process refusal are unchanged.
 
-Unsupported host-layer dormant-move preparation has a separate semantic cut.
-It preserves product/runtime session, branch, line, tree, node, queue, mailbox,
-attempt/result and continuation-command identities, but creates fresh target
-checkpoints. The native feed-tail floor travels with product projection bases,
-anchored intents and permanent content bindings. Tree schema 11 retains the
-closed topology, epochs, workspaces/candidates, accepted mail and queues,
-operator decisions and custody floors. Refolding starts from that immutable
-semantic base; it neither invents historical feed events nor re-admits an input
-already decided at the source. Active turns, startups, workspace operations and
-unresolved effects refuse before a cut is constructed. Runtime sessions shared
-by forked trees and current-line-head dependencies form one connected group;
-an unmapped head refuses, unrelated groups remain independent, and selecting
-one member for abandonment must name the explicit multi-tree group. These
-composition seams do not yet enable the public dormant ownership move.
-The capability-gated coordinator journals each connected group before freezing
-its complete native batch. Source tree custody and branch holds remain held
-through the global surrender decision; Prepared withdrawal restores archival
-and undoes only that preparation. Committed retirement is irreversible and is
-completed by the retained source producer, never by reading its native stores
-from the destination build. A lost acknowledgement is retried from its exact
-operation/digest. Passive installation recovers the already compiled stage,
-seeds every member's semantic stores, then publishes the native batch together.
-Fresh reconciliation accepts only the imported source witness or a destination
-CAS intent already persisted in the same receipt. Any other owner withholds the
-whole group; it is never a reason to raise a fence. Only a group-wide Ready write
-allows drivers and ordinary readoption. Newly Ready remote groups schedule owed
-continuations through the ordinary durable admission path, not prompt replay.
-The source can inspect a tree's exact persisted rows and custody floor in one
-read-only snapshot before pausing admissions. This does not apply the reopen
-law or claim, renew or release custody. A present tree without its custody floor
-refuses; an absent store/tree is absence, never a fabricated owner tuple.
-
 **Stops.** Every interrupt intent records its cause: a parent's
 `interrupt_agent` records `parent`, the operator's interrupt of a node
 `operator`, the root's interrupt reaching its descendants `cascade`, and an
@@ -4779,7 +4747,6 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |
-| Ownership-move base (`agent_move_seeds`, schema 11) | immutable semantic intent with seeded views | exact tree membership, topology, attempts, accepted mail/commands, lineage and fold positions at the carried runtime floor; clear/refold restores those views before applying facts above the floor. Captured decisions retain `effects_reserved`, so refolding never repeats reserved effects. Capture refuses a node with NULL fold order. The exact immutable `child_session:<agent>` allocation marker is resolved identity, not an unfinished effect: capture validates its kind, key, digest, empty completion fields and session/branch agreement with the node (its allocation checkpoint may be older). Reconstruction regenerates that marker against the destination node's new head, preserving the allocation identity. Other unresolved kinds still refuse. |
 | Node line, epoch number, runner placement, workspace root and cwd, parent composition | intent | the spawn: the caller's epoch, composition and runner; the root's runner is the one the tree's VCS port runs on (none for the local runner); written today as no line and no workspace override |
 | Successor epochs, current epoch | intent | an epoch append: a profile switch's settlement of its pending epoch, or a roster apply (§1.2) |
 | Tree provenance (`forked_from`) | intent | the fork or import that created the tree: a `/fork` genesis writes `node` (source tree, root agent, line, branch, source epoch); none for an import yet |

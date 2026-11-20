@@ -30,7 +30,7 @@ fn paired_handoff(handoff: Handoff) {
     let (_daemon, path, id) = runner::remote_fixture(&fixture);
     let (mut host, _client, session, node) = reopen::placed_job(&fixture, &path, &id, false, false);
     let pid = runner::job(&fixture).0;
-    let before = dormant::identity(&fixture, &plakd::home::state::state_key(), &session);
+    let before = identity(&fixture, &plakd::home::state::state_key(), &session);
     let job = running_job(&fixture, &session);
     settled_script(&fixture);
     match handoff {
@@ -65,7 +65,7 @@ fn paired_handoff(handoff: Handoff) {
         2,
         "handoff replayed a process call"
     );
-    let after = dormant::identity(&fixture, &plakd::home::state::state_key(), &session);
+    let after = identity(&fixture, &plakd::home::state::state_key(), &session);
     assert_eq!(after.0.session_id(), before.0.session_id());
     assert_eq!(after.0.branch_id(), before.0.branch_id());
     assert_eq!(after.1, before.1);
@@ -100,7 +100,7 @@ fn home_local_quiescent_job_survives_sigterm_and_restart() {
 }
 
 fn running_job(fixture: &Fixture, session: &str) -> (u32, u64) {
-    let (head, _) = dormant::identity(fixture, &plakd::home::state::state_key(), session);
+    let (head, _) = identity(fixture, &plakd::home::state::state_key(), session);
     let jobs = plakous_offline_crash_harness::ledger_signature::inspect_jobs(
         &plakd::home::paths::PlakPaths::explicit(fixture.home()).runtime_database(),
         head,

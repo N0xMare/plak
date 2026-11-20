@@ -62,55 +62,6 @@ pub enum StorageAdmission {
 
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
-    /// Producer-owned permanent identity facts, including compacted tombstones.
-    ///
-    /// # Errors
-    /// Refuses unavailable or unsupported identity inspection.
-    #[doc(hidden)]
-    fn move_identity_claims(
-        &self,
-        id: &str,
-    ) -> Result<Vec<crate::sessions::host_move::MoveIdentityClaim>, String> {
-        let _ = id;
-        Err("this store does not inspect ownership-move identity facts".into())
-    }
-    /// Unsupported host-owned installation of one semantic product cut.
-    /// The runtime group must remain withheld until all of its stores are installed.
-    ///
-    /// # Errors
-    /// Refuses conflicting identities, invalid seeds or unavailable storage.
-    #[doc(hidden)]
-    fn install_move_seed(
-        &self,
-        operation: &str,
-        digest: &str,
-        seed: &crate::sessions::host_move::DormantSession,
-    ) -> Result<(), RecordStoreError> {
-        let _ = (operation, digest, seed);
-        Err("this product store does not install ownership moves".into())
-    }
-
-    /// The immutable semantic base below an imported native feed window.
-    /// Reading this value never restores or modifies ordinary projection caches.
-    ///
-    /// # Errors
-    /// Refuses malformed seed data or an unavailable store.
-    #[doc(hidden)]
-    fn move_projection_base(&self, id: &str) -> Result<Option<SessionViews>, String> {
-        let _ = id;
-        Ok(None)
-    }
-
-    /// The immutable namespace a moved product used before the state-key cut.
-    ///
-    /// # Errors
-    /// Refuses invalid semantic base data or an unavailable store.
-    #[doc(hidden)]
-    fn move_plan_authority(&self, id: &str) -> Result<Option<String>, String> {
-        let _ = id;
-        Ok(None)
-    }
-
     /// This store as one session writes through it: a write parked on a
     /// storage outage through the returned handle stops waiting once `probe`
     /// reports the operator's interrupt. The probe is read-only: it cannot
@@ -376,7 +327,6 @@ pub use memory::MemoryStore;
 
 #[cfg(any(test, feature = "test-support"))]
 mod memory {
-    mod move_seed;
     use std::collections::{BTreeMap, HashMap};
     use std::path::Path;
     use std::sync::Mutex;
@@ -404,7 +354,6 @@ mod memory {
         bindings: BTreeMap<String, Binding>,
         intents: HashMap<String, ProductIntents>,
         views: HashMap<String, SessionViews>,
-        move_seeds: HashMap<String, (String, String, String)>,
         usage_emissions: Vec<crate::sessions::projector::ProjectedTurnUsage>,
     }
 
@@ -830,27 +779,6 @@ mod memory {
     }
 
     impl SessionRecordStore for MemoryStore {
-        fn move_identity_claims(
-            &self,
-            id: &str,
-        ) -> Result<Vec<crate::sessions::host_move::MoveIdentityClaim>, String> {
-            move_seed::claims(self, id)
-        }
-        fn install_move_seed(
-            &self,
-            operation: &str,
-            digest: &str,
-            seed: &crate::sessions::host_move::DormantSession,
-        ) -> Result<(), RecordStoreError> {
-            move_seed::install(self, operation, digest, seed)
-        }
-
-        fn move_projection_base(&self, id: &str) -> Result<Option<SessionViews>, String> {
-            move_seed::base(self, id)
-        }
-        fn move_plan_authority(&self, id: &str) -> Result<Option<String>, String> {
-            move_seed::plan_authority(self, id)
-        }
         fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
             let state = self
                 .state

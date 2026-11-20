@@ -22,7 +22,6 @@ pub(in crate::runtime) enum StorePhase {
     LoadCheckpoint,
     ReadFeed,
     Acquire,
-    ExecutionOpen,
     Commit,
     RecoverCommit,
     Renew,
@@ -49,9 +48,6 @@ impl StorePhase {
             }
             Self::ReadFeed => "session store feed-read phase exceeded its configured deadline",
             Self::Acquire => "session store lease-acquire phase exceeded its configured deadline",
-            Self::ExecutionOpen => {
-                "session store execution-open phase exceeded its configured deadline"
-            }
             Self::Commit => "session store commit phase exceeded its configured deadline",
             Self::RecoverCommit => {
                 "session store commit-recovery phase exceeded its configured deadline"

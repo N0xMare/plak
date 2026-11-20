@@ -482,10 +482,6 @@ impl TopCommand {
                 build_info: true, ..
             } => Ok(Command::BuildInfo),
             Self::Version {
-                host_upgrade_finish_source: Some(receipt),
-                ..
-            } => Ok(Command::HostUpgradeFinishSource { receipt }),
-            Self::Version {
                 host_upgrade_probe: true,
                 host_upgrade_service,
                 ..

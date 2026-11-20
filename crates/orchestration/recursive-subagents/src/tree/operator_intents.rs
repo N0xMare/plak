@@ -17,17 +17,6 @@ pub(super) struct OperatorIntent {
     decision: Decision,
 }
 
-impl OperatorIntent {
-    pub(super) const fn kind(&self) -> &'static str {
-        match self.decision {
-            Decision::Submitted { .. } => SUBMITTED_KIND,
-            Decision::Close { .. } => CLOSE_KIND,
-            Decision::Interrupt { .. } => INTERRUPT_KIND,
-            Decision::RecoveryAbandoned { .. } => RECOVERY_ABANDONED_KIND,
-        }
-    }
-}
-
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) enum Decision {

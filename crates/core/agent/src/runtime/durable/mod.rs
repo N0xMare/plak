@@ -29,7 +29,6 @@ pub(in crate::runtime) mod carry;
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
 pub use carry::{DurableCarryHead, DurableCarrySource};
-mod host_move;
 mod line_head;
 pub use line_head::{DurableBranchHold, DurableLineHead};
 mod recovery_publication;

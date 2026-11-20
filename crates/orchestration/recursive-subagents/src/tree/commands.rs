@@ -321,7 +321,6 @@ impl ProductAgentTree {
         reason = "epoch changes remove all scoped feed cursors and derived command, compaction and terminal evidence together"
     )]
     fn clear_scoped_feed_views(&mut self, scope: Option<(&str, &str)>) {
-        let imported = self.imported_scope(scope);
         self.compaction_views.retain(|id, _| {
             scope.is_some_and(|(agent, _)| {
                 self.attempts
@@ -437,7 +436,6 @@ impl ProductAgentTree {
         } else {
             self.feed_cursors.clear();
         }
-        self.restore_imported_feed_views(&imported, scope.map(|(_, session)| session));
         self.bump();
     }
 }

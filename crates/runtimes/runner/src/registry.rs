@@ -136,14 +136,6 @@ struct Entry {
     connection: Option<Connection>,
     refresh: refresh::ProbeState,
     required: bool,
-    connection_users: Arc<()>,
-}
-
-/// Scoped host-layer connection demand, not a lease or new-call admission.
-#[doc(hidden)]
-#[must_use]
-pub struct RunnerConnectionHold {
-    _users: Arc<()>,
 }
 
 #[derive(Clone)]
@@ -353,7 +345,6 @@ impl RunnerRegistry {
                     connection: None,
                     refresh: refresh::ProbeState::default(),
                     required: false,
-                    connection_users: Arc::new(()),
                 },
             );
         }
@@ -754,7 +745,6 @@ impl RunnerRegistry {
             .get(id)
             .is_some_and(|entry| {
                 entry.required
-                    || Arc::strong_count(&entry.connection_users) > 1
                     || match &entry.connection {
                         Some(Connection::Remote(client, services)) => {
                             client.has_pending_calls() || services.has_node_users()
@@ -771,27 +761,11 @@ impl RunnerRegistry {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
-            && Arc::strong_count(&entry.connection_users) == 1
             && let Some(Connection::Remote(client, services)) = &entry.connection
         {
             services.set_available(false);
             client.disconnect();
         }
-    }
-
-    /// Retains a configured connection through host-owned preparation/rebinding.
-    /// This host-layer seam has no stability claim and grants no call authority.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn retain_connection(&self, id: &str) -> Option<RunnerConnectionHold> {
-        self.entries
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(id)
-            .filter(|entry| !entry.row.runner.names.is_empty())
-            .map(|entry| RunnerConnectionHold {
-                _users: Arc::clone(&entry.connection_users),
-            })
     }
 
     /// Local catalog remains host-owned; the process daemon serves no files.

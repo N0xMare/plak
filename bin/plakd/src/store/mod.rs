@@ -1528,7 +1528,6 @@ mod binding_inspection;
 pub mod directory;
 /// Who holds a session another process has open.
 pub mod holders;
-mod host_move;
 mod lifecycle;
 pub(crate) mod revisions;
 mod schema;

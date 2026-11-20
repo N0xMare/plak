@@ -3,6 +3,8 @@
 //! deduplicates on or by a product-local identity, and never moved forward by
 //! a runtime outcome.
 
+mod locator_serde;
+
 use plakous::sessions::SessionLocator;
 use serde::{Deserialize, Serialize};
 
@@ -99,7 +101,7 @@ pub struct WorkflowRequest {
     /// What was asked for.
     pub kind: SessionWorkflowKind,
     /// The source checkpoint it was asked against.
-    #[serde(with = "crate::sessions::host_move::locator_serde")]
+    #[serde(with = "locator_serde")]
     pub source_locator: SessionLocator,
 }
 

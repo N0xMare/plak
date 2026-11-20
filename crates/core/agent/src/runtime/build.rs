@@ -772,21 +772,9 @@ impl AgentBuilder {
         let store = Arc::clone(bootstrap.branch.store());
         let lease = bootstrap.branch.lease().clone();
         let cleanup_timeout = bootstrap.branch.store_timeouts().cleanup;
-        let operation_timeout = bootstrap.branch.store_timeouts().operation;
         let folds_line_terminals = !bootstrap.line_terminals.is_empty();
         match PreparedAgent::new_durable(self, bootstrap) {
-            Ok(mut prepared) => match async {
-                store_call(
-                    StorePhase::ExecutionOpen,
-                    operation_timeout,
-                    store.record_execution_open(lease.clone()),
-                )
-                .await
-                .map_err(StoreCallError::into_agent)?;
-                prepared.publish_recovered_turn().await
-            }
-            .await
-            {
+            Ok(mut prepared) => match prepared.publish_recovered_turn().await {
                 Ok(()) => {
                     let agent = prepared.spawn();
                     if folds_line_terminals {

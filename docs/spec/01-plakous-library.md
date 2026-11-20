@@ -1760,113 +1760,6 @@ object is missing, is not operation evidence, or does not match its address.
 The decoded record and its recovery semantics do not depend on this encoding;
 only record, ledger and checkpoint digests do.
 
-The host layer has unsupported, doc-hidden composition seams for semantic runtime
-move batches and detached target-owned checkpoint compilation. They have no
-stability claim and are not supported embedding APIs, a serialized checkpoint
-carrier, or a topology in L0. The binding family carries semantic frozen tool
-presentation (PortableToolSchemaV2, names, descriptions and exposure), not native
-registry descriptors, cached schema hashes or resolved plan bytes. Target
-compilation reuses presentation overrides against currently enrolled capabilities
-and compatible executor bindings. A presentation-only release preserves the
-source presentation; a missing or changed executor refuses before surrender.
-Compilation has no driver, execution lease, provider dispatch or tool effects.
-Source preparation records the exact selected
-session set and checks every branch hold within those sessions before freezing
-their lines. A continued line includes its current head session, not its
-superseded predecessor sessions; those predecessors need no additional holds.
-Recovery reconstructs that recorded set, never all historical line members.
-The gate nevertheless covers the entire line, and commit clears every source
-branch lease and owned host claim on that line, including predecessors.
-Retirement is operation/digest-bound and permanent
-once committed. Only the matching prepared operation may abort. Dispositions
-require every original batch member still to belong to that operation; a newer partial move
-cannot let an older batch abandon its remaining members. These gates sit
-below product policy: line-head reads, branch opens, create/fork recovery,
-acquisition, renewal and revival cannot authorize a moved or hidden line.
-Historical checkpoint inspection does not grant execution authority.
-
-A semantic move carries each runtime session's feed-tail floor. Its destination
-starts with a retained-empty window at `floor + 1`, not a reset feed: every new
-fact appends above that floor. Product and tree owners seed their explicit
-views and intents at that cut without replaying historical admissions or
-silently consuming pending inputs. Source preparation, acknowledgement-loss
-recovery, and destination staging bind the floor into the batch fingerprint.
-Source read-only inspection loads complete-session dependency metadata and only
-current branch-head checkpoints, not historical checkpoint graphs; it takes no
-execution lease or retirement. Eligibility joins checkpoint job rows with their
-exact durable line-terminal evidence (process identity and allocation generation
-as well as job number), never with a process list's apparent idleness.
-The unsupported host seam selects an explicit job cut: `Settled` requires exact
-terminal evidence for every row; `Retained` preserves promoted allocation IDs,
-owner generations, metadata and number floors without inventing a terminal.
-Both require quiescent checkpoints, exact source-head job ownership and checked
-floors. The cut enters the batch fingerprint and schema-28 operation record so
-prepare/stage/recover cannot silently change it. Target compilation takes the
-same cut and creates no driver or process handle. Retained rows are not proof
-that a process is alive, permission to restart it, or permission to execute an
-installed group; the host must obtain fresh original-worker retention authority
-and whole-group Ready separately. The default dormant path remains `Settled`.
-The host's live source adapter performs inspection-based binding/configuration
-qualification for every selected active head before draining. The source emits
-bounded semantic tool presentation and configuration inspection data, not native
-checkpoint bytes; destination-image inspection opens no foreign native store,
-runtime, custody, workspace effect or credential. This ephemeral inspection is
-neither a session carrier nor a new purpose for export v13. After the joined
-drain, the producer rebuilds the exact quiescent capsule under guards and the
-destination fully recompiles/re-probes that cut before the commit decision.
-Changed membership or a failed final probe rolls back Prepared ownership.
-A Published but never-executed target batch can recover its original install
-fingerprint after lease-only reconciliation: its journal retains the original
-branch floors, feed cut and exact captured line-terminal set separately from
-later lease counters and facts. Recovery never rebuilds that terminal set from
-the mutable line-terminal observations: recording a new terminal under a
-lease-only reconciliation hold must not change the original batch digest or
-imply that the agent consumed its output.
-A changed head, session header, membership or execution-open bit refuses that
-recovery instead of recompiling an already staged checkpoint.
-
-Dormant reconstruction preserves public product/runtime session, branch, line,
-node, tree, queue/mail and continuation-command identities. It derives a new
-destination checkpoint identity and revision from the move operation, retaining
-the source checkpoint identity as provenance. This is a normal head advance,
-not replacement of an immutable source checkpoint with recompiled content.
-No source checkpoint or component codec becomes a cross-build reader.
-The original ForkLineage is retained verbatim as provenance. A missing old fork
-checkpoint is allowed only through the explicit imported-branch and matching
-pruned-provenance markers; ordinary fork creation still validates its actual
-source checkpoint. Schema 28 removes the physical fork/pruned-point foreign keys
-that would require recreating that old native branch, while logical admission
-checks both the imported provenance and later ordinary descendants of the same
-branch. No historical fork point is recompiled. Its last imported owner's
-deletion removes orphan provenance, while shared referenced provenance remains.
-
-Destination staging re-encodes checked semantic checkpoints with the current
-codec, retains identities and branch/generation floors, and imports no lease or
-process claim. One atomic batch gate keeps all its lines inaccessible until
-publication. Unguarded abandonment is Staged-only and permanent. A separate
-unsupported host seam can abandon a Published batch only while the coordinator
-holds its never-Ready receipt lock, every current head is under an exact presented
-BranchHold, every installed checkpoint/revision is unchanged, and no member's
-execution-open bit has ever been set. Lease-only reconciliation does not set that
-bit. Every ordinary durable-driver construction, including consuming a hold, sets
-it durably before recovery publication or returning the driver; read-only
-verification does not. Store wrappers forward this operational marker. Abandon
-clears every member lease atomically; even an idle ordinary open that did not
-advance the checkpoint permanently refuses guarded abandonment.
-Publication grants no lease, and the next
-acquisition must exceed the imported fence floor. Overflow and identity conflicts
-refuse instead of resetting counters or overwriting rows. Exact imported-row
-inventories justify absent source receipts without weakening checks on later
-ordinary mutations. Initial eligibility is conservative: fully held, quiescent
-branches with terminal job evidence. Whole-tree product reconstruction and
-ownership-move publication are not enabled by these seams.
-Prepared, staged, retired and abandoned sessions are excluded from session
-discovery. Historical checkpoint inspection remains available. Retired lines
-report moved ownership, rather than an ordinary superseded-head refusal; the
-durable error classification remains unchanged. Reclamation of abandoned and
-retired batches is deferred to the product move implementation; these seams
-retain their receipts and do not silently delete session state.
-
 ### 5.2 SQLite
 
 The backend uses bundled SQLite 3.54.0 (dependency policy: chapter 06 §7).
@@ -7513,13 +7406,6 @@ the normal recovery-required path before Ready. The driver's placement parking
   host, the call could not be journaled, the link never carries the verb) is
   `Unavailable`. Both are proven to have had no effect; neither is inferred
   from prose. Streams end with their link.
-  The doc-hidden `RunnerRegistry::retain_connection` / `RunnerConnectionHold`
-  pair is an unsupported host-layer seam. Its scoped demand survives registry
-  refresh and prevents idle retirement, without granting effects, leases or
-  new-call admission. Source preparation refreshes only capsule-named runners
-  under these holds before sampling owners; dropping a hold never clears a
-  separate durable reconnect requirement.
-
 The at-most-once law across restarts:
 
 - **Runner restart.** A new `instance` (and every new `boot_id`) has an empty
@@ -11424,19 +11310,9 @@ admission-headroom reserve, the explicit pre-send overflow rule of §6.8, or a
 current-binding provider refusal can force compaction before a credible anchor
 exists.
 
-The context-state encoding and digest are version 4. A host move may install an
-explicit imported-compaction selection instead of native compaction provenance:
-the summary entry, retained prefix and trailing segment counts, recorded
-strategy and replaced-segment count, and source checkpoint/operation provenance.
-The history reader projects those recorded display facts without inventing old
-audit evidence. No inactive per-turn cap placeholder is encoded. It carries no
-old observation, request admission or cache affinity. The destination derives
-the canonical prefix and summary identities from the imported history and
-creates fresh destination cache authority. Missing historical audits stay
-absent; this value is not evidence that a provider request was dispatched or
-admitted in the destination. Native compaction provenance and the imported
-selection are mutually exclusive; a later genuine compaction publishes its own
-native provenance. This is runtime epoch 38, not a migration of epoch 37.
+The context-state encoding and digest are version 4. The optional imported
+compaction selection is reserved in that encoding; there is no host-move
+installer. Its decode and display semantics are unchanged.
 Epoch 39 carries the same context codec. It bumps because Codex and
 SuperGrok credential-authority digests no longer include the store path,
 which changes persisted session-binding bytes.

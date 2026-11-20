@@ -58,7 +58,7 @@ fn line_row(
 }
 
 /// Refuses unless `s` is `line`'s head at exactly `generation`. Callers already
-/// read through gated `branch_row`; do not duplicate its ownership-move gate.
+/// read through `branch_row`.
 pub(super) fn require_line_head(
     c: &Connection,
     s: SessionRef,
@@ -240,7 +240,6 @@ pub(in super::super) fn load_line(
     c: &Connection,
     line: LineId,
 ) -> Result<LineRecord, SessionStoreError> {
-    host_move::require_line(c, line)?;
     load_line_unchecked(c, line)
 }
 

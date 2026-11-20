@@ -237,7 +237,6 @@ pub(crate) enum Command {
     },
     SessionCheckBinding {
         summary: bool,
-        inspection: Option<PathBuf>,
         store_probe: Option<PathBuf>,
     },
     SessionRename {
@@ -295,9 +294,6 @@ pub(crate) enum Command {
     },
     HostUpgradeCapacity {
         path: PathBuf,
-    },
-    HostUpgradeFinishSource {
-        receipt: uuid::Uuid,
     },
     /// Hidden `plakd version --reopen-probe <id>`.
     ReopenProbe {
@@ -535,7 +531,6 @@ impl Command {
             | Self::ReloadProbe
             | Self::HostUpgradeProbe { .. }
             | Self::HostUpgradeCapacity { .. }
-            | Self::HostUpgradeFinishSource { .. }
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }

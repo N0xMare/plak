@@ -64,7 +64,6 @@ pub(super) fn branch(
     state: &StoreState,
     selector: SessionRef,
 ) -> Result<&BranchRecord, SessionStoreError> {
-    super::host_move::require_branch(state, selector)?;
     let session = state
         .sessions
         .get(&selector.session_id())
@@ -85,7 +84,6 @@ impl MemorySessionStore {
     ) -> Result<LoadedBranch, SessionStoreError> {
         let state = self.lock()?;
         require_open(&state)?;
-        super::host_move::require_branch(&state, selector)?;
         let session = state
             .sessions
             .get(&selector.session_id())
@@ -139,7 +137,6 @@ impl MemorySessionStore {
             .filter(|(id, session)| {
                 query.after_session().is_none_or(|after| **id > after)
                     && (query.includes_archived() || !session.head.is_archived())
-                    && super::host_move::session_visible(&state, **id)
             })
             .map(|(_, session)| {
                 SessionSummary::from_store(session.head, count(session.branches.len()))

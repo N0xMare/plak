@@ -290,7 +290,6 @@ pub(super) fn recover_create(
     reference: CheckpointObjectRef,
     identity: Digest,
 ) -> Result<CreateReceipt, SessionStoreError> {
-    super::host_move::require_branch(state, request.session())?;
     let receipt = state
         .creates
         .get(&request.session().session_id())

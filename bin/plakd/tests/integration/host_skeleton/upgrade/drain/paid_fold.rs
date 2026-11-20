@@ -3,10 +3,6 @@ use super::*;
 
 #[test]
 fn host_step_drain_in_turn_paid_fold_at_bound_rolls_back_without_a_second_summary() {
-    in_turn_refusal(false);
-}
-
-pub(super) fn in_turn_refusal(live: bool) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let mut script = json!({
@@ -26,12 +22,7 @@ pub(super) fn in_turn_refusal(live: bool) {
         {"output":{"text":ANSWER},"finish":"stop","usage":{}}
     ]);
     fixture.write_script(&script);
-    let environment = if live {
-        vec![("PLAK_TEST_HOST_UPGRADE_LIVE", "1".into())]
-    } else {
-        Vec::new()
-    };
-    let mut host = start_env(&fixture, &[], &environment);
+    let mut host = start_env(&fixture, &[], &[]);
     let mut client = Client::connect(&host);
     let node = client
         .rows(1)
@@ -71,12 +62,8 @@ pub(super) fn in_turn_refusal(live: bool) {
             "--drain",
             "0",
         ],
-        live,
-        if live {
-            &[("PLAK_TEST_HOST_UPGRADE_LIVE", "1")]
-        } else {
-            &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")]
-        },
+        false,
+        &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")],
     );
     assert!(!refused.status.success());
     let detail = String::from_utf8_lossy(&refused.stderr);

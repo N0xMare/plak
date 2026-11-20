@@ -202,10 +202,10 @@ directly. Older native state remains untouched for its matching build.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
-| Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** (adds operation-bound runtime retirement and invisible semantic-install batches, with exact operation/session membership, immutable captured terminal sets in `runtime_move_members`, and imported-row inventories) |
+| Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39** (location-independent Codex and SuperGrok credential authority; retains context codec **4** for semantic imported-compaction selections and recorded strategy/count facts) |
-| Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains immutable semantic move seeds and permanent identity claims) |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **11** (adds immutable semantic move bases and imported custody floors) |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains permanent identity claims) |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **11** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
 | Host-upgrade ownership receipt | plakd | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
@@ -233,42 +233,14 @@ state, the session's runner and its profile, not tree seal outcomes. Its
 history preserves exact account/model replay scope. The v12 importer preserves
 named state and saved placement/profile; v11 and older are refused. Version 13
 introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
-accepts only portable sessions; dormant ownership move remains unavailable.
-The carrier cut itself changes no native schema. The host-only runtime move seam
-changes runtime SQLite 27 → 28 and the state key to `r28.e38.p38.t11`; checkpoint/
-feed epoch 37 → 38 incorporates context codec 3 → 4 in the same unshipped cut;
-product schema 37 → 38 and tree schema 10 → 11 add native semantic bases in
-that same state-key cut. Schema 28 records each move's exact selected session
-set, including across continued lines, its original installed heads, and the
-explicit settled/retained promoted-job cut. That cut is bound into semantic
-batch fingerprints and recovered from schema 28; this finalizes the same
-unshipped `r28.e38.p38.t11` cut, not a second version transition. Export v13's
-host-upgrade job family pins allocation identity separately from optional
-terminal evidence. Retained metadata is neither liveness nor execution authority;
-public live cross-key move capability remains disabled. The move seam's
-execution-open marker distinguishes ordinary durable drivers from read-only
-verification and lease-only importer reconciliation before guarded withdrawal.
-Move receipt fingerprints use version-1 length-framed semantic fields, not
-debug formatting. No native migration or foreign native-store reader is added.
-The imported compaction value contains only semantic summary/retained/trailing
-selection, committed per-turn cap facts and source provenance. The destination
-recomputes its canonical identities; no historical measurement, admission or
-cache grant is invented or carried. A retained-empty native feed begins above
-the exported tail floor, with product/tree views seeded semantically at the cut.
-Product schema 39 retains the immutable projection base, anchored intents and
-permanent content bindings after ordinary view-cache deletion. Tree schema 11
-retains its semantic base and source custody floor; refolding starts at that
-base, not at invented old feed records or fresh admissions.
+accepts only portable sessions; `host_upgrade` remains a reserved kind.
+
+The unused move tables in runtime schema 28, product generation 39, and tree
+generation 11 are reserved until the next planned state-key bump.
 
 Host-upgrade receipts do not carry history, bindings, topology or job registries.
 They coordinate the versioned export carrier and record surrender/reconnect
 authority; no destination opens the source key's databases (chapter 02 §4.6).
-Their introduction changes no state-key component or export encoding.
-The unshipped version-1 receipt also journals connected-group membership,
-source retirement acknowledgements, destination install digests and exact
-owner-transfer intents and bounded exact own-intent histories for delayed CAS
-recovery. Its global Committed decision precedes native retirement;
-only whole-group Ready releases the destination admission/readoption gate.
 Receipts remain operational authority, not a second session-data carrier.
 
 The runtime store has one supported schema and format epoch and is never
@@ -327,14 +299,6 @@ restore native control of that line: native adoption refuses until its retained
 jobs are finished and consumed or explicitly disowned through a compatible
 retention endpoint. Unrelated native lines remain usable. This exception grants
 no cross-build native-store reader and changes no runtime schema or state key.
-
-Live-move preflight also exchanges ephemeral binding inspection v1. The source
-build writes per-head semantic presentations and compiled provider configurations;
-the destination checks those bytes without opening a foreign native store. Its
-closed encoding, including `CompiledProviderConfiguration`, is pinned from the
-source writer. Unknown versions or shapes refuse rather than falling back. This
-is qualification data only, not another session carrier, journal, authority or
-operational purpose for export v13.
 
 ## How to read the rest of these docs
 

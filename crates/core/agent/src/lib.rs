@@ -252,8 +252,6 @@ pub mod internal {
         abandon_and_release_many, checkpoint_closes_on_reopen, checkpoint_recovery_verdict,
         close_admission, compile_explicit_runtime_profile, lease_released, shutdown_for_transfer,
     };
-    #[doc(hidden)]
-    pub use crate::session::host_move;
     pub use crate::session::{
         AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, BranchRevision,
         BranchTransitionMode, CheckpointObjectRef, CommitCheckpoint, CommitOperation,

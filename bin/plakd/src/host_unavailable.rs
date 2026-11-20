@@ -4,25 +4,7 @@ use plakous_hosted::error::{CliResult, ProcessOutcome};
 
 use crate::shell::services::Services;
 
-pub(crate) fn finish_move_source(_services: &Services, _id: uuid::Uuid) -> CliResult<()> {
-    crate::build_features::require_feature("web")?;
-    Err(crate::CliFailure::new("host service is unavailable"))
-}
-
 pub(crate) const AVAILABLE: bool = false;
-
-pub(crate) const fn live_move_protocol() -> Option<u32> {
-    None
-}
-
-pub(crate) fn inspect_binding(
-    _path: &std::path::Path,
-    _output: &mut dyn std::io::Write,
-) -> CliResult<ProcessOutcome> {
-    Err(crate::CliFailure::new(
-        "host-upgrade binding inspection is unavailable in this build",
-    ))
-}
 
 pub(crate) fn preflight_upgrade_service(
     services: &Services,

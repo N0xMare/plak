@@ -202,19 +202,7 @@ pub(crate) fn run_doctor(
         },
     });
 
-    let mut checks = report.checks;
-    for detail in crate::carry::upgrade::receipt::abandoning(paths)? {
-        checks.push(product_doctor::DoctorCheck {
-            kind: product_doctor::CheckKind::HostUpgrade,
-            group: "host upgrade",
-            severity: product_doctor::Severity::Warning,
-            result: "withheld".into(),
-            detail,
-            remediation: Some(
-                "Resolve the guard refusal, then retry abandonment by group ID.".into(),
-            ),
-        });
-    }
+    let checks = report.checks;
     let report = product_doctor::DoctorReport::from_checks(checks);
     writeln!(stdout, "plakd doctor\n").map_err(|_| CliFailure::new("stdout failed"))?;
     let mut table = cli_output::Table::new(["CHECK", "RESULT", "DETAIL", "FIX"]);
