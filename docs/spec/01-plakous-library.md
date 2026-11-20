@@ -8593,17 +8593,21 @@ members remain and leaves membership unknown, counted live; macOS answers
 EPERM for that zombie-only group, so there the `ps` scan, which lists every
 user's processes, decides. Per-owner live-member
 scans for classification/zombies are limited to one per 250 ms except a new
-termination phase. Concurrent probes share one complete host snapshot across
+termination phase. Concurrent probes share one complete membership observation across
 groups (a `/proc` scan on Linux, a bounded `ps` run on macOS) instead of
-scanning once per group, so stopping N jobs costs a few scans of the host's
-processes rather than N concurrent ones. A Linux `/proc` readdir is not a
+scanning once per group. On Linux, when the procfs mount and caller have
+the same PID namespace, each scan gets membership from the kernel and
+reads process state only for members of queried groups. Without that
+namespace match it takes a full stat snapshot. A Linux `/proc` readdir is not a
 point-in-time snapshot, so an empty count holds only when two consecutive
 shared scans, both begun after the probe's fence, agree; the previous scan is
 kept so concurrent probes share that confirmation. A probe
 requires a snapshot begun after its first membership query (following leader
 exit observation) or previous polling phase;
-starting a new termination phase invalidates its previous observation. Failed,
-truncated or malformed snapshots leave membership unknown, never empty.
+starting a new termination phase invalidates its previous observation. Linux
+reads each process's stat record once into a bounded buffer. A process that
+vanished during the scan is skipped; other failures, truncated records and
+malformed snapshots leave membership unknown, never empty.
 The scanner's own process group must be visible in a successful snapshot;
 empty output or a missing visibility anchor cannot prove absence. Scanner rollback
 polls for bounded reaping, then hands an unreaped helper to a detached reaper

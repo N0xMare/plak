@@ -1477,6 +1477,7 @@ dependencies = [
  "filedescriptor",
  "globset",
  "ignore",
+ "nix",
  "plakous-image",
  "plakous-model",
  "portable-pty",

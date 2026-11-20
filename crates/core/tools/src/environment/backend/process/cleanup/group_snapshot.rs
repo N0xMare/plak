@@ -10,16 +10,27 @@ use super::super::lock;
 #[cfg(target_os = "macos")]
 use super::super::set_nonblocking;
 
-struct Snapshot {
-    started: Instant,
-    groups: Option<BTreeMap<i32, usize>>,
+#[cfg(target_os = "linux")]
+mod linux;
+
+trait GroupCounts {
+    fn count(&mut self, group: i32) -> Option<usize>;
 }
 
-impl Snapshot {
-    fn count(&self, group: i32) -> Option<usize> {
-        self.groups
-            .as_ref()
-            .map(|groups| groups.get(&group).copied().unwrap_or(0))
+impl GroupCounts for BTreeMap<i32, usize> {
+    fn count(&mut self, group: i32) -> Option<usize> {
+        Some(self.get(&group).copied().unwrap_or(0))
+    }
+}
+
+struct Snapshot<S> {
+    started: Instant,
+    groups: Option<S>,
+}
+
+impl<S: GroupCounts> Snapshot<S> {
+    fn count(&mut self, group: i32) -> Option<usize> {
+        self.groups.as_mut()?.count(group)
     }
 
     fn serves(&self, fresh_since: Instant, now: Instant) -> bool {
@@ -29,13 +40,21 @@ impl Snapshot {
 }
 
 /// The two most recent shared scans.
-#[derive(Default)]
-struct Snapshots {
-    latest: Option<Snapshot>,
-    earlier: Option<Snapshot>,
+struct Snapshots<S> {
+    latest: Option<Snapshot<S>>,
+    earlier: Option<Snapshot<S>>,
 }
 
-impl Snapshots {
+impl<S> Default for Snapshots<S> {
+    fn default() -> Self {
+        Self {
+            latest: None,
+            earlier: None,
+        }
+    }
+}
+
+impl<S: GroupCounts> Snapshots<S> {
     /// The group's live-member count, or `None` when the scan is unknown.
     ///
     /// With `confirm_empty`, an empty count holds only when the scan before
@@ -50,7 +69,7 @@ impl Snapshots {
         fresh_since: Instant,
         mut now: impl FnMut() -> Instant,
         confirm_empty: bool,
-        mut scan: impl FnMut() -> Option<BTreeMap<i32, usize>>,
+        mut scan: impl FnMut() -> Option<S>,
     ) -> Option<usize> {
         let checked = now();
         if !self
@@ -60,31 +79,33 @@ impl Snapshots {
         {
             self.rescan(checked, &mut scan);
         }
-        let count = self.latest.as_ref()?.count(group);
+        let count = self.latest.as_mut()?.count(group);
         if !confirm_empty
             || count != Some(0)
-            || self.earlier.as_ref().is_some_and(|snapshot| {
+            || self.earlier.as_mut().is_some_and(|snapshot| {
                 snapshot.serves(fresh_since, checked) && snapshot.count(group) == Some(0)
             })
         {
             return count;
         }
         self.rescan(now(), &mut scan);
-        self.latest.as_ref()?.count(group)
+        self.latest.as_mut()?.count(group)
     }
 
-    fn rescan(
-        &mut self,
-        started: Instant,
-        scan: &mut impl FnMut() -> Option<BTreeMap<i32, usize>>,
-    ) {
+    fn rescan(&mut self, started: Instant, scan: &mut impl FnMut() -> Option<S>) {
         let groups = scan();
         self.earlier = self.latest.replace(Snapshot { started, groups });
     }
 }
 
 pub(super) fn members(group: rustix::process::Pid, fresh_since: Instant) -> Option<usize> {
-    static SNAPSHOTS: OnceLock<Mutex<Snapshots>> = OnceLock::new();
+    #[cfg(target_os = "linux")]
+    use linux::{ProcSnapshot as Groups, snapshot as scan};
+    #[cfg(target_os = "macos")]
+    type Groups = BTreeMap<i32, usize>;
+    #[cfg(target_os = "macos")]
+    let scan = live_groups;
+    static SNAPSHOTS: OnceLock<Mutex<Snapshots<Groups>>> = OnceLock::new();
     // Hold the lock through collection so concurrent supervisors share one
     // complete scan of the host's processes rather than one per group: a scan
     // costs time in the host's process count, and per-group scans run in
@@ -95,17 +116,17 @@ pub(super) fn members(group: rustix::process::Pid, fresh_since: Instant) -> Opti
         SNAPSHOTS.get_or_init(Mutex::default),
         group.as_raw_pid(),
         fresh_since,
-        live_groups,
+        scan,
     )
 }
 
 /// One probe of the shared snapshots. Only Linux confirms an empty count: its
 /// `/proc` readdir is not a point-in-time snapshot, unlike a `ps` run.
-fn shared_members(
-    snapshots: &Mutex<Snapshots>,
+fn shared_members<S: GroupCounts>(
+    snapshots: &Mutex<Snapshots<S>>,
     group: i32,
     fresh_since: Instant,
-    scan: impl FnMut() -> Option<BTreeMap<i32, usize>>,
+    scan: impl FnMut() -> Option<S>,
 ) -> Option<usize> {
     lock(snapshots).members(
         group,
@@ -119,58 +140,98 @@ fn shared_members(
 /// Live (non-zombie) members per process group, from one `/proc` scan.
 #[cfg(target_os = "linux")]
 pub(super) fn live_groups() -> Option<BTreeMap<i32, usize>> {
-    let mut records = Vec::new();
-    // A directory-entry error ends `ReadDir`, so the scan is unknown rather
-    // than a short count callers would trust as empty. A missing stat is a
-    // pid reaped between readdir and the read; that member is gone.
-    for entry in std::fs::read_dir("/proc").ok()? {
+    use rustix::fs::{Dir, Mode, OFlags, open, openat};
+    use rustix::io::{Errno, read};
+    use std::ffi::CStr;
+
+    let proc = open(
+        "/proc",
+        OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .ok()?;
+    let mut counts = ProcGroupCounts::new(rustix::process::getpgrp().as_raw_pid());
+    let mut buffer = [0_u8; 4096];
+    // One stat read per PID. Reading each pseudo-file to EOF also stats it,
+    // allocates a buffer, and issues a second read. That overhead is paid
+    // twice for every process on the machine when proving an empty group.
+    for entry in Dir::read_from(&proc).ok()? {
         let entry = entry.ok()?;
-        if !entry
-            .file_name()
-            .as_encoded_bytes()
-            .iter()
-            .all(u8::is_ascii_digit)
-        {
+        let pid = entry.file_name().to_bytes();
+        if pid.is_empty() || !pid.iter().all(u8::is_ascii_digit) {
             continue;
         }
-        if let Ok(stat) = std::fs::read(entry.path().join("stat")) {
-            records.push(stat);
-        }
+        let mut path = [0_u8; 16];
+        path.get_mut(..pid.len())?.copy_from_slice(pid);
+        let end = pid.len().checked_add(6)?;
+        path.get_mut(pid.len()..end)?.copy_from_slice(b"/stat\0");
+        let path = CStr::from_bytes_with_nul(path.get(..end)?).ok()?;
+        let length = match openat(&proc, path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())
+            .and_then(|stat| read(stat, &mut buffer[..]))
+        {
+            Ok(length) => length,
+            // The process was reaped between directory enumeration and read.
+            Err(Errno::NOENT | Errno::SRCH) => continue,
+            Err(_) => return None,
+        };
+        counts.observe(complete_stat(&buffer, length)?)?;
     }
-    parse_stats(
-        records.iter().map(Vec::as_slice),
-        rustix::process::getpgrp().as_raw_pid(),
-    )
+    counts.complete()
+}
+
+#[cfg(target_os = "linux")]
+fn complete_stat(buffer: &[u8], length: usize) -> Option<&[u8]> {
+    let stat = buffer.get(..length)?;
+    (length < buffer.len() && stat.ends_with(b"\n")).then_some(stat)
 }
 
 /// Counts live members per group from `/proc/<pid>/stat` records.
 ///
-/// A record is a `single_open` read: a successful read is the whole line,
-/// never a truncated prefix, so a malformed one makes the scan unknown.
 /// Zombies cannot run or receive signals; in particular an orphaned zombie
 /// waiting for the host's init must not keep a server job alive forever.
 /// Without the scanner's own group the scan cannot prove any group empty.
 #[cfg(target_os = "linux")]
-fn parse_stats<'a>(
-    records: impl IntoIterator<Item = &'a [u8]>,
-    visible_group: i32,
-) -> Option<BTreeMap<i32, usize>> {
-    let mut groups = BTreeMap::new();
-    let mut visible = false;
-    for stat in records {
-        // The comm field is raw bytes and may itself contain `)`.
-        let split = stat.iter().rposition(|byte| *byte == b')')?;
-        let fields = std::str::from_utf8(&stat[split + 1..]).ok()?;
-        let mut fields = fields.split_whitespace();
-        let state = fields.next()?;
-        let _parent = fields.next()?;
-        let group = fields.next()?.parse::<i32>().ok()?;
-        visible |= group == visible_group;
-        if state != "Z" && state != "X" {
-            *groups.entry(group).or_default() += 1;
+struct ProcGroupCounts {
+    groups: BTreeMap<i32, usize>,
+    own_group: i32,
+    visible: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl ProcGroupCounts {
+    fn new(own_group: i32) -> Self {
+        Self {
+            groups: BTreeMap::new(),
+            own_group,
+            visible: false,
         }
     }
-    visible.then_some(groups)
+
+    fn observe(&mut self, stat: &[u8]) -> Option<()> {
+        let (group, live) = stat_group(stat)?;
+        self.visible |= group == self.own_group;
+        if live {
+            *self.groups.entry(group).or_default() += 1;
+        }
+        Some(())
+    }
+
+    fn complete(self) -> Option<BTreeMap<i32, usize>> {
+        self.visible.then_some(self.groups)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn stat_group(stat: &[u8]) -> Option<(i32, bool)> {
+    // The comm field is raw bytes and may itself contain `)`.
+    let split = stat.iter().rposition(|byte| *byte == b')')?;
+    let mut fields = std::str::from_utf8(&stat[split + 1..])
+        .ok()?
+        .split_whitespace();
+    let state = fields.next()?;
+    let _parent = fields.next()?;
+    let group = fields.next()?.parse().ok()?;
+    Some((group, state != "Z" && state != "X"))
 }
 
 #[cfg(target_os = "macos")]
@@ -498,6 +559,16 @@ mod cleanup_contention_tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn proc_stats_count_live_members_and_need_the_scanners_own_group() {
+        fn parse_stats<'a>(
+            records: impl IntoIterator<Item = &'a [u8]>,
+            own_group: i32,
+        ) -> Option<BTreeMap<i32, usize>> {
+            let mut counts = ProcGroupCounts::new(own_group);
+            for record in records {
+                counts.observe(record)?;
+            }
+            counts.complete()
+        }
         let own = b"10 (test) S 1 11 11 0".as_slice();
         let member = b"20 (a) b) R 10 22 22 0".as_slice();
         let zombie = b"21 (sh) Z 10 22 22 0".as_slice();
@@ -512,6 +583,19 @@ mod cleanup_contention_tests {
         for malformed in [b"30 (x S".as_slice(), b"30 (x) S 1", b"30 (x) S 1 nan 0"] {
             assert_eq!(parse_stats([own, malformed], 11), None);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn incomplete_proc_stat_reads_cannot_prove_absence() {
+        let buffer = b"11 (a\nb) S 1 11 11\n\0";
+        assert!(complete_stat(buffer, 0).is_none());
+        assert!(complete_stat(buffer, buffer.len() - 2).is_none());
+        assert!(complete_stat(&buffer[..buffer.len() - 1], buffer.len() - 1).is_none());
+        assert_eq!(
+            complete_stat(buffer, buffer.len() - 1),
+            Some(&buffer[..buffer.len() - 1])
+        );
     }
 
     #[cfg(target_os = "linux")]
