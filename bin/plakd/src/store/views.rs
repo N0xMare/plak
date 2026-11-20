@@ -22,6 +22,7 @@ use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, Transact
 use super::{ProductStore, from_i64, to_i64};
 
 mod intents;
+pub(super) use intents::attention_facts_on;
 pub(super) use intents::intents_of;
 
 const WAKE_SUPPRESSION: &str = "wake_suppression";

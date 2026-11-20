@@ -68,6 +68,7 @@ mod notice_text;
 mod operator_process;
 mod refusal_text;
 mod review_expiry;
+mod session_attention;
 mod shipping_artifact;
 mod snapshot_install;
 pub(crate) mod surface_protocol;

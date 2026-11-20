@@ -20,6 +20,20 @@ const TRANSIENT_FIRST_DELAY: Duration = Duration::from_secs(1);
 const TRANSIENT_REARM: Duration = Duration::from_secs(60);
 pub(in crate::runtime) const WAKE_PROMPT: &str = "Background processes finished or sub-agent results arrived while you were idle; continue the current task, or reply briefly if nothing remains.";
 
+pub(super) fn log_operator_attention(
+    session: &str,
+    attention: crate::runtime::operator_attention::SessionAttention,
+) {
+    tracing::warn!(
+        target: "plak.attention",
+        %session,
+        reason = attention.reason.code(),
+        pending = attention.count,
+        action = attention.reason.action(),
+        "session needs operator"
+    );
+}
+
 #[derive(Default)]
 pub(super) struct RootWake {
     session_id: String,

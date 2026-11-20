@@ -45,6 +45,7 @@
 //! last face sender and attachment are gone.
 
 mod attachment;
+mod attention;
 mod child;
 pub(crate) mod drafts;
 mod face;
@@ -86,10 +87,7 @@ mod test_draft_gate {
 mod tree_nodes;
 pub mod wire;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-
+use self::wire::Face;
 use plakous_host_protocol::observation::{Delivery, ObservationClass};
 use plakous_host_protocol::views::transcript::TranscriptScope;
 use plakous_host_protocol::wire::{AttachmentId, NodeAddress, RequestRefusal};
@@ -97,8 +95,9 @@ use plakous_host_protocol::{
     IntentSendError, IntentSender, ObservationExtension, ProtocolExtension, SessionIntent,
     SessionObservation, WeakIntentSender,
 };
-
-use self::wire::Face;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use attachment::{attachment_of, kept_for_attach, origin};
 pub use child::{ChildNodes, ControlDone, NodeState};
@@ -327,6 +326,7 @@ struct CountWord {
     /// nothing keeps it, without waiting out the idle release
     /// (`release_session`).
     release_now: std::sync::atomic::AtomicU32,
+    attention: Mutex<Option<crate::runtime::operator_attention::SessionAttention>>,
     #[cfg(test)]
     seam: Mutex<MarkSeam>,
 }
@@ -352,6 +352,24 @@ impl CountSeen {
 }
 
 impl AttachmentCount {
+    pub(crate) fn publish_attention(
+        &self,
+        attention: Option<crate::runtime::operator_attention::SessionAttention>,
+    ) {
+        *self
+            .0
+            .attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = attention;
+    }
+
+    fn attention(&self) -> Option<crate::runtime::operator_attention::SessionAttention> {
+        *self
+            .0
+            .attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
     /// The attachments and holds counted now.
     #[must_use]
     pub fn get(&self) -> usize {
@@ -889,6 +907,9 @@ impl<P: ProtocolExtension> HostService<P> {
         }
         items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
         items.extend(snapshot.credential_wait.iter().cloned());
+        if let Some(attention) = state.count.attention() {
+            items.push(SessionObservation::Row(attention.notice()));
+        }
         items.retain(|item| face.receives(item) && !waiting);
         let sender = mailbox.map(|actions| actions.tagged(origin(id, face)));
         let scopes = match self.actions {
@@ -1066,37 +1087,6 @@ impl<P: ProtocolExtension> HostService<P> {
         drop(state);
         drop(removed);
         taken
-    }
-
-    /// What this service kept of the session that a directory shows: whether
-    /// a turn runs, whether an approval or a credential wait needs the
-    /// operator, and how many background processes run.
-    #[must_use]
-    pub fn kept_activity(&self) -> KeptActivity {
-        let state = self.lock();
-        let snapshot = &state.snapshot;
-        let mut kept = KeptActivity {
-            awaiting_operator: !snapshot.approvals.is_empty() || snapshot.credential_wait.is_some(),
-            ..KeptActivity::default()
-        };
-        for observation in &snapshot.states {
-            match observation {
-                SessionObservation::SetBusy(busy) => {
-                    kept.busy = *busy;
-                    kept.turn_busy = *busy;
-                }
-                SessionObservation::Processes { running, .. } => kept.processes = *running,
-                SessionObservation::ContextCapacityRecovery(Some(_)) => {
-                    kept.awaiting_operator = true;
-                }
-                _ => {}
-            }
-        }
-        drop(state);
-        kept.awaiting_operator |= crate::runtime::tree_needs_operator(&self.root().tree_id);
-        (kept.children, kept.held_children) = tree_nodes::child_counts(&self.root().tree_id);
-        kept.busy |= kept.children > 0;
-        kept
     }
 
     pub(super) fn lifecycle_busy(&self) -> plakous_host_protocol::wire::LifecycleReason {

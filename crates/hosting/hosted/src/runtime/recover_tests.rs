@@ -503,6 +503,120 @@ fn the_explicit_recover_control_recovers_once_and_then_has_nothing_to_do() {
     );
 }
 
+#[test]
+fn recovered_root_with_late_result_surfaces_attention_until_prompt() {
+    use crate::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest, WriterMode};
+    use crate::host_service::{AttachmentCount, HostService, Outbound, wire::Face};
+    use plakous_host_protocol::views::transcript::TranscriptRow;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (mut config, evidence) = scripted_host(dir.path());
+    config.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
+    let count = AttachmentCount::default();
+    config.idle_release = Some(crate::runtime::IdleRelease {
+        after: Duration::from_secs(300),
+        attachments: count.clone(),
+    });
+    let node = crate::host_service::wire::session_root(&config);
+    let mut tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        &node.tree_id,
+        "root",
+        "owner",
+        config.cwd.clone(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .unwrap();
+    tree.settle_for_test();
+    let runtime = crate::topology_runtime::insert_root(node.tree_id.clone(), tree, None)
+        .block()
+        .unwrap();
+    let (actions, events, worker) = spawn_host_worker(config).unwrap();
+    let service = HostService::new(actions.clone(), node.clone(), 64).with_attachment_count(&count);
+    let mut seen = Vec::new();
+    send_attached_action(&actions, UserAction::Prompt("first".into()));
+    wait_for(&events, &mut seen, "the fenced terminal", recovery_required);
+    wait_for(&events, &mut seen, "eager recovery", |event| {
+        matches!(event, HostEvent::Recovered { .. })
+    });
+    assert!(!service.kept_activity().awaiting_operator, "no mail yet");
+
+    runtime
+        .mutate_then_emit(false, |tree| {
+            let child = tree
+                .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                .unwrap()
+                .agent_id;
+            tree.submit_result(
+                &child,
+                &SubmitResultRequest {
+                    turn_token: 1,
+                    output_json: r#"{"ok":true}"#.into(),
+                },
+                None,
+            )
+            .unwrap();
+            tree.record_turn_completed(&child).unwrap();
+            Ok(())
+        })
+        .block()
+        .unwrap();
+    let notice = |event: &HostEvent| {
+        matches!(
+            event,
+            HostEvent::Row(TranscriptRow::Notice(row))
+                if row.text.contains("recovery_required: 1 pending mail/wake item")
+                    && row.text.contains("send a new prompt")
+        )
+    };
+    wait_for(&events, &mut seen, "attention notice", notice);
+    wait_for(&events, &mut seen, "pending continuation", |event| {
+        matches!(
+            event,
+            HostEvent::PendingContinuation {
+                results: 1,
+                auto_continue_paused: true,
+                ..
+            }
+        )
+    });
+    assert!(service.kept_activity().awaiting_operator);
+    let attachment = service.attach_asking(&node, Face::Remote, false).unwrap();
+    assert!(
+        service.take(attachment).iter().any(|item| matches!(
+            item, Outbound::Event { observation, .. } if notice(observation)
+        )),
+        "later attachments receive the current reason and count"
+    );
+    assert_eq!(
+        dispatches(&evidence),
+        1,
+        "mail did not restart a recovery pause"
+    );
+
+    send_attached_action(&actions, UserAction::Prompt("continue".into()));
+    wait_for(&events, &mut seen, "the next turn", turn_completed);
+    wait_for(&events, &mut seen, "attention cleared", |event| {
+        matches!(
+            event,
+            HostEvent::PendingContinuation {
+                results: 0,
+                auto_continue_paused: false,
+                ..
+            }
+        )
+    });
+    let attachment = service.attach_asking(&node, Face::Remote, false).unwrap();
+    assert!(
+        !service.take(attachment).iter().any(|item| matches!(
+            item, Outbound::Event { observation, .. } if notice(observation)
+        )),
+        "attach must not replay a cleared alert"
+    );
+    send_attached_action(&actions, UserAction::Quit);
+    worker.join().unwrap().unwrap();
+}
+
 /// `/recover` with no interrupted root turn runs the tree's recovery pass now
 /// and tells the user which stranded child agent it settled.
 #[test]

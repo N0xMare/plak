@@ -39,6 +39,10 @@ pub(crate) fn try_remote_account(
     if !is_account_command(command) {
         return Ok(None);
     }
+    if matches!(command, Command::StatusAll) {
+        crate::session_attention::write_status(services.paths()?, stdout)
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+    }
     let link = AdminLink::for_cli(services.paths()?).map_err(CliFailure::new)?;
     let address = &link.address;
     let key = link.key();

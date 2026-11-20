@@ -394,7 +394,7 @@ where
                     row.live_work.children = u32::try_from(kept.children).unwrap_or(u32::MAX);
                     row.live_work.held_children =
                         u32::try_from(kept.held_children).unwrap_or(u32::MAX);
-                    row.needs_operator = needs_operator(&kept, &row.runner_status);
+                    row.needs_operator |= needs_operator(&kept, &row.runner_status);
                     if kept.busy {
                         row.activity = SessionActivity::Busy;
                     }

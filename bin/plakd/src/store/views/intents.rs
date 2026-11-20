@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use plakous::sessions::SessionLocator;
+use plakous_hosted::runtime::ResumeAfterLoss;
+use plakous_hosted::runtime::operator_attention::{AttentionReason, root_reason};
 use plakous_hosted::session_store::WakeControls;
 use plakous_hosted::sessions::projector::{
     AnchoredIntent, OperatorNotice, ProductIntents, RootContinuation, RootInterrupt, SessionViews,
@@ -62,6 +64,96 @@ impl ProductStore {
         tx.commit().map_err(unavailable)?;
         Ok(WakeControls::from_join(&views, &intents))
     }
+
+    pub(crate) fn load_attention_reason(
+        &mut self,
+        session_id: &str,
+        policy: ResumeAfterLoss,
+    ) -> Result<Option<AttentionReason>, String> {
+        let tx = self
+            .connection
+            .unchecked_transaction()
+            .map_err(unavailable)?;
+        attention_facts_on(
+            &tx,
+            &mut self.verified_submissions,
+            session_id,
+            policy,
+            false,
+        )
+        .map(|(reason, _)| reason)
+    }
+}
+
+pub(in crate::store) fn attention_facts_on(
+    connection: &Connection,
+    verified: &mut VerifiedSubmissions,
+    session_id: &str,
+    policy: ResumeAfterLoss,
+    include_prepared_wakes: bool,
+) -> Result<(Option<AttentionReason>, u32), String> {
+    let mut views = SessionViews::empty();
+    if let Some((_, state)) = view_cursor_and_state(connection, session_id)? {
+        views.state = state;
+    }
+    let mut intents = ProductIntents::default();
+    read_host_intents(
+        connection,
+        "SELECT kind,anchor,ordinal,value FROM host_intents WHERE session_id=?1 AND kind IN ('pause_cause','interrupt_cause','continuation_decision') ORDER BY anchor,ordinal",
+        session_id,
+        &mut intents,
+    )?;
+    if policy == ResumeAfterLoss::Hold
+        && intents
+            .root_interrupts
+            .iter()
+            .max_by_key(|intent| (intent.anchor, intent.ordinal))
+            .is_some_and(|intent| {
+                intent.value.cause
+                    == plakous_hosted::sessions::projector::RootInterruptCause::OwnerLost
+            })
+    {
+        intents.submission_anchors =
+            intent_anchors(connection, session_id, "submissions", "command_id")?;
+        intents.submissions =
+            load_submissions_where(connection, verified, "session_id=?1", session_id)?
+                .into_iter()
+                .map(|(_, submission)| submission)
+                .collect();
+    }
+    let reason = root_reason(&views, &intents, policy);
+    let prepared_wakes = if include_prepared_wakes && reason.is_some() {
+        pending_wakes(connection, session_id, &views)?
+    } else {
+        0
+    };
+    Ok((reason, prepared_wakes))
+}
+
+fn pending_wakes(connection: &Connection, id: &str, views: &SessionViews) -> Result<u32, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT command_id,anchor FROM submissions WHERE session_id=?1 AND kind='host_wake'",
+        )
+        .map_err(unavailable)?;
+    let rows = statement
+        .query_map([id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+        })
+        .map_err(unavailable)?;
+    let mut count = 0_u32;
+    for row in rows {
+        let (id, anchor) = row.map_err(invalid)?;
+        if views
+            .state
+            .retained_from
+            .is_none_or(|floor| anchor >= floor)
+            && !views.state.deliveries.contains_key(&id)
+        {
+            count = count.saturating_add(1);
+        }
+    }
+    Ok(count)
 }
 
 pub(in crate::store) fn intents_of(

@@ -1533,6 +1533,8 @@ pub(crate) mod revisions;
 mod schema;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;
+/// Schema 31 intents and the projector's views.
+mod attention;
 /// The product's SQLite implementation of the hosted session-record port.
 pub mod session_records;
 /// The product session record's durable half: the free functions that open
@@ -1540,7 +1542,6 @@ pub mod session_records;
 pub mod sessions;
 /// The product's SQLite implementation of the tree store.
 pub mod tree;
-/// Schema 31 intents and the projector's views.
 pub mod views;
 
 /// One row of every type the product transcript stores, each with its

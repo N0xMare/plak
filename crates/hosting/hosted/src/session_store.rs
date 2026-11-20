@@ -256,6 +256,22 @@ pub trait SessionRecordStore: Send + Sync {
     /// Unreadable store or invalid wake control rows.
     fn load_wake_controls(&self, id: &str) -> Result<WakeControls, String>;
 
+    /// Read the root blocker for operator-facing pending-work displays.
+    ///
+    /// # Errors
+    /// Unreadable or invalid product authority.
+    fn load_attention_reason(
+        &self,
+        id: &str,
+        policy: crate::runtime::ResumeAfterLoss,
+    ) -> Result<Option<crate::runtime::operator_attention::AttentionReason>, String> {
+        let intents = self.load_intents_without_notices(id)?;
+        let views = self.load_views(id)?.unwrap_or_else(SessionViews::empty);
+        Ok(crate::runtime::operator_attention::root_reason(
+            &views, &intents, policy,
+        ))
+    }
+
     /// Verified owner of an immutable product submission, across sessions.
     /// Absence is not proof of canonical runtime non-admission.
     ///
@@ -1353,6 +1369,22 @@ mod memory {
             Ok(super::WakeControls::from_join(
                 state.views.get(id).unwrap_or(&SessionViews::empty()),
                 state.intents.get(id).unwrap_or(&ProductIntents::default()),
+            ))
+        }
+
+        fn load_attention_reason(
+            &self,
+            id: &str,
+            policy: crate::runtime::ResumeAfterLoss,
+        ) -> Result<Option<crate::runtime::operator_attention::AttentionReason>, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Ok(crate::runtime::operator_attention::root_reason(
+                state.views.get(id).unwrap_or(&SessionViews::empty()),
+                state.intents.get(id).unwrap_or(&ProductIntents::default()),
+                policy,
             ))
         }
 

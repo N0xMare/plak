@@ -223,11 +223,31 @@ impl ProductSessions {
         let config = read.profiles.and_then(|profiles| profiles.config.as_ref());
         let tree = self.tree.load(&entry.node.tree_id);
         let degraded = record.is_none() || config.is_none() || tree.is_err();
-        let roster = tree
-            .ok()
-            .flatten()
-            .map(ProductAgentTree::reopen)
-            .map(|tree| tree.current_epoch().clone());
+        let tree = tree.ok().flatten().map(ProductAgentTree::reopen);
+        let roster = tree.as_ref().map(|tree| tree.current_epoch().clone());
+        let needs_operator = !entry.archived
+            && config.is_some_and(|config| {
+                let policy = crate::session_attention::policy(config);
+                use plakous_hosted::runtime::operator_attention::{
+                    PendingTreeWork, prepared_wake_count,
+                };
+                let work = tree
+                    .as_ref()
+                    .map_or_default(|tree| PendingTreeWork::read(tree, policy));
+                let wakes = read.record.map_or(0, prepared_wake_count);
+                let root = if work.results > 0 || work.questions > 0 || wakes > 0 {
+                    read.store
+                        .load_attention_reason(&entry.id, policy)
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                };
+                work.attention(root, 0, wakes).is_some()
+            })
+            && self
+                .with_product(|store| store.head_of_tree(&entry.node.tree_id))
+                .is_ok_and(|head| head.as_deref() == Some(entry.id.as_str()));
         let profile = config
             .zip(record)
             .filter(|_| roster.is_some())
@@ -271,7 +291,7 @@ impl ProductSessions {
                 runner_views::status(runner_id, read.runners)
                     .unwrap_or(plakous_host_protocol::wire::RunnerStatus::Unknown)
             },
-            needs_operator: false,
+            needs_operator,
             activity_seq: read.activity_seq,
             archived: entry.archived,
             differences,
@@ -1581,6 +1601,10 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "offline product session fixtures")]
+mod attention_tests;
 
 #[cfg(test)]
 #[allow(

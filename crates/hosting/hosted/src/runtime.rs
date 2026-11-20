@@ -143,6 +143,8 @@ pub mod network_watch;
 #[cfg(test)]
 mod notice_tests;
 mod oneshot;
+/// Read-only projection of work waiting for an operator.
+pub mod operator_attention;
 mod processes;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]

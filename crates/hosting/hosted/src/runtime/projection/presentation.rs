@@ -163,6 +163,14 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_wake_controls(id)
     }
 
+    fn load_attention_reason(
+        &self,
+        id: &str,
+        policy: crate::runtime::ResumeAfterLoss,
+    ) -> Result<Option<crate::runtime::operator_attention::AttentionReason>, String> {
+        self.inner.load_attention_reason(id, policy)
+    }
+
     fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
         self.inner.submission_owner(command_id)
     }

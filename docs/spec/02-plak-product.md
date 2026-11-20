@@ -4658,7 +4658,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   `unknown`, `ready` or `blocked {reason}`; reads project cached readiness,
   never wait for SSH. `needs_operator` is independent of busy activity and
   aggregates unresolved approvals, credential waits and context-capacity
-  decisions across all resident nodes; dormant rows have false. It is also
+  decisions across all resident nodes. It also marks current, non-archived
+  sessions with pending work for a node waiting on a root pause cause, consent
+  after owner loss under `hold`, or child recovery. This part can be read
+  from durable facts even while the session is dormant. It does not count
+  unrelated mail to runnable nodes, and it does not decide admission or
+  continue a turn. It is also
   true for a resident row whose root turn itself is running while the row's
   runner status is `blocked {runner_unreachable}`: that turn may be waiting
   on its placement (spec 01 §8.4) until automatic release after reconnection
@@ -4692,6 +4697,19 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   status and custom profile with a roster difference as needed; no individual
   row failure freezes the directory for other sessions. These display
   fallbacks never admit an open or execution.
+  On the root attachment, the existing `PendingContinuation` observation
+  continues to report unread root results, questions and unannounced process
+  exits. `auto_continue_paused` also marks a root pause with pending work
+  that needs a new prompt. Holds and child recovery keep their own actions. A
+  current, non-persisted host warning row supplies the reason, the number of
+  pending items and the action; the root attach snapshot includes it if it
+  still applies. Use Resume after loss for a held continuation, a new prompt
+  for a root pause (a prompt also supersedes a root loss hold), and the affected
+  child's recovery action (§4.5a of chapter 03). An alert
+  clears once the blocker or its pending work clears. The host logs one
+  content-free WARN on entering the state, at most once per minute per
+  attached session, not on each idle tick or mail arrival. Wire schema and
+  protocol version do not change.
 - **Open admission.** Every open freshly validates its saved runner and
   canonical workspace before starting a mutable runtime. This includes local:
   an unready home-local daemon never silently becomes direct execution.
@@ -8669,7 +8687,15 @@ configured accounts and credentials, require no network call, and neither
 extend an expiry nor admit an expired subscription route. Product command tests
 inject a fixed clock; warning boundary tests supply time explicitly.
 
-`plakd status` is offline and says so: it prints local credential state in
+`plakd status` first prints any sessions needing
+operator attention for durably visible pending mail or wakes, by id, with the
+blocker, count and action. It inspects the current non-archived session heads
+without opening them, taking custody, or probing a provider or runner. A
+process exit known only to a live owner's job registry is not in this offline
+read; the serving host reports it on attachment and in its warning. The
+session section does not depend on a working credential gateway.
+
+Credential status is separate. It shows credentials in
 Ready and Setup needed, over the three OAuth verticals and the four API-key
 accounts, and closes with the sentence that no provider request was made. A
 section with no rows is omitted, heading and all. A row carries the account, whether it is OAuth or an API key, the

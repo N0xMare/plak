@@ -316,6 +316,14 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_wake_controls(id))
     }
 
+    fn load_attention_reason(
+        &self,
+        id: &str,
+        policy: plakous_hosted::runtime::ResumeAfterLoss,
+    ) -> Result<Option<plakous_hosted::runtime::operator_attention::AttentionReason>, String> {
+        self.with_store(|store| store.load_attention_reason(id, policy))
+    }
+
     fn submission_owner(&self, command_id: &str) -> Result<Option<String>, String> {
         self.with_store(|store| store.submission_owner(command_id))
     }

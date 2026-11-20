@@ -13,6 +13,9 @@ use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::PendingContinuation;
 
 use super::{Instant, RootActor, TREE_OBSERVE_INTERVAL, commit_session_update};
+use crate::runtime::operator_attention::{
+    AttentionReason, PendingTreeWork, SessionAttention, prepared_wake_count,
+};
 use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -27,30 +30,20 @@ pub(super) const WAKE_FAILURE_PAUSE_TEXT: &str =
 /// What the indicator reads from the session's agent tree.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct TreeFacts {
-    results: u32,
-    questions: u32,
+    work: PendingTreeWork,
     /// The tree has a node besides the root, so a child could wake the root.
     descendants: bool,
 }
 
 impl TreeFacts {
-    fn of(tree: &crate::agent_tree::ProductAgentTree) -> Self {
-        let mut facts = Self {
+    fn of(
+        tree: &crate::agent_tree::ProductAgentTree,
+        policy: crate::runtime::ResumeAfterLoss,
+    ) -> Self {
+        Self {
             descendants: tree.nodes().len() > 1,
-            ..Self::default()
-        };
-        for mail in tree.unread_mail(&tree.root_agent_id) {
-            match mail.purpose {
-                crate::agent_tree_protocol::MessagePurpose::Result => {
-                    facts.results = facts.results.saturating_add(1);
-                }
-                crate::agent_tree_protocol::MessagePurpose::Question => {
-                    facts.questions = facts.questions.saturating_add(1);
-                }
-                _ => {}
-            }
+            work: PendingTreeWork::read(tree, policy),
         }
-        facts
     }
 }
 
@@ -74,12 +67,17 @@ pub(super) struct PendingTrack {
     /// The first publish for this session. A pause already recorded in the
     /// transcript is the restored line, not a second one.
     baseline: bool,
+    root_reason: Option<AttentionReason>,
+    reason_read_at: Option<Instant>,
+    attention: Option<SessionAttention>,
+    warned_at: Option<Instant>,
 }
 
 impl PendingTrack {
     pub(super) fn unread_count(&self) -> usize {
-        self.tree
-            .map_or(0, |tree| tree.results as usize + tree.questions as usize)
+        self.tree.map_or(0, |tree| {
+            tree.work.results as usize + tree.work.questions as usize
+        })
     }
 }
 
@@ -113,15 +111,29 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .iter()
             .filter(|job| job.status != plakous::tools::JobStatus::Running)
             .count();
+        let process_exits = u32::try_from(process_exits).unwrap_or(u32::MAX);
+        let work = tree.work;
+        let prepared_wakes = prepared_wake_count(&self.role.config.session);
+        let reason =
+            if work.results > 0 || work.questions > 0 || process_exits > 0 || prepared_wakes > 0 {
+                self.read_root_attention_reason()
+            } else {
+                self.role.pending_track.reason_read_at = None;
+                None
+            };
+        let attention = work.attention(reason, process_exits, prepared_wakes);
         let suppressed = self.role.config.session.child_wake_suppressed;
+        let suppression_paused = suppressed
+            && self.role.config.prompt_host_facts().host_wakes
+            && (tree.descendants || !jobs.is_empty());
         let next = PendingContinuation {
-            results: tree.results,
-            questions: tree.questions,
-            process_exits: u32::try_from(process_exits).unwrap_or(u32::MAX),
-            auto_continue_paused: suppressed
-                && self.role.config.prompt_host_facts().host_wakes
-                && (tree.descendants || !jobs.is_empty()),
+            results: work.results,
+            questions: work.questions,
+            process_exits,
+            auto_continue_paused: suppression_paused
+                || attention.is_some_and(|attention| attention.reason.pauses_root_wakes()),
         };
+        self.publish_operator_attention(attention);
         if self.role.pending_track.last != Some(next) {
             let sent = self.role.events.send(ContentEvent::PendingContinuation {
                 results: next.results,
@@ -135,8 +147,50 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 self.role.pending_track.last = Some(next);
             }
         }
-        self.note_auto_continue_pause(suppressed, next.auto_continue_paused);
+        self.note_auto_continue_pause(suppressed, suppression_paused);
         self.role.pending_track.baseline = false;
+    }
+
+    fn read_root_attention_reason(&mut self) -> Option<AttentionReason> {
+        let now = Instant::now();
+        let track = &mut self.role.pending_track;
+        if track
+            .reason_read_at
+            .is_none_or(|last| now.duration_since(last) >= TREE_OBSERVE_INTERVAL)
+        {
+            track.reason_read_at = Some(now);
+            if let Ok(reason) = self.role.config.store.load_attention_reason(
+                &self.role.config.session.id,
+                self.role.config.resume_after_loss,
+            ) {
+                track.root_reason = reason;
+            }
+        }
+        track.root_reason
+    }
+
+    fn publish_operator_attention(&mut self, attention: Option<SessionAttention>) {
+        let track = &mut self.role.pending_track;
+        if track.attention == attention {
+            return;
+        }
+        let entered = track.attention.map(|old| old.reason) != attention.map(|new| new.reason);
+        track.attention = attention;
+        if let Some(release) = &self.role.config.idle_release {
+            release.attachments.publish_attention(attention);
+        }
+        if let Some(attention) = attention {
+            let now = Instant::now();
+            if entered
+                && track.warned_at.is_none_or(|last| {
+                    now.duration_since(last) >= std::time::Duration::from_secs(60)
+                })
+            {
+                track.warned_at = Some(now);
+                super::wake::log_operator_attention(&self.role.config.session.id, attention);
+            }
+            let _ = self.role.events.send(ContentEvent::Row(attention.notice()));
+        }
     }
 
     /// The wake path just paused auto-continue and said so in its own row;
@@ -150,6 +204,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     fn bind_pending_track(&mut self) {
         let id = &self.role.config.session.id;
         if self.role.pending_track.session_id.as_ref() != Some(id) {
+            if let Some(release) = &self.role.config.idle_release {
+                release.attachments.publish_attention(None);
+            }
             self.role.pending_track = PendingTrack {
                 session_id: Some(id.clone()),
                 baseline: true,
@@ -161,12 +218,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// A failed or not-yet-due observation is not evidence of a change.
     fn read_tree_facts(&mut self) -> Option<(TreeFacts, &'static str)> {
         let rows = self.role.config.topology_rows();
+        let facts_of = |tree: &crate::agent_tree::ProductAgentTree| {
+            TreeFacts::of(tree, self.role.config.resume_after_loss)
+        };
         let (source, observed) = if let Some(runtime) = self
             .role
             .last_tree_revision
             .runtime(&rows, &self.role.config.session)
         {
-            ("hub", runtime.read(TreeFacts::of).map_err(|_| ()))
+            ("hub", runtime.read(facts_of).map_err(|_| ()))
         } else {
             let now = Instant::now();
             if self
@@ -184,7 +244,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 .tree_id()
                 .ok_or(())
                 .and_then(|tree_id| rows.tree(tree_id).map_err(|_| ()))
-                .map(|tree| tree.as_ref().map_or_default(TreeFacts::of));
+                .map(|tree| tree.as_ref().map_or_default(facts_of));
             ("store", observed)
         };
         let Ok(tree) = observed else {
