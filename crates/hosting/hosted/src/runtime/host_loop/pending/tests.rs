@@ -71,6 +71,99 @@ fn held_process_loss_needs_operator_but_does_not_pause_wakes() {
     });
 }
 
+#[test]
+fn only_failed_pending_root_continuation_preparation_needs_operator() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::runtime::root_loss::{LostRootTurn, record_root_consent, record_root_owner_lost};
+    use crate::sessions::projector::{Anchored, PauseCause, SessionViews, ViewWrites};
+    use plakous_host_protocol::notice_remedy::NoticeRemedy;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct RefuseOwnership(Arc<AtomicBool>);
+    impl StoreFaults for RefuseOwnership {
+        fn before(
+            &self,
+            call: StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            if call == StoreCall::SubmissionOwner && self.0.load(Ordering::SeqCst) {
+                return Err("continuation submission ownership is inconsistent".to_owned());
+            }
+            Ok(())
+        }
+    }
+
+    let refuse = Arc::new(AtomicBool::new(false));
+    with_configured_tree(
+        1,
+        |config| {
+            config.store = Arc::new(FaultStore::new(
+                Arc::clone(&config.store),
+                RefuseOwnership(refuse.clone()),
+            ));
+        },
+        |host, _, _, observed| {
+            let config = &mut host.role.config;
+            config.store.save(&mut config.session).unwrap();
+            let store = config.store.as_ref();
+            let session = &config.session;
+            let before = store
+                .load_views(&session.id)
+                .unwrap()
+                .unwrap_or_else(SessionViews::empty);
+            let mut after = before.clone();
+            let turn_id = "lost-turn".to_owned();
+            after.state.pause = Some(Anchored {
+                anchor: after.cursor.get(),
+                value: Some(PauseCause::RecoveryRequired {
+                    turn_id: turn_id.clone(),
+                }),
+            });
+            store
+                .commit_projection_views(
+                    &session.id,
+                    &ViewWrites::between(&before, &after),
+                    &after.state,
+                )
+                .unwrap();
+            assert!(
+                record_root_owner_lost(
+                    store,
+                    session,
+                    &LostRootTurn {
+                        turn_id,
+                        applied_seq: after.cursor.get()
+                    },
+                )
+                .unwrap()
+            );
+            assert!(record_root_consent(store, session).unwrap().is_some());
+            assert!(store.load_wake_controls(&session.id).unwrap().paused);
+            host.role.pending_track.reason_read_at = None;
+            host.publish_pending_continuation();
+            assert!(
+                !notes(&observed.try_iter().collect::<Vec<_>>())
+                    .iter()
+                    .any(|note| note.starts_with("Needs operator"))
+            );
+
+            refuse.store(true, Ordering::SeqCst);
+            let error = host
+                .block(async |host| host.root_loss_resume_delivery().await)
+                .unwrap_err();
+            assert!(error.message().contains("ownership is inconsistent"));
+            host.role.pending_track.reason_read_at = None;
+            host.publish_pending_continuation();
+            assert!(observed.try_iter().any(|event| matches!(
+                event,
+                HostEvent::Row(TranscriptRow::Notice(notice))
+                    if notice.text.contains("Needs operator · root_continuation_preparation_failed: 1 pending mail/wake item")
+                        && notice.remedy == Some(NoticeRemedy::ResumeAfterLoss {})
+            )));
+        },
+    );
+}
+
 pub(super) fn snapshots(observed: &HostEventReceiver<TestExtension>) -> Vec<PendingContinuation> {
     observed
         .try_iter()

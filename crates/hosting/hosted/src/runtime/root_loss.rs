@@ -25,13 +25,15 @@ use plakous::sessions::feed::{
 use crate::session_store::SessionRecordStore;
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
-    Delivery, ProductIntents, RootContinuation, RootContinuationCause, RootContinuationDecision,
-    RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor, SessionViews,
-    SubmissionKind,
+    Delivery, HostPauseCause, PauseCause, ProductIntents, RootContinuation, RootContinuationCause,
+    RootContinuationDecision, RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    SessionViews, SubmissionKind,
 };
 
 /// Prefix of the root's continuation command identity after a loss.
 pub(crate) const ROOT_LOSS_RESUME_PREFIX: &str = "plak:resume-loss:root:";
+
+const PREPARATION_REFUSAL: &str = "root continuation could not be prepared: ";
 
 /// The host instruction a root continuation after a loss runs.
 pub(crate) const ROOT_LOSS_RESUME_TEXT: &str = "Your previous turn was interrupted because the host running it lost authority or stopped. Continue the current task from the last completed step: check what already happened before you act, and do not repeat completed actions. Some tool effects may be uncertain; verify them before repeating any action.";
@@ -207,6 +209,46 @@ pub(super) fn owner_loss_at_pause(
         && matches!(&loss.anchor, RootStopAnchor::Turn { turn_id: stopped } if stopped == turn_id))
     .then(|| state(&loss, intents, views))
     .flatten()
+}
+
+/// Records only a refusal of the current consented continuation. The existing
+/// host pause stores a content-free reason tied to that exact submission;
+/// a refusal must not grant another continuation or survive its decision.
+pub(super) fn record_preparation_refusal(
+    store: &dyn SessionRecordStore,
+    session: &SessionRecord,
+) -> Result<(), String> {
+    let intents = store.load_intents(&session.id)?;
+    let Some(loss) = latest_loss(&intents) else {
+        return Ok(());
+    };
+    let views = store
+        .load_views(&session.id)?
+        .unwrap_or_else(SessionViews::empty);
+    let Some(RootLossState::Pending(command)) = state(&loss, &intents, &views) else {
+        return Ok(());
+    };
+    let cause = HostPauseCause::UnrecordedRefusal {
+        reason: format!("{PREPARATION_REFUSAL}{command}"),
+    };
+    if views.pause_cause(&intents) == Some(PauseCause::Host(cause.clone())) {
+        return Ok(());
+    }
+    store
+        .write_host_controls(&session.id, false, Some(cause))
+        .map_err(|error| error.to_string())
+}
+
+/// A refusal notice matters only while the same decision is still pending.
+pub(super) fn preparation_refusal_is_pending(
+    reason: &str,
+    intents: &ProductIntents,
+    views: &SessionViews,
+) -> Option<bool> {
+    let command = reason.strip_prefix(PREPARATION_REFUSAL)?;
+    Some(latest_loss(intents).is_some_and(|loss| {
+        loss.decided.as_deref() == Some(command) && !views.state.deliveries.contains_key(command)
+    }))
 }
 
 /// Where this open's scan for a lost root turn starts; `None` for a

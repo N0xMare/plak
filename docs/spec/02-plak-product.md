@@ -4667,9 +4667,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   after owner loss under `hold`, a lost continuation that requires a fresh
   Resume even under `continue`, or child recovery. A recovery pause for the
   very turn that an automatic or already consented continuation will replace
-  does not ask for operator attention. It still pauses ordinary wakes until
-  the continuation is admitted, and the continuation submission itself is
-  not counted as a queued wake. This part can be read
+  does not ask for operator attention before admission unless preparation of
+  that pending continuation was refused. The host records that refusal
+  against the exact continuation and the attention notice offers Resume after
+  loss to retry, or Stop to leave the turn interrupted. The pause still
+  blocks ordinary wakes until the continuation is admitted; the continuation
+  submission itself is not counted as a queued wake. This part can be read
   from durable facts even while the session is dormant. It does not count
   unrelated mail to runnable nodes, and it does not decide admission or
   continue a turn. It is also

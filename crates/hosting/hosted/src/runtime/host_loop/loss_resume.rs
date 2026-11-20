@@ -13,8 +13,8 @@ use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
 use crate::runtime::root_loss::{
-    ROOT_HANDOFF_RESUME_TEXT, ROOT_LOSS_RESUME_TEXT, RootLossState, record_root_consent,
-    root_loss_is_handoff, root_loss_state,
+    ROOT_HANDOFF_RESUME_TEXT, ROOT_LOSS_RESUME_TEXT, RootLossState, record_preparation_refusal,
+    record_root_consent, root_loss_is_handoff, root_loss_state,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -187,6 +187,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if self.role.recovery.blocked() || self.role.pending_start.is_some() {
             return Ok(None);
         }
+        let result = self.prepare_root_loss_resume().await;
+        if result.is_err() {
+            let _ = record_preparation_refusal(
+                self.role.config.store.as_ref(),
+                &self.role.config.session,
+            );
+        }
+        result
+    }
+
+    async fn prepare_root_loss_resume(&mut self) -> CliResult<Option<NextPrompt>> {
         let rows = self.role.config.topology_rows();
         let text = if self.root_loss_handoff() {
             ROOT_HANDOFF_RESUME_TEXT

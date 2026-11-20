@@ -7,7 +7,7 @@ use plakous_recursive_subagents::tree::{ContinuationCause, LossContinuationState
 
 use super::root_loss::{
     RootLossState, RootStanding, is_root_loss_command, owner_loss_at_pause,
-    root_standing_from_intents,
+    preparation_refusal_is_pending, root_standing_from_intents,
 };
 
 /// Why the host is waiting for input. Contains no mail or provider text.
@@ -31,6 +31,8 @@ pub enum AttentionReason {
     HeldChild,
     /// One or more children need explicit recovery.
     ChildRecovery,
+    /// Consent was recorded, but the root continuation could not be prepared.
+    RootContinuationPreparationFailed,
 }
 
 impl AttentionReason {
@@ -51,6 +53,7 @@ impl AttentionReason {
             Self::HeldRoot => "root_held_after_loss",
             Self::HeldChild => "child_held_after_loss",
             Self::ChildRecovery => "child_recovery_required",
+            Self::RootContinuationPreparationFailed => "root_continuation_preparation_failed",
         }
     }
 
@@ -61,6 +64,9 @@ impl AttentionReason {
             Self::HeldRoot => "choose Resume after loss, or send a new prompt",
             Self::HeldChild => "choose Resume after loss for the held children",
             Self::ChildRecovery => "open Agents and retry recovery for the affected child",
+            Self::RootContinuationPreparationFailed => {
+                "choose Resume after loss to retry, or Stop to leave the turn interrupted"
+            }
             _ => "send a new prompt to continue",
         }
     }
@@ -94,7 +100,9 @@ impl SessionAttention {
             format!("Needs operator · {}", self.detail()),
         );
         match self.reason {
-            AttentionReason::HeldRoot | AttentionReason::HeldChild => {
+            AttentionReason::HeldRoot
+            | AttentionReason::HeldChild
+            | AttentionReason::RootContinuationPreparationFailed => {
                 row.with_remedy(NoticeRemedy::ResumeAfterLoss {})
             }
             // Retrying a named recovery is distinct from resuming a lost turn.
@@ -134,8 +142,12 @@ pub fn root_reason(
         PauseCause::ContextCapacity { .. } => AttentionReason::ContextCapacity,
         PauseCause::SessionRefusal { .. } => AttentionReason::SessionRefusal,
         PauseCause::CompactionNotApplied { .. } => AttentionReason::CompactionNotApplied,
-        PauseCause::Host(HostPauseCause::UnrecordedRefusal { .. }) => {
-            AttentionReason::UnrecordedRefusal
+        PauseCause::Host(HostPauseCause::UnrecordedRefusal { reason }) => {
+            match preparation_refusal_is_pending(&reason, intents, views) {
+                Some(true) => AttentionReason::RootContinuationPreparationFailed,
+                Some(false) => return None,
+                None => AttentionReason::UnrecordedRefusal,
+            }
         }
         PauseCause::Host(HostPauseCause::WakePreflightFailed { .. }) => {
             AttentionReason::WakePreflightFailed
