@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Maintainer Harbor / Terminal-Bench 4.0 entrypoint. Never part of just check.
+# Maintainer Harbor / Terminal-Bench 4.0 entrypoint. Outside the gate.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
@@ -203,7 +203,7 @@ print("eval: frozen pmux for linux/" + bins.arch + " from pseudomux " + bins.com
     cat <<'EOF'
 usage: eval/scripts/harbor.sh <bootstrap|check|build-agent|fetch-vendor-clis|fetch-pmux|eval|view> [harbor args]
 
-eval is opt-in and paid. It is not part of just check.
+eval is opt-in and paid. It is not part of the gate.
 Without --include-task-name, eval runs the full TB 4.0 dataset (66 tasks).
 Weekly A/B is eval/scripts/rung-a.sh; one TB 4.0 task is eval/scripts/rung-b.sh.
 fetch-pmux builds Full-cell pmux companions from PMUX_SRC (default ../pseudomux).

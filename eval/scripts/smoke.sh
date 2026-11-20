@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Five-task TB 4.0 smoke across v1 arms. Opt-in, paid, never just check.
+# Five-task TB 4.0 smoke across v1 arms. Opt-in, paid, outside the gate.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rung A: plumbing (local tiny tasks) then cheap TB 2.1 A/B.
 # Reviewed campaigns only; serial native-home pairs. OpenRouter is disabled.
-# Opt-in, paid, never just check.
+# Opt-in, paid, outside the gate.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"

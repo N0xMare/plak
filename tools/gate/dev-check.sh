@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Developer gate: check (default), fast iteration, platform, full.
-# Usage: tools/gate/dev-check.sh [--qual-container] [--fast [PACKAGE...] |
-#                            --platform | --batch-mac | --full | --soak | --steps GROUP[,GROUP...]]
-# Optional prefix: --static-scope full|shared|platform (explicit steps only).
+# Developer gate: batch (default), fast iteration, Mac batch, install, full.
+# Usage: tools/gate/dev-check.sh [--qual-container] [--fast [--rdeps] [PACKAGE...] |
+#                            --batch | --batch-mac | --install | --full | --soak |
+#                            --steps GROUP[,GROUP...]]
 # --steps selects exactly the named groups, in canonical order.
 # --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
 set -euo pipefail
@@ -10,38 +10,31 @@ root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
 # Canonical group order; every tier runs its groups in this order.
-all_groups=(static builds variants rustdoc tests-parallel tests-serial tests-durability contracts tooling package)
-check_groups=static,builds,tests-parallel,tests-serial,contracts,tooling
-platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
+all_groups=(static builds variants rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install package)
+batch_groups=static,standalone,contracts,tooling,tests-parallel,tests-durability,tests-serial
 
-tier=check
-static_scope=full
-explicit_static_scope=false
-selection=$check_groups
+tier=batch
+selection=$batch_groups
 packages=()
+fast_test_match=package
 # The musl qualification image lacks the wasm target; only that container may
 # skip the wasm check, and a run that skips records no evidence.
 qual_container=false
 if [[ "${1:-}" == --qual-container ]]; then qual_container=true; shift; fi
-if [[ "${1:-}" == --static-scope ]]; then
-  [[ $# -ge 2 ]] || { echo '--static-scope requires full, shared or platform' >&2; exit 2; }
-  explicit_static_scope=true
-  static_scope=$2; shift 2
-fi
-case "$static_scope" in full|shared|platform) ;; *) echo "unknown static scope: $static_scope" >&2; exit 2 ;; esac
-if [[ "$explicit_static_scope" == true && "${1:-}" != --steps ]]; then
-  echo '--static-scope requires --steps' >&2; exit 2
-fi
 case "${1:-}" in
-  --fast) tier=fast; selection=static,tests-parallel; shift; packages=("$@"); set -- ;;
-  --platform) tier=platform; static_scope=platform; selection=$platform_groups; shift ;;
-  --batch-mac) tier=batch-mac; static_scope=platform; selection=static,builds,tests-parallel; shift ;;
+  --fast)
+    tier=fast; selection=static,tests-parallel; shift
+    if [[ "${1:-}" == --rdeps ]]; then fast_test_match=rdeps; shift; fi
+    packages=("$@"); set -- ;;
+  --batch) shift ;;
+  --batch-mac) tier=batch-mac; selection=static,tests-parallel,tests-durability,tests-serial; shift ;;
+  --install) tier=install; selection=builds,rustdoc,tests-parallel,tests-install; shift ;;
   --full) tier=full; selection="$(IFS=,; echo "${all_groups[*]}")"; shift ;;
   --soak) tier=soak; selection=tests-serial,tests-durability; shift ;;
   --steps)
     tier=steps; selection="${2:-}"; shift
     if [[ $# -gt 0 ]]; then shift; fi ;;
-  -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
 esac
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 if [[ -z "$selection" || "$selection" == ,* || "$selection" == *, || "$selection" == *,,* ]]; then
@@ -83,15 +76,15 @@ export TMPDIR GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 isolated_home=$PLAK_HOME
 unset PLAK_HOME
 
-# Supported packages (spec 06 §3). Each also builds alone in the builds group:
-# Cargo resolves features per selected package set, so `cargo build -p plakd`
-# (the release resolution) can compile a closure no workspace build sees.
+# Supported packages (spec 06 §3) lint all targets standalone, and have
+# a separate default-resolution doc build at release.
 supported_packages=(plakous plakous-agent plakous-model plakous-tools plakd)
 
-# Fast narrows lint roots and the parallel lane to touched packages and their
-# reverse dependencies. Test compilation stays workspace all-features:
-# -p compilation would resolve a different feature graph.
+# Fast lints reverse dependencies but defaults to the changed packages' own
+# tests. Keep the main test build shared with batch and the real workers.
 scope=''
+mac_scope=''
+mac_serial_scope=''
 worker_clippy=()
 worker_features=()
 if [[ "$tier" == fast ]]; then
@@ -106,7 +99,7 @@ if [[ "$tier" == fast ]]; then
   if [[ ${#packages[@]} -eq 0 ]]; then
     selection=static
   elif [[ "${packages[*]}" != --workspace ]]; then
-    for name in "${packages[@]}"; do scope+="${scope:+ | }rdeps(=$name)"; done
+    for name in "${packages[@]}"; do scope+="${scope:+ | }$fast_test_match(=$name)"; done
   fi
   echo "fast: ${packages[*]:-no Rust package touched}"
   if [[ "${packages[*]:-}" != --workspace ]]; then
@@ -127,6 +120,31 @@ if [[ "$tier" == fast ]]; then
   fi
 fi
 
+# Explicit fan-out parallel steps can select the same committed batch base.
+if [[ "$tier" == batch || "$tier" == batch-mac ||
+      ( "$tier" == steps && ",$selection," == *",tests-parallel,"* && -n "${PLAK_BATCH_BASE:-}" ) ]]; then
+  scope="$(python3 tools/gate/changed_packages.py --batch-filter)"
+  echo "batch test scope: $scope"
+fi
+if [[ "$tier" == batch-mac ]]; then
+  mac_filter=''; mac_serial_filter=''; section=parallel
+  while IFS= read -r line; do
+    case "$line" in
+      '# serial') section=serial ;;
+      '#'*| '') ;;
+      *)
+        if [[ "$section" == parallel ]]; then
+          mac_filter+="${mac_filter:+ | }$line"
+        else
+          mac_serial_filter+="${mac_serial_filter:+ | }$line"
+        fi ;;
+    esac
+  done <tools/gate/mac-selection.filter
+  [[ -n "$mac_filter" && -n "$mac_serial_filter" ]] || { echo 'missing macOS test filter' >&2; exit 2; }
+  mac_scope="($mac_filter) & ($scope)"
+  mac_serial_scope="($mac_serial_filter) & ($scope)"
+fi
+
 # Bash 3.2 nounset rejects quoted empty arrays; guard their expansions.
 target_args=()
 if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then target_args=(--target "$CARGO_BUILD_TARGET"); fi
@@ -135,6 +153,8 @@ case "$target_dir" in
   /*) ;;
   *) target_dir="$PWD/$target_dir" ;;
 esac
+jobs="${CARGO_BUILD_JOBS:-$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN)}"
+if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]]; then jobs=1; fi
 py_host=''
 js_host=''
 mcp_server=''
@@ -484,7 +504,6 @@ run_lane() {
   case "$profile" in
     offline|durability) set -- ${nextest_partition[@]+"${nextest_partition[@]}"} "$@" ;;
   esac
-  prepare_tests
   PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" python3 tools/gate/test-processes.py -- cargo nextest run --locked --workspace --all-features \
     --profile "$profile" ${target_args[@]+"${target_args[@]}"} "$@"
 }
@@ -521,7 +540,7 @@ run_wasm_portability_checks() {
     # Override the process target for this command only, including the rustflags
     # the warning-denial helper selects for that triple.
     CARGO_BUILD_TARGET="$triple" run_build_denying_warnings \
-      cargo check --locked -p "$crate" --lib --target "$triple"
+      nice -n 5 cargo check --locked -p "$crate" --lib --target "$triple"
   done <<<"$crates"
 }
 
@@ -529,48 +548,51 @@ run_group() {
   case "$1" in
     static)
       local failed_steps=""
+      if [[ "$tier" == batch-mac ]]; then
+        tools/gate/clippy.sh
+        return
+      fi
       echo "== fmt =="
       cargo fmt --all --check || failed_steps="fmt"
       # Ruff covers the maintainer Python trees. vendor/ and Harbor task
       # fixtures are excluded in the root tool config, not here.
-      if [[ "$static_scope" != platform ]]; then
-        echo "== ruff =="
-        ruff check tools tests/tooling tests/live eval \
-          || failed_steps="${failed_steps:+$failed_steps }ruff"
-        ruff format --check tools tests/tooling tests/live eval \
-          || failed_steps="${failed_steps:+$failed_steps }ruff-format"
-      fi
-      structure_log='' structure_status=''
-      if [[ "$static_scope" == platform ]]; then
-        echo "skip structure checkers: platform-independent (check/full on Linux)"
-      else
-        echo "== dependencies: fetch locked (offline first) =="
-        cargo fetch --locked --offline || cargo fetch --locked \
-          || failed_steps="${failed_steps:+$failed_steps }fetch"
-        # The structure checkers run beside clippy: they need the fetched
-        # dependencies but no build of clippy's, and the feature checker's
-        # library checks build into a directory of their own, so neither
-        # waits on the other's Cargo build lock. Their output follows
-        # clippy's. No wall-clock assertion runs in this group.
-        structure_log="$(mktemp "$TMPDIR/plakd-structure.XXXXXX")"
-        structure_status="$(mktemp "$TMPDIR/plakd-structure-status.XXXXXX")"
-        (
-          failed=''
-          echo "== structure: workspace =="
-          python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
-          echo "== structure: features (static) =="
-          CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
-            || failed="${failed:+$failed }features"
+      echo "== ruff =="
+      ruff check tools tests/tooling tests/live eval \
+        || failed_steps="${failed_steps:+$failed_steps }ruff"
+      ruff format --check tools tests/tooling tests/live eval \
+        || failed_steps="${failed_steps:+$failed_steps }ruff-format"
+      echo "== dependencies: fetch locked (offline first) =="
+      cargo fetch --locked --offline || cargo fetch --locked \
+        || failed_steps="${failed_steps:+$failed_steps }fetch"
+      # The feature checks build into a separate directory and can run beside
+      # workspace clippy. Split the jobs cap between the two resolutions.
+      local structure_jobs=$((jobs / 4)) clippy_jobs
+      if [[ "$structure_jobs" -lt 1 ]]; then structure_jobs=1; fi
+      clippy_jobs=$((jobs - structure_jobs))
+      structure_log="$(mktemp "$TMPDIR/plakd-structure.XXXXXX")"
+      structure_status="$(mktemp "$TMPDIR/plakd-structure-status.XXXXXX")"
+      (
+        export CARGO_BUILD_JOBS=$structure_jobs
+        failed=''
+        echo "== structure: workspace =="
+        python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
+        echo "== structure: features (static) =="
+        CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
+          || failed="${failed:+$failed }features"
+        if [[ "$tier" == full ]]; then
           echo "== structure: evidence allowlist =="
           python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
-          printf '%s' "$failed" >"$structure_status"
-        ) >"$structure_log" 2>&1 &
-        structure_pid=$!
+        fi
+        printf '%s' "$failed" >"$structure_status"
+      ) >"$structure_log" 2>&1 &
+      structure_pid=$!
+      if [[ "$clippy_jobs" -lt 1 ]]; then
+        wait "$structure_pid" || true
+        clippy_jobs=1
       fi
-      # Workspace, then each supported package alone (tools/gate/clippy.sh).
       clippy_status="$(mktemp "$TMPDIR/plakd-clippy.XXXXXX")"
       clippy_failed=''
-      if [[ "$static_scope" != shared ]] && ! tools/gate/clippy.sh --status-file "$clippy_status" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
+      if ! CARGO_BUILD_JOBS=$clippy_jobs tools/gate/clippy.sh --status-file "$clippy_status" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
         s="$(cat "$clippy_status")"
         clippy_failed="${s:-clippy}"
       fi
@@ -587,18 +609,44 @@ run_group() {
         echo "== failed static steps: $failed_steps =="
         return 1
       fi ;;
+    standalone)
+      export CARGO_TARGET_DIR="$target_dir/standalone"
+      local order package targets standalone_failed=0
+      order="$(python3 tools/release/publish_plan.py order)"
+      [[ -n "$order" ]] || { echo 'standalone: empty publication plan' >&2; return 1; }
+      while read -r package _; do
+        echo "== clippy: $package alone =="
+        targets=(--lib --bins)
+        case " ${supported_packages[*]} " in
+          *" $package "*) targets=(--all-targets) ;;
+          *) if [[ "$package" == plakous-py-worker ]]; then targets=(--bins); fi ;;
+        esac
+        nice -n 5 cargo clippy --locked -p "$package" "${targets[@]}" ${target_args[@]+"${target_args[@]}"} -- -D warnings \
+          || standalone_failed=1
+      done <<<"$order"
+      run_wasm_portability_checks
+      return "$standalone_failed" ;;
+    package-lite) (
+      local scratch order package selection_args=()
+      scratch="$(mktemp -d "$TMPDIR/plakd-package-lite.XXXXXX")"
+      trap 'rm -rf "$scratch"' EXIT
+      python3 tools/release/publish_shape.py stage "$scratch/stage"
+      cd "$scratch/stage"
+      export CARGO_TARGET_DIR="$target_dir/package-lite"
+      order="$(python3 "$root/tools/release/publish_plan.py" order)"
+      [[ -n "$order" ]] || { echo 'package-lite: empty publication plan' >&2; return 1; }
+      while read -r package _; do selection_args+=(-p "$package"); done <<<"$order"
+      echo "== package the publishable cohort without verification =="
+      nice -n 5 cargo package --locked --no-verify --offline "${selection_args[@]}"
+    ) ;;
     builds)
-      echo "== default features =="
-      run_build_denying_warnings cargo build --locked --workspace --lib --bins ${target_args[@]+"${target_args[@]}"}
-      # Before the maintainer build: the linkage check reads that build's plakd.
-      for package in "${supported_packages[@]}"; do
-        echo "== $package alone: its own default features =="
-        run_build_denying_warnings cargo build --locked -p "$package" --lib --bins ${target_args[@]+"${target_args[@]}"}
-      done
+      echo "== release resolution (default plakd features) =="
+      run_build_denying_warnings cargo build --locked -p plakd --bins ${target_args[@]+"${target_args[@]}"}
       echo "== maintainer features =="
       run_build_denying_warnings cargo build --locked -p plakd --features maintainer --bins ${target_args[@]+"${target_args[@]}"}
-      python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug"
-      run_wasm_portability_checks ;;
+      echo "== release sidecars =="
+      run_build_denying_warnings cargo build --locked -p plakous-py-worker -p plakous-js-runtime --bins ${target_args[@]+"${target_args[@]}"}
+      python3 tools/build/check-artifact-linkage.py "$target_dir/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}debug" ;;
     variants)
       # Release-candidate evidence (`just full` or an explicit variants step).
       # The integration batch does not build these reduced resolutions.
@@ -609,26 +657,27 @@ run_group() {
       run_build_denying_warnings python3 tools/gate/check_features.py --product-builds ${target_args[@]+"${target_args[@]}"} ;;
     rustdoc)
       echo "== rustdoc =="
-      RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"}
-      if [[ "$tier" != fast ]]; then
-        for package in "${supported_packages[@]}"; do
-          echo "== rustdoc: $package alone =="
-          RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
-        done
-      fi ;;
+      RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked ${target_args[@]+"${target_args[@]}"} ;;
+    rustdoc-alone)
+      export CARGO_TARGET_DIR="$target_dir/rustdoc-alone"
+      for package in "${supported_packages[@]}"; do
+        echo "== rustdoc: $package alone =="
+        RUSTDOCFLAGS="-D warnings" cargo doc -p "$package" --no-deps --locked ${target_args[@]+"${target_args[@]}"}
+      done ;;
     tests-parallel)
       echo "-- nextest: parallel lane (profile offline) --"
-      if [[ -n "$scope" ]]; then
-        run_lane offline --no-tests=pass -E "$scope"
+      if [[ -n "${mac_scope:-$scope}" ]]; then
+        run_lane offline --no-tests=pass -E "${mac_scope:-$scope}"
       else
         run_lane offline
       fi ;;
     tests-serial)
       echo "-- nextest: serial lane (profile serial, wall-clock budgets, one thread) --"
-      prepare_tests
       local serial_status=0
       if [[ "$tier" != soak ]]; then
-        run_lane serial --test-threads=1 || serial_status=$?
+        local filter=()
+        if [[ -n "$mac_serial_scope" ]]; then filter=(--no-tests=pass -E "$mac_serial_scope"); fi
+        run_lane serial --test-threads=1 ${filter[@]+"${filter[@]}"} || serial_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: long-turn retirement soak (ignored evidence, one thread) --"
@@ -638,19 +687,14 @@ run_group() {
       return "$serial_status" ;;
     tests-durability)
       echo "-- nextest: durability lane (profile durability, host-scaled weighted crash matrices) --"
-      prepare_tests
       local durability_status=0
       if [[ "$tier" != soak ]]; then
         local durability_config="$TMPDIR/nextest-durability.toml" durability_threads
         durability_threads=$(python3 tools/gate/nextest_layout.py .config/nextest.toml "$durability_config") || return
         echo "-- durability pool: $durability_threads slots --"
-        # Check the full restart-family union before running a partition; a
-        # shard need not contain all groups.
-        PLAK_HOME="$isolated_home" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
-          cargo nextest list --locked --workspace --all-features --profile durability \
-          --config-file "$durability_config" ${target_args[@]+"${target_args[@]}"} --message-format json \
-          | python3 tools/gate/check_restart_families.py
-        run_lane durability --config-file "$durability_config" --test-threads="$durability_threads" || durability_status=$?
+        local filter=()
+        if [[ -n "$mac_scope" ]]; then filter=(--no-tests=pass -E "$mac_scope"); fi
+        run_lane durability --config-file "$durability_config" --test-threads="$durability_threads" ${filter[@]+"${filter[@]}"} || durability_status=$?
       fi
       if [[ "$tier" == full || "$tier" == soak ]]; then
         echo "-- nextest: full indexed retirement soak (ignored evidence, one thread) --"
@@ -658,12 +702,19 @@ run_group() {
           -E 'test(soak_ledger_retirement_)' || durability_status=$?
       fi
       return "$durability_status" ;;
+    tests-install)
+      # Until the install partition is defined, its rows still run in the
+      # regular lanes at batch and install-checks.
+      if [[ ! -f .config/nextest.toml ]] || ! grep -q '^\[profile\.install\]$' .config/nextest.toml; then
+        echo "== no separate install test profile =="
+        return 0
+      fi
+      run_lane install --test-threads=1 ;;
     contracts)
       echo "== positive/negative public compile contracts =="
-      python3 tools/gate/check_public_compile.py ;;
+      nice -n 5 python3 tools/gate/check_public_compile.py ;;
     tooling)
       echo "== structure: checker tests and real-host reference client =="
-      prepare_tests tooling
       PLAK_TOOLING_BINARY="$plak_host" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
         PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" \
         python3 tools/gate/run_tooling_tests.py -v ;;
@@ -675,6 +726,8 @@ run_group() {
       fi
       echo "== publish dry run: prefetch inputs, then verify the cohort offline =="
       tools/release/publish.sh --gate ;;
+    test-build)
+      prepare_tests "$test_build_mode" ;;
     *) echo "unimplemented step group: $1" >&2; exit 2 ;;
   esac
 }
@@ -732,69 +785,97 @@ run_timed() {
   fi
 }
 
-# Groups that build only in directories of their own (the contract fixtures'
-# cache, the publish dry run's package target) and assert nothing about wall
-# time run beside the others when no test lane is selected: a test lane's
-# wall-clock budgets must not share the host with their compiles. Package,
-# the longest, starts with the gate; contracts starts as static ends. Their
-# output follows, in canonical order, once they end; tooling, which has short
-# process timeouts, waits for them first.
-early=() late=()
-if [[ ",$selection," != *",tests-"* ]]; then
-  if [[ ",$selection," == *",package,"* ]]; then early+=(package); fi
-  if [[ ",$selection," == *",contracts,"* ]]; then late+=(contracts); fi
-  if [[ ",$selection," != *",static,"* ]]; then early+=(${late[@]+"${late[@]}"}); late=(); fi
+selected() { [[ ",$selection," == *",$1,"* ]]; }
+
+if selected static; then run_timed static; fi
+
+# Nice compile-only jobs run beside the one shared test build, never beside
+# a test lane or tooling. Even under an explicit Cargo jobs cap the children
+# collectively get no more slots than that cap.
+compile_only=()
+if selected standalone; then
+  compile_only+=(standalone)
+  # Full packaging already exercises no-verify on the same cohort.
+  if ! selected package || [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
+    compile_only+=(package-lite)
+  fi
 fi
+if selected contracts; then compile_only+=(contracts); fi
+
+# Install/RC link and doc commands use the main target before test preparation.
+# In particular a later build must not overwrite the selected host binary.
+for group in builds variants rustdoc rustdoc-alone; do
+  if selected "$group"; then run_timed "$group"; fi
+done
+
+test_build_needed=false
+test_build_mode=''
+if [[ ",$selection," == *",tests-"* ]] || selected tooling; then test_build_needed=true; fi
+if selected tooling; then test_build_mode=tooling; fi
 background=()
-overlapped=' '
-start_overlapping() {
-  local group log state
-  for group in "$@"; do
+compile_count=${#compile_only[@]}
+test_jobs=$jobs
+if [[ "$compile_count" -gt 0 && "$jobs" -gt "$compile_count" ]]; then
+  compile_jobs=$((jobs / 8))
+  if [[ "$test_build_needed" == false ]]; then
+    compile_jobs=$((jobs / compile_count))
+  fi
+  if [[ "$compile_jobs" -lt 1 ]]; then compile_jobs=1; fi
+  for group in ${compile_only[@]+"${compile_only[@]}"}; do
+    group_jobs=$compile_jobs
+    if [[ "$group" == package-lite ]]; then group_jobs=1; fi
+    test_jobs=$((test_jobs - group_jobs))
     log="$(mktemp "$TMPDIR/plakd-group-$group.XXXXXX")"
     state="$(mktemp "$TMPDIR/plakd-group-state-$group.XXXXXX")"
     (
+      export CARGO_BUILD_JOBS=$group_jobs
       gate_status=0 failed_groups='' skipped_checks=''
       run_timed "$group"
-      printf '%s\n%s\n' "$gate_status" "$failed_groups" >"$state"
-      printf '%s' "$skipped_checks" >>"$state"
+      printf '%s\n%s' "$gate_status" "$skipped_checks" >"$state"
     ) >"$log" 2>&1 &
-    background+=("$group:$!:$log:$state")
-    overlapped+="$group "
+    background+=("$!:$log:$state")
   done
-}
-finish_overlapping() {
-  local name entry group pid log state status rest
-  for name in "${all_groups[@]}"; do
-    for entry in ${background[@]+"${background[@]}"}; do
-      if [[ "${entry%%:*}" == "$name" ]]; then break; fi
-      entry=''
-    done
-    if [[ -z "${entry:-}" ]]; then continue; fi
-    IFS=: read -r group pid log state <<<"$entry"
-    wait "$pid" || true
-    cat "$log"
-    status="$(sed -n '1p' "$state")"
-    rest="$(sed -n '3,$p' "$state")"
-    if [[ -n "$rest" ]]; then skipped_checks+="$rest"$'\n'; fi
-    if [[ "${status:-1}" -ne 0 ]]; then
-      failed_groups="${failed_groups:+$failed_groups }$group"
-      if [[ "$gate_status" -eq 0 ]]; then gate_status=$status; fi
-    fi
-    rm -f "$log" "$state"
-  done
-  background=()
-}
-start_overlapping ${early[@]+"${early[@]}"}
-for group in "${all_groups[@]}"; do
-  if [[ ",$selection," != *",$group,"* ]]; then continue; fi
-  case "$overlapped" in
-    *" $group "*) continue ;;
-  esac
-  if [[ "$group" == tooling ]]; then finish_overlapping; fi
-  run_timed "$group"
-  if [[ "$group" == static ]]; then start_overlapping ${late[@]+"${late[@]}"}; fi
+else
+  for group in ${compile_only[@]+"${compile_only[@]}"}; do run_timed "$group"; done
+fi
+
+test_build_ok=true
+if [[ "$test_build_needed" == true ]]; then
+  if [[ "$compile_count" -eq 0 ]]; then
+    run_timed test-build
+  else
+    CARGO_BUILD_JOBS=$test_jobs run_timed test-build
+  fi
+  if [[ -z "$py_host" ]]; then test_build_ok=false; fi
+fi
+
+for index in ${!background[@]}; do
+  group=${compile_only[index]}
+  IFS=: read -r pid log state <<<"${background[index]}"
+  wait "$pid" || true
+  cat "$log"
+  status="$(sed -n '1p' "$state")"
+  rest="$(sed -n '2,$p' "$state")"
+  if [[ -n "$rest" ]]; then skipped_checks+="$rest"$'\n'; fi
+  if [[ "${status:-1}" -ne 0 ]]; then
+    failed_groups="${failed_groups:+$failed_groups }$group"
+    if [[ "$gate_status" -eq 0 ]]; then gate_status=${status:-1}; fi
+  fi
+  rm -f "$log" "$state"
 done
-finish_overlapping
+
+for group in "${all_groups[@]}"; do
+  if ! selected "$group"; then continue; fi
+  case "$group" in
+    tooling|tests-*)
+      if [[ "$test_build_ok" == true ]]; then
+        run_timed "$group"
+      else
+        echo "== not run: $group (test build failed) =="
+      fi ;;
+    package) run_timed "$group" ;;
+  esac
+done
 while IFS= read -r skipped; do
   if [[ -n "$skipped" ]]; then echo "== skipped: $skipped =="; fi
 done <<<"$skipped_checks"

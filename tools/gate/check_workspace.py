@@ -5211,7 +5211,7 @@ PORTABLE_CRATES = (
 )
 # Libraries whose default features compile for the portable target although an
 # optional feature makes their full closure native, so they stay off
-# PORTABLE_CRATES and its fence. The builds group checks their default library
+# PORTABLE_CRATES and its fence. Standalone checks their default library
 # for wasm32 beside the portable set; `--wasm-libraries` prints both.
 PORTABLE_DEFAULT_LIBRARIES = ("plakous-store",)
 # The fence resolves this target, not the host: cfg(target_arch = "wasm32")

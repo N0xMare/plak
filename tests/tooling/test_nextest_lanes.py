@@ -9,7 +9,10 @@ the exclusion names would never run at all.
 
 from __future__ import annotations
 
+from functools import cache
+import json
 import re
+import subprocess
 import sys
 import tomllib
 import unittest
@@ -86,7 +89,7 @@ def exact_test_paths(path: Path, text: str, prefix: tuple[str, ...] | None = Non
     return found
 
 
-def exact_inventory(root: Path) -> set[str]:
+def target_tests(entry: Path) -> set[str]:
     found: set[str] = set()
     visited: set[tuple[Path, tuple[str, ...]]] = set()
 
@@ -126,31 +129,36 @@ def exact_inventory(root: Path) -> set[str]:
                     child = base.joinpath(*inline[i], name, "mod.rs")
             visit(child, (*prefix, *inline[i], name))
 
-    root_manifest = root / "Cargo.toml"
-    workspace = tomllib.loads(root_manifest.read_text()).get("workspace", {})
-    members = workspace.get("members", [])
-    manifests = (
-        {path / "Cargo.toml" for member in members for path in root.glob(member)}
-        if members
-        else {root_manifest}
-    )
-    for manifest in manifests:
-        data = tomllib.loads(manifest.read_text())
-        if "package" not in data:
-            continue
-        package = manifest.parent
-        entries = {package / "src/lib.rs", package / "src/main.rs"}
-        for kind in ("lib", "bin", "test"):
-            items = data.get(kind, [])
-            if isinstance(items, dict):
-                items = [items]
-            entries.update(package / item["path"] for item in items if "path" in item)
-        for directory in (package / "tests", package / "src/bin"):
-            entries.update(directory.glob("*.rs"))
-            entries.update(directory.glob("*/main.rs"))
-        for entry in entries:
-            visit(entry, ())
+    visit(entry, ())
     return found
+
+
+@cache
+def target_inventory(root: Path) -> dict[tuple[str, str, str], set[str]]:
+    metadata = json.loads(
+        subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root
+        )
+    )
+    return {
+        (package["name"], kind, target["name"]): target_tests(Path(target["src_path"]))
+        for package in metadata["packages"]
+        for target in package["targets"]
+        if target["test"]
+        for kind in target["kind"]
+    }
+
+
+def exact_inventory(root: Path) -> set[str]:
+    return set().union(*target_inventory(root).values())
+
+
+def test_match(selector: str, name: str) -> bool:
+    if selector.startswith("="):
+        return name == selector[1:]
+    if selector.startswith("/") and selector.endswith("/"):
+        return re.search(selector[1:-1], name) is not None
+    return selector in name
 
 
 class NextestLaneTests(unittest.TestCase):
@@ -276,6 +284,55 @@ class NextestLaneTests(unittest.TestCase):
                     self.assertRegex(f"prefix::{family}::{role}_{group}", pattern)
             self.assertNotRegex(f"prefix::{family}", pattern)
             self.assertNotRegex(f"prefix::{family}::root_8", pattern)
+
+    def test_restart_families_cover_every_macro_generated_group(self) -> None:
+        directory = ROOT / "bin/plakd/tests/integration/host_skeleton/crash"
+        groups = exact_test_paths(
+            Path("restart_matrix.rs"), (directory / "restart_matrix.rs").read_text(), ()
+        )
+        expected = {f"{role}_{group}" for role in ("root", "child") for group in range(8)}
+        self.assertEqual({name for name in groups if re.match(r"^(root|child)_", name)}, expected)
+        modules = (directory / "wire/cuts.rs").read_text()
+        for family in ("wire_host_restart", "wire_host_restart_switch"):
+            self.assertRegex(modules, rf"mod {family} \{{[^}}]*restart_matrix::matrix_tests!")
+            lane = (
+                "install"
+                if family.endswith("_switch") and "install" in profiles()
+                else "durability"
+            )
+            for group in expected:
+                name = f"host_skeleton::crash::wire::cuts::{family}::{group}"
+                self.assertTrue(any(test_match(term, name) for term in predicates(lane)), name)
+
+    def test_each_mac_filter_clause_has_a_test_in_its_selected_target(self) -> None:
+        inventory = target_inventory(ROOT)
+        filters = ROOT / "tools/gate/mac-selection.filter"
+        # Inside a clause, only the test regex may contain a union.
+        for line in filters.read_text().splitlines():
+            if not line or line.startswith("#"):
+                continue
+            with self.subTest(clause=line):
+                clause = line.removeprefix("(").removesuffix(")") if line.startswith("(") else line
+                selected = inventory.items()
+                pattern = None
+                for term in clause.split(" & "):
+                    op, _, selector = term.removesuffix(")").partition("(")
+                    if op == "test":
+                        pattern = selector
+                    else:
+                        index = {"package": 0, "kind": 1, "binary": 2}[op]
+                        selected = [
+                            (key, tests)
+                            for key, tests in selected
+                            if test_match(selector, key[index])
+                        ]
+                self.assertTrue(
+                    any(
+                        pattern is None or test_match(pattern, test)
+                        for _, tests in selected
+                        for test in tests
+                    )
+                )
 
     def test_every_lane_predicate_names_a_test_or_module_in_the_tree(self) -> None:
         names = predicates("serial") + predicates("durability")

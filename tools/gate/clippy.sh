@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# The static group's clippy: the workspace, then each supported package alone.
+# The static group's all-feature clippy: the workspace or selected packages.
 # Usage: tools/gate/clippy.sh [--status-file PATH] [--packages PACKAGE...]
-# On failure the status file receives the same names the gate summarizes
-# (`clippy` and `clippy:<package>`), and the exit status is 1. Every package
-# still runs. A supported-package list that does not match the manifest writes
-# `clippy:packages` and exits before cargo.
+# On failure the status file receives `clippy` and the exit status is 1.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -24,42 +21,6 @@ target_args=()
 if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
   target_args=(--target "$CARGO_BUILD_TARGET")
 fi
-# Same five as dev-check.sh supported_packages (spec 06 §3). The manifest
-# class is the source of truth; a copied gate under test has no workspace
-# manifest, and the real tree does.
-packages=(plakous plakous-agent plakous-model plakous-tools plakd)
-if [[ -f Cargo.toml ]]; then
-  if ! python3 - "${packages[@]}" <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-expected = sys.argv[1:]
-root = Path(".").resolve()
-workspace = tomllib.loads((root / "Cargo.toml").read_text())
-found = []
-for member in workspace["workspace"]["members"]:
-    manifest = tomllib.loads((root / member / "Cargo.toml").read_text())
-    package = manifest.get("package") or {}
-    meta = package.get("metadata", {}).get("plakous", {})
-    if meta.get("class") == "supported":
-        found.append(package["name"])
-if sorted(found) != sorted(expected):
-    raise SystemExit(
-        "supported packages "
-        + " ".join(expected)
-        + " do not match manifest class supported: "
-        + " ".join(sorted(found))
-    )
-PY
-  then
-    # Write before exiting. An empty status file is not a failed step.
-    if [[ -n "$status_file" ]]; then
-      printf '%s' 'clippy:packages' >"$status_file"
-    fi
-    exit 1
-  fi
-fi
 failed=""
 selection=(--workspace)
 if [[ "$scoped" == true ]]; then
@@ -78,17 +39,6 @@ if ! cargo clippy --locked ${selection[@]+"${selection[@]}"} --all-features --al
   failed="clippy"
 fi
 echo "== clippy time: selected $((SECONDS - started)) s =="
-if [[ "$scoped" != true ]]; then
-  for package in "${packages[@]}"; do
-    started=$SECONDS
-    echo "== clippy: $package alone =="
-    if ! cargo clippy --locked -p "$package" --all-targets \
-      ${target_args[@]+"${target_args[@]}"} -- -D warnings; then
-      failed="${failed:+$failed }clippy:$package"
-    fi
-    echo "== clippy time: $package $((SECONDS - started)) s =="
-  done
-fi
 if [[ -n "$status_file" ]]; then
   printf '%s' "$failed" >"$status_file"
 fi

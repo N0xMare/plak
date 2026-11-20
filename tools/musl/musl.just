@@ -6,7 +6,7 @@ set working-directory := '../..'
 default:
     @just --justfile "{{justfile()}}" --list musl
 
-# Linux x86_64 with the rustup musl target and musl-gcc; defaults to platform.
+# Linux x86_64 with the rustup musl target and musl-gcc; defaults to complete native coverage.
 native *ARGS:
     tools/musl/musl-native.sh {{ARGS}}
 

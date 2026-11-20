@@ -11,41 +11,30 @@ mod prompts 'tools/prompts/prompts.just'
 mod dev 'tools/dev/dev.just'
 mod harbor 'eval/harbor.just'
 
-# Global fmt/structure, affected-package clippy, then the parallel lane over packages the
-# working-tree diff touches (or the named ones) and their dependents.
-[doc("static checks, then the parallel lane for the diff's packages and dependents")]
+# Global fmt/structure, affected-package clippy, then the touched packages' tests.
+[doc("static and touched-package parallel tests; --rdeps includes dependent tests")]
 fast *PACKAGES:
     tools/gate/dev-check.sh --fast {{PACKAGES}}
 
-[doc("macOS integration batch: fmt, platform clippy, builds and parallel tests")]
+[doc("integration batch: static, standalone, contracts, tooling and scoped tests")]
+batch:
+    tools/gate/dev-check.sh --batch
+
+[doc("macOS integration batch: workspace clippy and platform-sensitive tests")]
 batch-mac:
     tools/gate/dev-check.sh --batch-mac
 
-[doc("exact-tree macOS install supplement: serial, durability and package verification")]
+[doc("exact-tree macOS install supplement: complete offline test suite")]
 install-checks:
-    tools/gate/dev-check.sh --steps tests-serial,tests-durability,package
-
-# Linux workspace gate: fmt/clippy, structure checks, default/maintainer builds,
-# parallel and serial lanes, public contracts and tooling. No durability lane.
-[doc("Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel and serial, contracts, tooling")]
-check:
-    tools/gate/dev-check.sh
+    tools/gate/dev-check.sh --steps tests-parallel,tests-serial,tests-durability,tests-install
 
 # Exactly these comma-separated groups, in canonical order (for independent lanes).
 [doc("exactly these comma-separated groups, in canonical order")]
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
-# Per install on macOS/musl: fmt/clippy, default/maintainer builds, parallel,
-# serial and durability lanes. No platform-independent structure checkers or
-# public compile contracts.
-[doc("per install: fmt, clippy, builds, parallel, serial and durability")]
-platform:
-    tools/gate/dev-check.sh --platform
-
-# Every group: check + rustdoc, the durability lane and the publish dry run.
 # A pass on a clean tree records it as publication evidence.
-[doc("every group: check, plus rustdoc, durability and the publish dry run")]
+[doc("release candidate: every group, including archive verification and long soaks")]
 full:
     tools/gate/dev-check.sh --full
 
@@ -70,8 +59,7 @@ fmt:
     cargo fmt --all; \
     ruff format tools tests/tooling tests/live eval
 
-# Workspace clippy, then each supported package alone. Same invocations as static.
-[doc("workspace clippy, then each supported package alone")]
+[doc("workspace all-features clippy, warnings denied")]
 clippy:
     tools/gate/clippy.sh
 
@@ -95,8 +83,7 @@ nextest *ARGS:
 build profile:
     tools/build/recipe-build.sh {{quote(profile)}}
 
-# Install an immutable snapshot and point ~/.local/bin at it.
-# flavor: release (plain release) or maintainer (dogfood profile).
-[doc("release or maintainer immutable snapshot on PATH")]
-install flavor:
-    tools/build/recipe-install.sh {{quote(flavor)}}
+# No flavor runs the install gate; an explicit flavor installs the snapshot.
+[doc("install gate; with release or maintainer, install an immutable snapshot on PATH")]
+install flavor="":
+    if [[ -n {{quote(flavor)}} ]]; then tools/build/recipe-install.sh {{quote(flavor)}}; else tools/gate/dev-check.sh --install; fi

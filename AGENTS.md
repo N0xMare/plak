@@ -34,7 +34,7 @@ history, never prerequisite reading, and never cited as authority.
 MSRV and pinned toolchain are Rust 1.100.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest, cargo-deny and ruff and the `wasm32-unknown-unknown` rustc
-target the `builds` group checks the portable crates for; an existing setup
+target the `standalone` group checks the portable crates for; an existing setup
 re-runs it to add that target. The tools check every tier runs first also
 requires a working jj: `PLAK_TEST_JJ` when set, else `jj` on `PATH`, else the
 newest pinned jj that install unpacks under `.dev-tools/jj`.
@@ -46,21 +46,21 @@ batch, install and publication gates are spec 06 §8.
 offline image `plak-qual-base:86ab9e67`, which is not published (spec 06).
 
 ```text
-just fast [PKG...]        # static checks, then the parallel lane for the diff's packages and dependents
-just batch-mac            # Mac batch: fmt/clippy, builds and parallel tests
-just install-checks       # exact-tree Mac install supplement: serial, durability, package
+just fast [--rdeps] [PKG...] # static and changed-package parallel tests
+just batch                # standalone lint, contracts, tooling and scoped integration tests
+just batch-mac            # Mac workspace clippy and platform-sensitive tests
+just install              # Linux install supplement: builds, rustdoc and install tests
+just install-checks       # exact-tree Mac install supplement: full offline suite
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
-just check                # Linux workspace gate (no durability): fmt, clippy, structure, builds, parallel+serial, contracts, tooling
-just platform             # complete platform tier: fmt, clippy, builds and all three lanes
-just full                 # every group: check, plus variants, rustdoc, durability and the publish dry run
+just full                 # every group, including archive verification and long soaks
 just fmt                  # cargo fmt, then ruff format on the checked Python paths
-just clippy               # workspace clippy, then each supported package alone
+just clippy               # workspace all-features clippy, warnings denied
 just nextest ARGS         # pinned cargo nextest under the isolated test environment
 just publish [--execute]  # crates.io cohort dry run; --execute uploads
 just dev-tools ARGS       # pinned cargo-nextest, cargo-deny and ruff; `deny` is the dependency audit
 just build PROFILE        # debug, release, maintainer or profiling; no snapshot and no PATH change
 just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
-just musl native          # Linux x86_64 musl platform tier, static PIE via rust-lld
+just musl native          # complete Linux x86_64 musl coverage (use --batch for integration)
 just musl container       # full tier in the pinned offline Alpine image; maintainer-only
 just live RECIPE          # smoke, soak, jobs, mcp-oauth, census, estimate, daily-driver, qualify
 just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
@@ -78,51 +78,27 @@ runtime. Vendor comparator arms upload pinned Linux CLI prefixes matching
 they do not nvm/`@latest`/`curl | bash` per trial. When a Claude native-home
 arm exists, compare interactive subscription OAuth, not `claude --print`.
 
-All tiers use `tools/gate/dev-check.sh`; Rust test lanes build the whole workspace
-with all features and share that artifact set. Default and reduced product
-resolutions have separate compile evidence. The groups, in canonical order, are
-`static` (fmt, ruff check and ruff format --check, locked dependency fetch,
-offline first, online only for missing cache inputs, the workspace and feature
-structure checkers, clippy -D warnings on the workspace and on each supported
-package alone),
-`builds` (default-feature, each supported package alone in its own default
-resolution, and maintainer-feature builds, plus a `wasm32-unknown-unknown`
-library check of the portable crate set, rustc warnings denied),
-`variants` (named API/minimal builds and an admission fixture, clippy
-with warnings denied, and feature-admission/read-only-store contracts; full only),
-`rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
-(public compile contracts), `tooling` (Python self-tests) and `package` (the
-publish dry run: `tools/release/publish.sh --gate` prefetches archive verification
-inputs offline first, refreshing a stale index entry a version requirement
-names and retrying offline once, online only for missing cache inputs, then
-packages and verifies the cohort strictly offline; compiled review time is informational
-here, while publication dry runs and uploads require more than a third of each
-review window remaining). Check runs all but variants, rustdoc, durability and package; platform runs
-static without ruff or the platform-independent structure checkers (fmt and
-clippy still run), builds and the
-three lanes; full runs every group, and a full pass on a clean tree records that
-tree as the evidence `just publish` requires. Later commits that change only
-`AGENTS.md`, `CHANGELOG.md`, `tests/live/STATUS.md`, `docs/spec/**` (not spec 07) or
-`docs/user-guide/**` keep that evidence; a `README.md` change also needs
-`just steps package` on the new tree (spec 06 §6.5).
-`just fast` keeps fmt/ruff and structural checks global, narrows clippy to the
-touched packages and conservative reverse dependencies, and compiles only
-affected facade/hosted feature profiles; batch/full retain full clippy and
-all feature profiles. Supported-package-alone rustdoc is full/RC only.
-The integration batch and exact-tree install supplement are spec 06 §8.
-`just fast` maps the working-tree diff against HEAD to packages (a root Cargo
-input means all of them), runs static and the parallel lane over `rdeps(...)`
-of those packages; it is worker evidence, not a substitute for the integration
-batch gate. Every
-selected group runs even after another group fails; the final summary names
-all failed groups and the gate exits non-zero. Explicit groups do not imply
-other groups; Rust test groups still prepare their real-worker prerequisite.
-The nextest lanes are profiles in `.config/nextest.toml`: `offline` (parallel),
-`serial` (wall-clock budgets) and `durability` (crash matrices), which
-partition the suite; a new serial test goes into the `serial` or `durability`
-filter and the `offline` exclusion. Contract fixture builds use a persistent
-`.public-contracts/<target-dir-name>/<triple>` directory beside
-`CARGO_TARGET_DIR` (`PLAK_PUBLIC_CONTRACTS_DIR` overrides it).
+All tiers use `tools/gate/dev-check.sh`. Fast keeps format and structure checks
+global and narrows clippy, feature-profile compiles and the parallel lane by
+package; the test build uses the shared all-feature workspace resolution.
+Set `PLAK_BATCH_BASE` to the commit before the integration batch. Linux batch
+uses the changed packages' reverse dependencies plus runtime-binary edges
+for parallel tests; Mac batch intersects that scope with the platform-sensitive
+filters. Linux batch overlaps standalone, package-lite and public compile
+contracts with test preparation, never with tooling or timed test lanes.
+
+Production install uses exact-tree batch evidence plus the install groups,
+full Mac suite and strict crash sweep (spec 06 §8). Full adds release-only
+variants, standalone rustdoc, archive verification and ignored retirement
+soaks. A passing full run on a clean tree records the evidence publication
+requires. Inert documentation changes can reuse it; a `README.md` change
+needs new archive verification (spec 06 §6.5). Explicit groups do not imply
+other groups; test groups and tooling still prepare real worker binaries.
+
+The nextest profiles in `.config/nextest.toml` partition the offline suite.
+Keep new budget and crash cases in the reviewed lane, out of the parallel
+profile. Public compile contracts keep their own persistent cache beside the
+gate target (override with `PLAK_PUBLIC_CONTRACTS_DIR`).
 Hand-run nextest is `just nextest`. It exports the isolated test environment
 from `tools/gate/test-env.sh`: per-checkout `TMPDIR` (`tools/gate/test-tmpdir.sh`,
 `PLAK_TEST_TMPDIR` overrides), `PLAK_HOME` under that directory (mode 0700), an
@@ -160,7 +136,7 @@ requires locally declared UUID generation features, including for test code.
 It validates 2n+3 feature closures per package (none, each singleton, full
 minus each feature, default and full), with a reviewed cap of 24 public
 optional features. Reduced products compile only in the full-only `variants`
-group, not in `check`.
+group, not in batch.
 `check_features.py` owns the sole named-variant table. Only the default product
 is shipped and supported; API and minimal are built and tested only.
 The root workspace excludes `.plak` operator state and fork worktrees; the

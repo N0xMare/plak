@@ -107,7 +107,6 @@ class TouchedPackagesTests(unittest.TestCase):
             "docs/spec/07-config-reference.md",
             "docs/reference-config/config.toml",
             "docs/reference-config/agents/worker.toml",
-            "tests/fixtures/config-scenarios/tree-mixed-oauth/config.toml",
         ):
             with self.subTest(path=path):
                 self.assertEqual(
@@ -116,7 +115,6 @@ class TouchedPackagesTests(unittest.TestCase):
         self.assertEqual(
             self.touched(
                 "docs/reference-configs/config.toml",
-                "tests/fixtures/config-scenarios-old/config.toml",
                 "docs/spec/05-testing-and-evidence.md",
             ),
             [],
@@ -137,6 +135,70 @@ class TouchedPackagesTests(unittest.TestCase):
 
     def test_vendored_patch_sources_select_the_whole_workspace(self):
         self.assertEqual(self.touched("vendor/unclassified/src/lib.rs"), ["--workspace"])
+
+    def test_loose_test_fixtures_select_all_but_fixture_crates_keep_their_owners(self):
+        self.assertEqual(self.touched("tests/fixtures/config-scenarios/home.toml"), ["--workspace"])
+        self.assertEqual(
+            self.touched_in(
+                {"tests/fixtures/mcp-fake-server": "plakous-mcp-fake-server"},
+                "tests/fixtures/mcp-fake-server/src/main.rs",
+            ),
+            ["plakous-mcp-fake-server"],
+        )
+
+    def test_runtime_edges_add_consumers_of_changed_runtime_binaries(self):
+        packages = [
+            {"name": "dependency", "dependencies": []},
+            {
+                "name": "plakous-js-runtime",
+                "dependencies": [{"name": "dependency"}],
+            },
+            *(
+                {"name": name, "dependencies": []}
+                for name in (
+                    "plakous-py-worker",
+                    "plakous-cell",
+                    "plakd",
+                    "plakous-mcp-fake-server",
+                )
+            ),
+        ]
+        cell_consumers = "package(=plakd) | package(=plakous) | package(=plakous-hosted)"
+        for producer, consumers in (
+            ("dependency", cell_consumers),
+            ("plakous-py-worker", cell_consumers),
+            ("plakous-cell", cell_consumers),
+            ("plakd", "package(=plakous-offline-crash-harness)"),
+            (
+                "plakous-mcp-fake-server",
+                "package(=plakd) | package(=plakous-hosted) | package(=plakous-mcp)",
+            ),
+        ):
+            with self.subTest(producer=producer):
+                self.assertEqual(
+                    CHANGED.batch_filter([producer], packages), f"rdeps(={producer}) | {consumers}"
+                )
+        self.assertEqual(CHANGED.batch_filter(["--workspace"], packages), "all()")
+        self.assertEqual(CHANGED.batch_filter([], packages), "none()")
+
+    def test_install_path_triggers_nominate_the_directly_affected_families(self):
+        for path, name in (
+            ("bin/plakd/src/host/upgrade/carry.rs", "upgrade"),
+            ("crates/store/src/sqlite/host_move.rs", "upgrade"),
+            ("bin/plakd/src/store/revisions.rs", "upgrade"),
+            (
+                "crates/core/agent/src/runtime/operation_record/retirement/tests.rs",
+                "ledger-retirement",
+            ),
+            ("crates/common/image/src/lib.rs", "image-residency"),
+            ("crates/hosting/hosted/src/runtime/host_loop/residency.rs", "image-residency"),
+            ("bin/plakd/src/commands/runner/services.rs", "runner-startup"),
+            ("crates/common/runner-dial/src/lib.rs", "runner-startup"),
+            ("bin/plakd/tests/integration/host_skeleton/crash/wire/cuts.rs", "wire-restart-switch"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(CHANGED.install_families([path], {}), [name])
+        self.assertEqual(CHANGED.install_families(["AGENTS.md"], {}), [])
 
     def test_the_real_workspace_maps_every_manifest_to_its_package(self):
         dirs = CHANGED.package_dirs()

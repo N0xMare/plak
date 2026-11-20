@@ -951,7 +951,7 @@ For complete native musl platform evidence on a Linux x86_64 host:
 
 ```sh
 rustup target add x86_64-unknown-linux-musl
-just musl native          # defaults to --platform
+just musl native          # complete native build and offline test evidence
 just musl native --fast plakd  # optional targeted iteration
 ```
 
@@ -971,14 +971,13 @@ evidence. The Alpine qualification retains its own toolchain defaults.
 No host-specific paths are embedded. Missing host, target, compiler or linker
 prerequisites fail before Cargo with a message naming what is missing.
 It sets `CARGO_BUILD_TARGET=x86_64-unknown-linux-musl` and forwards the tier to
-`dev-check.sh`; `--platform` runs formatting, cfg-specific workspace clippy,
-default/maintainer feature builds and the parallel, serial and durability
-offline nextest lanes. It is genuine
+`dev-check.sh`; by default it runs static, install builds and the full
+offline test lanes. `--batch` and `--install` select the corresponding
+integration and installation groups instead. This is genuine
 musl build-and-test evidence on a GNU host, not Alpine container qualification.
 Apple Silicon batch evidence is `just batch-mac`; a production install adds
-`just install-checks` on that exact tree (§8). `just platform` remains the
-complete native platform tier. Platform-independent checks run once per
-integration batch, and `just full` retains every check (chapter 05 §1).
+`just install-checks` on that exact tree (§8). The shared checks run once per
+integration batch, and `just full` retains every group (chapter 05 §1).
 
 Before publication, run the full offline musl
 qualification on a Linux x86_64 Docker host:
@@ -1002,7 +1001,7 @@ substitute for them. The image's `nextest` target exports both binaries.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
 The pinned image includes the `wasm32-unknown-unknown` rustc target, so the
-`builds` group's wasm check runs there. `musl-check.sh` passes
+`standalone` group's wasm check runs there. `musl-check.sh` passes
 `--qual-container` to the gate, under which an image without the target skips
 that check instead of failing the tier; such a run names the skip in its final
 summary and records no gate evidence (section 7.5).
@@ -1572,7 +1571,7 @@ always verifies fresh; a successful verification still refreshes the receipt.
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
 | `tools/release/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify, or reuse a matching verification receipt (above); nothing uploaded |
-| `tools/release/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification, unless the verification receipt matches |
+| `tools/release/publish.sh --gate` | None (review time is informational) | Run by `just full`; the integration batch runs the standalone step instead. Offline-first verification-input prefetch, then strictly offline packaging and verification, unless the verification receipt matches |
 | `tools/release/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | Always verifies fresh, ignoring the receipt. Then `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
 Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
@@ -1585,7 +1584,7 @@ those dates never refuse a route. It resolves constants from each surface's
 source and the shared window constants in `plakous-auth`, failing closed on
 unreadable source. The `--gate` package group
 prints remaining days as a non-failing informational note instead. Neither
-`just check` nor `just full` has a time-dependent review-window precondition.
+`just batch` nor `just full` has a time-dependent review-window precondition.
 The hidden `test-clock` feature is excluded from supported feature closures
 and inventory, and checked absent from default, maintainer and release builds;
 only dev-dependencies or repository `test-hooks` enable it. The `plakous` and
@@ -1635,7 +1634,7 @@ path with its class, so the decision is auditable. On the `README.md` path the
 publish run's own packaging still packages and verifies the whole cohort at
 HEAD.
 
-The static group's `structure: evidence allowlist` step (`gate_evidence.py
+The full tier's `structure: evidence allowlist` step (`gate_evidence.py
 audit`) keeps the allowlist honest as a best-effort lint. It flags, in every
 tracked Rust, Python, shell, manifest, recipe or workflow file outside a
 comment or URL: an allowlisted path, a bare path-component literal (`"docs"`,
@@ -2130,17 +2129,16 @@ hosts, and those edges are outside the target closure. `notify` is banned
 before it is a dependency. Extending the ban amends this section and the
 constants together.
 
-The library check is in the `builds` group, not `static`. It is a compile with
-rustc warnings denied, and `builds` runs on both supported platforms, including
-the platform tier, which skips the platform-independent structure checkers.
-`static` stays free of target compilation. After the default, per-package and
-maintainer builds, the group checks each listed crate and each `PORTABLE_DEFAULT_LIBRARIES` entry:
+The library check is in the `standalone` group, not `static`. It compiles with
+rustc warnings denied, runs in Linux batch and full/RC on both platforms, and
+does not repeat in Mac batch. After standalone clippy, it checks each listed
+crate and each `PORTABLE_DEFAULT_LIBRARIES` entry:
 
 ```text
 cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown
 ```
 
-`-D warnings` is applied by the same helper as the other builds in the group.
+`-D warnings` is applied by the same helper as the install builds.
 The command sets `CARGO_BUILD_TARGET` to `wasm32-unknown-unknown` for itself
 only, so a musl lane's target does not redirect it and the command does not
 leave that target set. A crate whose default features are portable is checked
@@ -2252,71 +2250,70 @@ Some controls cannot live in the worktree. Authorized signed commits go directly
 to `main`, and local verification is the authoritative gate. **The repository
 uses local gates and has no CI except the release workflow** (§6.6), which
 builds and attests a pushed tag and creates its GitHub Release. A manual run
-is the pre-tag dry run and releases nothing. The workflow checks nothing else. Check is the Linux
-workspace gate: structure checkers, feature builds, the parallel and serial
-lanes, contracts and tooling, but no durability lane; no landing, install or
-publication rule requires it. Worker branches iterate and finish with
-`just fast <packages>` plus the groups their change needs. Main advances one
-integration batch at a time. Before a batch lands, its tip tree passes the
-integration batch gate:
+is the pre-tag dry run and releases nothing. The workflow checks nothing else.
+Worker branches use `just fast <packages>` plus the groups their change needs.
+Main advances one integration batch at a time. Before a batch lands, its tip
+tree passes the integration batch gate, with the Linux and Mac runs concurrent:
 
-- Linux x86_64 musl runs the full platform coverage: default, standalone
-  supported-package, maintainer and portability builds, cfg-specific workspace
-  and supported-package-alone clippy, and all three routine test lanes.
-- Shared formatting/ruff, workspace/feature structure and evidence audits run
-  once, alongside workspace and supported-package-alone rustdoc, public compile
-  contracts, tooling and the dependency audit. Platform static also rechecks
-  Rust formatting with clippy. `--static-scope shared --steps static,...` selects the
-  shared checks; `--static-scope platform --steps static,...` selects fmt and
-  cfg-specific clippy without repeating the shared checkers. These scopes
-  are accepted only with explicit `--steps`, never a named tier.
-- Apple Silicon macOS runs `just batch-mac`: fmt, cfg-specific workspace and
-  supported-package-alone clippy, all builds and the parallel lane. It does
-  not repeat the shared structure checks or run serial/durability per batch.
-- The crash sweep remains `just dev crash-sweep --strict` over the whole
-  matrix when recovery, persistence, store or host-loop code changed; otherwise
-  use `just dev crash-sweep --shapes <list>` for the affected shapes. Host locks
-  still exclude worker compiles from wall-clock lanes and the sweep.
+- Linux x86_64 musl runs workspace and standalone lint, the test build, and
+  the rdeps-scoped parallel, core serial and core durability lanes
+  (`just musl native --batch`). The parallel lane includes runtime-binary
+  edges (chapter 05 §1). Direct changes to install-only families nominate
+  those families for additional batch evidence.
+- Shared formatting, workspace/feature structure, public compile contracts
+  and tooling run once per batch. The dependency audit runs when `Cargo.lock`
+  or `.config/deny.toml` changes and at RC.
+- Apple Silicon macOS runs `just batch-mac`: workspace all-features clippy,
+  the workspace test build, and three platform-sensitive passes, each
+  intersected with the change scope (chapter 05 §1). It does not repeat the
+  shared checks or build install and archive artifacts.
 
-Per-package-alone rustdoc remains in every integration batch and full/RC run;
-`just steps rustdoc` selects the same complete group at every tier outside
-`--fast`. Production installs and release candidates run `package`, regardless
-of changed paths; integration batches do not. Archive
-verification is the standalone compilation witness for published-internal
-crates; source, build-script, compiler and Cargo configuration changes can
-affect it too. Only a matching cohort verification receipt (§6.5) may avoid
-repeating the archive verification; a path-based trigger cannot skip this group.
+Every integration batch runs the `standalone` step: each publishable crate is
+linted alone in its own default resolution
+(`cargo clippy --locked -p <crate> --lib --bins`, all targets for supported
+packages, warnings denied, in a dedicated target directory), the portable
+crates are checked for `wasm32-unknown-unknown`, and the cohort is packaged
+without verification (`cargo package --locked --no-verify`). That is the
+per-batch standalone compilation witness for published-internal crates; no
+path-based trigger skips it. Archive verification (`package`) builds every
+crate from its archive and runs in `just full` on both platforms, at release
+candidate and before publication; a production install builds from the source
+tree and does not require it. Only a matching cohort verification receipt
+(§6.5) may avoid repeating archive verification.
 
 Commits inside a batch are not gated individually. A production install
-requires the batch gate **and** macOS serial and durability lanes plus package
-verification on the exact tree being installed (`just install-checks`). A
-prior tree's install supplement is not evidence for a changed tree. Batch-only
-Mac evidence is not permission to install. A dedicated detached Mac gate
-checkout with its own stable target directory keeps installation checkout
-switches from invalidating gate artifacts; it refuses dirty or shared
-worktrees and concurrent use. Independent gate runners keep separate checkout,
-target and scratch roots; this change adds no overlap between tooling or
-wall-clock lanes and compiler-heavy groups.
+requires the batch gate **and** the install tier on the exact tree: the
+complete macOS suite (`just install-checks`), the full Linux parallel lane,
+the install-tier serial and durability rows, workspace rustdoc, the
+release-resolution and maintainer builds with the linkage check, and the
+strict crash sweep. Run the Linux install groups with `just install` or
+`just musl native --install` for the shipped target; strict crash sweep is a
+separate command. An explicit `release` or `maintainer` argument to
+`just install` installs a snapshot instead of running the gate.
+
+A prior tree's install evidence is not evidence for a changed tree. A
+dedicated detached Mac gate checkout with its own stable target directory
+keeps installation checkout switches from invalidating artifacts; it refuses
+dirty or shared worktrees and concurrent use. Independent runners have
+separate checkout, target and scratch roots. Compile-only groups may overlap
+the test build, but not tooling or timed test lanes.
+
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
-sweep, and the publish dry run.
-The full tier also runs the ignored 5,000-call and full indexed retirement
-soaks after its routine serial and durability tests. `just soak` selects that long evidence alone; ordinary check,
-platform and explicit serial groups keep the small retirement fixtures and
-exclude the soak (spec 05 §2.3).
-Independent batch groups may run on separate hosts or lanes, with macOS
-running alongside Linux. On the same host, the serial wall-clock-budget
-profile runs alone, one test at a time, and does not overlap durability or
-compiler-heavy groups. The durability profile uses a host-scaled weighted pool:
-`N = max(1, min(16, available_parallelism))`, using Rust's host/affinity/quota
-count. Internally parallel crash campaigns reserve the whole pool at late
-priority -50; priority plus full reservation keeps them separate from shared
-work. Ledger campaigns reserve `ceil(N/4)`, and the signature-sensitive
-closed-cell campaign the whole pool at early priority.
-Restart/recovery and approval cases reserve `ceil(N/4)` slots; independent restart
-groups run concurrently at early priority. No crash cuts are omitted. Gate commands pin
-the reviewed thread counts against environment overrides. Ignored full-tier
-soaks retain explicit one-thread execution (chapter 05 §2.3).
+sweep, the dependency audit and the publish dry run. Full adds per-package
+standalone rustdoc and archive verification, and runs the ignored 5,000-call
+and full indexed retirement soaks. `just soak` selects only that long test
+evidence (chapter 05 §2.3).
+
+The test lanes remain sequential. Serial uses one thread. The durability
+lane's host-scaled pool has `N = max(1, min(16, available_parallelism))`
+slots, using Rust's host, affinity and quota count. Internally parallel crash
+campaigns reserve the whole pool at late priority -50; other tests cannot
+overlap that reservation. Ledger and restart/recovery groups reserve
+`ceil(N/4)` slots, and the signature-sensitive closed-cell campaign reserves
+the whole pool at early priority. The gate pins reviewed thread counts
+against environment overrides. Ignored soaks run one at a time
+(chapter 05 §2.3).
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:
@@ -2388,7 +2385,7 @@ hidden launch/re-exec flags are removed, and explicit run/agent/wire session
 resume remains supported. The runnable Python example is test-only support.
 
 The default/reduced feature policy omits terminal/clipboard entries and their
-forwarding/closure witnesses; all remaining 2n+3 witnesses, supported-package
-standalone checks, portable builds, contracts and package verification remain.
+forwarding/closure witnesses. The remaining 2n+3 witnesses, standalone checks,
+portable builds and contracts run per batch; package verification runs at RC.
 Public host tests do not build or require any external client repository.
 Human client review is independent evidence, not a public gate dependency.

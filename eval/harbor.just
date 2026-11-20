@@ -80,7 +80,7 @@ summarize *ARGS:
 smoke *ARGS:
     eval/scripts/smoke.sh {{ARGS}}
 
-# Rung A: plumbing (local tiny tasks) then cheap TB 2.1 A/B. Paid, not just check.
+# Rung A: plumbing (local tiny tasks) then cheap TB 2.1 A/B. Paid, outside the gate.
 [doc("paid Rung A plumbing, then a cheap Terminal-Bench 2.1 A/B")]
 rung-a *ARGS:
     eval/scripts/rung-a.sh {{ARGS}}

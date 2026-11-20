@@ -16,26 +16,30 @@ GROUPS = (
     'builds',
     'variants',
     'rustdoc',
-    'tests-parallel',
-    'tests-serial',
-    'tests-durability',
+    'rustdoc-alone',
+    'standalone',
     'contracts',
     'tooling',
+    'tests-parallel',
+    'tests-durability',
+    'tests-serial',
+    'tests-install',
     'package',
 )
-CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
-PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
+BATCH_GROUPS = (
+    'static',
+    'standalone',
+    'contracts',
+    'tooling',
+    'tests-parallel',
+    'tests-durability',
+    'tests-serial',
+)
+INSTALL_GROUPS = ('builds', 'rustdoc', 'tests-parallel', 'tests-install')
 SUPPORTED = ('plakous', 'plakous-agent', 'plakous-model', 'plakous-tools', 'plakd')
-# The static group's clippy runs: the workspace, then each supported package alone.
-CLIPPIES = ['clippy'] * (1 + len(SUPPORTED))
-# The builds group, in order: workspace defaults, each supported package's own
-# resolution, then the maintainer parent build the linkage check reads.
+CLIPPIES = ['clippy']
 BUILDS = [
-    ['build', '--locked', '--workspace', '--lib', '--bins', '--target', 'host-triple'],
-    *(
-        ['build', '--locked', '-p', package, '--lib', '--bins', '--target', 'host-triple']
-        for package in SUPPORTED
-    ),
+    ['build', '--locked', '-p', 'plakd', '--bins', '--target', 'host-triple'],
     [
         'build',
         '--locked',
@@ -47,24 +51,25 @@ BUILDS = [
         '--target',
         'host-triple',
     ],
+    [
+        'build',
+        '--locked',
+        '-p',
+        'plakous-py-worker',
+        '-p',
+        'plakous-js-runtime',
+        '--bins',
+        '--target',
+        'host-triple',
+    ],
 ]
 
 
 class DevCheckWorkerTests(unittest.TestCase):
-    def test_platform_and_check_are_ordered_subsets_of_full_with_independent_exclusions(self):
-        self.assertLessEqual(set(PLATFORM_GROUPS), set(GROUPS))
-        self.assertLessEqual(set(CHECK_GROUPS), set(GROUPS))
-        self.assertNotIn('contracts', PLATFORM_GROUPS)
-        self.assertIn('builds', CHECK_GROUPS)
-        self.assertNotIn('tests-durability', CHECK_GROUPS)
-        self.assertIn('tests-durability', PLATFORM_GROUPS)
-        self.assertEqual(GROUPS[GROUPS.index('tests-serial') + 1], 'tests-durability')
-        self.assertLessEqual(
-            {'tests-parallel', 'tests-serial', 'contracts', 'tooling'}, set(CHECK_GROUPS)
-        )
+    def test_batch_and_install_reuse_distinct_subsets_of_full(self):
         for tier, groups in (
-            (('--platform',), PLATFORM_GROUPS),
-            ((), CHECK_GROUPS),
+            (('--install',), INSTALL_GROUPS),
+            (('--batch',), BATCH_GROUPS),
             (('--full',), GROUPS),
         ):
             with self.subTest(tier=tier):
@@ -75,8 +80,13 @@ class DevCheckWorkerTests(unittest.TestCase):
                 if 'tests-parallel' in groups:
                     self.assert_nextest_home_is_isolated(calls)
                 self.assertEqual(
-                    [line for line in result.stdout.splitlines() if line.startswith('== group:')],
-                    [f'== group: {group} ==' for group in groups],
+                    [
+                        line.split()[2]
+                        for line in result.stdout.splitlines()
+                        if line.startswith('== group:')
+                        and line.split()[2] not in ('test-build', 'package-lite')
+                    ],
+                    list(groups),
                 )
                 for checker in (
                     'check_workspace.py',
@@ -91,7 +101,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                             and '--wasm-libraries' not in s
                             for s in scripts
                         ),
-                        tier != ('--platform',),
+                        tier != ('--install',),
                     )
                 self.assertEqual(
                     sum('--product-builds' in s for s in scripts), int('variants' in groups)
@@ -111,7 +121,7 @@ class DevCheckWorkerTests(unittest.TestCase):
             "test-env.sh",
             "clippy.sh",
             "dev-tools.pins",
-            "check_restart_families.py",
+            "mac-selection.filter",
         ):
             destination = self.root / "tools/gate" / name
             shutil.copyfile(ROOT / "tools/gate" / name, destination)
@@ -143,6 +153,8 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_MCP_SERVER', None)
         self.env.pop('PLAK_TEST_BINARY', None)
         self.env.pop('PLAK_NEXTEST_PARTITION', None)
+        self.env.pop('PLAK_BATCH_BASE', None)
+        self.env['CARGO_BUILD_JOBS'] = '8'
         # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
@@ -186,34 +198,18 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'),
                              target_rustflags=os.environ.get(
                                  'CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'))) + '\n')
-if args[0] == 'clippy' and os.environ.get('GATE_CLIPPY_WAITS_FOR'):
+if args[0] == 'test' and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
     import time
     deadline = time.monotonic() + 5
-    while not Path(os.environ['GATE_CLIPPY_WAITS_FOR']).exists():
+    while not Path(os.environ['GATE_TEST_BUILD_WAITS_FOR']).exists():
         if time.monotonic() > deadline:
-            raise SystemExit('clippy ran alone')
-        time.sleep(0.02)
-if args[0] == 'doc' and os.environ.get('GATE_DOC_WAITS_FOR'):
-    import time
-    deadline = time.monotonic() + 5
-    while not Path(os.environ['GATE_DOC_WAITS_FOR']).exists():
-        if time.monotonic() > deadline:
-            raise SystemExit('doc ran alone')
+            raise SystemExit('test build ran alone')
         time.sleep(0.02)
 failure = json.loads(os.environ.get('GATE_CARGO_FAILURES', '{}')).get(args[0], 0)
 if args == ['fetch', '--locked', '--offline'] and os.environ.get('GATE_COLD_CACHE'):
     failure = 1
 if failure and args != ['nextest', '--version']:
     raise SystemExit(failure)
-if args[:2] == ['nextest', 'list']:
-    import runpy
-    families = runpy.run_path('tools/gate/check_restart_families.py')['FAMILIES']
-    tests = {f'{family}::{role}_{group}': dict(ignored=False, **{'filter-match': {'status': 'matches'}})
-             for family in families for role in ('root', 'child') for group in range(8)}
-    if os.environ.get('GATE_MISSING_RESTART_GROUP'):
-        tests.pop(next(iter(tests)))
-    print(json.dumps({'rust-suites': {'plak::integration': {
-        'package-name': 'plakd', 'binary-name': 'integration', 'testcases': tests}}}))
 if args[0] == 'test':
     if os.environ.get('GATE_BUILD_FAIL'):
         raise SystemExit(1)
@@ -248,7 +244,7 @@ if args[0] == 'test':
         self.executable(
             'python3',
             r'''import json, os, sys
-if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py', 'check_restart_families.py')):
+if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py')):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
@@ -263,8 +259,8 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                               rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                               target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
-if sys.argv[1].endswith('check_public_compile.py') and os.environ.get('GATE_DOC_WAITS_FOR'):
-    open(os.environ['GATE_DOC_WAITS_FOR'], 'w').close()
+if sys.argv[1].endswith('check_public_compile.py') and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
+    open(os.environ['GATE_TEST_BUILD_WAITS_FOR'], 'w').close()
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
     os.path.basename(sys.argv[1]), 0)
 if failure:
@@ -272,12 +268,18 @@ if failure:
 if sys.argv[1].endswith('changed_packages.py'):
     if '--dependents' in sys.argv:
         print(os.environ.get('GATE_DEPENDENTS', '\n'.join(sys.argv[3:])), end='')
+    elif '--batch-filter' in sys.argv:
+        print(os.environ.get('GATE_BATCH_FILTER', 'all()'))
     else:
         print(os.environ.get('GATE_CHANGED', ''), end='')
 if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv:
     print('plakous-model')
 if sys.argv[1].endswith('nextest_layout.py'):
     print(max(1, min(16, int(os.environ.get('GATE_AVAILABLE_PARALLELISM', '16')))))
+if sys.argv[1].endswith('publish_plan.py'):
+    print('plakous-model 0.0.4\nplakous-hosted 0.0.4')
+if sys.argv[1].endswith('publish_shape.py'):
+    os.mkdir(sys.argv[-1])
 ''',
         )
         self.executable(
@@ -301,8 +303,6 @@ os.execv(real, [real, *sys.argv[1:]])
 import json, os, sys
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(publish=sys.argv[1:], offline=os.environ.get('CARGO_NET_OFFLINE'))) + '\n')
-if os.environ.get('GATE_CLIPPY_WAITS_FOR'):
-    open(os.environ['GATE_CLIPPY_WAITS_FOR'], 'w').close()
 raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 '''
         )
@@ -381,23 +381,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def package_evidence(self):
         return self.root / 'custom target' / 'gate-evidence' / 'package'
 
-    def assert_feature_builds_deny_warnings(self, calls):
-        builds = [c for c in calls if c['args'][0] == 'build']
-        self.assertEqual(len(builds), len(BUILDS))
-        for build in builds:
-            self.assertIn('-D warnings', build.get('rustflags') or '')
-        ambient = self.env.get('RUSTFLAGS') or ''
-        if '-D warnings' in ambient:
-            return
-        for call in calls:
-            if call['args'][0] == 'build' or self.is_wasm_check(call):
-                continue
-            self.assertNotIn(
-                '-D warnings',
-                call.get('rustflags') or '',
-                call['args'][:3],
-            )
-
     def assert_nextest_home_is_isolated(self, calls):
         lanes = [c for c in calls if c['args'][:2] in (['nextest', 'run'], ['nextest', 'list'])]
         self.assertGreaterEqual(len(lanes), 1)
@@ -438,7 +421,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             for c in DevCheckWorkerTests.lanes(calls)
         ]
 
-    def test_full_gate_builds_and_passes_exact_cargo_artifact_to_both_lanes(self):
+    def test_batch_builds_once_and_passes_the_exact_artifacts_to_all_lanes(self):
         result, calls, _ = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         builds = [c for c in calls if c['args'][0] == 'test']
@@ -446,7 +429,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(builds[0]['target'], 'host-triple')
         self.assertEqual(builds[0]['target_dir'], self.env['CARGO_TARGET_DIR'])
         lanes = [c for c in calls if c['args'][:2] == ['nextest', 'run']]
-        self.assertEqual(len(lanes), 2)
+        self.assertEqual(len(lanes), 3)
         self.assertTrue(all(c['worker'] == str(self.worker.resolve()) for c in lanes))
         self.assertTrue(all(c['test_binary'] == str(self.worker.resolve()) for c in lanes))
         self.assertTrue(
@@ -600,7 +583,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             {
                 'check_workspace.py': 5,
                 'check_features.py': 6,
-                'gate_evidence.py': 9,
                 'run_tooling_tests.py': 7,
             }
         )
@@ -610,19 +592,17 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             [c['args'][0] for c in calls if c['args'][0] != 'nextest'],
             ['fmt', 'fetch', *CLIPPIES, 'test'],
         )
-        self.assertEqual(
+        self.assertCountEqual(
             [Path(s[0]).name for s in scripts if s[0].endswith('.py')],
             [
                 'check_workspace.py',
                 'check_features.py',
-                'gate_evidence.py',
                 'check_public_compile.py',
                 'run_tooling_tests.py',
             ],
         )
         self.assertIn(
-            'failed static steps: fmt workspace features evidence clippy '
-            + ' '.join(f'clippy:{package}' for package in SUPPORTED),
+            'failed static steps: fmt workspace features clippy',
             result.stdout,
         )
         self.assertIn('failed groups: static tooling', result.stdout)
@@ -632,15 +612,14 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 for line in result.stdout.splitlines()
                 if line.startswith('== time: ')
             ],
-            ['static', 'contracts', 'tooling'],
+            ['static', 'test-build', 'contracts', 'tooling'],
         )
         self.assertNotIn('gate passed', result.stdout)
 
-    def test_contracts_and_package_run_beside_rustdoc_when_no_test_lane_is_selected(self):
-        # The fake rustdoc waits for the contracts checker to have started:
-        # run one after the other, rustdoc would fail.
+    def test_contracts_overlap_the_test_build_and_finish_before_tooling(self):
+        # The fake test build waits for contracts, proving the overlap.
         self.commit_fixture()
-        self.env['GATE_DOC_WAITS_FOR'] = str(self.root / 'contracts-started')
+        self.env['GATE_TEST_BUILD_WAITS_FOR'] = str(self.root / 'contracts-started')
         result, calls, scripts = self.run_gate(
             '--steps', 'static,rustdoc,contracts,tooling,package'
         )
@@ -651,7 +630,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 for line in result.stdout.splitlines()
                 if line.startswith('== time: ')
             ],
-            ['static', 'rustdoc', 'contracts', 'package', 'tooling'],
+            ['static', 'rustdoc', 'test-build', 'contracts', 'tooling', 'package'],
         )
         self.assertEqual(len(self.publish_calls()), 1)
         self.assertEqual(scripts.count(['tools/gate/check_public_compile.py']), 1)
@@ -663,33 +642,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ),
         )
 
-    def test_package_starts_with_the_gate_beside_static(self):
-        # The fake clippy waits for the publish dry run to have started.
-        self.commit_fixture()
-        self.env['GATE_CLIPPY_WAITS_FOR'] = str(self.root / 'package-started')
-        result, calls, scripts = self.run_gate('--steps', 'static,contracts,package')
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(
-            [
-                line.split()[2]
-                for line in result.stdout.splitlines()
-                if line.startswith('== time: ')
-            ],
-            ['static', 'contracts', 'package'],
-        )
-        records = [json.loads(line) for line in self.log.read_text().splitlines()]
-        last_clippy = max(
-            i for i, row in enumerate(records) if row.get('args', [''])[0] == 'clippy'
-        )
-        contracts = next(
-            i
-            for i, row in enumerate(records)
-            if row.get('python') == ['tools/gate/check_public_compile.py']
-        )
-        # Contracts still waits for static to end.
-        self.assertGreater(contracts, last_clippy)
-
-    def test_contracts_and_package_run_after_a_selected_test_lane(self):
+    def test_test_lanes_do_not_share_the_host_with_contracts_or_package(self):
         self.commit_fixture()
         result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts,package')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -701,41 +654,69 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             if row.get('python') == ['tools/gate/check_public_compile.py']
         )
         publish = next(i for i, row in enumerate(records) if 'publish' in row)
-        self.assertGreater(contracts, lane)
-        self.assertGreater(publish, contracts)
+        self.assertLess(contracts, lane)
+        self.assertGreater(publish, lane)
 
     def test_failed_test_lanes_do_not_skip_contracts_or_tooling(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'nextest': 8})
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 8)
-        self.assertEqual(len(self.lanes(calls)), 2)
+        self.assertEqual(len(self.lanes(calls)), 3)
         self.assertEqual(sum(c['args'][0] == 'test' for c in calls), 1)
         for name in ('check_public_compile.py', 'run_tooling_tests.py'):
             self.assertTrue(any(s[0].endswith(name) for s in scripts))
-        self.assertIn('failed groups: tests-parallel tests-serial', result.stdout)
+        self.assertIn('failed groups: tests-parallel tests-durability tests-serial', result.stdout)
         self.assertNotIn('gate passed', result.stdout)
 
-    def test_default_tier_lints_builds_and_tests_the_whole_workspace_only(self):
+    def test_batch_uses_scope_and_keeps_builds_and_verification_out(self):
+        self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd) | package(=plakous-offline-crash-harness)'
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
+        self.assertCountEqual(
             [c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-            ['fmt', 'fetch', *CLIPPIES, *['build'] * len(BUILDS), 'check', 'test'],
+            ['fmt', 'fetch', *CLIPPIES, 'clippy', 'clippy', 'check', 'test', 'package'],
         )
-        builds = [c['args'] for c in calls if c['args'][0] == 'build']
-        self.assertIn('--workspace', builds[0])
-        self.assertNotIn('--all-features', builds[0])
-        self.assertEqual(builds[-1][builds[-1].index('--features') + 1], 'maintainer')
-        self.assert_feature_builds_deny_warnings(calls)
-        self.assertEqual(self.profiles(calls), ['offline', 'serial'])
-        self.assertEqual(self.filtersets(calls), [None, None])
+        self.assertEqual(self.publish_calls(), [])
+        self.assertEqual(
+            [c['args'][0:8] for c in calls if c['args'][0] == 'clippy' and '-p' in c['args']],
+            [
+                [
+                    'clippy',
+                    '--locked',
+                    '-p',
+                    'plakous-model',
+                    '--all-targets',
+                    '--target',
+                    'host-triple',
+                    '--',
+                ],
+                [
+                    'clippy',
+                    '--locked',
+                    '-p',
+                    'plakous-hosted',
+                    '--lib',
+                    '--bins',
+                    '--target',
+                    'host-triple',
+                ],
+            ],
+        )
+        lite = next(c for c in calls if c['args'][0] == 'package')
+        self.assertIn('--no-verify', lite['args'])
+        self.assertTrue(lite['target_dir'].endswith('/package-lite'))
+        self.assertTrue(
+            all('-D warnings' in c['rustflags'] for c in calls if self.is_wasm_check(c))
+        )
+        self.assertEqual(self.profiles(calls), ['offline', 'durability', 'serial'])
+        self.assertEqual(self.filtersets(calls), [self.env['GATE_BATCH_FILTER'], None, None])
         for checker in ('check_public_compile.py', 'check_workspace.py', 'check_features.py'):
             self.assertTrue(any(s[0].endswith(checker) for s in scripts))
         self.assertEqual(sum(s[0].endswith('run_tooling_tests.py') for s in scripts), 1)
 
     def test_feature_builds_deny_warnings_on_the_flags_cargo_will_use(self):
         self.env['RUSTFLAGS'] = '-C link-arg=-fuse-ld=mold'
-        result, calls, _ = self.run_gate()
+        result, calls, _ = self.run_gate('--steps', 'builds,tests-parallel')
         self.assertEqual(result.returncode, 0, result.stderr)
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(
@@ -750,7 +731,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.log.unlink()
         self.env['CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'] = '-C link-arg=-fuse-ld=mold'
         self.env['RUSTFLAGS'] = 'should-not-be-used'
-        result, calls, _ = self.run_gate()
+        result, calls, _ = self.run_gate('--steps', 'builds,tests-parallel')
         self.assertEqual(result.returncode, 0, result.stderr)
         builds = [c for c in calls if c['args'][0] == 'build']
         self.assertEqual(
@@ -878,95 +859,29 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ['-C link-arg=-fuse-ld=gold -D warnings'] * len(BUILDS),
         )
 
-    def test_full_tier_adds_rustdoc_before_tests_and_structure_after(self):
-        result, calls, scripts = self.run_gate('--full')
+    def test_full_runs_both_doc_resolutions_before_tests(self):
+        result, calls, _ = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
-        order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(
-            order,
-            [
-                'fmt',
-                'fetch',
-                *CLIPPIES,
-                *['build'] * len(BUILDS),
-                'check',
-                *['doc'] * (1 + len(SUPPORTED)),
-                'test',
-                'nextest',
-                'nextest',
-                'nextest',
-                'nextest',
-                'nextest',
-            ],
-        )
         docs = [c for c in calls if c['args'][0] == 'doc']
-        soaks = [c for c in calls if '--run-ignored' in c['args']]
-        self.assertEqual(len(soaks), 2)
-        self.assertEqual(
-            soaks[0]['args'][-4:], ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)']
-        )
+        self.assertEqual(len(docs), 1 + len(SUPPORTED))
+        self.assertLess(calls.index(docs[-1]), calls.index(self.lanes(calls)[0]))
         self.assertTrue(all(doc['rustdocflags'] == '-D warnings' for doc in docs))
-        for flag in ('--workspace', '--no-deps', '--all-features', '--locked'):
-            self.assertIn(flag, docs[0]['args'])
-        self.assertEqual(
-            [doc['args'] for doc in docs[1:]],
-            [
-                ['doc', '-p', package, '--no-deps', '--locked', '--target', 'host-triple']
-                for package in SUPPORTED
-            ],
-        )
-        ran = [s[0] for s in scripts]
-        for checker in (
-            'tools/gate/check_public_compile.py',
-            'tools/gate/check_workspace.py',
-            'tools/gate/check_features.py',
-            'tools/gate/run_tooling_tests.py',
-        ):
-            self.assertIn(checker, ran)
+        self.assertIn('--workspace', docs[0]['args'])
+        self.assertIn('--all-features', docs[0]['args'])
+        self.assertEqual([doc['args'][2] for doc in docs[1:]], list(SUPPORTED))
+        self.assertTrue(all(doc['target_dir'].endswith('/rustdoc-alone') for doc in docs[1:]))
 
-    def test_platform_tier_checks_features_and_both_lanes_without_linux_checks(self):
-        result, calls, scripts = self.run_gate('--platform')
+    def test_install_runs_full_parallel_and_the_install_profile_only(self):
+        (self.root / '.config').mkdir()
+        (self.root / '.config/nextest.toml').write_text('[profile.install]\n')
+        self.env['GATE_BATCH_FILTER'] = 'none()'
+        result, calls, _ = self.run_gate('--install')
         self.assertEqual(result.returncode, 0, result.stderr)
-        order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(
-            order,
-            [
-                'fmt',
-                *CLIPPIES,
-                *['build'] * len(BUILDS),
-                'check',
-                'test',
-                'nextest',
-                'nextest',
-                'nextest',
-            ],
-        )
-        self.assertEqual(self.profiles(calls), ['offline', 'serial', 'durability'])
-        checks = [c['args'] for c in calls if c['args'][0] == 'build']
-        self.assertEqual(checks, BUILDS)
-        for checker in (
-            'check_public_compile.py',
-            'check_workspace.py',
-            'check_features.py',
-            'run_tooling_tests.py',
-        ):
-            self.assertFalse(
-                any(
-                    s[0].endswith(checker)
-                    and '--product-builds' not in s
-                    and '--portable-crates' not in s
-                    and '--wasm-libraries' not in s
-                    for s in scripts
-                )
-            )
-        self.assertEqual(sum('--product-builds' in s for s in scripts), 0)
-        for call in calls:
-            if call['args'][0] in {'clippy', 'build', 'test'} or call['args'][:2] == [
-                'nextest',
-                'run',
-            ]:
-                self.assertIn('--target', call['args'])
-                self.assertEqual(call['args'][call['args'].index('--target') + 1], 'host-triple')
+        self.assertEqual(self.profiles(calls), ['offline', 'install'])
+        self.assertEqual(self.filtersets(calls), [None, None])
+        self.assertEqual([call['args'] for call in calls if call['args'][0] == 'build'], BUILDS)
+        self.assertNotIn('clippy', [call['args'][0] for call in calls])
+        self.assertEqual(self.publish_calls(), [])
 
     def test_full_tier_checks_default_and_maintainer_feature_sets(self):
         result, calls, _ = self.run_gate('--full')
@@ -1055,34 +970,34 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 
     WASM_SKIP = '== skipped: wasm32-unknown-unknown portable check (spec 06 §7.5) =='
 
-    def test_missing_wasm_target_fails_the_builds_group(self):
+    def test_missing_wasm_target_fails_standalone(self):
         shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
         # An environment variable is not the container flag.
         self.env['PLAK_QUAL_CONTAINER'] = '1'
-        result, calls, _ = self.run_gate('--steps', 'builds')
+        result, calls, _ = self.run_gate('--steps', 'standalone')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('just dev-tools install', result.stderr)
+        self.assertIn('just dev-tools install', result.stdout + result.stderr)
         self.assertNotIn('skip wasm32-unknown-unknown:', result.stdout)
         self.assertNotIn(self.WASM_SKIP, result.stdout)
-        self.assertIn('failed groups: builds', result.stdout)
+        self.assertIn('failed groups: standalone', result.stdout)
         self.assertFalse(any(self.is_wasm_check(call) for call in calls))
 
     def test_the_container_flag_runs_the_wasm_check_when_the_target_exists(self):
-        result, calls, _ = self.run_gate('--qual-container', '--steps', 'builds')
+        result, calls, _ = self.run_gate('--qual-container', '--steps', 'standalone')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len([c for c in calls if self.is_wasm_check(c)]), 1)
         self.assertNotIn('skipped:', result.stdout)
 
     def test_musl_container_skips_a_missing_wasm_target_and_names_it_last(self):
         shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
-        result, calls, _ = self.run_gate('--qual-container', '--steps', 'builds')
+        result, calls, _ = self.run_gate('--qual-container', '--steps', 'standalone')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
             'skip wasm32-unknown-unknown: the preloaded musl qualification image does not include this rustc target',
             result.stdout,
         )
         self.assertFalse(any(self.is_wasm_check(call) for call in calls))
-        self.assertEqual(len([c for c in calls if c['args'][0] == 'build']), len(BUILDS))
+        self.assertFalse(any(c['args'][0] == 'build' for c in calls))
         summary = result.stdout.splitlines()[-2:]
         self.assertEqual(summary, [self.WASM_SKIP, '== ok: steps gate passed =='])
 
@@ -1098,20 +1013,19 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertFalse(self.evidence.exists())
         self.assertFalse(self.package_evidence.exists())
 
-    def test_fast_tier_runs_the_parallel_lane_over_touched_packages_and_dependents(self):
+    def test_fast_tier_defaults_to_touched_package_tests(self):
         self.env['GATE_CHANGED'] = 'plakous-model\nplakd\n'
         result, calls, scripts = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(['tools/gate/changed_packages.py'], scripts)
-        scope = 'rdeps(=plakous-model) | rdeps(=plakd)'
-        # The serial budget lane is left to the default tier.
+        scope = 'package(=plakous-model) | package(=plakd)'
         self.assertEqual(self.profiles(calls), ['offline'])
         self.assertEqual(self.filtersets(calls), [scope])
         self.assertIn('--no-tests=pass', self.lanes(calls)[0]['args'])
         self.assertFalse(any(c['args'][0] == 'doc' for c in calls))
 
     def test_fast_tier_takes_explicit_packages_without_reading_the_diff(self):
-        result, calls, scripts = self.run_gate('--fast', 'plakous-store')
+        result, calls, scripts = self.run_gate('--fast', '--rdeps', 'plakous-store')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn(['tools/gate/changed_packages.py'], scripts)
         self.assertEqual(self.filtersets(calls), ['rdeps(=plakous-store)'])
@@ -1164,7 +1078,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             [
                 ['tools/gate/check_workspace.py'],
                 ['tools/gate/check_features.py'],
-                ['tools/release/gate_evidence.py', 'audit'],
             ],
         )
         features = next(
@@ -1176,11 +1089,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
         clippies = [row['args'] for row in records if row.get('args', [''])[0] == 'clippy']
         self.assertEqual(clippies[0][:3], ['clippy', '--locked', '--workspace'])
-        self.assertEqual([args[args.index('-p') + 1] for args in clippies[1:]], list(SUPPORTED))
-        for args in clippies[1:]:
-            self.assertNotIn('--all-features', args)
-            self.assertIn('--all-targets', args)
-            self.assertEqual(args[args.index('--') + 1 :], ['-D', 'warnings'])
+        self.assertIn('--all-features', clippies[0])
+        self.assertIn('--all-targets', clippies[0])
+        self.assertEqual(clippies[0][clippies[0].index('--') + 1 :], ['-D', 'warnings'])
 
     def test_cold_cache_fetches_locked_online_before_structure_checks(self):
         self.env['GATE_COLD_CACHE'] = '1'
@@ -1207,20 +1118,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertIn(['tools/gate/check_features.py'], scripts)
         self.assertTrue(any(c['args'][0] == 'clippy' for c in calls))
 
-    def test_mismatched_workspace_manifest_fails_static_naming_the_step(self):
-        (self.root / 'Cargo.toml').write_text('[workspace]\nmembers = ["crates/alpha"]\n')
-        member = self.root / 'crates/alpha/Cargo.toml'
-        member.parent.mkdir(parents=True)
-        member.write_text(
-            '[package]\nname = "beta"\n\n[package.metadata.plakous]\nclass = "supported"\n'
-        )
-        result, calls, _scripts = self.run_gate('--steps', 'static')
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn('== failed static steps: clippy:packages ==', result.stdout)
-        self.assertIn('failed groups: static', result.stdout)
-        self.assertIn('do not match manifest class supported', result.stderr)
-        self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
-
     def test_clippy_failure_without_a_status_still_names_the_step(self):
         script = self.root / 'tools/gate/clippy.sh'
         script.write_text('#!/bin/bash\nexit 1\n')
@@ -1231,88 +1128,50 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('clippy:packages', result.stdout)
         self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
 
-    def test_full_adds_only_the_ignored_soak_to_every_group(self):
-        full, full_calls, full_scripts = self.run_gate('--full')
-        self.log.unlink()
-        steps, step_calls, step_scripts = self.run_gate('--steps', ','.join(reversed(GROUPS)))
+    def test_full_runs_two_ignored_soaks_and_archive_verification(self):
+        self.commit_fixture()
+        full, calls, _ = self.run_gate('--full')
         self.assertEqual(full.returncode, 0, full.stderr)
-        self.assertEqual(steps.returncode, 0, steps.stderr)
-        soaks = [call for call in full_calls if '--run-ignored' in call['args']]
-        self.assertEqual(len(soaks), 2)
-
-        def stable(calls):
-            return [
-                {
-                    key: '<run>/' + Path(value).name
-                    if key in ('plak_home', 'git_global')
-                    and value
-                    and Path(value).parent.name.startswith('r')
-                    else value
-                    for key, value in call.items()
-                }
-                for call in calls
-            ]
-
         self.assertEqual(
-            stable([call for call in full_calls if call not in soaks]),
-            stable(step_calls),
+            self.profiles(calls), ['offline', 'durability', 'durability', 'serial', 'serial']
         )
-        self.assertEqual(full_scripts, step_scripts)
-        headings = [line for line in full.stdout.splitlines() if line.startswith('== group:')]
-        self.assertEqual(headings, [f'== group: {group} ==' for group in GROUPS])
+        soaks = [call for call in calls if '--run-ignored' in call['args']]
+        self.assertEqual(
+            [call['args'][-4:] for call in soaks],
+            [
+                ['--run-ignored', 'only', '-E', 'test(soak_ledger_retirement_)'],
+                ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
+            ],
+        )
+        self.assertEqual(len(self.publish_calls()), 1)
+        self.assertFalse(any(call['args'][0] == 'package' for call in calls))
 
-    def test_explicit_rustdoc_keeps_every_supported_default_resolution(self):
+    def test_explicit_rustdoc_selects_only_the_named_resolution(self):
         result, calls, _ = self.run_gate('--steps', 'rustdoc')
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        docs = [call for call in calls if call['args'][0] == 'doc']
-        self.assertEqual(len(docs), 1 + len(SUPPORTED))
-        self.assertEqual([doc['args'][2] for doc in docs[1:]], list(SUPPORTED))
-        self.assertTrue(all(doc['rustdocflags'] == '-D warnings' for doc in docs))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum(call['args'][0] == 'doc' for call in calls), 1)
+        self.log.unlink()
+        result, calls, _ = self.run_gate('--steps', 'rustdoc-alone')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [call['args'][2] for call in calls if call['args'][0] == 'doc'], list(SUPPORTED)
+        )
 
-    def test_durability_refuses_a_partial_restart_family_before_running(self):
-        self.env['GATE_MISSING_RESTART_GROUP'] = '1'
-        result, calls, _ = self.run_gate('--steps', 'tests-durability')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('expected all 16 restart groups', result.stderr)
-        self.assertEqual(self.lanes(calls), [])
-
-    def test_durability_prelists_the_actual_lane_selection(self):
-        result, calls, _ = self.run_gate('--steps', 'tests-durability')
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        listing = next(call for call in calls if call['args'][:2] == ['nextest', 'list'])
-        run = self.lanes(calls)[0]
-        for flag in ('--profile', '--config-file', '--target'):
-            self.assertEqual(
-                listing['args'][listing['args'].index(flag) + 1],
-                run['args'][run['args'].index(flag) + 1],
-            )
-        self.assertNotIn('--ignore-default-filter', listing['args'])
-        self.assertIn('both wire restart families contain all 16 groups', result.stdout)
-
-    def test_explicit_shards_keep_the_full_restart_inventory_and_weighted_layout(self):
+    def test_explicit_shards_preserve_the_weighted_layout_without_a_list_pass(self):
         self.env['PLAK_NEXTEST_PARTITION'] = 'count:2/3'
         self.env['GATE_AVAILABLE_PARALLELISM'] = '12'
+        self.env['PLAK_BATCH_BASE'] = 'test-base'
+        self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd)'
         result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-serial,tests-durability')
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        listing = next(call['args'] for call in calls if call['args'][:2] == ['nextest', 'list'])
-        offline, serial, durability = [call['args'] for call in self.lanes(calls)]
+        self.assertEqual(result.returncode, 0, result.stderr)
+        offline, durability, serial = [call['args'] for call in self.lanes(calls)]
         for args in (offline, durability):
-            i = args.index('--partition')
-            self.assertEqual(args[i + 1], 'count:2/3')
-        for args in (listing, serial):
-            self.assertNotIn('--partition', args)
+            self.assertEqual(args[args.index('--partition') + 1], 'count:2/3')
+        self.assertEqual(offline[offline.index('-E') + 1], 'rdeps(=plakd)')
+        self.assertNotIn('-E', durability)
+        self.assertNotIn('--partition', serial)
         self.assertIn('--test-threads=12', durability)
-        self.assertEqual(
-            listing[listing.index('--config-file') + 1],
-            durability[durability.index('--config-file') + 1],
-        )
-
-        self.log.unlink()
-        self.env['GATE_MISSING_RESTART_GROUP'] = '1'
-        result, calls, _ = self.run_gate('--steps', 'tests-durability')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('expected all 16 restart groups', result.stderr)
-        self.assertEqual(self.lanes(calls), [])
+        self.assertFalse(any(call['args'][:2] == ['nextest', 'list'] for call in calls))
 
     def test_partition_cannot_narrow_a_named_tier_or_a_nonshardable_selection(self):
         self.env['PLAK_NEXTEST_PARTITION'] = 'count:1/2'
@@ -1323,42 +1182,30 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertIn('PLAK_NEXTEST_PARTITION requires --steps', result.stderr)
                 self.assertEqual(calls, [])
 
-    def test_batch_mac_keeps_full_platform_clippy_but_no_wall_clock_lanes(self):
+    def test_mac_batch_runs_only_platform_clippy_and_filtered_lanes(self):
+        self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd)'
         result, calls, scripts = self.run_gate('--batch-mac')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.profiles(calls), ['offline'])
-        self.assertEqual(sum(call['args'][0] == 'clippy' for call in calls), len(CLIPPIES))
-        self.assertFalse(
-            any(
-                Path(script[0]).name in ('check_workspace.py', 'check_features.py')
-                and '--wasm-libraries' not in script
-                for script in scripts
-            )
+        self.assertEqual(self.profiles(calls), ['offline', 'durability', 'serial'])
+        parallel, durability, serial = self.filtersets(calls)
+        self.assertEqual(parallel, durability)
+        self.assertNotEqual(parallel, serial)
+        self.assertIn('binary(=deploy)', parallel)
+        for expression in (parallel, serial):
+            self.assertTrue(expression.endswith(' & (rdeps(=plakd))'), expression)
+        self.assertEqual(
+            [call['args'][0] for call in calls if call['args'][0] != 'nextest'],
+            ['clippy', 'test'],
         )
+        self.assertFalse(any(Path(script[0]).name.startswith('check_') for script in scripts))
 
-    def test_shared_and_platform_static_partition_without_weakening_full(self):
-        result, calls, scripts = self.run_gate('--static-scope', 'shared', '--steps', 'static')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
-        self.assertTrue(any(Path(script[0]).name == 'check_workspace.py' for script in scripts))
-        self.log.unlink()
-        result, calls, scripts = self.run_gate('--static-scope', 'platform', '--steps', 'static')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(sum(call['args'][0] == 'clippy' for call in calls), len(CLIPPIES))
-        self.assertFalse([script for script in scripts if script[0].endswith('.py')])
-        for scope in ('full', 'shared', 'platform'):
-            for tier in (
-                (),
-                ('--full',),
-                ('--platform',),
-                ('--batch-mac',),
-                ('--fast',),
-                ('--soak',),
-            ):
-                with self.subTest(scope=scope, tier=tier):
-                    result, calls, scripts = self.run_gate('--static-scope', scope, *tier)
-                    self.assertEqual(result.returncode, 2, result.stderr)
-                    self.assertIn('--static-scope requires --steps', result.stderr)
+    def test_removed_tier_and_static_scope_are_rejected_before_building(self):
+        for args in (('--static-scope', 'shared', '--steps', 'static'), ('--platform',)):
+            with self.subTest(args=args):
+                result, calls, _ = self.run_gate(*args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('unknown argument', result.stderr)
+                self.assertEqual(calls, [])
 
     def test_worker_scope_lints_reverse_dependencies_and_keeps_global_checkers(self):
         self.env['GATE_DEPENDENTS'] = 'plakd\nplakous-hosted\n'
@@ -1390,16 +1237,16 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
     def test_soak_runs_only_ignored_long_turn_evidence_with_real_workers(self):
         result, calls, _ = self.run_gate('--soak')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.profiles(calls), ['serial', 'durability'])
+        self.assertEqual(self.profiles(calls), ['durability', 'serial'])
         for lane in self.lanes(calls):
             self.assertIn('--test-threads=1', lane['args'])
         self.assertEqual(
             self.lanes(calls)[0]['args'][-4:],
-            ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
+            ['--run-ignored', 'only', '-E', 'test(soak_ledger_retirement_)'],
         )
         self.assertEqual(
             self.lanes(calls)[1]['args'][-4:],
-            ['--run-ignored', 'only', '-E', 'test(soak_ledger_retirement_)'],
+            ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
         )
         self.assertEqual(
             [call['args'][0] for call in calls if call['args'][0] != 'nextest'], ['test']
@@ -1413,34 +1260,15 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertFalse(any(c['args'][0] != 'nextest' for c in calls))
 
-    def test_check_omits_durability_and_platform_uses_its_weighted_pool(self):
-        check, check_calls, _ = self.run_gate()
-        self.assertEqual(check.returncode, 0, check.stderr)
-        self.assertEqual(self.profiles(check_calls), ['offline', 'serial'])
-        self.log.unlink()
-        platform, platform_calls, _ = self.run_gate('--platform')
-        self.assertEqual(platform.returncode, 0, platform.stderr)
-        self.assertEqual(self.profiles(platform_calls), ['offline', 'serial', 'durability'])
-        durability = self.lanes(platform_calls)[-1]
-        self.assertIn('--test-threads=16', durability['args'])
-        self.assertNotIn('-E', durability['args'])
-        self.assertFalse(any(arg.startswith('--partition') for arg in durability['args']))
-        self.log.unlink()
-        result, calls, _ = self.run_gate('--steps', 'tests-durability')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.profiles(calls), ['durability'])
-        self.assertIn('--test-threads=16', self.lanes(calls)[0]['args'])
-        self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
-
     def test_wall_clock_lanes_pin_their_width_against_environment_overrides(self):
         self.env['GATE_AVAILABLE_PARALLELISM'] = '10'
         self.env['NEXTEST_TEST_THREADS'] = '999'
         result, calls, _ = self.run_gate('--steps', 'tests-serial,tests-durability')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.profiles(calls), ['serial', 'durability'])
-        self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
-        self.assertIn('--test-threads=10', self.lanes(calls)[1]['args'])
-        self.assertIn('--config-file', self.lanes(calls)[1]['args'])
+        self.assertEqual(self.profiles(calls), ['durability', 'serial'])
+        self.assertIn('--test-threads=1', self.lanes(calls)[1]['args'])
+        self.assertIn('--test-threads=10', self.lanes(calls)[0]['args'])
+        self.assertIn('--config-file', self.lanes(calls)[0]['args'])
 
     def test_package_group_delegates_prefetch_and_offline_verification_in_a_git_tree(self):
         self.commit_fixture()

@@ -67,13 +67,16 @@ exit "${NATIVE_EXIT:-0}"
             timeout=15,
         )
 
-    def test_defaults_to_platform_with_explicit_target_and_path_compiler(self):
+    def test_defaults_to_complete_native_groups_with_explicit_target(self):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             json.loads(result.stdout),
             dict(
-                args=['--platform'],
+                args=[
+                    '--steps',
+                    'static,builds,tests-parallel,tests-durability,tests-serial,tests-install',
+                ],
                 target='x86_64-unknown-linux-musl',
                 cc='musl-gcc',
                 linker='rust-lld',

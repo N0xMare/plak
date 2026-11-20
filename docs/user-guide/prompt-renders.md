@@ -138,4 +138,4 @@ one.
 
 These artifacts let you inspect request shapes and prompts. They do not prove
 live authentication, successful provider execution or retry behavior, and
-native capture is not part of `just check`. Generated files are never committed.
+native capture is not part of the gate. Generated files are never committed.

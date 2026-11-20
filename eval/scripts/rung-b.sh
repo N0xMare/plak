@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rung B: Terminal-Bench 4.0 wiring. One-task proof only; never the 66-task campaign.
-# Opt-in, paid, never just check.
+# Opt-in, paid, outside the gate.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
