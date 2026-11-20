@@ -38,6 +38,7 @@ thiserror.workspace = true
 tokio = { workspace = true, optional = true, features = [
     "io-util",
     "net",
+    "rt",
     "sync",
     "time",
 ] }

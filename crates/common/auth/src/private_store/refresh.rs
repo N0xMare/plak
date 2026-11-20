@@ -22,7 +22,7 @@ impl PrivateCredentialStore {
         &self,
         expected: &CredentialFence,
     ) -> Result<RefreshClaim, PrivateStoreError> {
-        self.begin_refresh_with_options(expected, false)
+        self.begin_refresh_with_options(expected, false, false)
     }
 
     /// Begins refresh from an exact fence, allowing a durable
@@ -40,7 +40,7 @@ impl PrivateCredentialStore {
         &self,
         expected: &CredentialFence,
     ) -> Result<RefreshClaim, PrivateStoreError> {
-        self.begin_refresh_with_options(expected, true)
+        self.begin_refresh_with_options(expected, true, false)
     }
 
     /// Begins refresh using generation CAS.
@@ -55,7 +55,7 @@ impl PrivateCredentialStore {
         &self,
         expected_generation: CredentialGeneration,
     ) -> Result<RefreshClaim, PrivateStoreError> {
-        self.claim_under_execution_lock(|current| {
+        self.claim_under_execution_lock(false, |current| {
             if current.generation() != expected_generation {
                 return Err(PrivateStoreError::StaleWriter);
             }

@@ -32,7 +32,8 @@ where
     let fence = hooks.fence_to_revoke().await?;
     let started = Instant::now();
     let claim = store
-        .begin_refresh(&fence)
+        .try_begin_claim(&fence, false)
+        .await
         .map_err(|error| hooks.map_store_error(error))?;
     super::operation::run(store, client, claim, &mut Revoke(hooks), started).await
 }
@@ -63,12 +64,14 @@ impl<H: ClaimedRevokeHooks> super::operation::Operation for Revoke<'_, H> {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.0.accept_revoke_response(response)
     }
-    fn commit(
+    async fn commit(
         store: &PrivateCredentialStore,
         response: ClaimedHttpResponse,
         (): (),
     ) -> Result<Self::Receipt, PrivateStoreError> {
-        store.revoke_claimed_http(response)
+        store
+            .on_disk(move |store| store.revoke_claimed_http(response))
+            .await
     }
     fn output(&mut self, generation: Self::Receipt) -> Result<Self::Output, Self::Error> {
         self.0.output_from_revoked(generation)

@@ -47,7 +47,7 @@ pub(super) trait Operation {
         store: &PrivateCredentialStore,
         response: ClaimedHttpResponse,
         validated: Self::Validated,
-    ) -> Result<Self::Receipt, PrivateStoreError>;
+    ) -> impl Future<Output = Result<Self::Receipt, PrivateStoreError>> + Send;
     fn output(&mut self, receipt: Self::Receipt) -> Result<Self::Output, Self::Error>;
     fn map_claimed_http_error(
         &mut self,
@@ -211,7 +211,7 @@ where
                 http_status_class(response.status())
             };
             let (error, quarantined) =
-                quarantine_or_map(store, response, error, |e| hooks.map_store_error(e));
+                quarantine_or_map(store, response, error, |e| hooks.map_store_error(e)).await;
             emit_refresh_detailed(
                 hooks.observer(),
                 &attempt,
@@ -235,7 +235,7 @@ where
     };
     if let Err(error) = hooks.recheck_profile_before_complete().await {
         let (error, quarantined) =
-            quarantine_or_map(store, response, error, |e| hooks.map_store_error(e));
+            quarantine_or_map(store, response, error, |e| hooks.map_store_error(e)).await;
         emit_refresh(
             hooks.observer(),
             &attempt,
@@ -255,7 +255,7 @@ where
         hooks.after_post_start_failure(store, &error);
         return Err(error);
     }
-    match H::commit(store, response, record) {
+    match H::commit(store, response, record).await {
         Ok(fence) => {
             emit_refresh(
                 hooks.observer(),

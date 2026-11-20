@@ -114,8 +114,12 @@ impl ClaimedRevokeHooks for ScriptedRevokeHooks<'_> {
         std::future::ready("transport")
     }
 
-    fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {
-        "store"
+    fn map_store_error(&mut self, error: PrivateStoreError) -> Self::Error {
+        if error == PrivateStoreError::StoreBusy {
+            "busy"
+        } else {
+            "store"
+        }
     }
 
     fn output_from_revoked(
@@ -149,6 +153,32 @@ fn fixture_store()
     store.initialize_selected(&record)?;
     let fence = store.load()?.ok_or("missing record")?;
     Ok((directory, store, fence))
+}
+
+#[tokio::test]
+async fn revoke_with_a_ready_lease_refuses_without_a_claim()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_dir, store, fence) = fixture_store()?;
+    let _lease = store.acquire_ready(&fence)?;
+    let observer = RecordingObserver::new();
+    let mut hooks = ScriptedRevokeHooks {
+        observer: &observer,
+        fence: fence.clone(),
+        authorize: Ok(()),
+        build_failure: None,
+        origin: None,
+        accept: Ok(()),
+    };
+    let client = HttpClient::new_http1(Limits::default())?;
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(15),
+        run_claimed_revoke(&store, &client, &mut hooks),
+    )
+    .await?;
+    assert_eq!(outcome, Err("busy"));
+    assert_eq!(store.load()?, Some(fence));
+    assert_eq!(observer.phases(), [] as [CredentialRefreshPhase; 0]);
+    Ok(())
 }
 
 #[tokio::test]

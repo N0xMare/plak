@@ -208,6 +208,53 @@ fn client() -> Result<HttpClient, Box<dyn std::error::Error>> {
     Ok(HttpClient::new_http1(Limits::default())?)
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_ready_lease_does_not_block_the_refresh_executor()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_dir, store, fence) = fixture_store()?;
+    let lease = store.acquire_ready(&fence)?;
+    let observer = RecordingObserver::new();
+    let mut hooks = ScriptedHooks {
+        observer: &observer,
+        fence: Some(fence),
+        build: BuildMode::LeaveQuarantined,
+        authorize: Ok(()),
+        validate: ValidateMode::Fail,
+        request: None,
+        control: Duration::from_secs(1),
+    };
+    let client = client()?;
+    let (release, wait) = std::sync::mpsc::sync_channel(1);
+    // Release the fixture lock if the executor regresses to waiting in flock,
+    // so the test fails instead of deadlocking.
+    let holder = std::thread::spawn(move || {
+        let released = wait.recv_timeout(Duration::from_secs(15)).is_ok();
+        drop(lease);
+        released
+    });
+    let mut refresh = std::pin::pin!(run_claimed_refresh(&store, &client, &mut hooks));
+    let first_poll =
+        std::future::poll_fn(|cx| std::task::Poll::Ready(refresh.as_mut().poll(cx))).await;
+    let _ = release.send(());
+    assert!(
+        holder.join().unwrap(),
+        "refresh pinned the executor behind a Ready lease"
+    );
+    assert!(
+        first_poll.is_pending(),
+        "the refresh completed before the lease was released"
+    );
+    assert_eq!(refresh.await, Err("corrupt"));
+    assert_eq!(
+        observer.phases(),
+        [
+            CredentialRefreshPhase::Began,
+            CredentialRefreshPhase::Quarantined
+        ]
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn no_refresh_needed_emits_nothing() -> Result<(), Box<dyn std::error::Error>> {
     let (_dir, store, _fence) = fixture_store()?;

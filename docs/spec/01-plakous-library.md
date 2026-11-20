@@ -5727,7 +5727,15 @@ after reopening. The refresh-only retryable-failure policy below does not
 apply to revoke.
 
 Refresh is serialized by an in-process single-flight plus a per-slot
-cross-process lock with monotonic generations. Before any refresh network call
+cross-process lock with monotonic generations. The async ladder attempts both
+the execution and record locks without waiting on their holders. Contention
+leaves the record unchanged: refresh uses bounded async backoff and remote
+revoke reports local contention without dispatching.
+Claimed HTTP store reads, restoration and terminal writes run on blocking
+workers with the same pinned directory authority. A store step already
+running may finish its exact local transition if the waiter drops. It cannot
+start HTTP on the waiter's behalf; the claim's usual Unknown quarantine rules
+still apply. Before any refresh network call
 the credential slot records `RefreshOutcomeUnknown`; an ambiguous refresh
 leaves that state and blocks inference. Clock allowance is per vertical: xAI
 uses 60 seconds of leeway when validating and re-minting tokens, Codex refreshes

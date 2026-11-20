@@ -44,12 +44,10 @@ where
     let deadline = started + CLAIM_WAIT;
     let mut backoff = RESTORE_POLL_INITIAL;
     let claim = loop {
-        let begun = if hooks.reclaim_unknown_refresh() {
-            store.begin_refresh_reclaiming_unknown(&fence)
-        } else {
-            store.begin_refresh(&fence)
-        };
-        match begun {
+        match store
+            .try_begin_claim(&fence, hooks.reclaim_unknown_refresh())
+            .await
+        {
             Ok(claim) => break claim,
             // A peer writer or in-flight claim owns the store and nothing was
             // written. Back off instead of failing: when the peer finishes,
@@ -62,7 +60,11 @@ where
                 }
                 tokio::time::sleep(backoff.min(deadline.saturating_duration_since(now))).await;
                 backoff = backoff.saturating_mul(2).min(RESTORE_POLL_MAX);
-                let current = store.load().map_err(|error| hooks.map_store_error(error))?;
+                let current = match store.on_disk(PrivateCredentialStore::try_load).await {
+                    Ok(current) => current,
+                    Err(PrivateStoreError::StoreBusy) => continue,
+                    Err(error) => return Err(hooks.map_store_error(error)),
+                };
                 if current.as_ref() != Some(&fence) {
                     match hooks.fence_needing_refresh().await? {
                         Some(next) => fence = next,
@@ -124,12 +126,14 @@ impl<H: ClaimedRefreshHooks> super::operation::Operation for Refresh<'_, H> {
     ) -> impl Future<Output = Result<Self::Validated, Self::Error>> + Send {
         self.0.validate_tokens(prepared, response)
     }
-    fn commit(
+    async fn commit(
         store: &PrivateCredentialStore,
         response: ClaimedHttpResponse,
         record: Self::Validated,
     ) -> Result<Self::Receipt, PrivateStoreError> {
-        store.complete_claimed_http(response, record)
+        store
+            .on_disk(move |store| store.complete_claimed_http(response, record))
+            .await
     }
     fn output(&mut self, fence: Self::Receipt) -> Result<Self::Output, Self::Error> {
         self.0.output_from_completed(fence)

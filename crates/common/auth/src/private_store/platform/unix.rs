@@ -137,7 +137,7 @@ pub(super) fn execution_lock_held(
 ) -> Result<bool, PrivateStoreError> {
     verify_explicit_path_authority(store)?;
     let file = match rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         LockTarget::Execution.name(store),
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
@@ -346,7 +346,7 @@ fn open_lock_candidate(
     target: LockTarget,
 ) -> Result<(File, bool), PrivateStoreError> {
     match rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         target.name(store),
         OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::RUSR | Mode::WUSR,
@@ -362,7 +362,7 @@ fn open_current_lock(
     target: LockTarget,
 ) -> Result<File, PrivateStoreError> {
     let descriptor = rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         target.name(store),
         OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
@@ -498,7 +498,7 @@ pub(super) fn load_record_for_local_retirement(
     store: &PrivateCredentialStore,
 ) -> Result<Option<CredentialRecord>, PrivateStoreError> {
     let descriptor = match rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         &store.record_name,
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),
@@ -538,8 +538,12 @@ pub(super) fn load_record_for_local_retirement(
 /// Durably removes the record; local retirement of a record whose
 /// envelope this build cannot decode.
 pub(super) fn remove_record(store: &PrivateCredentialStore) -> Result<(), PrivateStoreError> {
-    rustix::fs::unlinkat(&store.directory, &store.record_name, AtFlags::empty())
-        .map_err(|_| PrivateStoreError::Io)?;
+    rustix::fs::unlinkat(
+        store.directory.as_ref(),
+        &store.record_name,
+        AtFlags::empty(),
+    )
+    .map_err(|_| PrivateStoreError::Io)?;
     store
         .directory
         .sync_all()
@@ -553,7 +557,7 @@ pub(super) fn write_record(
     let bytes = encode_record(store, record)?;
     let temporary_name = temporary_name(&store.record_name)?;
     let descriptor = rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         &temporary_name,
         OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::RUSR | Mode::WUSR,
@@ -575,9 +579,9 @@ pub(super) fn write_record(
         temporary.flush().map_err(|_| PrivateStoreError::Io)?;
         temporary.sync_all().map_err(|_| PrivateStoreError::Io)?;
         rustix::fs::renameat(
-            &store.directory,
+            store.directory.as_ref(),
             &temporary_name,
-            &store.directory,
+            store.directory.as_ref(),
             &store.record_name,
         )
         .map_err(|_| PrivateStoreError::Io)?;
@@ -588,14 +592,14 @@ pub(super) fn write_record(
         validate_installed_record(store)
     })();
     if result.is_err() {
-        let _ = rustix::fs::unlinkat(&store.directory, &temporary_name, AtFlags::empty());
+        let _ = rustix::fs::unlinkat(store.directory.as_ref(), &temporary_name, AtFlags::empty());
     }
     result
 }
 
 fn validate_installed_record(store: &PrivateCredentialStore) -> Result<(), PrivateStoreError> {
     let descriptor = rustix::fs::openat(
-        &store.directory,
+        store.directory.as_ref(),
         &store.record_name,
         OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
         Mode::empty(),

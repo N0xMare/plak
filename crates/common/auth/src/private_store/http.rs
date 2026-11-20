@@ -12,6 +12,15 @@ use plakous_http::{
     Headers as HttpHeaders, Request as HttpRequest, StatusCode, TransmissionFact, Version,
 };
 use std::fmt;
+use std::sync::Arc;
+
+struct AbortQueued(tokio::task::AbortHandle);
+
+impl Drop for AbortQueued {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 #[cfg(feature = "http-refresh")]
 impl ClaimedHttpResponse {
@@ -151,6 +160,38 @@ impl fmt::Display for ClaimedHttpError {
 impl std::error::Error for ClaimedHttpError {}
 
 impl PrivateCredentialStore {
+    /// Run disk I/O on a worker with the same pinned directory authority.
+    /// An operation already started there owns its inputs through the exact
+    /// store transition; dropping the waiter never replays it or starts HTTP.
+    pub(crate) async fn on_disk<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError> + Send + 'static,
+    ) -> Result<T, PrivateStoreError> {
+        let store = Self {
+            path: self.path.clone(),
+            record_name: self.record_name.clone(),
+            lock_name: self.lock_name.clone(),
+            execution_lock_name: self.execution_lock_name.clone(),
+            profile_id: self.profile_id.clone(),
+            slot_id: self.slot_id.clone(),
+            authority: self.authority,
+            directory: Arc::clone(&self.directory),
+        };
+        let task = tokio::task::spawn_blocking(move || operation(&store));
+        let _abort_queued = AbortQueued(task.abort_handle());
+        task.await.map_err(|_| PrivateStoreError::Io)?
+    }
+
+    pub(crate) async fn try_begin_claim(
+        &self,
+        expected: &CredentialFence,
+        allow_unknown: bool,
+    ) -> Result<RefreshClaim, PrivateStoreError> {
+        let expected = expected.clone();
+        self.on_disk(move |store| store.begin_refresh_with_options(&expected, allow_unknown, true))
+            .await
+    }
+
     /// Executes one concrete HTTP exchange under an exact durable refresh claim.
     ///
     /// The claim already owns the exclusive execution lock taken by
@@ -162,8 +203,8 @@ impl PrivateCredentialStore {
     /// and restores the exact old payload and status at the next generation. If
     /// it reports [`TransmissionFact::MayHaveTransmitted`], this method consumes
     /// the claim while verifying that its exact durable Unknown record remains.
-    /// Dropping this future after the claim is started leaves that durable
-    /// Unknown record unchanged.
+    /// Dropping an in-flight exchange leaves Unknown; a restoration already
+    /// running on a blocking worker after definite non-transmission may finish.
     ///
     /// A successful response remains inseparably paired with the started claim
     /// and retained lock while its body is pulled. Any response-body,
@@ -190,7 +231,19 @@ impl PrivateCredentialStore {
         request: HttpRequest,
         control: ExchangeControl,
     ) -> Result<ClaimedHttpResponse, ClaimedHttpError> {
-        if let Err(error) = self.verify_claimed_http_quarantine_under_lock(&claim.core) {
+        let (claim, verified) = self
+            .on_disk(move |store| {
+                let verified = store.verify_claimed_http_quarantine_under_lock(&claim.core);
+                Ok((claim, verified))
+            })
+            .await
+            .map_err(|error| ClaimedHttpError {
+                disposition: ClaimedHttpDisposition::ClaimRejected,
+                transport: None,
+                store: Some(error),
+                unstarted_claim: None,
+            })?;
+        if let Err(error) = verified {
             return Err(ClaimedHttpError {
                 disposition: ClaimedHttpDisposition::ClaimRejected,
                 transport: None,
@@ -219,8 +272,13 @@ impl PrivateCredentialStore {
             }
             Err(failure) => match failure.transmission() {
                 TransmissionFact::NotStarted | TransmissionFact::RequestIncomplete => {
-                    let mut unstarted = RefreshClaim { core: started.core };
-                    match self.restore_claimed_http_not_started_under_lock(&mut unstarted) {
+                    match self
+                        .on_disk(move |store| {
+                            let mut unstarted = RefreshClaim { core: started.core };
+                            store.restore_claimed_http_not_started_under_lock(&mut unstarted)
+                        })
+                        .await
+                    {
                         Ok(_) => Err(ClaimedHttpError {
                             disposition: ClaimedHttpDisposition::RestoredNotStarted,
                             transport: Some(failure),
@@ -236,7 +294,12 @@ impl PrivateCredentialStore {
                     }
                 }
                 TransmissionFact::MayHaveTransmitted => {
-                    match self.verify_claimed_http_quarantine_under_lock(&started.core) {
+                    match self
+                        .on_disk(move |store| {
+                            store.verify_claimed_http_quarantine_under_lock(&started.core)
+                        })
+                        .await
+                    {
                         Ok(_) => Err(ClaimedHttpError {
                             disposition: ClaimedHttpDisposition::QuarantinedMayHaveTransmitted,
                             transport: Some(failure),

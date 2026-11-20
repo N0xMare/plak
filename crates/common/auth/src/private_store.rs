@@ -3,6 +3,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq as _;
@@ -269,7 +270,7 @@ pub struct PrivateCredentialStore {
     profile_id: SubscriptionIntegrationProfileId,
     slot_id: CredentialSlotId,
     authority: StoreAuthority,
-    directory: platform::DirectoryHandle,
+    directory: Arc<platform::DirectoryHandle>,
 }
 
 impl PrivateCredentialStore {
@@ -306,7 +307,7 @@ impl PrivateCredentialStore {
             profile_id,
             slot_id,
             authority,
-            directory,
+            directory: Arc::new(directory),
         })
     }
 
@@ -359,9 +360,10 @@ impl PrivateCredentialStore {
         &self,
         expected: &CredentialFence,
         allow_unknown: bool,
+        nonblocking: bool,
     ) -> Result<RefreshClaim, PrivateStoreError> {
         self.require_fence_scope(expected)?;
-        self.claim_under_execution_lock(|current| {
+        self.claim_under_execution_lock(nonblocking, |current| {
             if current.fence() != *expected {
                 return Err(PrivateStoreError::FenceMismatch);
             }
@@ -372,20 +374,21 @@ impl PrivateCredentialStore {
     /// Takes the execution lock, then claims the loaded record under a brief
     /// exclusive record lock.
     ///
-    /// The execution lock is acquired without waiting and before anything is
-    /// written: a store owned by another writer or an in-flight claim yields
-    /// [`PrivateStoreError::StoreBusy`] with the durable record untouched.
+    /// The execution lock is always acquired without waiting. If requested,
+    /// the record lock is also non-blocking. Contention leaves the durable
+    /// record untouched.
     /// `admit` validates the loaded record and returns whether a durable
     /// Unknown record may be reclaimed.
     fn claim_under_execution_lock(
         &self,
+        nonblocking: bool,
         admit: impl FnOnce(&CredentialRecord) -> Result<bool, PrivateStoreError>,
     ) -> Result<RefreshClaim, PrivateStoreError> {
         let execution_lock =
             platform::try_lock_execution(self)?.ok_or(PrivateStoreError::StoreBusy)?;
         platform::verify_lock_authority(self, &execution_lock)?;
-        let record_lock =
-            platform::lock_record_for_claim(self, false)?.ok_or(PrivateStoreError::LockFailed)?;
+        let record_lock = platform::lock_record_for_claim(self, nonblocking)?
+            .ok_or(PrivateStoreError::StoreBusy)?;
         platform::verify_lock_authority(self, &record_lock)?;
         let record_lock_identity = record_lock.file_identity()?;
         let current = platform::load_record(self)?.ok_or(PrivateStoreError::RecordMissing)?;

@@ -218,7 +218,14 @@ async fn restore_unstarted_until(
 ) -> Result<bool, PrivateStoreError> {
     let mut backoff = RESTORE_POLL_INITIAL;
     loop {
-        match store.try_restore_refresh_definitely_not_started(&mut claim) {
+        let (returned, result) = store
+            .on_disk(move |store| {
+                let result = store.try_restore_refresh_definitely_not_started(&mut claim);
+                Ok((claim, result))
+            })
+            .await?;
+        claim = returned;
+        match result {
             Ok(Some(_)) => {
                 drop(claim);
                 return Ok(true);
@@ -318,13 +325,16 @@ async fn restore_or_map<E>(
 /// Quarantines a claimed response; store failure replaces the original error.
 ///
 /// The bool is `true` when quarantine verification succeeded.
-fn quarantine_or_map<E>(
+async fn quarantine_or_map<E>(
     store: &PrivateCredentialStore,
     response: ClaimedHttpResponse,
     error: E,
     map_store: impl FnOnce(PrivateStoreError) -> E,
 ) -> (E, bool) {
-    match store.quarantine_claimed_http(response) {
+    match store
+        .on_disk(move |store| store.quarantine_claimed_http(response))
+        .await
+    {
         Ok(_) => (error, true),
         Err(store_error) => (map_store(store_error), false),
     }
