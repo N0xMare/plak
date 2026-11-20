@@ -288,15 +288,12 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         spec.loader.exec_module(lanes)
         profile = tomllib.loads(lanes.weighted_config(4, 8))["profile"]["weighted-durability"]
         self.assertEqual(profile["test-threads"], 8)
-        self.assertEqual(profile["overrides"][0]["threads-required"], "num-test-threads")
-        self.assertIn(
-            "durability_ledger_retirement_closed_cells", profile["overrides"][0]["filter"]
-        )
-        self.assertEqual(profile["overrides"][1]["threads-required"], "num-test-threads")
-        self.assertEqual(profile["overrides"][1]["priority"], -50)
-        self.assertEqual(profile["overrides"][2]["threads-required"], 2)
-        self.assertIn("::(root|child)_[0-7]$/)", profile["overrides"][3]["filter"])
-        self.assertEqual(profile["overrides"][3]["threads-required"], 2)
+        heavy, restarts = profile["overrides"]
+        self.assertEqual(heavy["threads-required"], "num-test-threads")
+        self.assertIn("durability_twin_pilots", heavy["filter"])
+        self.assertEqual(heavy["priority"], -50)
+        self.assertIn("::wire_host_restart::(root|child)_[0-7]$/)", restarts["filter"])
+        self.assertEqual(restarts["threads-required"], 2)
 
     def test_weighted_lanes_select_all_four_non_test_artifacts(self):
         spec = importlib.util.spec_from_file_location(

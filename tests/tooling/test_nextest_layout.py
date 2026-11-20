@@ -13,7 +13,6 @@ import nextest_layout as layout  # noqa: E402
 class NextestLayoutTests(unittest.TestCase):
     def test_supported_pool_sizes_preserve_every_non_resource_setting(self):
         source = (ROOT / ".config/nextest.toml").read_text()
-        original = tomllib.loads(source)
         for available, width, quarter in [
             (0, 1, 1),
             (1, 1, 1),
@@ -25,27 +24,28 @@ class NextestLayoutTests(unittest.TestCase):
             (16, 16, 4),
             (24, 16, 4),
         ]:
-            with self.subTest(available=available):
-                rendered, actual_width = layout.render(source, available)
-                self.assertEqual(actual_width, width)
-                actual = tomllib.loads(rendered)
-                durability = actual["profile"].pop("durability")
-                expected = tomllib.loads(source)
-                baseline = expected["profile"].pop("durability")
-                self.assertEqual(actual, expected)
-                self.assertEqual(durability["test-threads"], width)
-                for key in ["default-filter", "slow-timeout", "junit"]:
-                    self.assertEqual(durability[key], baseline[key])
-                rules = durability["overrides"]
-                self.assertEqual(
-                    [r["threads-required"] for r in rules],
-                    ["num-test-threads", "num-test-threads", quarter, quarter],
-                )
-                self.assertEqual([r.get("priority", 0) for r in rules], [100, -50, 0, 90])
-                self.assertEqual(
-                    [r["filter"] for r in rules],
-                    [r["filter"] for r in original["profile"]["durability"]["overrides"]],
-                )
+            whole = "num-test-threads"
+            for profile, weights, priorities in (
+                ("durability", [whole, quarter], [-50, 90]),
+                ("install", [whole, whole, whole, quarter, quarter], [-50, 100, -50, 0, 90]),
+            ):
+                with self.subTest(profile=profile, available=available):
+                    rendered, actual_width = layout.render(source, available, profile)
+                    self.assertEqual(actual_width, width)
+                    actual = tomllib.loads(rendered)
+                    sized = actual["profile"].pop(profile)
+                    expected = tomllib.loads(source)
+                    baseline = expected["profile"].pop(profile)
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(sized["test-threads"], width)
+                    for key in ["default-filter", "slow-timeout", "junit"]:
+                        self.assertEqual(sized[key], baseline[key])
+                    rules = sized["overrides"]
+                    self.assertEqual([r["threads-required"] for r in rules], weights)
+                    self.assertEqual([r.get("priority", 0) for r in rules], priorities)
+                    self.assertEqual(
+                        [r["filter"] for r in rules], [r["filter"] for r in baseline["overrides"]]
+                    )
 
     def test_unrecognized_rewrite_fails_instead_of_using_the_wrong_width(self):
         source = (ROOT / ".config/nextest.toml").read_text()
