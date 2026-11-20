@@ -68,7 +68,16 @@ impl Client {
             .await?
             {
                 super::fault::Applied::Done(response) => return Ok(*response),
-                super::fault::Applied::Continue(control, fault) => (origin, control, fault),
+                super::fault::Applied::Continue(control, fault) => (
+                    super::test_dial::gateway_api_fixture(
+                        &origin,
+                        &method,
+                        path_and_query.as_str(),
+                    )?
+                    .unwrap_or(origin),
+                    control,
+                    fault,
+                ),
             }
         };
         let parts = RequestParts {

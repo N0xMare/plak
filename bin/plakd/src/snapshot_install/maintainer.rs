@@ -120,8 +120,14 @@ impl Manifest {
     }
 
     pub(super) fn check_current(&self, path: &Path) -> CliResult<()> {
+        self.check_running(&current()?, native()?, path)
+    }
+
+    fn check_running(&self, running: &BuildInfo, platform: &str, path: &Path) -> CliResult<()> {
         check(
-            native()? == self.platform && current()? == self.build_info,
+            platform == self.platform
+                && *running == self.build_info
+                && build_is_deployable(running),
             "maintainer installer and pinned build info differ",
         )?;
         if let Some(expected) = self.glibc {
@@ -135,16 +141,29 @@ impl Manifest {
 }
 
 fn build_is_deployable(build: &BuildInfo) -> bool {
-    build.flavor == "maintainer release" && !build.test_hooks && shipping::revision(&build.revision)
+    build.flavor == "maintainer release"
+        && !build.test_hooks
+        && build.omitted_features.is_empty()
+        && build.product_version == plakous::VERSION
+        && shipping::revision(&build.revision)
 }
 
 pub(crate) fn check_bootstrap(platform: &str, revision: &str, state_key: &str) -> CliResult<()> {
-    let running = current()?;
+    check_bootstrap_pin(&current()?, native()?, platform, revision, state_key)
+}
+
+fn check_bootstrap_pin(
+    running: &BuildInfo,
+    native: &str,
+    platform: &str,
+    revision: &str,
+    state_key: &str,
+) -> CliResult<()> {
     check(
-        native()? == platform
+        native == platform
             && running.revision == revision
             && running.state_key == state_key
-            && build_is_deployable(&running),
+            && build_is_deployable(running),
         "running maintainer candidate differs from pinned platform or build info",
     )
 }
@@ -225,12 +244,4 @@ pub(crate) fn glibc_version(text: &str) -> CliResult<[u32; 3]> {
 }
 
 #[cfg(test)]
-#[test]
-fn glibc_requirements_are_compared_numerically_and_fail_closed() {
-    let raw = "  0x0010: Name: GLIBC_2.9 Flags: none\n  0x0020: Name: GLIBC_2.34 Flags: none\n";
-    assert_eq!(required_glibc(raw).unwrap(), [2, 34, 0]);
-    assert!(required_glibc("Name: GLIBC_PRIVATE").is_err());
-    assert!(required_glibc("no version information").is_err());
-    assert!(glibc_version("2.34.x").is_err());
-    assert_eq!(glibc_version("2.2.5").unwrap(), [2, 2, 5]);
-}
+mod tests;

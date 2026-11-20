@@ -1843,7 +1843,8 @@ content-addressed sidecars that the snapshot names. Its manifest binds the
 binary and both sidecar digests, state key, and exact native triple, including
 `x86_64-unknown-linux-gnu` for GNU maintainer builds. The target revalidates
 the candidate's `version --build-info` facts, including full revision,
-`maintainer release` flavor, disabled test hooks and state key. Linux GNU
+`maintainer release` flavor, the current product version, no omitted
+features, disabled test hooks and state key. Linux GNU
 installer runs require `readelf` to measure the three images' maximum
 versioned GLIBC requirement; deploy checks it against target
 `getconf GNU_LIBC_VERSION` before transferring a bootstrap, and the

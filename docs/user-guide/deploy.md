@@ -27,7 +27,8 @@ unpacked artifact from `tools/release/package-release.sh` (`--untagged`
 for a rehearsal) and pin its `manifest.json`. Linux shipping releases are
 x86-64 musl.
 
-For a maintainer host or runner, run `just build maintainer` in the exact
+For a maintainer host or runner, run `just build maintainer` with the full
+product features and no test hooks in the exact
 source checkout, then that build's
 `plakd snapshot install --from <target-dir>/maintainer --source-build <target-dir> --flavor maintainer --no-link`.
 Use the printed immutable directory and keep its matching installer-published
@@ -44,11 +45,24 @@ List every account in use with its exact name and cheap canary model. Plan
 refuses any missing in-use account; signed-out accounts show `not_enrolled`.
 Canaries cover Codex OAuth, Claude OAuth, SuperGrok, OpenAI API, Anthropic
 API, xAI API and OpenRouter. Choose a cheap model that supports the
-tool-free 16-token request at low or disabled effort. For OpenRouter the
-model must support these parameters on Chat without fallback. Codex has no
-provider-side cap: pin the model's lowest admitted effort and review its
-`locally_bounded` evidence. The canary cancels at 64 observed text or
-reasoning bytes or ends on completion; it cannot cap provider billing.
+tool-free 16-token request at low or disabled effort. API canaries record
+`provider_capped_api_v1`. The fixed request bodies require models that accept:
+
+- OpenAI and xAI Responses: `reasoning.effort` set to `low` or `none`.
+- Anthropic Messages: adaptive thinking with `output_config.effort=low`,
+  or `thinking.type=disabled`.
+- OpenRouter Chat: low or disabled reasoning, with parameter support
+  required and provider fallback disabled.
+
+The provider must return completed assistant text within 16 tokens.
+An `incomplete` Responses result, including one that exhausts the token
+budget on reasoning, is a failed canary. Choose a different model or effort;
+deploy does not retry or relax the bound.
+
+Codex has no provider-side cap: pin the model's lowest admitted effort and
+review its `locally_bounded` evidence. The canary cancels at 64 observed text
+or reasoning bytes or ends on completion, with a 45-second deadline before
+bounded shutdown. It cannot cap provider billing.
 
 The incumbent must provide every in-use adapter for BASELINE. Move a fleet
 whose incumbent lacks an adapter to the first capable build using the

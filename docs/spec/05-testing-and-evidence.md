@@ -4482,6 +4482,13 @@ Startup tests check that the gateway advertises only once listening, and
 that host startup waits through a missing holder, unpublished or missing
 socket, and a socket that is bound but not listening.
 
+`PLAK_TEST_GATEWAY_API_PORT` reroutes only the pinned OpenAI Responses
+POST to a loopback peer in the same fault-injection builds. Unlike the
+OAuth fixture, it applies status and stream faults to the logical endpoint
+before dialing, so the deployment canary test exercises completed output,
+mid-body reset and deadline through the real gateway and counts physical
+requests at the peer.
+
 Relayed-path parity captures the upstream HTTP/1.1 request at that loopback
 peer. Those bytes, with the dial authority normalized, are pinned equal to a
 direct client exchange to the same peer, with the custodied value substituted

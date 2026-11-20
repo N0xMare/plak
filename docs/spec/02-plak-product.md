@@ -6537,7 +6537,9 @@ the inventory pin, and cancels and joins the stream at the first terminal
 result or after observing 64 text or reasoning bytes. Loss of observation
 refuses. This is a local observation threshold, not a provider generation
 or billing cap; an in-flight delta can cross it. Its evidence class is
-`locally_bounded`; other canaries use the provider-capped class. Compare the
+`locally_bounded` and has a 45-second deadline before bounded shutdown.
+API-key canaries record `provider_capped_api_v1` and require completed
+assistant output within the cap. Compare the
 gateway's OAuth generation before and after each canary and across BASELINE
 and verification; an increase is normal and a decrease refuses.
 

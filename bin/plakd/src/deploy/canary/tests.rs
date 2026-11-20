@@ -18,7 +18,7 @@ fn canary_selection_is_ephemeral_tool_free_and_dispatch_bounded() {
         LocalDurabilityDisposition::Ephemeral
     );
     assert_eq!(behavior.output_bound.bound().unwrap().get(), 16);
-    let limits = limits().unwrap();
+    let limits = limits(DEADLINE).unwrap();
     assert_eq!(limits.allowance(SubscriptionRequestClass::Inference), 1);
     assert_eq!(limits.retries(), 0);
     assert_eq!(limits.max_elapsed(), Some(Duration::from_secs(90)));
@@ -44,6 +44,10 @@ fn canary_codex_uses_no_wire_bound_and_a_different_evidence_class() {
     );
     assert_eq!(class("codex"), "locally_bounded");
     assert_ne!(pass_line("codex"), pass_line("grok"));
+    assert_eq!(
+        limits(CODEX_DEADLINE).unwrap().max_elapsed(),
+        Some(Duration::from_secs(45))
+    );
     assert_eq!(
         lowest_effort(&[
             ReasoningEffort::High,

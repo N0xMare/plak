@@ -24,7 +24,9 @@ use plakous::gateway::protocol::scope::{CallerId, ScopeSet, SourceNet};
 use plakous::gateway::protocol::{
     BoundedText, Endpoint, GatewayAccount, SecretText, UuidText, call,
 };
-use plakous::gateway::{GatewayEndpoint, RelayCallError, RelayClient, SensitiveBytes};
+use plakous::gateway::{
+    ApiCanaryFailure, GatewayCustody, GatewayEndpoint, RelayCallError, RelayClient, SensitiveBytes,
+};
 use plakous::subscriptions::{NativeProvider, NativeSubscriptions};
 
 use super::offline_support::TestChild;
@@ -52,7 +54,7 @@ impl GatewayFixture {
     }
 
     fn start_with_fault(tcp: Option<SocketAddr>, oauth: Option<&TcpListener>, fault: &str) -> Self {
-        Self::start_fixture(tcp, oauth, fault, false)
+        Self::start_fixture(tcp, oauth, fault, false, None)
     }
 
     fn start_fixture(
@@ -60,6 +62,7 @@ impl GatewayFixture {
         oauth: Option<&TcpListener>,
         fault: &str,
         api_keys: bool,
+        api: Option<&TcpListener>,
     ) -> Self {
         let root = tempfile::Builder::new().prefix("gw").tempdir().unwrap();
         let base = root.path();
@@ -105,8 +108,8 @@ impl GatewayFixture {
                 format!(
                     "{fault}host=api.anthropic.com,path=/api/oauth/usage,fault=429;\
                  host=api.anthropic.com,path=/api/oauth/profile,fault=503;\
-                 host=platform.claude.com,path=/v1/oauth/token,fault=400;\
-                 fault=connect"
+                 host=platform.claude.com,path=/v1/oauth/token,fault=400;{}",
+                    if api.is_some() { "" } else { "fault=connect" }
                 ),
             )
             .stdin(Stdio::null())
@@ -115,6 +118,12 @@ impl GatewayFixture {
             serve.env(
                 "PLAK_TEST_GATEWAY_OAUTH_PORT",
                 oauth.local_addr().unwrap().port().to_string(),
+            );
+        }
+        if let Some(api) = api {
+            serve.env(
+                "PLAK_TEST_GATEWAY_API_PORT",
+                api.local_addr().unwrap().port().to_string(),
             );
         }
         let mut process = TestChild::spawn(&mut serve);
@@ -203,7 +212,7 @@ fn deploy_api_canaries_relay_exactly_once_per_refusal_without_a_runtime() {
     for (_, host, path) in cases {
         write!(&mut faults, "host={host},path={path},nth=1,fault=429,retry-after=0;host={host},path={path},nth=2,fault=503;").unwrap();
     }
-    let gateway = GatewayFixture::start_fixture(None, None, &faults, true);
+    let gateway = GatewayFixture::start_fixture(None, None, &faults, true, None);
     let root = gateway.root.path();
     for (account, _, _) in cases {
         let start = || {
@@ -271,6 +280,143 @@ fn deploy_api_canaries_relay_exactly_once_per_refusal_without_a_runtime() {
     gateway.finish();
 }
 
+#[test]
+fn deploy_api_canary_success_reset_and_deadline_relay_one_physical_post_each() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let gateway = GatewayFixture::start_fixture(
+        None,
+        None,
+        concat!(
+            "host=api.openai.com,path=/v1/responses,nth=2,fault=reset,after-events=1;",
+            "host=api.openai.com,path=/v1/responses,nth=3,fault=stall,seconds=10,after-events=1;",
+        ),
+        true,
+        Some(&listener),
+    );
+    let upstream = std::thread::spawn(move || serve_api_canary_fixture(&listener));
+    let root = gateway.root.path();
+    let success = command(root)
+        .args([
+            "deploy-canary",
+            "--account=openai",
+            "--model=example-success",
+            "--effort=none",
+        ])
+        .output()
+        .unwrap();
+    assert!(success.status.success(), "{success:?}");
+    assert_eq!(
+        success.stdout,
+        b"plakd-deploy-canary-provider-capped-api-pass\n"
+    );
+    let custody =
+        GatewayCustody::connect(GatewayEndpoint::Unix(root.join("g.sock")), None, |kind| {
+            (kind == "openai")
+                .then_some(plakous::gateway::pins::openai::OPENAI_API_CREDENTIAL_HEADERS)
+        })
+        .unwrap();
+    gateway
+        .executor
+        .block_on(async {
+            for (name, bound) in [
+                ("example-reset", Duration::from_secs(4)),
+                ("example-stall", Duration::from_secs(1)),
+            ] {
+                let request = custody
+                    .prepare_api_canary("openai", name, false)
+                    .await
+                    .unwrap();
+                let started = Instant::now();
+                assert_eq!(
+                    request.run(started + bound).await,
+                    Err(ApiCanaryFailure::Transport),
+                    "{name}"
+                );
+                if name == "example-stall" {
+                    assert!(
+                        started.elapsed() >= bound,
+                        "the stall did not reach the deadline"
+                    );
+                }
+            }
+        })
+        .unwrap();
+    upstream.join().unwrap();
+    let audit = command(root).args(["gateway", "audit"]).output().unwrap();
+    assert!(audit.status.success());
+    let posts: Vec<serde_json::Value> = String::from_utf8(audit.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| row["method"] == "POST")
+        .collect();
+    assert_eq!(posts.len(), 3, "{posts:?}");
+    assert!(
+        posts
+            .iter()
+            .all(|row| row["attempt"] == 0 && row["account"] == "openai")
+    );
+    gateway.finish();
+}
+
+fn serve_api_canary_fixture(listener: &TcpListener) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    for model in ["example-success", "example-reset", "example-stall"] {
+        let mut peer = loop {
+            match listener.accept() {
+                Ok((peer, _)) => break peer,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "fixture did not receive the physical POST"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("fixture accept failed: {error}"),
+            }
+        };
+        peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut reader = BufReader::new(&mut peer);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("POST /v1/responses HTTP/1."));
+        let mut length = None;
+        loop {
+            line.clear();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                length = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+        let mut body = vec![0; length.unwrap()];
+        reader.read_exact(&mut body).unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["model"], model);
+        assert_eq!(body["max_output_tokens"], 16);
+        assert_eq!(body["reasoning"]["effort"], "none");
+        assert!(body.get("tools").is_none());
+        // The blank line counts as one body-event boundary for the stream
+        // fault injector, while the whole payload is valid Responses JSON.
+        let body = concat!(
+            "{\"status\":\"completed\",\n\n",
+            "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",",
+            "\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}],",
+            "\"usage\":{\"output_tokens\":2}}"
+        );
+        write!(
+            peer,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
+        ).unwrap();
+    }
+}
+
 fn state(root: &Path) -> PathBuf {
     root.join("xdg")
 }
@@ -284,6 +430,7 @@ fn command(root: &Path) -> Command {
         .env("XDG_STATE_HOME", state(root))
         .env_remove("PLAK_TEST_GATEWAY")
         .env_remove("PLAK_TEST_GATEWAY_OAUTH_PORT")
+        .env_remove("PLAK_TEST_GATEWAY_API_PORT")
         .env_remove("PLAK_TEST_FAULTS");
     for key in [
         "OPENAI_API_KEY",

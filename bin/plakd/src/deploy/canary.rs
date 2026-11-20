@@ -22,6 +22,7 @@ use crate::shell::services::Services;
 use crate::{CliFailure, CliResult, ProcessOutcome};
 
 const DEADLINE: Duration = Duration::from_secs(90);
+const CODEX_DEADLINE: Duration = Duration::from_secs(45);
 const CLEANUP_BOUND: Duration = Duration::from_secs(10);
 const OUTPUT_TOKENS: NonZeroU32 = NonZeroU32::new(16).expect("nonzero canary limit");
 const PROMPT: &str = "Reply with OK.";
@@ -30,18 +31,24 @@ const HTTP_REFUSAL: &str = "plakd-deploy-canary-upstream-http ";
 mod local;
 
 pub(super) fn class(kind: &str) -> &'static str {
-    if kind == "codex" {
-        "locally_bounded"
-    } else {
-        "bounded_cli_v1"
-    }
+    adapter(kind).0
 }
 
 pub(super) fn pass_line(kind: &str) -> &'static str {
-    if kind == "codex" {
-        "plakd-deploy-canary-locally-bounded-pass\n"
-    } else {
-        "plakd-deploy-canary-pass\n"
+    adapter(kind).1
+}
+
+fn adapter(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "codex" => (
+            "locally_bounded",
+            "plakd-deploy-canary-locally-bounded-pass\n",
+        ),
+        "openai" | "anthropic" | "xai-api" | "openrouter" => (
+            "provider_capped_api_v1",
+            "plakd-deploy-canary-provider-capped-api-pass\n",
+        ),
+        _ => ("bounded_cli_v1", "plakd-deploy-canary-pass\n"),
     }
 }
 
@@ -132,8 +139,8 @@ fn effort(value: &str) -> ReasoningEffort {
     }
 }
 
-fn limits() -> CliResult<SubscriptionRequestLimits> {
-    SubscriptionRequestLimits::new(1, 4, 1, 16_384, Some(DEADLINE), 0)
+fn limits(duration: Duration) -> CliResult<SubscriptionRequestLimits> {
+    SubscriptionRequestLimits::new(1, 4, 1, 16_384, Some(duration), 0)
         .map_err(|_| CliFailure::new("invalid canary request limits"))
 }
 
@@ -142,13 +149,19 @@ pub(crate) fn run(
     options: Options,
     stdout: &mut dyn Write,
 ) -> CliResult<ProcessOutcome> {
-    let deadline = Instant::now() + DEADLINE;
+    let started = Instant::now();
     let account: AccountRef = options
         .account
         .as_deref()
         .ok_or_else(|| CliFailure::new("missing canary account"))?
         .parse()?;
     account.vertical().require()?;
+    let duration = if account.vertical() == Vertical::Codex {
+        CODEX_DEADLINE
+    } else {
+        DEADLINE
+    };
+    let deadline = started + duration;
     if options.protocol.is_some() {
         return Err(CliFailure::new(
             "a deploy canary uses its exact enrolled wire, not a protocol override",
@@ -220,7 +233,11 @@ fn run_native(
         services.custody()?,
     )?;
     let subscriptions = backend.subscriptions_for(account)?;
-    let limits = limits()?;
+    let limits = limits(if provider == NativeProvider::Codex {
+        CODEX_DEADLINE
+    } else {
+        DEADLINE
+    })?;
     let (resolved, selected_effort) = executor
         .block_on(async {
             tokio::time::timeout_at(deadline.into(), async {
@@ -460,22 +477,19 @@ fn archive(
 }
 
 async fn prompt(agent: &Agent, locally_bounded: bool) -> CliResult<()> {
-    let mut turn = agent
+    let turn = agent
         .prompt(PROMPT)
         .await
         .map_err(|_| CliFailure::new("canary prompt was not admitted"))?;
-    let cancelled_at_bound = if locally_bounded {
-        local::cancel_at_bound(&mut turn).await?
-    } else {
-        false
-    };
+    if locally_bounded {
+        return local::cancel_at_bound(turn).await;
+    }
     let outcome = turn
         .result()
         .await
         .map_err(|_| CliFailure::new("canary turn did not settle"))?;
     match outcome.outcome() {
         TurnResultOutcome::Completed(_) => Ok(()),
-        TurnResultOutcome::Cancelled(_) if cancelled_at_bound => Ok(()),
         _ => Err(CliFailure::new("canary turn did not complete")),
     }
 }

@@ -487,12 +487,10 @@ fn deploy_plan_requires_every_enrolled_family_in_incumbent_canary_capabilities()
     let applied = fleet.staging("apply", "green", "");
     for phase in ["baseline", "verification"] {
         for account in families {
-            let class = if account == "codex" {
-                "locally_bounded"
-            } else {
-                "bounded_cli_v1"
-            };
-            assert_eq!(applied[phase]["canaries"][account], class);
+            assert_eq!(
+                applied[phase]["canaries"][account],
+                fake_canary_class(account)
+            );
         }
     }
     assert_eq!(
@@ -1652,16 +1650,20 @@ fn simulate(root: &Path, data: &mut Value, name: &str, op: &Value, blob: &[u8]) 
                 6
             };
             let account = op["route"]["account"].as_str().unwrap();
-            let class = if account.split('/').next() == Some("codex") {
-                "locally_bounded"
-            } else {
-                "bounded_cli_v1"
-            };
+            let class = fake_canary_class(account);
             json!({"adapter":class,"generation_before":fake_canary_generation(account, 5),"generation_after":fake_canary_generation(account, generation)})
         }
         other => panic!("unexpected SSH operation: {other}"),
     };
     json!({"ok":value})
+}
+
+fn fake_canary_class(account: &str) -> &'static str {
+    match account.split('/').next().unwrap() {
+        "codex" => "locally_bounded",
+        "openai" | "anthropic" | "xai-api" | "openrouter" => "provider_capped_api_v1",
+        _ => "bounded_cli_v1",
+    }
 }
 
 fn fake_canary_generation(account: &str, value: u64) -> Value {

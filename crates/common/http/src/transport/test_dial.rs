@@ -85,7 +85,23 @@ pub(super) fn gateway_oauth_fixture(
     {
         return Ok(None);
     }
-    let Some(port) = super::fault::read_env("PLAK_TEST_GATEWAY_OAUTH_PORT") else {
+    loopback_fixture("PLAK_TEST_GATEWAY_OAUTH_PORT")
+}
+
+pub(super) fn gateway_api_fixture(
+    origin: &Origin,
+    method: &http::Method,
+    path: &str,
+) -> Result<Option<Origin>, Failure> {
+    if *method != http::Method::POST || (origin.host(), path) != ("api.openai.com", "/v1/responses")
+    {
+        return Ok(None);
+    }
+    loopback_fixture("PLAK_TEST_GATEWAY_API_PORT")
+}
+
+fn loopback_fixture(variable: &str) -> Result<Option<Origin>, Failure> {
+    let Some(port) = super::fault::read_env(variable) else {
         return Ok(None);
     };
     port.parse()
