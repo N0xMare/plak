@@ -987,7 +987,7 @@ async fn runtime_second_save_refusal_reverts_and_dispatches_only_after_retry() {
                 assert_eq!(tree.revision, tree.stored_revision);
             })
             .unwrap();
-        assert!(vcs.calls_of(FakeOp::Seal).is_empty());
+        assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 0);
         runtime.mutate_then_emit(false, close).await.unwrap();
         assert_eq!(vcs.calls_of(FakeOp::Seal).len(), 1);
         runtime.mutate_then_emit(false, |_| Ok(())).await.unwrap();
@@ -1369,6 +1369,15 @@ async fn settle_records_every_effect_before_reporting_a_refused_publish() {
 
 #[tokio::test]
 async fn refused_watcher_save_still_settles_the_already_acknowledged_seal() {
+    refused_watcher_save(false).await;
+}
+
+#[tokio::test]
+async fn refused_tree_change_requeues_the_ready_seal_until_publication() {
+    refused_watcher_save(true).await;
+}
+
+async fn refused_watcher_save(change_tree: bool) {
     use crate::protocol::{NodeStatus, SubmitResultRequest};
     use plakous_workspace::occupancy_vcs::fake::{FakeOp, FakeVcs};
     use std::time::Duration;
@@ -1414,7 +1423,14 @@ async fn refused_watcher_save_still_settles_the_already_acknowledged_seal() {
     driver.mutate_and_settle(|_| ()).await.unwrap();
     vcs.set_placement_ready(path, true);
 
-    let refused = driver.mutate_and_settle(|_| ()).await.unwrap_err();
+    let refused = driver
+        .mutate_and_settle(move |tree| {
+            if change_tree {
+                tree.set_active_turn("root", true).unwrap();
+            }
+        })
+        .await
+        .unwrap_err();
     assert!(refused.message.contains("second save refused"));
     tokio::time::timeout(Duration::from_secs(5), async {
         while !driver.release_owners().is_empty() {
@@ -1423,6 +1439,23 @@ async fn refused_watcher_save_still_settles_the_already_acknowledged_seal() {
     })
     .await
     .expect("the dropped handoff returns to its owner");
+    if change_tree {
+        assert!(vcs.calls_of(FakeOp::Seal).is_empty());
+        assert!(driver.locked_for_test(|tree| tree.has_ready_deferred_seals()));
+        assert_eq!(
+            store
+                .load("watcher-save-refusal")
+                .unwrap()
+                .unwrap()
+                .rows()
+                .node(&child)
+                .unwrap()
+                .status,
+            NodeStatus::Sealing
+        );
+        driver.mutate_and_settle(|_| ()).await.unwrap();
+    }
+    driver.mutate_and_settle(|_| ()).await.unwrap();
     let saved = store.load("watcher-save-refusal").unwrap().unwrap();
     assert_eq!(
         saved.rows().node(&child).unwrap().status,

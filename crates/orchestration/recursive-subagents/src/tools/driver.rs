@@ -980,9 +980,8 @@ impl TreeDriver {
                 driver.save(tree).map(|()| result)
             })
             .await?;
-        let result = result?;
-        let settled = self.settle_here(effects.take()).await?;
-        Ok((result, settled))
+        let settled = self.settle_here(effects.take()).await;
+        Ok((result?, settled?))
     }
 
     /// Runs `effects` against the port with the mutex released, then
@@ -1043,7 +1042,13 @@ impl TreeDriver {
             let (admitted, refused, stages) = self
                 .write_owed(move |tree| {
                     tree.defer_unavailable_seals(&mut effects);
-                    let refused = Self::admit_settled_effects(tree, &mut effects)?;
+                    let refused = match Self::admit_settled_effects(tree, &mut effects) {
+                        Ok(refused) => refused,
+                        Err(error) => {
+                            tree.requeue_effects(effects);
+                            return Err(error);
+                        }
+                    };
                     // On a runner each effect is a recorded stage, published
                     // before it runs (spec 03 §14).
                     let stages = match &runner {

@@ -23,6 +23,11 @@ impl ProductAgentTree {
         self.effects.seals.extend(deferred);
     }
 
+    pub(crate) fn requeue_effects(&mut self, mut effects: Effects) {
+        effects.absorb(std::mem::take(&mut self.effects));
+        self.effects = effects;
+    }
+
     /// Drains what the mutations so far owe the VCS, excluding reopen-owned
     /// base-pin reconciliation, which the driver drains during attachment. The
     /// caller runs them with the mutex released and hands the answers back

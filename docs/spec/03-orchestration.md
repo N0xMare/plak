@@ -3794,7 +3794,9 @@ For a carried seal, an unstarted ticket waits for both the sealing runner and
 the runner that must take its bundle. Housekeeping and child ownership
 changes that do not settle VCS work leave queued tickets for the effect
 driver. When a writer does hand off queued work, dropping the batch early
-leaves settlement to a release owner. The tree restores routes from saved
+leaves settlement to a release owner. If the tree revision is not acknowledged,
+the driver returns the unrun batch to the queue for settlement after a later
+acknowledged write. The tree restores routes from saved
 node paths and its launch checkout before recovering either runner; it
 does not infer a local path when a runner is unavailable. Hold state,
 elapsed time and waiters add no persisted fields or wire versions.
@@ -5754,9 +5756,11 @@ Older builds can read these records but do not route the saved child path to
 its runner. Deploy recovery is forward-only regardless of placement
 (chapter 02 §4.6).
 A mutation retains the store-acknowledged revision from its explicit publish;
-settling an empty effect batch does not itself publish a mutation. Every queued
-effect is drained after the tree mutex is released, including when the initial
-publish fails. Chained cleanup is recorded before the original failure returns.
+settling an empty effect batch does not itself publish a mutation. Effects are
+drained after the tree mutex is released. If the initial publish fails, work
+that still has acknowledged authority can settle; a batch refused for lack of
+acknowledgment is requeued before returning the failure. Already dispatched
+effects are recorded, not run again.
 Raw tree handles are available only to test fixtures.
 
 Follow-up delivery snapshots an owned operation under the live-map lock and
