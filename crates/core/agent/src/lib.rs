@@ -89,6 +89,7 @@ mod test_hooks {
     /// Repository tracing observations require the `test-hooks` capability.
     pub mod commit_classes {}
     pub(crate) fn credential_wait_clear_refused(_: &dyn std::fmt::Debug) {}
+    pub(crate) const fn final_runner_probe() {}
 
     pub(crate) const fn working_prune_minimum(production: u64) -> u64 {
         production

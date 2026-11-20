@@ -25,6 +25,9 @@ use plakous_tools::{
     ToolOutcome, ToolPolicyFuture, ToolRegistration, ToolRegistryBuilder,
 };
 
+#[cfg(unix)]
+mod remote;
+
 struct FixedTool(ToolOutcome);
 
 struct CountingPolicy {

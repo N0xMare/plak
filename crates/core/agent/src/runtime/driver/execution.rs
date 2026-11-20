@@ -14,7 +14,8 @@ use crate::runtime::terminal::{
 };
 use crate::runtime::{ToolExecutionResult, TurnShared};
 use crate::tool_runtime::{
-    ToolDispatchObserver, ToolDispatchObserverFuture, ToolDispatchPermit, ToolExecutionControl,
+    DurableToolDispatchObserver, RemoteRevalidationFuture, ToolDispatchObserver,
+    ToolDispatchObserverFuture, ToolDispatchPermit, ToolExecutionControl,
 };
 use crate::{
     AgentError, AgentErrorKind, AgentEventKind, EventContext, EventPipeline, EventToolProgress,
@@ -162,19 +163,41 @@ impl ToolDispatchObserver for ActorToolDispatchObserver {
                 .admit()
                 .await
                 .map_err(|error| self.reject_start(error))?;
-            Ok(ToolDispatchPermit::new(move || {
-                let _guard = guard;
-                let result = self.authority.check().and_then(|()| {
-                    Self::check_controls(&self.cancellation)?;
-                    self.observe_started()
-                });
-                result.map_err(|error| self.reject_start(error))
-            }))
+            Ok(self.dispatch_permit(guard))
+        })
+    }
+}
+
+impl DurableToolDispatchObserver for ActorToolDispatchObserver {
+    fn dispatch_started_remote<'a>(
+        &'a self,
+        revalidate: &'a (dyn Fn() -> RemoteRevalidationFuture<'a> + Sync),
+    ) -> ToolDispatchObserverFuture<'a> {
+        Box::pin(async move {
+            let guard = self
+                .authority
+                .admit_after(revalidate, |error| self.reject_start(error))
+                .await?;
+            Ok(self.dispatch_permit(guard))
         })
     }
 }
 
 impl ActorToolDispatchObserver {
+    fn dispatch_permit(
+        &self,
+        guard: crate::runtime::checkpoint::owner::StartAdmission,
+    ) -> ToolDispatchPermit<'_> {
+        ToolDispatchPermit::new(move || {
+            let _guard = guard;
+            let result = self.authority.check().and_then(|()| {
+                Self::check_controls(&self.cancellation)?;
+                self.observe_started()
+            });
+            result.map_err(|error| self.reject_start(error))
+        })
+    }
+
     pub(in crate::runtime) fn check_controls(
         cancellation: &CancellationToken,
     ) -> Result<(), AgentError> {
@@ -280,7 +303,7 @@ async fn execute_read_only_tool(
     let control =
         ToolExecutionControl::new(cancellation.clone(), None, Arc::clone(&clock), progress)
             .with_preempt(preempt)
-            .with_dispatch_observer(dispatch_observer.clone());
+            .with_durable_dispatch_observer(dispatch_observer.clone());
     let mut execution = Box::pin(tools.execute(authorized, control));
     let mut progress_open = true;
     let outcome = loop {

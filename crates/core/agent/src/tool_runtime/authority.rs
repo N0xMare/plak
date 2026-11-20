@@ -200,9 +200,6 @@ impl LiveDispatchFence {
         Arc::ptr_eq(&self.runtime, runtime)
             && self.registry.is_same_snapshot(registry)
             && Arc::ptr_eq(&self.environment, environment)
-            && environment
-                .verify_descriptor(environment.descriptor())
-                .is_ok()
     }
 }
 

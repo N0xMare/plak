@@ -47,8 +47,15 @@ def claim_marker(path, contents=""):
 
 def main():
     directory = Path(sys.argv[1])
+    if (directory / "redial.held").is_file():
+        deadline = time.monotonic() + 9
+        while not (directory / "redial.release").is_file():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("fixture redial was not released")
+            time.sleep(0.005)
     child = subprocess.Popen(sys.argv[2:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     requests = {}
+    held_probes = set()
     mutex = threading.Lock()
 
     def cut(name):
@@ -74,6 +81,10 @@ def main():
                     evidence["verb"] = frame["operation"]["verb"]
                     with mutex:
                         requests[frame["request_id"]] = evidence
+                        marker = directory / "final-probe.next"
+                        if evidence["verb"] == "probe.workspace" and marker.is_file():
+                            marker.unlink()
+                            held_probes.add(frame["request_id"])
                         with (directory / "wire.jsonl").open("a") as log:
                             log.write(json.dumps(evidence) + "\n")
                             log.flush()
@@ -91,6 +102,11 @@ def main():
             raw, frame = item
             with mutex:
                 request = requests.get(frame.get("request_id"))
+                withheld = frame.get("request_id") in held_probes
+            if frame["kind"] == "result" and withheld:
+                count = len(held_probes)
+                claim_marker(directory / f"final-probe.{count}")
+                continue
             if (
                 frame["kind"] == "result"
                 and request

@@ -44,6 +44,34 @@ pub trait ToolDispatchObserver: Send + Sync + 'static {
     fn dispatch_started(&self) -> ToolDispatchObserverFuture<'_>;
 }
 
+pub(crate) type RemoteRevalidationFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), ToolRuntimeError>> + Send + 'a>>;
+
+pub(crate) trait DurableToolDispatchObserver: ToolDispatchObserver {
+    /// Admits a remote tool start with a live environment check. The check
+    /// may wait on runner I/O; a durable observer must not hold its lease
+    /// gate across it.
+    fn dispatch_started_remote<'a>(
+        &'a self,
+        revalidate: &'a (dyn Fn() -> RemoteRevalidationFuture<'a> + Sync),
+    ) -> ToolDispatchObserverFuture<'a>;
+}
+
+#[derive(Clone)]
+pub(super) enum DispatchObserver {
+    External(Arc<dyn ToolDispatchObserver>),
+    Durable(Arc<dyn DurableToolDispatchObserver>),
+}
+
+impl DispatchObserver {
+    pub(super) fn dispatch_started(&self) -> ToolDispatchObserverFuture<'_> {
+        match self {
+            Self::External(observer) => observer.dispatch_started(),
+            Self::Durable(observer) => observer.dispatch_started(),
+        }
+    }
+}
+
 /// Caller-owned cooperative controls for one already authorized dispatch.
 ///
 /// This value carries no authority and cannot be used to bypass policy. The
@@ -55,7 +83,7 @@ pub struct ToolExecutionControl {
     deadline: Option<Timestamp>,
     clock: Arc<dyn Clock>,
     progress: ProgressSink,
-    dispatch_observer: Option<Arc<dyn ToolDispatchObserver>>,
+    dispatch_observer: Option<DispatchObserver>,
     preempt: tokio::sync::watch::Receiver<plakous_tools::ToolPreempt>,
 }
 
@@ -81,7 +109,15 @@ impl ToolExecutionControl {
     /// Installs one exact pre-executor dispatch observer.
     #[must_use]
     pub fn with_dispatch_observer(mut self, observer: Arc<dyn ToolDispatchObserver>) -> Self {
-        self.dispatch_observer = Some(observer);
+        self.dispatch_observer = Some(DispatchObserver::External(observer));
+        self
+    }
+
+    pub(crate) fn with_durable_dispatch_observer(
+        mut self,
+        observer: Arc<dyn DurableToolDispatchObserver>,
+    ) -> Self {
+        self.dispatch_observer = Some(DispatchObserver::Durable(observer));
         self
     }
 
@@ -117,7 +153,7 @@ impl ToolExecutionControl {
         &self.progress
     }
 
-    pub(super) fn dispatch_observer(&self) -> Option<&Arc<dyn ToolDispatchObserver>> {
+    pub(super) const fn dispatch_observer(&self) -> Option<&DispatchObserver> {
         self.dispatch_observer.as_ref()
     }
 }

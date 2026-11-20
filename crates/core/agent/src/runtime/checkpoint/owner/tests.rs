@@ -334,6 +334,7 @@ struct FlakyRenewStore {
     now: std::sync::atomic::AtomicU64,
     busy: std::sync::atomic::AtomicUsize,
     expired: std::sync::atomic::AtomicBool,
+    revive_once: std::sync::atomic::AtomicBool,
     revive_error: SessionStoreError,
     renewals: std::sync::atomic::AtomicUsize,
 }
@@ -345,6 +346,7 @@ impl FlakyRenewStore {
             now: std::sync::atomic::AtomicU64::new(0),
             busy: std::sync::atomic::AtomicUsize::new(busy),
             expired: std::sync::atomic::AtomicBool::new(false),
+            revive_once: std::sync::atomic::AtomicBool::new(false),
             revive_error,
             renewals: std::sync::atomic::AtomicUsize::new(0),
         }
@@ -352,6 +354,12 @@ impl FlakyRenewStore {
 }
 
 impl SessionStore for FlakyRenewStore {
+    fn recover_storage(&self) -> StoreFuture<'_, ()> {
+        self.colocated_full
+            .store(false, std::sync::atomic::Ordering::Release);
+        Box::pin(async { Ok(()) })
+    }
+
     fn storage_unavailable(&self) -> bool {
         self.colocated_full
             .load(std::sync::atomic::Ordering::Acquire)
@@ -392,9 +400,22 @@ impl SessionStore for FlakyRenewStore {
         })
     }
 
-    fn revive(&self, _: BranchLease) -> StoreFuture<'_, BranchLease> {
+    fn revive(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
         let error = self.revive_error;
-        Box::pin(async move { Err(error) })
+        Box::pin(async move {
+            use std::sync::atomic::Ordering;
+            if !self.revive_once.swap(false, Ordering::AcqRel) {
+                return Err(error);
+            }
+            self.expired.store(false, Ordering::Release);
+            Ok(BranchLease::from_store(
+                lease.session(),
+                lease.owner(),
+                lease.fence(),
+                LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 103, 0)?,
+                lease.lease_seconds(),
+            ))
+        })
     }
 
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
@@ -448,6 +469,96 @@ async fn a_busy_renewal_is_retried_while_the_lease_is_live() -> TestResult {
         .heartbeat
         .stop_and_join(Duration::from_secs(1))
         .await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_dispatch_revalidation_does_not_block_lease_renewal() -> TestResult {
+    use std::sync::atomic::Ordering;
+
+    let store = Arc::new(FlakyRenewStore::new(0, SessionStoreError::LeaseHeld));
+    let owner = flaky_owner(Arc::clone(&store))?;
+    let start = owner.start_authority(CancellationToken::new());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let dispatch = tokio::spawn({
+        let entered = Arc::clone(&entered);
+        let release = Arc::clone(&release);
+        let first = std::sync::atomic::AtomicBool::new(true);
+        async move {
+            let _guard = start
+                .admit_after(
+                    || async {
+                        if !first.swap(false, Ordering::AcqRel) {
+                            return Ok(());
+                        }
+                        entered.notify_one();
+                        release.notified().await;
+                        Ok(())
+                    },
+                    std::convert::identity,
+                )
+                .await?;
+            Ok::<_, AgentError>(())
+        }
+    });
+    entered.notified().await;
+    let renewal = tokio::time::timeout(Duration::from_secs(10), async {
+        while store.renewals.load(Ordering::Acquire) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    release.notify_one();
+    renewal?;
+    dispatch.await??;
+    owner.heartbeat.check()?;
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn remote_dispatch_rechecks_after_contention_storage_recovery_and_revival() -> TestResult {
+    use std::sync::atomic::Ordering;
+    let store = Arc::new(FlakyRenewStore::new(0, SessionStoreError::LeaseHeld));
+    let owner = flaky_owner(Arc::clone(&store))?;
+    let start = owner.start_authority(CancellationToken::new());
+    let gate = lock_mutex(&owner.state)
+        .durable
+        .as_ref()
+        .ok_or("durable branch")?
+        .lease_gate
+        .clone();
+    let probes = std::sync::atomic::AtomicUsize::new(0);
+    let _guard = start
+        .admit_after(
+            || async {
+                match probes.fetch_add(1, Ordering::AcqRel) {
+                    0 => {
+                        let intervening = gate.clone().try_lock_owned().map_err(|_| {
+                            AgentError::new(AgentErrorKind::Internal, "probe held the lease gate")
+                        })?;
+                        tokio::spawn(async move {
+                            tokio::task::yield_now().await;
+                            drop(intervening);
+                        });
+                    }
+                    1 => store.colocated_full.store(true, Ordering::Release),
+                    2 => {
+                        store.now.store(100, Ordering::Release);
+                        store.expired.store(true, Ordering::Release);
+                        store.revive_once.store(true, Ordering::Release);
+                    }
+                    3 => {}
+                    _ => panic!("unexpected additional check"),
+                }
+                Ok(())
+            },
+            std::convert::identity,
+        )
+        .await?;
+    assert_eq!(probes.load(Ordering::Acquire), 4);
+    assert!(!store.storage_unavailable());
+    assert!(!store.expired.load(Ordering::Acquire));
     Ok(())
 }
 

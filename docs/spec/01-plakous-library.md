@@ -6914,6 +6914,32 @@ revision. The hold is
 process-local and per node; it is not a durable turn, call or node state, and
 a host restart never resumes it (ordinary owner-loss recovery applies).
 
+A same-daemon rebind keeps the live execution-environment binding. Its
+descriptor binds the backend and runner identity, run or attempt scope,
+canonical root and working directory, root device and inode, and environment
+configuration, not the transport generation or line lease. The live line
+owner and runner request fences are separate. An unanswered root identity
+probe refuses that start without proving a mismatch or invalidating the
+binding; a later check must still verify the actual root on the runner.
+Remote tool identity checks on the async dispatch path do not block its
+worker, and cancellation or a dispatch deadline drops that call's probe.
+Preparing an intent, recording its claim, and restoring or resolving an
+operator decision compare the frozen binding without probing the runner.
+They grant no executor start. Actual dispatch still revalidates the live
+root, so a missing probe answer refuses only the call and does not durably
+invalidate an operator decision.
+Before a remote tool's final start, the durable owner waits for its lease
+gate, releases it for the live environment check and takes it again without
+waiting. If taking it would wait or the lease needs revival, the owner
+awaits admission and repeats the check. The final guard still fences the
+lease and start observation, and dispatch still checks current policy and
+cancellation. Neither a placement hold nor a runner probe holds the
+local durable lease-renewal gate.
+Rebinding to a restarted daemon with the same descriptor and workspace root
+does not by itself end the turn. The restart still invalidates the former
+instance's outcomes as described below; a possibly sent call is never
+retried on the new daemon as a new effect.
+
 The authoritative cut is one `RunnerCall` at the admitted link, strictly
 outside the client's per-line foreground gate and owner-transfer lock, so the
 barrier can always run. Exactly these calls wait there, each sent under a

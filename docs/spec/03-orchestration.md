@@ -1533,6 +1533,9 @@ migration or guessed identity is performed.
 
 A live placement hold retains the exact child driver, turn, attempt and token;
 it admits no new turn or corrective submit nudge and spends no `max_turns`.
+A reconciled link to the same runner leaves that attempt in place; its tools
+still verify their original live binding and its retirement still releases
+the current durable lease. A link outage is not evidence of a lost child owner.
 A parked child stays parked. Mail and process arrivals remain coalesced pending
 wakes, unread and unclaimed until placement admission; mail already committed
 to a held turn stays read. Wake reservation and binding check the child's own

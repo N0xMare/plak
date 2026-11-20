@@ -976,36 +976,92 @@ impl ExecutionEnvironment {
     /// canonical paths, limits, and every delegation binding.
     #[must_use]
     pub fn matches_descriptor(&self, candidate: &ExecutionEnvironmentDescriptor) -> bool {
-        if !has_supported_digest_format(candidate.digest)
-            || candidate.backend != self.descriptor.backend
-            || candidate.scope != self.descriptor.scope
-        {
-            return false;
-        }
-        self.recompute_digest()
-            .is_ok_and(|digest| digest == candidate.digest && digest == self.descriptor.digest)
+        self.verify_descriptor(candidate).is_ok()
     }
 
-    /// Verifies an decision/persisted identity against this live environment.
+    /// Verifies a decision/persisted identity against this live environment.
     ///
     /// # Errors
     ///
-    /// Returns an identity-mismatch error without exposing configuration data.
+    /// Returns an identity mismatch or a live workspace probe error, without
+    /// exposing configuration data.
     pub fn verify_descriptor(
         &self,
         candidate: &ExecutionEnvironmentDescriptor,
     ) -> Result<(), ExecutionEnvironmentError> {
-        if self.matches_descriptor(candidate) {
-            Ok(())
-        } else {
-            Err(ExecutionEnvironmentError::new(
-                ExecutionEnvironmentErrorKind::IdentityMismatch,
-                "execution environment descriptor does not match the live environment",
-            ))
+        self.verify_descriptor_fields(candidate)?;
+        let digest = self.recompute_digest().map_err(|error| {
+            if self.is_remote() && error.kind() == ExecutionEnvironmentErrorKind::Workspace {
+                error
+            } else {
+                descriptor_mismatch()
+            }
+        })?;
+        self.verify_digest(candidate, digest)
+    }
+
+    /// Whether live workspace checks use a paired runner, rather than the
+    /// host filesystem (including the home-local process transport).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_remote(&self) -> bool {
+        self.runner_link.is_some()
+    }
+
+    /// Cancellable variant of the live check for an async dispatch owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns an identity mismatch or a live workspace probe error.
+    #[doc(hidden)]
+    pub async fn verify_descriptor_async(
+        &self,
+        candidate: &ExecutionEnvironmentDescriptor,
+    ) -> Result<(), ExecutionEnvironmentError> {
+        if !self.is_remote() {
+            return self.verify_descriptor(candidate);
         }
+        let probe = self.runner_probe().ok_or_else(remote_root_unavailable)?;
+        self.verify_descriptor_fields(candidate)?;
+        let root = probe
+            .filesystem_identity_async(self.workspace.root())
+            .await
+            .map_err(|_| remote_root_unavailable())?;
+        self.verify_digest(candidate, self.digest_with_root(root)?)
+    }
+
+    fn verify_descriptor_fields(
+        &self,
+        candidate: &ExecutionEnvironmentDescriptor,
+    ) -> Result<(), ExecutionEnvironmentError> {
+        if !has_supported_digest_format(candidate.digest)
+            || candidate.backend != self.descriptor.backend
+            || candidate.scope != self.descriptor.scope
+        {
+            return Err(descriptor_mismatch());
+        }
+        Ok(())
+    }
+
+    fn verify_digest(
+        &self,
+        candidate: &ExecutionEnvironmentDescriptor,
+        digest: Digest,
+    ) -> Result<(), ExecutionEnvironmentError> {
+        if digest != candidate.digest || digest != self.descriptor.digest {
+            return Err(descriptor_mismatch());
+        }
+        Ok(())
     }
 
     pub(super) fn recompute_digest(&self) -> Result<Digest, ExecutionEnvironmentError> {
+        self.digest_with_root(self.live_root_identity()?)
+    }
+
+    fn digest_with_root(
+        &self,
+        root: HostFilesystemObjectIdentity,
+    ) -> Result<Digest, ExecutionEnvironmentError> {
         if self.operation_backend.identity() != &self.live_backend {
             return Err(ExecutionEnvironmentError::new(
                 ExecutionEnvironmentErrorKind::IdentityMismatch,
@@ -1017,7 +1073,7 @@ impl ExecutionEnvironment {
             self.descriptor.scope,
             &path_identity_bytes(self.workspace.root())?,
             &path_identity_bytes(self.workspace.cwd())?,
-            self.live_root_identity()?,
+            root,
             &self.config,
         )
     }
@@ -1025,19 +1081,39 @@ impl ExecutionEnvironment {
     fn live_root_identity(
         &self,
     ) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
-        if let (Some(link), Some(runtime)) = (&self.runner_link, &self.runner_runtime) {
+        if self.is_remote() {
             use crate::WorkspaceProbe as _;
-            return super::runner::RunnerWorkspaceProbe::new(Arc::clone(link), runtime.clone())
+            return self
+                .runner_probe()
+                .ok_or_else(remote_root_unavailable)?
                 .filesystem_identity(self.workspace.root())
-                .map_err(|_| {
-                    ExecutionEnvironmentError::new(
-                        ExecutionEnvironmentErrorKind::Workspace,
-                        "runner root identity unavailable",
-                    )
-                });
+                .map_err(|_| remote_root_unavailable());
         }
         filesystem_object_identity(self.workspace.root())
     }
+
+    fn runner_probe(&self) -> Option<super::runner::RunnerWorkspaceProbe> {
+        let link = self.runner_link.as_ref()?;
+        let runtime = self.runner_runtime.as_ref()?;
+        Some(super::runner::RunnerWorkspaceProbe::new(
+            Arc::clone(link),
+            runtime.clone(),
+        ))
+    }
+}
+
+fn descriptor_mismatch() -> ExecutionEnvironmentError {
+    ExecutionEnvironmentError::new(
+        ExecutionEnvironmentErrorKind::IdentityMismatch,
+        "execution environment descriptor does not match the live environment",
+    )
+}
+
+fn remote_root_unavailable() -> ExecutionEnvironmentError {
+    ExecutionEnvironmentError::new(
+        ExecutionEnvironmentErrorKind::Workspace,
+        "runner root identity unavailable",
+    )
 }
 
 impl fmt::Debug for ExecutionEnvironment {

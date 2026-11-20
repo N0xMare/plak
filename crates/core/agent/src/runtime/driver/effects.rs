@@ -115,7 +115,7 @@ impl Driver {
             Arc::clone(&self.clock),
             progress,
         )
-        .with_dispatch_observer(observer.clone());
+        .with_durable_dispatch_observer(observer.clone());
         let (control, _preempt_guard) = if origin == ToolDispatchOrigin::TopLevel {
             let (preempt, guard) = self.dispatch_preempt();
             (control.with_preempt(preempt), Some(guard))

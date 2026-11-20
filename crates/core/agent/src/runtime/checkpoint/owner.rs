@@ -167,14 +167,57 @@ impl StartAuthority {
                 .await
                 .map_err(|_| lease_lost_before_dispatch())?;
         }
+        self.check_before_dispatch()?;
+        Ok(StartAdmission { _guard: guard })
+    }
+
+    /// Waits for durable authority, checks the remote environment without
+    /// holding the gate, and takes the final guard without another wait.
+    pub(in crate::runtime) async fn admit_after<E, F>(
+        &self,
+        revalidate: impl Fn() -> F,
+        refuse: impl Fn(AgentError) -> E,
+    ) -> Result<StartAdmission, E>
+    where
+        F: Future<Output = Result<(), E>>,
+    {
+        loop {
+            drop(self.admit().await.map_err(&refuse)?);
+            revalidate().await?;
+            if let Some(guard) = self.try_admit().map_err(&refuse)? {
+                return Ok(guard);
+            }
+        }
+    }
+
+    fn try_admit(&self) -> Result<Option<StartAdmission>, AgentError> {
+        let branch = lock_mutex(&self.checkpoint).durable.clone();
+        let guard = if let Some(branch) = branch {
+            if branch.store.storage_unavailable() {
+                return Ok(None);
+            }
+            let Ok(guard) = branch.lease_gate.try_lock_owned() else {
+                return Ok(None);
+            };
+            Some(guard)
+        } else {
+            None
+        };
+        if self.lease_expired() && !self.lost.is_cancelled() && !self.shutdown.is_cancelled() {
+            return Ok(None);
+        }
+        self.check_before_dispatch()?;
+        Ok(Some(StartAdmission { _guard: guard }))
+    }
+
+    fn check_before_dispatch(&self) -> Result<(), AgentError> {
         self.check().map_err(|error| {
             if error.kind() == AgentErrorKind::OutcomeUnknown {
                 lease_lost_before_dispatch()
             } else {
                 error
             }
-        })?;
-        Ok(StartAdmission { _guard: guard })
+        })
     }
 
     fn lease_expired(&self) -> bool {

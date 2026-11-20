@@ -11,6 +11,7 @@ use plakous_tools::{ToolRuntimeError, ToolRuntimeErrorKind};
 pub(super) struct ToolDispatchError {
     kind: ToolRuntimeErrorKind,
     diagnostic: SafeDiagnostic,
+    proven_no_effect: Option<bool>,
 }
 
 impl ToolDispatchError {
@@ -18,6 +19,7 @@ impl ToolDispatchError {
         Self {
             kind,
             diagnostic: SafeDiagnostic::new(message),
+            proven_no_effect: None,
         }
     }
 
@@ -30,6 +32,7 @@ impl ToolDispatchError {
         Self {
             kind: error.kind(),
             diagnostic: error.message().clone(),
+            proven_no_effect: Some(error.proven_no_effect()),
         }
     }
 
@@ -38,7 +41,11 @@ impl ToolDispatchError {
     }
 
     pub(super) fn into_portable(self) -> ToolRuntimeError {
-        ToolRuntimeError::new(self.kind(), self.diagnostic.as_str())
+        let error = ToolRuntimeError::new(self.kind(), self.diagnostic.as_str());
+        match self.proven_no_effect {
+            Some(proven) => error.with_proven_no_effect(proven),
+            None => error,
+        }
     }
 }
 

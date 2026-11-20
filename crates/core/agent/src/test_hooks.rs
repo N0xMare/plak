@@ -3,6 +3,15 @@
 
 pub mod commit_classes;
 
+pub(crate) fn final_runner_probe() {
+    if let Some(directory) = std::env::var_os("PLAK_TEST_FINAL_RUNNER_PROBE") {
+        let directory = std::path::Path::new(&directory);
+        if directory.join("final-probe.armed").is_file() {
+            let _ = std::fs::write(directory.join("final-probe.next"), []);
+        }
+    }
+}
+
 /// A credential-wait clear the event hub refused: the host keeps showing the
 /// wait, so a gate run names the refusal on stderr.
 pub(crate) fn credential_wait_clear_refused(error: &dyn std::fmt::Debug) {

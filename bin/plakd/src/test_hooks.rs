@@ -519,6 +519,16 @@ fn prepare_scripted_tree(
         WriterMode::SingleLease,
     )
     .map_err(|error| format!("offline scripted tree: {}", error.message))?;
+    if let Some(runner) = state_roots.runner_services() {
+        tree.place_genesis_root(plakous_hosted::agent_tree::NodePlacement {
+            runner_id: Some(runner.backend().runner_id().as_str().to_owned()),
+            workspace: Some(plakous_hosted::agent_tree::NodeWorkspace {
+                root: workspace.to_path_buf(),
+                cwd: workspace.to_path_buf(),
+            }),
+        })
+        .map_err(|error| format!("offline scripted tree placement: {}", error.message))?;
+    }
     pin_product_child_roster(&mut tree, plan)?;
     let inner: Arc<dyn TreeStore> = if plan.durable_tree {
         paths

@@ -49,9 +49,8 @@ fn protocol_nine_probe_payloads_are_pinned() {
 }
 
 /// A [`WorkspaceProbe`] whose answers come from the runner behind a link.
-/// Each question is one request, waited for on a thread of its own: callers
-/// of this synchronous port run off the async workers (spec 01 §8.5). Any
-/// link failure is [`ProbeError::Unavailable`], never an absent answer.
+/// Each question is one request. Any link failure is
+/// [`ProbeError::Unavailable`], never an absent answer.
 pub struct RunnerWorkspaceProbe {
     link: Arc<dyn RunnerLink>,
     runtime: tokio::runtime::Handle,
@@ -72,6 +71,31 @@ impl RunnerWorkspaceProbe {
             RunnerCall::unkeyed(RunnerVerb::ProbeWorkspace, payload),
         )
         .map_err(|_| ProbeError::Unavailable)
+    }
+
+    pub(in crate::environment) async fn filesystem_identity_async(
+        &self,
+        target: &Path,
+    ) -> Result<crate::HostFilesystemObjectIdentity, ProbeError> {
+        let payload = to_value(&ProbeWire::FilesystemIdentity {
+            path: path(target)?,
+        })
+        .map_err(|_| ProbeError::Unavailable)?;
+        // The link has its own executor. Dropping the wait aborts only this
+        // unkeyed probe, including across a reconnect.
+        let mut task = tokio::task::JoinSet::new();
+        task.spawn_on(
+            self.link
+                .call(RunnerCall::unkeyed(RunnerVerb::ProbeWorkspace, payload)),
+            &self.runtime,
+        );
+        let answer = task
+            .join_next()
+            .await
+            .ok_or(ProbeError::Unavailable)?
+            .map_err(|_| ProbeError::Unavailable)?
+            .map_err(|_| ProbeError::Unavailable)?;
+        serde_json::from_value(answer).map_err(|_| ProbeError::Unavailable)
     }
 }
 

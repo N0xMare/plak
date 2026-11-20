@@ -53,7 +53,17 @@ impl Remote {
     }
 
     pub(super) fn start(&self, fixture: &Fixture) -> (Host, Client, String, NodeAddress) {
-        let host = start_env(fixture, &[], &[("PATH", self.path.clone())]);
+        self.start_with(fixture, &[])
+    }
+
+    pub(super) fn start_with(
+        &self,
+        fixture: &Fixture,
+        extra: &[(&str, String)],
+    ) -> (Host, Client, String, NodeAddress) {
+        let mut env = vec![("PATH", self.path.clone())];
+        env.extend_from_slice(extra);
+        let host = start_env(fixture, &[], &env);
         let mut client = Client::connect(&host);
         let mut request = new_session(&fixture.workspace());
         if let Op::NewSession { runner, .. } = &mut request {

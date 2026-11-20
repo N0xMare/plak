@@ -21,6 +21,7 @@ mod scheduler;
 mod task;
 
 pub use authority::{AuthorizedToolInvocation, EffectAuthorization, PendingEffectDecision};
+pub(crate) use execution::{DurableToolDispatchObserver, RemoteRevalidationFuture};
 pub use execution::{
     ToolDispatchObserver, ToolDispatchObserverFuture, ToolDispatchPermit, ToolExecutionControl,
 };
@@ -37,6 +38,7 @@ pub use task::{
 use self::scheduler::{RuntimeLane, SchedulerPermits, default_scheduler};
 use authority::{ToolAttemptClaim, ToolAttemptKey, ToolAttemptState, ToolRuntimeAuthority};
 use dispatch_error::{DispatchFailure, ToolDispatchError};
+use execution::DispatchObserver;
 use interrupt::{
     cancelled_error, effective_deadline, execution_panic_error, execution_timeout_error,
     wait_for_dispatch_interrupt, wait_for_interrupt,
@@ -44,9 +46,9 @@ use interrupt::{
 use plakous_tools::{
     EffectAuthorizationBinding, EffectAuthorizationGrant, EffectAuthorizationGrantSource,
     EffectDecision, EffectDecisionDisposition, EffectDecisionPrompt, ExecutionEnvironment,
-    FrozenToolRegistry, RegisteredToolIdentity, ToolExposureBinding, ToolInvocation,
-    ToolInvocationRequest, ToolOutcome, ToolOutcomeLimits, ToolPolicy, ToolPolicyDecision,
-    ToolPolicyRevision, ToolRuntimeError, ToolRuntimeErrorKind,
+    ExecutionEnvironmentErrorKind, FrozenToolRegistry, RegisteredToolIdentity, ToolExposureBinding,
+    ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolOutcomeLimits, ToolPolicy,
+    ToolPolicyDecision, ToolPolicyRevision, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 const EFFECT_DISPATCH_INTENT_VERSION: u32 = 6;
@@ -553,7 +555,7 @@ impl ToolRuntime {
         binding_digest: Digest,
         prompt: EffectDecisionPrompt,
     ) -> Result<PendingEffectDecision, ToolDispatchError> {
-        self.verify_invocation(&invocation)?;
+        self.verify_invocation_scope(&invocation)?;
         let binding = self.binding_for(&invocation)?;
         if binding.digest() != binding_digest {
             return Err(authorization_error(
@@ -586,7 +588,12 @@ impl ToolRuntime {
         &self,
         invocation: ToolInvocation,
     ) -> Result<EffectAuthorization, ToolDispatchError> {
-        self.verify_invocation(&invocation)?;
+        self.verify_invocation_scope(&invocation)?;
+        self.verify_environment(
+            self.environment.descriptor(),
+            "execution environment identity is no longer valid",
+        )
+        .await?;
         let binding = self.binding_for(&invocation)?;
         let attempt_key = ToolAttemptKey::for_invocation(&invocation);
         match self.authority.begin(attempt_key, binding.digest()) {
@@ -626,7 +633,7 @@ impl ToolRuntime {
             .evaluate(request)
             .await
             .map_err(ToolDispatchError::from_control)?;
-        self.verify_binding(&invocation, &binding)?;
+        self.verify_live_binding(&invocation, &binding).await?;
         Ok(match decision {
             ToolPolicyDecision::Allowed => {
                 active.transition(ToolAttemptState::Authorized)?;
@@ -768,6 +775,14 @@ impl ToolRuntime {
         grant: &EffectAuthorizationGrant,
     ) -> Result<EffectDispatchIntent, ToolDispatchError> {
         self.verify_binding(invocation, grant.binding())?;
+        self.verified_effect_dispatch_intent(invocation, grant)
+    }
+
+    fn verified_effect_dispatch_intent(
+        &self,
+        invocation: &ToolInvocation,
+        grant: &EffectAuthorizationGrant,
+    ) -> Result<EffectDispatchIntent, ToolDispatchError> {
         let definition = self
             .registry
             .definition(invocation.identity().name())
@@ -1003,9 +1018,46 @@ impl ToolRuntime {
         if let Err(error) = active.transition(ToolAttemptState::DispatchStarted) {
             return DispatchExecution::not_started(error);
         }
-        let dispatch_permit = if let Some(observer) = control.dispatch_observer() {
-            let Ok(notification) = catch_unwind(AssertUnwindSafe(|| observer.dispatch_started()))
-            else {
+        let revalidate = || async {
+            if control.cancellation().is_cancelled() {
+                return Err(cancelled_error());
+            }
+            if Instant::now() >= deadline.monotonic {
+                return Err(execution_timeout_error());
+            }
+            if self.environment.is_remote() {
+                crate::test_hooks::final_runner_probe();
+            }
+            self.verify_live_binding(&invocation, grant.binding())
+                .await?;
+            if let Some(authority) = &effect_authority
+                && self.verified_effect_dispatch_intent(&invocation, &grant)? != authority.intent
+            {
+                return Err(effect_safety_error(
+                    "durable effect claim failed exact dispatch-time revalidation",
+                ));
+            }
+            Ok(())
+        };
+        let remote = self.environment.is_remote();
+        let durable_remote = remote
+            && matches!(
+                control.dispatch_observer(),
+                Some(DispatchObserver::Durable(_))
+            );
+        let remote_revalidate = || -> RemoteRevalidationFuture<'_> {
+            Box::pin(revalidate().map(|result| result.map_err(ToolDispatchError::into_portable)))
+        };
+        let mut dispatch_permit = if let Some(observer) = control.dispatch_observer() {
+            let Ok(notification) = catch_unwind(AssertUnwindSafe(|| {
+                if let DispatchObserver::Durable(observer) = observer
+                    && remote
+                {
+                    observer.dispatch_started_remote(&remote_revalidate)
+                } else {
+                    observer.dispatch_started()
+                }
+            })) else {
                 return DispatchExecution::not_started(dispatch_observer_error());
             };
             let notification =
@@ -1035,21 +1087,27 @@ impl ToolRuntime {
         } else {
             None
         };
-        // Admission may wait behind other calls. Revalidate every mutable
-        // authoritative dependency at the dispatch linearization point.
-        if let Err(error) = self.verify_binding(&invocation, grant.binding()) {
-            return DispatchExecution::not_started(error);
-        }
-        if let Some(authority) = &effect_authority {
-            let current = match self.effect_dispatch_intent_for(&invocation, &grant) {
-                Ok(intent) => intent,
-                Err(error) => return DispatchExecution::not_started(error),
-            };
-            if current != authority.intent {
-                return DispatchExecution::not_started(effect_safety_error(
-                    "durable effect claim failed exact dispatch-time revalidation",
-                ));
+        // Wait before checking mutable bindings. On a remote placement the
+        // durable observer checked the runner before taking its final guard.
+        if !durable_remote {
+            let interrupt = wait_for_interrupt(
+                control.cancellation().clone(),
+                deadline.monotonic,
+                Arc::clone(&self.timer),
+            );
+            match select(Box::pin(revalidate()), Box::pin(interrupt)).await {
+                Either::Left((Ok(()), _)) => {}
+                Either::Left((Err(error), _)) => return DispatchExecution::not_started(error),
+                Either::Right((Interrupt::Cancelled, _)) => {
+                    return DispatchExecution::not_started(cancelled_error());
+                }
+                Either::Right((Interrupt::Deadline, _)) => {
+                    return DispatchExecution::not_started(execution_timeout_error());
+                }
             }
+        }
+        if let Err(error) = self.verify_policy_revision() {
+            return DispatchExecution::not_started(error);
         }
         // The observer can wait on durable admission. Recheck cooperative
         // controls after that final wait before constructing the executor.
@@ -1059,7 +1117,7 @@ impl ToolRuntime {
         if Instant::now() >= deadline.monotonic {
             return DispatchExecution::not_started(execution_timeout_error());
         }
-        if let Some(permit) = dispatch_permit {
+        if let Some(permit) = dispatch_permit.take() {
             match catch_unwind(AssertUnwindSafe(|| permit.start())) {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
@@ -1068,6 +1126,7 @@ impl ToolRuntime {
                 Err(_) => return DispatchExecution::not_started(dispatch_observer_error()),
             }
         }
+        drop(dispatch_permit);
         if let Some(authority) = effect_authority {
             invocation = plakous_tools::internal::bind_effect_dispatch(
                 invocation,
@@ -1177,7 +1236,10 @@ impl ToolRuntime {
         .map_err(ToolDispatchError::from_control)
     }
 
-    fn verify_invocation(&self, invocation: &ToolInvocation) -> Result<(), ToolDispatchError> {
+    fn verify_invocation_scope(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<(), ToolDispatchError> {
         self.verify_policy_revision()?;
         let scope = self.environment.descriptor().scope();
         if scope.run_id() != invocation.run_id()
@@ -1189,14 +1251,6 @@ impl ToolRuntime {
                 "execution environment scope does not cover the tool invocation",
             ));
         }
-        self.environment
-            .verify_descriptor(self.environment.descriptor())
-            .map_err(|_error| {
-                ToolDispatchError::new(
-                    ToolRuntimeErrorKind::Policy,
-                    "execution environment identity is no longer valid",
-                )
-            })?;
         plakous_tools::internal::executor(&self.registry, invocation)
             .map(|_| ())
             .map_err(ToolDispatchError::from_control)
@@ -1207,15 +1261,16 @@ impl ToolRuntime {
         invocation: &ToolInvocation,
         binding: &EffectAuthorizationBinding,
     ) -> Result<(), ToolDispatchError> {
-        self.verify_invocation(invocation)?;
-        self.environment
-            .verify_descriptor(binding.environment_descriptor())
-            .map_err(|_error| {
-                ToolDispatchError::new(
-                    ToolRuntimeErrorKind::Policy,
-                    "decision environment binding is no longer valid",
-                )
-            })?;
+        self.verify_invocation_scope(invocation)?;
+        // Intermediate remote decisions and claims compare the exact frozen
+        // authority. Only the live verifier can admit the executor.
+        if !self.environment.is_remote() {
+            self.environment
+                .verify_descriptor(binding.environment_descriptor())
+                .map_err(|_| {
+                    authorization_error("decision environment binding is no longer valid")
+                })?;
+        }
         let expected = self.binding_for(invocation)?;
         if expected == *binding {
             Ok(())
@@ -1224,6 +1279,48 @@ impl ToolRuntime {
                 "tool authorization binding does not match the invocation",
             ))
         }
+    }
+
+    async fn verify_live_binding(
+        &self,
+        invocation: &ToolInvocation,
+        binding: &EffectAuthorizationBinding,
+    ) -> Result<(), ToolDispatchError> {
+        self.verify_binding(invocation, binding)?;
+        if self.environment.is_remote() {
+            self.verify_environment(
+                binding.environment_descriptor(),
+                "decision environment binding is no longer valid",
+            )
+            .await?;
+            self.verify_policy_revision()?;
+        }
+        Ok(())
+    }
+
+    async fn verify_environment(
+        &self,
+        descriptor: &plakous_tools::ExecutionEnvironmentDescriptor,
+        mismatch: &'static str,
+    ) -> Result<(), ToolDispatchError> {
+        self.environment
+            .verify_descriptor_async(descriptor)
+            .await
+            .map_err(|error| {
+                if self.environment.is_remote()
+                    && error.kind() == ExecutionEnvironmentErrorKind::Workspace
+                {
+                    ToolDispatchError::from_control(
+                        ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::Execution,
+                            "runner workspace identity is unavailable before tool dispatch",
+                        )
+                        .with_proven_no_effect(true),
+                    )
+                } else {
+                    authorization_error(mismatch)
+                }
+            })
     }
 
     fn verify_policy_revision(&self) -> Result<(), ToolDispatchError> {

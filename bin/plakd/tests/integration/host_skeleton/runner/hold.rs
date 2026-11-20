@@ -6,6 +6,8 @@ use super::*;
 mod support;
 use support::*;
 
+mod reconnect;
+
 fn strict_fixture() -> Fixture {
     fixture().expect(
         "strict runner hold shape cannot skip a long Unix socket path; shorten PLAK_TEST_TMPDIR",
