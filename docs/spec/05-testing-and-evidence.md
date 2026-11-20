@@ -6658,7 +6658,8 @@ qualification. Digest-pinned Compose images run Keycloak 26, strict
 node-oidc-provider RFC 8707 resource indicators, an official-SDK streamable
 HTTP MCP fixture, and pinned Playwright browser approval with disposable test
 users. plakd is built with `test-hooks` and driven by `PLAK_TEST_SCRIPT` in an
-isolated private home; no operator subscription store is inherited. The JSON
+isolated private home with a separate Unix-socket gateway per case; no
+operator subscription store is inherited. The JSON
 report binds the binary hash and source revision to per-scenario CLI/session
 log assertions and independent AS dispatch/MCP audience and effect witnesses.
 Browser URLs, authorization codes, device codes, tokens and client secrets

@@ -72,7 +72,6 @@ SIDE_REQUEST_401 = {
     ("grok", "web_search"): "host=cli-chat-proxy.grok.com,path=/v1/responses,nth=2,fault=401",
     ("grok", "image_gen"): "host=cli-chat-proxy.grok.com,path=/v1/images/,nth=1,fault=401",
 }
-_GENERATION = re.compile(r"generation (\d+)")
 
 BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -1031,7 +1030,7 @@ class Features:
     # --- a 401 on a subscription side request ------------------------------------------
 
     def credential_generation(self) -> int:
-        """The stored login's generation, from `plakd doctor`; a refresh bumps it."""
+        """The exact stored login generation from the fixture gateway."""
         child = {
             key: value
             for key, value in live.plak_child_source().items()
@@ -1041,13 +1040,18 @@ class Features:
         doctor_home.mkdir(mode=0o700, exist_ok=True)
         child["PLAK_HOME"] = str(doctor_home)
         result = subprocess.run(
-            [str(self.env.binary), "doctor"], env=child, capture_output=True, text=True, timeout=120
+            [str(self.env.binary), "deploy-credential-generation", self.route.account],
+            env=self.env.gateway_env(child),
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
-        for line in (result.stdout + result.stderr).splitlines():
-            match = _GENERATION.search(line)
-            if match and self.route.account in line.lower():
-                return int(match.group(1))
-        raise ScenarioFailure(HARNESS, f"plakd doctor shows no {self.route.account} generation")
+        generation = result.stdout.strip()
+        if result.returncode == 0 and generation.isascii() and generation.isdecimal():
+            return int(generation)
+        raise ScenarioFailure(
+            HARNESS, f"gateway facts show no ready {self.route.account} generation"
+        )
 
     def _side_request_401(self, tool: str) -> tuple[str, list[dict], list[Path], Path, str, str]:
         plan = SIDE_REQUEST_401.get((self.route.account, tool))

@@ -17,7 +17,8 @@ python3 tests/live/mcp_oauth/run.py --previous-binary /path/to/other-state-key/p
 
 The recipe builds a `test-hooks` release binary. Direct Python invocation
 requires one already built **from this checkout**. No sidecars are needed for
-the scripted direct composition. The driver refuses a non-test-hooks binary;
+the scripted direct composition. Every case starts a separate gateway on a
+private Unix socket. The driver refuses a non-test-hooks binary;
 the offline selector cannot fall back to a provider. `PLAK_TEST_FAULTS` injects
 revocation 503 and a calibrated `tools/call` 401; a separate MCP fixture injects
 a real HTTP 401 at `tools/call` so its

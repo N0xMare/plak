@@ -28,6 +28,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 import live  # noqa: E402
+from gateway_fixture import running_gateway  # noqa: E402
 
 CONTROL = "http://127.0.0.1:18082/control"
 KC = "http://127.0.0.1:18081"
@@ -606,6 +607,15 @@ class Harness:
                 "unverified_endpoint",
             ),
         )
+        with running_gateway(
+            self.binary, self.home, self.workspace, self.env(), socket_path=self.home / "g"
+        ) as gateway_config:
+            # Preserve the caller address even when a scenario rewrites the MCP table.
+            self.config = gateway_config + self.config
+            self.write_config()
+            return self.run_scenario(name)
+
+    def run_scenario(self, name):
         if name in ("split_origin_token_revocation", "split_origin_device", "unverified_endpoint"):
             self.control(splitEndpoints=True)
             self.login(
