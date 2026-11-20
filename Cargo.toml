@@ -398,6 +398,27 @@ debug = false
 [profile.dev.package.sha2]
 opt-level = 3
 
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.aho-corasick]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = "fat"
