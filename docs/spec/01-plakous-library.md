@@ -1555,11 +1555,15 @@ reboot is not a suspend). A lease that has not expired is simply renewed. The
 default method refuses, so a store that cannot prove all of this keeps the old
 rule. The owner revives once when a renewal reports expiry, from the heartbeat
 or from start admission, which does so under the lease gate it already holds
-because a suspended runtime's timers can fire after the first start. A refused
-revival ends the owner's authority: the session was taken over, and the other
-owner's open closes whatever this one left. A revival the store could not
-answer (busy, unavailable or past its deadline) keeps that error and is not
-reported as a takeover. Start admission that refuses
+because a suspended runtime's timers can fire after the first start. A revival
+refused because the fence was superseded or another owner holds it ends the
+old owner's authority: `lease_taken_over` is `OutcomeUnknown` with
+`FenceSuperseded`, and the other owner's open closes whatever this one left.
+A revival the store could not answer (busy, unavailable or past its deadline)
+is not a takeover. Once the same-domain clock proves the grant expired, this
+becomes `lease_authority_lost(LeaseExpired)`, an `OutcomeUnknown` with typed
+`LeaseExpired`; without proof of expiry the transient failure does not
+establish lease loss. Start admission that refuses
 because authority was lost or expired is a definite `Session` failure, because
 nothing was started; only a loss after dispatch remains `OutcomeUnknown`.
 

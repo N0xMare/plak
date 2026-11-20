@@ -25,6 +25,52 @@ fn operator_attention_warns_at_most_once_per_minute_on_entry() {
     assert!(!track.should_warn(true, first + Duration::from_secs(61)));
 }
 
+#[test]
+fn held_process_loss_needs_operator_but_does_not_pause_wakes() {
+    use crate::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+
+    with_tree(1, |host, _, _, observed| {
+        let pending = snapshots(observed);
+        let initial = pending.last().unwrap();
+        assert_eq!(initial.results, 1);
+        assert!(!initial.auto_continue_paused);
+        let config = &mut host.role.config;
+        assert_eq!(
+            config.resume_after_loss,
+            crate::runtime::ResumeAfterLoss::Hold
+        );
+        config.store.save(&mut config.session).unwrap();
+        config
+            .store
+            .write_root_loss(
+                &config.session.id,
+                RootLossIntent::Interrupt(RootInterrupt {
+                    anchor: RootStopAnchor::Turn {
+                        turn_id: "process-lost-turn".into(),
+                    },
+                    cause: RootInterruptCause::OwnerLost,
+                }),
+            )
+            .unwrap();
+        // Refresh the host's cached join with the just-recorded loss.
+        host.role.pending_track.reason_read_at = None;
+        host.publish_pending_continuation();
+        let events: Vec<_> = observed.try_iter().collect();
+        assert!(notes(&events).iter().any(|note| {
+            note.contains("Needs operator · root_held_after_loss: 1 pending mail/wake item")
+        }));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            HostEvent::PendingContinuation {
+                auto_continue_paused: true,
+                ..
+            }
+        )));
+    });
+}
+
 pub(super) fn snapshots(observed: &HostEventReceiver<TestExtension>) -> Vec<PendingContinuation> {
     observed
         .try_iter()

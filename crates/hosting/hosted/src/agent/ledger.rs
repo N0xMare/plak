@@ -179,8 +179,9 @@ fn mail_batch(
 
 /// Writes `command_id`'s intent for `recipient` with its exact text and
 /// batch, before submission. A command already written is returned as
-/// stored, so an exact resubmission reuses its text and batch; the same
-/// identity with another base prompt is refused.
+/// stored, so an exact resubmission reuses its text and batch. The same
+/// identity with another base prompt is refused, except when the child's
+/// recorded pending loss decision already identifies the command to retry.
 ///
 /// An unresolved command of the recipient's current attempt that carries a
 /// batch (or is a corrective round) refuses a different command until it has
@@ -210,11 +211,18 @@ fn prepare_in(
     loss_notice: impl FnOnce(&crate::agent_tree::ProductAgentTree, usize) -> Option<String>,
 ) -> Result<Prepared, String> {
     if let Some(stored) = tree.command(command_id) {
+        // A recorded continuation's bytes are authoritative even if the
+        // current build would compose a different instruction.
+        let pending_continuation = kind == CommandKind::Resume
+            && stored.kind == AgentCommandKind::Resume
+            && stored.unresolved()
+            && tree.loss_continuation_admissible(recipient, command_id);
         let exact = stored.recipient == recipient
-            && stored
-                .text
-                .strip_prefix(prompt)
-                .is_some_and(|batch| batch.is_empty() || batch.starts_with("\n\n"));
+            && (pending_continuation
+                || stored
+                    .text
+                    .strip_prefix(prompt)
+                    .is_some_and(|batch| batch.is_empty() || batch.starts_with("\n\n")));
         if !exact {
             return Err("child command id conflicts with a different stored command".to_owned());
         }

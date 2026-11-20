@@ -4811,6 +4811,15 @@ fn interrupt_hook(fixture: &Fixture, id: &str) -> crate::agent::park::hooks::Hoo
 /// Prepares the continuation's command the way a Start does before it
 /// submits, as a crash between preparation and submission leaves it.
 async fn prepare_continuation(fixture: &Fixture, id: &str) -> String {
+    prepare_continuation_with_text(
+        fixture,
+        id,
+        crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE,
+    )
+    .await
+}
+
+async fn prepare_continuation_with_text(fixture: &Fixture, id: &str, text: &'static str) -> String {
     let id = id.to_owned();
     fixture
         .runtime
@@ -4828,7 +4837,7 @@ async fn prepare_continuation(fixture: &Fixture, id: &str) -> String {
                 &id,
                 attempt,
                 crate::agent_tree::AgentCommandKind::Resume,
-                crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE,
+                text,
                 Vec::new(),
             ))
             .map_err(|error| error.message)?;
@@ -5088,9 +5097,10 @@ async fn continuation_ended_in_feed(
 /// still-pending continuation's command for the continuation to resubmit.
 #[tokio::test]
 async fn an_owed_childs_mark_keeps_its_pending_continuation() {
+    const OLD_INSTRUCTION: &str = "The host running this assignment was lost, which interrupted your work: a turn in progress, or your wait between turns. Continue the same assignment from the last completed step: check what already happened before you act, and do not repeat completed actions. This is a new turn, not a replay of anything that was lost. Keep the same turn_token and result schema; call submit_result when the assignment is done.";
     let fixture = Fixture::new("mark-keeps-pending");
     let id = owner_lost_child(&fixture).await;
-    let command = prepare_continuation(&fixture, &id).await;
+    let command = prepare_continuation_with_text(&fixture, &id, OLD_INSTRUCTION).await;
     // Another command the lost process prepared makes the child owed.
     let other = "plak:test:followup".to_owned();
     fixture
@@ -5141,6 +5151,19 @@ async fn an_owed_childs_mark_keeps_its_pending_continuation() {
                 Some(crate::agent_tree::LossContinuationState::Pending)
             );
         })
+        .unwrap();
+    recover_tree(&fixture.tree_id).await;
+    assert_eq!(continuation_admitted(&fixture).await, command);
+    assert_eq!(
+        continuation_commands(&fixture),
+        [(
+            command.clone(),
+            Some(crate::agent_tree::CommandFact::Accepted)
+        )]
+    );
+    fixture
+        .runtime
+        .read(|tree| assert_eq!(tree.commands()[&command].text, OLD_INSTRUCTION))
         .unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
 }

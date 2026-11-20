@@ -4037,10 +4037,11 @@ accepted or otherwise facted decision is never dispatched again. It is
 written and published before anything is dispatched; a refused publication
 rolls it back and nothing runs. With consent recorded and the turn not yet
 admitted the continuation is **pending**: every recovery run resubmits it
-under the same command id, and an owner-lost mark keeps that command rather
-than withdrawing it. Only a still-pending continuation's command is kept: once
-the continuation ended, its prepared command is withdrawn like any other (the
-reopen law owes the child for it, and a Start refused because the hold ended
+under the same command id, reusing a prepared command's exact text and mail
+batch even if the instruction template has changed. An owner-lost mark keeps
+that command rather than withdrawing it. Once the continuation ends, its
+prepared command is withdrawn like any other (the reopen law owes the child
+for it, and a Start refused because the hold ended
 withdraws it at once), so its batch returns to unread and the child takes
 commands again. *Durable before and after:* before consent the rows hold
 the held node and no decision; after it, the decision and nothing else; the

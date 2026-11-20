@@ -35,7 +35,7 @@ pub enum AttentionReason {
 
 impl AttentionReason {
     pub(crate) const fn pauses_root_wakes(self) -> bool {
-        !matches!(self, Self::HeldChild | Self::ChildRecovery)
+        !matches!(self, Self::HeldRoot | Self::HeldChild | Self::ChildRecovery)
     }
 
     /// The stable diagnostic reason label.
