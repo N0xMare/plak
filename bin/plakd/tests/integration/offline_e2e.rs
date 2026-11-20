@@ -3,7 +3,7 @@
 //! Every test here spawns the shipped executable and drives one of its three
 //! faces — the CLI (`plakd run`), the agent JSONL stream (`plakd agent`) and the
 //! terminal application — through a complete lifecycle against the scripted
-//! offline model (`crate::test_hooks`, feature `test-hooks`). No provider, no
+//! offline model (`crate::test_hooks`, feature `test-support`). No provider, no
 //! credential and no network is involved, and the script is a JSON document
 //! this file writes.
 //!

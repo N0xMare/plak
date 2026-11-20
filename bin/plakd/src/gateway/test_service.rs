@@ -45,7 +45,6 @@ impl GatewayFixture {
             let app = crate::commands::application::PlakousApplication::new(
                 config.state_root.clone(),
                 None,
-                None,
                 HostCustody::Local,
             )
             .map_err(|failure| failure.to_string())?

@@ -2209,7 +2209,7 @@ fn pi_edit_and_write_in_one_turn_commit_canonical_apply_patch_and_lower_by_expos
 // ---------------------------------------------------------------------------
 //
 // These cells drive `plakd agent` through the scripted offline model (the
-// `test-hooks` feature). The durability gate's workspace/all-features test
+// `test-support` feature). The durability gate's workspace/all-features test
 // build prepares that binary and both sidecars and passes their artifact paths.
 // Standalone invocations must set `PLAK_TEST_BINARY` to a matching build
 // with both sidecars beside it. Cut points on this face are reached

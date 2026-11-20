@@ -683,12 +683,12 @@ class Harness:
             if not self.args.previous_binary:
                 return (
                     "BLOCKED",
-                    "requires --previous-binary with test-hooks and a different state key",
+                    "requires --previous-binary with the test-hooks version label and a different state key",
                 )
             previous = Path(self.args.previous_binary).resolve()
             require(
                 "test-hooks" in self.command("version", binary=previous).stdout,
-                "previous binary must have test-hooks",
+                "previous binary must report the test-hooks version label",
             )
             oldkey = self.command("version", "--state-key", binary=previous).stdout.strip()
             newkey = self.command("version", "--state-key").stdout.strip()
@@ -1043,7 +1043,7 @@ def main(argv=None):
     os.umask(0o077)
     binary = Path(args.binary).resolve()
     if not binary.is_file():
-        parser.error("--binary does not exist; build the test-hooks binary first")
+        parser.error("--binary does not exist; build with plakd/test-support first")
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     harness = Harness(args)
     report = {
@@ -1082,7 +1082,7 @@ def main(argv=None):
                 "PATH": os.defpath,
             },
         )
-        require("test-hooks" in version, "binary must be built with test-hooks")
+        require("test-hooks" in version, "binary must report the test-hooks version label")
         report["version"] = version.strip()
         harness.start()
         for name in selected:

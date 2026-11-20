@@ -1,4 +1,4 @@
-//! Automatic private maintainer model-exchange capture; explicit test-hooks capture.
+//! Automatic private maintainer model-exchange capture; explicit test-support capture.
 
 use plakous::exchange_observation::ExchangeObserver;
 use std::sync::{Arc, OnceLock};
@@ -17,7 +17,7 @@ pub(super) fn from_environment(
                 let _ = home;
                 if dir.is_some() {
                     Err(
-                        "private exchange capture requires a maintainer or test-hooks build"
+                        "private exchange capture requires a maintainer or test-support build"
                             .to_owned(),
                     )
                 } else {

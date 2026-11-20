@@ -470,7 +470,7 @@ fn an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persis
     let Some(foreground_fixture) = super::fixture() else {
         return;
     };
-    // The test-hooks window replaces the production 300 s, which the pure
+    // The test-support window replaces the production 300 s, which the pure
     // idle-clock test in `host/idle.rs` keeps. The foreground host gets the
     // same short window, so its persistence is not the window's length.
     let idle = "PLAK_TEST_HOST_IDLE_EXIT_SECONDS";

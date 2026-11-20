@@ -26,7 +26,11 @@ use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-const CRASH_LEASE_SECONDS: u64 = if cfg!(feature = "test-hooks") { 2 } else { 30 };
+const CRASH_LEASE_SECONDS: u64 = if cfg!(feature = "test-support") {
+    2
+} else {
+    30
+};
 
 struct Fixture {
     _root: TempDir,

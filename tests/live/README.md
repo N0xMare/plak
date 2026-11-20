@@ -55,7 +55,7 @@ just live gateway            # offline plan and estimate line; no provider call
 just live gateway --paid     # every route through a separate gateway; paid
 ```
 
-The live drivers start a separate test-hooks gateway and point their callers
+The live drivers start a separate gateway built with `plakd/test-support` and point their callers
 at its private Unix socket. It uses the same OAuth state as the account under
 test, but exclusively holds that store. A paid run on the production machine
 needs a separate `XDG_STATE_HOME` with its own login state: the fixture gateway

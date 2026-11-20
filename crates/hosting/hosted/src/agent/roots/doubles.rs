@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{ExtraTelemetrySink, ProductTelemetry, TelemetryHealth, TelemetrySinkFactory};
+use super::{ProductTelemetry, TelemetryHealth, TelemetrySinkFactory};
 use super::{RosterSource, TreeStoreFactory};
 use crate::CliResult;
 use crate::agent_tree::{MemoryTreeStore, TreeStore};
@@ -73,7 +73,7 @@ mod openrouter;
 pub(crate) struct NoTelemetry;
 
 impl TelemetrySinkFactory for NoTelemetry {
-    fn open(&self, _extra_sink: Option<Arc<dyn ExtraTelemetrySink>>) -> Arc<dyn ProductTelemetry> {
+    fn open(&self) -> Arc<dyn ProductTelemetry> {
         Arc::new(Self)
     }
     fn log_unavailable(&self, _session_id: &str, _reason: &str) {}

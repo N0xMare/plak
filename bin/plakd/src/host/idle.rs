@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 pub(super) const IDLE_EXIT: Duration = Duration::from_secs(300);
 
-/// The production window. A `test-hooks` build may shorten it with
+/// The production window. A `test-support` build may shorten it with
 /// `PLAK_TEST_HOST_IDLE_EXIT_SECONDS` (a whole second from 1 through 300).
 fn window() -> Duration {
     window_override(crate::test_hooks::host_idle_exit_seconds().as_deref()).unwrap_or(IDLE_EXIT)

@@ -94,7 +94,6 @@ fn publication_command(root: &std::path::Path, args: &[&str]) -> Command {
         .env("HOME", root)
         .env("XDG_STATE_HOME", root.join("xdg"))
         .env_remove("PLAK_LOG")
-        .env_remove("PLAK_OTLP_ENDPOINT")
         .env_remove("PLAK_TEST_SCRIPT")
         .env_remove("VISUAL")
         .env_remove("EDITOR");
