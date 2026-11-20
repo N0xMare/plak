@@ -434,7 +434,7 @@ async fn artifact_gated_long_turn_soak_bounds_compactions_and_eventually_dispatc
     }
     let growth = (ROUNDS as u64 * 40_000 + bodies.iter().sum::<usize>() as u64).div_ceil(4);
     assert!(
-        compactions <= growth.div_ceil(50_000) + 1,
+        (3..=growth.div_ceil(50_000) + 1).contains(&compactions),
         "{compactions} compactions for {growth} tokens of growth"
     );
     assert!(model.paid_compaction_calls.load(Ordering::Acquire) >= 1);

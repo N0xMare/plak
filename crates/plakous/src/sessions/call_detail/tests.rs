@@ -286,6 +286,8 @@ fn probe_offsets_around_window_end_never_expose_a_short_credential() {
     let offsets = (0..15)
         .map(|i| REDACTION_WINDOW_BYTES - 40 + i * 5)
         .chain([
+            REDACTION_WINDOW_BYTES - 20_000,
+            REDACTION_WINDOW_BYTES - 17_497,
             REDACTION_WINDOW_BYTES - 3300,
             REDACTION_WINDOW_BYTES - 16 * 1024 - 1,
             REDACTION_WINDOW_BYTES - 16 * 1024 + 1,

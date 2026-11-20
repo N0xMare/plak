@@ -2318,9 +2318,10 @@ it does not assert wall-clock promptness.
 
 The bridge log-lock case holds the lock across a one-second discovery window
 after observing a refused auto-start, then requires a real Welcome. The
-hanging jj probe and stalled filesystem fixtures use one-second test
-deadlines and still require the correct timeout outcome from the real
-subprocess path. The shipping discovery and subprocess windows are unchanged.
+hanging jj probe and stalled filesystem fixtures use one- and three-second
+test deadlines, respectively, and still require the correct timeout outcome
+from the real subprocess path. The shipping discovery and subprocess windows
+are unchanged.
 
 `native_ready_lease_is_held_through_head_and_released_before_stream_body` runs
 in the parallel lane. Its logout-start, response-head and response-body barriers
@@ -2385,11 +2386,11 @@ assertions. The existing extended watchdogs for host-restart matrices remain.
 
 Fixed absence/liveness observation windows retain their lengths under this
 layout. `a_busy_roots_child_job_survives_attach_after_host_loss` observes a
-live held child for five seconds in each of four cases: crash, clean
-handoff, and the cuts before and after root handoff.
-`a_childs_daemon_job_survives_host_loss_and_handoff` observes for five seconds
-in each of its crash and clean handoff cases. Both fixtures cover the hold and
-continue policies across their cases. `runner_wake_live_foreground` observes a
+live held child for five seconds in each of six cases: both hold and continue
+for a crash and for a cut before root handoff, plus one clean handoff and one
+cut after root handoff. `a_childs_daemon_job_survives_host_loss_and_handoff`
+observes for five seconds in each of three cases: both policies for a crash,
+and one clean handoff. `runner_wake_live_foreground` observes a
 paused daemon's live job after 1.1 seconds.
 `a_transient_daemon_failure_keeps_the_redial_bound` requires the host to stay
 alive and report a blocked runner after a two-second redial window in each

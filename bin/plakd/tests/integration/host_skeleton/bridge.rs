@@ -273,7 +273,7 @@ fn a_curated_host_keeps_os_identity_bus_and_ca_inputs_but_not_proxy_variables() 
 }
 
 #[test]
-fn a_log_lock_without_a_host_retries_past_ten_seconds() {
+fn a_log_lock_without_a_host_retries_past_the_discovery_window() {
     let Some(fixture) = fixture() else { return };
     let started = StartedHome(fixture.home());
     let directory = fixture.home().join("host");

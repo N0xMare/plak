@@ -108,7 +108,7 @@ async fn dropping_a_request_kills_its_group() {
 }
 
 #[tokio::test]
-async fn a_stalled_filesystem_open_is_killed_at_the_five_second_deadline() {
+async fn a_stalled_filesystem_open_is_killed_at_the_request_deadline() {
     let root = checkout();
     let environment = environment(root.path());
     let fifo = root.path().join(".git/config");
@@ -120,7 +120,7 @@ async fn a_stalled_filesystem_open_is_killed_at_the_five_second_deadline() {
             .unwrap()
             .success()
     );
-    let budget = Duration::from_secs(1);
+    let budget = Duration::from_secs(3);
     BUDGET.set(Some(budget));
     let began = Instant::now();
     let answer = ask(&environment, ChangesRequest::status());

@@ -730,7 +730,7 @@ fn jj_cli_doctor_versions_and_missing_are_nonblocking() {
 }
 
 #[test]
-fn jj_cli_doctor_kills_hanging_process_group_at_five_seconds() {
+fn jj_cli_doctor_kills_hanging_process_group_at_the_deadline() {
     use std::os::unix::fs::PermissionsExt as _;
     use std::time::Duration;
     let timeout = Duration::from_secs(if cfg!(feature = "test-hooks") { 1 } else { 5 });

@@ -144,7 +144,7 @@ not (
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
   |
   test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
-  | test(a_log_lock_without_a_host_retries_past_ten_seconds)
+  | test(a_log_lock_without_a_host_retries_past_the_discovery_window)
   | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
@@ -180,7 +180,7 @@ not (
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
-  | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
+  | test(jj_cli_doctor_kills_hanging_process_group_at_the_deadline)
   | test(cell_startup::)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
@@ -462,7 +462,7 @@ default-filter = '''
   | test(await_claim_waits_for_an_unclaimed_child_to_exit)
   |
   test(an_auto_started_host_exits_after_its_idle_window_but_a_foreground_host_persists)
-  | test(a_log_lock_without_a_host_retries_past_ten_seconds)
+  | test(a_log_lock_without_a_host_retries_past_the_discovery_window)
   | test(bridge_refusal_starting_waits_for_readiness_but_stopping_is_typed)
   |
   test(foreground_awake_clock_excludes_suspend_then_expires_once)
@@ -498,7 +498,7 @@ default-filter = '''
   | test(ledger_retirement_nested_refusal_cell_finishes_and_next_cell_succeeds)
   | test(explicit_leftover_disown_is_released_and_reopen_is_read_only)
   | test(dropping_the_last_pooled_hyper_h1_client_closes_its_socket)
-  | test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
+  | test(jj_cli_doctor_kills_hanging_process_group_at_the_deadline)
   | test(cell_startup::)
   | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)

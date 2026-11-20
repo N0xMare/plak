@@ -330,7 +330,9 @@ fn a_busy_roots_child_job_survives_attach_after_host_loss() {
     use std::os::unix::process::ExitStatusExt as _;
     for (phase, policy) in [
         ("crash", "continue"),
+        ("crash", "hold"),
         ("handoff", "hold"),
+        ("before-root-handoff", "continue"),
         ("before-root-handoff", "hold"),
         ("after-root-handoff", "continue"),
     ] {

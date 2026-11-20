@@ -1618,10 +1618,12 @@ apart (another process may be probing it), so it never names a dead holder
 because another probe of the same lock held it that moment.
 
 The facade grants a 30 s session lease. `test-hooks` builds may set
-`PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30; other
-builds ignore it. The stored duration is whole seconds, so a test that waits
-out expiry cannot go below one second. Lease heartbeats schedule renewal
-starts one-third of the lease duration apart.
+`PLAK_TEST_SESSION_LEASE_SECONDS` to a whole second from 1 through 30, or
+override it on the current thread for synchronous fixture setup with
+`plakous::test_session_lease::with_test_session_lease_seconds`. Other builds
+ignore the variable and do not expose the scoped override. The stored duration
+is whole seconds, so a test that waits out expiry cannot go below one second.
+Lease heartbeats schedule renewal starts one-third of the lease duration apart.
 A delayed acknowledgement does not add another full interval before renewal:
 when the interval has elapsed, the next renewal starts immediately, without
 replaying missed ticks. A heartbeat renewal that fails transiently (the store

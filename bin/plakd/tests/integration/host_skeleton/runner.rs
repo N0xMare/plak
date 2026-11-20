@@ -919,7 +919,7 @@ fn handoff_keeps_jobs(policy: &str) {
 fn a_childs_daemon_job_survives_host_loss_and_handoff() {
     let Some(probe) = fixture() else { return };
     drop(probe);
-    for (handoff, policy) in [(false, "continue"), (true, "hold")] {
+    for (handoff, policy) in [(false, "continue"), (false, "hold"), (true, "hold")] {
         let fixture = fixture().unwrap();
         write_resume_policy(&fixture, policy);
         let (mut host, session, node) = start_child_job(&fixture);
