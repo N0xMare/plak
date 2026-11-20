@@ -205,6 +205,17 @@ if args[0] == 'test' and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
         if time.monotonic() > deadline:
             raise SystemExit('test build ran alone')
         time.sleep(0.02)
+if phases := os.environ.get('GATE_OVERLAP_PHASES'):
+    phases = Path(phases)
+    if args[0] == 'test':
+        (phases / 'test-build').touch()
+    if args[:2] == ['nextest', 'run']:
+        profile = args[args.index('--profile') + 1]
+        if profile == 'offline':
+            (phases / 'offline').touch()
+            raise SystemExit(8)
+        if not (phases / 'tooling-finished').exists():
+            raise SystemExit('timed lane started before tooling finished')
 failure = json.loads(os.environ.get('GATE_CARGO_FAILURES', '{}')).get(args[0], 0)
 if args == ['fetch', '--locked', '--offline'] and os.environ.get('GATE_COLD_CACHE'):
     failure = 1
@@ -243,7 +254,8 @@ if args[0] == 'test':
         self.env.pop('PLAK_TEST_JJ', None)
         self.executable(
             'python3',
-            r'''import json, os, sys
+            r'''import json, os, sys, time
+from pathlib import Path
 if sys.argv[1] == '-' or sys.argv[1].endswith(('vcs_listing.py', 'test-processes.py')):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
@@ -261,6 +273,19 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
 if sys.argv[1].endswith('check_public_compile.py') and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
     open(os.environ['GATE_TEST_BUILD_WAITS_FOR'], 'w').close()
+if phases := os.environ.get('GATE_OVERLAP_PHASES'):
+    script = Path(sys.argv[1]).name
+    phases = Path(phases)
+    required = {'check_features.py': 'test-build', 'run_tooling_tests.py': 'offline'}.get(script)
+    if required:
+        deadline = time.monotonic() + 8
+        while not (phases / required).exists():
+            if time.monotonic() > deadline:
+                raise SystemExit(f'{script} did not overlap {required}')
+            time.sleep(0.02)
+        print(f'{script} ran with {required}')
+    if script == 'run_tooling_tests.py':
+        (phases / 'tooling-finished').touch()
 failure = json.loads(os.environ.get('GATE_PYTHON_FAILURES', '{}')).get(
     os.path.basename(sys.argv[1]), 0)
 if failure:
@@ -551,7 +576,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.log.unlink(missing_ok=True)
                 result, calls, _ = self.run_gate()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('PLAK_PY_HOST', result.stderr)
+                self.assertIn('PLAK_PY_HOST', result.stdout + result.stderr)
                 self.assertFalse(
                     any(
                         c['args'][0] == 'test' or c['args'][:2] == ['nextest', 'run'] for c in calls
@@ -590,10 +615,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
         result, calls, scripts = self.run_gate('--steps', 'static,contracts,tooling')
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            [c['args'][0] for c in calls if c['args'][0] != 'nextest'],
-            ['fmt', 'fetch', *CLIPPIES, 'test'],
-        )
+        phases = [c['args'][0] for c in calls if c['args'][0] != 'nextest']
+        self.assertEqual(phases[0], 'fetch')
+        self.assertCountEqual(phases[1:-1], ['fmt', *CLIPPIES])
+        self.assertEqual(phases[-1], 'test')
         self.assertCountEqual(
             [Path(s[0]).name for s in scripts if s[0].endswith('.py')],
             [
@@ -617,6 +642,35 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ['static', 'test-build', 'contracts', 'tooling'],
         )
         self.assertNotIn('gate passed', result.stdout)
+
+    def test_batch_overlaps_checks_but_replays_independent_verdicts_in_order(self):
+        self.env['PLAK_BATCH_BASE'] = 'test-base'
+        self.env['GATE_OVERLAP_PHASES'] = str(self.root)
+        self.env['GATE_PYTHON_FAILURES'] = json.dumps({'run_tooling_tests.py': 7})
+        result, calls, _ = self.run_gate(
+            '--steps', 'static,tooling,tests-parallel,tests-durability,tests-serial'
+        )
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+        self.assertIn('check_features.py ran with test-build', result.stdout)
+        self.assertIn('run_tooling_tests.py ran with offline', result.stdout)
+        self.assertIn('failed groups: tooling tests-parallel', result.stdout)
+        self.assertEqual(
+            [
+                line.split()[2]
+                for line in result.stdout.splitlines()
+                if line.startswith('== group: ')
+            ],
+            [
+                'static',
+                'test-build',
+                'tooling',
+                'tests-parallel',
+                'tests-durability',
+                'tests-serial',
+            ],
+        )
+        cargo = [c['args'][0] for c in calls]
+        self.assertLess(cargo.index('clippy'), cargo.index('test'))
 
     def test_contracts_overlap_the_test_build_and_finish_before_tooling(self):
         # The fake test build waits for contracts, proving the overlap.
@@ -1069,7 +1123,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, _ = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch']
+            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fetch', 'fmt']
         )
         self.assertEqual(self.lanes(calls), [])
 
@@ -1089,17 +1143,14 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'static')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('== ruff ==', result.stdout)
-        self.assertEqual(
-            [c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', *CLIPPIES]
-        )
         self.assertIn(['tools/gate/check_workspace.py'], scripts)
         self.assertIn(['tools/gate/check_features.py'], scripts)
         self.assertEqual(self.lanes(calls), [])
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
-        fmt = next(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'fmt')
-        self.assertEqual(records[fmt + 1]['args'], ['fetch', '--locked', '--offline'])
-        # The structure checkers run in order beside clippy, after the fetch.
-        after_fetch = records[fmt + 2 :]
+        fetch = next(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'fetch')
+        self.assertEqual(records[fetch]['args'], ['fetch', '--locked', '--offline'])
+        # The tree checks and clippy only start after the fetch.
+        after_fetch = records[fetch + 1 :]
         self.assertEqual(
             [row['python'] for row in after_fetch if 'python' in row],
             [
@@ -1111,8 +1162,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             row for row in after_fetch if row.get('python') == ['tools/gate/check_features.py']
         )
         self.assertTrue(features['target_dir'].endswith('feature-check'), features)
-        self.assertEqual(
-            [row['args'][0] for row in after_fetch if 'args' in row], ['clippy'] * len(CLIPPIES)
+        self.assertCountEqual(
+            [row['args'][0] for row in after_fetch if 'args' in row], ['fmt', *CLIPPIES]
         )
         clippies = [row['args'] for row in records if row.get('args', [''])[0] == 'clippy']
         self.assertEqual(clippies[0][:3], ['clippy', '--locked', '--workspace'])

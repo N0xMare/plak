@@ -84,8 +84,8 @@ package; the test build uses the shared all-feature workspace resolution.
 Set `PLAK_BATCH_BASE` to the commit before the integration batch. Linux batch
 uses the changed packages' reverse dependencies plus runtime-binary edges
 for parallel tests; Mac batch intersects that scope with the platform-sensitive
-filters. Linux batch overlaps standalone, package-lite and public compile
-contracts with test preparation, never with tooling or timed test lanes.
+filters. Linux batch overlaps tree checks and independent compile groups with
+test preparation, and tooling with the parallel lane before timed test lanes.
 
 Production install uses exact-tree batch evidence plus the install groups,
 full Mac suite and strict crash sweep (spec 06 §8). Full adds release-only

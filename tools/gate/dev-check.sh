@@ -9,7 +9,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
-# Canonical group order; every tier runs its groups in this order.
+# Canonical group order, including replay of overlapped groups.
 all_groups=(static builds variants rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install package)
 batch_groups=static,standalone,contracts,tooling,tests-parallel,tests-durability,tests-serial
 
@@ -566,71 +566,74 @@ run_wasm_portability_checks() {
   done <<<"$crates"
 }
 
+run_static_tree_checks() {
+  local failed=''
+  echo "== fmt =="
+  cargo fmt --all --check || failed=fmt
+  # Ruff covers the maintainer Python trees, excluding vendor and Harbor fixtures.
+  echo "== ruff =="
+  ruff check tools tests/tooling tests/live eval || failed="${failed:+$failed }ruff"
+  ruff format --check tools tests/tooling tests/live eval || failed="${failed:+$failed }ruff-format"
+  echo "== structure: workspace =="
+  python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
+  echo "== structure: features (static) =="
+  CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
+    || failed="${failed:+$failed }features"
+  if [[ "$tier" == full ]]; then
+    echo "== structure: evidence allowlist =="
+    python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
+  fi
+  printf '%s %s\n' "$SECONDS" "$failed" >"$group_spool/static-tree.state"
+}
+
+begin_static() {
+  local clippy_jobs=$jobs
+  static_started=$SECONDS
+  if [[ "$tier" != batch-mac ]]; then
+    # Populate the registry before checks launch Cargo in separate targets.
+    echo "== dependencies: fetch locked (offline first) =="
+    cargo fetch --locked --offline || cargo fetch --locked || fetch_failed=fetch
+    structure_jobs=$((jobs / 4))
+    if [[ "$structure_jobs" -lt 1 ]]; then structure_jobs=1; fi
+    if [[ "$jobs" -gt 1 ]]; then
+      clippy_jobs=$((jobs - structure_jobs))
+      CARGO_BUILD_JOBS=$structure_jobs run_static_tree_checks >"$group_spool/static-tree.log" 2>&1 &
+      structure_pid=$!
+    else
+      run_static_tree_checks >"$group_spool/static-tree.log" 2>&1
+    fi
+  fi
+  # Clippy and the test build share the main target. Finish clippy first.
+  if ! CARGO_BUILD_JOBS=$clippy_jobs tools/gate/clippy.sh --status-file "$group_spool/clippy.state" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
+    clippy_failed="$(cat "$group_spool/clippy.state" 2>/dev/null || true)"
+    clippy_failed=${clippy_failed:-clippy}
+  fi
+  static_preflight_end=$SECONDS
+}
+
+finish_static() {
+  local tree_end=0 tree_failed='' end failed status=0
+  echo "== group: static =="
+  cat "$group_spool/static.log"
+  if [[ "$tier" != batch-mac ]]; then
+    if [[ -n "$structure_pid" ]]; then wait "$structure_pid" || true; fi
+    cat "$group_spool/static-tree.log"
+    if ! read -r tree_end tree_failed <"$group_spool/static-tree.state"; then
+      tree_end=$SECONDS tree_failed=structure
+    fi
+  fi
+  failed="${fetch_failed}${tree_failed:+ ${tree_failed}}${clippy_failed:+ ${clippy_failed}}"
+  if [[ -n "$failed" ]]; then
+    echo "== failed static steps: ${failed# } =="
+    status=1
+  fi
+  end=$((tree_end > static_preflight_end ? tree_end : static_preflight_end))
+  echo "== time: static $((end - static_started)) s =="
+  record_group_result static "$status"
+}
+
 run_group() {
   case "$1" in
-    static)
-      local failed_steps=""
-      if [[ "$tier" == batch-mac ]]; then
-        tools/gate/clippy.sh
-        return
-      fi
-      echo "== fmt =="
-      cargo fmt --all --check || failed_steps="fmt"
-      # Ruff covers the maintainer Python trees. vendor/ and Harbor task
-      # fixtures are excluded in the root tool config, not here.
-      echo "== ruff =="
-      ruff check tools tests/tooling tests/live eval \
-        || failed_steps="${failed_steps:+$failed_steps }ruff"
-      ruff format --check tools tests/tooling tests/live eval \
-        || failed_steps="${failed_steps:+$failed_steps }ruff-format"
-      echo "== dependencies: fetch locked (offline first) =="
-      cargo fetch --locked --offline || cargo fetch --locked \
-        || failed_steps="${failed_steps:+$failed_steps }fetch"
-      # The feature checks build into a separate directory and can run beside
-      # workspace clippy. Split the jobs cap between the two resolutions.
-      local structure_jobs=$((jobs / 4)) clippy_jobs
-      if [[ "$structure_jobs" -lt 1 ]]; then structure_jobs=1; fi
-      clippy_jobs=$((jobs - structure_jobs))
-      structure_log="$(mktemp "$TMPDIR/plakd-structure.XXXXXX")"
-      structure_status="$(mktemp "$TMPDIR/plakd-structure-status.XXXXXX")"
-      (
-        export CARGO_BUILD_JOBS=$structure_jobs
-        failed=''
-        echo "== structure: workspace =="
-        python3 tools/gate/check_workspace.py || failed="${failed:+$failed }workspace"
-        echo "== structure: features (static) =="
-        CARGO_TARGET_DIR="$target_dir/feature-check" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
-          || failed="${failed:+$failed }features"
-        if [[ "$tier" == full ]]; then
-          echo "== structure: evidence allowlist =="
-          python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
-        fi
-        printf '%s' "$failed" >"$structure_status"
-      ) >"$structure_log" 2>&1 &
-      structure_pid=$!
-      if [[ "$clippy_jobs" -lt 1 ]]; then
-        wait "$structure_pid" || true
-        clippy_jobs=1
-      fi
-      clippy_status="$(mktemp "$TMPDIR/plakd-clippy.XXXXXX")"
-      clippy_failed=''
-      if ! CARGO_BUILD_JOBS=$clippy_jobs tools/gate/clippy.sh --status-file "$clippy_status" ${worker_clippy[@]+"${worker_clippy[@]}"}; then
-        s="$(cat "$clippy_status")"
-        clippy_failed="${s:-clippy}"
-      fi
-      rm -f "$clippy_status"
-      if [[ -n "$structure_log" ]]; then
-        wait "$structure_pid" || true
-        cat "$structure_log"
-        s="$(cat "$structure_status")"
-        if [[ -n "$s" ]]; then failed_steps="${failed_steps:+$failed_steps }$s"; fi
-        rm -f "$structure_log" "$structure_status"
-      fi
-      if [[ -n "$clippy_failed" ]]; then failed_steps="${failed_steps:+$failed_steps }$clippy_failed"; fi
-      if [[ -n "$failed_steps" ]]; then
-        echo "== failed static steps: $failed_steps =="
-        return 1
-      fi ;;
     standalone)
       export CARGO_TARGET_DIR="$target_dir/standalone"
       local order package targets standalone_failed=0
@@ -768,8 +771,18 @@ gate_status=0
 # them in skipped_checks for the summary and the evidence decision.
 skip_record=''
 skipped_checks=''
+group_spool="$(mktemp -d "$TMPDIR/plakd-groups.XXXXXX")"
+trap 'rm -rf -- "$group_spool"' EXIT
+record_group_result() {
+  local group=$1 status=$2 skips=${3:-}
+  if [[ -n "$skips" ]]; then skipped_checks+="$skips"$'\n'; fi
+  if [[ "$status" -ne 0 ]]; then
+    failed_groups="${failed_groups:+$failed_groups }$group"
+    if [[ "$gate_status" -eq 0 ]]; then gate_status=$status; fi
+  fi
+}
 run_timed() {
-  local group=$1 started status worker_state
+  local group=$1 state=${2:-} started status worker_state skips
   echo "== group: $group =="
   started=$SECONDS
   skip_record="$(mktemp)"
@@ -796,18 +809,54 @@ run_timed() {
   mcp_server="$(sed -n '3p' "$worker_state")"
   plak_host="$(sed -n '4p' "$worker_state")"
   rm -f "$worker_state"
-  if [[ -s "$skip_record" ]]; then skipped_checks+="$(cat "$skip_record")"$'\n'; fi
+  skips="$(cat "$skip_record")"
   rm -f "$skip_record"
   echo "== time: $group $((SECONDS - started)) s =="
-  if [[ "$status" -ne 0 ]]; then
-    failed_groups="${failed_groups:+$failed_groups }$group"
-    if [[ "$gate_status" -eq 0 ]]; then gate_status=$status; fi
+  if [[ -n "$state" ]]; then
+    printf '%s\n%s' "$status" "$skips" >"$state"
+  else
+    record_group_result "$group" "$status" "$skips"
   fi
+}
+
+buffer_group() {
+  run_timed "$1" "$group_spool/$1.state" >"$group_spool/$1.log" 2>&1
+}
+
+start_group() {
+  CARGO_BUILD_JOBS=${2:-$jobs} buffer_group "$1" &
+  group_pid=$!
+}
+
+replay_group() {
+  local group=$1 pid=${2:-} status skips
+  if [[ -n "$pid" ]]; then wait "$pid" || true; fi
+  cat "$group_spool/$group.log"
+  status="$(sed -n '1p' "$group_spool/$group.state" 2>/dev/null || true)"
+  skips="$(sed -n '2,$p' "$group_spool/$group.state" 2>/dev/null || true)"
+  record_group_result "$group" "${status:-1}" "$skips"
 }
 
 selected() { [[ ",$selection," == *",$1,"* ]]; }
 
-if selected static; then run_timed static; fi
+test_build_needed=false
+test_build_mode=''
+if [[ ",$selection," == *",tests-"* ]] || selected tooling; then test_build_needed=true; fi
+if selected tooling; then test_build_mode=tooling; fi
+
+test_jobs=$jobs
+defer_static=false
+if selected static; then
+  fetch_failed='' clippy_failed='' structure_pid=''
+  begin_static >"$group_spool/static.log" 2>&1
+  if [[ "$batch_scoped" == true && "$test_build_needed" == true && -n "$structure_pid" ]] \
+    && ! selected builds && ! selected variants && ! selected rustdoc && ! selected rustdoc-alone; then
+    defer_static=true
+    test_jobs=$((test_jobs - structure_jobs))
+  else
+    finish_static
+  fi
+fi
 
 # Nice compile-only jobs run beside the one shared test build, never beside
 # a test lane or tooling. Even under an explicit Cargo jobs cap the children
@@ -828,15 +877,10 @@ for group in builds variants rustdoc rustdoc-alone; do
   if selected "$group"; then run_timed "$group"; fi
 done
 
-test_build_needed=false
-test_build_mode=''
-if [[ ",$selection," == *",tests-"* ]] || selected tooling; then test_build_needed=true; fi
-if selected tooling; then test_build_mode=tooling; fi
 background=()
 compile_count=${#compile_only[@]}
-test_jobs=$jobs
-if [[ "$compile_count" -gt 0 && "$jobs" -gt "$compile_count" ]]; then
-  compile_jobs=$((jobs / 8))
+if [[ "$compile_count" -gt 0 && "$test_jobs" -gt "$compile_count" ]]; then
+  compile_jobs=$((test_jobs / 8))
   if [[ "$test_build_needed" == false ]]; then
     compile_jobs=$((jobs / compile_count))
   fi
@@ -845,47 +889,47 @@ if [[ "$compile_count" -gt 0 && "$jobs" -gt "$compile_count" ]]; then
     group_jobs=$compile_jobs
     if [[ "$group" == package-lite ]]; then group_jobs=1; fi
     test_jobs=$((test_jobs - group_jobs))
-    log="$(mktemp "$TMPDIR/plakd-group-$group.XXXXXX")"
-    state="$(mktemp "$TMPDIR/plakd-group-state-$group.XXXXXX")"
-    (
-      export CARGO_BUILD_JOBS=$group_jobs
-      gate_status=0 failed_groups='' skipped_checks=''
-      run_timed "$group"
-      printf '%s\n%s' "$gate_status" "$skipped_checks" >"$state"
-    ) >"$log" 2>&1 &
-    background+=("$!:$log:$state")
+    start_group "$group" "$group_jobs"
+    background+=("$group_pid")
   done
-else
-  for group in ${compile_only[@]+"${compile_only[@]}"}; do run_timed "$group"; done
 fi
 
 test_build_ok=true
 if [[ "$test_build_needed" == true ]]; then
-  if [[ "$compile_count" -eq 0 ]]; then
-    run_timed test-build
+  if [[ "$defer_static" == true ]]; then
+    CARGO_BUILD_JOBS=$test_jobs buffer_group test-build
+    finish_static
+    replay_group test-build
   else
     CARGO_BUILD_JOBS=$test_jobs run_timed test-build
   fi
   if [[ -z "$py_host" ]]; then test_build_ok=false; fi
 fi
 
-for index in ${!background[@]}; do
-  group=${compile_only[index]}
-  IFS=: read -r pid log state <<<"${background[index]}"
-  wait "$pid" || true
-  cat "$log"
-  status="$(sed -n '1p' "$state")"
-  rest="$(sed -n '2,$p' "$state")"
-  if [[ -n "$rest" ]]; then skipped_checks+="$rest"$'\n'; fi
-  if [[ "${status:-1}" -ne 0 ]]; then
-    failed_groups="${failed_groups:+$failed_groups }$group"
-    if [[ "$gate_status" -eq 0 ]]; then gate_status=${status:-1}; fi
-  fi
-  rm -f "$log" "$state"
-done
+if [[ ${#background[@]} -gt 0 ]]; then
+  for index in ${!background[@]}; do
+    replay_group "${compile_only[index]}" "${background[index]}"
+  done
+else
+  for group in ${compile_only[@]+"${compile_only[@]}"}; do run_timed "$group"; done
+fi
+
+parallel_handled=false
+# The reference client has a private host fixture and nextest has its own
+# process-guard root. Join tooling before the wall-clock and whole-pool lanes.
+if [[ "$batch_scoped" == true && "$test_build_ok" == true && "$jobs" -gt 1 ]] \
+  && selected tooling && selected tests-parallel; then
+  start_group tooling
+  tooling_pid=$group_pid
+  buffer_group tests-parallel
+  replay_group tooling "$tooling_pid"
+  replay_group tests-parallel
+  parallel_handled=true
+fi
 
 for group in "${all_groups[@]}"; do
   if ! selected "$group"; then continue; fi
+  if [[ "$parallel_handled" == true && ( "$group" == tooling || "$group" == tests-parallel ) ]]; then continue; fi
   case "$group" in
     tooling|tests-*)
       if [[ "$test_build_ok" == true ]]; then

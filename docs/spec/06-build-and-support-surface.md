@@ -2296,7 +2296,9 @@ dedicated detached Mac gate checkout with its own stable target directory
 keeps installation checkout switches from invalidating artifacts; it refuses
 dirty or shared worktrees and concurrent use. Independent runners have
 separate checkout, target and scratch roots. Compile-only groups may overlap
-the test build, but not tooling or timed test lanes.
+the test build, but not tooling or test lanes. Linux batch also overlaps
+independent static checks with test preparation and tooling with the parallel
+lane, never with the wall-clock or weighted lanes (chapter 05 §1).
 
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash

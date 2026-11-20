@@ -1011,10 +1011,14 @@ roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
 preparation and package-lite. Standalone, package-lite and public compile
 contracts run under nice in their own target directories beside test
-preparation, subject to the Cargo jobs budget. They all finish before tooling
-or the first test lane starts: timed assertions do not share the host with
-compiler-heavy groups. Build and rustdoc groups that use the main target
-finish before the test build, so they cannot overwrite its executables.
+preparation, subject to the Cargo jobs budget. When Linux batch has spare
+Cargo slots, formatting and structure checks also run beside test preparation.
+Clippy finishes first because it shares the test build's target directory.
+Build and rustdoc groups that use the main target also finish before the test
+build, so they cannot overwrite its executables. The gate joins all these
+checks before starting tests. Linux batch can run tooling alongside the
+parallel lane; both finish before any durability, serial or install tests.
+Overlapped groups replay complete logs and verdicts in canonical order.
 
 After argument and prerequisite validation the gate attempts every independent
 selected group even if an earlier group fails. Within `static` it collects
