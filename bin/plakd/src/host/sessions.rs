@@ -18,6 +18,7 @@ use plakous_host_protocol::wire::{
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{Created, HostSessions, OpenedSession, session_root_of};
+use plakous_hosted::runtime::operator_attention::{PendingTreeWork, prepared_wake_count};
 use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_host_worker};
 use plakous_recursive_subagents::tree::{
     ContinuationCause, LossContinuationState, ProductAgentTree, holder_elsewhere,
@@ -225,29 +226,8 @@ impl ProductSessions {
         let degraded = record.is_none() || config.is_none() || tree.is_err();
         let tree = tree.ok().flatten().map(ProductAgentTree::reopen);
         let roster = tree.as_ref().map(|tree| tree.current_epoch().clone());
-        let needs_operator = !entry.archived
-            && config.is_some_and(|config| {
-                let policy = crate::session_attention::policy(config);
-                use plakous_hosted::runtime::operator_attention::{
-                    PendingTreeWork, prepared_wake_count,
-                };
-                let work = tree
-                    .as_ref()
-                    .map_or_default(|tree| PendingTreeWork::read(tree, policy));
-                let wakes = read.record.map_or(0, prepared_wake_count);
-                let root = if work.results > 0 || work.questions > 0 || wakes > 0 {
-                    read.store
-                        .load_attention_reason(&entry.id, policy)
-                        .ok()
-                        .flatten()
-                } else {
-                    None
-                };
-                work.attention(root, 0, wakes).is_some()
-            })
-            && self
-                .with_product(|store| store.head_of_tree(&entry.node.tree_id))
-                .is_ok_and(|head| head.as_deref() == Some(entry.id.as_str()));
+        let needs_operator = config
+            .is_some_and(|config| self.row_needs_operator(&entry, read, tree.as_ref(), config));
         let profile = config
             .zip(record)
             .filter(|_| roster.is_some())
@@ -311,6 +291,33 @@ impl ProductSessions {
             live_work: plakous_host_protocol::wire::LiveWork::default(),
             session: entry.id,
         })
+    }
+
+    fn row_needs_operator(
+        &self,
+        entry: &DirectoryEntry,
+        read: DirectoryRowRead<'_>,
+        tree: Option<&ProductAgentTree>,
+        config: &crate::product_config::ProductConfig,
+    ) -> bool {
+        if entry.archived {
+            return false;
+        }
+        let policy = crate::session_attention::policy(config);
+        let work = tree.map_or_default(|tree| PendingTreeWork::read(tree, policy));
+        let wakes = read.record.map_or(0, prepared_wake_count);
+        let root = if work.results > 0 || work.questions > 0 || wakes > 0 {
+            read.store
+                .load_attention_reason(&entry.id, policy)
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+        work.attention(root, 0, wakes).is_some()
+            && self
+                .with_product(|store| store.head_of_tree(&entry.node.tree_id))
+                .is_ok_and(|head| head.as_deref() == Some(entry.id.as_str()))
     }
 }
 

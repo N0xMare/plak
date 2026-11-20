@@ -570,7 +570,7 @@ fn recovered_root_with_late_result_surfaces_attention_until_prompt() {
         )
     };
     wait_for(&events, &mut seen, "attention notice", notice);
-    wait_for(&events, &mut seen, "pending continuation", |event| {
+    let pending = |event: &HostEvent| {
         matches!(
             event,
             HostEvent::PendingContinuation {
@@ -579,7 +579,10 @@ fn recovered_root_with_late_result_surfaces_attention_until_prompt() {
                 ..
             }
         )
-    });
+    };
+    if !seen.iter().any(pending) {
+        wait_for(&events, &mut seen, "pending continuation", pending);
+    }
     assert!(service.kept_activity().awaiting_operator);
     let attachment = service.attach_asking(&node, Face::Remote, false).unwrap();
     assert!(

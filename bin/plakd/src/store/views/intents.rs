@@ -138,12 +138,13 @@ fn pending_wakes(connection: &Connection, id: &str, views: &SessionViews) -> Res
         .map_err(unavailable)?;
     let rows = statement
         .query_map([id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })
         .map_err(unavailable)?;
     let mut count = 0_u32;
     for row in rows {
         let (id, anchor) = row.map_err(invalid)?;
+        let anchor = from_i64(anchor).map_err(invalid)?;
         if views
             .state
             .retained_from
