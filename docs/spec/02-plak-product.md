@@ -4357,6 +4357,7 @@ node, a pending context-capacity decision, or a running root turn whose own
 runner placement is unreachable, even while a turn runs.
 Clients use the busy activity to submit `follow_up` (Queue), never infer
 idle merely from attention. Child and held-child counts cover the whole tree.
+The directory rules below also specify when blocked pending work sets this flag.
 
 Every protocol-5 NodeView carries its own required runner `{name,runner_id}`.
 Local is explicitly `{name:"local",runner_id:"local"}`. The saved node id is

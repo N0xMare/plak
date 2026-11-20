@@ -86,26 +86,7 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
         assert!(needs_operator);
         if held_loss {
             assert_eq!(activity, SessionActivity::HeldAfterLoss);
-            product
-                .write_root_continuation(
-                    &record.id,
-                    &AnchoredIntent {
-                        anchor: 0,
-                        ordinal: 0,
-                        value: RootContinuation {
-                            anchor: stop,
-                            cause: RootContinuationCause::OwnerLost,
-                            host_generation: 1,
-                            round: 1,
-                            decided_at_ms: 1,
-                            decision: RootContinuationDecision::NewTurn {
-                                command_id: "plak:resume-loss:root:fixture".to_owned(),
-                                withdrawn: Vec::new(),
-                            },
-                        },
-                    },
-                )
-                .unwrap();
+            consent_to_resume(&mut product, &record.id, stop);
         } else {
             project_pause(&mut product, &record.id, &before, None);
         }
@@ -113,6 +94,29 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
         assert!(!status(&paths).contains(&record.id));
         assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
     }
+}
+
+fn consent_to_resume(product: &mut ProductStore, id: &str, stop: RootStopAnchor) {
+    product
+        .write_root_continuation(
+            id,
+            &AnchoredIntent {
+                anchor: 0,
+                ordinal: 0,
+                value: RootContinuation {
+                    anchor: stop,
+                    cause: RootContinuationCause::OwnerLost,
+                    host_generation: 1,
+                    round: 1,
+                    decided_at_ms: 1,
+                    decision: RootContinuationDecision::NewTurn {
+                        command_id: "plak:resume-loss:root:fixture".to_owned(),
+                        withdrawn: Vec::new(),
+                    },
+                },
+            },
+        )
+        .unwrap();
 }
 
 fn project_pause(
