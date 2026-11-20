@@ -204,7 +204,7 @@ pub(super) fn owner_loss_at_pause(
 ) -> Option<RootLossState> {
     let loss = latest_loss(intents)?;
     (loss.cause == RootContinuationCause::OwnerLost
-        && matches!(&loss.anchor, RootStopAnchor::Turn { turn_id: lost } if lost == turn_id))
+        && matches!(&loss.anchor, RootStopAnchor::Turn { turn_id: stopped } if stopped == turn_id))
     .then(|| state(&loss, intents, views))
     .flatten()
 }

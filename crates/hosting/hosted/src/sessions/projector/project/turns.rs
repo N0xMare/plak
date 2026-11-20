@@ -16,36 +16,7 @@ impl Applier<'_> {
         steering_unapplied: bool,
     ) -> Result<(), ProjectError> {
         let turn = turn_id.to_string();
-        // Retention can leave this terminal but not the continuation's
-        // admission. Preserve the exact stopped-command identity without
-        // overwriting the view of a different, possibly later turn.
-        if self.views.state.last_root_turn.is_none()
-            && crate::runtime::is_root_loss_command(command_id)
-        {
-            self.views.state.last_root_turn = Some(LastRootTurn {
-                turn_id: turn.clone(),
-                command_id: command_id.to_owned(),
-                outcome: None,
-                prompt: None,
-                committed_after_prompt: false,
-                history_seen: false,
-            });
-        }
-        if let Some(last) = self
-            .views
-            .state
-            .last_root_turn
-            .as_mut()
-            .filter(|last| last.turn_id == turn)
-        {
-            last.command_id = command_id.to_owned();
-            last.outcome = Some(match outcome {
-                FeedTurnOutcome::Completed { .. } => LastRootOutcome::Completed,
-                FeedTurnOutcome::Failed { .. } => LastRootOutcome::Failed,
-                FeedTurnOutcome::RecoveryRequired => LastRootOutcome::RecoveryRequired,
-                _ => LastRootOutcome::Cancelled,
-            });
-        }
+        self.project_last_terminal(&turn, command_id, outcome);
         let open_turn = self.views.state.open_turns.remove(&turn);
         // The operator's interrupt: a requested cancel, or any cancel of a
         // turn an accepted operator cancel named (its in-flight work may be
@@ -134,6 +105,34 @@ impl Applier<'_> {
             ));
         }
         Ok(())
+    }
+
+    fn project_last_terminal(&mut self, turn: &str, command_id: &str, outcome: FeedTurnOutcome) {
+        let outcome = match outcome {
+            FeedTurnOutcome::Completed { .. } => LastRootOutcome::Completed,
+            FeedTurnOutcome::Failed { .. } => LastRootOutcome::Failed,
+            FeedTurnOutcome::RecoveryRequired => LastRootOutcome::RecoveryRequired,
+            _ => LastRootOutcome::Cancelled,
+        };
+        match &mut self.views.state.last_root_turn {
+            Some(last) if last.turn_id == turn => {
+                command_id.clone_into(&mut last.command_id);
+                last.outcome = Some(outcome);
+            }
+            // Retention may leave the terminal but not the admission. Keep
+            // the exact command without overwriting a different turn.
+            slot @ None if crate::runtime::is_root_loss_command(command_id) => {
+                *slot = Some(LastRootTurn {
+                    turn_id: turn.to_owned(),
+                    command_id: command_id.to_owned(),
+                    outcome: Some(outcome),
+                    prompt: None,
+                    committed_after_prompt: false,
+                    history_seen: false,
+                });
+            }
+            _ => {}
+        }
     }
 
     /// A failed turn's error row, and the pause and wake suppression its

@@ -10,7 +10,10 @@ fn root_loss_resume_prompt_is_pinned() {
         ROOT_LOSS_RESUME_TEXT,
         "9791a373a9439b16170d36610e9c2546f3ae7132a215f12eedd75cf75c4fc761",
     )];
-    assert!(plakous::tools::drifted_pins(pins).is_empty());
+    assert_eq!(
+        plakous::tools::drifted_pins(pins),
+        [] as [(&str, String); 0]
+    );
 }
 
 fn lost(intents: &mut ProductIntents, anchor: u64, cause: RootInterruptCause) {
