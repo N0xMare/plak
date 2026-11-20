@@ -150,7 +150,8 @@ pub mod telemetry_sink;
 #[doc(hidden)]
 pub mod telemetry_store;
 #[cfg(feature = "test-hooks")]
-mod test_hooks;
+#[doc(hidden)]
+pub mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]
 #[path = "test_hooks/disabled.rs"]
 mod test_hooks;

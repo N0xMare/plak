@@ -697,7 +697,7 @@ fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
 /// by the reopen itself.
 mod account_continue_crash_cuts {
     use super::*;
-    use crate::runtime::test_support::wait_out_crashed_lease;
+    use crate::runtime::test_support::{use_short_crash_lease, wait_out_crashed_lease};
     use crate::runtime::{HostBoundary, HostWorkflow};
 
     struct Cut {
@@ -730,6 +730,7 @@ mod account_continue_crash_cuts {
             Some((workflow, boundary, nth)),
             b"offline-loopback-account",
         );
+        use_short_crash_lease(&config.state_roots);
         let store = Arc::clone(&config.store);
         let state_roots = config.state_roots.clone();
         let tree = config.session.id.clone();

@@ -111,23 +111,39 @@ async fn dropping_a_request_kills_its_group() {
 async fn a_stalled_filesystem_open_is_killed_at_the_five_second_deadline() {
     let root = checkout();
     let environment = environment(root.path());
-    std::fs::rename(
-        root.path().join(".git/config"),
-        root.path().join(".git/config.saved"),
-    )
-    .unwrap();
+    let fifo = root.path().join(".git/config");
+    std::fs::rename(&fifo, root.path().join(".git/config.saved")).unwrap();
     assert!(
         std::process::Command::new("mkfifo")
-            .arg(root.path().join(".git/config"))
+            .arg(&fifo)
             .status()
             .unwrap()
             .success()
     );
-    let result = tokio::time::timeout(
-        Duration::from_secs(7),
-        ask(&environment, ChangesRequest::status()),
-    )
-    .await
-    .unwrap();
+    let budget = Duration::from_secs(1);
+    BUDGET.set(Some(budget));
+    let began = Instant::now();
+    let answer = ask(&environment, ChangesRequest::status());
+    tokio::pin!(answer);
+    let writer = tokio::select! {
+        result = &mut answer => panic!("request ended before Git opened the FIFO: {result:?}"),
+        writer = async {
+            // A nonblocking write-only open succeeds only when Git is reading.
+            use rustix::fs::{Mode, OFlags, open};
+            loop {
+                match open(&fifo, OFlags::WRONLY | OFlags::NONBLOCK | OFlags::CLOEXEC, Mode::empty()) {
+                    Ok(writer) => break writer,
+                    Err(rustix::io::Errno::NXIO) => tokio::time::sleep(Duration::from_millis(5)).await,
+                    Err(error) => panic!("open fixture FIFO: {error}"),
+                }
+            }
+        } => writer,
+    };
+    // Keep Git's read blocked until the request expires.
+    let result = tokio::time::timeout_at(began + budget + Duration::from_secs(2), answer).await;
+    drop(writer);
+    BUDGET.set(None);
+    let result = result.unwrap();
+    assert!(began.elapsed() >= budget);
     assert_eq!(result, ChangesAnswer::Refused(ChangesRefusal::Deadline));
 }

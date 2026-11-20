@@ -412,12 +412,16 @@ async fn stopped_line_followup(branch_hold: bool, held_for: std::time::Duration)
     }
     assert_eq!(harness.retries.lock().unwrap()["review"].delay, delay);
     let mut progress = registry.progress_events();
+    let virtual_time = !held_for.is_zero();
+    if virtual_time {
+        tokio::time::pause();
+    }
     let deadline = tokio::time::Instant::now() + held_for;
     let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
     let mut attempts = 0;
     let budget = deadline + std::time::Duration::from_secs(30);
     // Cross the first steady-period attempt, not only the initial ramp.
-    while tokio::time::Instant::now() < deadline || (!held_for.is_zero() && attempts < 4) {
+    while tokio::time::Instant::now() < deadline || (virtual_time && attempts < 4) {
         assert!(tokio::time::Instant::now() < budget, "stop retry stalled");
         tokio::select! {
             _ = poll.tick() => harness.assert_admission().await,
@@ -427,12 +431,20 @@ async fn stopped_line_followup(branch_hold: bool, held_for: std::time::Duration)
             }
         }
     }
-    if !held_for.is_zero() {
+    if virtual_time {
         assert_eq!(attempts, 4, "stop-only ramp spun or duplicated");
         assert_eq!(harness.retries.lock().unwrap()["review"].delay, 15);
         assert!(harness.retries.lock().unwrap()["review"].scheduled);
+        tokio::time::resume();
     }
     harness.release_holder().await;
+    if virtual_time {
+        tokio::time::pause();
+        let delay = harness.retries.lock().unwrap()["review"].delay;
+        tokio::time::advance(std::time::Duration::from_secs(delay)).await;
+        // Let the stop settle over real I/O without advancing its watchdog.
+        tokio::time::resume();
+    }
     harness.wait_retired().await;
     assert_eq!(harness.stops.load(Ordering::SeqCst), 1);
     assert_eq!(

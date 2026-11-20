@@ -26,6 +26,8 @@ use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
+const CRASH_LEASE_SECONDS: u64 = if cfg!(feature = "test-hooks") { 2 } else { 30 };
+
 struct Fixture {
     _root: TempDir,
     home: PathBuf,
@@ -161,10 +163,10 @@ fn actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers() -> T
         ProductCrashBoundary::Prepared,
     )?;
 
-    // A real SIGKILL cannot release the facade's 30-second branch lease. Cut
+    // A real SIGKILL cannot release the fixture's branch lease. Cut
     // every independent fixture first so one bounded wait expires all leases
     // without weakening the production ownership fence.
-    std::thread::sleep(Duration::from_secs(31));
+    std::thread::sleep(Duration::from_secs(CRASH_LEASE_SECONDS + 1));
 
     for (workflow, cut, fixture, before) in interrupted {
         eprintln!("actual-host recovery {workflow:?}/{cut:?}");
@@ -593,7 +595,7 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
         interrupted.push((cut, fixture));
     }
     // One bounded wait lapses every cut's branch lease.
-    std::thread::sleep(Duration::from_secs(31));
+    std::thread::sleep(Duration::from_secs(CRASH_LEASE_SECONDS + 1));
     for (cut, fixture) in interrupted {
         eprintln!("account-continue recovery {cut:?}");
         let paths = PlakPaths::explicit(fixture.home.clone());
@@ -981,6 +983,10 @@ fn spawn(command: &ControlCommand) -> TestResult<TestChild> {
     let mut child = Command::new(std::env::current_exe()?)
         .args(super::CHILD_TEST_ARGS)
         .env(super::CHILD_SENTINEL, "1")
+        .env(
+            "PLAK_TEST_SESSION_LEASE_SECONDS",
+            CRASH_LEASE_SECONDS.to_string(),
+        )
         // The continue cells choose `codex/b`; no other cell reads readiness.
         .env("PLAK_TEST_READY_ACCOUNTS", "codex,codex/b")
         .stdin(Stdio::piped())

@@ -146,6 +146,12 @@ async fn ask(environment: &ExecutionEnvironment, request: ChangesRequest) -> Cha
     .unwrap()
 }
 
+thread_local! {
+    pub(super) static BUDGET: std::cell::Cell<Option<std::time::Duration>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
 async fn status(environment: &ExecutionEnvironment) -> ChangesStatus {
     let answer = ask(environment, ChangesRequest::status()).await;
     let ChangesAnswer::Status(status) = answer else {

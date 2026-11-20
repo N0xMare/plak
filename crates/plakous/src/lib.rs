@@ -416,7 +416,8 @@ pub mod gateway;
 pub mod sessions;
 
 #[cfg(all(feature = "store", feature = "test-hooks"))]
-mod test_session_lease;
+#[doc(hidden)]
+pub mod test_session_lease;
 #[cfg(all(feature = "store", not(feature = "test-hooks")))]
 mod test_session_lease {
     pub(crate) fn session_lease_seconds_override() -> Option<String> {

@@ -287,13 +287,27 @@ fn a_log_lock_without_a_host_retries_past_ten_seconds() {
     log.set_permissions(std::fs::Permissions::from_mode(0o600))
         .unwrap();
     log.lock().unwrap();
-    let mut bridge = Bridge::configured(&fixture, true, &[]);
+    let blocked = fixture.home().join("start-blocked");
+    let mut bridge = Bridge::configured(
+        &fixture,
+        true,
+        &[
+            ("PLAK_TEST_BRIDGE_DISCOVERY_SECONDS", "1"),
+            ("PLAK_TEST_BRIDGE_START_BLOCKED", blocked.to_str().unwrap()),
+        ],
+    );
     bridge.hello(WIRE_VERSION);
-    std::thread::sleep(Duration::from_secs(11));
+    let deadline = Instant::now() + WAIT;
+    while !blocked.is_file() {
+        assert!(Instant::now() < deadline, "bridge never attempted startup");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(1100));
     assert!(
         bridge.child.try_wait().unwrap().is_none(),
         "log holder is not a ready host"
     );
+    assert!(started.pid().is_none());
     drop(log);
     assert!(matches!(bridge.next(), HostFrame::Welcome(_)));
     bridge.finish();

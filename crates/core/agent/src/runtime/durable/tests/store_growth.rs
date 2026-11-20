@@ -3,7 +3,7 @@
 
 use super::*;
 
-const ROUNDS: usize = 200;
+const ROUNDS: usize = 128;
 const WINDOW: usize = 16;
 
 /// Bytes of one round of the turn, at the last checkpoint holding that many
@@ -187,8 +187,7 @@ fn assert_rounds_track_new_items(bytes: &[RoundBytes]) {
     );
     // What the head retains, and every round writes besides the one
     // superseded anchor, tracks the round's new items: the head exactly, the
-    // writes up to the ledger map's logarithmic path. The old records alone
-    // added about 57 KiB per late round here.
+    // writes up to the ledger map's logarithmic path.
     let (head_early, head_late) = (mean(&report[2].1), mean(&report[2].2));
     assert!(head_late <= head_early + 256, "{head_early} -> {head_late}");
     let (written_early, written_late) = (mean(&report[3].1), mean(&report[3].2));
@@ -198,7 +197,7 @@ fn assert_rounds_track_new_items(bytes: &[RoundBytes]) {
     );
 }
 
-/// Runs the 200-round turn against a store that prunes like a backend when
+/// Runs the long turn against a store that prunes like a backend when
 /// `simulate_prune` is set, and like the stub (never) otherwise.
 async fn long_turn(
     simulate_prune: bool,

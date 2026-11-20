@@ -732,6 +732,8 @@ fn jj_cli_doctor_versions_and_missing_are_nonblocking() {
 #[test]
 fn jj_cli_doctor_kills_hanging_process_group_at_five_seconds() {
     use std::os::unix::fs::PermissionsExt as _;
+    use std::time::Duration;
+    let timeout = Duration::from_secs(if cfg!(feature = "test-hooks") { 1 } else { 5 });
     let temp = tempfile::tempdir().unwrap();
     let binary = temp.path().join("jj");
     fs::write(
@@ -741,11 +743,18 @@ fn jj_cli_doctor_kills_hanging_process_group_at_five_seconds() {
     .unwrap();
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
     let started = std::time::Instant::now();
+    #[cfg(feature = "test-hooks")]
+    let row = plakd::test_hooks::probe_jj_with_test_timeout(
+        Some(temp.path().as_os_str()),
+        temp.path(),
+        timeout,
+    );
+    #[cfg(not(feature = "test-hooks"))]
     let row = product_doctor::jj_cli::probe(Some(temp.path().as_os_str()), temp.path());
     assert_eq!(row.severity, Severity::Warning);
     assert_eq!(row.result, "unavailable");
-    assert!(started.elapsed() >= std::time::Duration::from_secs(5));
-    assert!(started.elapsed() < std::time::Duration::from_secs(8));
+    assert!(started.elapsed() >= timeout);
+    assert!(started.elapsed() < timeout + Duration::from_secs(3));
     #[cfg(target_os = "linux")]
     assert_jj_descendant_retired(temp.path());
 }

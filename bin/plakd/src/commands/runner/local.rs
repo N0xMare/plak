@@ -147,9 +147,13 @@ pub(crate) async fn reconnect(paths: &PlakPaths, client: &RunnerClient) -> CliRe
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     };
-    tokio::time::timeout(super::START_WAIT, attempt)
-        .await
-        .map_err(|_| CliFailure::new("the home-local runner did not reconnect within 10 s"))?
+    let window = crate::test_hooks::runner_reconnect_window(super::START_WAIT);
+    tokio::time::timeout(window, attempt).await.map_err(|_| {
+        CliFailure::new(format!(
+            "the home-local runner did not reconnect within {} s",
+            window.as_secs()
+        ))
+    })?
 }
 
 fn check_start(home: &LocalRunnerHome) -> CliResult<()> {

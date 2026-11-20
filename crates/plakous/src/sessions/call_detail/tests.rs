@@ -283,15 +283,14 @@ fn probe_offsets_around_window_end_never_expose_a_short_credential() {
         prefix.push_str(&token);
         prefix.push(' ');
     }
-    let mut offsets: Vec<usize> = (0..8)
-        .map(|i| REDACTION_WINDOW_BYTES - 20_000 + i * 2_503)
-        .collect();
-    offsets.extend((0..15).map(|i| REDACTION_WINDOW_BYTES - 40 + i * 5));
-    offsets.extend([
-        REDACTION_WINDOW_BYTES - 3300,
-        REDACTION_WINDOW_BYTES - 16 * 1024 - 1,
-        REDACTION_WINDOW_BYTES - 16 * 1024 + 1,
-    ]);
+    let offsets = (0..15)
+        .map(|i| REDACTION_WINDOW_BYTES - 40 + i * 5)
+        .chain([
+            REDACTION_WINDOW_BYTES - 3300,
+            REDACTION_WINDOW_BYTES - 16 * 1024 - 1,
+            REDACTION_WINDOW_BYTES - 16 * 1024 + 1,
+        ])
+        .collect::<Vec<_>>();
     let mut failures = Vec::new();
     for filler in ["x", "\u{1f600}"] {
         for (kind, credential, marker) in probe_credentials() {

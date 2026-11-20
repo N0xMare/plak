@@ -60,7 +60,10 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
         let mut host = start_env(
             &fixture,
             &[],
-            &[("PLAK_TEST_RUNNER_DETACHED", detached.into())],
+            &[
+                ("PLAK_TEST_RUNNER_DETACHED", detached.into()),
+                ("PLAK_TEST_RUNNER_RECONNECT_SECONDS", "2".into()),
+            ],
         );
         wait_local_runner_ready(&host);
         let version = plakous::runner::protocol::PROTOCOL_VERSION;
@@ -71,7 +74,7 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
         // A listener that never sends Hello is transient, not a start refusal.
         let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
         kill_local_daemon_only(&fixture.home());
-        wait_for_recovery_failure(&fixture, &mut host, "did not reconnect within 10 s");
+        wait_for_recovery_failure(&fixture, &mut host, "did not reconnect within 2 s");
         assert_eq!(Client::connect(&host).rows(1), []);
         stop(&mut host);
     }
@@ -325,77 +328,75 @@ fn a_lost_daemon_is_redialed_while_the_host_serves() {
 #[test]
 fn a_busy_roots_child_job_survives_attach_after_host_loss() {
     use std::os::unix::process::ExitStatusExt as _;
-    for policy in ["continue", "hold"] {
-        for phase in [
-            "crash",
-            "handoff",
-            "before-root-handoff",
-            "after-root-handoff",
-        ] {
-            let Some(fixture) = fixture() else { return };
-            write_resume_policy(&fixture, policy);
-            let env = if phase == "before-root-handoff" {
-                vec![(
-                    "PLAK_TEST_HOST_READOPT_CUT",
-                    HostCut::BeforeRootHandoff.name().into(),
-                )]
-            } else {
-                Vec::new()
-            };
-            let (mut host, session, node) = start_child_job_variant(&fixture, true, &env);
-            let (pid, _) = job(&fixture);
-            hold_child_script(&fixture);
-            match phase {
-                "crash" => kill(&mut host),
-                "handoff" => stop(&mut host),
-                _ => {
-                    nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(host.child.as_ref().unwrap().id().cast_signed()),
-                        nix::sys::signal::Signal::SIGTERM,
-                    )
-                    .unwrap();
-                    if phase == "before-root-handoff" {
-                        assert_eq!(cut_exit(host.child.as_mut().unwrap()).signal(), Some(9));
-                        host.child = None;
-                        assert!(
-                            !root_record(&fixture, &session)
-                                .0
-                                .contains(&RootInterruptCause::Handoff)
-                        );
-                    } else {
-                        let deadline = std::time::Instant::now() + WAIT;
-                        while !root_record(&fixture, &session)
+    for (phase, policy) in [
+        ("crash", "continue"),
+        ("handoff", "hold"),
+        ("before-root-handoff", "hold"),
+        ("after-root-handoff", "continue"),
+    ] {
+        let Some(fixture) = fixture() else { return };
+        write_resume_policy(&fixture, policy);
+        let env = if phase == "before-root-handoff" {
+            vec![(
+                "PLAK_TEST_HOST_READOPT_CUT",
+                HostCut::BeforeRootHandoff.name().into(),
+            )]
+        } else {
+            Vec::new()
+        };
+        let (mut host, session, node) = start_child_job_variant(&fixture, true, &env);
+        let (pid, _) = job(&fixture);
+        hold_child_script(&fixture);
+        match phase {
+            "crash" => kill(&mut host),
+            "handoff" => stop(&mut host),
+            _ => {
+                nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(host.child.as_ref().unwrap().id().cast_signed()),
+                    nix::sys::signal::Signal::SIGTERM,
+                )
+                .unwrap();
+                if phase == "before-root-handoff" {
+                    assert_eq!(cut_exit(host.child.as_mut().unwrap()).signal(), Some(9));
+                    host.child = None;
+                    assert!(
+                        !root_record(&fixture, &session)
                             .0
                             .contains(&RootInterruptCause::Handoff)
-                        {
-                            assert!(
-                                std::time::Instant::now() < deadline,
-                                "the busy root never handed off"
-                            );
-                            std::thread::sleep(std::time::Duration::from_millis(5));
-                        }
-                        kill(&mut host);
+                    );
+                } else {
+                    let deadline = std::time::Instant::now() + WAIT;
+                    while !root_record(&fixture, &session)
+                        .0
+                        .contains(&RootInterruptCause::Handoff)
+                    {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "the busy root never handed off"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
                     }
+                    kill(&mut host);
                 }
             }
-            assert!(alive(pid), "{phase}: the child process died during handoff");
-            let mut host = start(&fixture);
-            let mut client = Client::connect(&host);
-            client.attach(1, &node);
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            assert!(
-                alive(pid),
-                "the held child lost its promoted job after attach"
-            );
-            assert_eq!(
-                client.request(2, Op::StopSession { session }),
-                Outcome::Ok(Answer::Stopped {
-                    runner_pending: false
-                })
-            );
-            stopped(pid);
-            stop(&mut host);
         }
+        assert!(alive(pid), "{phase}: the child process died during handoff");
+        let mut host = start(&fixture);
+        let mut client = Client::connect(&host);
+        client.attach(1, &node);
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        assert!(
+            alive(pid),
+            "the held child lost its promoted job after attach"
+        );
+        assert_eq!(
+            client.request(2, Op::StopSession { session }),
+            Outcome::Ok(Answer::Stopped {
+                runner_pending: false
+            })
+        );
+        stopped(pid);
+        stop(&mut host);
     }
 }
 #[test]

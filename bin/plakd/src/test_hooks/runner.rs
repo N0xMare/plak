@@ -40,6 +40,10 @@ pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
     })
 }
 
+pub(crate) fn runner_reconnect_window(default: std::time::Duration) -> std::time::Duration {
+    super::shorter_seconds("PLAK_TEST_RUNNER_RECONNECT_SECONDS", default)
+}
+
 pub(crate) async fn runner_before_ready(
     client: &plakous::runner::RunnerClient,
 ) -> Result<(), plakous::runner::PlacementFailure> {

@@ -40,7 +40,8 @@ async fn oversized_compaction_request_is_refused_before_paid_dispatch() -> TestR
     // have to dispatch dozens of rounds to construct an over-limit paid input.
     // Each segment is under the unchanged 16 MiB graph-segment bound.
     let mut segments = Vec::new();
-    for index in 0..80_u128 {
+    // 75 escaped segments just exceed the byte bound, even without the latest intent.
+    for index in 0..75_u128 {
         segments.push(HistorySegment::new(
             HistorySegmentKind::RecentIntent,
             vec![ConversationItem::new(
@@ -174,8 +175,9 @@ async fn completed_compaction_recovery_case(large: bool) -> TestResult {
         NonZeroU64::new(30).ok_or("nonzero lease")?,
     )?;
     let prompts = if large {
-        let mut prompts = (0..24)
-            .map(|index| format!("closed intent {index}: {}", "x".repeat(200_000)))
+        // Just over the former 4 MiB component limit, in five distinct intents.
+        let mut prompts = (0..5)
+            .map(|index| format!("closed intent {index}: {}", "x".repeat(850_000)))
             .collect::<Vec<_>>();
         prompts.push("latest protected intent".to_owned());
         prompts

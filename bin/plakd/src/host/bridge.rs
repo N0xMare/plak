@@ -6,6 +6,7 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use crate::surface_protocol::PlakExtension;
+use crate::test_hooks::host_lifecycle::{bridge_discovery_window, bridge_start_blocked};
 use crate::wire_transport::hosts;
 use crate::{CliFailure, CliResult, ProcessOutcome, product_paths::PlakPaths};
 use plakous_host_protocol::wire::{
@@ -96,11 +97,12 @@ type DiscoveryResult = Result<UnixStream, Box<(BridgeUnavailableReason, CliFailu
 fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
     let verify = |failure| Box::new((BridgeUnavailableReason::VerificationFailed, failure));
     let began = Instant::now();
+    let discovery_window = bridge_discovery_window(DISCOVERY_WINDOW);
     let mut deadline = began
         + if auto_start {
             Duration::from_secs(30)
         } else {
-            DISCOVERY_WINDOW
+            discovery_window
         };
     let key =
         crate::carry::upgrade::receipt::successor_key(paths, &crate::home::state::state_key())
@@ -127,7 +129,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
             )));
         }
         if restarting {
-            deadline = deadline.min(began + DISCOVERY_WINDOW);
+            deadline = deadline.min(began + discovery_window);
             if Instant::now() >= deadline {
                 return Err(Box::new((
                     BridgeUnavailableReason::Starting,
@@ -165,6 +167,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
                 if started {
                     continue;
                 }
+                bridge_start_blocked();
             } else {
                 return Err(Box::new((
                     BridgeUnavailableReason::Absent,

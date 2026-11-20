@@ -773,7 +773,7 @@ folds after that guard is spent, strict shrink against fresh source lowering,
 and stable placeholder prefix/cache affinity across passes. Production Codex
 lowering pins byte-identical serialized bodies for fresh encrypted-reasoning
 history and its portable projection, including reasoning-only and mixed items.
-A deterministic 64-round fixture bounds
+A deterministic 32-round fixture bounds
 compaction count and requires eventual paid dispatch without ContextLimit.
 Code Cell reopen fixtures also pin accepted pending and completed same-turn
 steering, and the exact Prepared-root, Completed-provider,
@@ -1762,7 +1762,7 @@ without an explicit refresh, reconnect, command or restart. Repeated observation
 of the same pending debt cannot queue duplicate retries or reset the delay.
 Settlement clears deferred remote connection requirements, but a serving host
 retains its intrinsic local-daemon requirement after the stop retry state clears.
-A resident holder remains open for at least 20 seconds while Ready and non-read
+A resident holder remains open for at least 20 seconds of paused Tokio time while Ready and non-read
 AdmittedLink dispatch remain continuously available; attempt counts pin the
 1/2/5/15-second ramp without full sweeps. Its release settles once and disarms.
 A later accepted submission during the delay suppresses the old stop after lease
@@ -2195,7 +2195,9 @@ join is not proof that its separate driver's graceful lease release completed:
 bounded executor teardown can cut that release short. Before exact reopen, the
 fixtures read the lease row without acquiring or changing authority, wait for
 release when it completes, and otherwise wait out the existing lease period
-plus two seconds. The still-live test process is never treated as a dead holder.
+plus two seconds. Child-stop and account-continue cut fixtures open their
+shared runtime with a two-second test lease before spawning its worker.
+The still-live test process is never treated as a dead holder.
 The root-stop matrix retains its long hang watchdog across repeated cuts.
 Each child-stop cut runs as a separate test under the normal per-test watchdog;
 both retain all continuation, cancellation and wake assertions.
@@ -2293,7 +2295,7 @@ assertions do not measure elapsed time and need no budget lane.
 | --- | --- |
 | Observation parity | `observation_parity_tests::` -- the whole module: the parity scenarios (plain turn with a tool call, tool error, capacity block, clear then turn, interrupt then second prompt, escape then quit, context placeholders, compaction, spawn/wait/adopt), each comparing against its golden under `bin/plakd/tests/parity/`, plus the normalization, wait-receipt, cancelled-tool terminal and JSONL terminal tool-line checks |
 | Process spawn, drain and cancellation windows | `exec_command_with_zero_yield_returns_the_joined_output`, `host_process_bounds_live_output_and_enforces_timeout`, `joined_process_pty_cancellation_and_timeout_join_the_group`, `cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window` |
-| Python worker request deadline | `a_stuck_worker_request_is_killed_and_reported_as_session_loss` — isolates bundle setup from parallel load without weakening the stuck-request kill and fail-closed loss assertions |
+| Python worker request deadline | `a_stuck_worker_request_is_killed_and_reported_as_session_loss` — uses a one-second fixture request deadline, isolating bundle setup from parallel load without weakening the stuck-request kill and fail-closed loss assertions |
 | Cleanup mutex admission | `terminate_contention_is_bounded_and_preserves_correlated_owner`, `join_all_handles_free_children_and_retains_contended_child_for_retry` — the two users of the two-second `assert_bounded` helper |
 | Executor/application ordering | `executor_drop_does_not_wait_out_spawn_blocking`, `result_before_terminal_event_returns_without_drain_or_hang`, `event_before_result_is_presented_without_becoming_terminal_authority`, `observation_error_before_result_is_non_authoritative_and_does_not_hang`, `ready_result_ignores_late_observation_error_without_hanging` |
 | Worker stdin and SIGTERM escalation | `nonreading_stdin_cannot_block_start_or_cancel`, `a_worker_that_ignores_sigterm_is_killed_inside_the_shutdown_bound` |
@@ -2313,6 +2315,12 @@ assertions do not measure elapsed time and need no budget lane.
 runs in the parallel lane. It requires the running free child to be
 terminated and joined while the contended peer is retained for a retry;
 it does not assert wall-clock promptness.
+
+The bridge log-lock case holds the lock across a one-second discovery window
+after observing a refused auto-start, then requires a real Welcome. The
+hanging jj probe and stalled filesystem fixtures use one-second test
+deadlines and still require the correct timeout outcome from the real
+subprocess path. The shipping discovery and subprocess windows are unchanged.
 
 `native_ready_lease_is_held_through_head_and_released_before_stream_body` runs
 in the parallel lane. Its logout-start, response-head and response-body barriers
@@ -2376,13 +2384,16 @@ Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
 
 Fixed absence/liveness observation windows retain their lengths under this
-layout. The reviewed cases exceed sixty seconds even before fixture setup:
-`a_busy_roots_child_job_survives_attach_after_host_loss` spends eight times
-five seconds observing a live held child, and
-`a_childs_daemon_job_survives_host_loss_and_handoff` spends four times five
-seconds. `runner_wake_live_foreground` observes a paused daemon's live job
-after 1.1 seconds. `a_transient_daemon_failure_keeps_the_redial_bound` also
-requires the host to stay alive through two ten-second failed-redial windows.
+layout. `a_busy_roots_child_job_survives_attach_after_host_loss` observes a
+live held child for five seconds in each of four cases: crash, clean
+handoff, and the cuts before and after root handoff.
+`a_childs_daemon_job_survives_host_loss_and_handoff` observes for five seconds
+in each of its crash and clean handoff cases. Both fixtures cover the hold and
+continue policies across their cases. `runner_wake_live_foreground` observes a
+paused daemon's live job after 1.1 seconds.
+`a_transient_daemon_failure_keeps_the_redial_bound` requires the host to stay
+alive and report a blocked runner after a two-second redial window in each
+daemon mode, shortened from the ten-second production window by a test hook.
 The start-scan and busy-release `host_crash_cuts_` matrices
 also check no new continuation/dispatch after 300 ms per indexed cut.
 The Python and JavaScript `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`
@@ -2394,8 +2405,9 @@ whole nextest pool, not a quiet internal worker.
 The accepted trade-off is to keep these windows on their existing reservations,
 not add a whole-pool phase exceeding a minute: descheduling can defer the
 forbidden event beyond the observation window and reduce detection sensitivity.
-This is not permission to shorten windows or retry failures. Lease-expiry
-sleeps (31 seconds in the actual-host matrix and 600 ms in runner link faults),
+This is not permission to shorten absence windows or retry failures. Lease-expiry
+sleeps (three seconds with a two-second test lease in the actual-host and
+account-continue SIGKILL matrices, and 600 ms in runner link faults),
 delayed reconnection/readoption, lower-bound hold checks and polling sleeps
 are not absence windows and keep their existing scheduling.
 
@@ -6130,7 +6142,7 @@ large synthetic store (the name is historical; reclaim is deferred; run with `--
 allows 300-second periods). A failed automatic prune emits `RetentionFinished`
 with status `Failed` and leaves the published result, the head and later turns
 unchanged (`a_failed_automatic_prune_emits_retention_failed_and_changes_nothing`). Facade tests (`sessions::tests::retention::`, and the
-capacity suite) run 300 rounds with automatic retention keeping the checkpoint
+capacity suite) run 144 rounds with automatic retention keeping the checkpoint
 count bounded and retained bytes growing no faster in the second half than the
 first; over SQLite they observe an automatic prune, an explicit prune that
 leaves the export document unchanged and repeats as a no-op, a verified reopen
@@ -6147,7 +6159,7 @@ without running or moving the head
 One 200-round Working turn over the memory backend keeps at most 160 checkpoints
 by pruning between rounds
 (`a_long_working_turn_prunes_superseded_checkpoints_between_rounds`); the agent
-suite pins the same bound and the reclaimed non-head bytes against a store that
+suite pins bounded retention and the reclaimed non-head bytes over 128 rounds against a store that
 prunes like a backend (`long_turn_keeps_its_superseded_working_checkpoints_bounded`),
 that every mid-turn prune retains exactly the four latest terminal checkpoints
 (`mid_turn_prunes_keep_exactly_the_four_latest_terminal_checkpoints`), and that

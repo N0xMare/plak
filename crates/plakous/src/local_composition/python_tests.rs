@@ -972,7 +972,7 @@ async fn successive_cells_retain_state_without_a_cumulative_duration_budget() {
 /// A request bound short enough to observe the kill-and-reap path without
 /// waiting out the production [`PYTHON_WORKER_REQUEST_BOUND`]. Only the bound
 /// differs; the session is built by the production code path.
-const TEST_WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_WORKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn blocking_cell(tool_call_id: &str, source: &str) -> LocalCompositionExecuteRequest {
     LocalCompositionExecuteRequest {

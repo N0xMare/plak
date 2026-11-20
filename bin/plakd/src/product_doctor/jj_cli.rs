@@ -8,6 +8,14 @@ use std::time::{Duration, Instant};
 
 /// Inspect one non-shim CLI on the supplied PATH, without inheriting credentials.
 pub fn probe(path: Option<&std::ffi::OsStr>, cwd: &Path) -> DoctorCheck {
+    probe_with_timeout(path, cwd, Duration::from_secs(5))
+}
+
+pub(crate) fn probe_with_timeout(
+    path: Option<&std::ffi::OsStr>,
+    cwd: &Path,
+    timeout: Duration,
+) -> DoctorCheck {
     let executable = path.and_then(|path| {
         std::env::split_paths(path)
             .filter(|entry| entry.is_absolute() && !entry.ends_with(".plak/bin"))
@@ -23,7 +31,7 @@ pub fn probe(path: Option<&std::ffi::OsStr>, cwd: &Path) -> DoctorCheck {
             cwd,
         );
     };
-    let output = version(&executable, path.unwrap_or_default(), cwd);
+    let output = version(&executable, path.unwrap_or_default(), cwd, timeout);
     let Some((major, minor, patch_version)) = output.as_deref().and_then(parse_version) else {
         return row(
             Severity::Warning,
@@ -105,8 +113,13 @@ fn row(
     check
 }
 
-fn version(executable: &Path, path: &std::ffi::OsStr, cwd: &Path) -> Option<String> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+fn version(
+    executable: &Path,
+    path: &std::ffi::OsStr,
+    cwd: &Path,
+    timeout: Duration,
+) -> Option<String> {
+    let deadline = Instant::now() + timeout;
     let mut child = Command::new(executable)
         .arg("--version")
         .current_dir(cwd)

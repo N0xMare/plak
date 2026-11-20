@@ -902,7 +902,10 @@ mod a_stop_cut_with_children_decides_the_root_and_the_wake {
     fn idle(expect: &CutExpect) {
         let root = tempfile::tempdir().unwrap();
         let lost =
-            release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| config);
+            release_a_running_root_turn(root.path(), Release::Lost, Cancel::Deaf, |config| {
+                crate::runtime::test_support::use_short_crash_lease(&config.state_roots);
+                config
+            });
         let (running, held) = crash_idle(root.path(), &lost, expect.at);
         assert_cut(root.path(), &lost, "idle", expect, &running, &held);
     }
@@ -1060,6 +1063,7 @@ fn crash_busy(root: &std::path::Path, at: &str) -> (Lost, String, String) {
         .unwrap(),
     );
     let (config, evidence) = scripted_host_with(root, plan);
+    crate::runtime::test_support::use_short_crash_lease(&config.state_roots);
     let id = config.session.id.clone();
     let store = Arc::clone(&config.store);
     let state_roots = config.state_roots.clone();

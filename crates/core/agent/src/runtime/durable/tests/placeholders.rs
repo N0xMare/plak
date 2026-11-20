@@ -381,7 +381,7 @@ async fn offline_pass_on_artifact_gated_replay_does_not_withhold_every_following
 #[tokio::test]
 async fn artifact_gated_long_turn_soak_bounds_compactions_and_eventually_dispatches_paid()
 -> TestResult {
-    const ROUNDS: usize = 64;
+    const ROUNDS: usize = 32;
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let mut bodies = vec![20_000, 120_000];

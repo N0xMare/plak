@@ -161,6 +161,15 @@ pub(super) fn durable_authority_count(database: &std::path::Path, table: &str) -
         .unwrap()
 }
 
+/// Opens the fixture's shared runtime before its host worker takes ownership.
+pub(super) fn use_short_crash_lease(roots: &ProductStateRoots) {
+    let sessions = plakous::test_session_lease::with_test_session_lease_seconds(2, || {
+        roots.runtime_sessions()
+    })
+    .unwrap();
+    assert_eq!(sessions.lease_period_seconds(), 2);
+}
+
 /// Waits for a crashed actor's branch release or its existing lease to expire.
 ///
 /// Even idle actor drop only requests the separate driver's shutdown. Panic

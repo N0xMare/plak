@@ -54,7 +54,10 @@ pub(super) fn execute(
     machine: ChangesEnvironment,
 ) -> ExecutionBackendFuture<ChangesAnswer> {
     Box::pin(async move {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let budget = std::time::Duration::from_secs(5);
+        #[cfg(test)]
+        let budget = tests::BUDGET.get().unwrap_or(budget);
+        let deadline = tokio::time::Instant::now() + budget;
         let cancellation = control.cancellation().clone();
         let result = tokio::select! {
             biased;

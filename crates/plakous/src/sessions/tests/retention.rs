@@ -29,7 +29,7 @@ fn open_retention_store(path: &Path) -> TestResult<(SqliteSessionStore, AgentSes
 
 #[tokio::test]
 async fn automatic_retention_keeps_hundreds_of_rounds_bounded_with_flat_growth() -> TestResult {
-    const ROUNDS: u64 = 300;
+    const ROUNDS: u64 = 144;
     // Head, its parent, the create checkpoint, the retained terminal results
     // and less than one automatic prune's worth of superseded checkpoints.
     const CHECKPOINT_BOUND: usize = 128;

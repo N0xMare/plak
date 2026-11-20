@@ -62,6 +62,16 @@ pub(crate) fn gateway_review_clock(
 
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
+    pub(crate) fn bridge_discovery_window(default: std::time::Duration) -> std::time::Duration {
+        super::shorter_seconds("PLAK_TEST_BRIDGE_DISCOVERY_SECONDS", default)
+    }
+
+    pub(crate) fn bridge_start_blocked() {
+        if let Some(marker) = super::hook_environment("PLAK_TEST_BRIDGE_START_BLOCKED") {
+            let _ = std::fs::write(marker, []);
+        }
+    }
+
     pub(crate) fn record_handoff_budget(
         elapsed: std::time::Duration,
         remaining: std::time::Duration,
@@ -241,8 +251,24 @@ pub(crate) use host::OfflineFace;
 mod tests;
 pub(crate) use runner::{
     host_start_environment, runner_before_ready, runner_lease_clock, runner_link,
-    runner_ready_result, runner_windows,
+    runner_ready_result, runner_reconnect_window, runner_windows,
 };
+
+fn shorter_seconds(name: &str, default: std::time::Duration) -> std::time::Duration {
+    hook_environment(name)
+        .and_then(|value| value.to_str()?.parse::<u64>().ok())
+        .filter(|&seconds| (1..=default.as_secs()).contains(&seconds))
+        .map_or(default, std::time::Duration::from_secs)
+}
+
+/// Runs the real doctor subprocess cleanup under a short fixture deadline.
+pub fn probe_jj_with_test_timeout(
+    path: Option<&std::ffi::OsStr>,
+    cwd: &Path,
+    timeout: std::time::Duration,
+) -> crate::product_doctor::DoctorCheck {
+    crate::product_doctor::jj_cli::probe_with_timeout(path, cwd, timeout)
+}
 
 #[allow(dead_code, reason = "headless builds do not start hosts")]
 pub(crate) fn runner_detached() -> bool {

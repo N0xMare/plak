@@ -82,6 +82,9 @@ pub(crate) fn host_start_environment() -> Vec<(&'static str, std::ffi::OsString)
 pub(crate) fn runner_windows() -> plakous::runner::ClientWindows {
     plakous::runner::ClientWindows::default()
 }
+pub(crate) const fn runner_reconnect_window(default: std::time::Duration) -> std::time::Duration {
+    default
+}
 pub(crate) fn runner_before_ready(
     _client: &plakous::runner::RunnerClient,
 ) -> std::future::Ready<Result<(), plakous::runner::PlacementFailure>> {
