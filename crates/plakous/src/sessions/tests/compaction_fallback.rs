@@ -20,84 +20,71 @@ impl LanguageModel for EndpointModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        Ok(PreparedModelCall::new(inert.record().clone(), move |_| {
-            Box::pin(async move {
-                let ordinal = self.calls.fetch_add(1, Ordering::AcqRel);
-                let failure = || {
-                    ModelError::new(
-                        ModelErrorKind::InvalidEvent,
-                        "endpoint fixture output failed",
-                    )
-                };
-                let id = Uuid::from_bytes(
-                    plan.digest().bytes()[..16]
-                        .try_into()
-                        .map_err(|_| failure())?,
-                );
-                let block = if !self.compact && ordinal == 1 {
-                    ContentBlock::ToolCall(
-                        ToolCallBlock::new(
-                            CallId::try_from(id).map_err(|_| failure())?,
-                            ToolName::new("probe").map_err(|_| failure())?,
-                            ToolExecutionOwner::Local,
-                            ToolCallState::Requested,
-                            ToolCorrelation::default(),
-                            "{}",
+        self.scripted
+            .clone()
+            .prepare_with_start(plan, context, move |_, plan| {
+                Box::pin(async move {
+                    let ordinal = self.calls.fetch_add(1, Ordering::AcqRel);
+                    let failure = || {
+                        ModelError::new(
+                            ModelErrorKind::InvalidEvent,
+                            "endpoint fixture output failed",
                         )
-                        .map_err(|_| failure())?,
-                    )
-                } else {
-                    ContentBlock::Text(
-                        TextBlock::new(
-                            if !self.compact && ordinal == 0 {
-                                "x".repeat(60_000)
-                            } else {
-                                "summary".to_owned()
-                            },
-                            None,
+                    };
+                    let id = Uuid::from_bytes(
+                        plan.digest().bytes()[..16]
+                            .try_into()
+                            .map_err(|_| failure())?,
+                    );
+                    let block = if !self.compact && ordinal == 1 {
+                        ContentBlock::ToolCall(
+                            ToolCallBlock::new(
+                                CallId::try_from(id).map_err(|_| failure())?,
+                                ToolName::new("probe").map_err(|_| failure())?,
+                                ToolExecutionOwner::Local,
+                                ToolCallState::Requested,
+                                ToolCorrelation::default(),
+                                "{}",
+                            )
+                            .map_err(|_| failure())?,
                         )
-                        .map_err(|_| failure())?,
+                    } else {
+                        ContentBlock::Text(
+                            TextBlock::new(
+                                if !self.compact && ordinal == 0 {
+                                    "x".repeat(60_000)
+                                } else {
+                                    "summary".to_owned()
+                                },
+                                None,
+                            )
+                            .map_err(|_| failure())?,
+                        )
+                    };
+                    let finish = if self.compact {
+                        FinishReason::Length
+                    } else if ordinal == 1 {
+                        FinishReason::ToolCalls
+                    } else {
+                        FinishReason::Stop
+                    };
+                    let output = ConversationItem::new(
+                        EntryId::try_from(id).map_err(|_| failure())?,
+                        Actor::Assistant,
+                        vec![block],
+                        Provenance::ModelOutput,
                     )
-                };
-                let finish = if self.compact {
-                    FinishReason::Length
-                } else if ordinal == 1 {
-                    FinishReason::ToolCalls
-                } else {
-                    FinishReason::Stop
-                };
-                let output = ConversationItem::new(
-                    EntryId::try_from(id).map_err(|_| failure())?,
-                    Actor::Assistant,
-                    vec![block],
-                    Provenance::ModelOutput,
-                )
-                .map_err(|_| failure())?;
-                let response = ModelResponse::new(
-                    vec![output.clone()],
-                    FinishDetails::new(finish, None),
-                    None,
-                    None,
-                    plan.digest(),
-                );
-                Ok(Box::pin(FixtureStream {
-                    events: vec![
-                        Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                            None,
-                            plan.digest(),
-                        ))),
-                        Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                            output.id(),
-                            OutputLocation::new(0, 0),
-                            BlockStart::Complete(output.blocks()[0].clone()),
-                        ))),
-                        Ok(ModelEvent::ResponseCompleted(response)),
-                    ]
-                    .into(),
-                }) as ModelStream)
+                    .map_err(|_| failure())?;
+                    let response = ModelResponse::new(
+                        vec![output],
+                        FinishDetails::new(finish, None),
+                        None,
+                        None,
+                        plan.digest(),
+                    );
+                    Ok(plakous_test_support::single_block_stream(response))
+                })
             })
-        }))
     }
 }
 

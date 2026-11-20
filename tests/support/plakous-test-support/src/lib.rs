@@ -6,6 +6,7 @@
 
 mod conformance;
 mod model;
+mod store;
 mod tool;
 
 /// Isolated loopback TLS peers for native-auth tests; never vendor endpoints.
@@ -17,6 +18,7 @@ pub mod gateway;
 pub use conformance::{recover_model_operation, run_model_operation};
 pub use model::{
     ExpectedRequest, ModelScenario, ScenarioBarrier, ScenarioStart, ScenarioStep, ScriptedModel,
-    ScriptedRecoverySnapshotError, ScriptedRecoveryState,
+    ScriptedRecoverySnapshotError, ScriptedRecoveryState, semantic_history_tokens,
+    single_block_events, single_block_stream,
 };
 pub use tool::{CapturedToolInvocation, ScriptedTool, ScriptedToolStep};

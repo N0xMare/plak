@@ -565,13 +565,6 @@ impl ArtifactModel {
     }
 }
 
-fn semantic_history_tokens(history: &CanonicalHistory) -> u64 {
-    let bytes = history.segments().iter().fold(0usize, |total, segment| {
-        total.saturating_add(segment.canonical_bytes().len())
-    });
-    u64::try_from(bytes).unwrap_or(u64::MAX).div_ceil(4).max(1)
-}
-
 /// The two session-workflow prepares the v2 shrink proof compares. Other
 /// prepares, including the paid summary itself, keep the fixture's flat count.
 fn shrink_proof_measurement(metadata: RequestMetadata) -> bool {
@@ -849,7 +842,7 @@ impl LanguageModel for ArtifactModel {
             // The publication proof re-measures source and successor. Count
             // canonical history bytes so a fold has to shrink real content.
             // Turn rounds and the paid summary keep the fixture's flat count.
-            semantic_history_tokens(plan.request().input().history())
+            plakous_test_support::semantic_history_tokens(plan.request().input().history())
         } else {
             let folded = self.context_growth_ends_at_fold.load(Ordering::Acquire)
                 && !lock_mutex(&self.observed_compaction_contexts).is_empty();

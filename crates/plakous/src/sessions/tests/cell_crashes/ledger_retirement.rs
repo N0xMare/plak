@@ -90,30 +90,16 @@ impl LanguageModel for ClosedCellsModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        Ok(PreparedModelCall::new(inert.record().clone(), move |_| {
-            Box::pin(async move {
-                let response = self.response(&plan).map_err(|error| {
-                    ModelError::new(ModelErrorKind::InvalidEvent, error.to_string())
-                })?;
-                let item = &response.output()[0];
-                let events = vec![
-                    Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                        None,
-                        plan.digest(),
-                    ))),
-                    Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                        item.id(),
-                        OutputLocation::new(0, 0),
-                        BlockStart::Complete(item.blocks()[0].clone()),
-                    ))),
-                    Ok(ModelEvent::ResponseCompleted(response)),
-                ];
-                Ok(Box::pin(FixtureStream {
-                    events: events.into(),
-                }) as ModelStream)
+        self.scripted
+            .clone()
+            .prepare_with_start(plan, context, move |_, plan| {
+                Box::pin(async move {
+                    let response = self.response(&plan).map_err(|error| {
+                        ModelError::new(ModelErrorKind::InvalidEvent, error.to_string())
+                    })?;
+                    Ok(plakous_test_support::single_block_stream(response))
+                })
             })
-        }))
     }
 }
 

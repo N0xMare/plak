@@ -1,5 +1,6 @@
 //! Count-based bounds for host read batches.
 use super::*;
+use plakous_agent::internal as store_api;
 
 struct CountingReads {
     inner: MemorySessionStore,
@@ -82,8 +83,11 @@ async fn facade_placeholder_suffix_is_refused_before_any_receipt_read() -> TestR
 }
 
 impl SessionStore for CountingReads {
-    fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
-        self.inner.lease_now()
+    plakous_test_support::session_store_methods! {
+        forward store_api, inner;
+        lease_now, recover_create, acquire, release, commit, fork, recover_fork, list,
+        usage, archive, delete, prune, recover_delete, read_feed, feed_tail, branch_line,
+        load_line, line_job_terminals, record_line_job_terminals, flush, shutdown,
     }
 
     fn create(
@@ -97,13 +101,6 @@ impl SessionStore for CountingReads {
             }
             result
         })
-    }
-
-    fn recover_create(
-        &self,
-        request: CreateSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CreateReceipt> {
-        self.inner.recover_create(request)
     }
 
     fn load_branch(
@@ -125,13 +122,6 @@ impl SessionStore for CountingReads {
         self.inner.load_checkpoint(checkpoint)
     }
 
-    fn acquire(
-        &self,
-        request: AcquireBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
-        self.inner.acquire(request)
-    }
-
     fn renew(
         &self,
         lease: plakous_agent::internal::BranchLease,
@@ -145,20 +135,6 @@ impl SessionStore for CountingReads {
         })
     }
 
-    fn release(
-        &self,
-        lease: plakous_agent::internal::BranchLease,
-    ) -> plakous_agent::internal::StoreFuture<'_, ()> {
-        self.inner.release(lease)
-    }
-
-    fn commit(
-        &self,
-        request: CommitCheckpoint,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CommitReceipt> {
-        self.inner.commit(request)
-    }
-
     fn recover_commit(
         &self,
         checkpoint: CheckpointId,
@@ -166,122 +142,6 @@ impl SessionStore for CountingReads {
     {
         self.receipts.fetch_add(1, Ordering::SeqCst);
         self.inner.recover_commit(checkpoint)
-    }
-
-    fn fork(
-        &self,
-        request: plakous_agent::internal::ForkBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
-        self.inner.fork(request)
-    }
-
-    fn recover_fork(
-        &self,
-        request: plakous_agent::internal::RecoverFork,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
-        self.inner.recover_fork(request)
-    }
-
-    fn list(
-        &self,
-        query: plakous_agent::internal::SessionQuery,
-    ) -> plakous_agent::internal::StoreFuture<
-        '_,
-        plakous_agent::internal::Page<plakous_agent::internal::SessionSummary>,
-    > {
-        self.inner.list(query)
-    }
-
-    fn usage(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::StoreUsage> {
-        self.inner.usage()
-    }
-
-    fn archive(
-        &self,
-        request: ArchiveSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ArchiveReceipt> {
-        self.inner.archive(request)
-    }
-
-    fn delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.delete(request)
-    }
-
-    fn prune(
-        &self,
-        request: plakous_agent::internal::PruneBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::PruneReceipt> {
-        self.inner.prune(request)
-    }
-
-    fn recover_delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.recover_delete(request)
-    }
-
-    fn read_feed(
-        &self,
-        session_id: SessionId,
-        after: FeedSeq,
-        max_records: NonZeroUsize,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedPage> {
-        self.inner.read_feed(session_id, after, max_records)
-    }
-
-    fn feed_tail(
-        &self,
-        session_id: SessionId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
-        self.inner.feed_tail(session_id)
-    }
-
-    fn branch_line(
-        &self,
-        session: SessionRef,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
-        self.inner.branch_line(session)
-    }
-
-    fn load_line(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
-        self.inner.load_line(line)
-    }
-
-    fn line_job_terminals(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
-    {
-        self.inner.line_job_terminals(line)
-    }
-
-    fn record_line_job_terminals(
-        &self,
-        request: plakous_agent::internal::RecordLineJobTerminals,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
-    {
-        self.inner.record_line_job_terminals(request)
-    }
-
-    fn flush(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.flush()
-    }
-
-    fn shutdown(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.shutdown()
     }
 }
 

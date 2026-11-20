@@ -48,17 +48,10 @@ fn scenario(
     Ok(ModelScenario::new(
         ExpectedRequest::Any,
         ScenarioStart::Immediate,
-        vec![
-            ScenarioStep::Emit(ModelEvent::ResponseStarted(ResponseStarted::new(
-                None, digest,
-            ))),
-            ScenarioStep::Emit(ModelEvent::BlockStarted(BlockStarted::new(
-                item.id(),
-                OutputLocation::new(0, 0),
-                BlockStart::Complete(item.blocks()[0].clone()),
-            ))),
-            ScenarioStep::Emit(ModelEvent::ResponseCompleted(response)),
-        ],
+        plakous_test_support::single_block_events(response)
+            .into_iter()
+            .map(ScenarioStep::Emit)
+            .collect(),
     ))
 }
 

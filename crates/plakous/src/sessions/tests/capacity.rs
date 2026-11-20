@@ -761,36 +761,6 @@ async fn sqlite_recovery_writes_into_the_reserve_and_an_over_limit_store_opens()
     close_store(store, sessions).await
 }
 
-struct CountingModel {
-    inner: Arc<CompletingModel>,
-    starts: Arc<AtomicUsize>,
-}
-
-impl LanguageModel for CountingModel {
-    fn revalidate_runtime_authority(
-        self: Arc<Self>,
-        checked_at: Timestamp,
-    ) -> RuntimeModelAuthorityOperation {
-        self.inner.clone().revalidate_runtime_authority(checked_at)
-    }
-
-    fn prepare_call(
-        self: Arc<Self>,
-        plan: ValidatedRequestPlan,
-        context: ModelPreparationContext,
-    ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let starts = Arc::clone(&self.starts);
-        Ok(self
-            .inner
-            .clone()
-            .prepare_call(plan, context)?
-            .map_start(move |start| {
-                starts.fetch_add(1, Ordering::AcqRel);
-                start
-            }))
-    }
-}
-
 fn counting_compaction_binding(
     workspace: &Arc<WorkspacePolicy>,
     account: &[u8],
@@ -812,10 +782,18 @@ fn counting_compaction_binding(
             .with_content_sensitive_observation()
             .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
     );
-    let model: Arc<dyn LanguageModel> = Arc::new(CountingModel {
-        inner: Arc::new(CompletingModel { scripted }),
-        starts: Arc::clone(starts),
-    });
+    let model: Arc<dyn LanguageModel> = {
+        let starts = Arc::clone(starts);
+        Arc::new(scripted.with_preparer(move |scripted, plan, context| {
+            let starts = Arc::clone(&starts);
+            Ok(
+                prepare_completion(scripted, plan, context)?.map_start(move |start| {
+                    starts.fetch_add(1, Ordering::AcqRel);
+                    start
+                }),
+            )
+        }))
+    };
     let configured = crate::test_model::configured_compaction_model(
         model,
         descriptor,

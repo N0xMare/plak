@@ -2,13 +2,11 @@ use super::*;
 use crate::checkpoint_bundle::tests::{
     fixture_with_history, fixture_with_history_and_ledger, history_segment, without_cached_objects,
 };
-use crate::internal::{LeaseDomain, LeaseInstant, RuntimeObject};
-use crate::manifest::LineJobTerminal;
+use crate::internal::{self as store_api, LeaseDomain, LeaseInstant, RuntimeObject};
 use crate::runtime::ToolExecutionResult;
 use crate::runtime::continuation::runtime_component;
 use crate::runtime::driver::DurableUndispatchedToolRequest;
 use crate::runtime::operation_record::{tool_operation_terminal_state, working_lifecycle};
-use crate::session::{LineRecord, LineTerminalsReceipt, RecordLineJobTerminals};
 use crate::*;
 use plakous_model::{
     AttemptId, CallId, CanonicalHistory, DigestDomain, EntryId, ToolCallBlock, ToolCallState,
@@ -154,57 +152,19 @@ impl SweepStore {
     }
 }
 
-macro_rules! unused_store_methods {
-    ($($name:ident($arg:ident: $input:ty) -> $output:ty;)*) => {
-        $(fn $name(&self, _: $input) -> StoreFuture<'_, $output> {
-            Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-        })*
-    };
-}
-
 impl SessionStore for SweepStore {
     fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
         LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 0, 0)
     }
 
-    unused_store_methods! {
-        create(request: CreateSession) -> CreateReceipt;
-        recover_create(request: CreateSession) -> CreateReceipt;
-        load_branch(session: SessionRef) -> LoadedBranch;
-        load_checkpoint(checkpoint: CheckpointId) -> StoredCheckpoint;
-        acquire(request: AcquireBranch) -> BranchLease;
-        renew(lease: BranchLease) -> BranchLease;
-        release(lease: BranchLease) -> ();
-        commit(request: CommitCheckpoint) -> CommitReceipt;
-        recover_commit(checkpoint: CheckpointId) -> CommittedCheckpoint;
-        fork(request: ForkBranch) -> ForkReceipt;
-        recover_fork(request: RecoverFork) -> ForkReceipt;
-        list(query: SessionQuery) -> Page<SessionSummary>;
-        archive(request: ArchiveSession) -> ArchiveReceipt;
-        delete(request: DeleteSession) -> DeleteReceipt;
-        recover_delete(request: DeleteSession) -> DeleteReceipt;
-        feed_tail(session: SessionId) -> feed::FeedTail;
-        branch_line(session: SessionRef) -> LineId;
-        load_line(line: LineId) -> LineRecord;
-        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
-        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
+    plakous_test_support::session_store_methods! {
+        unavailable store_api;
+        create, recover_create, load_branch, load_checkpoint, acquire, renew, release,
+        commit, recover_commit, fork, recover_fork, list, archive, delete, recover_delete,
+        feed_tail, branch_line, load_line, line_job_terminals, record_line_job_terminals,
+        read_feed, usage, flush,
     }
 
-    fn read_feed(
-        &self,
-        _: SessionId,
-        _: FeedSeq,
-        _: std::num::NonZeroUsize,
-    ) -> StoreFuture<'_, feed::FeedPage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-
-    fn usage(&self) -> StoreFuture<'_, StoreUsage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-    fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
         self.flush()
     }
@@ -404,26 +364,12 @@ impl SessionStore for FlakyRenewStore {
         )
     }
 
-    unused_store_methods! {
-        create(request: CreateSession) -> CreateReceipt;
-        recover_create(request: CreateSession) -> CreateReceipt;
-        load_branch(session: SessionRef) -> LoadedBranch;
-        load_checkpoint(checkpoint: CheckpointId) -> StoredCheckpoint;
-        acquire(request: AcquireBranch) -> BranchLease;
-        release(lease: BranchLease) -> ();
-        commit(request: CommitCheckpoint) -> CommitReceipt;
-        recover_commit(checkpoint: CheckpointId) -> CommittedCheckpoint;
-        fork(request: ForkBranch) -> ForkReceipt;
-        recover_fork(request: RecoverFork) -> ForkReceipt;
-        list(query: SessionQuery) -> Page<SessionSummary>;
-        archive(request: ArchiveSession) -> ArchiveReceipt;
-        delete(request: DeleteSession) -> DeleteReceipt;
-        recover_delete(request: DeleteSession) -> DeleteReceipt;
-        feed_tail(session: SessionId) -> feed::FeedTail;
-        branch_line(session: SessionRef) -> LineId;
-        load_line(line: LineId) -> LineRecord;
-        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
-        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
+    plakous_test_support::session_store_methods! {
+        unavailable store_api;
+        create, recover_create, load_branch, load_checkpoint, acquire, release, commit,
+        recover_commit, fork, recover_fork, list, archive, delete, recover_delete,
+        feed_tail, branch_line, load_line, line_job_terminals, record_line_job_terminals,
+        read_feed, usage, flush,
     }
 
     fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
@@ -451,21 +397,6 @@ impl SessionStore for FlakyRenewStore {
         Box::pin(async move { Err(error) })
     }
 
-    fn read_feed(
-        &self,
-        _: SessionId,
-        _: FeedSeq,
-        _: std::num::NonZeroUsize,
-    ) -> StoreFuture<'_, feed::FeedPage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-
-    fn usage(&self) -> StoreFuture<'_, StoreUsage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-    fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
         self.flush()
     }
@@ -572,24 +503,11 @@ impl SessionStore for SupersededStore {
         LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 0, 0)
     }
 
-    unused_store_methods! {
-        create(request: CreateSession) -> CreateReceipt;
-        recover_create(request: CreateSession) -> CreateReceipt;
-        load_branch(session: SessionRef) -> LoadedBranch;
-        load_checkpoint(checkpoint: CheckpointId) -> StoredCheckpoint;
-        acquire(request: AcquireBranch) -> BranchLease;
-        release(lease: BranchLease) -> ();
-        fork(request: ForkBranch) -> ForkReceipt;
-        recover_fork(request: RecoverFork) -> ForkReceipt;
-        list(query: SessionQuery) -> Page<SessionSummary>;
-        archive(request: ArchiveSession) -> ArchiveReceipt;
-        delete(request: DeleteSession) -> DeleteReceipt;
-        recover_delete(request: DeleteSession) -> DeleteReceipt;
-        feed_tail(session: SessionId) -> feed::FeedTail;
-        branch_line(session: SessionRef) -> LineId;
-        load_line(line: LineId) -> LineRecord;
-        line_job_terminals(line: LineId) -> Vec<LineJobTerminal>;
-        record_line_job_terminals(request: RecordLineJobTerminals) -> LineTerminalsReceipt;
+    plakous_test_support::session_store_methods! {
+        unavailable store_api;
+        create, recover_create, load_branch, load_checkpoint, acquire, release, fork,
+        recover_fork, list, archive, delete, recover_delete, feed_tail, branch_line,
+        load_line, line_job_terminals, record_line_job_terminals, read_feed, usage, flush,
     }
 
     fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
@@ -612,21 +530,6 @@ impl SessionStore for SupersededStore {
         Box::pin(async { Err(SessionStoreError::NotLineHead) })
     }
 
-    fn read_feed(
-        &self,
-        _: SessionId,
-        _: FeedSeq,
-        _: std::num::NonZeroUsize,
-    ) -> StoreFuture<'_, feed::FeedPage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-
-    fn usage(&self) -> StoreFuture<'_, StoreUsage> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
-    fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
-        Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
-    }
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
         self.flush()
     }

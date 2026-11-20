@@ -119,38 +119,25 @@ impl LanguageModel for PythonModel {
             Provenance::ModelOutput,
         )
         .map_err(|_| failure())?;
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        Ok(PreparedModelCall::new(inert.record().clone(), move |_| {
-            Box::pin(async move {
-                let finish = if matches!(output.blocks()[0], ContentBlock::ToolCall(_)) {
-                    FinishReason::ToolCalls
-                } else {
-                    FinishReason::Stop
-                };
-                let response = ModelResponse::new(
-                    vec![output.clone()],
-                    FinishDetails::new(finish, None),
-                    None,
-                    None,
-                    plan.digest(),
-                );
-                Ok(Box::pin(FixtureStream {
-                    events: vec![
-                        Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                            None,
-                            plan.digest(),
-                        ))),
-                        Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                            output.id(),
-                            OutputLocation::new(0, 0),
-                            BlockStart::Complete(output.blocks()[0].clone()),
-                        ))),
-                        Ok(ModelEvent::ResponseCompleted(response)),
-                    ]
-                    .into(),
-                }) as ModelStream)
+        self.scripted
+            .clone()
+            .prepare_with_start(plan, context, move |_, plan| {
+                Box::pin(async move {
+                    let finish = if matches!(output.blocks()[0], ContentBlock::ToolCall(_)) {
+                        FinishReason::ToolCalls
+                    } else {
+                        FinishReason::Stop
+                    };
+                    let response = ModelResponse::new(
+                        vec![output],
+                        FinishDetails::new(finish, None),
+                        None,
+                        None,
+                        plan.digest(),
+                    );
+                    Ok(plakous_test_support::single_block_stream(response))
+                })
             })
-        }))
     }
 }
 

@@ -40,74 +40,64 @@ impl LanguageModel for ToolLoopModel {
         plan: ValidatedRequestPlan,
         context: ModelPreparationContext,
     ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        Ok(PreparedModelCall::new(inert.record().clone(), move |_| {
-            Box::pin(async move {
-                let failure =
-                    || ModelError::new(ModelErrorKind::InvalidEvent, "tool loop fixture failed");
-                let ordinal = self.calls.fetch_add(1, Ordering::AcqRel);
-                let stats = self.store.stats().map_err(|_| failure())?;
-                test_lock(&self.samples).push(Sample {
-                    checkpoints: u64::try_from(stats.checkpoints()).unwrap_or(u64::MAX),
-                    bytes: u64::try_from(stats.unique_object_bytes()).unwrap_or(u64::MAX),
-                });
-                let id = Uuid::from_bytes(
-                    plan.digest().bytes()[..16]
-                        .try_into()
-                        .map_err(|_| failure())?,
-                );
-                let (block, finish) = if ordinal < ROUNDS {
-                    (
-                        ContentBlock::ToolCall(
-                            ToolCallBlock::new(
-                                CallId::try_from(id).map_err(|_| failure())?,
-                                ToolName::new("probe").map_err(|_| failure())?,
-                                ToolExecutionOwner::Local,
-                                ToolCallState::Requested,
-                                ToolCorrelation::default(),
-                                "{}",
-                            )
+        self.scripted
+            .clone()
+            .prepare_with_start(plan, context, move |_, plan| {
+                Box::pin(async move {
+                    let failure = || {
+                        ModelError::new(ModelErrorKind::InvalidEvent, "tool loop fixture failed")
+                    };
+                    let ordinal = self.calls.fetch_add(1, Ordering::AcqRel);
+                    let stats = self.store.stats().map_err(|_| failure())?;
+                    test_lock(&self.samples).push(Sample {
+                        checkpoints: u64::try_from(stats.checkpoints()).unwrap_or(u64::MAX),
+                        bytes: u64::try_from(stats.unique_object_bytes()).unwrap_or(u64::MAX),
+                    });
+                    let id = Uuid::from_bytes(
+                        plan.digest().bytes()[..16]
+                            .try_into()
                             .map_err(|_| failure())?,
-                        ),
-                        FinishReason::ToolCalls,
+                    );
+                    let (block, finish) = if ordinal < ROUNDS {
+                        (
+                            ContentBlock::ToolCall(
+                                ToolCallBlock::new(
+                                    CallId::try_from(id).map_err(|_| failure())?,
+                                    ToolName::new("probe").map_err(|_| failure())?,
+                                    ToolExecutionOwner::Local,
+                                    ToolCallState::Requested,
+                                    ToolCorrelation::default(),
+                                    "{}",
+                                )
+                                .map_err(|_| failure())?,
+                            ),
+                            FinishReason::ToolCalls,
+                        )
+                    } else {
+                        (
+                            ContentBlock::Text(
+                                TextBlock::new("done", None).map_err(|_| failure())?,
+                            ),
+                            FinishReason::Stop,
+                        )
+                    };
+                    let output = ConversationItem::new(
+                        EntryId::try_from(id).map_err(|_| failure())?,
+                        Actor::Assistant,
+                        vec![block],
+                        Provenance::ModelOutput,
                     )
-                } else {
-                    (
-                        ContentBlock::Text(TextBlock::new("done", None).map_err(|_| failure())?),
-                        FinishReason::Stop,
-                    )
-                };
-                let output = ConversationItem::new(
-                    EntryId::try_from(id).map_err(|_| failure())?,
-                    Actor::Assistant,
-                    vec![block],
-                    Provenance::ModelOutput,
-                )
-                .map_err(|_| failure())?;
-                let response = ModelResponse::new(
-                    vec![output.clone()],
-                    FinishDetails::new(finish, None),
-                    None,
-                    None,
-                    plan.digest(),
-                );
-                Ok(Box::pin(FixtureStream {
-                    events: vec![
-                        Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                            None,
-                            plan.digest(),
-                        ))),
-                        Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                            output.id(),
-                            OutputLocation::new(0, 0),
-                            BlockStart::Complete(output.blocks()[0].clone()),
-                        ))),
-                        Ok(ModelEvent::ResponseCompleted(response)),
-                    ]
-                    .into(),
-                }) as ModelStream)
+                    .map_err(|_| failure())?;
+                    let response = ModelResponse::new(
+                        vec![output],
+                        FinishDetails::new(finish, None),
+                        None,
+                        None,
+                        plan.digest(),
+                    );
+                    Ok(plakous_test_support::single_block_stream(response))
+                })
             })
-        }))
     }
 }
 

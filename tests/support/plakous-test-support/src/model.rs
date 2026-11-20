@@ -14,19 +14,58 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use plakous_model::{
-    CancellationToken, CountObservation, Digest, DigestDomain, LanguageModel, ModelCallContext,
-    ModelCallRecoveryError, ModelCallRecoveryOperation, ModelCallRecoveryRequest,
-    ModelCallRecoveryResult, ModelError, ModelErrorKind, ModelEvent, ModelPreparationContext,
-    ModelPreparationError, ModelPreparationErrorKind, ModelRequest, ModelResponse, ModelStream,
+    BlockStart, BlockStarted, CancellationToken, CanonicalHistory, CountObservation, Digest,
+    DigestDomain, LanguageModel, ModelCallContext, ModelCallRecoveryError,
+    ModelCallRecoveryOperation, ModelCallRecoveryRequest, ModelCallRecoveryResult, ModelError,
+    ModelErrorKind, ModelEvent, ModelPreparationContext, ModelPreparationError,
+    ModelPreparationErrorKind, ModelRequest, ModelResponse, ModelStream, OutputLocation,
     PreparedCacheUse, PreparedCallError, PreparedCallRecord, PreparedModelCall,
     PreparedModelProjection, PreparedOutputLimit, PreparedTokenProjection,
     ProviderCallRecoveryLocator, ResolvedModelDescriptor, ResponseStarted, RuntimeModelAuthority,
-    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Timestamp, ValidatedRequestPlan,
+    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, StartModelCall, Timestamp,
+    ValidatedRequestPlan,
 };
 
 fn register_cancellation(token: &CancellationToken, context: &mut Context<'_>) {
     let mut cancelled = Box::pin(token.cancelled());
     let _ = cancelled.as_mut().poll(context);
+}
+
+/// The fixture count used by compaction proofs that must shrink real content.
+#[must_use]
+pub fn semantic_history_tokens(history: &CanonicalHistory) -> u64 {
+    let bytes = history.segments().iter().fold(0usize, |total, segment| {
+        total.saturating_add(segment.canonical_bytes().len())
+    });
+    u64::try_from(bytes).unwrap_or(u64::MAX).div_ceil(4).max(1)
+}
+
+/// Emit the start, complete block, and terminal events for a single-block response.
+///
+/// # Panics
+/// Panics if the fixture response has no output item or block.
+#[must_use]
+pub fn single_block_events(response: ModelResponse) -> [ModelEvent; 3] {
+    let output = &response.output()[0];
+    [
+        ModelEvent::ResponseStarted(ResponseStarted::new(None, response.plan_digest())),
+        ModelEvent::BlockStarted(BlockStarted::new(
+            output.id(),
+            OutputLocation::new(0, 0),
+            BlockStart::Complete(output.blocks()[0].clone()),
+        )),
+        ModelEvent::ResponseCompleted(response),
+    ]
+}
+
+/// The event stream for a single-block fixture response.
+///
+/// # Panics
+/// Panics if the fixture response has no output item or block.
+pub fn single_block_stream(response: ModelResponse) -> ModelStream {
+    Box::pin(futures_util::stream::iter(
+        single_block_events(response).map(Ok),
+    ))
 }
 
 #[derive(Debug, Default)]
@@ -615,6 +654,42 @@ impl ScriptedModel {
         &self.descriptor
     }
 
+    /// Keep scripted authority revalidation and provide test-specific preparation.
+    /// Recovery stays unsupported, even if the scripted preparation records a locator.
+    #[must_use]
+    pub fn with_preparer<F>(self: Arc<Self>, prepare: F) -> impl LanguageModel
+    where
+        F: Fn(
+                Arc<Self>,
+                ValidatedRequestPlan,
+                ModelPreparationContext,
+            ) -> Result<PreparedModelCall, ModelPreparationError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        PreparingModel {
+            scripted: self,
+            prepare,
+        }
+    }
+
+    /// Prepare normally but use the fixture's start in place of consuming a scenario.
+    ///
+    /// # Errors
+    /// Returns any error from the scripted call preparation.
+    pub fn prepare_with_start(
+        self: Arc<Self>,
+        plan: ValidatedRequestPlan,
+        context: ModelPreparationContext,
+        start: impl FnOnce(ModelCallContext, ValidatedRequestPlan) -> StartModelCall + Send + 'static,
+    ) -> Result<PreparedModelCall, ModelPreparationError> {
+        let inert = self.prepare_call(plan.clone(), context)?;
+        Ok(PreparedModelCall::new(inert.record().clone(), move |ctx| {
+            start(ctx, plan)
+        }))
+    }
+
     /// Adds explicit credential-free authority facts for durable-runtime tests.
     ///
     /// The scripted model is a deterministic test double. Production adapters
@@ -859,16 +934,7 @@ impl LanguageModel for ScriptedModel {
             if !self.content_sensitive_observation || summary_request {
                 return observation;
             }
-            let bytes = plan
-                .request()
-                .input()
-                .history()
-                .segments()
-                .iter()
-                .fold(0usize, |total, segment| {
-                    total.saturating_add(segment.canonical_bytes().len())
-                });
-            let tokens = u64::try_from(bytes).unwrap_or(u64::MAX).div_ceil(4).max(1);
+            let tokens = semantic_history_tokens(plan.request().input().history());
             CountObservation::new(
                 observation.certificate_id(),
                 observation.certificate_revision(),
@@ -956,6 +1022,38 @@ impl LanguageModel for ScriptedModel {
                 completed: false,
             })
         }))
+    }
+}
+
+struct PreparingModel<F> {
+    scripted: Arc<ScriptedModel>,
+    prepare: F,
+}
+
+impl<F> LanguageModel for PreparingModel<F>
+where
+    F: Fn(
+            Arc<ScriptedModel>,
+            ValidatedRequestPlan,
+            ModelPreparationContext,
+        ) -> Result<PreparedModelCall, ModelPreparationError>
+        + Send
+        + Sync
+        + 'static,
+{
+    fn revalidate_runtime_authority(
+        self: Arc<Self>,
+        checked_at: Timestamp,
+    ) -> RuntimeModelAuthorityOperation {
+        Arc::clone(&self.scripted).revalidate_runtime_authority(checked_at)
+    }
+
+    fn prepare_call(
+        self: Arc<Self>,
+        plan: ValidatedRequestPlan,
+        context: ModelPreparationContext,
+    ) -> Result<PreparedModelCall, ModelPreparationError> {
+        (self.prepare)(Arc::clone(&self.scripted), plan, context)
     }
 }
 

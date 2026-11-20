@@ -5,21 +5,20 @@ mod carry_replay;
 mod command_ancestry;
 mod compaction_fallback;
 
+use plakous_agent::internal as store_api;
 use plakous_agent::internal::{RuntimeDurability, SessionStoreError};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroU64};
 #[cfg(any(all(unix, feature = "sessions-sqlite"), feature = "composition"))]
 use std::path::Path;
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::path::PathBuf;
-use std::pin::Pin;
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::process::{Child, Command, Stdio};
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::task::{Context, Poll};
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::time::{Duration, Instant};
 #[cfg(all(unix, feature = "sessions-sqlite"))]
@@ -53,22 +52,21 @@ use plakous_agent::internal::{
 };
 use plakous_agent::{AgentRequestPolicy, TurnResultOutcome};
 use plakous_model::{
-    Actor, AttemptId, BlockStart, BlockStarted, Capability, CapabilityConstraints, CapabilitySet,
-    ContentBlock, ContextStatusKind, ConversationItem, DigestDomain, EntryId, FactProvenance,
-    FactSource, FamilyArtifactProducerFacts, FeatureSupport, FinishDetails, FinishReason,
-    FixedClock, GenerationLimits, LanguageModel, LocalDurabilityDisposition, ModelAdapterProfileId,
-    ModelError, ModelErrorKind, ModelEvent, ModelFamilyId, ModelPreparationContext,
-    ModelPreparationError, ModelPreparationErrorKind, ModelResponse, ModelStream,
-    OutputBoundDisposition, OutputLocation, PreparedCallRecord, PreparedModelCall, Provenance,
-    ReasoningPolicy, ResolvedModelDescriptor, ResponseStarted, RunId, RuntimeModelAuthority,
-    RuntimeModelAuthorityOperation, SealedFamilyArtifactCandidate, Support, SystemIdGenerator,
-    TextBlock, Timestamp, ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName,
-    ToolOutputContract, TurnId, ValidatedRequestPlan,
+    Actor, AttemptId, Capability, CapabilityConstraints, CapabilitySet, ContentBlock,
+    ContextStatusKind, ConversationItem, DigestDomain, EntryId, FactProvenance, FactSource,
+    FamilyArtifactProducerFacts, FeatureSupport, FinishDetails, FinishReason, FixedClock,
+    GenerationLimits, LanguageModel, LocalDurabilityDisposition, ModelAdapterProfileId, ModelError,
+    ModelErrorKind, ModelFamilyId, ModelPreparationContext, ModelPreparationError,
+    ModelPreparationErrorKind, ModelResponse, OutputBoundDisposition, PreparedCallRecord,
+    PreparedModelCall, Provenance, ReasoningPolicy, ResolvedModelDescriptor, RunId,
+    RuntimeModelAuthority, RuntimeModelAuthorityOperation, SealedFamilyArtifactCandidate, Support,
+    SystemIdGenerator, TextBlock, Timestamp, ToolConcurrency, ToolDefinition, ToolEffect,
+    ToolInputContract, ToolName, ToolOutputContract, TurnId, ValidatedRequestPlan,
 };
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use plakous_model::{
     CountObservation, HistorySegmentKind, ModelCallRecoveryOperation, ModelCallRecoveryRequest,
-    ModelOperationRoot, Usage,
+    ModelEvent, ModelOperationRoot, ResponseStarted, Usage,
 };
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use plakous_store::SqliteSessionStore;
@@ -517,22 +515,9 @@ fn runtime_binding_with_registry(
     Ok(SessionRuntimeBinding::new(builder))
 }
 
-struct CompletingModel {
-    scripted: Arc<plakous_test_support::ScriptedModel>,
-}
-
-struct CapturingCompletingModel {
-    inner: Arc<CompletingModel>,
-    prepared: Arc<Mutex<Option<PreparedCallRecord>>>,
-}
-
 struct HostedPauseModel {
     scripted: Arc<plakous_test_support::ScriptedModel>,
     calls: AtomicUsize,
-}
-
-struct FixtureStream {
-    events: VecDeque<Result<ModelEvent, ModelError>>,
 }
 
 fn hosted_pause_fixture_error() -> ModelError {
@@ -542,103 +527,51 @@ fn hosted_pause_fixture_error() -> ModelError {
     )
 }
 
-impl futures_core::Stream for FixtureStream {
-    type Item = Result<ModelEvent, ModelError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.events.pop_front())
-    }
-}
-
-impl LanguageModel for CompletingModel {
-    fn revalidate_runtime_authority(
-        self: Arc<Self>,
-        checked_at: Timestamp,
-    ) -> RuntimeModelAuthorityOperation {
-        self.scripted
-            .clone()
-            .revalidate_runtime_authority(checked_at)
-    }
-
-    fn prepare_call(
-        self: Arc<Self>,
-        plan: ValidatedRequestPlan,
-        context: ModelPreparationContext,
-    ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        let record = inert.record().clone();
-        let mut output_identity = [0_u8; 16];
-        output_identity.copy_from_slice(&plan.digest().bytes()[..16]);
-        let output = ConversationItem::new(
-            EntryId::try_from(Uuid::from_bytes(output_identity)).map_err(|_| {
-                ModelPreparationError::rejected(
-                    ModelPreparationErrorKind::InvalidConfiguration,
-                    "completion fixture entry identity is invalid",
-                )
-            })?,
-            Actor::Assistant,
-            vec![ContentBlock::Text(
-                TextBlock::new("completed", None).map_err(|_| {
-                    ModelPreparationError::rejected(
-                        ModelPreparationErrorKind::InvalidConfiguration,
-                        "completion fixture text is invalid",
-                    )
-                })?,
-            )],
-            Provenance::ModelOutput,
-        )
-        .map_err(|_| {
+fn prepare_completion(
+    scripted: Arc<plakous_test_support::ScriptedModel>,
+    plan: ValidatedRequestPlan,
+    context: ModelPreparationContext,
+) -> Result<PreparedModelCall, ModelPreparationError> {
+    let inert = scripted.prepare_call(plan.clone(), context)?;
+    let record = inert.record().clone();
+    let mut output_identity = [0_u8; 16];
+    output_identity.copy_from_slice(&plan.digest().bytes()[..16]);
+    let output = ConversationItem::new(
+        EntryId::try_from(Uuid::from_bytes(output_identity)).map_err(|_| {
             ModelPreparationError::rejected(
                 ModelPreparationErrorKind::InvalidConfiguration,
-                "completion fixture output is invalid",
+                "completion fixture entry identity is invalid",
             )
-        })?;
-        Ok(PreparedModelCall::new(record, move |_| {
-            Box::pin(async move {
-                let response = ModelResponse::new(
-                    vec![output.clone()],
-                    FinishDetails::new(FinishReason::Stop, None),
-                    None,
-                    None,
-                    plan.digest(),
-                );
-                let events = vec![
-                    Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                        None,
-                        plan.digest(),
-                    ))),
-                    Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                        output.id(),
-                        OutputLocation::new(0, 0),
-                        BlockStart::Complete(output.blocks()[0].clone()),
-                    ))),
-                    Ok(ModelEvent::ResponseCompleted(response)),
-                ];
-                Ok(Box::pin(FixtureStream {
-                    events: events.into(),
-                }) as ModelStream)
-            })
-        }))
-    }
-}
-
-impl LanguageModel for CapturingCompletingModel {
-    fn revalidate_runtime_authority(
-        self: Arc<Self>,
-        checked_at: Timestamp,
-    ) -> RuntimeModelAuthorityOperation {
-        self.inner.clone().revalidate_runtime_authority(checked_at)
-    }
-
-    fn prepare_call(
-        self: Arc<Self>,
-        plan: ValidatedRequestPlan,
-        context: ModelPreparationContext,
-    ) -> Result<PreparedModelCall, ModelPreparationError> {
-        let call = self.inner.clone().prepare_call(plan, context)?;
-        *test_lock(&self.prepared) = Some(call.record().clone());
-        Ok(call)
-    }
+        })?,
+        Actor::Assistant,
+        vec![ContentBlock::Text(
+            TextBlock::new("completed", None).map_err(|_| {
+                ModelPreparationError::rejected(
+                    ModelPreparationErrorKind::InvalidConfiguration,
+                    "completion fixture text is invalid",
+                )
+            })?,
+        )],
+        Provenance::ModelOutput,
+    )
+    .map_err(|_| {
+        ModelPreparationError::rejected(
+            ModelPreparationErrorKind::InvalidConfiguration,
+            "completion fixture output is invalid",
+        )
+    })?;
+    Ok(PreparedModelCall::new(record, move |_| {
+        Box::pin(async move {
+            let response = ModelResponse::new(
+                vec![output],
+                FinishDetails::new(FinishReason::Stop, None),
+                None,
+                None,
+                plan.digest(),
+            );
+            Ok(plakous_test_support::single_block_stream(response))
+        })
+    }))
 }
 
 impl LanguageModel for HostedPauseModel {
@@ -659,128 +592,114 @@ impl LanguageModel for HostedPauseModel {
         let cache_affinity = context
             .cache_affinity()
             .map(plakous_model::ModelCacheAffinity::identity);
-        let inert = self.scripted.clone().prepare_call(plan.clone(), context)?;
-        let record = inert.record().clone();
-        Ok(PreparedModelCall::new(record, move |_| {
-            Box::pin(async move {
-                let call = self.calls.fetch_add(1, Ordering::AcqRel);
-                let entry_id = EntryId::try_from(Uuid::from_u128(10_000_u128.saturating_add(
-                    u128::try_from(call).map_err(|_| hosted_pause_fixture_error())?,
-                )))
-                .map_err(|_| hosted_pause_fixture_error())?;
-                let output = ConversationItem::new(
-                    entry_id,
-                    Actor::Assistant,
-                    vec![ContentBlock::Text(
-                        TextBlock::new(format!("hosted pause response {call}"), None)
+        self.scripted
+            .clone()
+            .prepare_with_start(plan, context, move |_, plan| {
+                Box::pin(async move {
+                    let call = self.calls.fetch_add(1, Ordering::AcqRel);
+                    let entry_id = EntryId::try_from(Uuid::from_u128(10_000_u128.saturating_add(
+                        u128::try_from(call).map_err(|_| hosted_pause_fixture_error())?,
+                    )))
+                    .map_err(|_| hosted_pause_fixture_error())?;
+                    let output = ConversationItem::new(
+                        entry_id,
+                        Actor::Assistant,
+                        vec![ContentBlock::Text(
+                            TextBlock::new(format!("hosted pause response {call}"), None)
+                                .map_err(|_| hosted_pause_fixture_error())?,
+                        )],
+                        Provenance::ModelOutput,
+                    )
+                    .map_err(|_| hosted_pause_fixture_error())?;
+                    let mut response = ModelResponse::new(
+                        vec![output.clone()],
+                        FinishDetails::new(
+                            if call == 0 {
+                                FinishReason::ProviderContinuation
+                            } else {
+                                FinishReason::Stop
+                            },
+                            None,
+                        ),
+                        None,
+                        None,
+                        plan.digest(),
+                    );
+                    if call == 0 {
+                        let request = plan.request();
+                        let source = request
+                            .input()
+                            .canonical_item_prefix_identity(request.input().items().len())
+                            .map_err(|_| hosted_pause_fixture_error())?;
+                        let covered = request
+                            .input()
+                            .staged_canonical_item_prefix_identity(std::slice::from_ref(&output))
+                            .map_err(|_| hosted_pause_fixture_error())?;
+                        let metadata = request.metadata();
+                        let producer = FamilyArtifactProducerFacts::new(
+                            request.identity(),
+                            request.model_input_identity(),
+                            plan.digest(),
+                            cache_affinity,
+                            metadata.run_id(),
+                            metadata.root(),
+                            metadata.attempt_id(),
+                            source.identity(),
+                            u32::try_from(request.input().items().len()).map_err(|_| {
+                                ModelError::new(
+                                    ModelErrorKind::InvalidEvent,
+                                    "hosted pause fixture source count overflowed",
+                                )
+                            })?,
+                            1,
+                            covered.identity(),
+                            u32::try_from(covered.item_count()).map_err(|_| {
+                                ModelError::new(
+                                    ModelErrorKind::InvalidEvent,
+                                    "hosted pause fixture coverage count overflowed",
+                                )
+                            })?,
+                            Digest::sha256(
+                                DigestDomain::ProviderOperation,
+                                3,
+                                &[
+                                    b"facade-hosted-pause-physical",
+                                    metadata.attempt_id().as_uuid().as_bytes(),
+                                ],
+                            )
                             .map_err(|_| hosted_pause_fixture_error())?,
-                    )],
-                    Provenance::ModelOutput,
-                )
-                .map_err(|_| hosted_pause_fixture_error())?;
-                let mut response = ModelResponse::new(
-                    vec![output.clone()],
-                    FinishDetails::new(
-                        if call == 0 {
-                            FinishReason::ProviderContinuation
-                        } else {
-                            FinishReason::Stop
-                        },
-                        None,
-                    ),
-                    None,
-                    None,
-                    plan.digest(),
-                );
-                if call == 0 {
-                    let request = plan.request();
-                    let source = request
-                        .input()
-                        .canonical_item_prefix_identity(request.input().items().len())
-                        .map_err(|_| hosted_pause_fixture_error())?;
-                    let covered = request
-                        .input()
-                        .staged_canonical_item_prefix_identity(std::slice::from_ref(&output))
-                        .map_err(|_| hosted_pause_fixture_error())?;
-                    let metadata = request.metadata();
-                    let producer = FamilyArtifactProducerFacts::new(
-                        request.identity(),
-                        request.model_input_identity(),
-                        plan.digest(),
-                        cache_affinity,
-                        metadata.run_id(),
-                        metadata.root(),
-                        metadata.attempt_id(),
-                        source.identity(),
-                        u32::try_from(request.input().items().len()).map_err(|_| {
-                            ModelError::new(
-                                ModelErrorKind::InvalidEvent,
-                                "hosted pause fixture source count overflowed",
+                            Digest::sha256(
+                                DigestDomain::ProviderOperation,
+                                3,
+                                &[
+                                    b"facade-hosted-pause-terminal",
+                                    metadata.attempt_id().as_uuid().as_bytes(),
+                                ],
                             )
-                        })?,
-                        1,
-                        covered.identity(),
-                        u32::try_from(covered.item_count()).map_err(|_| {
-                            ModelError::new(
-                                ModelErrorKind::InvalidEvent,
-                                "hosted pause fixture coverage count overflowed",
-                            )
-                        })?,
-                        Digest::sha256(
-                            DigestDomain::ProviderOperation,
-                            3,
-                            &[
-                                b"facade-hosted-pause-physical",
-                                metadata.attempt_id().as_uuid().as_bytes(),
-                            ],
+                            .map_err(|_| hosted_pause_fixture_error())?,
                         )
-                        .map_err(|_| hosted_pause_fixture_error())?,
-                        Digest::sha256(
-                            DigestDomain::ProviderOperation,
-                            3,
-                            &[
-                                b"facade-hosted-pause-terminal",
-                                metadata.attempt_id().as_uuid().as_bytes(),
-                            ],
-                        )
-                        .map_err(|_| hosted_pause_fixture_error())?,
-                    )
-                    .map_err(|_| hosted_pause_fixture_error())?;
-                    let candidate = SealedFamilyArtifactCandidate::new(
-                        "responses",
-                        RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION,
-                        RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
-                        Digest::sha256(
-                            DigestDomain::ModelBinding,
-                            3,
-                            &[b"facade-hosted-pause-binding"],
-                        )
-                        .map_err(|_| hosted_pause_fixture_error())?,
-                        producer,
-                        b"facade-hosted-pause-artifact".as_slice(),
-                    )
-                    .map_err(|_| hosted_pause_fixture_error())?;
-                    response = response
-                        .with_family_artifact_candidate(candidate)
                         .map_err(|_| hosted_pause_fixture_error())?;
-                }
-                let events = vec![
-                    Ok(ModelEvent::ResponseStarted(ResponseStarted::new(
-                        None,
-                        plan.digest(),
-                    ))),
-                    Ok(ModelEvent::BlockStarted(BlockStarted::new(
-                        output.id(),
-                        OutputLocation::new(0, 0),
-                        BlockStart::Complete(output.blocks()[0].clone()),
-                    ))),
-                    Ok(ModelEvent::ResponseCompleted(response)),
-                ];
-                Ok(Box::pin(FixtureStream {
-                    events: events.into(),
-                }) as ModelStream)
+                        let candidate = SealedFamilyArtifactCandidate::new(
+                            "responses",
+                            RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION,
+                            RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
+                            Digest::sha256(
+                                DigestDomain::ModelBinding,
+                                3,
+                                &[b"facade-hosted-pause-binding"],
+                            )
+                            .map_err(|_| hosted_pause_fixture_error())?,
+                            producer,
+                            b"facade-hosted-pause-artifact".as_slice(),
+                        )
+                        .map_err(|_| hosted_pause_fixture_error())?;
+                        response = response
+                            .with_family_artifact_candidate(candidate)
+                            .map_err(|_| hosted_pause_fixture_error())?;
+                    }
+                    Ok(plakous_test_support::single_block_stream(response))
+                })
             })
-        }))
     }
 }
 
@@ -850,10 +769,14 @@ fn completing_runtime_binding_with_capture_and_durability(
             .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
     );
     let prepared = Arc::new(Mutex::new(None));
-    let model: Arc<dyn LanguageModel> = Arc::new(CapturingCompletingModel {
-        inner: Arc::new(CompletingModel { scripted }),
-        prepared: Arc::clone(&prepared),
-    });
+    let model: Arc<dyn LanguageModel> = {
+        let prepared = Arc::clone(&prepared);
+        Arc::new(scripted.with_preparer(move |scripted, plan, context| {
+            let call = prepare_completion(scripted, plan, context)?;
+            *test_lock(&prepared) = Some(call.record().clone());
+            Ok(call)
+        }))
+    };
     let registry = ToolRegistryBuilder::default().freeze();
     let configured = crate::test_model::configured_model(
         model,
@@ -899,7 +822,7 @@ fn instructed_runtime_binding_for(
             .with_context_observation(crate::test_model::context_observation()?)
             .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
     );
-    let model: Arc<dyn LanguageModel> = Arc::new(CompletingModel { scripted });
+    let model: Arc<dyn LanguageModel> = Arc::new(scripted.with_preparer(prepare_completion));
     let registry = ToolRegistryBuilder::default().freeze();
     let configured = crate::test_model::configured_model(
         Arc::clone(&model),
@@ -1009,7 +932,7 @@ fn completing_compaction_runtime_binding_for(
             .with_content_sensitive_observation()
             .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
     );
-    let model: Arc<dyn LanguageModel> = Arc::new(CompletingModel { scripted });
+    let model: Arc<dyn LanguageModel> = Arc::new(scripted.with_preparer(prepare_completion));
     let registry = ToolRegistryBuilder::default().freeze();
     let configured = crate::test_model::configured_compaction_model(
         model,
@@ -1201,29 +1124,12 @@ impl LoseForkAckStore {
 }
 
 impl SessionStore for LoseForkAckStore {
-    fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
-        self.inner.lease_now()
-    }
-
-    fn create(
-        &self,
-        request: CreateSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CreateReceipt> {
-        self.inner.create(request)
-    }
-
-    fn recover_create(
-        &self,
-        request: CreateSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CreateReceipt> {
-        self.inner.recover_create(request)
-    }
-
-    fn load_branch(
-        &self,
-        session: SessionRef,
-    ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
-        self.inner.load_branch(session)
+    plakous_test_support::session_store_methods! {
+        forward store_api, inner;
+        lease_now, create, recover_create, load_branch, acquire, renew, recover_commit,
+        recover_fork, list, usage, archive, delete, recover_delete, read_feed, feed_tail,
+        branch_line, load_line, line_job_terminals, record_line_job_terminals, flush,
+        shutdown,
     }
 
     fn load_checkpoint(
@@ -1238,20 +1144,6 @@ impl SessionStore for LoseForkAckStore {
             return Box::pin(async { Err(SessionStoreError::Pruned) });
         }
         self.inner.load_checkpoint(checkpoint)
-    }
-
-    fn acquire(
-        &self,
-        request: AcquireBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
-        self.inner.acquire(request)
-    }
-
-    fn renew(
-        &self,
-        lease: plakous_agent::internal::BranchLease,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
-        self.inner.renew(lease)
     }
 
     fn release(
@@ -1299,14 +1191,6 @@ impl SessionStore for LoseForkAckStore {
         })
     }
 
-    fn recover_commit(
-        &self,
-        checkpoint: CheckpointId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CommittedCheckpoint>
-    {
-        self.inner.recover_commit(checkpoint)
-    }
-
     fn fork(
         &self,
         request: plakous_agent::internal::ForkBranch,
@@ -1320,108 +1204,6 @@ impl SessionStore for LoseForkAckStore {
                 Ok(receipt)
             }
         })
-    }
-
-    fn recover_fork(
-        &self,
-        request: plakous_agent::internal::RecoverFork,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
-        self.inner.recover_fork(request)
-    }
-
-    fn list(
-        &self,
-        query: plakous_agent::internal::SessionQuery,
-    ) -> plakous_agent::internal::StoreFuture<
-        '_,
-        plakous_agent::internal::Page<plakous_agent::internal::SessionSummary>,
-    > {
-        self.inner.list(query)
-    }
-
-    fn usage(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::StoreUsage> {
-        self.inner.usage()
-    }
-
-    fn archive(
-        &self,
-        request: ArchiveSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ArchiveReceipt> {
-        self.inner.archive(request)
-    }
-
-    fn delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.delete(request)
-    }
-
-    fn recover_delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.recover_delete(request)
-    }
-
-    fn read_feed(
-        &self,
-        session_id: SessionId,
-        after: plakous_agent::internal::FeedSeq,
-        max_records: std::num::NonZeroUsize,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedPage> {
-        self.inner.read_feed(session_id, after, max_records)
-    }
-
-    fn feed_tail(
-        &self,
-        session_id: SessionId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
-        self.inner.feed_tail(session_id)
-    }
-
-    fn branch_line(
-        &self,
-        session: SessionRef,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
-        self.inner.branch_line(session)
-    }
-
-    fn load_line(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
-        self.inner.load_line(line)
-    }
-
-    fn line_job_terminals(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
-    {
-        self.inner.line_job_terminals(line)
-    }
-
-    fn record_line_job_terminals(
-        &self,
-        request: plakous_agent::internal::RecordLineJobTerminals,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
-    {
-        self.inner.record_line_job_terminals(request)
-    }
-
-    fn flush(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.flush()
-    }
-
-    fn shutdown(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.shutdown()
     }
 }
 
@@ -1950,22 +1732,12 @@ impl CrashCutStore {
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 impl SessionStore for CrashCutStore {
-    fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
-        self.inner.lease_now()
-    }
-
-    fn create(
-        &self,
-        request: CreateSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CreateReceipt> {
-        self.inner.create(request)
-    }
-
-    fn recover_create(
-        &self,
-        request: CreateSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CreateReceipt> {
-        self.inner.recover_create(request)
+    plakous_test_support::session_store_methods! {
+        forward store_api, inner;
+        lease_now, create, recover_create, load_checkpoint, acquire, renew, release,
+        recover_commit, fork, recover_fork, list, usage, archive, delete, recover_delete,
+        read_feed, feed_tail, branch_line, load_line, line_job_terminals,
+        record_line_job_terminals, flush, shutdown,
     }
 
     fn load_branch(
@@ -1974,27 +1746,6 @@ impl SessionStore for CrashCutStore {
     ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
         self.branch_loads.fetch_add(1, Ordering::AcqRel);
         self.inner.load_branch(session)
-    }
-
-    fn load_checkpoint(
-        &self,
-        checkpoint: CheckpointId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::StoredCheckpoint> {
-        self.inner.load_checkpoint(checkpoint)
-    }
-
-    fn acquire(
-        &self,
-        request: AcquireBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
-        self.inner.acquire(request)
-    }
-
-    fn renew(
-        &self,
-        lease: plakous_agent::internal::BranchLease,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::BranchLease> {
-        self.inner.renew(lease)
     }
 
     fn revive(
@@ -2015,13 +1766,6 @@ impl SessionStore for CrashCutStore {
             }
             Ok(revived)
         })
-    }
-
-    fn release(
-        &self,
-        lease: plakous_agent::internal::BranchLease,
-    ) -> plakous_agent::internal::StoreFuture<'_, ()> {
-        self.inner.release(lease)
     }
 
     fn commit(
@@ -2046,123 +1790,6 @@ impl SessionStore for CrashCutStore {
             }
             Ok(receipt)
         })
-    }
-
-    fn recover_commit(
-        &self,
-        checkpoint: CheckpointId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::CommittedCheckpoint>
-    {
-        self.inner.recover_commit(checkpoint)
-    }
-
-    fn fork(
-        &self,
-        request: plakous_agent::internal::ForkBranch,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
-        self.inner.fork(request)
-    }
-
-    fn recover_fork(
-        &self,
-        request: plakous_agent::internal::RecoverFork,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
-        self.inner.recover_fork(request)
-    }
-
-    fn list(
-        &self,
-        query: plakous_agent::internal::SessionQuery,
-    ) -> plakous_agent::internal::StoreFuture<
-        '_,
-        plakous_agent::internal::Page<plakous_agent::internal::SessionSummary>,
-    > {
-        self.inner.list(query)
-    }
-
-    fn usage(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::StoreUsage> {
-        self.inner.usage()
-    }
-
-    fn archive(
-        &self,
-        request: ArchiveSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ArchiveReceipt> {
-        self.inner.archive(request)
-    }
-
-    fn delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.delete(request)
-    }
-
-    fn recover_delete(
-        &self,
-        request: DeleteSession,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DeleteReceipt> {
-        self.inner.recover_delete(request)
-    }
-
-    fn read_feed(
-        &self,
-        session_id: SessionId,
-        after: plakous_agent::internal::FeedSeq,
-        max_records: std::num::NonZeroUsize,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedPage> {
-        self.inner.read_feed(session_id, after, max_records)
-    }
-
-    fn feed_tail(
-        &self,
-        session_id: SessionId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::FeedTail> {
-        self.inner.feed_tail(session_id)
-    }
-
-    fn branch_line(
-        &self,
-        session: SessionRef,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_model::LineId> {
-        self.inner.branch_line(session)
-    }
-
-    fn load_line(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineRecord> {
-        self.inner.load_line(line)
-    }
-
-    fn line_job_terminals(
-        &self,
-        line: plakous_model::LineId,
-    ) -> plakous_agent::internal::StoreFuture<'_, Vec<plakous_agent::internal::LineJobTerminal>>
-    {
-        self.inner.line_job_terminals(line)
-    }
-
-    fn record_line_job_terminals(
-        &self,
-        request: plakous_agent::internal::RecordLineJobTerminals,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::LineTerminalsReceipt>
-    {
-        self.inner.record_line_job_terminals(request)
-    }
-
-    fn flush(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.flush()
-    }
-
-    fn shutdown(
-        &self,
-    ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::DurabilityReport> {
-        self.inner.shutdown()
     }
 }
 
@@ -2345,31 +1972,22 @@ impl LanguageModel for CrashRecoveryModel {
                 "compaction fixture output is invalid",
             )
         })?;
-        let response = ModelResponse::new(
-            vec![output.clone()],
-            FinishDetails::new(FinishReason::Stop, None),
-            Some(Usage::new(11, 3, 0, 0, 0)),
-            None,
-            plan.digest(),
-        );
         let steps = if self.outcome_unknown {
             vec![plakous_test_support::ScenarioStep::Emit(
                 ModelEvent::ResponseStarted(ResponseStarted::new(None, plan.digest())),
             )]
         } else {
-            vec![
-                plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseStarted(
-                    ResponseStarted::new(None, plan.digest()),
-                )),
-                plakous_test_support::ScenarioStep::Emit(ModelEvent::BlockStarted(
-                    BlockStarted::new(
-                        output.id(),
-                        OutputLocation::new(0, 0),
-                        BlockStart::Complete(output.blocks()[0].clone()),
-                    ),
-                )),
-                plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseCompleted(response)),
-            ]
+            let response = ModelResponse::new(
+                vec![output],
+                FinishDetails::new(FinishReason::Stop, None),
+                Some(Usage::new(11, 3, 0, 0, 0)),
+                None,
+                plan.digest(),
+            );
+            plakous_test_support::single_block_events(response)
+                .into_iter()
+                .map(plakous_test_support::ScenarioStep::Emit)
+                .collect()
         };
         let scenario = plakous_test_support::ModelScenario::new(
             plakous_test_support::ExpectedRequest::PlanDigest(plan.digest()),
@@ -7352,29 +6970,6 @@ mod portable_history {
         ToolResultKind, ToolResultPart, hex_lower,
     };
 
-    struct PlanCapturingModel {
-        inner: Arc<CompletingModel>,
-        history: Arc<Mutex<Option<Vec<HistorySegment>>>>,
-    }
-
-    impl LanguageModel for PlanCapturingModel {
-        fn revalidate_runtime_authority(
-            self: Arc<Self>,
-            checked_at: Timestamp,
-        ) -> RuntimeModelAuthorityOperation {
-            self.inner.clone().revalidate_runtime_authority(checked_at)
-        }
-
-        fn prepare_call(
-            self: Arc<Self>,
-            plan: ValidatedRequestPlan,
-            context: ModelPreparationContext,
-        ) -> Result<PreparedModelCall, ModelPreparationError> {
-            *test_lock(&self.history) = Some(plan.request().input().history().segments().to_vec());
-            self.inner.clone().prepare_call(plan, context)
-        }
-    }
-
     type CapturedHistory = Arc<Mutex<Option<Vec<HistorySegment>>>>;
 
     pub(super) fn capturing_binding(
@@ -7397,10 +6992,13 @@ mod portable_history {
                 .with_call_recovery(plakous_test_support::ScriptedRecoveryState::new()),
         );
         let history = Arc::new(Mutex::new(None));
-        let model: Arc<dyn LanguageModel> = Arc::new(PlanCapturingModel {
-            inner: Arc::new(CompletingModel { scripted }),
-            history: Arc::clone(&history),
-        });
+        let model: Arc<dyn LanguageModel> = {
+            let history = Arc::clone(&history);
+            Arc::new(scripted.with_preparer(move |scripted, plan, context| {
+                *test_lock(&history) = Some(plan.request().input().history().segments().to_vec());
+                prepare_completion(scripted, plan, context)
+            }))
+        };
         let registry = ToolRegistryBuilder::default().freeze();
         let configured = crate::test_model::configured_model(
             model,

@@ -4,15 +4,12 @@
 
 use super::*;
 use plakous_agent::internal::{
-    ArchiveReceipt, ArchiveSession, BranchLease, CheckpointId, CommitReceipt, CommittedCheckpoint,
-    CreateReceipt, DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail,
-    ForkBranch, ForkReceipt, LineJobTerminal, LineRecord, LineTerminalsReceipt, LoadedBranch, Page,
-    PruneBranch, PruneReceipt, RecordLineJobTerminals, RecoverFork, SessionQuery, SessionRef,
-    SessionStoreError, SessionSummary, StoreAdmission, StoreFuture, StoreReclaimMode,
-    StoreReclaimReport, StoreUsage, StoredCheckpoint,
+    self as store_api, CommitReceipt, StoreAdmission, StoreFuture, StoreReclaimMode,
+    StoreReclaimReport, StoreUsage,
 };
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use plakous_store::SqliteStoreOptions;
+#[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::num::NonZeroUsize;
 use std::sync::atomic::AtomicU64;
 
@@ -41,30 +38,14 @@ pub(super) struct Metered<S> {
 }
 
 impl<S: SessionStore> SessionStore for Metered<S> {
-    fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
-        self.inner.lease_now()
+    plakous_test_support::session_store_methods! {
+        forward store_api, inner;
+        lease_now, create, recover_create, load_branch, load_checkpoint, acquire, renew,
+        release, recover_commit, fork, recover_fork, list, archive, delete, prune,
+        recover_delete, read_feed, feed_tail, branch_line, load_line, line_job_terminals,
+        record_line_job_terminals, flush, shutdown,
     }
-    fn create(&self, request: CreateSession) -> StoreFuture<'_, CreateReceipt> {
-        self.inner.create(request)
-    }
-    fn recover_create(&self, request: CreateSession) -> StoreFuture<'_, CreateReceipt> {
-        self.inner.recover_create(request)
-    }
-    fn load_branch(&self, session: SessionRef) -> StoreFuture<'_, LoadedBranch> {
-        self.inner.load_branch(session)
-    }
-    fn load_checkpoint(&self, checkpoint: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {
-        self.inner.load_checkpoint(checkpoint)
-    }
-    fn acquire(&self, request: AcquireBranch) -> StoreFuture<'_, BranchLease> {
-        self.inner.acquire(request)
-    }
-    fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
-        self.inner.renew(lease)
-    }
-    fn release(&self, lease: BranchLease) -> StoreFuture<'_, ()> {
-        self.inner.release(lease)
-    }
+
     fn commit(&self, request: CommitCheckpoint) -> StoreFuture<'_, CommitReceipt> {
         self.commits.fetch_add(1, Ordering::SeqCst);
         let arm = self.raise_between.load(Ordering::SeqCst) && contains_evaluation(&request);
@@ -80,18 +61,6 @@ impl<S: SessionStore> SessionStore for Metered<S> {
             Ok(receipt)
         })
     }
-    fn recover_commit(&self, checkpoint: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint> {
-        self.inner.recover_commit(checkpoint)
-    }
-    fn fork(&self, request: ForkBranch) -> StoreFuture<'_, ForkReceipt> {
-        self.inner.fork(request)
-    }
-    fn recover_fork(&self, request: RecoverFork) -> StoreFuture<'_, ForkReceipt> {
-        self.inner.recover_fork(request)
-    }
-    fn list(&self, query: SessionQuery) -> StoreFuture<'_, Page<SessionSummary>> {
-        self.inner.list(query)
-    }
     fn reclaim(&self, mode: StoreReclaimMode) -> StoreFuture<'_, StoreReclaimReport> {
         assert_eq!(mode, StoreReclaimMode::Bounded);
         self.reclaims.fetch_add(1, Ordering::SeqCst);
@@ -103,53 +72,6 @@ impl<S: SessionStore> SessionStore for Metered<S> {
     fn usage(&self) -> StoreFuture<'_, StoreUsage> {
         let used = self.used.load(Ordering::SeqCst);
         Box::pin(async move { Ok(StoreUsage::new((used, LIMIT), (0, 1 << 20), (0, 1 << 30))) })
-    }
-    fn archive(&self, request: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt> {
-        self.inner.archive(request)
-    }
-    fn delete(&self, request: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
-        self.inner.delete(request)
-    }
-    fn prune(&self, request: PruneBranch) -> StoreFuture<'_, PruneReceipt> {
-        self.inner.prune(request)
-    }
-    fn recover_delete(&self, request: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
-        self.inner.recover_delete(request)
-    }
-    fn read_feed(
-        &self,
-        session_id: SessionId,
-        after: FeedSeq,
-        max_records: NonZeroUsize,
-    ) -> StoreFuture<'_, FeedPage> {
-        self.inner.read_feed(session_id, after, max_records)
-    }
-    fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail> {
-        self.inner.feed_tail(session_id)
-    }
-    fn branch_line(&self, session: SessionRef) -> StoreFuture<'_, plakous_model::LineId> {
-        self.inner.branch_line(session)
-    }
-    fn load_line(&self, line: plakous_model::LineId) -> StoreFuture<'_, LineRecord> {
-        self.inner.load_line(line)
-    }
-    fn line_job_terminals(
-        &self,
-        line: plakous_model::LineId,
-    ) -> StoreFuture<'_, Vec<LineJobTerminal>> {
-        self.inner.line_job_terminals(line)
-    }
-    fn record_line_job_terminals(
-        &self,
-        request: RecordLineJobTerminals,
-    ) -> StoreFuture<'_, LineTerminalsReceipt> {
-        self.inner.record_line_job_terminals(request)
-    }
-    fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
-        self.inner.flush()
-    }
-    fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
-        self.inner.shutdown()
     }
 }
 

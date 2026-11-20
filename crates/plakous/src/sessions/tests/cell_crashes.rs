@@ -94,7 +94,7 @@ fn scenario(engine: Engine) -> TestResult<ModelScenario> {
     )?;
     let digest = Digest::sha256(DigestDomain::Blob, 1, &[b"unbound-fixture-plan"])?;
     let response = ModelResponse::new(
-        vec![item.clone()],
+        vec![item],
         FinishDetails::new(FinishReason::ToolCalls, None),
         None,
         None,
@@ -103,17 +103,10 @@ fn scenario(engine: Engine) -> TestResult<ModelScenario> {
     Ok(ModelScenario::new(
         ExpectedRequest::Any,
         ScenarioStart::Immediate,
-        vec![
-            ScenarioStep::Emit(ModelEvent::ResponseStarted(ResponseStarted::new(
-                None, digest,
-            ))),
-            ScenarioStep::Emit(ModelEvent::BlockStarted(BlockStarted::new(
-                item.id(),
-                OutputLocation::new(0, 0),
-                BlockStart::Complete(item.blocks()[0].clone()),
-            ))),
-            ScenarioStep::Emit(ModelEvent::ResponseCompleted(response)),
-        ],
+        plakous_test_support::single_block_events(response)
+            .into_iter()
+            .map(ScenarioStep::Emit)
+            .collect(),
     ))
 }
 
