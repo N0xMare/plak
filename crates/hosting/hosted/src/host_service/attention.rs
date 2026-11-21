@@ -8,7 +8,12 @@ impl<P: ProtocolExtension> HostService<P> {
     /// operator, and how many background processes run.
     #[must_use]
     pub fn kept_activity(&self) -> KeptActivity {
-        let state = self.lock();
+        let tree_id = &self.root().tree_id;
+        let mut state = self.lock();
+        let children = tree_nodes::try_child_counts(tree_id);
+        if let Some(counts) = children {
+            state.directory_children = Some((tree_id.clone(), counts));
+        }
         let snapshot = &state.snapshot;
         let mut kept = KeptActivity {
             awaiting_operator: !snapshot.approvals.is_empty()
@@ -16,6 +21,11 @@ impl<P: ProtocolExtension> HostService<P> {
                 || state.count.attention().is_some(),
             ..KeptActivity::default()
         };
+        (kept.children, kept.held_children) = state
+            .directory_children
+            .as_ref()
+            .filter(|(tree, _)| tree == tree_id)
+            .map_or((0, 0), |(_, counts)| *counts);
         for observation in &snapshot.states {
             match observation {
                 SessionObservation::SetBusy(busy) => {
@@ -30,8 +40,7 @@ impl<P: ProtocolExtension> HostService<P> {
             }
         }
         drop(state);
-        kept.awaiting_operator |= crate::runtime::tree_needs_operator(&self.root().tree_id);
-        (kept.children, kept.held_children) = tree_nodes::child_counts(&self.root().tree_id);
+        kept.awaiting_operator |= crate::runtime::tree_needs_operator(tree_id);
         kept.busy |= kept.children > 0;
         kept
     }

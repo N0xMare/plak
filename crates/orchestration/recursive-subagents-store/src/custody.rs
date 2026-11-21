@@ -132,12 +132,20 @@ impl SqliteTreeStore {
                 .map_err(|error| {
                     sqlite_unavailable("could not begin agent tree custody", &error)
                 })?;
-            let (record, answer) = step(read(&tx, tree_id)?.as_ref())?;
+            let current = read(&tx, tree_id)?;
+            let (record, answer) = step(current.as_ref())?;
             if let Some(record) = record {
                 write(&tx, tree_id, &record)?;
                 tx.commit().map_err(|error| {
                     sqlite_unavailable("could not durably commit agent tree custody", &error)
                 })?;
+                if !current.is_some_and(|current| {
+                    current.fence == record.fence
+                        && current.holding == record.holding
+                        && current.released == record.released
+                }) {
+                    self.notify_commit(tree_id, crate::store::TreeChange::Custody);
+                }
             }
             Ok(answer)
         })

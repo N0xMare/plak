@@ -154,6 +154,10 @@ impl SqliteSessionStore {
 }
 
 impl SessionRecordStore for SqliteSessionStore {
+    fn observe_owner(&self, session_id: &str) {
+        super::directory_notice::product(&self.paths, session_id);
+    }
+
     fn with_storage_interrupt(
         self: Arc<Self>,
         probe: Arc<dyn Fn() -> bool + Send + Sync>,

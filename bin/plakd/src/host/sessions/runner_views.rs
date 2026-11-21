@@ -1,6 +1,7 @@
 //! Neutral runner facts projected into the authenticated client vocabulary.
 
-use plakous::runner::{PlacementFailure, ProbePhase, RunnerRow};
+pub(super) use plakous::runner::RunnerRow;
+use plakous::runner::{PlacementFailure, ProbePhase};
 use plakous_host_protocol::wire;
 
 pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {

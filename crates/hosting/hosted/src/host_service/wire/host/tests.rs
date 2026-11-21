@@ -133,6 +133,7 @@ struct Script {
     unreadable_rows: std::sync::atomic::AtomicBool,
     pending_stops: std::sync::atomic::AtomicBool,
     opens: AtomicUsize,
+    stored_reads: AtomicUsize,
     dormant_stops: AtomicUsize,
     stop_intents: AtomicUsize,
     /// Sessions whose open fails, with the failure.
@@ -323,6 +324,7 @@ impl HostSessions<Core> for Fake {
         session: &str,
         include_unarchived: bool,
     ) -> Result<Option<StoredSessionView<Core>>, RequestRefusal> {
+        self.0.stored_reads.fetch_add(1, Ordering::SeqCst);
         let archived = self
             .0
             .rows
@@ -1017,6 +1019,58 @@ fn attached(frames: &[HostFrame<Core>], id: RequestId) -> AttachmentId {
         Outcome::Ok(Answer::Attached { attachment }) => attachment,
         other => panic!("not attached: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list() {
+    let (host, fake) = host(&["s1"]);
+    let (release, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let out = Out::default();
+    let mut connection = host
+        .connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        )
+        .buffered_output();
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    request(&mut connection, 2, Op::Ping);
+    request(
+        &mut connection,
+        3,
+        Op::ListSessions {
+            workspace: None,
+            runner: None,
+            include_archived: false,
+        },
+    );
+    let frames = out.take();
+    assert_eq!(frames.len(), 2);
+    assert!(matches!(outcome(&frames, 2), Outcome::Ok(Answer::Pong)));
+    assert!(matches!(
+        outcome(&frames, 3),
+        Outcome::Ok(Answer::Sessions { .. })
+    ));
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            connection.flush().unwrap();
+            let frames = out.take();
+            if frames
+                .iter()
+                .any(|frame| matches!(frame, HostFrame::Response { id: 1, .. }))
+            {
+                attached(&frames, 1);
+                break;
+            }
+            connection.changed().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
 }
 
 /// The welcome names no session, and a node request before any attach is
@@ -2171,10 +2225,13 @@ fn an_attach_in_the_served_tree_changes_nothing_on_the_host() {
     );
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     attached(&out.take(), 1);
+    let reads = fake.0.stored_reads.load(Ordering::SeqCst);
+    assert_eq!(reads, 1, "the dormant attach checks the archive flag");
     let mut changes = host.changes();
     changes.borrow_and_update();
     request(&mut connection, 2, Op::Attach { node: node("s1") });
     attached(&out.take(), 2);
+    assert_eq!(fake.0.stored_reads.load(Ordering::SeqCst), reads);
     assert!(
         !changes.has_changed().unwrap(),
         "the same tree's attach went through the host"

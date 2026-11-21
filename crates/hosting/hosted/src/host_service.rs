@@ -236,6 +236,7 @@ struct State<P: ProtocolExtension> {
     attachments: BTreeMap<AttachmentId, Attachment<P>>,
     next_attachment: AttachmentId,
     snapshot: Snapshot<P>,
+    directory_children: Option<(String, (usize, usize))>,
     /// The attachment whose intent the session is answering.
     requester: Option<AttachmentId>,
     /// How many attachments hold each agent transcript: the session serves
@@ -327,6 +328,7 @@ struct CountWord {
     /// (`release_session`).
     release_now: std::sync::atomic::AtomicU32,
     attention: Mutex<Option<crate::runtime::operator_attention::SessionAttention>>,
+    directory: std::sync::OnceLock<tokio::sync::watch::Sender<u64>>,
     #[cfg(test)]
     seam: Mutex<MarkSeam>,
 }
@@ -356,11 +358,26 @@ impl AttachmentCount {
         &self,
         attention: Option<crate::runtime::operator_attention::SessionAttention>,
     ) {
-        *self
+        let mut current = self
             .0
             .attention
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = attention;
+            .unwrap_or_else(PoisonError::into_inner);
+        if *current != attention {
+            *current = attention;
+            drop(current);
+            self.directory_changed();
+        }
+    }
+
+    pub(crate) fn watch_directory(&self, notify: tokio::sync::watch::Sender<u64>) {
+        let _ = self.0.directory.set(notify);
+    }
+
+    pub(crate) fn directory_changed(&self) {
+        if let Some(notify) = self.0.directory.get() {
+            notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
     }
 
     fn attention(&self) -> Option<crate::runtime::operator_attention::SessionAttention> {
@@ -415,6 +432,9 @@ impl AttachmentCount {
         #[cfg(test)]
         if let Some(after) = after {
             after(marked);
+        }
+        if marked {
+            self.directory_changed();
         }
         marked
     }
@@ -592,6 +612,7 @@ impl<P: ProtocolExtension> HostService<P> {
                     approvals: Vec::new(),
                     credential_wait: None,
                 },
+                directory_children: None,
                 requester: None,
                 agent_holders: BTreeMap::new(),
                 holding: false,

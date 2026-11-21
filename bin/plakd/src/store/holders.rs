@@ -10,7 +10,7 @@ use std::io::Read as _;
 use std::sync::Arc;
 
 use plakous::sessions::SessionLocator;
-use plakous::sessions::holder::BranchHolder;
+pub(crate) use plakous::sessions::holder::BranchHolder;
 use plakous_hosted::runtime::LeaseHolder;
 
 use crate::home::paths::PlakPaths;

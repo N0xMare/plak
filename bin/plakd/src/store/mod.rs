@@ -176,6 +176,7 @@ impl From<AdmissionError> for ProductStoreOpenError {
 #[derive(Debug)]
 pub struct ProductStore {
     connection: Connection,
+    paths: PlakPaths,
     #[cfg(unix)]
     file_identity: (u64, u64),
     /// The collections this handle last loaded or committed per record; a
@@ -193,6 +194,32 @@ pub struct ProductStore {
 
 #[cfg(feature = "test-support")]
 struct SettleCommitTrace;
+
+#[cfg(test)]
+pub(crate) mod open_counts {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::{LazyLock, Mutex, PoisonError};
+
+    static COUNTS: LazyLock<Mutex<BTreeMap<PathBuf, usize>>> = LazyLock::new(Mutex::default);
+
+    pub(super) fn record(path: PathBuf) {
+        *COUNTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(path)
+            .or_default() += 1;
+    }
+
+    pub(crate) fn get(path: &Path) -> usize {
+        COUNTS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+            .copied()
+            .unwrap_or(0)
+    }
+}
 
 #[cfg(feature = "test-support")]
 impl Drop for SettleCommitTrace {
@@ -331,6 +358,8 @@ impl ProductStore {
         paths: &PlakPaths,
         read: impl FnOnce(&Transaction<'_>) -> Result<T, String>,
     ) -> Result<T, ProductStoreOpenError> {
+        #[cfg(test)]
+        open_counts::record(paths.product_database());
         let database = product_sqlite_path(paths)?;
         let connection = Connection::open_with_flags(
             database,
@@ -367,6 +396,8 @@ impl ProductStore {
     }
 
     fn open_internal(paths: &PlakPaths) -> Result<Self, ProductStoreOpenError> {
+        #[cfg(test)]
+        open_counts::record(paths.product_database());
         if !paths.probing_stores() {
             paths
                 .ensure_layout()
@@ -385,6 +416,7 @@ impl ProductStore {
         })?;
         Ok(Self {
             connection,
+            paths: paths.clone(),
             #[cfg(unix)]
             file_identity: {
                 let metadata = std::fs::metadata(&database).map_err(|_| {
@@ -523,6 +555,7 @@ impl ProductStore {
         session.transcript.mark_committed();
         self.remember(session);
         session.queue_commands = queue_commands;
+        self.session_changed(&session.id);
         Ok(())
     }
 
@@ -858,7 +891,12 @@ impl ProductStore {
         lifecycle::crash_cut("delete_after_commit");
         self.baselines.remove(id);
         self.verified_submissions.forget_session(id);
+        self.session_changed(id);
         Ok(())
+    }
+
+    fn session_changed(&self, id: &str) {
+        directory_notice::product(&self.paths, id);
     }
 
     pub fn list_for_workspace(&mut self, workspace: &Path) -> Result<Vec<SessionRecord>, String> {
@@ -1526,6 +1564,9 @@ pub(crate) mod benchmark;
 mod binding_inspection;
 /// What a host's session directory reads.
 pub mod directory;
+pub(crate) mod directory_notice;
+#[cfg(feature = "web")]
+pub(crate) mod directory_projection;
 /// Who holds a session another process has open.
 pub mod holders;
 mod lifecycle;

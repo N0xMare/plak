@@ -21,7 +21,7 @@ use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, Transact
 
 use super::{ProductStore, from_i64, to_i64};
 
-mod intents;
+pub(super) mod intents;
 pub(super) use intents::attention_facts_on;
 pub(super) use intents::intents_of;
 
@@ -34,7 +34,7 @@ fn invalid(_: rusqlite::Error) -> String {
     "product view row is invalid".to_owned()
 }
 
-fn unavailable(_: rusqlite::Error) -> String {
+pub(super) fn unavailable(_: rusqlite::Error) -> String {
     "product store is unavailable".to_owned()
 }
 
@@ -175,7 +175,9 @@ impl ProductStore {
         super::lifecycle::admit_work(&tx, session_id)?;
         insert_submission(&tx, &mut self.verified_submissions, session_id, submission)?;
         tx.commit()
-            .map_err(|error| super::write_error(error, "product store write failed"))
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
+        self.session_changed(session_id);
+        Ok(())
     }
 
     /// Writes one workflow request before it is submitted.
@@ -262,6 +264,7 @@ impl ProductStore {
             None,
         )?;
         let next = workflow_intent_cas(&tx, session)?;
+        let mut added = None;
         if request.kind == plakous_hosted::sessions::SessionWorkflowKind::New {
             let target = session.new_session_from_request(request)?;
             let exists: bool = tx
@@ -283,12 +286,17 @@ impl ProductStore {
                 }
             } else {
                 super::commit_in_transaction(&tx, &target, 0, None)?;
+                added = Some(target.id);
             }
         }
         tx.commit()
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
+        self.session_changed(&session.id);
+        if let Some(id) = added {
+            self.session_changed(&id);
+        }
         Ok(())
     }
 
@@ -336,6 +344,7 @@ impl ProductStore {
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
+        self.session_changed(&session.id);
         Ok(())
     }
 
@@ -359,6 +368,7 @@ impl ProductStore {
         }
         let next = workflow_intent_cas(&tx, session)?;
         let mut rows = Vec::new();
+        let mut removed = Vec::new();
         for (id, notice) in withdrawals {
             if let Some(request) = intents.workflow_request(&id)
                 && request.kind == plakous_hosted::sessions::SessionWorkflowKind::New
@@ -386,6 +396,7 @@ impl ProductStore {
                     tx.execute("DELETE FROM sessions WHERE id=?1", [&target_id])
                         .map_err(|error| super::write_error(error, "product store write failed"))?;
                     self.verified_submissions.forget_session(&target_id);
+                    removed.push(target_id);
                 }
             }
             tx.execute(
@@ -400,6 +411,10 @@ impl ProductStore {
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         session.store_revision = next;
         session.touch();
+        self.session_changed(&session.id);
+        for id in removed {
+            self.session_changed(&id);
+        }
         Ok(rows)
     }
 
@@ -483,6 +498,7 @@ impl ProductStore {
                 params![session_id, kind, to_i64(anchor)?, ordinal, value],
             )
             .map_err(|error| super::write_error(error, format!("could not record the {kind} intent")))?;
+        self.session_changed(session_id);
         Ok(())
     }
 
@@ -575,6 +591,7 @@ impl ProductStore {
         if commit_views(&tx, session_id, writes, views)? == ProjectionCommit::CursorMoved {
             return Ok(ProjectionCommit::CursorMoved);
         }
+        let mut changed = Vec::new();
         if views
             .created_operation_id
             .as_deref()
@@ -600,6 +617,7 @@ impl ProductStore {
                     source_views.consume_before_retention(&intents);
                     let writes = ViewWrites::between(&previous, &source_views);
                     commit_views(&tx, source_id, &writes, &source_views.state)?;
+                    changed.push(source_id.to_owned());
                 }
             }
         }
@@ -647,6 +665,7 @@ impl ProductStore {
                     continue;
                 }
                 target.store_revision = super::commit_in_transaction(&tx, &target, 0, None)?;
+                changed.push(target.id.clone());
                 for notice in &intents.notices {
                     if notice.anchor < successor.published_seq.get() {
                         insert_notice(&tx, &target.id, notice)?;
@@ -669,7 +688,13 @@ impl ProductStore {
             }
         }
         match tx.commit() {
-            Ok(()) => Ok(ProjectionCommit::Applied),
+            Ok(()) => {
+                self.session_changed(session_id);
+                for id in changed {
+                    self.session_changed(&id);
+                }
+                Ok(ProjectionCommit::Applied)
+            }
             Err(error) => projection_refusal(error),
         }
     }
@@ -697,7 +722,9 @@ impl ProductStore {
             .map_err(|error| super::write_error(error, "product store write failed"))?;
         }
         tx.commit()
-            .map_err(|error| super::write_error(error, "product store write failed"))
+            .map_err(|error| super::write_error(error, "product store write failed"))?;
+        self.session_changed(session_id);
+        Ok(())
     }
 }
 
@@ -1061,7 +1088,7 @@ fn inherited_submissions_of(
     Ok(submissions)
 }
 
-fn view_cursor_and_state(
+pub(super) fn view_cursor_and_state(
     connection: &Connection,
     session_id: &str,
 ) -> Result<Option<(FeedSeq, SessionViewState)>, String> {

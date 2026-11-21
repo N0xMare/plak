@@ -77,7 +77,15 @@ pub fn open_tree_store(paths: &PlakPaths) -> Result<SqliteTreeStore, String> {
         paths.ensure_layout()?;
         bind_custody_host(paths)?;
     }
-    SqliteTreeStore::open(&paths.subagents_database()).map_err(|error| error.message().to_owned())
+    let store = SqliteTreeStore::open(&paths.subagents_database())
+        .map_err(|error| error.message().to_owned())?;
+    if paths.probing_stores() {
+        return Ok(store);
+    }
+    let paths = paths.clone();
+    Ok(store.with_commit_notice(move |id, change| {
+        super::directory_notice::tree(&paths, id, change);
+    }))
 }
 
 /// The tree store as the port, for a caller that holds it for a runtime's

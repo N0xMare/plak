@@ -170,6 +170,7 @@ impl ProductStore {
             .map_err(|error| CliFailure::new(error.to_string()))?;
         #[cfg(test)]
         crash_cut("metadata_after_commit");
+        self.session_changed(id);
         Ok(title)
     }
 }

@@ -20,6 +20,13 @@ impl ProductSessions {
             .services
             .paths()
             .map_err(|failure| unavailable(failure.message().to_owned()))?;
+        if !include_unarchived
+            && !self
+                .with_product(|store| store.archive_flag(id))
+                .map_err(unavailable)?
+        {
+            return Ok(None);
+        }
         let record = ProductStore::inspect_session_read_only(paths, id)
             .map_err(|error| unavailable(error.into()))?;
         if !record.archived && !include_unarchived {
@@ -81,10 +88,19 @@ mod tests {
             drop(store);
             let services = Services::for_home(paths.clone());
             let product = ProductSessions::new(&services, None, None).unwrap();
+            // Open the shared metadata handle, as the real host's startup scan does.
+            product.with_product(|_| Ok(())).unwrap();
             assert_eq!(services.product_store_opens(), 0);
+            let database = paths.product_database();
+            let opens = crate::store::open_counts::get(&database);
             assert_eq!(
                 product.read_stored(&record.id, false).unwrap().is_some(),
                 archived
+            );
+            assert_eq!(
+                crate::store::open_counts::get(&database) - opens,
+                usize::from(archived),
+                "an unarchived attach must not open a stored-history connection"
             );
             let view = product.read_stored(&record.id, true).unwrap().unwrap();
             assert_eq!(view.session, record.id);

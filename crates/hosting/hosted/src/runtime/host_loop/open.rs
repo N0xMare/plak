@@ -553,6 +553,10 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
             });
         }
         let _ = events.send(ContentEvent::SetBusy(restored_working));
+        config
+            .state_roots
+            .session_records()
+            .observe_owner(&config.session.id);
         let _ = events.send(ContentEvent::AgentAttached(true));
         let _ = events.send(ContentEvent::Activity {
             label: if restored_working {

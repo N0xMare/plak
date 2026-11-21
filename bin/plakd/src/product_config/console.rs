@@ -30,7 +30,9 @@ pub(crate) fn publish(
     bytes: &[u8],
     create_new: bool,
 ) -> Result<(), super::ConfigSaveError> {
-    publish_with_fault(paths, file, bytes, create_new, &mut |_, _| Ok(()))
+    publish_with_fault(paths, file, bytes, create_new, &mut |_, _| Ok(()))?;
+    crate::store::directory_notice::configuration(paths);
+    Ok(())
 }
 
 fn publish_with_fault(

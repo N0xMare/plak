@@ -34,15 +34,18 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
         .unwrap();
         let (before, stop) = recovered_pause(&mut product, &record.id, held_loss);
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+        sessions.directory.settle();
         assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
         assert!(!status(&paths).contains(&record.id));
 
         finish_child(&mut tree);
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+        sessions.directory.settle();
         if policy == "continue" {
             assert!(!status(&paths).contains(&record.id));
             assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
             consent_to_resume(&mut product, &record.id, before.cursor.get(), stop);
+            sessions.directory.settle();
             assert!(!status(&paths).contains(&record.id));
             assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
             continue;
@@ -77,6 +80,7 @@ fn status_and_directory_show_blocked_mail_and_clear_with_operator_action() {
             project_pause(&mut product, &record.id, &before, None);
         }
         // Clearing the blocker is sufficient; mail need not have been read yet.
+        sessions.directory.settle();
         assert!(!status(&paths).contains(&record.id));
         assert!(!sessions.rows(None, None, false).unwrap()[0].needs_operator);
     }

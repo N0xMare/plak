@@ -1037,7 +1037,9 @@ impl ProductConfig {
                 .template_origins
                 .retain(|_, origin| *origin != ConfigValueOrigin::Project);
         }
-        user_view.save_with_fault(paths, &mut |_, _| Ok(()))
+        user_view.save_with_fault(paths, &mut |_, _| Ok(()))?;
+        crate::store::directory_notice::configuration(paths);
+        Ok(())
     }
 
     #[allow(
@@ -1151,6 +1153,7 @@ impl ProductConfig {
             })?;
             atomic_file(&config_path, published.as_bytes(), false, fault)?;
         }
+        crate::store::directory_notice::configuration(paths);
         Ok(())
     }
 

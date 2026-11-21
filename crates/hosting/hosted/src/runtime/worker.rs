@@ -2,7 +2,7 @@
 
 use crate::CliResult;
 use std::sync::{
-    Arc,
+    Arc, Mutex, PoisonError,
     atomic::{AtomicBool, Ordering},
 };
 use std::thread;
@@ -40,6 +40,29 @@ pub struct HostWorkerHandle {
     thread: thread::JoinHandle<CliResult<()>>,
     receipt: QuitReceipt,
     pub(crate) steps: Arc<super::step_hold::StepControl>,
+    completion: Arc<WorkerCompletion>,
+}
+
+#[derive(Debug, Default)]
+struct WorkerCompletion {
+    done: AtomicBool,
+    directory: Mutex<Option<tokio::sync::watch::Sender<u64>>>,
+}
+
+struct FinishWork(Arc<WorkerCompletion>);
+
+impl Drop for FinishWork {
+    fn drop(&mut self) {
+        self.0.done.store(true, Ordering::Release);
+        let directory = self
+            .0
+            .directory
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(notify) = &*directory {
+            notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
+    }
 }
 
 impl HostWorkerHandle {
@@ -58,14 +81,30 @@ impl HostWorkerHandle {
         let steps = Arc::new(super::step_hold::StepControl::default());
         let lifetime = super::step_hold::StepOwner(Arc::clone(&steps));
         let control = Arc::clone(&steps);
+        let completion = Arc::new(WorkerCompletion::default());
+        let finishing = FinishWork(Arc::clone(&completion));
         Self {
             thread: thread::spawn(move || {
+                let _finishing = finishing;
                 let _lifetime = lifetime;
                 work(owned, control)
             }),
             receipt,
             steps,
+            completion,
         }
+    }
+
+    pub(crate) fn watch_directory(&self, notify: tokio::sync::watch::Sender<u64>) {
+        *self
+            .completion
+            .directory
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(notify);
+    }
+
+    pub(crate) fn finished_work(&self) -> bool {
+        self.completion.done.load(Ordering::Acquire)
     }
 
     /// Whether the host thread has completed, including release.

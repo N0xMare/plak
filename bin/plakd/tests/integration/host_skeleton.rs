@@ -840,6 +840,21 @@ fn dormant(client: &mut Client, from: RequestId) -> RequestId {
     id + 1
 }
 
+fn wait_for_holder(client: &mut Client, id: RequestId, expected: Option<u32>) -> SessionRow {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let row = client.rows(id).remove(0);
+        if row.hosted_elsewhere.as_ref().map(|holder| holder.pid) == expected {
+            return row;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the directory did not publish the holder: {row:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 /// An embedded `plakd agent` that holds a session (its runtime lease, a
 /// session with no tree hub and so no custody): the directory names it with
 /// its pid and its environment, the host's attach is refused
@@ -867,7 +882,7 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     kill_local_daemon_only(&fixture.home());
     let agent = embedded(&fixture, &session).expect("plakd agent opened the session");
     let pid = agent.child.id();
-    let row = client.rows(id).remove(0);
+    let row = wait_for_holder(&mut client, id, Some(pid));
     assert_eq!(row.hosted_elsewhere.map(|held| held.pid), Some(pid));
     assert_eq!(row.environment, SessionEnvironment::Cli);
     assert_eq!(row.residency, SessionResidency::Dormant);
@@ -889,7 +904,7 @@ fn a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone() {
     assert!(message.contains("use that process"), "{message}");
     assert!(!message.contains("it is plakd host"), "{message}");
     drop(agent);
-    let row = client.rows(id + 2).remove(0);
+    let row = wait_for_holder(&mut client, id + 2, None);
     assert_eq!(
         row.hosted_elsewhere, None,
         "a killed holder still reads held"
@@ -970,12 +985,10 @@ fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
 
     // This process takes the dormant tree's custody: a live holder elsewhere.
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
-    let store =
-        plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
-            .unwrap();
+    let store = plakd::store::tree::open_tree_store(&paths).unwrap();
     let hold = plakous_recursive_subagents::tree::acquire_custody(&store, &node.tree_id).unwrap();
     let me = std::process::id();
-    let row = client.rows(id).remove(0);
+    let row = wait_for_holder(&mut client, id, Some(me));
     assert_eq!(row.hosted_elsewhere.map(|held| held.pid), Some(me));
     match client.request(id + 1, Op::Attach { node: node.clone() }) {
         Outcome::Refused(plakous_host_protocol::wire::RequestRefusal::TreeHostedElsewhere {
@@ -985,7 +998,10 @@ fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
         other => panic!("not refused as held elsewhere: {other:?}"),
     }
     plakous_recursive_subagents::tree::release_custody_hold(&store, hold).unwrap();
-    assert_eq!(client.rows(id + 2)[0].hosted_elsewhere, None);
+    assert_eq!(
+        wait_for_holder(&mut client, id + 2, None).hosted_elsewhere,
+        None
+    );
 
     // An embedded face takes it, and is killed holding it.
     kill_local_daemon_only(&fixture.home());
@@ -993,7 +1009,7 @@ fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
     let agent_pid = agent.child.id();
     assert_eq!(custody_pid(&fixture, &node.tree_id), Some(agent_pid));
     assert_eq!(
-        client.rows(id + 3)[0]
+        wait_for_holder(&mut client, id + 3, Some(agent_pid))
             .hosted_elsewhere
             .as_ref()
             .map(|held| held.pid),
@@ -1008,7 +1024,7 @@ fn a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone() {
         "the killed holder's custody record stays held"
     );
     assert_eq!(
-        client.rows(id + 4)[0].hosted_elsewhere,
+        wait_for_holder(&mut client, id + 4, None).hosted_elsewhere,
         None,
         "a crashed holder's stale custody reads held"
     );
@@ -1778,6 +1794,20 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
             [&node.tree_id],
         )
         .unwrap();
+    // The fixture wrote directly to SQLite, bypassing all product notices.
+    // Deliver an unkeyed invalidation to exercise directory gap recovery.
+    std::os::unix::net::UnixDatagram::unbound()
+        .unwrap()
+        .send_to(b"gap unknown", host.socket.with_extension("dir"))
+        .unwrap();
+    let deadline = std::time::Instant::now() + WAIT;
+    while client.rows(3).len() != 1 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "directory did not rebuild"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
     match client.request(
         3,
         Op::ListSessions {

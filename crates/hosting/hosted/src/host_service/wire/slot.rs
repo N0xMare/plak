@@ -60,7 +60,7 @@ pub type RootResolver = Box<dyn Fn(&str) -> Option<NodeAddress> + Send + Sync>;
 /// Opens the session of an id on a fresh host worker.
 type Opener<P> = Box<dyn Fn(&str) -> CliResult<OpenedSession<P>> + Send + Sync>;
 
-type HeldSession<P> = (Arc<WireSession<P>>, ResidencyHold, u64);
+pub(super) type HeldSession<P> = (Arc<WireSession<P>>, ResidencyHold, u64);
 
 pub(crate) enum StepOwnerHold {
     Busy,
@@ -92,6 +92,7 @@ pub struct SessionSlot<P: ProtocolExtension> {
     /// Last open failure, visible without waiting for a retry's slot lock.
     failure: Mutex<Option<CliFailure>>,
     startup_retrying: AtomicBool,
+    directory: Option<tokio::sync::watch::Sender<u64>>,
 }
 
 /// The slot's lock is held for no long step.
@@ -129,13 +130,14 @@ where
     ) -> Self {
         let known = Mutex::new(opened.session_id.clone());
         Self {
-            slot: Mutex::new(resident(opened)),
+            slot: Mutex::new(resident(opened, None)),
             open: Box::new(open),
             release_join: RELEASE_JOIN,
             busy: AtomicU8::new(BUSY_NONE),
             known,
             failure: Mutex::new(None),
             startup_retrying: AtomicBool::new(false),
+            directory: None,
         }
     }
 
@@ -155,6 +157,18 @@ where
             busy: AtomicU8::new(BUSY_NONE),
             failure: Mutex::new(None),
             startup_retrying: AtomicBool::new(false),
+            directory: None,
+        }
+    }
+
+    pub(super) fn watch_directory(mut self, notify: tokio::sync::watch::Sender<u64>) -> Self {
+        self.directory = Some(notify);
+        self
+    }
+
+    fn directory_changed(&self) {
+        if let Some(notify) = &self.directory {
+            notify.send_modify(|revision| *revision = revision.wrapping_add(1));
         }
     }
 
@@ -203,7 +217,7 @@ where
                 if session.ended() || attachments.releasing() {
                     // A release whose worker ended is dormant; the next
                     // trigger only joins it.
-                    if worker.is_finished() {
+                    if worker.finished_work() {
                         SlotView::Dormant(session.session_id())
                     } else {
                         SlotView::Releasing(session.session_id())
@@ -274,11 +288,33 @@ where
             .flatten()
     }
 
+    pub(super) fn try_hold_resident(&self) -> Option<HeldSession<P>> {
+        let slot = self.slot.try_lock().ok()?;
+        let Slot::Resident {
+            session,
+            attachments,
+            ..
+        } = &*slot
+        else {
+            return None;
+        };
+        if session.ended() {
+            return None;
+        }
+        Some((Arc::clone(session), attachments.hold()?, session.releases()))
+    }
+
     /// [`Self::resident`], and how many releases had already been asked when
     /// the slot handed the session over. That count is read under the slot
     /// lock, so a release that waited out this open is still ahead of it and
     /// the attachment it makes detaches.
     pub(super) fn resident_at_handoff(&self) -> CliResult<HeldSession<P>> {
+        let result = self.handoff();
+        self.directory_changed();
+        result
+    }
+
+    fn handoff(&self) -> CliResult<HeldSession<P>> {
         let mut slot = self.lock();
         loop {
             if let Slot::Resident { session, .. } = &*slot {
@@ -293,11 +329,14 @@ where
                 // executor, which a caller's async runtime would refuse.
                 self.set_known(session_id);
                 self.busy.store(BUSY_OPENING, Ordering::Release);
+                self.directory_changed();
                 let opened = self.open_on_thread(session_id);
                 self.busy.store(BUSY_NONE, Ordering::Release);
                 *self.failure.lock().unwrap_or_else(PoisonError::into_inner) =
                     opened.as_ref().err().cloned();
-                *slot = resident(opened?);
+                let opened = opened?;
+                self.set_known(&opened.session_id);
+                *slot = resident(opened, self.directory.as_ref());
             }
             if let Slot::Resident {
                 session,
@@ -491,7 +530,7 @@ where
         let opening = opened.map(|opened| {
             root = opened.root.clone();
             self.set_known(&opened.session_id);
-            *slot = resident(opened);
+            *slot = resident(opened, self.directory.as_ref());
         });
         cut(HostCut::ReopenOpened);
         old.end_reopen(Some((&root, attachment, request)));
@@ -530,12 +569,19 @@ where
     }
 }
 
-fn resident<P>(opened: OpenedSession<P>) -> Slot<P>
+fn resident<P>(
+    opened: OpenedSession<P>,
+    directory: Option<&tokio::sync::watch::Sender<u64>>,
+) -> Slot<P>
 where
     P: ProtocolExtension + 'static,
     P::Intent: Send,
     P::Observation: Send,
 {
+    if let Some(notify) = directory {
+        opened.attachments.watch_directory(notify.clone());
+        opened.worker.watch_directory(notify.clone());
+    }
     let roots = opened.roots;
     Slot::Resident {
         session: Arc::new(

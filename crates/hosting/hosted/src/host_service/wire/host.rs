@@ -13,8 +13,7 @@
 //! session resident from the moment the slot hands it over, so an idle
 //! release never takes a session between its open and the attach. The
 //! host attachment is the directory: a snapshot of every row, then each row
-//! that changed, read again whenever the host's sessions change and at least
-//! every [`DIRECTORY_POLL`] while it is open.
+//! that changed, read again when a session or product summary changes.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -36,11 +35,6 @@ use super::super::ResidencyHold;
 use super::slot::{OpenedSession, SessionSlot, SlotView};
 use super::{Face, WireConnection, WireSession, host_welcome, write_frame};
 use crate::error::{CliFailure, CliResult};
-
-/// How often an open host attachment reads the directory again when
-/// nothing on the host changed: a session's title and its durable facts
-/// change in its own stores.
-pub const DIRECTORY_POLL: Duration = Duration::from_secs(1);
 
 /// How long `release_session` waits for its session to begin releasing.
 pub const RELEASE_WAIT: Duration = Duration::from_secs(10);
@@ -100,6 +94,7 @@ pub struct Creation<'a> {
     pub request_id: &'a str,
 }
 
+mod attach;
 mod lifecycle;
 mod product;
 mod upgrade_controls;
@@ -129,14 +124,7 @@ pub struct SessionHost<P: ProtocolExtension> {
     release_join: Duration,
     /// Set once the host stops: nothing opens or is created after it.
     closing: Arc<std::sync::atomic::AtomicBool>,
-    /// The directory last read, shared by every host attachment: when, at
-    /// which host revision, and its rows.
-    directory: Mutex<[Option<DirectoryRead>; 2]>,
 }
-
-/// One shared read of the directory: when, at which host revision, and its
-/// rows.
-type DirectoryRead = (Instant, u64, Arc<Vec<SessionRow>>);
 
 /// Whether this nonblocking slot view names `session`. Busy views use a
 /// cached peek label, not an authority for selecting a session to open.
@@ -191,7 +179,6 @@ where
             release_wait: RELEASE_WAIT,
             release_join: RELEASE_JOIN,
             closing: Arc::default(),
-            directory: Mutex::new([None, None]),
         })
     }
 
@@ -205,9 +192,7 @@ where
         self.closing.load(Ordering::SeqCst)
     }
 
-    /// The whole directory, read at most once per host revision and per
-    /// `DIRECTORY_POLL` (1 s), whichever comes first, and shared by every host
-    /// attachment: a read in flight is waited for, not repeated.
+    /// The whole visible directory.
     ///
     /// # Errors
     ///
@@ -220,21 +205,7 @@ where
         &self,
         include_archived: bool,
     ) -> Result<Arc<Vec<SessionRow>>, String> {
-        let revision = *self.changes.borrow();
-        let mut entries = self
-            .directory
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let cached = &mut entries[usize::from(include_archived)];
-        if let Some((read, at, rows)) = &*cached
-            && *at == revision
-            && read.elapsed() < DIRECTORY_POLL
-        {
-            return Ok(Arc::clone(rows));
-        }
-        let rows = Arc::new(self.rows(None, None, include_archived)?);
-        *cached = Some((Instant::now(), revision, Arc::clone(&rows)));
-        Ok(rows)
+        self.rows(None, None, include_archived).map(Arc::new)
     }
 
     /// [`Self::new`] whose `release_session` waits `release_wait`.
@@ -330,8 +301,10 @@ where
             principal,
             read_ready: Arc::default(),
             host_reads: BTreeMap::new(),
+            attaching: None,
             host: Arc::clone(self),
             host_changes: self.changes.subscribe(),
+            directory_changes: self.sessions.directory_changes(),
             out,
             buffered_output: false,
             snapshot_output: None,
@@ -390,6 +363,7 @@ where
                     row.residency = SessionResidency::Resident;
                     // This process holds the tree.
                     row.hosted_elsewhere = None;
+                    row.environment = SessionEnvironment::Host;
                     let kept = session.kept_activity();
                     row.live_work.processes = u32::try_from(kept.processes).unwrap_or(u32::MAX);
                     row.live_work.children = u32::try_from(kept.children).unwrap_or(u32::MAX);
@@ -408,8 +382,7 @@ where
     /// The slot of the session whose tree `node` is in: the resident one
     /// serving that tree, or the head session of that tree's root line.
     fn resolve(&self, node: &NodeAddress) -> Result<Arc<SessionSlot<P>>, RequestRefusal> {
-        let mut slots = self.lock();
-        for slot in slots.iter() {
+        for slot in self.lock().iter() {
             if let SlotView::Resident(session) = slot.peek()
                 && session.root().tree_id == node.tree_id
             {
@@ -421,38 +394,48 @@ where
             .session_of(node)
             .map_err(|detail| RequestRefusal::SessionUnavailable { detail })?
             .ok_or(RequestRefusal::UnknownNode)?;
-        Ok(Self::slot_in(
-            &mut slots,
-            &self.sessions,
-            &self.closing,
-            &session,
-        ))
+        Ok(self.slot(&session))
     }
 
     /// The slot of `session`, made dormant when the host has none yet.
     pub fn slot(&self, session: &str) -> Arc<SessionSlot<P>> {
-        Self::slot_in(&mut self.lock(), &self.sessions, &self.closing, session)
+        // A candidate may be opening. Wait only for that slot, never under
+        // the host-wide lock used by other attaches and directory readers.
+        loop {
+            let snapshot = self.slots();
+            if let Some(slot) = snapshot
+                .iter()
+                .find(|slot| serves(slot, session) && slot.serves_current(session))
+            {
+                return Arc::clone(slot);
+            }
+            let mut slots = self.lock();
+            if slots.len() == snapshot.len()
+                && slots
+                    .iter()
+                    .zip(snapshot)
+                    .all(|(old, current)| Arc::ptr_eq(old, &current))
+                && !slots.iter().any(|slot| serves(slot, session))
+            {
+                let slot = self.released_slot(session);
+                slots.push(Arc::clone(&slot));
+                return slot;
+            }
+        }
     }
 
-    fn slot_in(
-        slots: &mut Vec<Arc<SessionSlot<P>>>,
-        sessions: &Arc<dyn HostSessions<P>>,
-        closing: &Arc<std::sync::atomic::AtomicBool>,
-        session: &str,
-    ) -> Arc<SessionSlot<P>> {
-        if let Some(slot) = slots.iter().find(|slot| slot.serves_current(session)) {
-            return Arc::clone(slot);
-        }
-        let (opener, closing) = (Arc::clone(sessions), Arc::clone(closing));
-        let slot = Arc::new(SessionSlot::released(session, move |id: &str| {
-            // A stopping host opens nothing its handoff would miss.
-            if closing.load(Ordering::SeqCst) {
-                return Err(CliFailure::new("the host is stopping"));
-            }
-            opener.open(id)
-        }));
-        slots.push(Arc::clone(&slot));
-        slot
+    fn released_slot(&self, session: &str) -> Arc<SessionSlot<P>> {
+        let (opener, closing) = (Arc::clone(&self.sessions), Arc::clone(&self.closing));
+        Arc::new(
+            SessionSlot::released(session, move |id: &str| {
+                // A stopping host opens nothing its handoff would miss.
+                if closing.load(Ordering::SeqCst) {
+                    return Err(CliFailure::new("the host is stopping"));
+                }
+                opener.open(id)
+            })
+            .watch_directory(self.changes.clone()),
+        )
     }
 
     /// Every slot the host holds, resident or not.
@@ -518,7 +501,6 @@ struct Watch {
     attachment: AttachmentId,
     seq: u64,
     sent: Option<BTreeMap<String, SessionRow>>,
-    read_at: Option<Instant>,
     dirty: bool,
 }
 
@@ -531,8 +513,10 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     principal_budget: Arc<admission::PrincipalBudget>,
     read_ready: Arc<reads::ReadyReads>,
     host_reads: BTreeMap<plakous_host_protocol::wire::RequestId, reads::PendingRead<P>>,
+    attaching: Option<attach::PendingAttach<P>>,
     host: Arc<SessionHost<P>>,
     host_changes: watch::Receiver<u64>,
+    directory_changes: Option<watch::Receiver<u64>>,
     out: W,
     face: Face,
     stopped: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -574,8 +558,7 @@ where
 {
     /// Answers one client line; `false` once the client has left.
     ///
-    /// An attach of a dormant session opens it first, so this can block
-    /// for as long as that open takes.
+    /// Buffered transports complete an attach in a later flush.
     /// Request ids must be unique across all pending operations of this
     /// connection, including host reads and session operations.
     ///
@@ -626,6 +609,22 @@ where
                 Ok(true)
             };
         };
+        if self
+            .attaching
+            .as_ref()
+            .is_some_and(|attach| attach.id() == id)
+        {
+            write_frame(
+                &mut self.out,
+                &HostFrame::<P>::Response {
+                    id,
+                    outcome: Outcome::Refused(RequestRefusal::Malformed {
+                        detail: "request id is already in flight".into(),
+                    }),
+                },
+            )?;
+            return Ok(true);
+        }
         if matches!(
             op,
             Op::Intent { .. }
@@ -693,8 +692,6 @@ where
         match op {
             Op::Host { request } => Ok(self.start_host_read(request_id, request)),
             Op::Ping => answered(Outcome::Ok(Answer::Pong)),
-            // A one-shot list is a fresh read, so it names a holder the
-            // moment it holds; only a watch shares the cached read.
             Op::ListSessions {
                 runner,
                 include_archived,
@@ -737,7 +734,7 @@ where
                 abandon_jobs,
             } => answered(self.delete_session(session, abandon_children, abandon_jobs)),
             Op::StopSession { session } => self.stop(&session, text),
-            Op::Attach { node } => self.attach(&node, text),
+            Op::Attach { node } => self.start_attach(request_id, node, text),
             Op::RetryAttach {
                 attachment,
                 request_id,
@@ -778,7 +775,6 @@ where
             attachment,
             seq: 0,
             sent: None,
-            read_at: None,
             dirty: true,
         });
         Outcome::Ok(Answer::Watching { attachment })
@@ -1030,50 +1026,25 @@ where
             Err(detail) => Err(RequestRefusal::SessionUnavailable { detail }),
         }
     }
-    /// Attaches `node`: on the session the connection already serves when
-    /// the node is in its tree, else on its session, opened first when it
-    /// is dormant. The old node attachment ends once the new one is made,
-    /// as a new attach on one session's connection ends the one before it;
-    /// a refused attach leaves it.
-    fn attach(&mut self, node: &NodeAddress, text: &str) -> CliResult<Forwarded<P>> {
-        if let Some(successor) = self
-            .host
-            .sessions
-            .successor_node(node)
-            .map_err(CliFailure::new)?
-        {
+    fn attach_resident(
+        &mut self,
+        (session, hold, releases): super::slot::HeldSession<P>,
+        text: &str,
+    ) -> CliResult<Forwarded<P>> {
+        if session.ended() || session.releases() != releases {
             return Ok(Forwarded::Answered(Outcome::Refused(
-                RequestRefusal::Moved { node: successor },
+                RequestRefusal::SessionUnavailable {
+                    detail: "the session released during attach".into(),
+                },
             )));
         }
-        if self.host.closed() {
-            return Ok(Forwarded::Answered(Outcome::Refused(stopping())));
-        }
-        if let Some(readonly) = self.stored_attachment(node, text, None)? {
-            return Ok(readonly);
-        }
-        if self.node.as_ref().is_some_and(|link| {
-            link.session.root().tree_id == node.tree_id && !link.session.ended()
-        }) {
+        if self
+            .node
+            .as_ref()
+            .is_some_and(|link| Arc::ptr_eq(&session, &link.session) && link.releases == releases)
+        {
             return self.forward(text.to_owned()).map(Forwarded::Reading);
         }
-        let slot = match self.host.resolve(node) {
-            Ok(slot) => slot,
-            Err(refusal) => return Ok(Forwarded::Answered(Outcome::Refused(refusal))),
-        };
-        self.host.changed();
-        let resident = slot.resident_at_handoff();
-        self.host.changed();
-        let (session, hold, releases) = match resident {
-            Ok(resident) => resident,
-            Err(failure) => {
-                if let Some(readonly) = self.stored_attachment(node, text, Some(&failure))? {
-                    return Ok(readonly);
-                }
-                let refusal = self.host.sessions.refusal(&slot.known(), &failure);
-                return Ok(Forwarded::Answered(Outcome::Refused(refusal)));
-            }
-        };
         let stopped = Arc::clone(&self.stopped);
         let sessions = Arc::clone(&self.host.sessions);
         let mut connection = session
@@ -1290,6 +1261,7 @@ where
     fn flush_replies(&mut self) -> CliResult<()> {
         self.flush_lifecycle()?;
         self.flush_host_reads()?;
+        self.flush_attach()?;
         self.flush_draining()
     }
 
@@ -1339,26 +1311,16 @@ where
     }
 
     fn flush_directory(&mut self) -> CliResult<()> {
-        let changed = self.host_changes.has_changed().unwrap_or(false);
-        if changed {
-            self.host_changes.borrow_and_update();
-        }
+        let host_changed = consume_change(&mut self.host_changes);
+        let product_changed = self.directory_changes.as_mut().is_some_and(consume_change);
         let Some(watch) = &mut self.watch else {
             return Ok(());
         };
-        let due = watch.dirty
-            || changed
-            || watch
-                .read_at
-                .is_none_or(|read| read.elapsed() >= DIRECTORY_POLL);
-        if !due {
+        if !watch.dirty && !host_changed && !product_changed {
             return Ok(());
         }
-        // A read that failed is a skipped tick: the next one reads again.
+        // A failed read is skipped; the next publication permits a retry.
         let Ok(rows) = self.host.directory_with_archived(watch.include_archived) else {
-            if let Some(watch) = &mut self.watch {
-                watch.read_at = Some(Instant::now());
-            }
             return Ok(());
         };
         let rows: Vec<SessionRow> = rows
@@ -1370,7 +1332,6 @@ where
             .watch
             .as_mut()
             .ok_or_else(|| CliFailure::new("unwatched"))?;
-        watch.read_at = Some(Instant::now());
         watch.dirty = false;
         let now: BTreeMap<String, SessionRow> = rows
             .iter()
@@ -1401,11 +1362,13 @@ where
     }
 
     /// Waits until the connection may have something to write: the node
-    /// attachment's session published, the host's sessions changed, or the
-    /// directory is due to be read again.
+    /// attachment's session or the host directory published a change.
     pub async fn changed(&mut self) {
         let stream = self.host.sessions.host_stream_notify(&self.host_context());
-        let watching = self.watch.is_some();
+        let directory = self
+            .directory_changes
+            .as_mut()
+            .filter(|_| self.watch.is_some());
         let host = &mut self.host_changes;
         let session = self.node.as_mut().map(|link| &mut link.changes);
         let draining = self.draining.as_mut().map(|link| &mut link.changes);
@@ -1415,9 +1378,9 @@ where
             () = self.read_ready.notify.notified() => false,
             () = async { match deadline { Some(at) => tokio::time::sleep_until(at.into()).await, None => std::future::pending::<()>().await } } => false,
             _ = host.changed() => true,
+            () = session_changed(directory) => true,
             () = session_changed(session) => false,
             () = session_changed(draining) => false,
-            () = tokio::time::sleep(DIRECTORY_POLL), if watching => false,
         };
         // The wait saw the host's change: the directory is due.
         if host_changed && let Some(watch) = &mut self.watch {
@@ -1428,6 +1391,7 @@ where
     /// The client left: its node attachment detaches, its host attachment
     /// closes, and its session hold ends.
     pub fn leave(&mut self) {
+        self.attaching = None;
         self.host_reads.clear();
         self.host.sessions.host_disconnect(
             &self.principal,
@@ -1460,6 +1424,14 @@ where
 
 /// Resolves once `changes`, when there are any, changed; a session that
 /// ended changes no more.
+fn consume_change(changes: &mut watch::Receiver<u64>) -> bool {
+    let pending = changes.has_changed().unwrap_or(false);
+    if pending {
+        changes.borrow_and_update();
+    }
+    pending
+}
+
 async fn session_changed(changes: Option<&mut watch::Receiver<u64>>) {
     match changes {
         Some(changes) => {

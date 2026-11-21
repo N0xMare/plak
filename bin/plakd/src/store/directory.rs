@@ -1,7 +1,7 @@
 //! What a host's session directory reads of the product store (spec 02
 //! §4.4): every session's identity and labels, newest first, and each tree's
-//! current root-line head. Lean on purpose: no transcript previews, so a host
-//! can read it every second while a client watches.
+//! current root-line head. The serving host projects these facts after commits;
+//! presenting the directory does not read this store.
 
 use std::path::{Path, PathBuf};
 

@@ -180,7 +180,7 @@ pub(in crate::store) fn intents_of(
     read_intents(connection, verified, session_id, true)
 }
 
-fn read_intents(
+pub(in crate::store) fn read_intents(
     connection: &Connection,
     verified: &mut VerifiedSubmissions,
     session_id: &str,

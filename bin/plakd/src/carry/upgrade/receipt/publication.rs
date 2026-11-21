@@ -69,6 +69,8 @@ impl Receipt {
             .map_err(failed)?;
         File::open(paths.home())
             .and_then(|file| file.sync_all())
-            .map_err(failed)
+            .map_err(failed)?;
+        crate::store::directory_notice::inputs(paths, "visibility");
+        Ok(())
     }
 }

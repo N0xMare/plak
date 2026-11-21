@@ -33,13 +33,15 @@ mod test_support {
     pub(super) const fn schema(base: crate::admission::Schema) -> crate::admission::Schema {
         base
     }
+
+    pub(super) const fn record_tree_load(_path: &std::path::Path) {}
 }
 
 pub use database::{
     GENERATION, OpenError, OpenErrorKind, SCHEMA_VERSION, TreeInspection,
     expected_schema_fingerprint,
 };
-pub use store::SqliteTreeStore;
+pub use store::{SqliteTreeStore, TreeChange};
 
 /// The `SQLite` integer bound: every count, stamp, and revision a row carries
 /// has to survive the round trip through `i64`.

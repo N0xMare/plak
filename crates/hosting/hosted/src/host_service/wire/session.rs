@@ -13,7 +13,9 @@ use std::thread;
 
 use crate::error::{CliFailure, CliResult};
 use plakous_host_protocol::wire::{ClientFrame, HostFrame, NodeAddress};
-use plakous_host_protocol::{IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent};
+use plakous_host_protocol::{
+    IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent, SessionObservation,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::watch;
@@ -35,6 +37,20 @@ pub struct WireSession<P: ProtocolExtension> {
     releases: std::sync::atomic::AtomicU64,
     attachments: AttachmentCount,
     reopening: AtomicBool,
+}
+
+fn directory_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
+    matches!(
+        event,
+        SessionObservation::Binding { .. }
+            | SessionObservation::SetBusy(_)
+            | SessionObservation::Processes { .. }
+            | SessionObservation::ContextCapacityRecovery(_)
+            | SessionObservation::ApprovalRequired { .. }
+            | SessionObservation::ApprovalResolved { .. }
+            | SessionObservation::CredentialWait { .. }
+            | SessionObservation::TopologyNavigatorSnapshot(_)
+    )
 }
 
 impl<P: ProtocolExtension> std::fmt::Debug for WireSession<P> {
@@ -119,12 +135,14 @@ impl<P: ProtocolExtension> WireSession<P> {
         let pumped = Arc::clone(&served);
         let pump_ended = Arc::clone(&ended);
         let host_notify = notify.clone();
+        let directory = attachments.clone();
         // The pump is the session's only observation consumer; it ends
         // with the session's observations and is never joined.
         thread::spawn(move || {
             if !before_pump() {
                 pump_ended.store(true, Ordering::Release);
                 notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                directory.directory_changed();
                 return;
             }
             let mut lost = LostTranscripts::default();
@@ -132,8 +150,10 @@ impl<P: ProtocolExtension> WireSession<P> {
                 match events.recv_timeout(POLL) {
                     Ok(event) => {
                         let mut guard = served::lock(&pumped);
+                        let mut affects_directory = directory_event(&event);
                         let mut found = guard.observe(event);
                         while let Ok(event) = events.try_recv() {
+                            affects_directory |= directory_event(&event);
                             found &= guard.observe(event);
                         }
                         lost.check(&guard.service(), &events);
@@ -142,12 +162,16 @@ impl<P: ProtocolExtension> WireSession<P> {
                             pump_ended.store(true, Ordering::Release);
                         }
                         notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                        if affects_directory || !found {
+                            directory.directory_changed();
+                        }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         served::lock(&pumped).end();
                         pump_ended.store(true, Ordering::Release);
                         notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                        directory.directory_changed();
                         return;
                     }
                 }
@@ -185,11 +209,13 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn publisher(&self) -> super::super::FacePublisher<P> {
         let notify = self.notify.clone();
+        let directory = self.attachments.clone();
         served::lock(&self.served)
             .service()
             .publisher()
             .waking(move || {
                 notify.send_modify(|revision| *revision = revision.wrapping_add(1));
+                directory.directory_changed();
             })
     }
 

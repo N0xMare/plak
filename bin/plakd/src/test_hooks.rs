@@ -536,14 +536,9 @@ fn prepare_scripted_tree(
         state_roots.runner_services(),
     )?;
     let inner: Arc<dyn TreeStore> = if plan.durable_tree {
-        paths
-            .ensure_layout()
-            .map_err(|error| format!("offline scripted tree layout: {error}"))?;
-        crate::store::tree::bind_custody_host(paths)
-            .map_err(|error| format!("offline scripted tree custody host: {error}"))?;
         Arc::new(
-            plakous_recursive_subagents_store::SqliteTreeStore::open(&paths.subagents_database())
-                .map_err(|error| format!("offline scripted tree store: {}", error.message()))?,
+            crate::store::tree::open_tree_store(paths)
+                .map_err(|error| format!("offline scripted tree store: {error}"))?,
         )
     } else {
         Arc::new(MemoryTreeStore::new())

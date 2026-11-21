@@ -28,8 +28,21 @@ use crate::rows::{
 pub struct SqliteTreeStore {
     writer: Arc<Mutex<Writer>>,
     storage_waiting: std::sync::atomic::AtomicBool,
+    notice: Option<CommitNotice>,
     /// The database file, canonical when it resolves: the custody scope.
     path: std::path::PathBuf,
+}
+
+type CommitNotice = Box<dyn Fn(&str, TreeChange<'_>) + Send + Sync>;
+
+/// Committed facts for an optional process-local presentation subscriber.
+pub enum TreeChange<'a> {
+    /// Use the acknowledged image instead of reading it back from SQLite.
+    Saved(&'a ProductAgentTree),
+    /// The existing image and custody were deleted together.
+    Deleted,
+    /// Custody changed hands or was released, without changing the image.
+    Custody,
 }
 
 /// The connection and, per tree, the image of its last acknowledged save.
@@ -83,6 +96,7 @@ impl SqliteTreeStore {
     /// Reads one existing tree's exact persisted rows without a writer or
     /// in-memory reopen transition.
     pub fn inspect(database: &Path, tree_id: &str) -> Result<TreeInspection, OpenError> {
+        crate::test_support::record_tree_load(database);
         SubagentsDatabase::inspect_tree(database, tree_id)
     }
 
@@ -163,9 +177,27 @@ impl SqliteTreeStore {
             .map_err(|_| OpenError::unavailable_text("tree store path is unavailable"))?;
         Ok(Self {
             path,
+            notice: None,
             storage_waiting: std::sync::atomic::AtomicBool::new(false),
             writer,
         })
+    }
+
+    /// Sends best-effort presentation notices after a successful commit.
+    /// The callback must not read this store or perform authority work.
+    #[must_use]
+    pub fn with_commit_notice(
+        mut self,
+        notice: impl Fn(&str, TreeChange<'_>) + Send + Sync + 'static,
+    ) -> Self {
+        self.notice = Some(Box::new(notice));
+        self
+    }
+
+    pub(crate) fn notify_commit(&self, tree: &str, change: TreeChange<'_>) {
+        if let Some(notice) = &self.notice {
+            notice(tree, change);
+        }
     }
 
     /// Deletes every row of one tree, compare-and-swapped on the revision the
@@ -200,8 +232,11 @@ impl SqliteTreeStore {
                 Some(_) => delete_agent_tree_rows(&tx, tree_id)?,
             }
             crate::custody::delete_record(&tx, tree_id)?;
-            tx.commit()
-                .map_err(|error| sqlite_unavailable("could not durably delete agent tree", &error))
+            tx.commit().map_err(|error| {
+                sqlite_unavailable("could not durably delete agent tree", &error)
+            })?;
+            self.notify_commit(tree_id, TreeChange::Deleted);
+            Ok(())
         })
     }
 
@@ -387,7 +422,11 @@ impl TreeStore for SqliteTreeStore {
         tree: &ProductAgentTree,
         claim: &CustodyClaim,
     ) -> Result<Revision, TreeStoreError> {
-        let result = self.with_writer(|writer| writer.save(tree, claim));
+        let result = self.with_writer(|writer| {
+            writer.save(tree, claim)?;
+            self.notify_commit(&tree.tree_id, TreeChange::Saved(tree));
+            Ok(())
+        });
         if result.is_ok() {
             self.storage_waiting
                 .store(false, std::sync::atomic::Ordering::Release);
@@ -401,6 +440,7 @@ impl TreeStore for SqliteTreeStore {
     }
 
     fn load(&self, tree_id: &str) -> Result<Option<PersistedTree>, TreeStoreError> {
+        crate::test_support::record_tree_load(&self.path);
         self.with_writer(|writer| {
             writer.images.remove(tree_id);
             let tx = writer

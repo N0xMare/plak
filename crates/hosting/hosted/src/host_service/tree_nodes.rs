@@ -4,10 +4,9 @@ use crate::agent_tree_protocol::NodeStatus;
 
 use super::{ChildNodes, NodeState};
 
-pub(super) fn child_counts(tree_id: &str) -> (usize, usize) {
+pub(super) fn try_child_counts(tree_id: &str) -> Option<(usize, usize)> {
     crate::topology_runtime::lookup(tree_id)
-        .and_then(|runtime| runtime.read(count_children).ok())
-        .unwrap_or_default()
+        .map_or(Some((0, 0)), |runtime| runtime.try_read(count_children))
 }
 
 pub(super) fn lifecycle_children(tree_id: &str) -> Result<Vec<String>, ()> {

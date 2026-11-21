@@ -112,7 +112,9 @@ fn publish(paths: &PlakPaths, roots: &BTreeSet<PathBuf>) -> Result<(), String> {
         false,
         &mut no_fault,
     )
-    .map_err(ConfigSaveError::into_message)
+    .map_err(ConfigSaveError::into_message)?;
+    crate::store::directory_notice::configuration(paths);
+    Ok(())
 }
 
 #[cfg(test)]

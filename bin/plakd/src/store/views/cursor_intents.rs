@@ -25,14 +25,18 @@ impl ProductStore {
             tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,'null')", (session_id, WAKE_SUPPRESSION, anchor, ordinal))
                 .map_err(|error| write_error(error, "could not record wake suppression".to_owned()))?;
         }
-        if let Some(pause) = pause {
-            let value = serde_json::to_string(&pause)
+        if let Some(pause) = &pause {
+            let value = serde_json::to_string(pause)
                 .map_err(|error| write_error(error, "pause cause is not encodable".to_owned()))?;
             tx.execute("INSERT INTO host_intents(session_id,kind,anchor,ordinal,value) VALUES(?1,?2,?3,?4,?5)", (session_id, PAUSE_CAUSE, anchor, ordinal, value))
                 .map_err(|error| write_error(error, "could not record pause cause".to_owned()))?;
         }
         tx.commit()
-            .map_err(|error| write_error(error, "could not commit host intents".to_owned()))
+            .map_err(|error| write_error(error, "could not commit host intents".to_owned()))?;
+        if suppress_wake || pause.is_some() {
+            self.session_changed(session_id);
+        }
+        Ok(())
     }
 
     /// Writes a root loss intent at the current applied cursor, after every
@@ -59,7 +63,9 @@ impl ProductStore {
         )
         .map_err(|error| write_error(error, format!("could not record the {kind} intent")))?;
         tx.commit()
-            .map_err(|error| write_error(error, "could not commit host intents".to_owned()))
+            .map_err(|error| write_error(error, "could not commit host intents".to_owned()))?;
+        self.session_changed(session_id);
+        Ok(())
     }
 }
 

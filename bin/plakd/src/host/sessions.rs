@@ -7,30 +7,26 @@
 //! stale custody never reads as held, and a holder on another machine,
 //! which cannot be proven gone, always does.
 
-use plakous::runner::RunnerRow;
-use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use plakous_host_protocol::wire::{
-    HostedElsewhere, NodeAddress, RequestRefusal, SessionActivity, SessionEnvironment,
-    SessionResidency, SessionRow,
+    HostedElsewhere, NodeAddress, RequestRefusal, SessionActivity, SessionEnvironment, SessionRow,
 };
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::AttachmentCount;
 use plakous_hosted::host_service::wire::{Created, HostSessions, OpenedSession, session_root_of};
-use plakous_hosted::runtime::operator_attention::{PendingTreeWork, prepared_wake_count};
 use plakous_hosted::runtime::{IDLE_RELEASE, IdleRelease, RootStanding, spawn_host_worker};
 use plakous_recursive_subagents::tree::{
-    ContinuationCause, LossContinuationState, ProductAgentTree, holder_elsewhere,
+    ContinuationCause, CustodyHost, LossContinuationState, ProductAgentTree, holder_elsewhere,
 };
 use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
 use crate::shell::services::Services;
 use crate::store::ProductStore;
-use crate::store::directory::DirectoryEntry;
 use crate::surface_protocol::PlakExtension;
 
 mod archived;
+mod directory;
 mod lifecycle;
 mod options;
 #[cfg(test)]
@@ -42,31 +38,15 @@ use placement::Placement;
 
 /// This home's sessions, as `plakd host` serves them.
 pub(super) struct ProductSessions {
-    console: std::sync::Arc<super::console::Console>,
+    console: Arc<super::console::Console>,
     runtime: Option<tokio::runtime::Handle>,
     services: Services,
     idle_release: Option<std::time::Duration>,
     product: Mutex<Option<ProductStore>>,
-    tree: std::sync::Arc<SqliteTreeStore>,
+    tree: Arc<SqliteTreeStore>,
+    directory: directory::Directory,
     placement: Box<dyn Placement>,
     idle_reason: Mutex<Option<&'static str>>,
-}
-
-struct DirectoryProfiles {
-    config: Option<crate::product_config::ProductConfig>,
-    profiles: Vec<(
-        crate::surface_protocol::ProfileRow,
-        crate::profiles::Prepared,
-    )>,
-}
-
-#[derive(Clone, Copy)]
-struct DirectoryRowRead<'a> {
-    store: &'a dyn crate::store::session_records::SessionRecordStore,
-    record: Option<&'a crate::store::sessions::SessionRecord>,
-    profiles: Option<&'a DirectoryProfiles>,
-    runners: &'a [RunnerRow],
-    activity_seq: u64,
 }
 
 impl ProductSessions {
@@ -80,8 +60,9 @@ impl ProductSessions {
         idle_release: Option<std::time::Duration>,
         runtime: Option<tokio::runtime::Handle>,
     ) -> CliResult<Self> {
-        let tree =
-            crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?;
+        let tree = Arc::new(
+            crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?,
+        );
         let switches = crate::product_config::ProductConfig::console_switches(services.paths()?)
             .unwrap_or_else(|_| {
                 eprintln!(
@@ -112,13 +93,22 @@ impl ProductSessions {
             services: services.clone(),
             idle_release,
             product: Mutex::new(None),
-            tree: std::sync::Arc::new(tree),
+            directory: directory::Directory::start(services.paths()?, Arc::clone(&tree))?,
+            tree,
             idle_reason: Mutex::new(None),
         })
     }
 
     pub(super) fn console_switches(&self) -> plakd_wire_types::console::ConfiguredSwitches {
         self.console.switches()
+    }
+
+    pub(super) fn serve_directory(&mut self, runtime: &tokio::runtime::Handle) -> CliResult<()> {
+        self.directory.serve(
+            self.services.paths()?,
+            runtime,
+            self.services.runners().changes(),
+        )
     }
 
     fn stop_roots(
@@ -172,152 +162,65 @@ impl ProductSessions {
         tree_id: &str,
         locator: Option<plakous::sessions::SessionLocator>,
     ) -> Result<Option<HostedElsewhere>, String> {
-        let custody = holder_elsewhere(self.tree.as_ref(), tree_id)
-            .map_err(|error| format!("the tree store could not be read: {error}"))?;
-        if let Some(holder) = custody {
-            return Ok(Some(HostedElsewhere {
-                host_name: holder.host_name,
-                binary: holder.binary,
-                pid: holder.instance.pid(),
-            }));
-        }
         let paths = self
             .services
             .paths()
             .map_err(|failure| failure.message().to_owned())?;
-        Ok(locator
-            .and_then(|locator| crate::store::holders::runtime_holder(paths, locator))
-            .map(|holder| HostedElsewhere {
-                host_name: holder.host_name,
+        holder(paths, &self.tree, tree_id, locator).map(|holder| holder.as_ref().map(Holder::wire))
+    }
+}
+
+fn holder(
+    paths: &crate::home::paths::PlakPaths,
+    tree: &SqliteTreeStore,
+    tree_id: &str,
+    locator: Option<plakous::sessions::SessionLocator>,
+) -> Result<Option<Holder>, String> {
+    let custody = holder_elsewhere(tree, tree_id)
+        .map_err(|error| format!("the tree store could not be read: {error}"))?;
+    if let Some(holder) = custody {
+        return Ok(Some(Holder::Tree(holder)));
+    }
+    Ok(locator.and_then(|locator| {
+        crate::store::holders::runtime_holder(paths, locator)
+            .map(|holder| Holder::Runtime(locator, holder))
+    }))
+}
+
+enum Holder {
+    Tree(CustodyHost),
+    Runtime(
+        plakous::sessions::SessionLocator,
+        crate::store::holders::BranchHolder,
+    ),
+}
+
+impl Holder {
+    fn wire(&self) -> HostedElsewhere {
+        match self {
+            Self::Tree(holder) => HostedElsewhere {
+                host_name: holder.host_name.clone(),
+                binary: holder.binary.clone(),
+                pid: holder.instance.pid(),
+            },
+            Self::Runtime(_, holder) => HostedElsewhere {
+                host_name: holder.host_name.clone(),
                 binary: None,
                 pid: holder.pid,
-            }))
-    }
-
-    fn row(&self, entry: DirectoryEntry, read: DirectoryRowRead<'_>) -> Option<SessionRow> {
-        use plakous_recursive_subagents::tree::TreeStore as _;
-        static OMITTED: Mutex<std::collections::BTreeSet<(std::path::PathBuf, String)>> =
-            Mutex::new(std::collections::BTreeSet::new());
-
-        let activity = plakous_hosted::runtime::root_standing(read.store, &entry.id);
-        let holder = self.elsewhere(&entry.node.tree_id, entry.locator);
-        let (activity, hosted_elsewhere) = match (activity, holder) {
-            (Ok(activity), Ok(holder)) => (activity_of(activity), holder),
-            (activity, _) => {
-                let reason = if activity.is_err() {
-                    "activity"
-                } else {
-                    "holder"
-                };
-                let home = self.services.paths().ok()?.home().to_owned();
-                if OMITTED
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .insert((home, entry.id.clone()))
-                {
-                    eprintln!("plakd host: session directory row omitted ({reason})");
-                }
-                return None;
-            }
-        };
-        let record = read.record;
-        let config = read.profiles.and_then(|profiles| profiles.config.as_ref());
-        let tree = self.tree.load(&entry.node.tree_id);
-        let degraded = record.is_none() || config.is_none() || tree.is_err();
-        let tree = tree.ok().flatten().map(ProductAgentTree::reopen);
-        let roster = tree.as_ref().map(|tree| tree.current_epoch().clone());
-        let needs_operator = config
-            .is_some_and(|config| self.row_needs_operator(&entry, read, tree.as_ref(), config));
-        let profile = config
-            .zip(record)
-            .filter(|_| roster.is_some())
-            .map(|(config, record)| {
-                crate::shell::settings::session_profile_with_profiles(
-                    config,
-                    &plakous_hosted::runtime::SurfaceSession {
-                        runner: record.runner.clone(),
-                        id: record.id.clone(),
-                        account: record.account.clone(),
-                        model: record.model.clone(),
-                        effort: record.effort.clone(),
-                        fast: record.target_selection
-                            == crate::product_config::ProductTargetSelection::NativePriority,
-                        workspace: record.workspace_root.clone(),
-                        roster,
-                        live_children: false,
-                        mcp: None,
-                        account_choices: std::collections::BTreeMap::new(),
-                    },
-                    read.profiles
-                        .map_or(&[], |profiles| profiles.profiles.as_slice()),
-                )
-            });
-        let (profile, differences) = match profile {
-            Some(profile) => (Some(profile.id), profile.differences),
-            None => (
-                Some("custom".to_owned()),
-                vec![plakous_host_protocol::views::ProfileDifference::Roster],
-            ),
-        };
-        let runner_id = record
-            .as_ref()
-            .and_then(|record| record.runner.as_ref())
-            .map_or("local", |runner| runner.runner_id.as_str());
-        Some(SessionRow {
-            runner: runner_views::label(runner_id, read.runners),
-            runner_status: if degraded {
-                plakous_host_protocol::wire::RunnerStatus::Unknown
-            } else {
-                runner_views::status(runner_id, read.runners)
-                    .unwrap_or(plakous_host_protocol::wire::RunnerStatus::Unknown)
             },
-            needs_operator,
-            activity_seq: read.activity_seq,
-            archived: entry.archived,
-            differences,
-            environment: environment_of(hosted_elsewhere.is_some()),
-            hosted_elsewhere,
-            node: NodeAddress {
-                tree_id: entry.node.tree_id.clone(),
-                agent_id: entry.node.agent_id.clone(),
-            },
-            title: entry.title.clone(),
-            workspace: entry.workspace_root.display().to_string(),
-            profile,
-            created_at: entry.created_at_unix,
-            updated_at: entry.updated_at_unix,
-            residency: SessionResidency::Dormant,
-            activity,
-            live_work: plakous_host_protocol::wire::LiveWork::default(),
-            session: entry.id,
-        })
-    }
-
-    fn row_needs_operator(
-        &self,
-        entry: &DirectoryEntry,
-        read: DirectoryRowRead<'_>,
-        tree: Option<&ProductAgentTree>,
-        config: &crate::product_config::ProductConfig,
-    ) -> bool {
-        if entry.archived {
-            return false;
         }
-        let policy = crate::session_attention::policy(config);
-        let work = tree.map_or_default(|tree| PendingTreeWork::read(tree, policy));
-        let wakes = read.record.map_or(0, prepared_wake_count);
-        let root = if work.results > 0 || work.questions > 0 || wakes > 0 {
-            read.store
-                .load_attention_reason(&entry.id, policy)
-                .ok()
-                .flatten()
-        } else {
-            None
-        };
-        work.attention(root, 0, wakes).is_some()
-            && self
-                .with_product(|store| store.head_of_tree(&entry.node.tree_id))
-                .is_ok_and(|head| head.as_deref() == Some(entry.id.as_str()))
+    }
+
+    fn gone(&self, paths: &crate::home::paths::PlakPaths, tree: &SqliteTreeStore) -> bool {
+        use plakous_recursive_subagents::tree::TreeCustody as _;
+        match self {
+            Self::Tree(holder) => tree.liveness_dir().is_some_and(|dir| {
+                plakous_recursive_subagents::tree::custody_holder_gone(&dir, holder)
+            }),
+            Self::Runtime(locator, holder) => {
+                crate::store::holders::runtime_holder(paths, *locator).as_ref() != Some(holder)
+            }
+        }
     }
 }
 
@@ -553,7 +456,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 context,
                 request,
                 self.services.clone(),
-                std::sync::Arc::clone(&self.tree),
+                Arc::clone(&self.tree),
             );
         }
         self.console.request(context, request)
@@ -574,7 +477,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
     fn host_stream_notify(
         &self,
         context: &plakous_hosted::host_service::wire::HostRequestContext,
-    ) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+    ) -> Option<Arc<tokio::sync::Notify>> {
         self.console.terminal_notify(context)
     }
     fn contains(&self, session: &str) -> Result<bool, String> {
@@ -606,13 +509,18 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn rename(&self, session: &str, title: Option<&str>) -> Result<Option<String>, RequestRefusal> {
-        crate::commands::session::lifecycle::rename_session(&self.services, session, title)
-            .map_err(|error| lifecycle::refusal(session, error))
+        let title =
+            crate::commands::session::lifecycle::rename_session(&self.services, session, title)
+                .map_err(|error| lifecycle::refusal(session, error))?;
+        self.directory.settle();
+        Ok(title)
     }
 
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
         crate::commands::session::lifecycle::set_archived(&self.services, session, archived)
-            .map_err(|error| lifecycle::refusal(session, error))
+            .map_err(|error| lifecycle::refusal(session, error))?;
+        self.directory.settle();
+        Ok(())
     }
 
     fn delete(
@@ -627,7 +535,9 @@ impl HostSessions<PlakExtension> for ProductSessions {
             abandon_children,
             abandon_jobs,
         )
-        .map_err(|error| lifecycle::refusal(session, error))
+        .map_err(|error| lifecycle::refusal(session, error))?;
+        self.directory.settle();
+        Ok(())
     }
 
     fn rows(
@@ -636,82 +546,20 @@ impl HostSessions<PlakExtension> for ProductSessions {
         runner: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String> {
-        let store = self
-            .services
-            .session_records()
-            .map_err(|failure| failure.message().to_owned())?;
-        let mut entries = self.with_product(|store| {
-            store.directory_filtered(workspace.map(Path::new), runner, include_archived)
-        })?;
-        let paths = self
-            .services
-            .paths()
-            .map_err(|failure| failure.message().to_owned())?;
-        let withheld = crate::carry::upgrade::receipt::withheld_targets(paths)
-            .map_err(|error| error.message().to_owned())?;
-        entries.retain(|entry| !withheld.contains(&entry.id));
-        let records = entries
-            .iter()
-            .map(|entry| store.load(&entry.id).ok())
-            .collect::<Vec<_>>();
-        let mut contexts = std::collections::BTreeMap::new();
-        for record in records.iter().flatten() {
-            let key = record
-                .runner
-                .as_ref()
-                .is_none_or(|runner| runner.runner_id == "local")
-                .then(|| record.workspace_root.clone());
-            contexts.entry(key.clone()).or_insert_with(|| {
-                let config = match &key {
-                    Some(workspace) => {
-                        crate::product_config::ProductConfig::load(&paths.for_workspace(workspace))
-                    }
-                    None => crate::product_config::ProductConfig::load_user(paths),
-                }
-                .ok();
-                let profiles = config.as_ref().map_or_default(|config| {
-                    crate::profiles::prepared_catalog(config, paths.home())
-                });
-                DirectoryProfiles { config, profiles }
-            });
-        }
-        let runners = self.services.runners().rows();
-        let locators = entries
-            .iter()
-            .filter_map(|entry| entry.locator)
-            .collect::<Vec<_>>();
-        let revisions = plakous::sessions::AgentSessions::inspect_branch_revisions_sqlite(
-            paths.runtime_database(),
-            &locators,
-        )
-        .unwrap_or_else(|_| vec![None; locators.len()]);
-        let mut revisions = revisions.into_iter();
-        let rows: Vec<_> = entries
-            .into_iter()
-            .zip(records.iter())
-            .filter_map(|(entry, record)| {
-                let revision = entry
-                    .locator
-                    .and_then(|_| revisions.next().flatten())
-                    .unwrap_or(0);
-                let key = record.as_ref().and_then(|record| {
-                    record
-                        .runner
-                        .as_ref()
-                        .is_none_or(|runner| runner.runner_id == "local")
-                        .then(|| record.workspace_root.clone())
-                });
-                let read = DirectoryRowRead {
-                    store: store.as_ref(),
-                    record: record.as_ref(),
-                    profiles: record.as_ref().and_then(|_| contexts.get(&key)),
-                    runners: &runners,
-                    activity_seq: revision,
-                };
-                self.row(entry, read)
-            })
-            .collect();
-        Ok(rows)
+        Ok(self.directory.rows(
+            workspace,
+            runner,
+            include_archived,
+            &self.services.runners().rows(),
+        ))
+    }
+
+    fn directory_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        Some(self.directory.changes())
+    }
+
+    fn settle_directory(&self) {
+        self.directory.settle();
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -922,6 +770,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
         };
         // A replay of the same request finds the session it created.
         if let Ok(existing) = store.load(&session) {
+            self.directory.settle();
             return replayed(&existing);
         }
         let validated = self.placement.validate(creation.runner, workspace)?;
@@ -948,16 +797,20 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 },
             }
         };
-        if let Some(workspace) = local_workspace {
-            return self
-                .services
+        let result = if let Some(workspace) = local_workspace {
+            self.services
                 .runner_overlap()
                 .with_local_admission(workspace, commit)
                 .map_err(|failure| {
                     runner_views::refusal(creation.runner, failure, &self.services.runners().rows())
-                })?;
+                })?
+        } else {
+            commit()
+        };
+        if result.is_ok() {
+            self.directory.settle();
         }
-        commit()
+        result
     }
 }
 
@@ -1212,7 +1065,7 @@ fn open_session(
     let (actions, events, worker) = spawn_host_worker(host)?;
     eprintln!("plakd host: opened session {session}");
     Ok(OpenedSession {
-        runner_pending: Some(std::sync::Arc::new(move || {
+        runner_pending: Some(Arc::new(move || {
             pending_roots.tree_runner_stop_pending(&pending_tree)
         })),
         root,
@@ -1229,6 +1082,39 @@ fn open_session(
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_reads_never_load_a_tree_or_open_a_product_store() {
+        let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+        let mut store = ProductStore::open(&paths).unwrap();
+        store.commit(&mut record).unwrap();
+        let sessions =
+            ProductSessions::new(&Services::for_home(paths.clone()), None, None).unwrap();
+        let opens = crate::store::open_counts::get(&paths.product_database());
+        #[cfg(feature = "test-support")]
+        let loads = plakous_recursive_subagents_store::test_support::tree_load_count(
+            &paths.subagents_database(),
+        );
+        for include_archived in [false, true] {
+            for _ in 0..3 {
+                let rows = sessions.rows(None, None, include_archived).unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].session, record.id);
+            }
+        }
+        assert_eq!(
+            crate::store::open_counts::get(&paths.product_database()),
+            opens
+        );
+        #[cfg(feature = "test-support")]
+        assert_eq!(
+            plakous_recursive_subagents_store::test_support::tree_load_count(
+                &paths.subagents_database()
+            ),
+            loads
+        );
+    }
 
     #[test]
     fn unreadable_row_is_omitted_without_hiding_healthy_rows_and_returns_after_repair() {
@@ -1260,6 +1146,7 @@ mod tests {
                 assert!(product.elsewhere(&broken.node.tree_id, None).is_err());
                 database
             };
+            product.directory.gap();
             for _ in 0..2 {
                 let rows = product.rows(None, None, false).unwrap();
                 assert_eq!(rows.len(), 1);
@@ -1280,6 +1167,7 @@ mod tests {
                     )
                     .unwrap();
             }
+            product.directory.gap();
             assert_eq!(product.rows(None, None, false).unwrap().len(), 2);
         }
     }
@@ -1322,6 +1210,7 @@ mod tests {
         )
         .unwrap();
         tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
+        product.directory.settle();
         let expected = crate::shell::settings::session_profile(
             &config,
             paths.home(),

@@ -272,7 +272,7 @@ fn open_host(
     let restart_services = services.clone();
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
     let (services, local) = upgrade::prepare_host(&services)?;
-    let sessions = sessions::ProductSessions::new(
+    let mut sessions = sessions::ProductSessions::new(
         &services,
         command.idle_release,
         Some(runtime.handle().clone()),
@@ -280,6 +280,7 @@ fn open_host(
     // Read before the host serves, so nothing this host does is mistaken
     // for what the last one left.
     let owed = sessions.owed()?;
+    sessions.serve_directory(runtime.handle())?;
     let console_switches = sessions.console_switches();
     let host = SessionHost::new(sessions, binary.to_owned(), terminals.generation());
     terminals.serve(&host, runtime.handle())?;

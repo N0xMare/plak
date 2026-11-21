@@ -4649,12 +4649,25 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   session's slot hands it over until the connection holds no attachment
   there, so an idle release never takes a session between its open and the
   attach, and a connection that detached keeps nothing resident. An attach
-  of a node of another session ends the connection's node attachment
-  first. The directory is read once per host change (an open, a
-  `release_session`, a create) and at most once a second otherwise, and
-  that read is shared by every host attachment; an idle release is seen by
-  the next read. A read that fails is a skipped tick, not a lost
-  connection. A row gone from the stores is said by a fresh snapshot.
+  of a node of another session ends the old attachment only when the new
+  attachment succeeds. On buffered transports, attach preparation, including
+  a dormant open, runs outside frame handling; the connection can still
+  answer control requests while it waits. An already resident session uses
+  the live service without opening a store. For a nonresident session, the
+  host reads only the archive flag before choosing a live open or loading the
+  archived read-only view. Directory requests do not open dormant sessions.
+  The startup scan below is separate recovery authority.
+  The host seeds one in-memory summary per session from storage at startup.
+  Product and tree commit notices update affected summaries; residency,
+  observation and runner changes wake directory watches. A detected notice
+  gap requests a rebuild off the connection. A sibling product process can
+  send a private presentation notice, which names changed facts but conveys
+  no admission or write authority. For an observed external holder, the
+  directory rechecks its process lock off the connection so a crash can clear
+  the holder without a release notice. Both directory watches and
+  one-shot lists read memory without opening a database, loading an agent
+  tree or taking a store write lock. There is no periodic directory read.
+  A row gone from the directory is said by a fresh snapshot.
   A wire creation profile is an exact listed built-in or user profile id,
   never a trimmed spelling, path or CLI alias. Profile is mutually exclusive
   with template/model overrides; malformed combinations fail before creation.
@@ -4704,14 +4717,13 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   the lexically first configured alias, `local`, or the saved id if removed.
   Live-table contention keeps the last-known operator-attention value for
   that resident tree, rather than publishing a false cleared state.
-  A directory read resolves config and the profile catalog once per distinct
-  workspace context (including trusted project overlays for local rows;
-  remote rows stay home-only), and uses one read-only runtime snapshot for
-  checkpoint revisions. Failure to obtain the session-record store refuses
-  the read. Rows whose activity or holder cannot be read are omitted until
-  readable again, with one content-free diagnostic per session per host run.
-  There is no last-known row cache and no fabricated idle, held or unheld
-  verdict. Other per-row failures use activity revision zero, unknown runner
+  The summary resolves config and the profile catalog per distinct workspace
+  context (including trusted project overlays for local rows; remote rows stay
+  home-only). Its checkpoint revisions come from read-only runtime inspection
+  during updates, not during listing. Rows whose activity or holder cannot be
+  read are omitted, with one content-free diagnostic per session per host run.
+  The summary does not fabricate idle, held or unheld verdicts. Other per-row
+  failures use activity revision zero, unknown runner
   status and custom profile with a roster difference as needed; no individual
   row failure freezes the directory for other sessions. These display
   fallbacks never admit an open or execution.

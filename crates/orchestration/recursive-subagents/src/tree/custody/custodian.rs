@@ -263,16 +263,22 @@ pub fn holder_elsewhere(
     if record.released || holder == *own {
         return Ok(None);
     }
-    let gone = store.liveness_dir().is_some_and(|directory| {
-        super::CustodyLiveness::holder_gone(
-            &super::liveness::DirectoryLiveness {
-                directory: &directory,
-                own,
-            },
-            &holder,
-        )
-    });
+    let gone = store
+        .liveness_dir()
+        .is_some_and(|directory| custody_holder_gone(&directory, &holder));
     Ok((!gone).then_some(holder))
+}
+
+/// Rechecks an already observed holder's process lock, without a store read.
+#[must_use]
+pub fn custody_holder_gone(directory: &std::path::Path, holder: &CustodyHost) -> bool {
+    super::CustodyLiveness::holder_gone(
+        &super::liveness::DirectoryLiveness {
+            directory,
+            own: custody_host(),
+        },
+        holder,
+    )
 }
 
 /// Gives up one holder's share; the last share releases the record.

@@ -8,9 +8,45 @@ use plakous_host_protocol::{
 
 use super::{
     Arc, CliResult, ClientFrame, DeserializeOwned, Forwarded, HostConnection, HostFrame,
-    NodeAddress, Outcome, ProtocolExtension, ReadOnlyLink, RequestRefusal, Serialize, SlotView,
-    StoredSessionView, WireConnection, Write,
+    ProtocolExtension, ReadOnlyLink, RequestRefusal, Serialize, StoredSessionView, WireConnection,
+    Write,
 };
+
+pub(super) struct StoredAttachment<P: ProtocolExtension> {
+    session: String,
+    refusal: RequestRefusal,
+    service: crate::host_service::HostService<P>,
+    actions: plakous_host_protocol::IntentSender<P>,
+    mailbox: plakous_host_protocol::IntentReceiver<P>,
+}
+
+impl<P: ProtocolExtension> StoredAttachment<P> {
+    pub(super) fn new(
+        mut view: StoredSessionView<P>,
+        refusal: RequestRefusal,
+        failure: Option<&crate::error::CliFailure>,
+    ) -> Self {
+        if let Some(failure) = failure.filter(|_| !view.archived) {
+            view.mark_unavailable(failure);
+        }
+        let (actions, mailbox) = plakous_host_protocol::intent_channel();
+        let service = crate::host_service::HostService::new(
+            actions.clone(),
+            view.root,
+            super::super::ATTACHMENT_CAPACITY,
+        );
+        for observation in view.observations {
+            service.observe(observation);
+        }
+        Self {
+            session: view.session,
+            refusal,
+            service,
+            actions,
+            mailbox,
+        }
+    }
+}
 
 impl<P: ProtocolExtension> StoredSessionView<P> {
     fn mark_unavailable(&mut self, failure: &crate::error::CliFailure) {
@@ -55,83 +91,18 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    pub(super) fn stored_attachment(
+    pub(super) fn attach_stored(
         &mut self,
-        node: &NodeAddress,
+        stored: StoredAttachment<P>,
         text: &str,
-        failure: Option<&crate::error::CliFailure>,
-    ) -> CliResult<Option<Forwarded<P>>> {
-        let refused = |refusal| Some(Forwarded::Answered(Outcome::Refused(refusal)));
-        let resident = self.host.lock().iter().find_map(|slot| match slot.peek() {
-            SlotView::Resident(session) if session.root().tree_id == node.tree_id => {
-                Some(session.session_id())
-            }
-            _ => None,
-        });
-        let session = match resident.map_or_else(
-            || self.host.sessions.session_of(node),
-            |session| Ok(Some(session)),
-        ) {
-            Ok(Some(session)) => session,
-            Ok(None) => return Ok(None),
-            Err(detail) => return Ok(refused(RequestRefusal::SessionUnavailable { detail })),
-        };
-        let cached = self
-            .host
-            .lock()
-            .iter()
-            .find(|slot| super::serves(slot, &session) && slot.startup_retrying())
-            .and_then(|slot| slot.open_failure());
-        let failure = failure.or(cached.as_ref());
-        let mut view = match self.host.sessions.stored_view(&session, failure.is_some()) {
-            Ok(Some(view)) => view,
-            Ok(None) => return Ok(None),
-            Err(refusal) => return Ok(refused(refusal)),
-        };
-        // Ownership refusals must be rechecked when their holder goes away,
-        // even when the product can no longer resolve the old holder's PID.
-        if !view.archived
-            && failure.is_some_and(|failure| failure.code() == Some("tree_hosted_elsewhere"))
-        {
-            return Ok(None);
-        }
-        let refusal = if view.archived {
-            RequestRefusal::SessionArchived {
-                session: session.clone(),
-            }
-        } else if let Some(failure) = failure {
-            self.host.sessions.refusal(&session, failure)
-        } else {
-            return Ok(None);
-        };
-        if !matches!(
+    ) -> CliResult<Forwarded<P>> {
+        let StoredAttachment {
+            session,
             refusal,
-            RequestRefusal::SessionArchived { .. }
-                | RequestRefusal::SessionUnavailable { .. }
-                | RequestRefusal::PlacementRefused { .. }
-                | RequestRefusal::BindingRefused { .. }
-        ) {
-            return Ok(None);
-        }
-        if view.root != *node {
-            return Ok(refused(if view.archived {
-                RequestRefusal::UnknownNode
-            } else {
-                refusal
-            }));
-        }
-        if let Some(failure) = failure.filter(|_| !view.archived) {
-            view.mark_unavailable(failure);
-        }
-        let (actions, mailbox) = plakous_host_protocol::intent_channel();
-        let service = crate::host_service::HostService::new(
-            actions.clone(),
-            view.root,
-            super::super::ATTACHMENT_CAPACITY,
-        );
-        for observation in view.observations {
-            service.observe(observation);
-        }
+            service,
+            actions,
+            mailbox,
+        } = stored;
         let sessions = Arc::clone(&self.host.sessions);
         let mut connection = WireConnection::on_service(
             service,
@@ -150,12 +121,12 @@ where
         if connection.holding() {
             self.unlink();
             self.readonly = Some(ReadOnlyLink {
-                session: view.session,
+                session,
                 refusal,
                 connection,
                 _mailbox: mailbox,
             });
         }
-        Ok(Some(Forwarded::Reading(reading)))
+        Ok(Forwarded::Reading(reading))
     }
 }

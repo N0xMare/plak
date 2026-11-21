@@ -2376,6 +2376,12 @@ kernel-held private locks; a stopping diagnostic is meaningful only while its
 verified lock is held. Unverifiable ownership, permissions, receipts or socket
 identity returns `verification_failed`, never absence or permission to start.
 
+The directory's separate same-user notice socket accepts only invalidations
+of cached presentation facts. It carries no session transcript, credentials,
+or commands. The reader re-reads affected durable facts under its own
+authority; a notice cannot change storage, open a driver, or answer a client
+request by itself.
+
 An explicit `plakd host upgrade --expect-binary <id>` is operator authority,
 not a frontend reload request or a browser capability. Its separate control
 socket is `host/upgrade.sock`, mode 0600 under the owned private host directory;

@@ -69,6 +69,10 @@ pub enum StorageAdmission {
 
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
+    /// A runtime owner reached its initial live attachment. This is a
+    /// presentation notice, not admission or a store operation.
+    fn observe_owner(&self, _session_id: &str) {}
+
     /// This store as one session writes through it: a write parked on a
     /// storage outage through the returned handle stops waiting once `probe`
     /// reports the operator's interrupt. The probe is read-only: it cannot

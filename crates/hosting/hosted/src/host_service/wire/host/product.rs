@@ -109,6 +109,15 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         include_archived: bool,
     ) -> Result<Vec<SessionRow>, String>;
 
+    /// Changes to the product's in-memory directory projection.
+    fn directory_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        None
+    }
+
+    /// Let a just-opened session's committed directory facts catch up before
+    /// returning its attachment. Not called on the resident fast path.
+    fn settle_directory(&self) {}
+
     /// The head of the tree's root line, or `None`. A successor that kept
     /// its source's node supersedes it independently of directory ordering.
     ///
