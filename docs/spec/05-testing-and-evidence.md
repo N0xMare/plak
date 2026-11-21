@@ -2490,7 +2490,9 @@ Real-process fixtures own host children and their process groups from spawn,
 before waiting for readiness. Teardown reaps them on drop, panic or a readiness
 timeout, and reaps home-local daemons before removing their homes.
 The process-group teardown regression waits for the grandchild's exit as well
-as reaping its parent: group signal delivery is not a join.
+as reaping its parent: group signal delivery is not a join. The service test
+checks that the grandchild cannot run when termination returns; an exited
+zombie may still have a PID until its adoptive parent reaps it.
 Remote skills regressions construct a native Claude-profile session through a
 workspace-restricted loopback runner with its own user-skill exception and
 cold-reopen an API session through the host

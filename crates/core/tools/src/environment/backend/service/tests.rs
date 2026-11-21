@@ -169,6 +169,21 @@ async fn host_service_environment_is_curated() -> TestResult {
     Ok(())
 }
 
+fn process_is_live(pid: rustix::process::Pid) -> TestResult<bool> {
+    let status = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.as_raw_pid().to_string()])
+        .env("LC_ALL", "C")
+        .output()?;
+    let state = std::str::from_utf8(&status.stdout)?.trim();
+    if status.status.code() == Some(1) && state.is_empty() && status.stderr.is_empty() {
+        return Ok(false); // The process has already been reaped.
+    }
+    if !status.status.success() || state.is_empty() {
+        return Err("could not observe process state".into());
+    }
+    Ok(!state.starts_with(['Z', 'X']))
+}
+
 #[tokio::test]
 async fn host_service_terminate_joins_a_grandchild() -> TestResult {
     let workspace = tempfile::tempdir()?;
@@ -185,9 +200,10 @@ async fn host_service_terminate_joins_a_grandchild() -> TestResult {
     stdout.read_line(&mut line).await?;
     let grandchild =
         rustix::process::Pid::from_raw(line.trim().parse()?).ok_or("grandchild pid is invalid")?;
-    assert!(rustix::process::test_kill_process(grandchild).is_ok());
+    assert!(process_is_live(grandchild)?);
     handle.terminate(SERVICE_PROCESS_TERMINATE_GRACE).await?;
-    assert!(rustix::process::test_kill_process(grandchild).is_err());
+    // Signal 0 still finds an exited child until its new parent reaps it.
+    assert!(!process_is_live(grandchild)?);
     Ok(())
 }
 
