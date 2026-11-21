@@ -375,7 +375,7 @@ mod tests {
             reply(
                 4,
                 Answer::Host {
-                    response: plakd_wire_types::console::HostResponse::TerminalAccepted {},
+                    response: HostResponse::TerminalAccepted {},
                 },
             ),
             reply(
