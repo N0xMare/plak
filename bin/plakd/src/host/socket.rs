@@ -300,6 +300,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameWriter for ProgressIo<W> {
                 .write_all(&line)
                 .await
                 .map_err(|_| SendError::Disconnected),
+            #[cfg(feature = "web")]
             Frame::Ping => Err(SendError::Disconnected),
         }
     }
@@ -464,9 +465,6 @@ async fn attached(
             () = outbox.drained() => {}
             () = tokio::time::sleep(STOP_POLL) => {}
         }
-    }
-    if outbox.overflowed() {
-        tracing::info!(target: "plak::host", "socket client fell behind");
     }
     outbox.close();
     if matches!(

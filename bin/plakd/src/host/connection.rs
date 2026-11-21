@@ -39,6 +39,7 @@ struct Pending {
 
 pub(crate) enum Frame {
     Line(Vec<u8>),
+    #[cfg(feature = "web")]
     Ping,
 }
 
@@ -46,6 +47,7 @@ impl Frame {
     fn len(&self) -> usize {
         match self {
             Self::Line(line) => line.len(),
+            #[cfg(feature = "web")]
             Self::Ping => 0,
         }
     }
@@ -95,6 +97,7 @@ impl Outbox {
         Ok(())
     }
 
+    #[cfg(feature = "web")]
     pub(crate) fn ping(&self) -> io::Result<()> {
         self.push(Frame::Ping, true)
     }
@@ -104,6 +107,7 @@ impl Outbox {
         self.0.ready.notify_one();
     }
 
+    #[cfg(feature = "web")]
     pub(crate) fn overflowed(&self) -> bool {
         self.lock().overflowed
     }
@@ -307,8 +311,11 @@ mod tests {
             outbox.write_all(line.as_bytes()).unwrap();
         }
         for index in [6, 7, 9, 0, 1, 2, 3, 4, 5, 8] {
-            let (Frame::Line(line), ordered) = outbox.pop().unwrap().unwrap() else {
-                panic!("expected a text frame");
+            let (frame, ordered) = outbox.pop().unwrap().unwrap();
+            let line = match frame {
+                Frame::Line(line) => line,
+                #[cfg(feature = "web")]
+                Frame::Ping => panic!("expected a text frame"),
             };
             assert_eq!(line, with_bulk[index].as_bytes());
             outbox.sent(line.len(), ordered);

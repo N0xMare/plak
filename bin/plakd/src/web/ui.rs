@@ -213,15 +213,18 @@ fn collect(
         }
         let bytes = std::fs::read(&resolved).map_err(|_| unreadable())?;
         let url = format!("/{relative}");
-        let logical = url
-            .strip_suffix(".br")
-            .or_else(|| url.strip_suffix(".gz"))
-            .unwrap_or(&url);
+        let (logical, variant) = if let Some(path) = url.strip_suffix(".br") {
+            (path, "br")
+        } else if let Some(path) = url.strip_suffix(".gz") {
+            (path, "gzip")
+        } else {
+            (url.as_str(), "identity")
+        };
         let etag = matches!(logical, INDEX | SERVICE_WORKER)
             .then(|| {
                 let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
                 let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-                HeaderValue::from_str(&format!("\"{encoded}\""))
+                HeaderValue::from_str(&format!("\"{variant}-{encoded}\""))
             })
             .transpose()
             .map_err(|_| unreadable())?;

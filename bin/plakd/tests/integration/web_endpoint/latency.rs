@@ -1,6 +1,6 @@
 //! Opt-in latency probe, using only the real host and an offline scripted model.
-//! Run with the test-support build and --run-ignored; PLAK_LATENCY_SECONDS
-//! overrides the default ten-minute switching run for shorter comparisons.
+//! Run with the `test-support` build and `--run-ignored`;
+//! `PLAK_LATENCY_SECONDS` overrides the ten-minute default.
 
 use super::*;
 use std::time::{Duration, Instant};
