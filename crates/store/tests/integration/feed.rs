@@ -1,4 +1,4 @@
-//! Change-feed conformance (spec 05 §2.6, “Feed and projection”) over any
+//! Change-feed conformance (spec 05 §2.6, "Feed and projection") over any
 //! `SessionStore`, plus the memory backend's retention bounds.
 
 use std::collections::BTreeSet;

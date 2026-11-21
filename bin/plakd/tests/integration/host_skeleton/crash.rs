@@ -1,4 +1,4 @@
-//! Crash windows after creation (spec 05 §2.6, “Host loss, release and handoff”):
+//! Crash windows after creation (spec 05 §2.6, "Host loss, release and handoff"):
 //! kill the host at every indexed commit of start-scan open and continuation,
 //! of a `release_session` waiting on a running turn, and of a `release_session`
 //! for a root whose tree is in custody. The next host recovers each cut.

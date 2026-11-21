@@ -1947,7 +1947,7 @@ test cannot prove these. There is no provider network or credential authority.
 | ScriptPlan `fold` | Answers or refuses a semantic-summary request. A refusal takes the offline placeholder rung. |
 | ScriptPlan `effect_decision_timeout_ms` | Overrides the scripted runtime's effect-decision deadline for expiry/refusal cases, never the production default. |
 | ScriptPlan `child_hold_ms` / `child_hold_after` | Hold a scripted child for the given milliseconds after publishing its locator, once that many earlier children have bound. A count of zero holds the first child; a zero duration disables the hold. |
-| ScriptPlan `fail_child_after_successes` | After the selected number of successful child binds, return recovery-required at the next bind. |
+| ScriptPlan `fail_child_after_successes` | Children whose zero-based bind ordinal is at least the configured threshold N return recovery-required; earlier children complete. |
 | ScriptPlan `stall_ignores_cancellation` | Opts a scripted stall out of its normal cancellation observation. |
 | `plakous-mcp-fake-server --call-log PATH` / `--list-log PATH` | Append the called tool's name before it runs, or one `list` line per `tools/list` request, respectively. These cross-process witnesses distinguish dispatch from listing and recovery from replay. |
 | `PLAK_TEST_ASSISTANT_DONE_RELEASE` | Only applies with the offline model. Gates the face after writing `assistant_done`, before checking stdin. Atomically release with `quit` to wait for the already-sent input, `release` to continue without input, or `idle` to drain through the real `busy:false` observation first. |
