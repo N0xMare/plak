@@ -403,6 +403,102 @@ async fn revalidate_picks_up_rotated_credential_generation() {
 }
 
 #[tokio::test]
+async fn claude_revalidation_adopts_peer_rotation_after_reading_old_ready_fence() {
+    use plakous_auth::subscription_limit::{
+        InMemorySubscriptionRequestGate, SubscriptionRequestClass, SubscriptionRequestLimits,
+        SystemSubscriptionGateClock,
+    };
+    let (temp, first, peer) = fixture(serde_json::json!({
+        "access_token": "fixture-new-access",
+        "refresh_token": "fixture-new-refresh",
+        "expires_in": 3600,
+        "scope": "user:inference"
+    }))
+    .await;
+    first
+        .persist_test_grant("fixture-access", "fixture-refresh", 3600, "user:inference")
+        .unwrap();
+    let mut second = tests::manager(temp.path().join("credentials/claude.json"));
+    let core = Arc::get_mut(&mut second.core).unwrap();
+    core.client = first.core.client.clone();
+    core.token_origin.clone_from(&first.core.token_origin);
+    let gate = Arc::new(InMemorySubscriptionRequestGate::new(
+        SubscriptionRequestLimits::new(4, 4, 4, 1_000_000, None, 0).unwrap(),
+        Arc::new(SystemSubscriptionGateClock::default()),
+    ));
+    let first = first.with_subscription_request_gate(gate.clone());
+    let second = second.with_subscription_request_gate(gate.clone());
+    let (left, admitted, _) = first
+        .resolve_model(
+            "claude-sonnet-5",
+            first.core.client.clone(),
+            plakous_model::SessionLineage::Root,
+        )
+        .await
+        .unwrap();
+    let (right, _, _) = second
+        .resolve_model(
+            "claude-sonnet-5",
+            second.core.client.clone(),
+            plakous_model::SessionLineage::Root,
+        )
+        .await
+        .unwrap();
+
+    let store = first.core.store().unwrap();
+    let before = store.load().unwrap().unwrap();
+    let mut stored = first.core.read_stored(&before).unwrap();
+    stored.expires_at = 1;
+    let due = before.generation().next().unwrap();
+    store
+        .replace(
+            before.generation(),
+            &credential_record(due, &stored).unwrap(),
+        )
+        .unwrap();
+    drop(stored);
+
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *second.core.refresh_probe_pause.lock().unwrap() = Some(refresh::RefreshProbePause {
+        reached: Arc::clone(&reached),
+        resume: Arc::clone(&resume),
+    });
+    let checked_at = admitted.observed_at();
+    let (left, right) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(
+            async {
+                reached.notified().await;
+                let renewed = left.revalidate_runtime_authority(checked_at).await;
+                resume.notify_one();
+                renewed
+            },
+            right.revalidate_runtime_authority(checked_at),
+        )
+    })
+    .await
+    .unwrap();
+    let generation = store.load().unwrap().unwrap().generation().get();
+    assert_eq!(generation, due.get() + 2, "one claim and one completion");
+    assert_eq!(left.unwrap().credential_generation(), generation);
+    assert_eq!(right.unwrap().credential_generation(), generation);
+    assert_eq!(peer.await.unwrap(), "POST /v1/oauth/token HTTP/1.1");
+    let counts = gate.snapshot().unwrap();
+    assert_eq!(
+        counts
+            .class(SubscriptionRequestClass::AuthRefresh)
+            .dispatched(),
+        1
+    );
+    assert_eq!(
+        counts
+            .class(SubscriptionRequestClass::Inference)
+            .dispatched(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn a_named_source_revalidates_under_its_own_authority() {
     let (_temp, manager, peer) = fixture(serde_json::json!({"access_token":"fixture-new-access","refresh_token":"fixture-new-refresh","expires_in":3600,"scope":"user:inference"})).await;
     let manager = manager.with_credential_source_scope("claude/work".into());

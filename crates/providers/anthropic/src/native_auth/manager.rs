@@ -12,8 +12,8 @@ use super::{
     StoredTokens, SubscriptionRequestGate, SubscriptionUsageCredentialState, SubscriptionUsageRead,
     SubscriptionUsageUnavailable, Timestamp, attach_claude_profile, auth_profile_id,
     claude_authorize_url, credential_record, fmt, network_failure, oauth_control_headers,
-    oauth_control_headers_with, run_claimed_refresh, system_unix_seconds, usage_credential_refusal,
-    validate_acceptance, validate_current_ready_record,
+    oauth_control_headers_with, refuse_newer_record, run_claimed_refresh, system_unix_seconds,
+    usage_credential_refusal, validate_acceptance, validate_current_ready_record,
 };
 #[cfg(test)]
 use super::{Origin, parse_claude_oauth_token_grant};
@@ -74,6 +74,8 @@ impl ClaudeNativeAuthManager {
                 #[cfg(test)]
                 control_origin: None,
                 refresh_flight: AsyncMutex::new(()),
+                #[cfg(test)]
+                refresh_probe_pause: std::sync::Mutex::new(None),
             }),
             request_gate: None,
             refresh_observer: None,
@@ -110,6 +112,8 @@ impl ClaudeNativeAuthManager {
                 #[cfg(test)]
                 control_origin: None,
                 refresh_flight: AsyncMutex::new(()),
+                #[cfg(test)]
+                refresh_probe_pause: std::sync::Mutex::new(None),
             }),
             request_gate: None,
             refresh_observer: None,
@@ -547,7 +551,10 @@ impl ClaudeNativeAuthManager {
                 Err(ClaudeNativeAuthError::NotReady)
             };
         }
-        validate_current_ready_record(self.core.store()?)?;
+        let store = self.core.store()?;
+        store
+            .on_disk(|store| Ok(refuse_newer_record(store)))
+            .await??;
         let flight = self.core.refresh_flight.lock().await;
         let mut hooks = ClaudeRefreshHooks {
             core: &self.core,
@@ -558,7 +565,7 @@ impl ClaudeNativeAuthManager {
             force,
             detail: CredentialRefreshDetail::default(),
         };
-        run_claimed_refresh(self.core.store()?, &self.core.client, &mut hooks).await
+        run_claimed_refresh(store, &self.core.client, &mut hooks).await
     }
 
     /// Replaces the current credential with a local revoked tombstone.

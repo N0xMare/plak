@@ -172,6 +172,8 @@ struct ManagerCore {
     #[cfg(test)]
     control_origin: Option<String>,
     refresh_flight: AsyncMutex<()>,
+    #[cfg(test)]
+    refresh_probe_pause: std::sync::Mutex<Option<refresh::RefreshProbePause>>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -280,11 +282,8 @@ fn credential_record(
     )?)
 }
 
-/// Refuses a record in any lifecycle state whose payload a newer build
-/// wrote, then validates a Ready record's payload in this build's format.
-fn validate_current_ready_record(
-    store: &PrivateCredentialStore,
-) -> Result<(), ClaudeNativeAuthError> {
+/// Refuses a record in any lifecycle state whose payload a newer build wrote.
+fn refuse_newer_record(store: &PrivateCredentialStore) -> Result<(), ClaudeNativeAuthError> {
     let newer = store.inspect_payload(|payload| {
         serde_json::from_slice::<StoredVersion>(payload.expose_secret()).is_ok_and(|stored| {
             RecordAge::of_version(stored.version.into(), STORED_VERSION.into()) == RecordAge::Newer
@@ -293,6 +292,13 @@ fn validate_current_ready_record(
     if newer == Some(true) {
         return Err(ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild);
     }
+    Ok(())
+}
+
+fn validate_current_ready_record(
+    store: &PrivateCredentialStore,
+) -> Result<(), ClaudeNativeAuthError> {
+    refuse_newer_record(store)?;
     let Some(fence) = store.load()? else {
         return Ok(());
     };
@@ -300,20 +306,33 @@ fn validate_current_ready_record(
         return Ok(());
     }
     let lease = store.acquire_ready(&fence)?;
-    let payload = lease.payload().expose_secret();
+    decode_current_ready_payload(&fence, lease.payload()).map(drop)
+}
+
+fn decode_current_ready_payload(
+    fence: &CredentialFence,
+    payload: &SecretBytes,
+) -> Result<StoredTokens, ClaudeNativeAuthError> {
+    let payload = payload.expose_secret();
     let Ok(current) = serde_json::from_slice::<StoredTokens>(payload) else {
         return Err(match serde_json::from_slice::<StoredVersion>(payload) {
+            Ok(stored) if stored.version > STORED_VERSION => {
+                ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild
+            }
             Ok(stored) if stored.version < STORED_VERSION => {
                 ClaudeNativeAuthError::StoredCredentialFormatRetired
             }
             _ => ClaudeNativeAuthError::InvalidStoredCredential,
         });
     };
+    if current.version > STORED_VERSION {
+        return Err(ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild);
+    }
     current.validate()?;
     if current.grant_binding != fence.account_binding().as_str() {
         return Err(ClaudeNativeAuthError::InvalidStoredCredential);
     }
-    Ok(())
+    Ok(current)
 }
 
 fn oauth_grant_binding(refresh_token: &str) -> Result<AccountBinding, ClaudeNativeAuthError> {

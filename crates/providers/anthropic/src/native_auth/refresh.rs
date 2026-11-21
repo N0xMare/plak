@@ -8,8 +8,9 @@ use super::{
     ManagerCore, PrivateCredentialStore, PrivateStoreError, REFRESH_SKEW_SECONDS, REQUEST_TIMEOUT,
     RefreshClaim, Request, StoredTokens, SubscriptionRequestGate, SubscriptionRequestPermit,
     Zeroizing, access_needs_refresh, acquire_refresh_permit, claude_oauth_scope_admits_inference,
-    claude_token_refresh_body, credential_record, map_pull_body_error, network_failure,
-    parse_claude_oauth_token_grant, pull_claimed_body, stored_tokens, system_unix_seconds,
+    claude_token_refresh_body, credential_record, decode_current_ready_payload,
+    map_pull_body_error, network_failure, parse_claude_oauth_token_grant, pull_claimed_body,
+    stored_tokens, system_unix_seconds,
 };
 
 pub(super) struct ClaudeRefreshHooks<'a> {
@@ -22,6 +23,12 @@ pub(super) struct ClaudeRefreshHooks<'a> {
     pub(super) force: RefreshForce,
     /// Numbers and rejecting check of the received response, for diagnostics.
     pub(super) detail: CredentialRefreshDetail,
+}
+
+#[cfg(test)]
+pub(super) struct RefreshProbePause {
+    pub(super) reached: Arc<tokio::sync::Notify>,
+    pub(super) resume: Arc<tokio::sync::Notify>,
 }
 
 /// When a claimed refresh runs although the stored expiry is outside the skew.
@@ -57,38 +64,47 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         self.request_permit = None;
         let store = self.core.store()?;
-        let fence = store
-            .on_disk(PrivateCredentialStore::load)
-            .await?
+        let force = self.force;
+        let (fence, ready_due) = store
+            .inspect_for_refresh(move |fence, payload| {
+                let stored = decode_current_ready_payload(fence, payload)?;
+                let forced = match force {
+                    RefreshForce::IfDue => false,
+                    RefreshForce::Always => true,
+                    RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
+                };
+                Ok::<_, ClaudeNativeAuthError>(
+                    forced
+                        || access_needs_refresh(
+                            stored.expires_at,
+                            system_unix_seconds()?,
+                            REFRESH_SKEW_SECONDS,
+                        ),
+                )
+            })
+            .await??
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
-        if fence.status() == CredentialStatus::RefreshRequired {
-            self.request_permit = acquire_refresh_permit(self.request_gate)?;
-            return Ok(Some(fence));
+        #[cfg(test)]
+        if fence.status() == CredentialStatus::Ready {
+            let pause = self
+                .core
+                .refresh_probe_pause
+                .lock()
+                .map_err(|_| ClaudeNativeAuthError::NotReady)?
+                .take();
+            if let Some(pause) = pause {
+                pause.reached.notify_one();
+                pause.resume.notified().await;
+            }
         }
-        if fence.status() != CredentialStatus::Ready {
-            return Err(ClaudeNativeAuthError::NotReady);
+        match ready_due {
+            Some(false) => return Ok(None),
+            Some(true) => {}
+            None if fence.status() == CredentialStatus::RefreshRequired => {}
+            None => return Err(ClaudeNativeAuthError::NotReady),
         }
-        let expected = fence.clone();
-        let stored = store
-            .on_disk(move |store| Ok(ManagerCore::read_stored_from(store, &expected)))
-            .await??;
-        let forced = match self.force {
-            RefreshForce::IfDue => false,
-            RefreshForce::Always => true,
-            RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
-        };
-        if forced
-            || access_needs_refresh(
-                stored.expires_at,
-                system_unix_seconds()?,
-                REFRESH_SKEW_SECONDS,
-            )
-        {
-            self.request_permit = acquire_refresh_permit(self.request_gate)?;
-            Ok(Some(fence))
-        } else {
-            Ok(None)
-        }
+        self.request_permit = acquire_refresh_permit(self.request_gate)?;
+        Ok(Some(fence))
     }
 
     fn fresh_output(&mut self) -> Result<Self::Output, Self::Error> {
