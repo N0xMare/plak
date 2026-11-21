@@ -26,24 +26,33 @@ impl PrivateCredentialStore {
         )
     }
 
-    /// Examines a refresh candidate's fence and, only when Ready, its payload
-    /// from the same record under the shared lock. The lock is not retained
-    /// by the result: an exchange still requires a claim on the exact fence.
+    /// Inspects a refresh candidate on a blocking worker. For a Ready
+    /// record, `judge_ready` decodes the payload under the same shared lock
+    /// as the fence and returns whether refresh is due. The closure must not
+    /// retain secret material, including in its redaction-safe errors.
+    /// Non-Ready records return the fence without a verdict or payload.
+    /// An exchange still requires a claim on the exact fence.
     ///
     /// # Errors
     ///
-    /// Returns the same errors as [`Self::load`].
-    pub fn inspect_for_refresh<T>(
+    /// Returns store or worker failures outside the provider's verdict error.
+    pub async fn inspect_for_refresh<E: Send + 'static>(
         &self,
-        inspect: impl FnOnce(CredentialFence, Option<&SecretBytes>) -> T,
-    ) -> Result<Option<T>, PrivateStoreError> {
-        self.with_shared_lock(|store| {
-            Ok(platform::load_record(store)?.map(|record| {
-                let payload =
-                    (record.status() == CredentialStatus::Ready).then(|| record.payload());
-                inspect(record.fence(), payload)
-            }))
+        judge_ready: impl FnOnce(&CredentialFence, &SecretBytes) -> Result<bool, E> + Send + 'static,
+    ) -> Result<Result<Option<(CredentialFence, Option<bool>)>, E>, PrivateStoreError> {
+        self.on_disk(move |store| {
+            store.with_shared_lock(|store| {
+                let Some(record) = platform::load_record(store)? else {
+                    return Ok(Ok(None));
+                };
+                let fence = record.fence();
+                let due = (fence.status() == CredentialStatus::Ready)
+                    .then(|| judge_ready(&fence, record.payload()))
+                    .transpose();
+                Ok(due.map(|due| Some((fence, due))))
+            })
         })
+        .await
     }
 
     /// Reports whether a durable [`CredentialStatus::RefreshOutcomeUnknown`]

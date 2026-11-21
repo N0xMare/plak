@@ -67,14 +67,39 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         self.request_permit = None;
         let store = self.core.store()?;
-        let (fence, stored) = store
-            .on_disk(|store| {
-                store.inspect_for_refresh(|fence, payload| {
-                    let stored = payload.map(|payload| ManagerCore::decode_stored(&fence, payload));
-                    (fence, stored)
-                })
+        let account = self.expected_account.cloned();
+        let selection_epoch = self.expected_selection_epoch.map(str::to_owned);
+        let authority_matches = self
+            .expected_authority
+            .is_some_and(|expected| self.core.authority_is(expected));
+        let force = self.force;
+        let (fence, ready_due) = store
+            .inspect_for_refresh(move |fence, payload| {
+                if account
+                    .as_ref()
+                    .is_some_and(|expected| expected != fence.account_binding())
+                {
+                    return Err(XaiNativeAuthError::AccountChanged);
+                }
+                let stored = ManagerCore::decode_stored(fence, payload)?;
+                if selection_epoch
+                    .is_some_and(|epoch| epoch != stored.selection_epoch || !authority_matches)
+                {
+                    return Err(XaiNativeAuthError::SelectionChanged);
+                }
+                let forced = match force {
+                    RefreshForce::IfDue => false,
+                    RefreshForce::Always => true,
+                    RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
+                };
+                Ok(forced
+                    || access_needs_refresh(
+                        stored.expires_at,
+                        system_unix_seconds()?,
+                        ACCESS_REFRESH_LEAD_SECONDS,
+                    ))
             })
-            .await?
+            .await??
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         #[cfg(test)]
         if fence.status() == CredentialStatus::Ready {
@@ -94,34 +119,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         {
             return Err(XaiNativeAuthError::AccountChanged);
         }
-        let forced = match self.force {
-            RefreshForce::IfDue => false,
-            RefreshForce::Always => true,
-            RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
-        };
         // Unknown/RefreshRequired keep the payload, but only the claim
         // may read its selection epoch in build_refresh_request.
-        match stored {
-            Some(stored) => {
-                let stored = stored?;
-                if self.expected_selection_epoch.is_some_and(|epoch| {
-                    epoch != stored.selection_epoch
-                        || !self
-                            .expected_authority
-                            .is_some_and(|expected| self.core.authority_is(expected))
-                }) {
-                    return Err(XaiNativeAuthError::SelectionChanged);
-                }
-                if !forced
-                    && !access_needs_refresh(
-                        stored.expires_at,
-                        system_unix_seconds()?,
-                        ACCESS_REFRESH_LEAD_SECONDS,
-                    )
-                {
-                    return Ok(None);
-                }
-            }
+        match ready_due {
+            Some(false) => return Ok(None),
+            Some(true) => {}
             None if matches!(
                 fence.status(),
                 CredentialStatus::RefreshRequired | CredentialStatus::RefreshOutcomeUnknown

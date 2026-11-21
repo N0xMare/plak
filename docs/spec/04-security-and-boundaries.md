@@ -1613,11 +1613,13 @@ failure. Readers and Ready leases hold only the shared record lock, so a status
 read never waits behind a peer's provider round-trip. Only a *started* claim may
 reach the network, and a started claim has no restore path.
 
-SuperGrok reads the Ready payload and fence together when deciding whether a
-refresh is due. A peer rotation after that read is settled by the claim's
-fence comparison, which makes renewal check the current grant's selection and
-expiry instead of failing on the outdated read. The read grants no dispatch
-authority.
+A refresh inspection reads the fence and decides whether a Ready credential
+needs a refresh under the same shared record lock on a blocking worker.
+The store lends the Ready payload only to the decode-and-judge closure;
+neither the payload nor any decoded secret outlives the closure. Only the
+fence and a non-secret verdict or error leave the inspection; it grants no
+dispatch authority. If a peer rotates after a due verdict, the exact-fence
+claim comparison makes renewal check the current credential again.
 
 The outcome is classified by what actually crossed the wire:
 
