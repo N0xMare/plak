@@ -1,6 +1,6 @@
 use super::common_error::map_credential_status;
 use super::login::{PendingCompatibilityConsent, complete_pending_with_consent};
-use super::online::{LocalLogin, auth_client, run_refresh};
+use super::online::{LocalLogin, auth_client, map_offline_lifecycle, run_refresh};
 use super::vertical::{NativeFuture, NativeVertical, NativeVerticalEntry};
 use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, ModelId,
@@ -241,26 +241,13 @@ impl NativeSubscriptions {
     }
 }
 
-#[allow(
-    clippy::match_same_arms,
-    reason = "unknown non-exhaustive lifecycle states fail closed as quarantined"
-)]
 pub(super) fn map_xai_offline_status(
     status: plakous_xai::XaiOfflineCredentialStatus,
 ) -> NativeAuthStatus {
-    match status {
-        plakous_xai::XaiOfflineCredentialStatus::SignedOut => NativeAuthStatus::SignedOut,
-        plakous_xai::XaiOfflineCredentialStatus::Ready => NativeAuthStatus::Ready,
-        plakous_xai::XaiOfflineCredentialStatus::RefreshRequired => {
-            NativeAuthStatus::RefreshRequired
-        }
-        plakous_xai::XaiOfflineCredentialStatus::Quarantined => NativeAuthStatus::Quarantined,
-        plakous_xai::XaiOfflineCredentialStatus::Refreshing => NativeAuthStatus::Refreshing,
-        plakous_xai::XaiOfflineCredentialStatus::Revoked => NativeAuthStatus::Revoked,
-        plakous_xai::XaiOfflineCredentialStatus::WrittenByNewerBuild => {
-            NativeAuthStatus::WrittenByNewerBuild
-        }
-        _ => NativeAuthStatus::Quarantined,
+    if status == plakous_xai::XaiOfflineCredentialStatus::LoginRequired {
+        NativeAuthStatus::Quarantined
+    } else {
+        map_offline_lifecycle(status)
     }
 }
 #[allow(

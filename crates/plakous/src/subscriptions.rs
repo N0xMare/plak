@@ -13,7 +13,7 @@ mod child;
 mod claude;
 #[cfg(feature = "codex")]
 mod codex;
-#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+#[cfg(any(feature = "grok", feature = "claude"))]
 mod common_error;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod compatibility;

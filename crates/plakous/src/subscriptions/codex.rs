@@ -237,7 +237,7 @@ impl NativeSubscriptions {
     }
 }
 
-pub(super) use super::common_error::map_offline_lifecycle as map_codex_status;
+pub(super) use super::online::map_offline_lifecycle as map_codex_status;
 #[allow(
     clippy::match_same_arms,
     reason = "unknown non-exhaustive provider failures map to one redacted internal category"
