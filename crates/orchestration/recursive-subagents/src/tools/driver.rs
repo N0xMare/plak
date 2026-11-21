@@ -260,10 +260,12 @@ impl TreeDriver {
         let tickets = self
             .write(move |tree| {
                 let mut snapshot = None;
-                let result = tree
-                    .prepare_child_retention_guarded(plakous::model::now_unix_millis(), |before| {
-                        snapshot = Some(before.clone())
-                    });
+                let result = tree.prepare_child_retention_guarded(
+                    plakous::model::now_unix_millis(),
+                    |before| {
+                        snapshot = Some(before.clone());
+                    },
+                );
                 let result = result.and_then(|tickets| {
                     // Even an old ticket needs the custody check before dispatch.
                     if !tickets.is_empty() || snapshot.is_some() {

@@ -47,7 +47,10 @@ fn insert_tree(
 #[test]
 fn idle_housekeeping_waits_for_tree_change_or_expiry() {
     let root = tempfile::tempdir().unwrap();
-    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
+    let (config, _) = scripted_host_with(
+        root.path(),
+        script(&serde_json::json!([{"output": {"text": "idle"}}])),
+    );
     let runtime = insert_tree(&config);
     let id = &config.session.id;
     let mut housekeeping = super::super::projection::live::IdleTreeHousekeeping::default();
@@ -56,7 +59,7 @@ fn idle_housekeeping_waits_for_tree_change_or_expiry() {
     assert!(housekeeping.due(id, now));
     assert!(!housekeeping.due(id, idle_tick));
     runtime
-        .mutate_then_emit(false, |tree| {
+        .mutate_then_emit_typed(false, |tree| {
             tree.spawn_agent(
                 "root",
                 &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
