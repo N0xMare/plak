@@ -1,5 +1,9 @@
 //! No-op lifecycle probes when `test-hooks` is disabled.
 
+pub(crate) const fn directory_revalidation(default: std::time::Duration) -> std::time::Duration {
+    default
+}
+
 pub(crate) const fn bridge_discovery_window(default: std::time::Duration) -> std::time::Duration {
     default
 }

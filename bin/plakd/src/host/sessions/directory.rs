@@ -28,18 +28,6 @@ mod files;
 const REVALIDATE: Duration = Duration::from_secs(15);
 const PROBE_HOLDERS: Duration = Duration::from_millis(250);
 
-fn revalidation_interval() -> Duration {
-    #[cfg(feature = "test-support")]
-    if let Some(millis) = std::env::var("PLAK_TEST_DIRECTORY_REVALIDATE_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|millis| (1..=60_000).contains(millis))
-    {
-        return Duration::from_millis(millis);
-    }
-    REVALIDATE
-}
-
 type Rows = BTreeMap<String, Summary>;
 
 #[derive(PartialEq, Eq)]
@@ -322,7 +310,7 @@ struct Source {
 
 impl Source {
     fn run(&mut self, events: &Mailbox, shared: &RwLock<Rows>, notify: &watch::Sender<u64>) {
-        let interval = revalidation_interval();
+        let interval = crate::test_hooks::host_lifecycle::directory_revalidation(REVALIDATE);
         let mut next_tick = Instant::now() + interval;
         let mut next_probe = Instant::now() + PROBE_HOLDERS;
         let mut retry_rebuild = false;

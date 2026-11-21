@@ -76,6 +76,13 @@ pub(crate) fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewaySer
 
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
+    pub(crate) fn directory_revalidation(default: std::time::Duration) -> std::time::Duration {
+        super::hook_environment("PLAK_TEST_DIRECTORY_REVALIDATE_MS")
+            .and_then(|value| value.to_str()?.parse::<u64>().ok())
+            .filter(|millis| (1..=60_000).contains(millis))
+            .map_or(default, std::time::Duration::from_millis)
+    }
+
     pub(crate) fn bridge_discovery_window(default: std::time::Duration) -> std::time::Duration {
         super::shorter_seconds("PLAK_TEST_BRIDGE_DISCOVERY_SECONDS", default)
     }
