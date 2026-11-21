@@ -167,7 +167,7 @@ async fn close_body(body: ResponseBody) -> Result<(), Failure> {
 /// so every kernel records the same one. A failure the client inferred names
 /// none.
 #[must_use]
-pub const fn retry_cause_refusal(cause: ModelRetryCause) -> Option<ProviderRefusal> {
+pub(crate) const fn retry_cause_refusal(cause: ModelRetryCause) -> Option<ProviderRefusal> {
     match cause {
         ModelRetryCause::HttpStatus { status } => ProviderRefusal::from_http_status(status),
         ModelRetryCause::StreamInterrupted {
@@ -182,7 +182,7 @@ pub const fn retry_cause_refusal(cause: ModelRetryCause) -> Option<ProviderRefus
 
 /// Everything the turn-retry decline ladder reads for one failed generation.
 #[derive(Clone, Copy, Debug)]
-pub struct RetryDeclineInput {
+pub(crate) struct RetryDeclineInput {
     /// Time left before the caller's hard deadline, if it set one.
     pub deadline_remaining: Option<Duration>,
     /// A decline the exchange already established, such as a provider's
@@ -215,7 +215,7 @@ pub struct RetryDeclineInput {
 /// beyond the wait budget, the budget, and a deadline the delay would cross. The long-stream budget is consulted (and
 /// charged) only when every earlier rung admits the retry.
 #[must_use]
-pub fn retry_decline(
+pub(crate) fn retry_decline(
     input: &RetryDeclineInput,
     long_stream_replays: &mut LongStreamReplayBudget,
 ) -> Option<ModelRetryDeclineReason> {

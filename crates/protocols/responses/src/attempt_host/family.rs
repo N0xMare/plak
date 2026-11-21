@@ -11,7 +11,7 @@ use plakous_exchange::retry_phase;
 use plakous_model::{ModelRetry, ModelRetryDeclineReason, ModelRetryPhase, ModelTransportFault};
 use tokio::time::Instant;
 
-use super::dispatch::{execute_admitted, refusal_status, status_outcome};
+use super::dispatch::{AttemptResult, execute_admitted, refusal_status, status_outcome};
 use super::{
     Arc, Client, PhysicalRequestOutcome, ResponsesAttempt, ResponsesAttemptDialectData,
     ResponsesAttemptError, ResponsesAttemptResponse, ResponsesAuthorizationAdapter,
@@ -27,8 +27,6 @@ pub(super) struct ResponsesExchange<D, G> {
     pub(super) attempt: ResponsesAttempt,
 }
 
-type AttemptResult = Result<ResponsesAttemptResponse, ResponsesAttemptError>;
-
 impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for ResponsesExchange<D, G> {
     type Result = AttemptResult;
     type Terminal = AttemptResult;
@@ -41,7 +39,7 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
         let attempt = &mut self.attempt;
         attempt.deadline = generation.deadline.into_std();
         attempt.stream.physical_started = Some(generation.started.into_std());
-        let terminal = execute_admitted(
+        let (terminal, request_log) = execute_admitted(
             &self.client,
             self.dialect.as_ref(),
             self.data.clone(),
@@ -83,7 +81,7 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
         if stream.retry_disabled {
             failure = failure.with_decline(ModelRetryDeclineReason::RetryDisabled);
         }
-        if let Some(request) = attempt.request_log.take() {
+        if let Some(request) = request_log {
             failure = failure.with_request(request);
         }
         GenerationEnd::Retry { terminal, failure }

@@ -424,7 +424,7 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
             });
         }
         let physical = attempt.observe_physical_request_started()?;
-        if !attempt.authorize_generation(physical.generation())? {
+        if !attempt.authorize_generation(&physical)? {
             return finish_error(
                 attempt,
                 PhysicalRequestOutcome::DefiniteRejection,

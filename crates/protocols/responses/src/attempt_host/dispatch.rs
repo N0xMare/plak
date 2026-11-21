@@ -35,10 +35,9 @@ pub(super) fn admit_attempt(attempt: &ResponsesAttempt) -> Result<(), FamilyCore
     Ok(())
 }
 
-#[allow(
-    clippy::result_large_err,
-    reason = "the attempt error is returned once per attempt from a future that already holds it"
-)]
+pub(super) type AttemptResult = Result<ResponsesAttemptResponse, ResponsesAttemptError>;
+type RequestLog = (String, String, usize);
+
 pub(super) async fn execute_admitted<D, G>(
     client: &Client,
     dialect: &D,
@@ -46,19 +45,51 @@ pub(super) async fn execute_admitted<D, G>(
     authorization: ResponsesAuthorizationAdapter<D, G>,
     attempt: &mut ResponsesAttempt,
     generation: Generation,
-) -> Result<ResponsesAttemptResponse, ResponsesAttemptError>
+) -> (AttemptResult, Option<RequestLog>)
 where
     D: Send + Sync + 'static,
     G: Send + 'static,
 {
-    let (prepared, dispatch_binding) =
-        prepare_dispatch(dialect, authorization.preflight, data.auth_slots, attempt).await?;
+    let prepared =
+        match prepare_dispatch(dialect, authorization.preflight, data.auth_slots, attempt).await {
+            Ok(prepared) => prepared,
+            Err(error) => return (Err(error), None),
+        };
+    let log = RetryFailure::request_log(&prepared.0.request);
+    let result = exchange_prepared(
+        client,
+        dialect,
+        data,
+        authorization,
+        attempt,
+        generation,
+        prepared,
+    )
+    .await;
+    (result, Some(log))
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "the attempt error is returned once per attempt from a future that already holds it"
+)]
+async fn exchange_prepared<D: Send + Sync + 'static, G: Send + 'static>(
+    client: &Client,
+    dialect: &D,
+    data: ResponsesAttemptDialectData,
+    authorization: ResponsesAuthorizationAdapter<D, G>,
+    attempt: &mut ResponsesAttempt,
+    generation: Generation,
+    (prepared, dispatch_binding): (
+        ResponsesPreparedPhysicalRequest<G>,
+        ResponsesPhysicalDispatchBinding,
+    ),
+) -> AttemptResult {
     let ResponsesPreparedPhysicalRequest {
         request,
         mut response_head_guard,
         ..
     } = prepared;
-    attempt.request_log = Some(RetryFailure::request_log(&request));
     let transport = GenerationTransport::new(&generation, None);
     let http_cancellation = transport.cancellation().clone();
     let revalidation = ResponsesRevalidationRequest {

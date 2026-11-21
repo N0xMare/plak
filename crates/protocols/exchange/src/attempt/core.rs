@@ -113,18 +113,6 @@ impl FamilyAttemptCore {
         Ok(self.observations.admit_service()?)
     }
 
-    pub fn reserve_primary_auth(&self) -> Result<u32, FamilyCoreError> {
-        Ok(self
-            .observations
-            .reserve_auth(AuthReservationMask::PRIMARY)?)
-    }
-
-    pub fn validate_primary_auth(&self, generation: u32) -> Result<(), FamilyCoreError> {
-        Ok(self
-            .observations
-            .validate_auth(generation, AuthReservationMask::PRIMARY)?)
-    }
-
     /// Reserves and validates the wire family's exact slot set. A different
     /// generation returns false without granting dispatch authority.
     ///

@@ -682,10 +682,18 @@ impl<W: FamilyWire> FamilyAttempt<W> {
     }
     pub(super) fn authorize_generation(
         &self,
-        generation: u32,
+        physical: &FamilyPhysicalRequestBinding,
     ) -> Result<bool, FamilyAttemptError<W>> {
+        if physical.attempt() != &self.binding {
+            return Err(FamilyAttemptError::<W>::Binding {
+                facts: self.terminal_facts(),
+            });
+        }
         self.core
-            .authorize_generation(generation, crate::attempt::AuthReservationMask::PRIMARY)
+            .authorize_generation(
+                physical.generation(),
+                crate::attempt::AuthReservationMask::PRIMARY,
+            )
             .map_err(|source| self.observation(source))
     }
     /// Returns current conservative facts.
@@ -725,33 +733,6 @@ impl<W: FamilyWire> FamilyAttempt<W> {
     pub fn observe_provider_accepted(&self) -> Result<(), FamilyAttemptError<W>> {
         self.core
             .observe_provider_accepted()
-            .map_err(|source| self.observation(source))
-    }
-    /// Reserves the one family authorization slot for the active generation.
-    pub fn reserve_authorization(
-        &self,
-    ) -> Result<FamilyPhysicalRequestBinding, FamilyAttemptError<W>> {
-        let generation = self
-            .core
-            .reserve_primary_auth()
-            .map_err(|source| self.observation(source))?;
-        Ok(PhysicalRequestBinding::new(
-            self.binding.clone(),
-            generation,
-        ))
-    }
-    /// Revalidates a non-cloneable authorization against the active generation.
-    pub fn validate_authorization(
-        &self,
-        physical: &FamilyPhysicalRequestBinding,
-    ) -> Result<(), FamilyAttemptError<W>> {
-        if physical.attempt() != &self.binding {
-            return Err(FamilyAttemptError::<W>::Binding {
-                facts: self.terminal_facts(),
-            });
-        }
-        self.core
-            .validate_primary_auth(physical.generation())
             .map_err(|source| self.observation(source))
     }
     fn observation(&self, source: FamilyCoreError) -> FamilyAttemptError<W> {

@@ -583,7 +583,6 @@ pub struct ResponsesAttempt {
     stream: StreamProgress,
     core: FamilyAttemptCore,
     retry_permitted: bool,
-    request_log: Option<(String, String, usize)>,
 }
 
 impl ResponsesAttempt {
@@ -626,7 +625,6 @@ impl ResponsesAttempt {
             stream: StreamProgress::default(),
             core: FamilyAttemptCore::new_with_policy(ledger_policy),
             retry_permitted,
-            request_log: None,
         }
     }
 

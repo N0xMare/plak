@@ -103,7 +103,7 @@ fn a_refused_generation_is_followed_by_a_fresh_one_never_an_overlapping_one()
     );
     let second = attempt.observe_physical_request_started()?;
     assert_eq!((first.generation(), second.generation()), (1, 2));
-    assert_eq!(attempt.reserve_authorization()?, second);
+    assert!(attempt.authorize_generation(&second)?);
     assert_eq!(attempt.terminal_facts().physical_attempts(), 2);
     Ok(())
 }
@@ -114,22 +114,17 @@ fn authorization_rejects_foreign_attempt_and_generation_bindings()
     let owner = attempt(b"binding-owner")?;
     owner.core.mark_service_admitted()?;
     let physical = owner.observe_physical_request_started()?;
-    let reserved = owner.reserve_authorization()?;
-    assert_eq!(physical, reserved);
-
-    let wrong_generation = ChatPhysicalRequestBinding::new(owner.binding().clone(), 2);
-    assert!(matches!(
-        owner.validate_authorization(&wrong_generation),
-        Err(ChatAttemptError::Observation { .. })
-    ));
-
     let foreign = attempt(b"binding-foreign")?;
     let foreign_binding =
         ChatPhysicalRequestBinding::new(foreign.binding().clone(), physical.generation());
     assert!(matches!(
-        owner.validate_authorization(&foreign_binding),
+        owner.authorize_generation(&foreign_binding),
         Err(ChatAttemptError::Binding { .. })
     ));
+    assert!(owner.authorize_generation(&physical)?);
+    owner.observe_physical_request_finished(PhysicalRequestOutcome::DefiniteRejection)?;
+    owner.observe_physical_request_started()?;
+    assert!(!owner.authorize_generation(&physical)?);
     Ok(())
 }
 
