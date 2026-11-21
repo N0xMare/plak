@@ -1111,7 +1111,7 @@ async fn disconnect_cancels_queued_attach_and_releases_a_new_unattached_actor() 
                 .lock()
                 .unwrap()
                 .get("s1")
-                .is_some_and(|count| count.release_now());
+                .is_some_and(crate::host_service::AttachmentCount::release_now);
             if released && fake.0.active_workers.load(Ordering::SeqCst) == 0 {
                 break;
             }
@@ -1121,7 +1121,7 @@ async fn disconnect_cancels_queued_attach_and_releases_a_new_unattached_actor() 
     .await
     .unwrap();
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
-    assert!(out.take().is_empty());
+    assert_eq!(out.take(), [] as [HostFrame<Core>; 0]);
 }
 
 #[tokio::test]

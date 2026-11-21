@@ -871,7 +871,7 @@ fn cross_process_record_notice_publishes_directory_row() {
     let Some(fixture) = fixture() else { return };
     let host = start(&fixture);
     let mut client = Client::connect(&host);
-    assert!(client.rows(1).is_empty());
+    assert_eq!(client.rows(1), [] as [SessionRow; 0]);
     let spawned = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",

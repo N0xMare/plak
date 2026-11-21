@@ -5,7 +5,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 
 use crate::{OpenError, database::schema};
 
-type Images = BTreeMap<String, i64>;
+type Images = BTreeMap<String, u64>;
 type Custody = BTreeMap<String, (i64, String, String, Option<String>, String, bool)>;
 
 /// Changed tree revisions and custody placement facts since the previous inspection.
@@ -75,6 +75,15 @@ impl TreeDirectoryProbe {
             .optional()
             .map_err(unavailable)
     }
+
+    /// Records an image revision already observed by a presentation caller.
+    pub fn note_image(&mut self, id: &str, revision: Option<u64>) {
+        if let Some(revision) = revision {
+            self.images.insert(id.into(), revision);
+        } else {
+            self.images.remove(id);
+        }
+    }
 }
 
 fn changed<T: Eq>(old: &BTreeMap<String, T>, new: &BTreeMap<String, T>) -> Vec<String> {
@@ -100,7 +109,7 @@ fn fingerprints(connection: &Connection) -> Result<(Images, Custody), OpenError>
     let images = tx
         .prepare("SELECT tree_id,revision FROM agent_trees")
         .map_err(unavailable)?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map([], |row| Ok((row.get(0)?, crate::from_i64(row.get(1)?)?)))
         .map_err(unavailable)?
         .collect::<Result<_, _>>()
         .map_err(unavailable)?;

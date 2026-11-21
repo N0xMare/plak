@@ -26,6 +26,22 @@ type Stamp = (
     Option<i64>,
 );
 
+const STAMP_FIELDS: &str = "s.revision,s.updated_at,s.archived,s.title_override,s.runner_display,
+    v.head_locator,p.applied_seq,(SELECT max(i.rowid) FROM host_intents i WHERE i.session_id=s.id)";
+
+fn stamp(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Stamp> {
+    Ok((
+        row.get(at)?,
+        row.get(at + 1)?,
+        row.get(at + 2)?,
+        row.get(at + 3)?,
+        row.get(at + 4)?,
+        row.get(at + 5)?,
+        row.get(at + 6)?,
+        row.get(at + 7)?,
+    ))
+}
+
 pub(crate) struct ProductDirectoryProbe {
     connection: Connection,
     version: i64,
@@ -68,6 +84,14 @@ impl ProductDirectoryProbe {
         self.version = version;
         Ok(changed)
     }
+
+    pub(crate) fn note(&mut self, id: &str, metadata: Option<&DirectoryMetadata>) {
+        if let Some(metadata) = metadata {
+            self.rows.insert(id.into(), metadata.stamp.clone());
+        } else {
+            self.rows.remove(id);
+        }
+    }
 }
 
 fn data_version(connection: &Connection) -> Result<i64, String> {
@@ -78,35 +102,20 @@ fn data_version(connection: &Connection) -> Result<i64, String> {
 
 fn fingerprints(connection: &Connection) -> Result<BTreeMap<String, Stamp>, String> {
     connection
-        .prepare(
-            "SELECT s.id,s.revision,s.updated_at,s.archived,s.title_override,s.runner_display,
-                v.head_locator,p.applied_seq,
-                (SELECT max(i.rowid) FROM host_intents i WHERE i.session_id=s.id)
-         FROM sessions s LEFT JOIN projector_cursors p ON p.session_id=s.id
-         LEFT JOIN session_views v ON v.session_id=s.id",
-        )
+        .prepare(&format!(
+            "SELECT s.id,{STAMP_FIELDS}
+            FROM sessions s LEFT JOIN projector_cursors p ON p.session_id=s.id
+            LEFT JOIN session_views v ON v.session_id=s.id"
+        ))
         .map_err(unavailable)?
-        .query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                (
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                ),
-            ))
-        })
+        .query_map([], |row| Ok((row.get(0)?, stamp(row, 1)?)))
         .map_err(unavailable)?
         .collect::<Result<_, _>>()
         .map_err(unavailable)
 }
 
 pub(crate) struct DirectoryMetadata {
+    stamp: Stamp,
     pub(crate) workspace: PathBuf,
     pub(crate) identity: String,
     pub(crate) title: Option<String>,
@@ -124,19 +133,21 @@ pub(crate) struct DirectoryMetadata {
 impl ProductStore {
     pub(crate) fn directory_metadata(&self, id: &str) -> Result<Option<DirectoryMetadata>, String> {
         self.connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT s.workspace_root,s.workspace_identity,COALESCE(s.title_override,s.title),
                         s.node_tree_id,s.node_agent_id,s.runner_display,s.archived,s.created_at,s.updated_at,
                         CASE WHEN v.session_id IS NULL THEN s.locator ELSE v.head_locator END,
-                        s.account,s.model,s.effort,s.target_selection
-                 FROM sessions s LEFT JOIN session_views v ON v.session_id=s.id WHERE s.id=?1",
-            )
+                        s.account,s.model,s.effort,s.target_selection,{STAMP_FIELDS}
+                 FROM sessions s LEFT JOIN session_views v ON v.session_id=s.id
+                 LEFT JOIN projector_cursors p ON p.session_id=s.id WHERE s.id=?1",
+            ))
             .and_then(|mut statement| statement.query_row([id], |row| {
                 let selection = serde_json::from_str::<crate::product_config::ProductTargetSelection>(
                     &row.get::<_, String>(13)?,
                 )
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
                 Ok(DirectoryMetadata {
+                    stamp: stamp(row, 14)?,
                     workspace: PathBuf::from(row.get::<_, String>(0)?),
                     identity: row.get(1)?,
                     title: row.get(2)?,

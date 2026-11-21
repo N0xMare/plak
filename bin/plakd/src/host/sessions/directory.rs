@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
@@ -63,6 +64,7 @@ impl Directory {
             withheld: BTreeSet::new(),
             omitted: BTreeSet::new(),
             retry_rows: BTreeSet::new(),
+            retry_visibility: false,
             holders: BTreeMap::new(),
         };
         let rows = Arc::new(RwLock::new(source.rebuild().map_err(CliFailure::new)?));
@@ -98,7 +100,6 @@ impl Directory {
         let socket = tokio::net::UnixDatagram::bind(&path).map_err(|error| {
             CliFailure::new(format!("could not bind session directory notices: {error}"))
         })?;
-        use std::os::unix::fs::PermissionsExt as _;
         if let Err(error) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
         {
             let _ = External::remove_socket(&path);
@@ -116,17 +117,14 @@ impl Directory {
                 let Some(recipient) = inbox.upgrade() else {
                     return;
                 };
-                match result {
-                    Ok(count) => {
-                        if let Some(notice) = external_notice(&bytes[..count]) {
-                            recipient.send_external(notice);
-                        }
+                if let Ok(count) = result {
+                    if let Some(notice) = external_notice(&bytes[..count]) {
+                        recipient.send_external(notice);
                     }
-                    Err(_) => {
-                        recipient.send_external(Notice::Revalidate);
-                        drop(recipient);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
+                } else {
+                    recipient.send_external(Notice::Revalidate);
+                    drop(recipient);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         });
@@ -290,6 +288,7 @@ struct Source {
     withheld: BTreeSet<String>,
     omitted: BTreeSet<String>,
     retry_rows: BTreeSet<String>,
+    retry_visibility: bool,
     holders: BTreeMap<String, Holder>,
 }
 
@@ -362,7 +361,7 @@ impl Source {
             }
         }
         batch.configuration |= self.files.global_changed(&self.paths);
-        batch.visibility |= self.files.receipts_changed(&self.paths);
+        batch.visibility |= self.files.receipts_changed(&self.paths) || self.retry_visibility;
         self.profiles.retain(|workspace, profile| {
             if profile.is_some()
                 && !self
@@ -387,15 +386,18 @@ impl Source {
             self.profiles.clear();
             affected.extend(self.metadata.values().map(|row| row.node.tree_id.clone()));
         }
-        if batch.visibility
-            && let Ok(withheld) = crate::carry::upgrade::receipt::withheld_targets(&self.paths)
-        {
-            for id in withheld.symmetric_difference(&self.withheld) {
-                if let Some(row) = self.metadata.get(id) {
-                    affected.insert(row.node.tree_id.clone());
+        if batch.visibility {
+            if let Ok(withheld) = crate::carry::upgrade::receipt::withheld_targets(&self.paths) {
+                for id in withheld.symmetric_difference(&self.withheld) {
+                    if let Some(row) = self.metadata.get(id) {
+                        affected.insert(row.node.tree_id.clone());
+                    }
                 }
+                self.withheld = withheld;
+                self.retry_visibility = false;
+            } else {
+                self.retry_visibility = true;
             }
-            self.withheld = withheld;
         }
         self.update(
             std::mem::take(&mut batch.records),
@@ -408,6 +410,7 @@ impl Source {
         let ids = self.store.session_ids()?.into_iter().collect();
         self.withheld = crate::carry::upgrade::receipt::withheld_targets(&self.paths)
             .map_err(|error| error.message().to_owned())?;
+        self.retry_visibility = false;
         self.metadata.clear();
         self.revisions.clear();
         self.retry_revisions.clear();
@@ -440,6 +443,10 @@ impl Source {
                 }
                 TreeUpdate::Image(_) | TreeUpdate::Inspect => inspect_tree(&self.paths, &id),
             };
+            if let Ok(facts) = &facts {
+                self.tree_probe
+                    .note_image(&id, facts.as_ref().map(|facts| facts.revision));
+            }
             activity_trees.insert(id.clone());
             if self.trees.get(&id) != Some(&facts) {
                 affected.insert(id.clone());
@@ -458,13 +465,17 @@ impl Source {
             }
             match self.store.directory_metadata(&id) {
                 Ok(Some(metadata)) => {
+                    self.product_probe.note(&id, Some(&metadata));
                     affected.insert(metadata.node.tree_id.clone());
                     if let Some(locator) = metadata.locator {
                         locators.push((id.clone(), locator));
                     }
                     self.metadata.insert(id, metadata);
                 }
-                Ok(None) => changes.push((id, None)),
+                Ok(None) => {
+                    self.product_probe.note(&id, None);
+                    changes.push((id, None));
+                }
                 Err(_) => {
                     self.omit(&id, "metadata");
                     changes.push((id, None));
