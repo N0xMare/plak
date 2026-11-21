@@ -18,6 +18,10 @@ _profiling:
 smoke *ARGS:
     tools/perf/perf-smoke.sh {{ARGS}}
 
+[doc("measure wire latency on a generated offline scratch host, or sample Linux /proc")]
+host-latency *ARGS:
+    python3 tools/perf/host_latency.py {{ARGS}}
+
 # Sample a plakd invocation with samply (Linux/macOS). Usage: just perf samply agent --help
 samply *ARGS: _profiling
     command -v samply >/dev/null || { echo "install: cargo install samply" >&2; exit 1; }
