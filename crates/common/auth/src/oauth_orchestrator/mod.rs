@@ -66,12 +66,16 @@ pub use revoke::run_claimed_revoke;
 /// even when its access token is not yet due.
 #[derive(Clone, Copy)]
 pub enum RefreshForce<F> {
+    /// Let the dialect's expiry check decide.
     IfDue,
+    /// An explicit refresh regardless of expiry.
     Always,
+    /// Force only the rejected fence or generation.
     WhileCurrent(F),
 }
 
 impl<F: PartialEq> RefreshForce<F> {
+    /// Report whether this exact candidate bypasses the expiry check.
     #[must_use]
     pub fn forces(self, current: F) -> bool {
         match self {

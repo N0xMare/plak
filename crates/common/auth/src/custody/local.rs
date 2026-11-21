@@ -74,12 +74,22 @@ async fn snapshot<D: LocalCustody>(
     dialect: &D,
     slot: &CustodySlot,
 ) -> Result<Snapshot<D::Selection>, CustodyError> {
+    retry_snapshot(|| dialect.snapshot_once(slot), D::retry_snapshot).await
+}
+
+/// Retry a snapshot under a dialect's read policy. Also used to reread
+/// after a once-only identity hydration without starting another hydration.
+///
+/// # Errors
+/// Returns the first non-retryable or last retryable refusal.
+pub async fn retry_snapshot<T, F: Future<Output = Result<T, CustodyError>>>(
+    mut read: impl FnMut() -> F,
+    retry: impl Fn(&CustodyError) -> bool,
+) -> Result<T, CustodyError> {
     let mut attempts = 1;
     loop {
-        match dialect.snapshot_once(slot).await {
-            Err(error) if attempts < SNAPSHOT_ATTEMPTS && D::retry_snapshot(&error) => {
-                attempts += 1;
-            }
+        match read().await {
+            Err(error) if attempts < SNAPSHOT_ATTEMPTS && retry(&error) => attempts += 1,
             result => return result,
         }
     }

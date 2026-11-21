@@ -1596,6 +1596,12 @@ environment-variable, or provider discovery of its own.
 
 ### 3.3 Refresh is claim-based and crash-safe
 
+The native subscription dialects share the local custody retry, Ready-lease
+and refresh-settlement loops in `plakous-auth`. Refresh eligibility reads the
+fence and judges the Ready payload in one shared-lock inspection. The claimed
+HTTP ladder consumes that exact fence. Dialects own payload formats, account
+and selection evidence, request and response validation, and refusal mapping.
+
 Confirmed host refresh enters this same claimed workflow. Host login workers
 retain the same ArmedLoginRecovery drop behavior: cancel before exchange
 creates no credential; cancellation or process loss during exchange leaves

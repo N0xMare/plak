@@ -1,13 +1,15 @@
 //! Claimed refresh hooks for the Claude OAuth token endpoint.
 
+use plakous_auth::oauth_orchestrator::select_refresh_fence;
+
 use super::{
     Arc, BuildRequestFailure, CLAUDE_OAUTH_INFERENCE_SCOPE, ClaimedHttpDisposition,
     ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks, ClaudeNativeAuthError,
     CredentialFence, CredentialRecord, CredentialRefreshDetail, CredentialRefreshFailureReason,
-    CredentialRefreshObserver, CredentialStatus, ExchangeControl, Instant, MAX_TOKEN_BYTES,
-    ManagerCore, PrivateCredentialStore, PrivateStoreError, REFRESH_SKEW_SECONDS, REQUEST_TIMEOUT,
-    RefreshClaim, Request, StoredTokens, SubscriptionRequestGate, SubscriptionRequestPermit,
-    Zeroizing, access_needs_refresh, acquire_refresh_permit, claude_oauth_scope_admits_inference,
+    CredentialRefreshObserver, ExchangeControl, Instant, MAX_TOKEN_BYTES, ManagerCore,
+    PrivateCredentialStore, PrivateStoreError, REFRESH_SKEW_SECONDS, REQUEST_TIMEOUT, RefreshClaim,
+    Request, StoredTokens, SubscriptionRequestGate, SubscriptionRequestPermit, Zeroizing,
+    access_needs_refresh, acquire_refresh_permit, claude_oauth_scope_admits_inference,
     claude_token_refresh_body, credential_record, decode_current_ready_payload,
     map_pull_body_error, network_failure, parse_claude_oauth_token_grant, pull_claimed_body,
     stored_tokens, system_unix_seconds,
@@ -31,17 +33,8 @@ pub(super) struct RefreshProbePause {
     pub(super) resume: Arc<tokio::sync::Notify>,
 }
 
-/// When a claimed refresh runs although the stored expiry is outside the skew.
-#[derive(Clone, Copy)]
-pub(super) enum RefreshForce {
-    /// Only inside the skew.
-    IfDue,
-    /// Always (the provider rejected the access token with HTTP 401).
-    Always,
-    /// Only while the store still holds this rejected generation; a
-    /// generation another refresher already rotated is refreshed if due.
-    WhileCurrent(plakous_auth::CredentialGeneration),
-}
+pub(super) type RefreshForce =
+    plakous_auth::oauth_orchestrator::RefreshForce<plakous_auth::CredentialGeneration>;
 
 pub(super) struct ClaudeRefreshPrepared {
     pub(super) account_uuid: Option<crate::ClaudeAccountUuid>,
@@ -68,13 +61,8 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
         let (fence, ready_due) = store
             .inspect_for_refresh(move |fence, payload| {
                 let stored = decode_current_ready_payload(fence, payload)?;
-                let forced = match force {
-                    RefreshForce::IfDue => false,
-                    RefreshForce::Always => true,
-                    RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
-                };
                 Ok::<_, ClaudeNativeAuthError>(
-                    forced
+                    force.forces(fence.generation())
                         || access_needs_refresh(
                             stored.expires_at,
                             system_unix_seconds()?,
@@ -85,7 +73,7 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
             .await??
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         #[cfg(test)]
-        if fence.status() == CredentialStatus::Ready {
+        if fence.status() == plakous_auth::CredentialStatus::Ready {
             let pause = self
                 .core
                 .refresh_probe_pause
@@ -97,12 +85,16 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
                 pause.resume.notified().await;
             }
         }
-        match ready_due {
-            Some(false) => return Ok(None),
-            Some(true) => {}
-            None if fence.status() == CredentialStatus::RefreshRequired => {}
-            None => return Err(ClaudeNativeAuthError::NotReady),
-        }
+        let Some(fence) = select_refresh_fence(
+            fence,
+            ready_due,
+            false,
+            false,
+            ClaudeNativeAuthError::NotReady,
+        )?
+        else {
+            return Ok(None);
+        };
         self.request_permit = acquire_refresh_permit(self.request_gate)?;
         Ok(Some(fence))
     }
