@@ -134,6 +134,15 @@ impl TreeSnapshotPush {
     pub(super) fn tree_id(&self) -> Option<&str> {
         self.tree_id.as_deref()
     }
+
+    pub(super) fn resolved_id<'a>(
+        &'a mut self,
+        rows: &dyn TopologyRows,
+        session: &'a SessionRecord,
+    ) -> &'a str {
+        let _ = self.runtime(rows, session);
+        self.tree_id().unwrap_or(&session.id)
+    }
 }
 
 fn snapshot_due(

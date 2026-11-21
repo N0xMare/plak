@@ -1,4 +1,4 @@
-//! The live projector tick (spec 02 §2.6): one background task per attached
+//! The live projector (spec 02 §2.6): one background task per attached
 //! session applies the feed to the views after each acknowledged commit and
 //! keeps them, with the settled rows it has shown, for the whole attachment.
 //! The host loop never waits on it while streaming; admission, send-now and
@@ -8,6 +8,7 @@
 //! the next open catches up.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use plakous::sessions::{AgentSessions, SessionLocator};
@@ -102,6 +103,7 @@ impl LiveTarget {
 pub(in crate::runtime) struct Applied {
     generation: u64,
     error: Option<String>,
+    subscription_lost: bool,
 }
 
 /// A request is answered once even when a feed wake repeats it.
@@ -176,6 +178,30 @@ impl LiveProjector {
             tasks: tasks.clone(),
             task,
         }
+    }
+
+    pub(crate) fn ensure_following(&mut self, target: LiveTarget, entry: bool) {
+        let retarget = self
+            .requests
+            .borrow()
+            .as_ref()
+            .is_none_or(|request| !request.target.same_session(&target));
+        let retry = {
+            let applied = self.applied.borrow();
+            applied.generation == self.generation
+                && (applied.error.is_some() || applied.subscription_lost)
+        };
+        if entry || retarget || retry {
+            self.tick(target);
+        }
+    }
+
+    pub(crate) fn take_change(&mut self) -> bool {
+        let changed = self.applied.has_changed().unwrap_or(false);
+        if changed {
+            self.applied.borrow_and_update();
+        }
+        changed
     }
 
     /// Asks for a pass over `target` and returns at once. Requests coalesce:
@@ -341,6 +367,17 @@ impl Drop for LiveProjector {
     }
 }
 
+struct FeedForwarder {
+    task: crate::TaskHandle<()>,
+    lost: Arc<AtomicBool>,
+}
+
+impl FeedForwarder {
+    fn lost(&self) -> bool {
+        self.lost.load(Ordering::Acquire) || self.task.is_finished()
+    }
+}
+
 /// Wakes the task on a request or on a commit of the followed session. A
 /// forwarder task turns the feed subscription into wakes; it is replaced
 /// when the followed session changes.
@@ -355,7 +392,7 @@ async fn run(
 ) -> Option<SessionViews> {
     let mut current: Option<Request> = None;
     let mut cached = None;
-    let mut forwarder: Option<crate::TaskHandle<()>> = None;
+    let mut forwarder: Option<FeedForwarder> = None;
     let mut shown = SettledRows::default();
     loop {
         wake.notified().await;
@@ -372,16 +409,14 @@ async fn run(
             {
                 cached = None;
             }
-            if forwarder
-                .as_ref()
-                .is_none_or(crate::TaskHandle::is_finished)
+            if forwarder.as_ref().is_none_or(FeedForwarder::lost)
                 || current
                     .as_ref()
                     .is_none_or(|current| !current.target.same_session(&next.target))
             {
                 shown = SettledRows::default();
                 if let Some(old) = forwarder.take() {
-                    old.abort();
+                    old.task.abort();
                 }
                 if let Ok(mut feed) = next
                     .target
@@ -390,13 +425,18 @@ async fn run(
                     .await
                 {
                     let wake = Arc::clone(&wake);
-                    // A lost subscription ends the forwarder; the next request
-                    // resubscribes.
-                    forwarder = Some(next.target.roots.session_tasks().spawn(async move {
+                    let lost = Arc::new(AtomicBool::new(false));
+                    let lost_in_task = Arc::clone(&lost);
+                    // Tell the owner a lost subscription needs a retry, even
+                    // when the feed has gone quiet.
+                    let task = next.target.roots.session_tasks().spawn(async move {
                         while feed.changed().await.is_ok() {
                             wake.notify_one();
                         }
-                    }));
+                        lost_in_task.store(true, Ordering::Release);
+                        wake.notify_one();
+                    });
+                    forwarder = Some(FeedForwarder { task, lost });
                 }
             }
             current = Some(next);
@@ -424,7 +464,7 @@ async fn run(
                 #[cfg(test)]
                 tests::pause_noncurrent(
                     &request.target.product_id,
-                    forwarder.as_ref().is_some_and(|task| !task.is_finished()),
+                    forwarder.as_ref().is_some_and(|feed| !feed.lost()),
                 )
                 .await;
             }
@@ -442,13 +482,14 @@ async fn run(
         report.send_replace(Applied {
             generation: request.generation,
             error,
+            subscription_lost: forwarder.as_ref().is_none_or(FeedForwarder::lost),
         });
         if request.finish {
             break;
         }
     }
     if let Some(forwarder) = forwarder {
-        forwarder.abort();
+        forwarder.task.abort();
     }
     cached
 }

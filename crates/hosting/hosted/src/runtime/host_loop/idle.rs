@@ -135,7 +135,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .child_live
             .retain_session(&self.role.config.session.id);
         self.update_background_process_count();
-        self.publish_pending_continuation();
+        self.publish_idle_pending_continuation();
         self.role
             .readiness
             .apply_settled(&mut self.role.config, &self.role.events);
@@ -1266,7 +1266,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return self.continuation_prompt().await.map(Some);
         }
         if observed_tree {
-            let step = self.child_wake_prompt(Instant::now()).await?;
+            let step = self.idle_child_wake_prompt(Instant::now()).await?;
             // A check that admitted nothing still leaves the timeout available
             // for residency. Coalescing arrivals and recovery can keep it held.
             return Ok((!matches!(step, HostStep::Continue)).then_some(step));

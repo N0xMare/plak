@@ -262,8 +262,14 @@ impl TreeDriver {
                 let snapshot = (**tree).clone();
                 match tree
                     .prepare_child_retention(plakous::model::now_unix_millis())
-                    .and_then(|tickets| driver.save_guarded(tree).map(|()| tickets))
-                {
+                    .and_then(|tickets| {
+                        // Even an old ticket needs the custody check before
+                        // dispatch. An empty, unchanged check has no effect.
+                        if !tickets.is_empty() || tree.revision != snapshot.revision {
+                            driver.save_guarded(tree)?;
+                        }
+                        Ok(tickets)
+                    }) {
                     Ok(tickets) => Ok(tickets),
                     Err(error) => {
                         **tree = snapshot;

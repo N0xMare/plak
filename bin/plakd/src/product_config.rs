@@ -7,6 +7,7 @@ mod forward;
 mod keys;
 mod load;
 pub(crate) mod mcp_edit;
+pub(crate) mod metadata;
 mod policy;
 mod publication;
 mod readiness;

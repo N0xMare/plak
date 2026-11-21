@@ -168,6 +168,12 @@ controls are home-scoped. Project values for them are ignored with a warning,
 and their displayed origins remain user or default. The entire file still
 must satisfy TOML syntax and schema validation; invalid values are load errors
 even in a home-scoped section.
+
+When deciding whether to announce a hosted session for reload requests, the
+service reuses its last validated `host.reload_requests` decision while the
+configuration sources are unchanged. A changed configuration or template is
+subject to the usual full-load validation.
+
 A project-scope `config set orchestration.*` fails with a hint
 to use `--scope user`. A
 trusted `project/.plak/agents/<name>.toml` replaces the whole global template
@@ -1037,8 +1043,9 @@ file bytes.
 quiescent persisted trees. Changes apply to new sessions and explicit profile
 switches; they do not modify an attached epoch.
 `turn.auto_continue` is home-only and Immediate:
-it saves without tree quiescence, and the attached interactive host re-reads
-it before waking. Every other immediate key saves immediately.
+it saves without tree quiescence, and the attached interactive host checks
+the home file before waking, reading its contents when the file changes.
+Every other immediate key saves immediately.
 
 ## 7. `plakd config` commands
 

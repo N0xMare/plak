@@ -8,25 +8,29 @@ use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
 use plakous_hosted::host_service::wire::{SessionHost, SlotView};
 
 use crate::product_paths::PlakPaths;
-use crate::reload_request::{Listener, ReloadOutcome};
+use crate::reload_request::ReloadOutcome;
+use crate::reload_request::hosted::{HostedListener, ReloadPolicy};
 use crate::surface_protocol::{HostEvent, PlakExtension};
 
 pub(super) async fn serve(host: Arc<SessionHost<PlakExtension>>, paths: PlakPaths, binary: String) {
-    let mut listeners = BTreeMap::<String, Listener>::new();
+    let mut listeners = BTreeMap::new();
+    let mut policy = ReloadPolicy::default();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
     loop {
         tick.tick().await;
-        tokio::task::block_in_place(|| poll(&host, &paths, &mut listeners, &binary));
+        tokio::task::block_in_place(|| poll(&host, &paths, &mut listeners, &mut policy, &binary));
     }
 }
 
 fn poll(
     host: &SessionHost<PlakExtension>,
     paths: &PlakPaths,
-    listeners: &mut BTreeMap<String, Listener>,
+    listeners: &mut BTreeMap<String, HostedListener>,
+    policy: &mut ReloadPolicy,
     binary: &str,
 ) {
     let mut resident = BTreeSet::new();
+    let mut allowed = None;
     for slot in host.slots() {
         let SlotView::Resident(session) = slot.peek() else {
             continue;
@@ -37,9 +41,10 @@ fn poll(
         let id = session.session_id();
         resident.insert(id.clone());
         if listeners
-            .get(&id)
+            .get_mut(&id)
             .is_none_or(|listener| !listener.is_current())
-            && let Some(listener) = Listener::announce_hosted(paths, &id)
+            && *allowed.get_or_insert_with(|| policy.enabled(paths))
+            && let Some(listener) = HostedListener::announce(paths, &id)
         {
             listeners.insert(id.clone(), listener);
         }

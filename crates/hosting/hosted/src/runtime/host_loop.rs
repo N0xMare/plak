@@ -231,7 +231,7 @@ pub(in crate::runtime) mod wake;
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// What the live projector follows now: the attached session's feed.
-    fn live_target(&self) -> super::projection::live::LiveTarget {
+    fn live_target(&mut self) -> super::projection::live::LiveTarget {
         let rows = self.role.config.topology_rows();
         let events = self.role.events.clone();
         self.role
@@ -245,17 +245,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             roots: self.role.config.state_roots.clone(),
             product_id: self.role.config.session.id.clone(),
             followed: self.opened.locator(),
-            tree_id: durable_tree_id(&rows, &self.role.config.session),
+            tree_id: self
+                .role
+                .last_tree_revision
+                .resolved_id(&rows, &self.role.config.session)
+                .to_owned(),
             emit_settled: std::sync::Arc::new(move |row| {
                 let _ = events.send(ContentEvent::Row(row));
             }),
         }
     }
 
-    /// The live projector tick (spec 02 §2.6): asks the session's projector
-    /// task for a pass and returns at once (it also follows every commit the
-    /// runtime acknowledges). A refused pass is projection debt; the next
-    /// pass applies it.
+    /// Start or retarget the live projector, or retry a refused pass. Once
+    /// caught up, the projector follows acknowledged feed commits instead of
+    /// rereading a settled session at each idle observation.
     ///
     /// A session the product has not stored yet still gets its task: the
     /// first prompt stores it mid-turn. No pass is requested before that:
@@ -286,7 +289,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if self.role.config.session.store_revision != 0
             && let Some(live) = self.role.live.as_mut()
         {
-            live.tick(target.clone());
+            live.ensure_following(target.clone(), self.role.idle_entry_pass_due);
             if let Some(error) = live.take_refusal() {
                 self.log_projector_debt(&error);
             }

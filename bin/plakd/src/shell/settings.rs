@@ -947,8 +947,33 @@ pub struct ProductSurface {
     usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
     /// True only while an external client's Usage tab is the open control tab.
     usage_watch: std::sync::atomic::AtomicBool,
+    auto_continue: std::sync::Mutex<Option<AutoContinueConfig>>,
     state_home: Result<std::path::PathBuf, String>,
     reload: crate::shell::reload_surface::ReloadChannel,
+}
+
+struct AutoContinueConfig {
+    stamp: Option<crate::product_config::metadata::FileStamp>,
+    enabled: Option<bool>,
+}
+
+impl AutoContinueConfig {
+    fn read(path: &std::path::Path) -> Option<bool> {
+        let default = ProductConfig::default_product().auto_continue;
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(default),
+            Err(_) => return None,
+        };
+        let config = text.parse::<toml::Table>().ok()?;
+        match config
+            .get("turn")
+            .and_then(|table| table.get("auto_continue"))
+        {
+            Some(value) => value.as_bool(),
+            None => Some(default),
+        }
+    }
 }
 
 /// How long a Usage refresh-account read waits for the host's usage read to
@@ -985,6 +1010,7 @@ impl ProductSurface {
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_accounts_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
             usage_watch: std::sync::atomic::AtomicBool::new(false),
+            auto_continue: std::sync::Mutex::new(None),
             reload: crate::shell::reload_surface::ReloadChannel::new(paths.clone()),
             paths,
         }
@@ -1099,21 +1125,20 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
     }
 
     fn child_wake_enabled(&self) -> Option<bool> {
-        let text = match std::fs::read_to_string(self.paths.config_file()) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Some(ProductConfig::default_product().auto_continue);
-            }
-            Err(_) => return None,
-        };
-        let config = text.parse::<toml::Table>().ok()?;
-        match config
-            .get("turn")
-            .and_then(|table| table.get("auto_continue"))
+        let path = self.paths.config_file();
+        let mut cached = self
+            .auto_continue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stamp = crate::product_config::metadata::file_stamp(&path).ok()?;
+        if let Some(config) = &*cached
+            && config.stamp == stamp
         {
-            Some(value) => value.as_bool(),
-            None => Some(ProductConfig::default_product().auto_continue),
+            return config.enabled;
         }
+        let enabled = AutoContinueConfig::read(&path);
+        *cached = Some(AutoContinueConfig { stamp, enabled });
+        enabled
     }
 
     fn needs_usage(&self, intent: &SurfaceIntent) -> bool {

@@ -400,6 +400,8 @@ mod memory {
         inherited_reads: std::sync::atomic::AtomicUsize,
         #[cfg(test)]
         notice_id_reads: std::sync::atomic::AtomicUsize,
+        #[cfg(test)]
+        wake_control_reads: std::sync::atomic::AtomicUsize,
     }
 
     impl MemoryStore {
@@ -457,6 +459,12 @@ mod memory {
         #[cfg(test)]
         pub(crate) fn notice_id_read_count(&self) -> usize {
             self.notice_id_reads
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn wake_control_read_count(&self) -> usize {
+            self.wake_control_reads
                 .load(std::sync::atomic::Ordering::Relaxed)
         }
 
@@ -1373,6 +1381,9 @@ mod memory {
         }
 
         fn load_wake_controls(&self, id: &str) -> Result<super::WakeControls, String> {
+            #[cfg(test)]
+            self.wake_control_reads
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let state = self
                 .state
                 .lock()

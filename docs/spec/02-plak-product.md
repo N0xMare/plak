@@ -2366,9 +2366,9 @@ recovery, export and `gc`, and, in memory, by the read-only rehearsal (§3.1).
 The attached host runs the product projector's live passes on one
 background task per session (the tree projector runs inline from its loop, so
 tree saves stay ordered with the tree's own writes):
-the task follows the session's `subscribe_feed` and the host's requests (one
-before each action it takes from its loop), coalesces them, and always passes
-over the newest target. Its store reads and commits run on the blocking
+the task follows the session's `subscribe_feed` and the host's requests for
+catch-up, settlement or retry. It coalesces them and always passes over the
+newest target. Its store reads and commits run on the blocking
 pool, so a slow commit never holds a runtime worker.
 The live task lives for the whole attachment and keeps its committed views, and
 the settled tool rows it has already shown, between pages, passes and turns. It
@@ -2411,6 +2411,12 @@ when retrying a revision whose notices did not settle), not on text deltas
 or progress-only changes. Cancellation and quit retain their own bounded
 settlement deadlines. An explicitly open Usage watch refreshes at its
 own freshness deadline.
+
+Between turns, a caught-up live projector follows acknowledged feed changes,
+not the idle observation clock. The clock still checks release and scheduled
+maintenance. Those checks reuse the bound tree identity, inspect live residency
+and pending work, and do not read a quiescent session's durable rows. A refused
+read or projection and queued work still get their normal retry paths.
 
 Terminal publication takes the settled views and counters directly from
 the live task and emits the canonical settlement update (a patch, or a snapshot
@@ -6798,7 +6804,10 @@ to resend input with a new identity.
 
 `host.reload_requests` enables the existing same-user reload-request channel.
 A hosted session's service owns announcements and records the existing
-host-restart refusal, even without an attached client. This authority does not depend on an attached application client.
+host-restart refusal, even without an attached client. The service checks the
+channel every 250 ms; a check of unchanged configuration or an unchanged
+announcement uses file metadata, not a content read. This authority does not
+depend on an attached application client.
 Build identity/reopen/carry probes remain product services; client reload is
 not host upgrade. The host upgrade coordinator and its receipts remain §4.6's
 authority. A session export remains the only cross-build history carrier.

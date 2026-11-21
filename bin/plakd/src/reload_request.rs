@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::home::paths::PlakPaths;
 
 #[cfg(feature = "web")]
-mod hosted;
+pub(crate) mod hosted;
 
 const VERSION: u32 = 1;
 const MAX_FILE_BYTES: u64 = 4096;
@@ -205,7 +205,14 @@ impl Listener {
     /// their retention are pruned.
     /// Only a session's UUID ever names a file in the channel.
     pub fn announce(paths: &PlakPaths, session: &str) -> Option<Self> {
-        if !enabled(paths) || uuid::Uuid::parse_str(session).is_err() {
+        if !enabled(paths) {
+            return None;
+        }
+        Self::announce_enabled(paths, session)
+    }
+
+    fn announce_enabled(paths: &PlakPaths, session: &str) -> Option<Self> {
+        if uuid::Uuid::parse_str(session).is_err() {
             return None;
         }
         let dir = private_directory(paths).ok()?;

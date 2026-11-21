@@ -179,6 +179,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .store
             .write_host_controls(&self.role.config.session.id, true, pause.clone())
             .map_err(CliFailure::from)?;
+        self.role.pending_track.invalidate_root_controls();
         self.role.child_wake.suppression_pending = false;
         self.role.child_wake.pause_pending = None;
         if pause.is_some() {
@@ -228,24 +229,55 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 Some(crate::sessions::projector::HostPauseCause::UnrecordedRefusal { reason }),
             )
             .map_err(CliFailure::from)?;
+        self.role.pending_track.invalidate_root_controls();
         self.role.config.session.queue_drain_state = super::SessionQueueDrainState::RestoredPaused;
         Ok(())
     }
 
-    pub(in crate::runtime) async fn child_wake_prompt(
-        &mut self,
-        now: Instant,
-    ) -> CliResult<HostStep> {
-        self.role
-            .child_wake
-            .diagnostics
-            .checked(&self.role.config.session.id, now);
+    fn refresh_child_wake_policy(&mut self) {
         if self.role.config.interactive
             && let Some(surface) = self.role.config.surface.as_deref()
             && let Some(enabled) = surface.child_wake_enabled()
         {
             self.role.config.auto_continue = enabled;
         }
+    }
+
+    pub(super) async fn idle_child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
+        self.refresh_child_wake_policy();
+        let role = &self.role;
+        if !role.child_wake.pending(&role.config.session.id)
+            && (!role.pending_track.wake_candidates()
+                || !role.config.prompt_host_facts().host_wakes
+                || role.config.session.child_wake_suppressed
+                || role.pending_track.wake_paused()
+                || role.recovery.blocked()
+                || !role.config.session.pending_queue.is_empty()
+                || role.config.session.queue_commands.has_pending())
+        {
+            self.role
+                .child_wake
+                .diagnostics
+                .checked(&self.role.config.session.id, now);
+            return Ok(HostStep::Continue);
+        }
+        self.check_child_wake(now).await
+    }
+
+    #[cfg(test)]
+    pub(in crate::runtime) async fn child_wake_prompt(
+        &mut self,
+        now: Instant,
+    ) -> CliResult<HostStep> {
+        self.refresh_child_wake_policy();
+        self.check_child_wake(now).await
+    }
+
+    async fn check_child_wake(&mut self, now: Instant) -> CliResult<HostStep> {
+        self.role
+            .child_wake
+            .diagnostics
+            .checked(&self.role.config.session.id, now);
         if self.role.child_wake.suppression_pending
             && self
                 .suppress_child_wake(self.role.child_wake.pause_pending.clone())

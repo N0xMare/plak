@@ -1142,13 +1142,13 @@ impl<'o, P: plakous_host_protocol::ProtocolExtension>
             ));
         }
 
+        let live_target = self.live_target();
         let agent = self
             .opened
             .agent()
             .ok_or_else(|| CliFailure::new("session source is detached"))?;
         let subscription_service = self.role.config.target.native_subscriptions().cloned();
         let turn_started = Instant::now();
-        let live_target = self.live_target();
         let driven = Box::pin(drive_one_turn(
             agent,
             self.opened.sessions(),

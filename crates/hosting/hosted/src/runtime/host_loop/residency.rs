@@ -59,8 +59,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     /// Whether nothing but an attachment would keep the session resident.
-    async fn residency_clear(&self) -> bool {
-        let role = &self.role;
+    async fn residency_clear(&mut self) -> bool {
+        let role = &mut self.role;
         let pending = role.pending_start.is_some()
             || role.pending_resume.is_some()
             || role.root_loss_resume_due
@@ -75,8 +75,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if pending || role.config.state_roots.job_registry().running_count() > 0 {
             return false;
         }
-        let tree_id = super::durable_tree_id(&role.config.topology_rows(), &role.config.session);
-        match crate::topology_runtime::lookup(&tree_id) {
+        match role
+            .last_tree_revision
+            .runtime(&role.config.topology_rows(), &role.config.session)
+        {
             Some(runtime) => runtime.children_quiet().await,
             None => true,
         }

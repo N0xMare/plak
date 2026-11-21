@@ -129,7 +129,7 @@ fn an_observed_empty_wake_does_not_bypass_work_or_a_racing_hold() {
 }
 
 #[test]
-fn rebound_root_idle_ticks_do_not_load_full_product_records() {
+fn idle_observation_windows_do_not_read_a_resident_session() {
     use crate::sessions::projector::{Lane, RowKey, SessionViews, ViewWrites};
     use crate::sessions::{NoticeScope, SessionRecord, TranscriptRow};
 
@@ -165,17 +165,29 @@ fn rebound_root_idle_ticks_do_not_load_full_product_records() {
             store.save(&mut config.session).unwrap();
             let _runtime = install_idle_topology_hub(&ancestor.id, &config.session.workspace_root);
         },
-        |host, _| {
+        |host, attachments| {
             assert!(matches!(observed_tick(host), Next::Again));
             let drain = async |host: &mut RootActor<'_, TestExtension>| {
                 host.role.live.as_mut().unwrap().drain_ticks().await;
             };
             host.block(drain);
-            let before = store.record_read_count();
-            for _ in 0..5 {
-                assert!(matches!(observed_tick(host), Next::Again));
-                host.block(drain);
-                assert_eq!(store.record_read_count(), before);
+            let reads = || {
+                (
+                    store.record_read_count(),
+                    store.view_read_count(),
+                    store.intent_read_count(),
+                    store.inherited_read_count(),
+                    store.wake_control_read_count(),
+                )
+            };
+            let before = reads();
+            for attached in [false, true] {
+                let _hold = attached.then(|| attachments.hold().unwrap());
+                for _ in 0..5 {
+                    assert!(matches!(observed_tick(host), Next::Again));
+                    host.block(drain);
+                    assert_eq!(reads(), before, "attached: {attached}");
+                }
             }
             host.block(async |host| host.release().await).unwrap();
         },
