@@ -152,7 +152,7 @@ impl OpenError {
         Self::unavailable(message)
     }
 
-    fn unavailable(message: impl Into<String>) -> Self {
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             kind: OpenErrorKind::Unavailable,
             message: message.into(),

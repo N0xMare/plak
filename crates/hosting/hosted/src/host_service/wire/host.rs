@@ -800,7 +800,7 @@ where
             let result = self.host.slot(&session).resident_at_handoff();
             self.host.changed();
             return match result {
-                Ok((served, _hold, _releases)) => {
+                Ok(((served, _hold, _releases), _opened)) => {
                     let node = served.root();
                     link.connection
                         .service
