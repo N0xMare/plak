@@ -737,6 +737,39 @@ fn holder_and_sqlite_locks_refuse_before_any_directory_is_removed() {
 }
 
 #[test]
+fn confirmation_releases_holder_lock_with_a_lingering_descriptor() {
+    let (_root, paths, old) = fixture();
+    let directory = old.join("runtime.sqlite3-holders");
+    fs::create_dir(&directory).unwrap();
+    let lock = directory.join("unused.lock");
+    fs::write(&lock, "").unwrap();
+    let LockedPruneInventory {
+        inventory,
+        holders,
+        databases,
+        ..
+    } = build_prune_inventory(&paths, PruneOptions::default()).unwrap();
+    let [holder] = holders.as_slice() else {
+        panic!("expected one legacy inspection holder");
+    };
+    let lingering = holder.try_clone().unwrap();
+    let independent = fs::File::open(&lock).unwrap();
+    assert_eq!(
+        rustix::fs::flock(
+            &independent,
+            rustix::fs::FlockOperation::NonBlockingLockExclusive
+        ),
+        Err(rustix::io::Errno::WOULDBLOCK)
+    );
+
+    drop(databases);
+    release_confirmation_holders(holders).unwrap();
+    assert_eq!(prune_confirmed(&paths, &inventory).unwrap(), 1);
+    assert!(!old.exists());
+    drop(lingering);
+}
+
+#[test]
 fn free_local_holder_evidence_of_every_format_is_pruned_and_foreign_evidence_refuses() {
     let host = rustix::system::uname()
         .nodename()

@@ -1185,7 +1185,10 @@ session cannot claim artifacts after the membership check. During removal,
 current product/tree writes from a running host wait under their ordinary 5 s
 busy timeout and can fail cleanly if removal holds the fence longer. The current
 `runtime.sqlite3` is not read by inventory and is never fenced. Inspection drops
-its holder locks and database transactions before the interactive prompt;
+its database transactions and explicitly unlocks its holder files before
+confirmation returns or prompts, even if a duplicate descriptor keeps an
+inspection file description open. A failed probe distinguishes a busy holder
+from a lock syscall error, and either refuses removal;
 removal re-proves ownership under fresh locks and holds them through removal. It also lists and removes the recorded fork worktrees,
 `plak/*` branches and candidate refs of non-current state keys and deleted
 sessions. Whenever the current key's `product.sqlite3` exists (including a

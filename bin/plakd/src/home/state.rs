@@ -828,8 +828,15 @@ fn probe_state_locks(
                 .map_err(|error| format!("cannot prove legacy state is unused: {error}"))?;
             if !record {
                 rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-                    .map_err(|_| {
-                        format!("legacy state {} is in use (holder lock)", path.display())
+                    .map_err(|error| {
+                        if error == rustix::io::Errno::WOULDBLOCK {
+                            format!("legacy state {} is in use (holder lock)", path.display())
+                        } else {
+                            format!(
+                                "cannot probe legacy state holder lock {}: {error}",
+                                path.display()
+                            )
+                        }
                     })?;
             }
             let mut identity = String::new();
@@ -983,7 +990,7 @@ pub(crate) fn confirm_prune_legacy_options(
     }
     // Confirmation must not keep a running session blocked behind maintenance.
     drop(databases);
-    drop(holders);
+    release_confirmation_holders(holders)?;
     if options.forget_missing_launches {
         writeln!(stderr, "Explicit --forget-missing-launches: forget ownership only for missing launches (ENOENT) whose parent directory exists, unless a retained group shares that inventory; no repository artifacts are removed for those groups.")
             .map_err(|error| error.to_string())?;
@@ -1003,6 +1010,16 @@ pub(crate) fn confirm_prune_legacy_options(
     } else {
         Err("state prune-legacy confirmation declined".to_owned())
     }
+}
+
+fn release_confirmation_holders(holders: Vec<fs::File>) -> Result<(), String> {
+    for holder in holders {
+        // Closing this descriptor alone cannot release the lock if another
+        // reference still pins its open file description (e.g. across fork).
+        rustix::fs::flock(&holder, rustix::fs::FlockOperation::Unlock)
+            .map_err(|error| format!("cannot release legacy state holder lock: {error}"))?;
+    }
+    Ok(())
 }
 
 /// The refusal for a session id this build's state does not hold but another
