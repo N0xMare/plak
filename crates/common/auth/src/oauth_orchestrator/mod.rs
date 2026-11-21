@@ -74,7 +74,7 @@ pub enum RefreshForce<F> {
     WhileCurrent(F),
 }
 
-impl<F: PartialEq> RefreshForce<F> {
+impl<F: Copy + PartialEq> RefreshForce<F> {
     /// Report whether this exact candidate bypasses the expiry check.
     #[must_use]
     pub fn forces(self, current: F) -> bool {

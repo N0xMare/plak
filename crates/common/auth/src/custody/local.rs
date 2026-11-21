@@ -45,6 +45,7 @@ pub trait LocalCustody: Sync {
     ) -> impl Future<Output = Result<Snapshot<Self::Selection>, CustodyError>> + Send + 'a;
 
     /// Whether a snapshot error can mean its reads straddled a replacement.
+    #[must_use]
     fn retry_snapshot(error: &CustodyError) -> bool {
         matches!(error, CustodyError::Store)
     }
