@@ -3873,6 +3873,8 @@ fn assert_leftover_terminal_reopen(fixture: &Fixture, expected: plakous::tools::
         .unwrap();
 }
 
+/// Observe the exact waiting line before releasing the real process. Its
+/// exit wakes the second admitted turn; stdout contains only that answer.
 #[test]
 fn run_waits_for_a_real_promoted_process_then_continues_and_prints_only_last_answer() {
     let command = "printf ready > ready.txt; n=0; while [ ! -f release.txt ] && [ -d \"$PWD\" ] && [ $((n += 1)) -le 6000 ]; do sleep 0.1; done";
@@ -7898,6 +7900,9 @@ mod durability {
         jsonl_failure_wave(&jsonl_home);
     }
 
+    /// A clipped next turn must end without replaying the previous tool.
+    /// The accepted bounded summary is for subsequent explicit work; the
+    /// fixture then quits and proves exact reopen in a different process.
     #[test]
     fn durability_jsonl_chain_tool_cancel_compact_quit_and_exact_resume() {
         let fixture = Fixture::new(&chain_script());

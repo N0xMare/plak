@@ -31,19 +31,11 @@ history, never prerequisite reading, and never cited as authority.
 
 ## Dev
 
-MSRV and pinned toolchain are Rust 1.100.0; supported platforms are Linux x86_64
-musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
-cargo-nextest, cargo-deny and ruff and the `wasm32-unknown-unknown` rustc
-target the `standalone` group checks the portable crates for; an existing setup
-re-runs it to add that target. The tools check every tier runs first also
-requires a working jj: `PLAK_TEST_JJ` when set, else `jj` on `PATH`, else the
-newest pinned jj that install unpacks under `.dev-tools/jj`.
-`tools/gate/dev-tools.pins` holds every tool version, URL and checksum; a cloud
-agent VM installs them from `.agents/setup`. Worker branches iterate and finish
-with `just fast <packages>` plus the groups their change needs. The integration
-batch, install and publication gates are spec 06 §8.
-`just musl container` is a maintainer-only container gate: it needs the preloaded
-offline image `plak-qual-base:86ab9e67`, which is not published (spec 06).
+Rust 1.100.0 is the pinned toolchain and MSRV. Work targets Linux x86_64 musl
+and Apple Silicon macOS. Run `just dev-tools install` to install or update the
+pinned tools and the `wasm32-unknown-unknown` target; cloud workspaces use
+`.agents/setup`. All tiers require working jj: `PLAK_TEST_JJ`, then `PATH`,
+then the newest pinned installation under `.dev-tools/jj`.
 
 ```text
 just fast [--rdeps] [PKG...] # static and changed-package parallel tests
@@ -66,99 +58,43 @@ just live RECIPE          # smoke, soak, jobs, mcp-oauth, census, estimate, dail
 just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
 just prompts RECIPE       # render, diff, pins, native-compare
 just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat, weighted-lanes
-just harbor RECIPE        # Harbor bakeoff, not a gate; `test` is the zero-inference adapter suite
+just dev RECIPE           # coverage, crash-sweep, reload-rehearsal and other dev helpers
+just harbor RECIPE        # opt-in bakeoff; `test` is the zero-inference adapter suite
 ```
+Finish worker changes with `just fast <packages>` and any affected groups. Set
+`PLAK_BATCH_BASE` to the pre-batch commit for integration. Neither batch runs
+the install profile. For changes to install-family tests or code they exercise
+(including crash-sweep shapes), run `just steps tests-install` before handoff.
+See spec 05 §1 and §2.3 for gate selection, lane membership and isolation;
+spec 06 §8 for exact-tree integration, install and release evidence. Production
+install includes the complete install profile, Mac suite and strict crash sweep.
+Publication requires clean-tree full evidence; inert docs can reuse it, but a
+`README.md` change needs fresh archive verification (spec 06 §6.5).
+`just musl container` is maintainer-only and needs the unpublished pinned image.
 
-`eval/` is the opt-in Harbor bakeoff plane: Rung A uses selected
-Terminal-Bench 2.1 tasks; Rung B uses Terminal-Bench 4.0 (see
-`eval/README.md`). Neither paid Harbor runs nor its zero-inference
-adapter tests (`just harbor test`) are in any gate tier. There is no second
-runtime. Vendor comparator arms upload pinned Linux CLI prefixes matching
-`HARBOR_ARCH` (`amd64` or `arm64`, defaulting to the Docker daemon's architecture);
-they do not nvm/`@latest`/`curl | bash` per trial. When a Claude native-home
-arm exists, compare interactive subscription OAuth, not `claude --print`.
+Edit the owning nextest budget or crash filter (install families in
+`.config/nextest-install.toml`), then run
+`python3 tools/gate/nextest_layout.py --sync`. Use `just nextest` for manual
+tests under the isolated environment (spec 05 §1). Transport injection needs
+a `test-support` binary and follows spec 05 §2.8. Prompt renders are regenerated
+into gitignored `target/prompt-renders/` and are **never committed**; update the
+in-code sha256 pins when reviewed prompt output changes.
+There is no CI; the tag release workflow and manual dry run are in spec 06 §6.6.
+Harbor and its adapter tests are outside all tiers. Follow the pinned
+architecture-matched vendor install and interactive subscription OAuth rules
+in `eval/README.md` and spec 05 §1.2; do not use `claude --print` for native-home
+subscription comparisons.
 
-All tiers use `tools/gate/dev-check.sh`. Fast keeps format and structure checks
-global and narrows clippy, feature-profile compiles and the parallel lane by
-package; the test build uses the shared all-feature workspace resolution.
-Set `PLAK_BATCH_BASE` to the commit before the integration batch. Linux batch
-uses the changed packages' reverse dependencies plus runtime-binary edges
-for parallel tests; Mac batch intersects that scope with the platform-sensitive
-filters. Linux batch overlaps tree checks and independent compile groups with
-test preparation, and tooling with the parallel lane before timed test lanes.
-Neither batch runs the install profile, even when an install test changes.
-If you change an install-family test or code it exercises, including crash-sweep
-shapes, run `just steps tests-install` before handoff. Main can carry an
-install-profile failure; the install tier catches it before production.
-
-The integration batch targets eight minutes warm and a 15-minute cold wall
-time with empty build and public contract caches. A warm repeat uses the same
-checkout and populated workspace build, lint, standalone and public contract
-caches without invalidating their Rust inputs. A core-crate edit requires
-recompilation and currently exceeds
-eight minutes (about ten minutes on one Linux host with populated caches).
-Install evidence is timed separately.
-
-Production install uses exact-tree batch evidence plus the install groups,
-full Mac suite and strict crash sweep (spec 06 §8). Full adds standalone
-rustdoc, archive verification and ignored retirement soaks. A passing full
-run on a clean tree records the evidence publication requires. Inert
-documentation changes can reuse it; a `README.md` change
-needs new archive verification (spec 06 §6.5). The install profile always runs
-in full, including the two exclusive indexed crash-sweep campaigns.
-
-The nextest profiles partition the offline suite. Edit the owning budget or
-crash filter (install families are in `.config/nextest-install.toml`), then
-run `python3 tools/gate/nextest_layout.py --sync`. Public compile contracts
-keep a persistent cache beside the gate target (`PLAK_PUBLIC_CONTRACTS_DIR`
-overrides it).
-Hand-run nextest is `just nextest`. It exports the isolated test environment
-from `tools/gate/test-env.sh`: per-checkout `TMPDIR` (`tools/gate/test-tmpdir.sh`,
-`PLAK_TEST_TMPDIR` overrides), `PLAK_HOME` under that directory (mode 0700), an
-empty `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`, and it unsets the
-provider API keys. The gate, coverage, the crash sweep, perf smoke and the live
-drivers use the same helper; the live drivers' `--json` form keeps the keys
-(spec 05 §1).
-There is no CI: the only workflow,
-`.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag, and a manual run on `main` is the pre-tag dry run that releases nothing
-(`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
-
-Transport faults for smoke and soak runs: a `test-support` build of `plakd` reads
-`PLAK_TEST_FAULTS`, e.g.
-`host=api.x.ai,path=/v1/responses,nth=2,fault=429,retry-after=5;host=openrouter.ai,fault=stall,seconds=40,after-events=3`,
-and injects statuses, connect failures, and mid-stream resets, clean EOFs and
-stalls into real provider traffic. Omit `host`/`path` and discovery or token
-requests count too. Syntax and classification: spec 05 §2.8.
-
-Prompt renders are regenerated locally into the gitignored `target/prompt-renders/`
-and are **never committed**; correctness is pinned by sha256 tables in code.
-
-The workspace has 39 packages in three classes: supported (5),
-published-internal (31), repository-only (3). Publication and nameability
-confer accessibility, not support.
-
-Packages declare the dependency features their Rust targets use rather than
-relying on another workspace member's feature unification. Native routes
-(`codex`, `grok`, `claude`), API exports, evaluators,
-MCP and local page fetch are independent at the facade boundary. Persisted route
-and tool vocabulary stays readable even when its runtime is omitted.
-The static feature checker compiles thirteen library profiles without
-workspace feature unification: eleven facade profiles, including API-only and
-single-provider and tool selections, and hosted with no optional features and
-with all features. It requires locally declared UUID generation features,
-including for test code.
-It validates 2n+3 feature closures per package (none, each singleton, full
-minus each feature, default and full), with a reviewed cap of 24 public
-optional features. The default product is the only shipped and supported
-build. Its provider, evaluator, MCP, image, local fetch and Git capabilities
-are unconditional; the facade still offers independent feature selection.
-The root workspace excludes `.plak` operator state and fork worktrees; the
-workspace checker requires this exclusion without permitting unreviewed ones.
-The workspace checker also ratchets, per package, item-level allows of
-`clippy::too_many_lines` and `clippy::too_many_arguments` and files over 1500
-non-test lines (`[package.metadata.plakous-lint]` in the package's own
-manifest, spec 06 §4): a split that removes debt lowers its ceiling, and no
-new crate-wide allow of either lint is permitted.
+Declare dependency features (including test UUID generation) at the point of
+use; do not rely on workspace feature unification. Keep facade selections
+independent and persisted vocabulary readable with routes/tools omitted;
+only the default product build is supported. Follow the closure checks and
+reviewed feature cap in spec 06. Keep the root workspace exclusions for
+`.plak` state and fork worktrees; do not add unreviewed exclusions.
+Ratchet per-package item-level `clippy::too_many_lines`,
+`clippy::too_many_arguments`, and files over 1500 non-test lines in
+`[package.metadata.plakous-lint]`: lower the ceiling after removing debt, and
+do not add a crate-wide allow for either lint (spec 06 §4).
 
 Invariants the spec states — single-owner driver with one terminal result per
 admitted root turn, single-agent L0, exact-URL auth that never falls back across

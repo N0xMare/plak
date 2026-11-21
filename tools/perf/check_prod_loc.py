@@ -22,6 +22,7 @@ from plakous_policy import (  # noqa: E402
     L0_LAYERS,
     Package,
     Workspace,
+    blank_rust_non_code,
     load_workspace,
 )
 
@@ -202,87 +203,6 @@ def is_test_only_file_name(name: str) -> bool:
     )
 
 
-def blank_literals(lines: list[str]) -> list[str]:
-    """Return `lines` with comments, strings and char literals replaced by spaces.
-
-    Brace depth is only meaningful over real code: `println!("{}", x)` and a
-    `// closing }` comment would otherwise unbalance the count. The blanked
-    text keeps every line's length and index, so callers can still report
-    positions against the original file.
-    """
-    blanked: list[str] = []
-    # Cross-line lexer state: block-comment nesting depth, and the open string
-    # (None, or the terminator of a normal/raw string).
-    comment_depth = 0
-    string_end: str | None = None
-    for line in lines:
-        out: list[str] = []
-        i = 0
-        n = len(line)
-        while i < n:
-            ch = line[i]
-            if comment_depth:
-                if line.startswith("/*", i):
-                    comment_depth += 1
-                    out.append("  ")
-                    i += 2
-                    continue
-                if line.startswith("*/", i):
-                    comment_depth -= 1
-                    out.append("  ")
-                    i += 2
-                    continue
-                out.append(" ")
-                i += 1
-                continue
-            if string_end is not None:
-                if string_end == '"' and ch == "\\":
-                    out.append("  ")
-                    i += 2
-                    continue
-                if line.startswith(string_end, i):
-                    out.append(" " * len(string_end))
-                    i += len(string_end)
-                    string_end = None
-                    continue
-                out.append(" ")
-                i += 1
-                continue
-            if line.startswith("//", i):
-                out.append(" " * (n - i))
-                break
-            if line.startswith("/*", i):
-                comment_depth = 1
-                out.append("  ")
-                i += 2
-                continue
-            raw = re.match(r'(?:b|c)?r(#*)"', line[i:])
-            if raw:
-                string_end = '"' + raw.group(1)
-                out.append(" " * raw.end())
-                i += raw.end()
-                continue
-            if ch == '"':
-                string_end = '"'
-                out.append(" ")
-                i += 1
-                continue
-            if ch == "'":
-                # A char literal (`'x'`, `'\n'`, `'{'`) versus a lifetime (`'a`).
-                char = re.match(r"'(?:\\.|[^\\'])'", line[i:])
-                if char:
-                    out.append(" " * char.end())
-                    i += char.end()
-                    continue
-                out.append(ch)
-                i += 1
-                continue
-            out.append(ch)
-            i += 1
-        blanked.append("".join(out))
-    return blanked
-
-
 def _attribute_run_start(blanked: list[str], index: int) -> int:
     """Return the first line of the attribute run immediately above `index`."""
     start = index
@@ -316,7 +236,7 @@ def production_line_mask(lines: list[str]) -> list[bool]:
     # either its keyword or its same-line opening brace.
     if not any("mod" in line and "{" in line for line in lines):
         return counted
-    blanked = blank_literals(lines)
+    blanked = blank_rust_non_code("\n".join(lines)).split("\n")
     depth = 0
     test_depth: int | None = None
     for index, code in enumerate(blanked):

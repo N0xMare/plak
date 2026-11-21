@@ -176,6 +176,8 @@ fn a_startup_stop_never_takes_a_line_the_sweep_did_not_readopt() {
     stop(&mut host);
 }
 
+/// A running daemon-owned process requires explicit ownership transfer.
+/// Refusal must not fabricate a terminal or prevent the next host from adopting.
 #[test]
 fn an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal() {
     let Some(fixture) = fixture() else { return };

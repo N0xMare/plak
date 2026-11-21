@@ -4,10 +4,12 @@ import json
 import os
 import shutil
 import queue
+import sqlite3
 import sys
 import tempfile
 import time
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -1560,3 +1562,897 @@ class AgentStartupFailureTests(unittest.TestCase):
             self.assertIn(
                 "model lookup failed after 2 attempts: transport timeout", str(raised.exception)
             )
+
+
+class SmokeEvidenceTests(unittest.TestCase):
+    def test_smoke_compaction_accepts_context_limit_then_capacity_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver, agent = self.compaction_driver(Path(directory))
+            driver.route = live.ROUTES["or-glm"]
+            agent.prompt.side_effect = [
+                live.Turn(phase="failed", model_error_kind="ContextLimit"),
+                live.Turn(phase="completed"),
+                live.Turn(phase="completed", text="ZEBRA-42"),
+            ]
+            rows = [
+                {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "first"},
+                {"kind": "compact.started", "reason": "capacity"},
+                {"kind": "compact.started", "reason": "manual"},
+                {"kind": "compact.finished", "outcome": "committed"},
+            ]
+            with patch.object(long_session, "poll_records", return_value=rows):
+                self.assertEqual(
+                    driver.compaction(), "capacity recovery compaction, context carried"
+                )
+            self.assertEqual(agent.prompt.call_count, 3)
+            agent.command.assert_not_called()
+
+    def test_smoke_capacity_remedy_rejects_large_windows_and_reordered_logs(self):
+        failed = {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "first"}
+        started = {"kind": "compact.started", "reason": "capacity"}
+        committed = {"kind": "compact.finished", "outcome": "committed"}
+        with tempfile.TemporaryDirectory() as directory:
+            for route, rows in (
+                ("codex", [failed, started, committed]),
+                ("grok", [failed, started, committed]),
+                ("or-glm", [started, failed, committed]),
+                ("or-glm", [started, committed]),
+                ("deepseek", [dict(failed, phase="completed"), started, committed]),
+            ):
+                with self.subTest(route=route, rows=rows):
+                    driver, agent = self.compaction_driver(Path(directory))
+                    driver.route = live.ROUTES[route]
+                    agent.prompt.side_effect = [
+                        live.Turn(phase="failed", model_error_kind="ContextLimit"),
+                        live.Turn(phase="completed"),
+                        live.Turn(phase="completed", text="ZEBRA-42"),
+                    ]
+                    with patch.object(long_session, "poll_records", return_value=rows):
+                        with self.assertRaises(live.ScenarioFailure) as raised:
+                            driver.compaction()
+                    self.assertEqual(raised.exception.outcome, live.HARNESS)
+                    self.assertEqual(agent.prompt.call_count, 1)
+
+    def test_smoke_small_known_window_accepts_ordered_capacity_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver, agent = self.compaction_driver(Path(directory))
+            driver.route = live.ROUTES["deepseek"]
+            agent.prompt.side_effect = [
+                live.Turn(phase="failed", model_error_kind="ContextLimit"),
+                live.Turn(phase="completed"),
+                live.Turn(phase="completed", text="ZEBRA-42"),
+            ]
+            rows = [
+                {"kind": "turn.lifecycle", "phase": "admitted"},
+                {"kind": "turn.lifecycle", "phase": "failed"},
+                {"kind": "compact.started", "reason": "capacity"},
+                {"kind": "compact.finished", "outcome": "committed"},
+            ]
+            with patch.object(long_session, "poll_records", return_value=rows):
+                self.assertEqual(
+                    driver.compaction(), "capacity recovery compaction, context carried"
+                )
+
+    def test_smoke_context_limit_without_capacity_commit_stays_harness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for rows in (
+                [],
+                [{"kind": "compact.finished", "outcome": "committed"}],
+                [
+                    {"kind": "compact.started", "reason": "capacity"},
+                    {"kind": "compact.finished", "outcome": "failed"},
+                ],
+            ):
+                driver, agent = self.compaction_driver(Path(directory))
+                agent.prompt.return_value = live.Turn(
+                    phase="failed", model_error_kind="ContextLimit"
+                )
+                with patch.object(long_session, "poll_records", return_value=rows):
+                    with self.assertRaises(live.ScenarioFailure) as raised:
+                        driver.compaction()
+                self.assertEqual(raised.exception.outcome, live.HARNESS)
+                self.assertEqual(agent.prompt.call_count, 1)
+
+    def test_durable_terminal_classifies_only_exhausted_provider_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            telemetry = home / "telemetry"
+            telemetry.mkdir()
+            with (
+                closing(sqlite3.connect(telemetry / "telemetry-v14.sqlite3")) as connection,
+                connection,
+            ):
+                connection.execute(
+                    "CREATE TABLE model_retries "
+                    "(turn_id TEXT, cause_kind TEXT, "
+                    "next_attempt INTEGER, max_attempts INTEGER, declined_reason TEXT)"
+                )
+                connection.executemany(
+                    "INSERT INTO model_retries VALUES (?, ?, ?, ?, ?)",
+                    [
+                        ("transient", "http_status", 2, 4, None),
+                        ("exhausted", "http_status", 4, 4, None),
+                        ("other-turn", "http_status", 4, 4, None),
+                        ("declined-budget", "http_status", 4, 4, None),
+                        ("declined-budget", "http_status", 5, 4, "budget"),
+                        ("declined-deadline", "http_status", 4, 4, "deadline"),
+                    ],
+                )
+            for turn_id, outcome in (
+                ("transient", live.HARNESS),
+                ("exhausted", live.PROVIDER),
+                ("declined-budget", live.PROVIDER),
+                ("declined-deadline", live.HARNESS),
+                ("no-retries", live.HARNESS),
+            ):
+                with self.subTest(turn_id=turn_id):
+                    with self.assertRaises(live.ScenarioFailure) as raised:
+                        smoke.require_durable_completed(
+                            {"phase": "failed", "turn_id": turn_id}, "durable turn", home=home
+                        )
+                    self.assertEqual(raised.exception.outcome, outcome)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def compaction_driver(self, repo):
+        driver = smoke.Smoke(live.ROUTES["codex"], Mock(capture_segments=[]))
+        driver.repo = Mock(return_value=repo)
+        agent = Mock(session_id="session", capture_dir=repo)
+        agent.prompt.return_value = live.Turn(phase="completed", text="ZEBRA-42", tools=1)
+        agent.command.return_value = {"kind": "ok"}
+        driver.agent = Mock(return_value=agent)
+        return driver, agent
+
+    def test_compaction_fact_cannot_leak_into_a_repository_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            driver, agent = self.compaction_driver(repo)
+
+            def prompt(text, **kwargs):
+                if "Remember the code word" in text:
+                    self.assertNotIn("Do not write", text)
+                    (repo / "nested").mkdir()
+                    (repo / "nested" / "fact.bin").write_bytes(b"\x00ZEBRA-42\x00")
+                return live.Turn(phase="completed", text="ZEBRA-42", tools=1)
+
+            agent.prompt.side_effect = prompt
+            with patch.object(
+                live,
+                "session_records",
+                return_value=[{"kind": "compact.finished", "outcome": "committed"}],
+            ):
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    driver.compaction()
+            self.assertEqual(raised.exception.outcome, live.HARNESS)
+            self.assertEqual(agent.prompt.call_count, 2)
+
+    def test_compaction_first_prompt_names_the_code_mode_tool_only_for_codex(self):
+        codex = smoke.compaction_first_prompt("codex")
+        self.assertIn("one exec_command", codex)
+        self.assertIn("without max_output_tokens", codex)
+        self.assertTrue(codex.endswith("Remember the code word ZEBRA-42. Reply: ok"))
+        for pack in ("grok", "claude", "pi"):
+            self.assertEqual(
+                smoke.compaction_first_prompt(pack),
+                "Read fold.txt in full with one read. Remember the code word ZEBRA-42. Reply: ok",
+            )
+
+    def test_compaction_first_turn_without_the_read_is_a_model_miss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver, agent = self.compaction_driver(Path(directory))
+            agent.prompt.return_value = live.Turn(phase="completed", text="ok", tools=0)
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                driver.compaction()
+            self.assertEqual(raised.exception.outcome, live.MODEL)
+            self.assertIn("without reading fold.txt", str(raised.exception))
+            self.assertEqual(agent.prompt.call_count, 1)
+            agent.command.assert_not_called()
+
+    def test_compaction_fact_survives_without_a_file_shortcut(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver, agent = self.compaction_driver(Path(directory))
+            with patch.object(
+                live,
+                "session_records",
+                return_value=[{"kind": "compact.finished", "outcome": "committed"}],
+            ):
+                self.assertIn("context carried", driver.compaction())
+            self.assertEqual(agent.prompt.call_count, 3)
+            agent.command.assert_called_once_with("compact")
+
+
+class ArgumentCaptureTests(unittest.TestCase):
+    def test_fault_reset_does_not_pass_a_capture_proven_model_argument_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write_capture(segment, self.chat_arguments("{"))
+            turn = live.Turn(
+                phase="failed",
+                model_error_kind="Protocol",
+                errors=[
+                    "OpenRouter Chat stream validation failed: "
+                    "tool arguments are malformed or ambiguous",
+                    "stream reset observed",
+                ],
+            )
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                smoke.judge_fault_reset(turn, segment / "hello.txt", [segment])
+            self.assertEqual(raised.exception.outcome, live.MODEL)
+
+    def write_capture(self, segment, events, exchange=1):
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode()
+        name = f"exchange-{exchange:04}"
+        (segment / f"{name}.request").write_bytes(b"synthetic request")
+        (segment / f"{name}.body").write_bytes(body)
+        (segment / f"{name}.info").write_text(
+            f"process_id=123\nexchange={exchange}\nstatus=Some(200)\nconnection=Some(Fresh)\n"
+            f"terminal=Complete\nrecorded_bytes={len(body)}\nincomplete=false\n"
+        )
+
+    def chat_arguments(self, arguments):
+        return [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"arguments": arguments}}]
+                        },
+                    }
+                ]
+            },
+            {"choices": [{"index": 0, "finish_reason": "tool_calls"}]},
+        ]
+
+    def messages_arguments(self, arguments):
+        return [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "tool_use", "input": {}},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": arguments},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "tool_use"}},
+            {"type": "message_stop"},
+        ]
+
+    def test_messages_duplicate_keys_are_valid_but_non_json_constants_are_not(self):
+        message = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for arguments, outcome in (
+                ('{"x":1,"x":2}', live.HARNESS),
+                ('{"x":NaN}', live.MODEL),
+                ('{"x":Infinity}', live.MODEL),
+                ("[]", live.MODEL),
+            ):
+                with self.subTest(arguments=arguments):
+                    self.write_capture(segment, self.messages_arguments(arguments))
+                    self.assertEqual(live.stream_validation_outcome(message, [segment]), outcome)
+
+    def test_argument_failure_markers_require_their_own_protocol_and_full_prefix(self):
+        chat = "Chat stream validation failed: tool arguments are malformed or ambiguous"
+        messages = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for marker, matching, mismatched in (
+                (chat, self.chat_arguments("{"), self.messages_arguments("{")),
+                (messages, self.messages_arguments("{"), self.chat_arguments("{")),
+            ):
+                with self.subTest(marker=marker):
+                    self.write_capture(segment, mismatched)
+                    self.assertEqual(
+                        live.stream_validation_outcome(marker, [segment]), live.HARNESS
+                    )
+                    self.write_capture(segment, matching)
+                    self.assertEqual(live.stream_validation_outcome(marker, [segment]), live.MODEL)
+                    bare = marker.split("stream validation failed: ", 1)[1]
+                    self.assertIsNone(live.stream_validation_outcome(bare, [segment]))
+
+    def test_other_provider_argument_failures_without_stream_prefix_stay_harness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for diagnostic, events in (
+                ("OpenAI tool arguments are malformed or ambiguous", self.chat_arguments("{")),
+                (
+                    "Anthropic terminal Messages tool input was not complete valid JSON",
+                    self.messages_arguments("{"),
+                ),
+            ):
+                with self.subTest(diagnostic=diagnostic):
+                    self.write_capture(segment, events)
+                    turn = live.Turn(
+                        phase="failed", model_error_kind="Protocol", errors=[diagnostic]
+                    )
+                    with self.assertRaises(live.ScenarioFailure) as raised:
+                        live.classify_incomplete(turn, "turn", segments=[segment])
+                    self.assertEqual(raised.exception.outcome, live.HARNESS)
+
+    def test_invalid_argument_evidence_is_process_and_last_exchange_scoped(self):
+        message = "Chat stream validation failed: tool arguments are malformed or ambiguous"
+        with tempfile.TemporaryDirectory() as directory:
+            earlier = Path(directory) / "earlier"
+            failing = Path(directory) / "failing"
+            earlier.mkdir()
+            failing.mkdir()
+            self.write_capture(earlier, self.chat_arguments("{"))
+            self.write_capture(failing, self.chat_arguments("{}"))
+            self.assertEqual(
+                live.stream_validation_outcome(message, [earlier, failing]), live.HARNESS
+            )
+            self.write_capture(failing, self.chat_arguments("{"))
+            self.write_capture(failing, self.chat_arguments("{}"), exchange=2)
+            self.assertEqual(live.stream_validation_outcome(message, [failing]), live.HARNESS)
+            self.write_capture(failing, self.chat_arguments("{"), exchange=3)
+            self.assertEqual(live.stream_validation_outcome(message, [failing]), live.MODEL)
+
+    def test_invalid_argument_evidence_orders_exchanges_by_number(self):
+        message = (
+            "OpenRouter Chat stream validation failed: tool arguments are malformed or ambiguous"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write_capture(segment, self.chat_arguments("{"), exchange=9999)
+            self.write_capture(segment, self.chat_arguments("{}"), exchange=10000)
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
+            self.write_capture(segment, self.chat_arguments("{"), exchange=10000)
+            info = segment / "exchange-10000.info"
+            info.write_text(
+                info.read_text().replace("terminal=Complete", "terminal=ProtocolComplete")
+            )
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
+
+    def test_invalid_argument_evidence_requires_the_highest_exchange_to_be_finished(self):
+        message = (
+            "OpenRouter Chat stream validation failed: tool arguments are malformed or ambiguous"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write_capture(segment, self.chat_arguments("{"))
+            for terminal, outcome in (("ClosedEarly", live.MODEL), ("Abandoned", live.HARNESS)):
+                with self.subTest(terminal=terminal):
+                    self.write_capture(segment, self.chat_arguments("{"), exchange=2)
+                    info = segment / "exchange-0002.info"
+                    info.write_text(
+                        info.read_text().replace("terminal=Complete", f"terminal={terminal}")
+                    )
+                    self.assertEqual(live.stream_validation_outcome(message, [segment]), outcome)
+
+    def test_a_fail_closed_early_close_needs_the_finish_in_the_body(self):
+        # The kernel rejects the finished arguments and closes before end of
+        # body: the captured finish proves the model ended them unterminated.
+        chat = "OpenRouter Chat stream validation failed: tool arguments are malformed or ambiguous"
+        messages = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
+        unterminated = '{"path": "repo. cwd: repo. cwd: repo'
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for marker, finished, unfinished in (
+                (chat, self.chat_arguments(unterminated), self.chat_arguments(unterminated)[:1]),
+                (
+                    messages,
+                    self.messages_arguments(unterminated),
+                    self.messages_arguments(unterminated)[:2],
+                ),
+            ):
+                for events, outcome in ((finished, live.MODEL), (unfinished, live.HARNESS)):
+                    with self.subTest(marker=marker, events=len(events)):
+                        self.write_capture(segment, events)
+                        info = segment / "exchange-0001.info"
+                        info.write_text(
+                            info.read_text().replace("terminal=Complete", "terminal=ClosedEarly")
+                        )
+                        self.assertEqual(live.stream_validation_outcome(marker, [segment]), outcome)
+
+    def test_subagents_scores_only_its_root_process_capture(self):
+        message = "Chat stream validation failed: tool arguments are malformed or ambiguous"
+        with tempfile.TemporaryDirectory() as directory:
+            earlier = Path(directory) / "earlier"
+            root = Path(directory) / "root"
+            earlier.mkdir()
+            root.mkdir()
+            self.write_capture(earlier, self.chat_arguments("{"))
+            self.write_capture(root, self.chat_arguments("{}"))
+            driver = smoke.Smoke(live.ROUTES["codex"], Mock(capture_segments=[earlier, root]))
+            driver.repo = Mock(return_value=root)
+            agent = Mock(capture_dir=root)
+            agent.prompt.return_value = live.Turn(phase="failed", errors=[message])
+            driver.agent = Mock(return_value=agent)
+            with patch.object(
+                live, "stream_validation_outcome", wraps=live.stream_validation_outcome
+            ) as classify:
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    driver.subagents()
+            self.assertEqual(raised.exception.outcome, live.HARNESS)
+            self.assertEqual(classify.call_args.args[1], [root])
+
+    def test_finished_malformed_chat_arguments_are_model_on_every_surface(self):
+        message = "Chat stream validation failed: tool arguments are malformed or ambiguous"
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for arguments, outcome in (
+                ("{", live.MODEL),
+                ('{"x":1,"x":2}', live.MODEL),
+                ('{"x":1}', live.HARNESS),
+            ):
+                events = [
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {"index": 0, "function": {"arguments": arguments}}
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+                ]
+                self.write_capture(segment, events)
+                self.assertEqual(live.stream_validation_outcome(message, [segment]), outcome)
+            self.write_capture(
+                segment,
+                [
+                    {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [{"index": 0, "function": {"arguments": "{"}}]
+                                },
+                            }
+                        ]
+                    },
+                    {"choices": [{"index": 0, "finish_reason": "tool_calls"}]},
+                ],
+            )
+            for classify in (
+                lambda: live.classify_incomplete(
+                    live.Turn(phase="failed", errors=[message]), "turn", segments=[segment]
+                ),
+                lambda: live.classify_command_error(message, "compact", segments=[segment]),
+                lambda: live.classify_cli_failure(5, message, "CLI", segments=[segment]),
+            ):
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    classify()
+                self.assertEqual(raised.exception.outcome, live.MODEL)
+            (segment / "exchange-0001.info").unlink()
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
+            self.assertEqual(live.stream_validation_outcome(message, None), live.HARNESS)
+
+    def test_messages_arguments_need_a_finished_capture(self):
+        message = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            events = [
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "tool_use", "input": {}},
+                },
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": '{"x":'},
+                },
+                {"type": "content_block_stop", "index": 0},
+                {"type": "message_delta", "delta": {"stop_reason": "tool_use"}},
+                {"type": "message_stop"},
+            ]
+            self.write_capture(segment, events)
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
+            info = segment / "exchange-0001.info"
+            info.write_text(info.read_text().replace("terminal=Complete", "terminal=ClosedEarly"))
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
+            info.write_text(info.read_text().replace("terminal=ClosedEarly", "terminal=Abandoned"))
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
+            self.write_capture(segment, events[:-2])
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
+
+    def test_subagents_root_failure_uses_its_capture_segments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write_capture(
+                segment,
+                [
+                    {"choices": [{"delta": {"content": "x"}}], "usage": {"prompt_tokens": 1}},
+                ],
+            )
+            driver = smoke.Smoke(live.ROUTES["codex"], Mock(capture_segments=[segment]))
+            driver.repo = Mock(return_value=segment)
+            agent = Mock(capture_dir=segment)
+            agent.prompt.return_value = live.Turn(
+                phase="failed", errors=["stream validation failed"]
+            )
+            driver.agent = Mock(return_value=agent)
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                driver.subagents()
+            self.assertEqual(raised.exception.outcome, live.PROVIDER)
+
+
+KEEP_ALIVE = b": OPENROUTER PROCESSING\n\n"
+IN_BAND_504 = b'data: {"choices":[],"error":{"code":504,"message":"error code: 504"}}\n\n'
+FAILED_504 = dict(
+    phase="failed",
+    model_error_kind="Timeout",
+    http_status=504,
+    errors=[
+        "OpenRouter returned an in-band error after accepting the request: "
+        "HTTP 504 (timeout) from Liquid"
+    ],
+)
+
+
+class UnfiredFaultTests(unittest.TestCase):
+    """An `after-events` reset the provider's own error beat to the cut."""
+
+    def write_exchange(
+        self,
+        segment,
+        number,
+        body,
+        *,
+        request=b'{"messages":[]}',
+        status="Some(200)",
+        terminal="ClosedEarly",
+    ):
+        name = f"exchange-{number:04}"
+        (segment / f"{name}.request").write_bytes(request)
+        (segment / f"{name}.body").write_bytes(body)
+        (segment / f"{name}.info").write_text(
+            f"process_id=123\nexchange={number}\nstatus={status}\nconnection=Some(Fresh)\n"
+            f"terminal={terminal}\nrecorded_bytes={len(body)}\nincomplete=false\n"
+        )
+
+    def judge(
+        self, target_body, *, turn=None, status="Some(200)", terminal="ClosedEarly", threshold=3
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            # Model lookups are bodiless GETs; the targeted exchange is the
+            # first inference request, and a later replay does not count.
+            self.write_exchange(segment, 1, b'{"data":[]}', request=b"", terminal="Complete")
+            self.write_exchange(segment, 2, target_body, status=status, terminal=terminal)
+            self.write_exchange(segment, 3, b"data: {}\n\ndata: [DONE]\n\n", terminal="Complete")
+            turn = turn or live.Turn(**FAILED_504)
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                smoke.judge_fault_reset(turn, segment / "hello.txt", [segment], threshold)
+            return raised.exception
+
+    def test_after_events_parses_the_fault_plan(self):
+        plan = live.fault_plan(live.ROUTES["or-flint-free"], "reset", after_events=3)
+        self.assertEqual(smoke.after_events(plan), 3)
+        self.assertIsNone(smoke.after_events(live.fault_plan(live.ROUTES["or-flint-free"], "429")))
+
+    def test_keep_alives_then_an_in_band_504_before_the_cut_is_provider(self):
+        failure = self.judge(KEEP_ALIVE * 33 + IN_BAND_504)
+        self.assertEqual(failure.outcome, live.PROVIDER)
+        self.assertEqual(
+            str(failure),
+            "the provider ended the targeted stream (exchange-0002) in "
+            "HTTP 504 after 1 of 3 events, before the reset fired",
+        )
+
+    def test_comment_only_blocks_do_not_count_as_events(self):
+        self.assertEqual(
+            live.sse_events(KEEP_ALIVE * 33 + IN_BAND_504 + b"data: x"), [IN_BAND_504.rstrip(b"\n")]
+        )
+        self.assertEqual(len(live.sse_events(b": a\r\nevent: e\r\n: b\r\ndata: 1\r\n\r\n\n\n")), 1)
+
+    def test_a_targeted_http_error_status_is_provider(self):
+        failure = self.judge(
+            b'{"error":{"code":503}}',
+            status="Some(503)",
+            terminal="Complete",
+            turn=live.Turn(phase="failed", model_error_kind="Unavailable", http_status=503),
+        )
+        self.assertEqual(failure.outcome, live.PROVIDER)
+        self.assertIn("in HTTP 503 after 0 of 3 events", str(failure))
+
+    def test_other_wires_and_a_provider_transport_failure_before_the_cut(self):
+        messages = (
+            b'event: message_start\ndata: {"type":"message_start"}\n\n'
+            b'event: error\ndata: {"type":"error","error":{"type":"overloaded_error"}}\n\n'
+        )
+        failure = self.judge(
+            messages, turn=live.Turn(phase="failed", model_error_kind="Unavailable")
+        )
+        self.assertEqual(
+            (failure.outcome, str(failure)),
+            (
+                live.PROVIDER,
+                "the provider ended the targeted stream (exchange-0002) in HTTP 529 "
+                "after 2 of 3 events, before the reset fired",
+            ),
+        )
+        reset = (
+            "Failed(Failure { phase: ResponseBody, transmission: MayHaveTransmitted, "
+            "kind: DeadlineExceeded, cause: None, http2_reason: None, os_error: None, tls: None, "
+            "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None, connect_attempts: None })"
+        )
+        failure = self.judge(
+            KEEP_ALIVE, terminal=reset, turn=live.Turn(phase="failed", model_error_kind="Timeout")
+        )
+        self.assertEqual(
+            str(failure),
+            "the provider ended the targeted stream (exchange-0002) in "
+            "a transport failure (DeadlineExceeded) in ResponseBody "
+            "after 0 of 3 events, "
+            "before the reset fired",
+        )
+        # The product typed it a transport failure, not a provider error.
+        failure = self.judge(
+            KEEP_ALIVE, terminal=reset, turn=live.Turn(phase="failed", model_error_kind="Transport")
+        )
+        self.assertEqual(failure.outcome, live.HARNESS)
+
+    def test_a_retried_head_timeout_before_the_cut_is_provider(self):
+        # The recorded shape: the targeted Messages request got no response
+        # head within the dispatch deadline, the product retried it and the
+        # turn completed, so the reset armed after three events never fired.
+        head = (
+            "Failed(Failure { phase: ResponseHead, transmission: MayHaveTransmitted, "
+            "kind: DeadlineExceeded, cause: None, http2_reason: None, os_error: None, tls: None, "
+            "tls_alert: None, alpn: Some(\"http/1.1\"), http2_io: false, "
+            "connection: Some(Fresh), idle_age: None, connect_attempts: None })"
+        )
+        retried = live.Turn(
+            phase="completed",
+            retries=[{"attempt": 2, "cause_kind": "transport_after_send", "max_attempts": 4}],
+        )
+        failure = self.judge(b"", status="None", terminal=head, turn=retried)
+        self.assertEqual(
+            (failure.outcome, str(failure)),
+            (
+                live.PROVIDER,
+                "the provider ended the targeted stream (exchange-0002) in a transport "
+                "failure (DeadlineExceeded) in ResponseHead after 0 of 3 events, before "
+                "the reset fired; the product retried it and completed the turn",
+            ),
+        )
+        # Without a transport or provider retry, or without a replay of the
+        # targeted request, it stays harness.
+        other_retry = live.Turn(phase="completed", retries=[{"cause_kind": "model_output"}])
+        for name, turn, later in (
+            ("no retry", live.Turn(phase="completed"), b'{"messages":[]}'),
+            ("not a replay cause", other_retry, b'{"messages":[]}'),
+            ("no later request", retried, None),
+            ("a different request", retried, b'{"messages":[{"role":"user"}]}'),
+        ):
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                segment = Path(directory)
+                self.write_exchange(segment, 1, b"", status="None", terminal=head)
+                if later is not None:
+                    self.write_exchange(
+                        segment, 2, b"data: {}\n\n", request=later, terminal="Complete"
+                    )
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    smoke.judge_fault_reset(turn, segment / "hello.txt", [segment], 3)
+                self.assertEqual(raised.exception.outcome, live.HARNESS)
+
+    def test_a_request_without_a_conversation_is_not_the_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write_exchange(
+                segment, 1, b'{"ok":true}', request=b'{"grant_type":"refresh"}', terminal="Complete"
+            )
+            self.write_exchange(segment, 2, KEEP_ALIVE * 3 + IN_BAND_504)
+            failure = smoke.provider_ended_before_cut(live.Turn(**FAILED_504), [segment], 3)
+            self.assertIn("(exchange-0002) in HTTP 504", failure)
+
+    def test_other_unobserved_resets_stay_harness(self):
+        for name, kwargs in (
+            ("no error event", {"target_body": KEEP_ALIVE + b"data: {}\n\n"}),
+            ("the cut was reached", {"target_body": b"data: {}\n\n" * 2 + IN_BAND_504}),
+            ("an abandoned capture", {"target_body": IN_BAND_504, "terminal": "Abandoned"}),
+            ("a 400 error event", {"target_body": IN_BAND_504.replace(b"504", b"400")}),
+            (
+                "a completed turn",
+                {"target_body": IN_BAND_504, "turn": live.Turn(phase="completed")},
+            ),
+            (
+                "a turn that failed as the product's",
+                {
+                    "target_body": IN_BAND_504,
+                    "turn": live.Turn(phase="failed", model_error_kind="Protocol"),
+                },
+            ),
+            ("no after-events threshold", {"target_body": IN_BAND_504, "threshold": None}),
+        ):
+            with self.subTest(name):
+                failure = self.judge(**kwargs)
+                self.assertEqual(
+                    (failure.outcome, str(failure)),
+                    (live.HARNESS, "injected reset was not observed"),
+                )
+
+
+class CancelWithoutInterruptTests(unittest.TestCase):
+    def cancel(self, turn):
+        driver = smoke.Smoke(live.ROUTES["or-flint-free"], Mock(capture_segments=[]))
+        driver.repo = Mock(return_value=Path("repo"))
+        agent = Mock(capture_dir=Path("segment"), lookup_faults=None)
+        agent.prompt.return_value = turn
+        driver.agent = Mock(return_value=agent)
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            driver.cancel()
+        agent.quit.assert_called_once()
+        return raised.exception
+
+    def test_a_turn_that_failed_before_the_command_is_classified_like_any_turn(self):
+        failure = self.cancel(live.Turn(**FAILED_504))
+        self.assertEqual(failure.outcome, live.PROVIDER)
+        self.assertEqual(str(failure), "cancel turn: provider in-band error (Timeout)")
+
+    def test_only_a_completed_turn_without_the_command_is_model(self):
+        failure = self.cancel(live.Turn(phase="completed", text="done"))
+        self.assertEqual(
+            (failure.outcome, str(failure)), (live.MODEL, "the model never started the command")
+        )
+
+
+class RunawayOutputTests(unittest.TestCase):
+    """A model output the 8 MiB capture cap stopped is the model's, not an evidence gap."""
+
+    CAP = live.CAPTURE_RESPONSE_CAP_BYTES
+    TERMINAL = (
+        "Failed(Failure { phase: ResponseBody, transmission: MayHaveTransmitted, "
+        "kind: Internal, cause: None, http2_reason: None, os_error: None, tls: None, "
+        "tls_alert: None, alpn: Some(\"http/1.1\"), http2_io: false, "
+        "connection: Some(Fresh), idle_age: None, connect_attempts: None })"
+    )
+
+    def write(self, segment, events, *, recorded=None, terminal=None, incomplete="true"):
+        body = b"".join(
+            b"event: x\ndata: " + json.dumps(event).encode() + b"\n\n" for event in events
+        )
+        filler = {
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_1",
+            "delta": "*** End Patch\n",
+        }
+        line = b"event: x\ndata: " + json.dumps(filler).encode() + b"\n\n"
+        body += line * ((self.CAP - len(body)) // len(line))
+        body = (body + b"event: x\ndata: {\"type\":\"respo")[: self.CAP]
+        body += b"x" * (self.CAP - len(body))
+        (segment / "exchange-0001.request").write_bytes(b'{"input":[]}')
+        (segment / "exchange-0001.body").write_bytes(body)
+        (segment / "exchange-0001.info").write_text(
+            "process_id=1\nexchange=1\nstatus=Some(200)\nconnection=Some(Fresh)\n"
+            f"terminal={terminal or self.TERMINAL}\nrecorded_bytes={recorded or self.CAP}\n"
+            f"incomplete={incomplete}\n"
+        )
+
+    PREAMBLE = [
+        {"type": "response.created", "response": {}},
+        {"type": "response.in_progress", "response": {}},
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"id": "ctc_1", "type": "custom_tool_call", "name": "exec"},
+        },
+    ]
+
+    def test_a_runaway_tool_call_at_the_cap_is_model_and_the_capture_is_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write(segment, self.PREAMBLE)
+            reasons = live.runaway_outputs([segment])
+            self.assertEqual(
+                reasons,
+                [
+                    f"model output ran past the 8 MiB capture bound (runaway "
+                    f"output in custom_tool_call exec) at {segment.name} "
+                    "exchange-0001"
+                ],
+            )
+            self.assertTrue(live.capture_integrity([segment]))
+            aborted = (
+                "overflow turn: failed Transport agent turn failed: Responses transport "
+                "failed: response stream interrupted [1 requests; last: unclassified]"
+            )
+            self.assertEqual(
+                live.score_runaway(live.HARNESS, aborted, [segment]), (live.MODEL, reasons[0])
+            )
+            self.assertEqual(
+                live.score_runaway(
+                    live.HARNESS, "renamed diagnostic", [segment], model_error_kind="Transport"
+                ),
+                (live.MODEL, reasons[0]),
+            )
+            self.assertEqual(
+                live.score_runaway(live.HARNESS, aborted, [segment], model_error_kind="Protocol"),
+                (live.HARNESS, aborted),
+            )
+            self.assertEqual(
+                live.score_runaway(live.PROVIDER, "429", [segment]), (live.PROVIDER, "429")
+            )
+            # A cancelled bodiless request after it (the continuation stopped
+            # at quit) leaves the runaway the last answered exchange.
+            self.add_exchange(segment, 2, b"")
+            self.assertEqual(live.score_runaway(live.HARNESS, aborted, [segment])[0], live.MODEL)
+
+    def add_exchange(self, segment, number, body):
+        name = f"exchange-{number:04}"
+        (segment / f"{name}.request").write_bytes(b'{"input":[]}')
+        (segment / f"{name}.body").write_bytes(body)
+        (segment / f"{name}.info").write_text(
+            f"process_id=1\nexchange={number}\nstatus=Some(200)\nconnection=Some(Fresh)\n"
+            f"terminal=Complete\nrecorded_bytes={len(body)}\nincomplete=false\n"
+        )
+
+    def test_a_runaway_does_not_relabel_an_unrelated_harness_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            self.write(segment, self.PREAMBLE)
+            for detail in (
+                "TUI exited 1 after Ctrl+Q",
+                "prepared input reached the compaction trigger without a committed remedy",
+                "plakd agent exited during a turn",
+            ):
+                with self.subTest(detail):
+                    self.assertEqual(
+                        live.score_runaway(live.HARNESS, detail, [segment]), (live.HARNESS, detail)
+                    )
+            # The failing turn ended later than the runaway: a later exchange answered.
+            self.add_exchange(segment, 2, b"data: {}\n\ndata: [DONE]\n\n")
+            aborted = "follow-up: failed Transport response stream interrupted"
+            self.assertEqual(
+                live.score_runaway(live.HARNESS, aborted, [segment]), (live.HARNESS, aborted)
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "segment-001", Path(directory) / "segment-002"
+            first.mkdir()
+            second.mkdir()
+            self.write(first, self.PREAMBLE)
+            # The turn that failed ran in a later process, not the runaway's.
+            self.add_exchange(second, 1, b"")
+            aborted = "follow-up: failed Transport response stream interrupted"
+            self.assertEqual(
+                live.score_runaway(live.HARNESS, aborted, [first, second]), (live.HARNESS, aborted)
+            )
+            self.assertEqual(
+                live.score_runaway(live.HARNESS, aborted, [second, first])[0], live.MODEL
+            )
+
+    def test_every_other_incomplete_capture_stays_an_evidence_gap(self):
+        second_item = {"type": "response.output_text.delta", "item_id": "msg_2", "delta": "x"}
+        transport = self.TERMINAL.replace("kind: Internal", "kind: Protocol")
+        for name, kwargs in (
+            ("below the cap", {"recorded": self.CAP - 1}),
+            ("another failure", {"terminal": transport}),
+            ("two output items", {"events": [*self.PREAMBLE, second_item]}),
+            ("a non-output event", {"events": [*self.PREAMBLE, {"type": "response.completed"}]}),
+            ("a complete record", {"incomplete": "false"}),
+        ):
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                segment = Path(directory)
+                events = kwargs.pop("events", self.PREAMBLE)
+                self.write(segment, events, **kwargs)
+                self.assertEqual(live.runaway_outputs([segment]), [])
+                # A complete record is a terminal Failed exchange, not a gap.
+                self.assertEqual(live.capture_integrity([segment]), name == "a complete record")
+                aborted = "turn: failed Transport response stream interrupted"
+                self.assertEqual(
+                    live.score_runaway(live.HARNESS, aborted, [segment]), (live.HARNESS, aborted)
+                )
+
+
+class FailureLinesTests(unittest.TestCase):
+    def test_the_final_line_keeps_the_error_before_it(self):
+        stderr = (
+            "plakd: composition Direct\nplakd: agent turn failed: provider HTTP 500\n"
+            "plakd: retry summary\nplakd: turn_failed:provider\n"
+        )
+        self.assertEqual(
+            live.failure_lines(stderr),
+            "plakd: agent turn failed: provider HTTP 500 | plakd: turn_failed:provider",
+        )
+        self.assertEqual(live.failure_lines("plakd: done\n"), "plakd: done")
+        self.assertEqual(live.failure_lines(""), "")

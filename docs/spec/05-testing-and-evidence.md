@@ -1,762 +1,136 @@
 # Testing and evidence
 
-This chapter states what the repository verifies, what it deliberately does not
-verify, and what each kind of evidence is allowed to claim. Two ideas run
-through all of it.
+This chapter states what the repository verifies and what each kind of evidence
+can claim. **Evidence binds an exact tuple**: source, binary, host, procedure,
+account, provider, model, effort, composition and protocol. **Reachability is
+not qualification**: a catalog listing, a nameable symbol, a command that
+parses or a route that renders is not a support or correctness promise.
 
-The first is that **evidence binds an exact tuple**. A passing run qualifies the
-exact source, binary, host, procedure, account, provider, model, effort,
-composition, and protocol it named — nothing adjacent. The second is that
-**reachability is not qualification**. A model that appears in a catalog, a
-symbol that is nameable, a command that parses, and a route that renders are all
-accessibility facts. None of them is a support or correctness promise.
+### Binding, upgrade and construction evidence
 
-The OpenAI review of 2026-11-15 compares official Codex tags `rust-v0.166.0`
-and `rust-v0.169.0` and public API documentation. It establishes unchanged
-bundled catalog bytes and OAuth consent facts, not live 0.169.0 acceptance.
-The rotated Codex binding needs fresh catalog/refresh and HTTP/SSE qualification,
-including local tools, encrypted replay, Lite Code Mode and single-dispatch
-remote compaction. The renewed Platform review needs the existing inexpensive
-`api-openai` row's listing, stateless multi-turn/tool and compaction checks.
-Terra, Cyber and Rosalind remain `NeedsReview`; no paid check of those models
-is needed to establish their fail-closed classification. Owner-approved live
-runs and a maintainer's human client review remain separate from offline evidence.
+- **Route and executor contracts.** Data-only builds pin selected/effective
+  configuration, model authority, per-tool schemas and bindings, registry,
+  projection and plan across native, API and OpenRouter families, root/leaf
+  roles and Direct/native/JS/Python presentations. Synthetic platform, time and
+  workspace authority enter through normal parsers and builders; never patch
+  digests. Repinning requires review. An unchanged executor binding must
+  continue accepting the structural subset described by each old schema;
+  narrowing requires a binding cut. Distinguish revised and unknown executors
+  from provider changes. Host-local file observations are not golden inputs.
+- **Persisted binding witnesses.** The predecessor-authored SQLite fixture pins
+  native/API root and child bindings, source and input digests, and
+  non-dispatching sidecar identities. Linux opens exact locators; other platforms
+  check frozen data and the expected execution-binding cut, not native Linux
+  composition. Rebuild using the committed recipe in a detached checkout with
+  isolated artifacts and immutable dummy sidecars. No private store, credentials
+  or inference enter the fixture. Read-only inspection preserves main and WAL
+  bytes and uses one runtime snapshot; inactive refusals do not gate. Differential
+  preflight separates new live regressions from old failures, inactive rows and
+  external availability. Exact reopen cannot substitute for the export carrier
+  across state keys.
+- **Planned handoff.** Same-key real-binary fixtures exercise bounded drain,
+  cancellation and continuation, PID-preserving promotion, pre-surrender
+  rollback and once-only terminal publication. Exceeding a drain bound with a
+  foreground call or paid compaction must not silently cancel, redispatch or
+  surrender it; Stop cannot continue work it stopped. Progress polling joins
+  the same computation and deadline. Holds revoke stale ingress, extend
+  approval expiry only by parked time and remain outside model-operation
+  deadlines; a crash before durable surrender is owner loss, not a handoff.
+  Client delivery at the verdict barrier is an attempted write, not receipt.
+  Deadline tests belong to the owner of each clock: L0 holds, provider watchdogs
+  and process executors are separate evidence.
+- **Settled carry.** Install fixtures exercise real host and runner processes,
+  named state, paused queues, source refusal or precommit rollback,
+  destination-only continuation after surrender, and exact imported successor
+  readiness. Remote placement must not consult a same-spelled host checkout.
+  Partial, unavailable and abandoned successors stay withheld until their
+  own proof; an already-Ready successor keeps its foreground work. The
+  runner qualification interface is read-only with a closed allowlist.
+  Test-only overrides (`PLAK_TEST_BINDING_CUT_IMAGE`,
+  `PLAK_TEST_FORCE_HOST_UPGRADE`, `PLAK_TEST_STATE_KEY`,
+  `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION`) control these cases without bypassing
+  custody checks or changing production reads. No fixture proves a live-tree/job
+  migration or cross-revision binary pair. Use literal producer/destination
+  builds and staging receipts for cross-revision evidence (chapter 02 §4.6).
+- **Hosted ports.** A scripted `RuntimeFactory` uses the same construction
+  port as production. Admission-scoped observers do not retain the prompt;
+  immutable registration is construction-root-local. Switchable test overrides
+  remove only their own registration, including out-of-order drops. The tests
+  preserve normal admission and publication ordering.
+- **External facade.** Compile and run the custom-model/tool workflow,
+  cancellation, durable reopen and shutdown from outside the workspace in the
+  public contract gate (§1.1). The 30-second lifecycle uses only public APIs;
+  all-feature and JavaScript-only consumers require no `[patch]`. This proves
+  neither provider admission, sandboxing, evaluator behavior nor distribution.
 
-Release-binding contracts are offline and data-only. The hosted route matrix
-pins canonical selected/effective configurations and IDs, model-binding facts,
-per-tool tables (name, definition/schema digests, executor id/binding and
-nesting), registry/projection and plan digests across native routes, direct APIs
-and the three OpenRouter wire families, with root/leaf, Direct, native Code Mode
-and JS/Python compositions. Diffs name field paths and cap detail per route.
-Synthetic workspace/platform and fixed model authority are compilation inputs,
-not patched digests. Fixture-clock constructors retain normal discovery parsers;
-ordinary constructors retain their production clocks. Repinning needs review.
+### Provider wire and continuity evidence
 
-The release executor contract separately pins each id, semantic binding and
-accepted input-schema digest set. With an unchanged binding, every previously
-accepted schema must remain a structural subset of a current schema; narrowing
-requires an explicit executable revision cut. Both fetch image-result variants
-are enrolled. Host-specific shell file observations are never golden inputs:
-replacement/revalidation tests and old inode-bearing descriptor reconstruction
-preserve recorded identities without invoking tools. Non-tool provider changes,
-revised executors and unknown executors must remain distinct refusals.
+The compiled Codex review compares official `rust-v0.166.0` and
+`rust-v0.169.0` and public API documentation, not live 0.169.0 acceptance.
+A rotated binding needs fresh catalog/refresh and HTTP/SSE qualification,
+including tools, encrypted replay, Lite Code Mode and single-dispatch
+compaction. The Platform review requires listing and stateless multi-turn,
+tool and compaction checks on `api-openai`. Terra, Cyber and Rosalind remain
+`NeedsReview`; offline fail-closed classification needs no paid request.
 
-A predecessor-authored SQLite fixture pins seventeen native/API root and child
-bindings, including native Code Mode and JS/Python through production builders
-with non-dispatching authority doubles. The Linux candidate opens the exact
-locators; other platforms check all frozen data and require the Linux execution
-binding cut on Direct cases rather than attempting Linux composition runtimes.
-The manifest pins source, schema, epoch, database SHA-256, every injected
-candidate source file's SHA-256, and never-invoked process bindings. Resolution
-uses explicitly injected candidate-owned doubles. The committed recipe uses a detached predecessor checkout and isolated
-artifacts. Its explicit immutable dummy-sidecar prefix has fixed synthetic path
-and bytes, not old executable code; conflicting artifacts refuse. No private
-state or inference enters the fixtures. Compact-admission checks reach unpaid
-measurement; a separate production host test covers native/API compact builds
-and restored source presentations. Recovery remedies are tested for both schema
-shapes, and native/API production successors preserve inherited skills and epochs.
-
-Read-only inspection tests preserve durable database and WAL bytes, report
-archival/succession with decoded inactive checkpoint verdicts, and use one
-runtime snapshot for list/load. Inactive refusals remain non-gating. An ignored, explicit 200-head measurement with
-128 KiB of distinct retained state per head records store size, output size and
-elapsed inspection time. Differential preflight
-contracts separate new live regressions from pre-existing failures, inactive
-rows and external availability. A real-binary same-key upgrade with an explicit
-`test-support`-only `PLAK_TEST_BINDING_CUT_IMAGE` metadata revision cut must print
-the refused rows and leave its source serving. Production builds ignore that
-hook. The daemon-job upgrade still checks the ordinary exact-reopen probes and
-preserves processes. These contracts do not qualify credentials, runner or
-future remote-catalog availability.
-
-Same-key step-drain cases use the same isolated real-binary homes. A
-`test-support`-only `PLAK_TEST_FORCE_HOST_UPGRADE` bypasses the current-image no-op
-so the ordinary same-key planned handoff is exercised; it bypasses no image,
-source-instance, custody or binding check. Production ignores it. Durability
-cases cover zero-bound interruption/continuation, finite natural completion,
-requester-loss rollback, idle natural completion and visible progress/Cancel, with unchanged
-session, branch and node identities. A foreground process and a paid fold
-running together past the bounded freeze must refuse surrender, reopen admissions, and
-finish once without cancellation or redispatch. Same-triple foreground promotion
-must preserve the real process PID through handoff, with one continuation and
-no process redispatch. Operator stop must abort before surrender without
-continuing stopped work. Private coordinator protocol 3 progress framing is
-checked with consecutive buffered replies; native runner/client protocols do
-not change. Changed-triple process probes fail closed until cross-build
-retention is available. A scheduled in-turn paid fold past the zero-drain
-bound must refuse with `paid_compaction_in_flight`, keep its single summary
-dispatch, and complete after rollback. A process starting after the initial
-changed-triple check must be found by the final check, remain source-owned and
-survive refusal. Coordinator parallel cases pin a slow joined lock computation
-across progress ticks, cancellation, and the single freeze bound; polling must
-not drop and restart that computation. Core parallel cases pin
-full-ingress guard revocation, stale generations, idle and internally admitted
-holds, preparation-window re-resolution, restored undispatched slots, approval expiry
-extended by actual parked time, closed-tree versus StepHeld recovery, and the
-first paid fold after deferred image residency. L0 clock evidence is generic:
-Held lies outside the model-operation deadline and a running operation remains
-Draining. Real retry-after and semantic-stall composition tests belong to the
-provider layer and use its real watchdogs; foreground deadlines are pinned at
-the process executor owner. No provider dependency enters agent/model to test
-host coordination. Hub/host cases pin dispatched child startup under a pause,
-parent/child hold rollback, deferred recovery notification, claims not yet
-registered as tasks, busy-slot retry, foreign pause refusal and timeout cleanup.
-The verdict barrier pins cancellation and its ten-second finite-budget floor;
-its client delivery promise remains an attempted write, not receipt. A hold itself changes no persisted format: before a durable planned
-handoff a crash is owner loss, not an upgrade receipt or permission to replay.
-
-Semantic tool-presentation tests preserve old schemas/descriptions against
-current capability/executor compatibility and reject a different capability
-sharing the executor. Constructor/export tests assert no model dispatch.
-Previous-build native fixture bytes and their hash remain pinned: a different
-state key refuses native reopen and requires the export carrier, not migration.
-Context codec 4 shipped with epoch 38. Epoch 39 refreshes the graph and
-publication goldens because every object address carries the format epoch;
-the credential-authority change adds no checkpoint field. Imported
-compaction data is boxed internally so its optional semantic facts do not grow
-the live driver's stack frame; nested settlement keeps its normal stack budget.
-
-Settled host-upgrade regressions use isolated real-binary homes and a
-test-support-only `PLAK_TEST_STATE_KEY` override to make producer and destination
-keys differ without changing the v12 carrier. Production builds ignore that
-variable. `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION` alters only the destination
-capability probe under test-support to pin changed-triple foreground refusal;
-production ignores it and the source runner triple is untouched. The install profile owns `host_skeleton::upgrade::`, excluded
-from offline: named state and paused queue round trips, source reopen refusal,
-recorded-root redirects, lost-ack retry, precommit rollback, postcommit-only
-destination recovery, wait timeout and preflight failures. Receipt cuts cover
-initial publication, export publication, mapping publication, imported seeds,
-surrender, reply loss and destination acknowledgement. Remote placed-root
-fixtures also cut after source surrender before import, after canonical create
-but before product binding, partway through multiple imports and before Ready.
-They require source custody release, once-only reserved successors, inert paused
-queues, destination-only receipt recovery and normal post-import readiness.
-Paired command mismatch must refuse before drain with an operator remedy; the
-configuration builder must not read a same-spelled host checkout. None authorizes prompt
-replay or proves live-tree/job migration. Dedicated input-limit/import-refusal
-hooks model unknown/smaller windows and unsupported readers only in test-support
-probes. Runner qualification regressions independently pin the closed read
-allowlist, refusals for every other request/frame class, unchanged unpaired
-inspection and absence of persisted runner mutations after qualification.
-This fixture lane exercises settlement and recovery, not a cross-revision
-binary pair.
-
-Cross-revision settled-upgrade evidence comes from staging cutovers and deploy
-staging receipts (chapter 02 §4.6). Those cutovers run the literal source and
-destination binaries: the source produces the export and the destination
-imports it. No in-tree rehearsal substitutes for that evidence.
-
-Plain-start durability cases cut Prepared receipts after initial publication
-and after mapping publication with multiple roots, then restart as either key
-without invoking the upgrade recovery command. Both roots must reopen under
-the source, the receipt must be Aborted and no target record may exist. Cuts
-between source archival and surrender also prove archival rollback, including
-when the retained source image is missing; a later destination-key start must
-not be redirected by Aborted history. A non-crash preparation-error hook proves
-immediate withdrawal while source authority remains held. Mixed local/remote
-outage fixtures keep remote successors withheld, admit a ready local successor,
-then restore the runner and require receipt completion without host restart,
-duplicate import or inference. Upgrade hooks live only in the test-support
-composition root; no release build reads their environment inputs.
-
-Retry regressions keep a real foreground call open on an already-Ready remote
-successor while another successor imports on the same runner. The process must
-survive, stay in flight, and leave no OutcomeUnknown effect. Explicit abandonment
-tests select both successor UUID and runner ID, retry idempotently, prove the
-reservation stays withheld after acknowledgement, then copy the retained
-document and normally import it onto a local placement. An independently
-missing source record does not fail Prepared rollback. Archived-head fixtures
-exceed the carried-root cap without consuming it and show their settlement is
-not inspected. All these upgrade cases use the existing durability module
-filter and parallel exclusion.
-
-Offline runner fault injection targets only the recorded daemon that still
-has the fixture home's lock file open, never a host's transient startup probe.
-Its exit wait tracks the killed daemon, not a replacement the live host may
-already have started while redialing. Fixture teardown instead re-lists and
-kills that home's daemons until none remain. A real-daemon regression places
-a successor and a startup probe before the exit observation, on both supported
-platforms.
-
-Runner placement contracts pin protocol 9 frames, process payloads and read-only
-root-identity probes without modifying earlier version pins. Deterministic runner
-tests distinguish an answered/Acked start from a committed terminal driver operation:
-same-owner live reconnect preserves foreground work, terminal cleanup stops only the
-matching call/PID, and promoted jobs survive. Stopped-report receipts survive newer
-owners and lost acknowledgments. Independent home admission guards retain the shared
-file lock through the product/pin commit and reread durable occupancy before admission.
-Probe tests cover the four-wide limit, admission-relative budgets, five-second cache,
-shared bind ownership and cancellation that leaves probes/reconciliation running.
-
-Operator-terminal evidence is separate from agent foreground/job evidence. Pure
-tests exercise concurrent quota reservations, principal-private tables, lost open
-answers, input acknowledgment loss with no replay, duplicate/gap offsets, binary
-bytes, strict base64 and byte bounds, controller ownership, ring overflow and
-output-gap cursors, fair shared byte budgets, awake idle/detach/namespace expiry,
-and reclamation/open exclusion in both admission orders. PTY serial tests use a
-deterministic child for raw echo and resize and an interactive shell for real
-background/stopped/foreground job-control groups and session-wide cleanup. A
-new-session descendant initially leaves termination unknown; close and periodic
-re-proofs distinguish later absence from explicit acknowledged loss with live
-escapees. A fast double-fork case records the non-containment residual. The
-platform scan test compares the runner's own kernel session id against a fresh
-PTY child's before platform cleanup qualification. Injected observation failures
-must leave a shell running. Forged session/group rows must never authorize a
-signal to a non-member, and uncertainty in one group cannot suppress another
-validated group. Unknown survivors include live session rows; periodic re-proofs
-are bounded to one scan pair and a capped exponential cadence. A zombie-anchor regression keeps Linux's full scan
-requirement while checking Darwin's unreaped direct-child fallback and rejection
-of changed start identity. A child exits before identity observation on both
-platforms: Darwin accepts its by-construction unreaped-child anchor without any
-start/session table row or waitid result, while Linux still requires its full
-scan. Cleanup must prove absence and every anchor clone must refuse even a
-matching stale row after retirement/reap. The exact-key environment assertion
-remains strict and also requires cleanup
-proof; job-control commands run from a short sourced script, disabling Bash
-history expansion before any job-id expansion rather than relying on shell-specific
-interactive parsing. The runner wire fixture waits for a proved `Exited` event
-even if the first event reports unknown termination; the detached-shell
-fixture waits for the last runner pin to clear before checking idle exit.
-Tests read the exact curated environment from `env`,
-validate passwd/fallback shell selection, bound output before cursor advancement,
-collect more than 65 closed receipts without replay, collect more than 64 refused
-opens while admitting a fresh id and preserving old refusal/digest outcomes, and fence more than 129
-retired generations. A full-bulk-channel serial regression holds input behind the controller reserve,
-then proves InputAccepted follows output with a gap-free sequence; a separate cut
-requires the read deadline to expire even while that gate is closed.
-Runner-loss durability tests kill a real PTY-owning process,
-including one with a real surviving HUP-ignoring orphaned shell, and distinguish
-lost-instance receipts from permission to spawn or signal a remembered PID.
-The host-only loss fixture waits for cleanup proof from the old runner itself,
-including when the replacement runner reports no terminals.
-The orphaned-shell fixture gates the HUP-ignoring shell's exit on a test
-marker and publishes a complete PID marker. On Linux it checks that specific
-PID's start identity and state without a whole-system scan.
-These platform-sensitive tests require both supported operating systems; Linux
-evidence alone is not macOS process-supervision qualification. The product client
-terminal scheduler and browser transport-loss evidence belong to their later
-client-protocol increment, not these runner-side tests.
-
-Client-9 terminal contracts pin independent stream frames, raw bytes, instance
-cursors, consent/takeover scope, product refusals and the exact schema. Four-stream
-contracts verify round-robin bytes/seq, atomic 64 KiB grants, wrong-owner and
-unsent-byte rejection, aggregate rate limits across runners, response-before-stream
-ordering and controller queue release. Rejected input cannot change offsets or
-enqueue bytes; acknowledgment loss reports unknown and never replays input. CSP
-contracts permit WASM only under the captured terminal switch and retain script
-and Trusted Types boundaries. Browser rendering/scheduler qualification remains
-separate client evidence, not inferred from these host contracts. A real-PTY
-product-wire test covers one-use consent, lookup-only open retry, preserved grants
-on no-effect busy refusal, confirmed takeover, a one-time execution marker,
-disconnect/reattach without input replay, runner replacement and acknowledged
-loss without killing the old shell. Runner-clock tests pin once-per-idle-period
-warnings and output-capacity behavior without advancing wall time. A renewal regression polls a real runner refresh to Pending,
-then proves controller input is acknowledged before refresh completion. A small-chunk
-PTY test stalls the reader beyond sixteen frames, then proves input still works,
-Exit remains deliverable and ended command admission refuses without effect.
-Before disconnecting to verify offline release, it waits for runner cleanup
-proof: stream exit alone can report unknown termination and leave a pin. The
-takeover/loss fixture likewise joins old-runner cleanup after testing that
-acknowledged loss did not kill the shell. Mutant checks distinguish
-same-principal wrong-connection input, correct-next-offset input
-before acknowledgment, and unreachable non-acknowledged close retaining its pin.
-Host tests collect over 1,024 completed receipts, import live runner inventory even
-with 4,096 exhausted receipt fences without creating an agent line, enforce quotas across runners,
-refill the six-open rolling minute and isolate runner/namespace operation locks;
-shutdown of a healthy runner must complete even while another operation is stalled. A re-pin
-regression deliberately unpins the host mirror of a still-live runner terminal,
-then requires same-instance inventory to restore pinned state, its residency hold,
-idle-exit refusal and reclamation exclusion. Deterministic loss acknowledgment tests
-advance only the host observation timestamp: before 90 seconds acknowledgment
-refuses, a rebind invalidates the old witness even if disconnected again, and an
-expired witness or removed runner permits explicit Lost without claiming death or
-killing the still-live shell. Open-rate tests pin the exact remaining retry delay;
-wire fixtures cover both a timed hint and null, and the schema pin changes with it. A minimal
-test-only client shares one bounded request cadence between four streaming
-terminals, typing and file-tree expansion, returning consumed output in four-row
-64 KiB credit batches. Its deliberate unscheduled overrun must return typed
-`rate_limited` before accepting input, while directory, ping and terminal traffic
-remain attached and continue. This is host enforcement evidence, not a published
-scheduler implementation or browser qualification.
-
-Host-internal terminal tests cover memory-only pin/hold acquisition, original
-product-37 schema/state-key identity, both pin/reclamation orders, authenticated
-controller exclusion, reconnect-before-input and joined shutdown without agent
-line/job records. Inventory tests distinguish paired hosts and state scopes and
-include no raw output. Repeated scope reconciliation across namespace expiry
-uses no terminal namespace quota and cannot reopen an expired principal. Lease tests reject another owner and retain the guard until
-Close/disconnect. A VCS wrapper checks admission at the actual removal.
-Host-loss durability cuts kill the authority subprocess after memory reservation
-and live PTY open. Restart discovers surviving runner pins before reclaim and
-refuses old ids. Runner replacement with surviving host memory retains precise lost
-pins until owner-only acknowledged loss, never signaling old PIDs. Combined host
-memory loss and an empty replacement have no global barrier: that is unlocalized
-unknown loss, not proof of process death. These are internal authority tests, not
-browser end-to-end qualification. Run platform preflight first; serial PTY tests
-and durability host/runner cuts remain excluded from offline.
-
-Direct Anthropic API refusal qualification follows Anthropic's
-[refusals and fallback documentation](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback),
-which treats partial refused output as incomplete and instructs consumers to
-discard it. Its [streaming-refusal guidance](https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/handle-streaming-refusals)
-also warns that unchanged context may produce another refusal. These statements
-do not qualify an unchanged-context task retry or authorize automatic fallback.
-Claude OAuth qualification instead requires the pinned native interactive
-Claude Code client and route-specific fixtures; API documentation alone is
-not authority for subscription behavior.
-The Sonnet 5.5 Platform model page and migration guide alone establish no
-Claude OAuth enrollment. The pinned Claude Code 2.1.284 macOS arm64
-executable (SHA-256
+[Anthropic Platform refusal guidance](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)
+requires discarding partial output, not retrying unchanged context or falling
+back. It does not qualify Claude OAuth. The pinned native interactive
+Claude Code 2.1.284 macOS arm64 executable (SHA-256
 `50a14c2f50f56668380fdda490167f1d3630d5cc18fb8aed3073c2c7ea7314fe`)
-lists the model and low–max effort. Synthetic interactive low, medium and max
-request captures establish the first-turn effort shape; short authenticated
-interactive turns at those efforts reached a response. The server does not echo
-the effective effort in these observations. Multi-turn thinking replay and
-native PTC remain unqualified.
+lists Sonnet 5.5 and low–max effort. First-turn captures at low, medium and max
+and short authenticated interactive turns do not prove server-side effective
+effort, multi-turn thinking replay or native PTC. Native costume/attribution
+uses separately pinned, synthetic interactive captures; source-derived and
+native-executed checksum evidence are distinct (§6).
 
-The [tool-input accumulation contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
-requires a physical block stop but warns that accumulated JSON can be incomplete.
-Refusal tests therefore cover wire-closed malformed/truncated client inputs;
-no evidence here permits terminal metadata before a physical block stop.
-
-Offline refusal regressions cover closed client-tool proposals, text and refusal
-blocks across strict Messages, Claude OAuth and OpenRouter stream endings. They
-require empty canonical refusal output, retained usage/identity/stop details,
-no local dispatch, no invented results, and durable reopen followed by a new
-explicit turn without replaying discarded blocks. Physically open Messages blocks, open non-client canonical blocks, non-refusal
-output mismatches, identity/usage contradictions, and possible hosted effects
-remain rejected. The canonical assembler also rejects revocation of `Pending`,
-`Completed`, and `Failed` tool calls for both local and MCP ownership, while
-allowing their `Requested` proposals and rejecting every provider-hosted state.
-A live refusal demonstrates terminal handling, never successful
-completion of the requested file work; a live scenario must check file content
-independently of a clean protocol terminal.
-
-Offline idle-continuation evidence covers notices without a tree runtime,
-content-free trigger receipts, `turn.auto_continue` home-only immediate policy,
-obsolete-key rejection, interrupt suppression, and RFC 3339 UTC notice envelopes.
-
-Run-until-idle regressions cover continuation admission and terminal status,
-turn-free waiting diagnostics, admitted-turn and timeout bounds, signal
-interruption, and exactly-once stdout projection.
-Spawned-binary offline loopback fixtures promote a real OS process, synchronize
-on the exact stderr waiting line, release the process, and require a second
-admitted turn with only its authoritative answer on stdout. Separate real-job
-fixtures require max-turns and timeout cleanup with exit 6 and a real SIGINT
-while waiting with exit 4; a TERM-trap marker proves the process was stopped.
-Child-owned promoted-process fixtures cover timeout and SIGINT, interrupted
-tree status, stopped process groups, durable terminal attribution and exact
-child reopen, including a live attempt with a Quiescent runtime head. Their
-shell publishes readiness after installing its TERM trap and opening a
-separate FIFO, then waits in a builtin read. Closing process stdin cannot end
-that wait, and no foreground sleep can defer the trap past the unchanged
-session-exit grace. The marker and exact terminal/reopen assertions remain
-required. A real
-js-ptc sidecar cell promotes nested `exec_command` and
-requires `JobPromoted { nested: true }` telemetry. Process-watch regressions
-cover output/exit wakeups and await notification waiting that leaves the
-blocking pool available; child-live
-attachment regressions enforce one-second retry spacing without snapshot floods.
-Terminal observations with more than 256 unread records drain before their hint
-deadline. A contended stop/poll on a one-worker Tokio runtime leaves another
-async task responsive. Behavioural monitor tests require unobserved short-job
-retirement and owner-drop wakeup even without terminal publication. Run cleanup
-tests distinguish closed/backpressured child ingress from fatal publication
-failures.
-Preparation regressions require an expired deadline to precede authentication,
-cancel pending preparation, forbid later request dispatch, and remain expired
-when the hosted drive starts. All use bounded waits with gate-load slack.
+Refusal fixtures distinguish a physically closed malformed client proposal
+from an open block or a possible hosted effect. Closed, undispatched local
+and MCP proposals may be discarded, but `Pending`, `Completed`, `Failed` and
+provider-hosted calls cannot be revoked. Preserve identity, usage and stop
+facts; publish no invented output/results and allow an explicit next turn
+without replay. Continuous Claude requests retain attributable provider
+continuation after exact reopen, reject ambiguous, imported and foreign
+provenance, and tie the HTTP session header to the logical UUID, not the
+per-dispatch request UUID. None of this shows why a provider refused; a live
+file-work oracle checks the file independently of the protocol terminal.
 
 ### Process lifetime and recovery regressions
 
-Memory and SQLite cleanup conformance advances lease time without waiting for
-a heartbeat: exact expired grants release singly and in batches, including
-idempotent repetition. Renewed, reacquired and foreign-domain grants refuse;
-SQLite rolls back a stale batch without releasing its valid expired peer.
+| Family | What the evidence must pin |
+| --- | --- |
+| Admission and release | Preparation deadlines precede auth and forbid later dispatch. Exact lease cleanup is idempotent, batch atomic and fenced against renewed, reacquired or foreign grants. Release joins descendants and stops before sealing; interrupt alone does not stop promoted jobs. Live attempts or jobs prevent submission. |
+| Continuations and waits | Idle notices are home-policy controlled, content-free and suppressible by interrupt. Run bounds count admitted turns; wait/timeout/SIGINT are proved with real jobs, joined cleanup, exact reopen and once-only stdout. Polls are wake-driven and leave the async/blocking pools responsive; retries do not flood snapshots. Durable non-mail receipts are not wake tokens. |
+| Foreground and job ledger | Ownership is branch-local. Foreground transfer precedes promoted transfer; only matching calls stop, and an unknown outcome cannot masquerade as exit. Retain attributed terminals/counters across carry and folds until atomic consumption, reserve terminal capacity before promotion and preserve ordered job transitions under backpressure. Idle wake and model notice consumption are separate. |
+| Steering and cells | Only safe boundaries preempt. Superseded unstarted calls have durable no-dispatch proof; nested mutations settle once, retain results and never inherit top-level control variants. Parked/cancelled observations resume the same cell or return its buffered terminal, leaving the original delivery deadline and bounded output intact. Named state publishes old or complete new state at result commit; no partial maps or replay on reopen. |
+| Recovery and compaction | Recorded decisions finish without redispatch. Fenced effects settle outcome-unknown with exactly one typed terminal and honest claim/cause; queue drain is explicitly resumed. Same-fence lease revival cannot outrun foreign takeover. Compaction limits paid dispatch, preserves valid reasoning only on unchanged prefixes, measures the actual sanitized tail, and keeps operations/counters through exact reopen. |
+| Transport versus capacity | Test-I/O allocation refusal is injected before a store mutation, not by filling disk or using transport injection. Assert unchanged heads on refusal, exact later publication, retained unsaved output and intent identities, and no repeated paid call; SQLite generic IOERR is not inferred to be EDQUOT. Clock-based cases advance the owner clock without substituting sleep or extending authority. |
+| Provider process vocabularies | Grok multi-await has one deadline and consumes only terminals; repeat snapshots, natural exits and stop/steer semantics stay distinct. Claude's native pack exposes exactly Bash, Edit, Read, TaskStop and Write. TaskStop takes only the string task ID; output uses the issued path via Read, not a retired output or shell-ID alias. Native schemas are compared against sanitized captures; truthful presented descriptions are not claimed as byte copies. |
 
-Offline orchestration regressions distinguish watched urgent mail from steer
-wakes, require edge-triggered owned-process wakes without durable non-mail
-receipts, reject foreign process ids, and refuse submission with live child
-attempts or jobs. Attempt-end and close tests fence descendant work and process
-stops before sealing; interrupt preserves promoted jobs. Adoption with running
-processes succeeds with an explicit warning rather than a refusal.
-Retirement regressions require unrelated settlement not to stop historical
-attempt jobs, a job promoted after closure but before cancellation to stop with
-`attempt ended`, and complete descendant and own-owner retirement despite one
-release failure. Hosted run-bound tests use the child-runtime factory to admit
-a real live child, trigger timeout without a wall-clock wait, join max-turns,
-timeout and interruption cleanup, and reopen the released child canonically.
-These hosted tests do not establish CLI signal delivery for a real live child;
-the CLI real-child resume e2e remains separate evidence.
-Offline background regressions cover v1 JSONL command admission, a background
-edge waking an in-flight top-level dispatch without cancellation, later-batch
-and next-turn reset, foreground-only promotion routing, and process-start-only
-preemption (polls keep waiting). Job protocol fixtures check ordered promotion
-and terminal transitions, repeated-snapshot suppression and uncorrelated v1
-wire identity pins. Route schema fixtures accept oversized start hints before
-lowering clamps them; no paid inference qualifies these checks. Full-ledger
-regressions cover Background and Steer, including a command that outlives the
-original foreground hint. Registry tests consume a terminal before the next host
-poll, verify ordered lifecycle publication, retry a saturated observation channel,
-and reserve terminal capacity before promotion. Channel fixtures protect job
-lifecycle receipts from eviction and cap/coalesce child traffic with a gap. Child
-fixtures pin stable selection beyond eight children and finished-tail reattachment.
-The background driver fixture rendezvous on dispatch readiness rather than a
-two-second wall-clock timeout. Neutral telemetry fixtures exercise adapter labels
-without tool-name or argument-key classification in L0.
-
-Hosted registry fixtures pin foreground-first same-branch transfer, branch
-isolation, running-only transition refusals without side effects, and host-wide
-stops across registered slices. A durable fast-exit
-fixture checks attributed process stop, a history-unchanged terminal checkpoint,
-and lease release in that order. Portable export refuses missing job-terminal
-evidence before producing a document. These tests are deterministic
-and use local pipes, never provider inference or persisted PIDs.
-Dedicated carry fixtures pin fork/rebind branch seeding and crash/recovery
-release, including abandonment of a Working provider turn, with terminal rows
-and the number counter preserved. A release receipt alone still yields an
-unknown process outcome. Reload admission reads a process-local host count and
-refuses without closing the terminal.
-Real-process `host_skeleton::upgrade::` cases qualify the settled successor path.
-
-Export-v13/v12 fixtures round-trip neutral content (including inline image bytes,
-opaque replay, native compaction bindings and turn counts), retain only the v12
-reader and refuse v11, and reject malformed or oversized input. Closed-kind
-tests reject missing/unknown/mismatched tags and the reserved host kind at ordinary import.
-Explicit account/protocol
-loopback bindings pin same-binding equality and cross-provider replay stripping.
-The scripted `history_report` output reports the text actually present in a
-model request, proving a >64 KiB, multi-turn conversation reaches the next
-request after a simulated state-key move. Seed fixtures distinguish unanchored
-above-trigger input that still fits from genuinely over-window input, and
-exercise first-prompt compaction. Offline capacity probes create no session;
-CLI and installed-build probe tests pin pre-carry window warnings. No live credential or inference is involved.
-Terminal-mode regressions cover hosted-owner shutdown, direct attachment
-release, and retirement of an interrupted child with a running job, then reopen
-with a fresh registry to prove terminal evidence was committed before release.
-Explicit transfer reopens the same branch with its live job and number intact.
-Admission-gate fixtures refuse promotion after terminal release starts and fence
-stale-owner cleanup after a replacement binds the retained service.
-Quit-grace fixtures distinguish a settled interrupted terminal from an
-unsettled 300 ms cancel, and check post-abandon exact-locator publication.
-Cancel refusal text retains millisecond precision for subsecond deadlines.
-
-The job release review regressions pin RecoveryRequired followed by an owner
-transfer, stop and record failures that still release the exact lease, hidden
-unmatched terminal snapshots, and registry pruning that retains live jobs and
-pending notices. Notice envelope tests inject control characters and check
-entity-aligned escaped tails; export refusal tests distinguish unsettled process
-rows from unfinished turns. The real promoted-process quit/resume fixture also
-asserts the one-second elapsed bound.
-
-Hosted real-root/two-child batched-release regressions run in the serial
-budget lane. They check atomic SQLite mutation, released holders, stopped
-admission, aborted hub recovery and no late actor publication; store tests
-reject an old commit before and after a successor acquires the branch.
-
-Job fixtures pin per-id joining and snapshot reads, cancellation detachment,
-64-per-runtime and 128-per-host pre-spawn refusals, attributed stops, foreground
-hint promotion, output-woken empty polls and non-PTY Ctrl-C. The durable driver
-also pins steer delivery to the top-level executor without cancellation,
-reset after the steering commit with a second normally dispatched batch in the
-same turn, mid-response source-ordered superseded closes with durable
-`ProvenNotDispatched` transitions and no `Dispatched` transition,
-and a nested terminal read that preserves the unconsumed row through its
-enclosing composition close. Projection fixtures distinguish empty-poll
-5..300-second hints from nonempty-input 250 ms..30-second hints and verify
-that zero selects the 250 ms first observation on every process vocabulary.
-Paused-clock quiet-poll fixtures prove the 900-second ceiling, prompt wakes
-with elapsed-time assertions distinct from that ceiling, cancellation during
-a hold, nonempty/Close/cursor reset rules, and exclusion of inline foreground
-terminals. Hosted fixtures prove unread mail re-signals later polls, stale
-in-band job joins do not preempt the next Bash, and driver-owned terminal
-notices deduplicate per turn. Nested cell and parallel read-only observer
-fixtures prove in-band exits do not spuriously yield computing cells or sibling
-waits. Repeated-mail fixtures bound forced yields per batch and pin the fixed
-model-visible end-turn reason. Automatic notices are gated on earned host wakes.
-Cell wait contract fixtures pin the shared 600-second schema ceiling and
-pre-validation hint clamp without changing cell-id normalization or invalid
-hint shapes. Driver fixtures steer during the initial cell observation and
-an outer wait, then resume the same un-joined cell to completion. Parked-cell
-fixtures abandon initial observations and polled resumes, coalesce multiple
-orphaned yields, and require the buffered terminal with ordered bounded output
-rather than stale running answers or queue loss. Host-window fixtures abandon
-observations and require the same retained terminal. Notice fixtures distinguish
-pre-resume preemption from an in-flight resume that is expedited once and retained,
-while host-window observations remain promptly preemptible after polling and
-prefer their buffered terminal over a notice.
-Session probes pin first-terminal-wins ordering, shutdown/stop wakeups,
-non-resuming buffered-terminal peeks, empty-yield resume behavior, and the
-same bounded truncation within and across yields. Driver fixtures expedite
-600-second parked-cell waits on steer and unread-mail Notice without creating
-a second wait; both complete within one second of paused-clock time, under
-the five-second runtime observation bound after nested settlement.
-Expedited-wait fixtures retain the original resume across a held nested call
-and a six-second computation: the former yields before its blocked answer,
-the latter yields at five seconds and completes through its next observation.
-A queued-call fixture prevents terminal preference from bypassing pending
-nested dispatch; an exact-frame worker pins the extra zero-window step when
-expedite races an unpublished yield.
-Delayed-acknowledgement fixtures complete the same eight-second delivery with
-and without Notice; a twenty-second delivery still reaches the ordinary
-fifteen-second failure bound rather than an expedited five-second failure.
-A hosted waiter warning fixture pins content-free recovery diagnostics to
-the agent id, attempt id, turn id and error kind before recycling. A nested
-mutation fixture proves steer never injects the Steer/Background variants
-into nested work, waits for non-waiting settlement and one accepted result
-delivery, then yields; the exact yielded
-checkpoint is checked by the Code Cell abandonment fold. A process-local crash
-snapshot reopens or reconciles that exact prefix without replaying the mutation.
-Real nested process fixtures prove steer forwards Notice to promote a waiting
-start or shorten an empty poll without killing its process; a top-level read-only group fixture pins whole-group closes or
-whole-group dispatch.
-Mixed-mode fixtures keep a live cell's lineage marker while a top-level process
-observes steer and a prepared top-level read-only group closes without dispatch.
-Live and restored operator-approval fixtures prove an approval after steer
-cannot execute the superseded effect. Full-row-ledger process fixtures prove
-steer retains foreground ownership through normal terminal observation.
-A virtual-time regression expires the outer observation deadline inside a
-nested mutation and requires the later steer yield to remain successful rather
-than cancelling and joining the cell. A nested read-only regression likewise
-drains its running execution and delivery before yielding.
-Grok 1.0.46 fixtures cover process-only multi-await under one deadline,
-immediate and repeated output-so-far snapshots, terminal-only consumption,
-steer without stop, idempotent stop, preserved natural exits, identifier
-mapping and the 600-second foreground/one-hour await clamps. The trio's
-schemas come from a sanitized Grok Build 1.0.46 native capture; draft,
-format/default annotations and nullable optional hints are narrowed to the
-strict portable schema subset, with the changed budgets described explicitly.
-Claude Code 2.1.289's TaskStop takes a strict object with one string task id;
-plakd presents that shape and does not expose the deprecated shell-id alias.
-The output file is named by the pack-neutral `full output: <path>` line rather
-than native `Output is being written to:` wording; tests pin that the Claude
-`Bash` description names that line and `Read`, that the `Read` description
-names the issued-path exception, its earlier-process refusal and the
-write-failure line, and that Claude `Read` reads an issued file outside the
-workspace. Claude Code 2.1.289
-and later present no TaskOutput (a background task's output file is read with
-`Read`), so the Claude pack presents no output tool. Its five-tool surface
-(`Bash`, `Edit`, `Read`, `TaskStop`, `Write`) is pinned by exact exposed-name
-tests on every catalog path, and the retired `BashOutput`, `Grep`, `Glob` and
-`TodoWrite` names are tested to fail to lower. The Claude Code 2.1.325 native
-interactive captures (mock origin, synthetic OAuth) are the costume evidence for
-the user agent and billing `cc_version` pin; the capture tool's scripted
-multi-turn mode (`--claude-scenario multiturn`: two `tool_use` rounds, one 529
-retry, a `--continue` reopen) is the evidence for `diagnostics` and the turn
-indices, pinned offline by sanitized facts in the Anthropic protocol tests. Native Bash/Read/Edit/Write
-schemas and descriptions remain those compared with native 2.1.289 (plakd's
-presented descriptions are its own truthful wording in that vocabulary, not
-the native text). The version suffix test pins `hello` to the captured `f16` for 2.1.325;
-`2.1.293` stays `72d`. Occupancy fixtures
-keep the stop name process-allowlist gated without changing its effect tag.
-The job-ledger fixture carries a promoted row across later turns and their operation-only and
-terminal commits, copies terminal evidence in a history-unchanged Quiescent
-checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 36.
-Fresh-service reopen retains exit-code and output-tail answers until consumption;
-stop on an already terminal snapshot preserves its original outcome. Row-cap
-fixtures keep foreground retention separate from promoted, unconsumed jobs.
-The top-level terminal-result commit removes the row and snapshot together;
-repeated terminal recording after that commit is a no-op.
-Compaction and its verified re-fold preserve the pending terminal and counter.
-Review regressions cover CRLF/lone-CR normalization and NUL/C0/C1/DEL terminal
-output, including a real PTY tail, followed by successful recording
-and later commits, defensive tail bounds, monotonic counter-only extensions,
-missing stopper attribution, consumption before retirement and cancellation
-between the running observation and promotion. Lost-owner reopen fixtures poll
-and consume formerly running rows as outcome-unknown snapshots; hydrated rows
-count toward the 128-row cap while a full ledger still permits foreground starts.
-Code Cell recovery rejects crossed dispatched root-command request bytes.
-External consumer fixtures name the job registry, views, terminal-recording
-workflow and the preempt receiver through supported surfaces.
-
-Process-notice regressions pin atomic prompt admission (the notice precedes
-`RecentIntent` and its rows disappear in that same checkpoint), one notice-only
-boundary commit, and delivery riding a pending steering commit. Held model
-responses deterministically finish jobs before a continuing boundary or before
-a final answer: notices affect the next continuing request but never extend an
-answered turn. A host-instruction admission covers the L0 path used by child
-start, follow-up and nudge turns. A one-shot ordinary-capacity refusal leaves
-the row pending until the next safe boundary. A blocked notice publication
-models a crash before commit and requires redelivery after reopen; a crash
-after publication preserves the notice and empty ledger without redelivery.
-Lost-owner reopen pins the exact `outcome_unknown` warning. Terminal-reporting
-top-level tool results suppress later notices; nested terminal reads retain
-their pending rows. Envelope tests cover integer versus string handles, every
-stop attribution, escaped/sanitized 40-line/4-KiB tails, and oldest-first
-coalescing under the 16-KiB batch bound. Coalesced rows use the same atomic
-consumption path as full envelopes. No host idle-wake policy is tested here.
-
-The deterministic full-driver sequential-process fixture exceeds both the live
-handle retention and retirement-tombstone bounds with 136 exited children. It
-checks a successful terminal, finalized durable process lifetimes and a usable
-following turn. Retained-child superset tests and genuinely missing-child tests
-keep their separate roles: completion of exited work cannot excuse lost proof.
-JSONL recovery tests require explicit `resume_queue` before draining paused work;
-queue resumption and persisted-tree resumption are distinct controls.
-
-In-process fences recover in place. The hosted and spawned-binary suites drive a
-scripted turn whose stream reports an unobservable outcome after two deltas and
-require: one `recovery_required` terminal per turn, one `recovered` record with
-the `model_request` claim and `interrupted` cause (from JSONL `recover`, from the
-next prompt, from `plakd run --session`, and from `plakd session recover`), exactly
-one harness note, no second provider dispatch, and no text naming a new-session operation.
-Unit tests pin the abandonment fold per obligation shape, the claim precedence
-and each claim × cause note, the process-session and Code Cell abandonments at
-reopen, interrupt inside a paid fold ending `Cancelled` with the fold finalized, a
-failed paid fold falling to placeholders with one fold dispatched, lease
-revival under the same fence (and its refusal after an acquire or a store
-reopen), and a pre-dispatch lease refusal being definite. Unsynced renewal and
-revival are pinned by a pragma probe, a restore-failure refusal, and power-loss
-image tests that restore the database and WAL as of the last `FULL` commit: a
-new boot retires the grant, a revival never survives a reboot, a dead holder in
-the same boot is taken over through holder proof, a renewal is inside the
-next `FULL` commit's image, and a renewal whose WAL frames are torn or fail
-their checksum recovers as exactly the state before it. The SQLite SIGKILL
-campaign also cuts commits that follow unsynced renewals, and the no-locator
-compaction SIGKILL cuts after a revival that follows durable `Dispatched`,
-before the provider start.
-Offline compaction regressions cover artifact-gated replay across twelve tool
-rounds, pressure preparation refusal leaving the paid guard unspent, occupancy
-folds after that guard is spent, strict shrink against fresh source lowering,
-and stable placeholder prefix/cache affinity across passes. Production Codex
-lowering pins byte-identical serialized bodies for fresh encrypted-reasoning
-history and its portable projection, including reasoning-only and mixed items.
-A deterministic 32-round fixture bounds
-compaction count and requires eventual paid dispatch without ContextLimit.
-Code Cell reopen fixtures also pin accepted pending and completed same-turn
-steering, and the exact Prepared-root, Completed-provider,
-`EvaluationAbandonmentRequired` shape: no invented cell result, preserved
-completed evidence, and exactly one root terminal. Named-state fixtures save
-through driver-owned events, close and reopen the session, and require a new
-cell to read the exact value. They cover canonical and exact-integer bounds,
-fork/rebind copy, compaction and interpreter resets, yield/wait publication,
-failed/stopped/abandoned/refused rollback, generation loss paired with definite
-success/error/refusal responses, and store cuts immediately before
-and after the result checkpoint (old state or the complete new map, never
-partial state). The first state-carrying checkpoint must complete its own outer
-operation; real session open recovers both cut shapes with exactly one root
-terminal and no source replay. The SQLite fixture closes and reopens the real
-store and rejects corrupt or missing value objects rather than substituting
-empty state. A real-driver crash matrix
-(`code_cell_crash`) cuts the store inside a native Code Mode, JavaScript and
-Python cell — the round landed but the cell not yet prepared (claim
-`NothingStarted`), source admitted with no nested call, a nested tool or
-`exec_command` running, a nested call returned or yielded while the cell runs,
-and a later cell beside an earlier cell's live job — and requires the head to be
-closable by the runtime, the reopen to settle every in-flight cell, child, effect and process
-operation outcome-unknown with claim `RunningTool` (cause `ProcessLost`), no
-source, nested call or provider request replayed, the job kept as
-outcome-unknown, and the next prompt to complete. Host refusal classification
-distinguishes local abandonment/finalization debt from external effect evidence.
-
-### The external facade consumer
-
-The external facade consumer also executes offline in the public-contract gate.
-It uses public facade APIs for a custom model and tool, cancellation, durable
-session reopening and shutdown, without repository test-support APIs. The
-lifecycle has a 30-second bound. It proves the public workflow, not live
-provider/auth admission, an OS sandbox, or any evaluator. The
-`facade-consumer` fixture selects every feature and the JavaScript-only fixture
-the `composition` workflow; neither needs a `[patch]` table (§06). Neither is a
-registry-distribution proof.
-
-### Claude continuity regressions
-
-Offline Claude continuity regressions require previous-response attribution
-after durable reopen with refreshed capability/context observation timestamps,
-while retaining rejection of foreign configuration, account, credential authority,
-and ambiguous or imported response provenance. Local TLS capture checks the HTTP
-session header against the logical session UUID in the request body and keeps
-the per-dispatch client request UUID distinct. These checks establish wire and
-provenance behavior; they do not establish the cause of a live provider refusal.
-
-### Hosted construction ports
-
-Hosted construction tests register a scripted `RuntimeFactory` through the
-same port as production host builders. Lifecycle boundary observations are
-port calls, not feature-conditioned host control flow. Admission selects a
-per-turn observer without retaining the prompt in the drive; production selects
-none. Child binding fixtures
-register against their own construction roots: cloning those roots preserves
-the immutable registration and an unrelated host cannot observe it. Mid-test
-changes belong to a test-kit switchable factory; dropping an override removes
-only that override, including when guards are dropped out of order. Existing lifecycle
-and crash-cut observations retain their ordering and durability authority;
-scripted construction does not replace the real admission or publication path.
+Runner-side platform tests distinguish a live process from a PID or stream
+terminal. A missed observation cannot authorize a signal; exact session/group
+proof, lost-instance receipts, bounded cleanup scans and explicit acknowledged
+loss are different evidence. Serial PTY and durability host/runner cuts stay
+outside offline parallel. They require both supported operating systems;
+Linux cannot qualify macOS supervision or the browser/client scheduler.
+Operator-terminal, Files, account and console evidence is grouped in §6.4.
 
 ### The Harbor bakeoff plane
 
-`eval/` is a separate, opt-in and paid Harbor bakeoff plane that runs
-the same `plakd run` binary against other coding CLIs. It is maintainer tooling,
-in no gate tier and not product qualification; its adapter tests run with
-`just harbor test`, and `eval/README.md` owns its datasets, arms,
-evidence rules and recipes.
+`eval/` is opt-in, paid harness comparison using the same `plakd run` binary.
+Neither campaigns nor the zero-inference `just harbor test` suite are gate or
+product qualification evidence. `eval/README.md` owns datasets, architecture-
+matched pinned comparators, private digest-reviewed plans, calibration, A/A
+and campaign recipes. Use interactive subscription OAuth for native Claude;
+do not substitute print mode.
 
-Scored Harbor comparisons are gated as defined in `eval/README.md`.
-The preparation plane freezes common root/package task images and writes
-private, digest-reviewed campaign plans without inference. Calibration plans
-are explicitly unscored, admit no fabricated prior calibration, and run one
-plumbing trial per arm. Comparator HTTPS recording is cell-local, verifies
-upstream TLS, and exports only structural fields and digests; plakd retains
-its exact-URL subscription routes and uses its own wire capture instead.
-The A/A recipe requires eight tasks, three serial blocks and identical plakd
-labels; the Codex campaign recipe requires its successful source/platform/
-binary-bound A/A receipt. All paid entry points remain explicit opt-ins.
-Account leases are host-local; the operator must prevent cross-host reuse.
-Incomplete wire evidence and retry lower bounds must never be represented as
-complete observations or exact retry counts. Claude trial instruction matching
-uses only the documented billing-nonce projection; exact full instruction and
-body digests remain evidence, and base client version, entrypoint, unknown
-fields and all other content stay pinned. Other arms retain exact matching.
-
-Test-only session-record faults use one complete forwarding store with per-method
-policies; composition fixtures use one scripted integration, session and event
-port. Refactoring these fixtures does not change their scenario assertions.
-Capacity-outage coverage injects direct-I/O `ENOSPC` and `EDQUOT` before a SQLite actor
-mutation, without filling a real filesystem. This does not cover SQLite-mediated
-EDQUOT: SQLite IOERR without safely available errno remains generic unavailability.
-It checks unchanged heads on
-refusal and exact publication after recovery. Paused-clock driver tests
-cover the five-second cadence, parking beyond physical-call deadlines until
-a write succeeds or the owner cancels/shuts down, retained model output,
-lost acknowledgement reconciliation and duplicate command receipts without
-another paid dispatch. Tree and product tests retain retirement intent and
-queue identities across a refused write; reads cannot clear their pause.
-Advancing-clock tests jump past expiry without an outage and hold all writes
-refused beyond the lease, requiring same-fence revival and exactly one result
-without another paid dispatch. Foreign takeover still refuses revival and
-publication; capacity debt cannot make an expired grant valid. Cancellation
-after one and repeated in-commit revivals retains the newest grant for heartbeat
-and exact release while only checkpoint writes are full. An unreadable lease
-clock with transient renewal failure retries without ending authority. Scoped
-cancellation tests keep unrelated child publications parked and permit later
-owners to recover. Hosted parked-product-write tests interrupt without losing
-queue identities, then quit with a clean runtime release.
-Storage injection is local to these store seams, not `PLAK_TEST_FAULTS`,
-whose transport faults do not simulate database allocation failures.
-Memory conformance runs once, independently of the SQLite suite. The route
-SIGKILL matrix owns the direct boundary cells; the commit-cut campaign remains
-separate. Projection rebuild and plain-reopen laws share a lifecycle per shape,
-and capacity and workflow cuts share immutable seed/pilot fixtures, never the
-mutated cut workspace. Busy and quiescent child-timeout fixtures overlap their
-unchanged real timeout windows but assert each terminal and exact reopen.
-
-The settled destination probe has a byte-for-byte fixture.
-
-Offline compaction regressions use synthetic native-reasoning envelopes only.
-They check that a retained tool exchange loses invalidated reasoning but keeps
-calls/results, that Messages translation after a cut omits signed, omitted and
-redacted thinking under both exact and portable policies, and that unchanged
-prefixes and post-cut append-only reasoning retain exact replay. Exact-model
-replay follows that same prefix rule. A semantic fit probe measures the
-sanitized tail the request sends. Semantic provenance's retained-tail count
-and digest both name the post-omission tail, and a negative test fails when
-they diverge. The manual Messages validator still refuses a tool-result
-continuation that lost its thinking when steering text was merged into that
-user message. Prefix-change cases also cover tool-result placeholders and
-image retirement. These tests prove request/history projection, not provider
-acceptance or live qualification.
+Calibration is unscored. A scored campaign must carry its required source,
+binary and platform-bound preparation receipts. Recorders verify upstream TLS
+and export structural fields and digests only; plakd uses its own wire capture
+and exact-URL routes. Operators must prevent cross-host lease reuse. Incomplete
+wire evidence and retry lower bounds are never complete/exact observations.
+Only the documented Claude billing-nonce projection permits instruction
+normalization; every other field remains pinned.
 
 ## 1. Gate layers
 
@@ -2122,7 +1496,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
 | Mail yield window | `unread_mail_yields_are_bounded_within_one_tool_batch` measures elapsed time and stays in serial |
 | Host quit, compaction and session round trips | `interactive_observation_timeout_releases_gate_and_joins_without_masking_failure`, `interrupt_then_quit_publishes_the_cancelled_terminal`, `quit_during_active_turn_waits_for_cancelled_terminal_projection`, `scheduled_compaction_failure_keeps_host_worker_alive`, `product_session_facade_create_turn_shutdown_and_reopen`, `retiring_a_live_child_advances_its_session_locator`, `real_session_late_start_ack_releases_after_deadline_without_redispatch` |
-| Wall-clock promptness bounds | `the_idle_wait_wakes_on_an_intent_and_not_before`, `host_service_ignoring_sigterm_is_killed_after_the_grace`, `an_exited_session_reports_its_joined_status_while_active_and_after_retirement`, `codex_observations_accumulate_one_bound_and_resume_exactly`, `the_whole_fetch_deadline_bounds_a_stalled_peer`, `deadline_bounds_the_wait_behind_an_in_flight_fetch`, the eight quit-grace scenarios (`disconnected_control_plane_*`, `ordinary_quit_*`, `process_exit_quit_with_settled_cancel_reports_a_stuck_child_release`, `quit_grace_*`), `a_recycling_waiter_is_an_owner_that_recovery_never_waits_on`, `user_stop_grants_the_term_grace_without_blocking_the_caller`, `jj_cli_doctor_bounds_output_wait_after_leader_exit`, `pending_wakes_return_the_wait_and_are_consumed` — each asserts that something returns within one to five real seconds instead of waiting out a longer grace or window, a real timing assertion that parallel load could trip |
+| Wall-clock promptness bounds | Idle intent and process wakes, TERM grace and process exit, fetch and credential observation deadlines, quit and recovery admission, bounded user stop and jj doctor waits — each asserts a one- to five-second return rather than waiting out a longer grace or window. Parallel load can trip these real timing assertions. |
 | A real race, listed not hidden | `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` |
 | Product durability scenarios | `offline_e2e::durability::` — quit, resume and failure-wave tests. The separate gateway and subscription custody durability modules run only in core durability |
 
@@ -2486,27 +1860,17 @@ provider status responses.
 
 ### 2.6 Spawned-binary lifecycles
 
-Real-process fixtures own host children and their process groups from spawn,
-before waiting for readiness. Teardown reaps them on drop, panic or a readiness
-timeout, and reaps home-local daemons before removing their homes.
-The process-group teardown regression waits for the grandchild's exit as well
-as reaping its parent: group signal delivery is not a join. The service test
-checks that the grandchild cannot run when termination returns; an exited
-zombie may still have a PID until its adoptive parent reaps it.
-Remote skills regressions construct a native Claude-profile session through a
-workspace-restricted loopback runner with its own user-skill exception and
-cold-reopen an API session through the host
-after dropping the runtime and topology handles. Exact reopen retains the frozen
-listing even when another project skill appears; neither open reads host-home skills.
-The native fixture counts real runner file-read requests, exercises multiple
-bounded slices, permits an internal user-root link, refuses an escaping link,
-and requires a disconnected runner to refuse rather than read the host file.
-Raw instruction requests independently pin the runner's refusal of an escaping
-user-root link and a non-root path, without host-side discovery filtering.
-Held-link and between-slice replacement fixtures require Stop to return without
-the runner's answer and refuse a torn page. Slice identity tests pin inode,
-size and modification-time changes. Fixture leak cleanup checks the recorded
-child's process group before signalling it.
+#### Process ownership and synchronization
+
+Real-process fixtures own the child and its process group before waiting for
+readiness. Drop, panic and timeout must join the group and reap home-local
+daemons before deleting the home. Signal delivery alone is not a join: a
+grandchild must no longer be able to run, even if its zombie PID is still
+visible. Failure injection targets the recorded owner, not a transient probe
+or redial successor. Teardown re-lists successors in its own home.
+Signal tests wait for the fsynced provider-dispatch record, after installation
+of the signal watcher, not for an arbitrary elapsed interval.
+
 The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and
 `tools/perf/perf-smoke.sh` are not guarded.
@@ -2536,92 +1900,51 @@ The tooling socket-budget check reserves at least 12 bytes below macOS's
 103-byte path limit for the current runner-build, home-local, host-control,
 web and remote fixture suffixes, including maximum PID and fixture-ordinal widths.
 
-UI reload evidence keeps a real session WebSocket open across `SIGUSR1`,
-checks the replacement policy and continued wire service, and rejects an
-invalid replacement while retaining the old build. SIGHUP remains a
-planned host handoff, never an asset reload.
+#### Offline faces and fixture controls
 
-Host binding-request process cuts cover the actor fence, joined release,
-durable carry and opened target for both `rebind` and `retry_attach`.
-Restart must recover custody, retain one canonical terminal and the carried
-history, serve one actor, and append no provider dispatch evidence.
+The product integration suites spawn real `run`, `agent` and `host` processes
+against an offline scripted model. They prove exit status, cancellation,
+non-reading peers, ordered events and exact reopen across processes; a unit
+test cannot prove these. There is no provider network or credential authority.
 
-A class of defect lives only in the process: how a signal ends it, what its
-writer does when the reader stops reading, whether a failed shutdown still
-terminates the stream, and whether a session an earlier process wrote reopens.
-No in-process test reaches any of it, and each of those was found live rather
-than in the gate.
+- A `test-support` binary accepts `PLAK_TEST_MODEL=offline-loopback-v1` and an
+  absolute `PLAK_TEST_SCRIPT` pointing to a `ScriptPlan`. A minimal script is
+  `{"version":1,"repeat_last_step":true,"steps":[{"output":{"text":"offline answer"}}]}`.
+  Optional `PLAK_TEST_EVIDENCE` is an absolute JSONL output path.
+  Use an isolated home and `PLAK_TEST_RUNNER_DETACHED=1` for a home-local
+  runner without a user service manager. An unusable requested hook refuses;
+  never fall through to real inference.
+- The exact selector makes capacity Available. The independent
+  `PLAK_TEST_STORAGE_CAPACITY=available|warning|refused` override refuses
+  invalid values and lets doctor fixtures avoid actual free-space dependence.
+  In-process capacity fixtures use the store injection seam; ordinary builds
+  use the real probe.
+- Only the scripted Codex account/model row becomes Ready, with low and medium
+  effort and no priority tier. Scripted profile switch, fork and reopen use the
+  normal binder over that exact route. Effort remains binding, unchanged exact
+  runtime still refuses, and no unrelated account/model becomes Ready.
+- Scripts vary model rounds, faults, usage and folds through the same offline
+  model and boundary controller as the in-process fixture. Frozen/selected
+  optional tools go through the product binder; Direct and nested Code Mode /
+  JS catalogs preserve MCP ownership, including after compaction or rebind.
+  Fake MCP call/list markers distinguish once-only dispatch and frozen listing
+  from recovery replay. A child fault does not imply refused root admission.
+- `tree_process_tools` requires `tree` and adds the standard process tools to
+  that scripted registry. Child controls require `tree`;
+  `disk_full_at_child_locator` and `product_child_script` require
+  `durable_tree`. Real product children (`product_child_script`) exclude
+  scripted-child fault/hold dials, use the actual child path for bind/reopen and
+  append requests to `child-evidence.jsonl` alongside root evidence.
+- `PLAK_TEST_PROVIDER_RELEASE` gates first physical dispatch and respects
+  cancellation. `PLAK_TEST_ASSISTANT_DONE_RELEASE` gates after publishing
+  `assistant_done`: `quit` waits for input, `release` continues without
+  input, and `idle` drains through the real busy-false record. The
+  script's `identity_hash_delay_ms` delays hashing, not identity or bounds.
+  With `--timeout`, an existing `PLAK_TEST_RUN_DEADLINE` file reaches the
+  ordinary interrupt/deadline path; without `--timeout` it does nothing.
+  These are scheduling controls, not product policy.
 
-`bin/plakd/tests/integration/offline_e2e.rs` spawns the shipped executable through
-`env!("CARGO_BIN_EXE_plakd")` and drives `plakd run` and the `plakd agent` JSONL
-stream against a deterministic in-process model. There is no provider, no credential
-and no network.
-
-The model is selected by two environment variables the binary reads only under
-the `test-support` feature: `PLAK_TEST_MODEL`, which must name
-`offline-loopback-v1`, and `PLAK_TEST_SCRIPT`, which names a JSON document.
-With that exact offline model selected, capacity is injected as Available,
-independent of the fixture volume. A `test-support` build also accepts the exact
-`PLAK_TEST_STORAGE_CAPACITY=available|warning|refused` override, independently
-of model selection, so binary doctor tests never depend on actual free space.
-An invalid override refuses admission. Ordinary builds use the filesystem
-probe. Real product-store capacity tests inject Warning
-and Refused through the in-process store constructor seam.
-In-process unit tests use an injected Available value by default, and the
-product-store unit-test builder can override it to any admission value.
-A hook that is requested and unusable refuses the launch; it never falls through
-to a provider, because a gate run that silently tested nothing is worse than a
-failing one.
-
-The same selector on a real `plakd host` admits the exact
-`account = "codex"`, `model = "offline-loopback-v1"` route in its Ready
-catalog, with `low` and `medium` effort and no priority tier (Fast is refused
-by the ordinary tier admission). Other routes retain their real
-credential readiness, including other models on `codex`; the injected row
-does not make an unready real model selectable. Profile Switch now, Fork now
-and explicit profile actions use the ordinary profile validation, canonical branch
-transition, line/epoch publication and exact reopen, with the scripted runtime
-as their provider transport. No credentials or network are needed. The
-profile's effort is frozen in the scripted provider configuration, so an
-effort change is a real canonical binding change rather than an admission
-shortcut; an unchanged exact runtime is still refused normally. For example,
-under an isolated `PLAK_HOME`, `agents/offline-low.toml` can contain:
-
-```toml
-account = "codex"
-model = "offline-loopback-v1"
-effort = "low"
-composition = "direct"
-description = "offline profile"
-```
-
-`profiles/offline-low.toml` then contains `root = "offline-low"` and
-`working_set = ["offline-worker"]`, with `agents/offline-worker.toml` also
-selecting that exact route (the same template shape suffices). A second
-profile can name another template on the same
-exact route, for example `offline-medium` with `effort = "medium"`. To start
-on that template with profile orchestration enabled, `config.toml` contains:
-
-```toml
-[root]
-agent = "offline-medium"
-[orchestration]
-subagents = true
-```
-
-Launch a binary built with
-the default product features plus `test-support`, with `PLAK_TEST_MODEL=offline-loopback-v1` and
-`PLAK_TEST_SCRIPT=/absolute/path/to/script.json`; a minimal script is
-`{"version":1,"repeat_last_step":true,"steps":[{"output":{"text":"offline answer"}}]}`.
-`PLAK_TEST_EVIDENCE=/absolute/path/to/evidence.jsonl` is optional. Isolated
-process fixtures also set `PLAK_TEST_RUNNER_DETACHED=1` so their home-local
-runner does not require an installed user service manager. The
-real-host socket tests cover successful switch/fork, successor reopen and
-unready-route/unsupported-effort refusals without changing the home default.
-These hooks and the scripted runtime factory are absent from the shipped
-default build; they add no persisted or wire vocabulary.
-
-Two explicit client-test producers also require `test-support`. The setup-only
+Two explicit client-test producers require `test-support`. The setup-only
 `plakd --test-seed-abandoned-open without-submission|with-submission` command
 requires the offline selector/script, an explicit absolute `PLAK_HOME`, an
 unused runtime store and an isolated workspace. It settles `seed terminal`
@@ -2674,185 +1997,77 @@ The product reads none of these controls in default or maintainer builds;
 the hosted hold port is compiled only with `test-support`, already excluded
 from both production resolutions. Binary-marker/CLI contracts prove exclusion.
 
-The document is `plakous_offline_crash_harness::script::ScriptPlan`: a version,
-a list of assistant steps, and the fixture dials the compaction ladder needs.
-The test-only `tree_process_tools` dial explicitly adds the standard coding/process
-packs to the topology fixture's one registry and requires `tree`; ordinary registry
-selectors remain mutually exclusive. It exercises retirement in a parent with both
-a live child turn and a live process without changing product bindings. A
-step names its output (text, a tool call with arguments, a reasoning-only block,
-or nothing), its stop reason, its usage figures, an optional stall, and an
-optional provider fault — refused before the stream, reported in band after a
-named number of events, or reported after a stall. The script's `fold` says
-whether a semantic-summary request is answered or refused, and a refused fold is
-what drops the compaction ladder onto its offline placeholder rung. This is the same
-`LoopbackModel`, descriptor, runtime authority, tool registry and boundary
-controller the Rust loopback builders use; only the round-by-round shape comes
-from data. `effect_decision_timeout_ms` overrides the scripted runtime's
-decision deadline for expiry/refusal cells without changing production defaults.
+`plakd/test-support` is absent from default, maintainer and release builds.
+Workspace and feature checks pin its edges to the harness, hosted scripted
+factory and tree-store trace forwarding (chapter 06 §4). The normal construction
+port remains available without them. The harness supplies the product's only
+edge to transport fault injection (§2.8). No test selector adds persisted or
+wire vocabulary.
 
-The scripted runtimes compile their own registries, so the root's optional
-tools reach them through the product's own binder: the session's frozen tools
-on reopen, or the `[root] agent` template a creation freezes. A template
-naming `mcp:<server>` therefore offers that server's tools Direct (plain
-scripts) or in the Code Mode / `js-ptc` nested catalog (`code_mode` scripts),
-each under its MCP owner, and the scripted compaction twin carries the same
-extensions. `plakous-mcp-fake-server --call-log PATH` appends each called
-tool's name to `PATH` before it runs, and `--list-log PATH` one `list` line per
-`tools/list` request, so a test in another process counts dispatches and
-listings: one offline test calls `mcp__fake__echo` from a Code Mode cell,
-another compacts a session holding an MCP call, a hosted test checks that a
-rebind keeps the session's frozen MCP tools without listing again, and the
-durability module kills the host after an MCP call's
-write-ahead claim and checks that reopen settles it without a second
-dispatch.
+**Code Mode enrolment is harness-only and says so in its own identity.** Local
+Code Mode compiles only for a model whose projection target the composition
+enrolment recognises, and the scripted model is not any real provider's model.
+`plakous-compose` therefore carries one extra enrolled target behind the
+`scripted-code-mode-enrolment` feature, which is off by default and reached only
+through the harness. The target's every field is a `scripted` or `offline`
+identifier — `offline.scripted.code-mode.responses`,
+`offline.scripted.code-mode`, `offline-scripted-code-mode-v1`,
+`offline-scripted-code-mode-adapter-v1` — so a scripted session can never be
+mistaken for an enrolled Codex one, and the feature adds exactly one branch to
+the gate while leaving the gate's own conditions byte-identical. No Codex model
+name, adapter revision or route appears anywhere in it.
 
-`bin/plakd/tests/integration/offline_e2e.rs` module `durability` chains those gestures in one
-spawned session. Its tool/cancel/compact/resume chain uses an accepted bounded
-summary: when retained tool output clips the next turn, it checks that turn
-ends without replay, compacts for subsequent work, and answers a new explicit
-prompt before quitting and reopening. A `tree` script may also set
-`durable_tree` (publish through the product `subagents.sqlite3` so
-`plakd session show` reads the same rows),
-`disk_full_at_child_locator` (the first bound child locator publish and all
-later saves return the classified `disk_full` category and no backend text;
-the child row lands before the fault, independent of projector save counts),
-`child_hold_ms` / `child_hold_after` (later children stay running after the
-locator is published), and `fail_child_after_successes` (a later bind returns
-recovery-required). Those dials stand in for the child session. With
-`product_child_script` instead, children are real product child sessions: the
-scripted root's parent is parked on its attached hub as a root attach parks
-it, so spawn, live slot, release, reopen and continuation all take the
-product's own child route, and each child binds the named script document
-(read whenever it binds, so a test rewrites it between builds) over the pi
-coding projection, against a roster whose `review` template binds
-`openrouter`. A child's provider requests append to `child-evidence.jsonl`
-beside the root's evidence. Those dials are refused unless `tree` is set,
-`disk_full_at_child_locator` requires `durable_tree`, and
-`product_child_script` requires `durable_tree` and none of the scripted child
-dials. They are fixture controls,
-not product configuration. A scripted stall observes cancellation unless the
-script sets `stall_ignores_cancellation`. On an attached offline face,
-`PLAK_TEST_PROVIDER_RELEASE` selects a file gate at the first physical provider
-dispatch: the operation waits, observing cancellation, until that file exists.
-This repository-only hook uses the harness boundary controller, not a scripted
-delay or a persisted-format change. With the offline model selected,
-`PLAK_TEST_ASSISTANT_DONE_RELEASE` file-gates the face after writing
-`assistant_done`, before checking stdin. Atomic release with `quit` waits for
-the already-sent input frame before consuming another host event; release with
-`release` does not require input. A gate containing `idle` drains host events
-through the actual busy-false observation before checking stdin. This
-deterministic scheduling hook never applies without the offline model.
-A script's `identity_hash_delay_ms` makes every process that reads it (the
-offline model selected, `test-support` only) hold each hash of the build's image
-that long, so a test can make a manifest-less build's identity slow without
-loading the machine; it changes no identity and no bound.
-`PLAK_TEST_RUN_DEADLINE`, only with `test-support`, names a file. While that file
-exists and a `--timeout` is configured, a non-interactive run is at its
-whole-run deadline: the same timeout bound and interrupt as an elapsed
-`--timeout`, including stopping owned processes. Without a configured deadline
-the file does nothing. It is not a second timeout policy, and release builds
-do not read it. The failure-wave chain checks the
-failed child on the JSONL face, then sends another root prompt.
-It does not require root refusal while a child locator is unavailable: child recovery
-inspection and root admission are separate facts.
+The harness does not mint a `ResolvedProvider`. It builds the composed
+configuration directly: the provider configuration owns exactly the two markers
+in the `LocalCompositionOnly` presentation, the nested catalog stays in the
+registry, and the harness plan comes from `compile_local_composition_plan`, so
+the provider-visible exposure is empty. A composition deployment exposes its
+catalog through the evaluator, never to the provider, which is why those two
+facts are consistent rather than contradictory.
 
-`test-support` is not in `default`, is never enabled in a release build, and
-carries exactly three edges: the harness that holds the model,
-`plakous-hosted/test-support`, the scripted factory registration, and
-`plakous-recursive-subagents-store/test-support`, tracing the already-present
-tree-store dependency. The direct tree feature avoids a harness-to-tree normal
-edge cycling through the subagents crate's harness dev-dependency. All are
-pinned — `check_workspace.py` refuses any other contents for the feature, and
-`check_features.py` requires the forwarding edge, without which the scripted
-factory registration is unavailable. `check_features.py` also refuses a default
-or maintainer `plakd` that enables `plakous-hosted/test-support`; only
-`test-support` may. The sealed production construction port
-remains available without test support. The default and release binaries
-contain none of the selector's strings. The harness also carries
-`plakous-http/fault-injection` (§2.8) unconditionally, so `test-support` is the
-one product edge to transport fault injection as well.
+#### Authority and convergence families
 
-Hosted ledger equivalence tests `root_ledger_prechange_bytes`,
-`root_batched_command_bytes`, `child_ledger_prechange_bytes`,
-`mail_start_batched_command_bytes`, and `root_send_now_command_bytes` pin
-product submission and tree-command fields and exact prompt bytes. Batched
-root Start and host wake fixtures check the tree `RootBatch` row and session
-touch; send-now pins its target turn, untouched session timestamp and repeated
-pending-intent save. Mail Start carries its primary envelope, another unread
-envelope and a child result. The explicit-intent matrices cover root Start,
-host wake and transient resume, and child spawn, wake, transient resume,
-corrective, mail Start, follow-up and steer.
-`interrupted_tree_capacity_refusal_keeps_exact_child_intents_retryable` checks
-typed preparation/settlement refusals, retained unread mail and exact retry;
-`live_steer_skips_intent_reads_and_preserves_typed_store_refusals` checks typed
-product capacity refusal before dispatch and during root settlement.
-`root_batch_capacity_refusal_is_typed_and_exact_retry_is_not_duplicated`
-checks attached and stored-only tree-batch recording and withdrawal refusals,
-retained input/mail and exact retry without a duplicate tree command.
-`reloaded_pending_steer_retries_the_identical_submission` checks a pending
-steer's field-for-field identity after session reload and refuses a changed
-submission without saving it.
-`uncancelled_stored_only_root_batch_full_keeps_run_loop_alive_and_retries_once`
-drives the host prompt/run loop with a non-cancelling full tree store, retains
-the queued input and unread mail, and admits one retry after storage recovers.
+| Family | Required observations |
+| --- | --- |
+| Remote runner and skills | Workspace and user-root discovery is through the runner; exact reopen keeps frozen skills. Bounded slices must preserve file identity across reads and refuse escaping links, torn pages and unavailable runners, not read host fallbacks. Stop may return without a held link's answer. |
+| Host lifecycle | Real signal, blocked reader and failed-shutdown evidence checks bounded joins, published locators and terminal stream behavior. UI asset reload keeps the same session WebSocket on `SIGUSR1` and retains the previous assets on refusal; `SIGHUP` is planned handoff. |
+| Runner reconnect, startup and stop | Check exact physical owner and command receipts through acquisition, foreground/job transfer, terminal recording, job adoption and keyed stop. An answered start is not a committed terminal. Preserve the matching process and start environment on live reconnect; do not recreate it after proof is lost. Sweep all lines and collect failures; held work cannot block unrelated cleanup. Embedded open must not adopt running runner work implicitly. |
+| Host loss, release and handoff | Busy handoff continues at most once from its own durable decision; an unrecorded turn remains held and an idle handoff cannot borrow an old decision. Release does not turn an answered turn into loss. Real holders fence takeover until proved gone, with exact tree custody separate from runtime lease. A replacement cannot treat an absent daemon as proof that an orphan was stopped. |
+| Product bind and residency | Rebind/retry-attach restart from the actual custody fence, release, carried history or opened target; keep one canonical terminal and one actor, without replay. Explicit retry after pressure keeps exact input/mail and submission identity. Full capacity refusal and image-residency fallback preserve the paid guard and cannot publish unstaged authority. |
+| Durable tree and process work | Spawn, refreshed workspace, adoption and conflict resolution use real intent/feed boundaries. Retained copies keep pinned provenance, sealed artifacts and exact result mail once; live remote jobs retain their owner. The single-root sweep cannot enroll real child-turn recovery without multi-branch summaries and child-specific relaunch binding; the durability child matrix is separate. |
+| Recorded decisions | A checkpoint atomically records each decision and its history, control, usage and budget facts. Completion races may leave a durable decision without its consequence, never half a consequence. Open publishes it once; `recovery_verdict` is the sole predicate for live open, inspection and rehearsal. Every closure-table row has a synthetic witness for claim, note, closed operations and exact usage. |
+| Feed and projection | A commit appends its facts atomically; event and fact witnesses agree. Each row has an owning source; a stale cursor cannot overwrite newer derived rows or admit foreign work. Incremental, clear-and-replay, and plain reopen produce exactly the same views; a second projection is inert. Export, GC, open and rehearsal share the same reconciliation path. |
+| Capture versus inference | Read-only inspection must preserve main/WAL bytes. Runtime/test hooks and append-only dispatch evidence distinguish root, child, tool and paid summary operations. Provider-hosted tool results never cause local dispatch. A new explicit work request is distinct from replaying a recorded dispatch. |
 
-`root_wake_prechange_bytes` and the child live-job wake fixture pin the root
-submission and tree intent, child intent, both wake prefixes and model-visible
-prompt bytes against original-code captures. The shared coalescer's pure and
-property tests pin the resetting 2 s root quiet window, fixed 1 s child
-coalesce, claimed-mail hold, disappearing-work trigger, and no re-fire on
-carried arrivals while live work remains. Existing wake/park integration tests
-retain interruption, exact reopen retry, retention consumption and turn budgets.
+The named hosted cuts are the variants of
+`plakous_hosted::test_support_runner::HostCut`, public only with
+`test-support`. `PLAK_TEST_HOST_READOPT_CUT` must name a variant; invalid
+values abort rather than silently skipping a cut. The analogous SQLite test
+enum requires exactly one SIGKILL matrix membership per cut. Exact-name lane
+checks use full binary-relative paths, not bare module names or suffixes.
 
-`root_transient_ready_enqueues_one_instruction_without_user_history_or_mail`
-and `transient_failure_continues_same_attempt_after_exact_route_probe` pin the
-root and child transient-resume identities, instruction kinds and prompt bytes.
-The root transient matrix checks task budgets, cancellation and reload; child
-park and reopen tests check durable rounds, exact retry, retained mail and
-ownership loss while the shared continuation gate waits.
-The child deadline regression pins Fire at and beyond the coalescing deadline
-and observes one admitted wake through the production park adapter.
-The matrix also checks non-cancelling product capacity refusal cancels a root
-continuation before retaining a live, paused host with no submission or retry,
-reopen at the exact spent budget, and startup cancellation as the probe resolves
-without failed settlement.
-The one-shot wake capacity regression drives the real run loop with a pending
-process notice and a `SaveSubmission` capacity refusal: one unavailable notice,
-no new submission or live queue item, and a bounded exit before its deadline.
-The transient capacity case checks cancellation precedes the unavailable
-notice through that same loop. A corrupt zero saved round refuses without
-panicking; the command-id validity assertion remains in force.
+#### Indexed crash-point sweep
 
-**Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
-[--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the install-profile
-`crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
-`promoted_background_job`, and `sealed_family_artifacts` with up to sixteen workers.
-`crash_sweep::durability_twin_pilots` runs the twin pilots of every other
-registered shape without cutting, so a change that makes any strict shape's
-per-store commit sequence differ between twins fails in the install lane.
-The `ledger_retirement_closed_cells`, `ledger_retirement_interrupted_batch`,
-`ledger_retirement_live_child_process` and `ledger_retirement_yielded_cell`
-shapes exercise closed debt, interrupted slots, a parent
-with both a live child and process, and a LocatorBound cell spanning rounds
-with delivered children below P. The corresponding
-`crash_sweep::durability_ledger_retirement_*` tests run each bounded campaign separately;
-the ignored `crash_sweep::soak_ledger_retirement_*` tests cut every indexed
-publication on demand and in the full tier. The live-child/process and
-yielded-cell campaigns each run the same twin pilots as their standalone
-pilot checks and the same relaunch at their first indexed product commit as
-their standalone early-relaunch checks. Representative selection always
-includes the first commit of each store; both campaigns explicitly require
-the product cut to exist and pass the same invariants in the strict run.
-Their twin pilots compare final operation ids/states and tagged counter bytes,
-alpha-renaming only independently minted root UUIDs after checking their binding.
-A test-support build accepts `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048,
-default 2048) and `PLAK_TEST_LEDGER_HEADROOM_LIMIT` (default 3584) to trigger
-retirement/refusal in small serial fixtures. These change no persisted bounds.
-A pilot whose shape's live assertion fails preserves its fixture with the
-face's records (`pilot.jsonl`) and stderr (`pilot.stderr`) beside it, and its
-panic names the fixture, the record kinds, the `credential_wait` rows and
-stderr.
+**Selection.** `just dev crash-sweep [--shapes SHAPES] [--jobs N] [--repeat R]
+[--strict]` builds the shared workspace fixtures and runs the ignored full
+sweep. The install subset cuts `final_only`, `direct_tool_then_final`,
+`promoted_background_job` and `sealed_family_artifacts` with up to sixteen
+workers. Other registered shapes run twin pilots in install. Separate bounded
+retirement campaigns cover closed cells, interrupted batches, a live child
+and process, and a yielded cell with delivered children below the retirement
+boundary. Representative cuts include the first commit of each store; the
+live-child/process and yielded-cell campaigns require a first product cut
+and reserve the entire pool as specified in §2.3. Their ignored exhaustive
+counterparts run in full/soak.
+
+Test-support `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048, default 2048)
+and `PLAK_TEST_LEDGER_HEADROOM_LIMIT` (default 3584) reach retirement/refusal
+without changing persisted bounds. Retirement pilots compare final ids/states
+and tagged counters, alpha-renaming only independently minted root UUIDs
+after checking their bindings. Pilot assertion failures preserve
+`pilot.jsonl` and `pilot.stderr` with the fixture and name observed
+record kinds and credential-wait rows.
+
 Without `--shapes`, `--strict` selects every registered shape; a non-strict run
 uses the quick `final_only,direct_tool_then_final` selection. An explicit
 `--shapes` selection applies in either mode. The wrapper overrides any inherited
@@ -2878,490 +2093,63 @@ ordinal, so `sweep.jsonl` and `table.md` do not depend on which work finished
 first; while the sweep runs they are refreshed at most every 30 seconds, and the
 final pair is written once every task is done. `timings.jsonl` beside them
 records each setup-and-pilot and each cut with its start and duration.
-The child-runner shapes `runner_job_survives_host_loss` and
-`runner_restart_unknown` run a session on a real runner daemon (`plakd runner
-serve`, started by the harness in its own process group over a runner home of its
-own) that the product reaches through `plakd runner connect
---stdio`, the offline script's `child_runner` route (spec 01 §8.5). A fork
-keeps the seed's runner identity and owner floors, so its session reopens on
-the same runner, under a daemon of its own. The session promotes one job,
-which the daemon retains after the pilot quits. The pilot checks the daemon
-started it, its process remains alive and its durable row is not terminal.
-Every cut kills the host at one of its commits. In
-`runner_job_survives_host_loss` the daemon survives, and so does a job it
-started, even past answer publication and ordinary release. The successor must
-keep that process alive without inventing a terminal notice. The converged
-summary must retain its non-terminal row with the original number and owner
-generation. A runner-arm regression uses ordinary calls without a job-watch
-stream: promotion must reach the host observer before the turn completes.
-Companion release cases require Terminal without a `JobHost` and Transfer
-with one. Planned host-release tests also read durable rows and terminal
-evidence: no terminal at SIGTERM or unchanged-triple upgrade, then exactly one
-user-attributed terminal after the explicit stop.
-In `runner_restart_unknown` the harness kills the daemon at the cut as well and
-starts a replacement, so the successor's bridge meets a new runner instance,
-and a job the cut left running is reported only as of unknown outcome. The
-job appends one line per start to its marker, and no cut or successor may
-start it twice. A fixture reaps every daemon of its runner home (each
-process that has a socket's lock file open, found without taking the lock), checks that a marked job is still that job
-before it kills it, and fails if any daemon survives.
-The host variants `runner_job_survives_host_loss_host` and
-`runner_restart_unknown_host` use the control socket of a real `plakd host`
-and its home-local daemon, with the same one-start marker law. Their cuts
-restart the host through its startup sweep; the latter also kills the daemon,
-so durable old jobs become `OutcomeUnknown` and are never re-run. The shapes
-`host_handoff_keeps_jobs`, `host_crash_mid_readopt` and `host_crash_mid_stop`
-cut a busy signal handoff, the returning host's lease-only re-adoption, and
-completion of a recorded stop, respectively. The durability cases
-`host_crash_mid_readopt_converges_after_every_transfer_boundary` and
-`host_crash_mid_stop_finishes_the_recorded_stop_once_after_retransfer`
-add explicit repeated SIGKILL boundaries after lease acquisition, transfer,
-terminal recording, and immediately before and after the keyed stop.
-These boundaries, the root-handoff boundary, the four binding-reopen
-boundaries and the re-adoption skip are the variants of one
-`plakous_hosted::test_support_runner::HostCut`, public only with
-`test-support`. Tests name a cut by its variant in
-`PLAK_TEST_HOST_READOPT_CUT`, and a value that names no cut aborts the gate
-build's host instead of never firing. The store's SQLite commit, prune,
-line-advance and reclaim cuts are one `cfg(test)` enum in the same way, and
-a unit test requires each of them to be listed in exactly one `SIGKILL`
-matrix.
-The child-stop counterpart cuts the live stop and repeats startup cuts on
-both sides of the child's keyed stop before checking its one terminal.
-`host_handoff_keeps_jobs_and_continues_the_busy_turn_once` checks both loss
-policies; an idle handoff after a previous host's cancelled turn records
-no new handoff and revives nothing, under both policies. That probe cuts
-between settling the original host's cancellation and recording its handoff,
-so the idle successor cannot borrow an earlier attachment's authority.
-`a_childs_daemon_job_survives_host_loss_and_handoff` covers a real
-child's process with its binding present and its job still running five seconds
-after attachment; the busy-root case pins the same law. A slow user-manager
-fixture checks success, unit-exists and timeout without a detached fallback.
-Link-loss probes require another process start on the serving host, and require
-non-zero exit when bounded redial fails. The startup journal probe leaves a real
-pair of answered keys unacknowledged, then proves both are spent and the journal
-empty. A held first line cannot prevent the next line's sweep, and child-stop
-recovery collects every failure rather than returning after the first.
-The exact-name lane checker uses full binary-relative test paths, rejects bare
-module and suffix matches, and preserves exact lane/exclusion comparison.
-`embedded_open_after_host_crash` adds indexed refusal cuts: a line with a running
-job or live foreground process refuses embedded open without a job terminal,
-and the next host still adopts it. A listed process-free line is not a refusal.
-Start-environment coverage uses two hosts sharing one daemon
-with distinct login-shell PATHs and HOMEs. An EOF before Hello, contention
-with an exiting daemon's socket lock, and an unreachable user manager have
-deterministic fixtures. A version-1 socket accepts only an inspecting bind
-from an upgraded host, which starts a separate version-3 daemon alongside it.
-Fixtures kill their local daemon and its process
-groups, including on a cut or assertion failure; a daemon restart's surviving
-marked jobs are reaped separately with process-identity checks. Cleanup waits
-for each marked live identity to disappear before releasing its evidence.
-`a_runner_restart_leaves_an_unpromoted_call_unknown_without_restarting_it`
-pins the missing foreground call's once-only recovery after daemon loss;
-the fixture reaps the old orphan without giving the new runner PID authority.
 
-Foreground authority is pinned separately: a host cut before promotion
-stops the process at transfer, writes no job-terminal row, and the next full
-open settles the tool call unknown exactly once despite a re-cut, under both
-loss policies. Runner fixtures
-cover a newer transfer, a cut after promotion before recording, lease lapse
-without a successor, and a same-instance link blip whose foreground call
-completes. An admitted start queued past its instance lease is refused with
-no effect, even before the next idle tick; a queued start behind a newer
-transfer is refused too. Those probes hold the execution gate, cross admission,
-then change authority with a zero-duration test lease or a newer owner, with
-no wall-clock wait. Removing the transfer stop, removing its report, stopping on link
-loss, or removing the lapse stop must each fail the corresponding probe.
-The sweep observes the runner's promotion state before recovery: only
-promoted jobs may survive the successor's transfer.
+**Pilot and cut laws.** A clean post-setup seed supplies each fresh home.
+Twins must agree on each store's indexed `(store, label, tables)` sequence
+and on live effect/dispatch evidence. The terminal-input barrier follows
+actual `busy:false` after the answer (and after any compact tool terminal),
+not a stale idle record. The 45-second stalled-step deadline advances only
+with face records or indexed commits, never lease renewals; the lifecycle
+also has an absolute 450-second cap. Fail a success pilot on its first
+unexpected failed terminal. Killing at `<store>:<k>` must exit by SIGKILL
+with exactly the prefix through k on that store and a prefix of each other
+store; inter-store ordinal and non-target progress may differ. Two
+divergence retries precede a reported failure with the trace diff. Setup
+authority is excluded from classification of the cut original.
 
-The residency corpus includes `image_residency_admission`,
-`image_residency_tool_batch` and `image_residency_continue`. Each seeds protected
-image history, crosses a mandatory aggregate-image fence with optional scheduled
-compaction disabled, and cuts every indexed runtime/product commit before and
-after the offline one-CAS publication. Pilots require strategy
-`ResidencyPlaceholdersV1`, exactly one Finalized compaction and no paid compact
-dispatch. The install lane repeats these three shapes through
-`image_residency_crash_cuts_recover_without_redispatch`; direct receipt tests
-independently materialize and validate v3 source/selection/successor evidence.
-The shape `residency_dormant_materialize` serves its session through `plakd host
---web unix:<path> --idle-release 1` instead of `plakd agent`: a wire v2 client
-(`plakous_host_protocol::client::connect_to`, attaching the session's root)
-comes in through the endpoint's gate as `tailscale serve` would, prompts and
-reads the answer, and leaves; once the runtime store shows no live owner the
-session is dormant, and a second connection's attach materializes it again,
-then `SIGINT` ends the host while that connection holds the session. Its
-pilot requires one answer, one provider dispatch, and the host's `opening
-session` and `opened session` lines twice each (the first attach's open and
-the wake's). Its cuts kill the endpoint at every indexed commit, the idle
-release's and the wake's included, and recover through the ordinary `plakd
-agent` relaunch.
+**Reopen oracle.** Read-only rehearsal of the exact runtime head, recovery
+obligations and ordered ledger, feed/cursors, product/tree views, sealed
+artifacts and physical dispatches predicts closure and projection lag and
+must preserve each SQLite main and WAL byte (not transient SHM). The first
+relaunch closes/reconciles and runs an explicit follow-up. Assert that open
+alone brought the cursor to the feed tail before any harness projector pass;
+that pass must be inert. The second relaunch adds no dispatch or publication;
+CAS revision changes from idle attach/quit are recorded, not new authority.
+A refused relaunch must leave the entire decoded summary unchanged.
 
-`plakd host`'s crash windows run against the real binary on its control
-socket (`host_skeleton`, the durability lane for the `host_crash_` cases):
-`host_crash_cuts_of_create_materialize_and_release_recover` kills the host at
-every indexed commit of a `new_session`, the first attach that materializes
-it, a turn and a `release_session`, and a restarted host answers the
-replayed request with one session, reads the dead host gone, opens the
-session and answers a turn, with no handoff and, past the turn, no loss;
-`host_crash_sigkill_mid_handoff_continues_each_handed_off_turn_once` kills a
-stopping host at once and after its handoff is durable, and the next host's
-start scan continues a handed-off turn once and leaves an unrecorded one
-held; `host_crash_cuts_of_the_start_scan_continue_once_or_hold` kills the
-host after a handoff at every indexed commit of its start scan's open and
-continuation, and a third host continues the root or holds its turn as a
-loss, never with two decisions or a second dispatch, and a fourth continues
-nothing; `host_crash_cuts_of_a_busy_release_lose_no_answered_turn` cuts a
-`release_session` that waits on a running turn at every commit from the
-request on, with no handoff, no decision, no redispatch and no answered turn
-read as lost; `host_crash_cuts_of_a_custody_release_hand_the_tree_to_the_next_host`
-cuts the release of a root whose tree is in custody, and the next host's
-attach takes the custody. The parallel lane carries
-`a_sigterm_hands_a_running_turn_to_the_next_host_which_continues_it_once`
-(a running turn handed off by `SIGTERM` and continued once by the next start
-scan, and by none after it),
-`a_held_loss_continues_at_the_next_start_only_under_continue`,
-`a_tree_in_custody_is_named_by_its_holder_until_the_holder_is_gone` and
-`a_session_an_embedded_face_holds_is_refused_until_its_holder_is_gone` (a
-tree in custody, or a hubless session's runtime lease, held by a live
-process is named and refused; an embedded holder is named, killed, read free
-and taken over), `a_crashed_hosts_sessions_read_free_and_open_again` and
-`an_idle_session_releases_and_the_next_attach_opens_it`.
-Released job coverage distinguishes successful explicit disown, ordinary stop
-and missing-owner unknown outcomes, preserves read-only reopen and consumption,
-and rejects released terminals carrying an exit code or stopper.
-The durability fixture
-`released_leftover_terminal_recording_sigkill_cuts_preserve_no_signal_authority`
-SIGKILLs a real `plakd run --leave-jobs-running` on each side of the terminal
-recording commit: reopen reports unknown before it and released after it,
-never signals the orphan, and the fixture independently releases the group.
-The enabled-ladder residency regression seeds a source over the token window
-with 22 images: the non-Fits image-only candidate defers without publication
-to one ordinary paid fold, and the admitted round dispatches within both
-aggregate image budgets. Halting the store after each accepted commit of a
-round-start fold reopens exactly with no dispatch, second paid fold or
-republished compaction. Image refusals after a server pause with steered
-images and at a provider-programmatic tool-batch fence finalize the open
-continuation and leave a Quiescent head.
-The entry point first prepares the whole workspace's all-features test build,
-including `plakd`, `plakous-js-runtime`'s `plakous-js-host` and
-`plakous-py-worker`'s `plakous-py-host`, in the same Cargo
-profile and target directory used by the sweep. Build failure stops the sweep;
-an existing sibling worker is never treated as build evidence. This is the
-same prerequisite the gate prepares for the offline e2e harness. Standalone
-offline e2e runs likewise require `cargo test --no-run --locked --workspace
---all-features` before selecting the product tests.
-The opt-in `tree_child_submit_adopt` shape persists a scripted child tree
-through spawn, validated submission and adoption. Its pilot inspects the stored
-output and landing provenance. Its indexed cuts exercise tree transactions and
-derived-output reload with the fake VCS port; real Git pin publication and
-collection are covered separately by the workspace transaction and GC laws.
-The opt-in `tree_conflict_accept` shape uses the fake VCS port to persist a
-textual conflict candidate and explicitly accept it. Its pilot verifies source,
-conflict and `adopted_via` ownership. Indexed cuts cover conflict-record
-publication and resolution acceptance; real Git tests separately verify marker
-contents, untouched targets, resolver bases, provenance pins and orphan-pin retry.
-The real-Git producer-collection probe keeps a losing resolver alive while the
-source and winning resolver conversations are collected. Its late seal must
-retain workspace lineage and be superseded; adopting its unresolved markers
-must refuse without changing the target. Separate laws refuse late resolver
-spawns and fail sealing closed when persisted resolver lineage is inconsistent.
-Real-Git stacked ordinary copies seal and adopt after an adopted input is
-collected, through both turn-end and dormancy sealing. An accepted resolver
-also rehydrates after source collection and seals an ordinary follow-up delta.
-SQLite and
-maintenance laws preserve the same workspace lineage and live-input protection.
-The opt-in `tree_conflict_resolver` shape instead spawns a resolver over that
-conflict candidate and adopts its sealed resolution. Its pilot verifies both
-the resolver and source acceptance; indexed cuts exercise the two-workspace
-adopting hold and its interrupted recovery.
-The opt-in `tree_revert` shape adopts and then reverses one candidate. Its pilot
-verifies cleared acceptance, retained original provenance and durable reversal
-stamps; indexed cuts cover the reversal's adopting hold and publication.
-Real-Git followup laws cover live-fork catch-up, pinned candidate bases, explicit
-opt-out, conflict reports on both sides, detached/staged/job skips and adoption
-of an older candidate without moving a refreshed base. The durability-lane
-`live_fork_refresh_crash_cuts_reconcile_only_exact_git_states` law cuts after
-intent publication, worktree application, branch CAS and base-pin CAS, then
-reopens the persisted tree against those real Git artifacts.
-Refresh laws also cover logical-base restoration after rehydration, adopted
-uncommitted inputs, pre-write rejection of every apply precondition, pending
-discard/reclaim/retention fences, stale prepared bases and mailbox reservation.
-The strict `tree_refresh` sweep scripts a Ready/Refreshed VCS pair through the
-real durable driver, and checks at every indexed cut that an applying intent
-still owns the old row base or a settled intent records its advanced base.
-Its scripted followup finishes before send returns, and the root consumes the
-child's wait result before its final step, so root and child publications do
-not race the indexed pilot at high sweep concurrency.
-All five scripted tree shapes hold each returned model stream at a file
-rendezvous until read-only feed and tree inspection observes that round's
-command/history prefix projected. Their immediate fake child binds and finishes
-before spawn returns; intentionally held and real-process child fixtures remain
-asynchronous. These are harness ordering constraints, not product scheduling
-guarantees: independent real agents can publish tree transactions in either
-order. Every indexed commit and exact per-store assertion remains enrolled.
-Hosted milestone laws finish a child before the host's first lifecycle read,
-then verify one start, one finished, one child-result and one adopted notice.
-A fresh host and a truncated visible transcript must not duplicate their
-retained notice intents. Twin and cut comparisons remain exact per-store
-indexed sequences; cross-store interleaving remains informational.
-The same hosted laws cover an early question, named notices pending in an
-unsaved session, and distinct adoptions with reused or absent presentation
-call ids. Their identities come from durable message and merge operations.
-An adopt-then-revert law requires exactly one adopted milestone and one
-ordinary tree-info reversal notice, including on a repeated first-read push.
-Conflict laws run the real topology tool with distinct operation ids, then
-present its terminals with reused, absent and empty display ids. Every
-operation retains one keyed conflict notice and its own whole path; conflict
-facts still cross the existing process-local tool boundary, not a new store
-encoding. Product schema 37, tree schema 10 and export v13 importing v12 stay
-unchanged by these notice corrections.
-The bounded result-mail observation law requires start and finished milestones
-before its result row even on the first read. The spawn/wait/adopt parity
-fixture uses a standalone tool driver, not a hub-visible tree: its three faces
-compare tool observations and the landed receipt, without inventing adoption
-notices from presentation call facts. The hosted laws above require adoption
-notices from the root's durable tree operations instead.
-The process pilots prove a real shell job was promoted and either terminal
-direct release settled it or its daemon retained it;
-the sealed pilot additionally proves promotion of managed native family bytes.
-PID evidence is scoped to each fixture root, never a workspace shared by cuts.
-Each shape starts from a clean
-post-setup home. Twin pilots must agree on indexed (store, label, tables)
-sequences independently per store and establish the live publication/tool/dispatch
-facts. Completing shapes wait for the face's `busy:false` after their `assistant_done`
-before sending terminal input; the compaction-workflow shape also waits for
-`busy:false` after its compact tool terminal before quitting. A pre-marker idle
-record or an idle status alone does not acknowledge that boundary. Both pilot
-twins use the existing answer-release gate: the first exposes the answer marker
-before face idle and consumes any prematurely sent quit before another event;
-the second drains events through `busy:false` before checking stdin. This pins
-the legal face schedules without adding an interrupt to the scripted inputs.
-The lifecycle's stalled-step deadline advances only for new face records or
-indexed commits, not lease-renewal trace writes. A failed worker startup cannot
-keep a pilot waiting for `assistant_done` forever by renewing its idle lease.
-`scheduled_native_compaction_in_turn` enrolls the scripted direct model's
-`native_compaction` facet, runs two tool groups and one native fold, then
-continues to the original answer. Its pilot requires native provenance with
-a protected current-round tool tail and exactly one compaction operation;
-it is not a harness-summary substitute. The fixture-only dial requires
-scheduled direct composition and an admitted context contract.
-`native_credential_wait_then_final` uses a test-owned readiness gate on the
-scripted model port, without native credential files. It becomes unavailable
-after preparation, publishes exactly one login wait and clear, then dispatches
-the captured request once after readiness and commits its answer. Its strict
-store-cut sweep covers Prepared undispatched recovery; an additional process
-test SIGKILLs the owner after observing the live wait, recovers one interrupted
-terminal, and proves the old request is never redispatched.
-Every lifecycle also has an absolute cap of ten step budgets (450 s), even
-when it continues producing progress. Pilots that expect success fail as soon
-as an `error` terminal or failed `turn_lifecycle` record appears. Cut runs and
-pilots deliberately testing recovery, escalated quit or capacity denial keep
-their expected failure semantics rather than taking this success-only check.
-The strict corpus also includes `busy_quit_escalates`: a cancellation-deaf
-provider emits a prefix and then stalls, so quit is sent while busy, exhausts
-the cancellation grace and result-join bound, and releases only the lease
-without inventing a terminal. Both pilots must have identical per-store traces;
-the pilot proves the released head is still Working and requires abandonment
-on reopen. Every indexed startup, admission, escalation and release commit is
-cut, with the same outcome/verdict table and convergence checks. A prompt cut
-before admission resumes normally from its restored queue, then completes once.
-`handoff_resume` quits a running root turn as a planned handoff (the agent
-face's quit, made one by a fixture file): a cut after the handoff row is
-durable relaunches into one continuation by itself, any earlier cut into
-nothing continued, and a second relaunch continues nothing more.
-`handoff_resume_child` and `owner_lost_child_continue` run the same laws on
-a real product child (`product_child_script`): the root spawns a child, the
-child's request waits, and the root's turn ends with it running. The first
-quits as a handoff; a cut after the child's handoff row relaunches into one
-continuation of the child, any earlier cut leaves its loss held. The second
-runs under `resume_after_loss = "continue"`, opens the child's gate once the
-root answered and quits plainly once the child's attempt ended, so no live
-turn races the release; a cut that loses the child's running request
-continues it exactly once (the same cut under `hold`, in the first shape,
-leaves it held). Either way each continuation is one accepted
-continuation command and one request, counted while it runs, and a second
-relaunch dispatches nothing for the root or the child. Their lifecycles
-let the root answer only after every store stayed still for a second behind
-the child's dispatch, and quit only once the tree folded the child's
-acceptance, so both twins release the same feed.
-`handoff_resume_deaf_child` is `handoff_resume_child` with a child whose
-request ignores its cancel, so the releasing host's two-second hub join is cut
-short with the child still running: its handoff row stands and nothing else is
-recorded for it, a cut after the row continues it once, any earlier cut holds
-it. In every child shape a cut never leaves the child `recovery_required`.
-`tree_grandchild_survives_loss` is that child with a spawn of its own: the
-grandchild's request waits, every cut keeps the grandchild node, and no cut
-or relaunch dispatches it again. The child's spawn opens only once the root's
-second request is dispatched and the stores are quiet, so the root's round
-pass and the spawn's tree writes never race, and hub shutdown retires the
-grandchild before the child (spec 03 §16), so its twins commit in one order. `tree_child_parked_job_loss` parks the child
-on one local process; the process appends one line per start, and no cut or
-relaunch may start it twice. Both quit with the descendant still running, so
-their cuts are `HELD` once that work exists and `REQUEUED` or
-`NOT_HANDED_OFF` before it.
-`node_fenced_turn` fences the root with an in-band outcome nobody can observe
-and quits only after the live host's in-place `recovered` record (claim
-`model_request`); a quit already deferred when the turn goes idle would skip
-that reopen. `node_fenced_turn_child` is the same fault on a product child.
-Eager in-place recovery is the root's: the child stays held, is not dropped,
-and is not dispatched again.
-`root_transient_resume_cut` quits while the automatic-continuation notice is
-up and the provider has dispatched once. A cut admits at most one
-`plak:resume-transient:root:` continuation, and a second relaunch admits none.
-`custody_takeover` is a durable-tree answer. A cut whose custody row is still
-held is taken by the relaunch (exit 0 and a higher fence). A clean quit
-releases the row. Exit 7 (`tree_hosted_elsewhere`) is not a recovered class.
-`cross_runner_fork_stages` stays the in-process durability test named above:
-the sweep drives one product process, and that process has one runner port.
-Profile-switch cuts stay on the durability carry law. The agent face has no
-switch or rebind command, so a sweep shape cannot apply one and keep the
-rebind scripted.
-The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
-result into an uncertain tool outcome; its pilot's host recovers the fenced
-root in place before quit, so its cuts cover that reopen's commits, including
-the window after the closure commits and before it is projected, whose claim
-the next open must surface. Every cut then exercises recovery and a follow-up
-on exact reopen. It participates in the complete SQLite view-rebuild and plain
-reopen laws and in the strict indexed sweep.
-Cross-store interleaving is free. Every per-store indexed commit, including
-startup and shutdown, is killed in a fresh home copy with `<store>:<k>`. The
-child must exit with signal 9; its targeted store must emit exactly the pilot
-prefix through k, and every other store must emit a prefix of its pilot sequence.
-Each prefix compares both labels and tables. Non-target store progress and durable
-post-state are not compared for equality across cuts or repeats: interleaving
-can change how far those stores got before the targeted commit.
-The trace global order and final global ordinal are recorded, informational only;
-divergence is retried twice, then fails with its diff. One lifecycle step is
-bounded to 45 seconds without observed stdout or durable commit-trace progress;
-each new record or commit renews that stalled-step budget. Slow startup and
-several individually progressing steps do not share one lifecycle wall-clock
-deadline. Commit-prefix equality, outcome classification and convergence
-assertions are unchanged.
-
-Seeded shapes capture their post-setup durable summary once and classify only
-new operation ids, commands, feed records, submissions and queue items beyond it.
-Finalized seed commands are not evidence that the swept original was admitted;
-an unchanged seeded baseline is `NOT_ADMITTED`, or `REQUEUED` for a new queue item.
-
-Read-only summaries bind the runtime head, recovery phase and ordered
-(operation, action) obligations, decoded ledger-state signature and durable
-answer marker, promoted artifact family/schema/codec and native-byte digest,
-content-free unconsumed job rows, the runtime feed tail and the decoded fact
-kinds after the setup baseline, the product and tree cursors, the product head
-view, submission, workflow-request and queue rows, transcript counts, tree nodes
-and physical dispatch identities. Offline rehearsal must predict the actual
-runtime closure and the number of records the projection is behind, and its
-runtime/product/tree main and WAL bytes must be unchanged (SHM is transient
-reader coordination). The session-workflow compaction cut has a compact request
-with `WorkflowAdmitted` and no settlement; the runtime closes it on open by its
-workflow row (chapter 01 §5.5) and the projector derives the settlement's rows
-from its `WorkflowSettled` fact: for `Abandoned`, exactly one not-applied notice
-naming proven-unsent summaries as not sent and otherwise preserving the
-may-have-been-billed warning; for a Completed summary, the `Compacted`
-settlement's rows. The cut must retain its answer, dispatch no
-admitted fold again, and the second reopen must converge.
-Relaunch one closes/reconciles, runs a follow-up, and quits; relaunch two must
-converge without new dispatch or publication (idle attach/quit may advance the
-CAS revision, which is recorded but not semantic turn authority).
-Converged-state checks after each reopen first require the product cursor to
-equal the runtime feed tail, without a harness projector pass. The subsequent
-harness pass must leave the views unchanged; it cannot mask unpaid reopen debt.
-Refused relaunches must preserve the entire decoded summary, including revision; WAL
-checkpoint representation is not an authority change. Fixture PID files reap
-orphans.
-
-The table has six classes: `COMPLETED_ONCE` (exactly one expected terminal
-publication: an answer proved by the original root command's completed terminal
-and matching published assistant row, independent of fixture text, or, for
-`capacity_overflow`, a capacity denial; shape markers remain content proofs),
-`ABANDONED{claim}` (one honest typed interruption notice, never over a durable
-answer), `REQUEUED` (the prompt is restored to a paused queue, its submission
-pending with no feed fact), `REFUSED{name}` (typed exit 5 and a signature-keyed
-allowlist name, with durable authority unchanged), `NOT_ADMITTED` (no
-submission and no runtime root command for the prompt, no answer, clean reopen,
-exactly one follow-up dispatch), and `FENCED` (the root turn's one terminal is
-`RecoveryRequired`, and either the live host's eager in-place recovery closed it
-before the cut, so the reopen is quiescent, or the cut kept only its recorded
-outcome-unknown `FailTurn` decision, so the reopen commits that terminal and
-closes the turn in one closure; exactly one turn is newly fenced, it is
-the shape's own root turn, and after recovery the session log holds exactly
-the shape's expected claim for it once, whether the live host or the reopen
-surfaced it). `UNCLASSIFIED`, invariant violations and
-divergent traces are findings and fail the run.
-
-**Product and tree cuts always converge.** A cut at any `product:<k>` or
-`subagents:<k>` commit can only leave a projector cursor behind the feed or an
-intent without a fact, so relaunch one MUST converge: it is never `REFUSED`, and
-no product or tree signature may enter the allowlist. After relaunch one the
-product and tree cursors equal their feeds' tails, the head view equals the
-runtime head, every submission and workflow request either has a fact or is
-pending behind a paused queue, and relaunch two changes no view row.
-The signature-keyed REFUSED allowlist is empty and stays empty: recovery
-replays recorded decisions (chapter 01 §5.5), every Working head this build
-writes has a closure row, and an uncertain external effect is closed as outcome
-unknown rather than refused. A `REFUSED` row in any shape, subset or opt-in, is
-a finding. A refusal may only be accepted by adding a row to this chapter that
-names the signature and the genuinely uncertain external effect no closure can
-honestly settle; there is no such row.
-
-The signatures below close as follows. A final
-answer's or capacity failure's `Completed` provider is the decision commit
-of chapter 01 §3.5 item 1: it carries the recorded `Terminal` or `FailTurn`
-decision, and the reopen finishes the turn from it with the live consequence
-commit, so the original answer or capacity denial is published once.
-
-| Former signature | Durable post-state | Expected outcome after J |
-| --- | --- | --- |
-| `code_mode_cell_final.7c3eca1e96` (runtime:10, product:9) | root Dispatched; provider Completed `ToolBatch`; evaluation Completed | `ABANDONED{RunningTool}`, finished-but-not-added wording; every record keeps its own evidence |
-| `code_mode_cell_nested_then_final.e99d839a60` (runtime:17, product:12) | as above, plus nested child and effect Completed | `ABANDONED{RunningTool}`, same wording; the nested effect is named and never replayed |
-| `code_mode_cell_final.fdcce09124` (runtime:11) | root Dispatched; provider, evaluation Finalized (`ToolBatch` exchange committed) | `ABANDONED{ToolRoundCompleted}` |
-| `code_mode_cell_nested_then_final.89657b4651` (runtime:18) | as above, plus nested child and effect Finalized | `ABANDONED{ToolRoundCompleted}` |
-| `code_mode_cell_final.8b6a4d6455` (runtime:14) | final provider Completed `Terminal` with an answer (the decision commit) | `COMPLETED_ONCE`: finished from the recorded decision |
-| `code_mode_cell_nested_then_final.b2ea8aab19` (runtime:21) | final provider Completed `Terminal` with an answer | `COMPLETED_ONCE`: finished from the recorded decision |
-| `hosted_tool_call_final.6618879652` (runtime:15) | final provider Completed `Terminal` with a provider-hosted ToolCall and an answer | `COMPLETED_ONCE`: finished from the recorded decision; the hosted call never dispatches locally |
-| `capacity_overflow.58600eb911` (runtime:7) | provider Completed `FailTurn` with a `ContextLimit` failure, no terminal | `COMPLETED_ONCE` (capacity denial): finished from the recorded decision, its withheld-prompt choice and remedy included |
-The subset keeps all four shapes at every install and reserves the nextest pool
-while running `min(16, available_parallelism)` independent cut workers internally.
-The inventory test pins both the four-shape membership and that worker bound;
-no cut or assertion is dropped.
-
-The real-host matrix retires only cuts subsumed by this install subset. The
-subset's `coverage::retired_host_cuts` guard requires the corresponding decoded
-states in successful rows, not fixed ordinals (store interleaving remains free):
-
-| Retired real-host RootDelivery cut | Sweep replacement and assertions |
+| Result | Required witness |
 | --- | --- |
-| Prepared | `direct_tool_then_final`, submission written before root admission: restored queue, pending submission resubmitted under its own command id on resume, clean follow-up and convergence |
-| RuntimeReturned | `direct_tool_then_final`, root command recorded with the projection behind: offline closure, no recovery dispatch, one honest notice derived from the abandonment fact |
-| ProductPublished | `direct_tool_then_final`, the projector transaction that applied `CommandAccepted`: consumed item, exact head view and no duplicate dispatch or row |
-| ProductCommitted | `direct_tool_then_final`, a later projector transaction of the same turn: same closure and second-relaunch convergence |
-| TerminalReady | `direct_tool_then_final`, `TurnTerminal` committed with the projection behind: exactly one original answer derived on reopen, head view at the quiescent head and no redispatch |
+| `COMPLETED_ONCE` | The original command's one recorded terminal decision and matching answer row, or the recorded capacity denial; fixture text is not the decision witness. |
+| `ABANDONED{claim}` | One honest typed interruption derived from the obligations, never overriding a durable answer. |
+| `REQUEUED` | The original prompt remains in a paused queue, with a pending submission and no admission fact. |
+| `NOT_ADMITTED` | No submission, command or answer for the original beyond the seed; clean reopen and one explicit follow-up dispatch. |
+| `FENCED` | One `RecoveryRequired` terminal/claim for the original, from live closure or from its recorded outcome-unknown decision. |
+| `REFUSED{name}` | Typed exit 5 and unchanged durable authority. No signature is allowlisted; any refusal is a finding. |
 
-Missing replacement rows fail the subset. All rows
-add read-only runtime/product/tree rehearsal, exact per-store commit prefixes,
-physical dispatch uniqueness, canonical notice/usage uniqueness, and two
-relaunches; the retired hand-written cuts did not check all of these.
+`UNCLASSIFIED`, divergences and invariant violations fail all runs. **All
+product and tree cuts MUST converge.** After relaunch one, cursors equal
+their feed tails and the head view equals the runtime head; submissions and
+workflow requests have a fact or remain pending behind a paused queue.
+Relaunch two changes no views. A durable provider terminal/failure decision
+finishes once; partial local evaluation/tool evidence is retained honestly
+as abandonment and cannot authorize a replay. Do not duplicate dispatch,
+derived terminal rows, usage or canonical notice consumption; observational
+job snapshots may rehydrate once per attachment. A compaction without an
+admitted summary withdraws with one not-started notice and explicit remedy;
+admitted compaction recovers the recorded decision or its honest uncertainty,
+with zero summary redispatch. Summary-specific fsynced evidence counts physical
+dispatch, not ordinary provider turns.
 
-Keep the CompletedToolRound trigger: the sweep's post-kill durable job facts
-do not prove physical-process liveness at the pre-kill boundary. Keep the
-Finalization and FinalizationPendingTerminal triggers: their exact
-prior and final sealed candidates and mismatched-command rehearsal refusal are
-not asserted by the subset. Keep reclaimed delivery after another face advances,
-SendNow, Compact, Fork and Rebind cuts, product-projection component matrices,
-GC-before-compaction-projection, public-facade matrices and SQLite atomicity
-cuts: none is fully subsumed by the four install shapes. The two 31-second lease
-waits remain for those retained real-host/GC cases; they protect the production
-ownership fence and cannot be replaced with a shorter sleep.
+The install subset requires root delivery coverage spanning prepared,
+runtime-returned, projected and terminal-ready states. It does not replace
+physical-process liveness at completed-tool-round, exact sealed-candidate and
+mismatched-command finalization, reclaimed delivery, send-now, Compact, Fork
+or Rebind cuts; component, GC-before-projection, facade and store-atomicity
+matrices still stand. Retained real-host/GC lease waits exercise the actual
+ownership fence, not a shortened timer.
 
-No shape has an allowlisted refusal, and a new shape enrolls none: a refusal,
-an UNCLASSIFIED row or an invariant violation is a finding in every shape.
-`--strict` and the default run therefore agree on refusals. No duplicate
-dispatch, derived terminal row, usage or canonical process notice receipt is
-permitted. Observational `job_terminal` snapshots may rehydrate once per
-attachment; they do not consume a model-facing notice. Non-refused final head
-views must equal the quiescent head with the cursors at the feed tails.
-Artifacts are `target/crash-sweep/<run>/sweep.jsonl` and `table.md`.
+Artifacts are `target/crash-sweep/<run>/sweep.jsonl` and `table.md` with
+per-shape/repeat outcome counts and refusal signatures/cuts.
 
 Compare two artifacts with `python3 tools/dev/compare_crash_sweeps.py
 BASE.jsonl TIP.jsonl [--json]`. The cut key is `(shape, store, store_ordinal)`;
@@ -3389,428 +2177,6 @@ failure or a new failure kind makes the exit status 1 even when the base
 already failed that key. Covered pre-existing samples remain visible with
 `baseline_failed: true`; unmatched samples have it false. Fewer failures of
 the same kinds do not themselves make the exit status 1.
-
-Admission regressions hold the live tree mutex on another thread while pause
-readers run. A live tree stays unpaused, an actual restored pause stays visible,
-and guarded and detached resume transitions update the same lock-free predicate.
-Capacity-refused resume publication pins the live state and atomic predicate
-while the guard is detached and parked, then requires both to return to paused
-on rollback. A non-quiescent restored tree must read paused immediately after
-insertion, before any later observation or mutation.
-The one-shot drive holds that mutex through its initial admission check and
-releases it at the following storage probe, then requires a completed turn
-rather than a restored-pause hint; no elapsed-time race releases the lock.
-
-The running-root projection regression holds the host after acknowledgement
-until a real scripted two-round turn reaches its second stream, then requires
-two bounded cursor advances, not a coalesced pass. A separate admission law
-requires the post-ack pass to stop at the acknowledgement even when the first
-round has committed. The lease-only process-exit regression holds
-each dispatched child on its own explicit provider gate until after batched
-release. It retains the one-second shutdown bound and exact single-transaction
-assertion, then releases both late actors and requires no further publication;
-fixture construction time cannot consume a child's stall or let it finish early.
-A result-observation regression acknowledges the child's result before the
-host's first read, then requires one durable result activity after its finished
-milestone, including across a repeated observation. Milestones and retained
-results share one tree read, so a concurrent completion cannot place a result
-before its finished notice or erase it by consumption. A fresh-host law
-requires no live result line for a recorded, consumed result.
-The attachment's exact one-cold-load assertion remains unchanged. A forced
-queue refresh must not load transcript views, and the SQLite queue-join law
-still succeeds when unrelated transcript rows cannot be decoded. These cover
-the timing-dependent extra full-view read of a delayed queue projection,
-without changing the allowed number of attachment cold loads.
-Unstored attachments also defer background passes until the product session
-exists, rather than racing a refused pre-storage pass against the first prompt.
-A counted-read law drains the idle ticks without requesting an extra pass:
-zero view reads before storage, exactly one cold load after the first prompt.
-The lagged-face fixture waits for the shared reducer to observe an
-uncommitted text prefix before attaching the face, then gates its 256 deltas
-in 16-event batches, requiring the reducer to consume each batch before the next. Only the face's
-128-update buffer is intentionally overrun, not the core feed serving the
-reducer. The fixture checks the attach gap, one later resync gap, the
-256-update barrier and convergence on committed history.
-The coverage-cursor fixture holds back the child reducer until the provider
-reaches its first gate, proving that provider progress alone does not make
-the attach gap available. It waits for the reducer to publish the text prefix
-before attaching the face, and for the intervening delta before capturing the
-history cursor. It requires one gap, only the post-attachment delta in the
-live tail, and a canonical refresh that retires the gap at terminal.
-
-**Feed and projector laws.** The always-on offline lanes pin:
-
-- *Feed conformance*: memory and SQLite backends append exactly one record per
-  accepted mutation and none for a refused, rolled-back or renew-only one; the
-  sequence is gap-free from 1 across branches, forks and rebinds; `recover_*`
-  returns the record sequence of the original mutation; a cut at every runtime
-  commit of the sweep leaves `feed_tail` equal to the number of accepted
-  mutations; retention trims a prefix only, by the record and byte bounds, in
-  transactions of at most 4,096 rows outside any publishing commit, and reports
-  `BehindRetention` below it; a mutation whose record would exceed 1 MiB is
-  refused before commit; `committed_at_ms` is stamped on every record.
-- *Event/fact parity*: for every pilot, every live event that reports a commit
-  names a `feed_seq` whose record carries the matching fact, and every fact
-  kind is produced by at least one pilot or sweep row; each atomic transition of
-  chapter 01 §3.5 (the decision and consequence commits of a turn's end
-  included) and each closure-table and workflow row has a golden fact list.
-  `a_cut_after_each_commit_of_a_turn_leaves_a_whole_transition` reopens every
-  commit cut, with exactly one terminal and usage equal to the round ledger.
-  `dispatch_rejected_fail_turn_cut_reopens_without_redispatch` and
-  `dispatch_rejected_fail_turn_refused_consequence_reopens_without_redispatch`
-  pin failure publication from a proven-unsent recorded decision.
-  `recovery_required_terminal_enrichment_is_add_only_and_once` rejects terminal
-  rewrites and repeated enrichment.
-  `abandonment_terminal_report_survives_parent_pruning_and_sqlite_inspection`
-  pins the recorded report without a retained parent.
-  `finalized_terminal_without_root_terminal_is_integrity_not_restore` pins the
-  refusal of a Finalized round without its root's terminal consequence.
-  `turn_fence_workflow_after_recovery_required_closes_the_turn_not_an_endpoint`
-  pins the interrupted turn row and TurnFence settlement for workflow-rooted debt.
-  `a_terminal_result_reads_the_recorded_remedy_not_the_conversation` pins the
-  persisted remedy as authority even when the conversation suggests another.
-  `fold_commit_authority_is_its_own_finalization_not_history` pins fold-local
-  publication evidence against unrelated or subsequently rewritten history.
-  `a_recovered_context_limit_finish_preserves_the_withheld_prompt_remedy_and_note`,
-  `a_recovered_dispatch_rejected_finish_equals_the_live_consequence_commit` and
-  `a_recovered_refused_consequence_equals_the_live_proposal` compare the finish
-  row's history, artifact, ledger, terminal facts, usage and duplicate-command
-  result to the live consequence (including a refused live proposal).
-- *Lingering owner*: a fenced host whose lease expired keeps running beside the
-  new owner. Its projector transactions fail the cursor CAS or write identical
-  views, its intent writes are revision-CAS'd, and every submission it makes is
-  refused at the runtime fence; the new owner's views and physical dispatch
-  counts are unchanged.
-- *Reopen order*: a session whose runtime head moved past the product's cursor
-  (another owner committed, the product never saw it) opens at that head with
-  no stale refusal; a commit injected between the lease-free feed pass and the
-  open is retried once, and a second injected commit is a lease-contention
-  refusal, never recovery-required.
-- *Row provenance*: a pinned table test enumerates every persisted
-  `TranscriptRow` field and its one source (chapter 02 §2.6); a rebuild from
-  empty reproduces every field the table sources from facts, reads and
-  intents, and no live-only field is persisted.
-- *Projector idempotence*: for every pilot feed and a generated corpus of
-  well-formed feeds, applying the feed twice (including every page boundary and
-  a replayed page) yields byte-identical views to applying it once, for the
-  product and the tree projector.
-  `converged_memory_views_are_byte_identical_after_replaying_every_feed_page`
-  and `converged_sqlite_views_are_byte_identical_after_replaying_every_feed_page`
-  replay the retained pages over converged real-host sessions: the cursor
-  advances zero, complete views are unchanged, and no writes or successors are
-  planned. The SQLite snapshot inventories all live schema tables, classifies
-  intents explicitly and rejects any unknown table; every cell of every view
-  table is compared byte-for-byte, including the keyed bookkeeping and head.
-- *Rebuild equals incremental*: deleting every view row and cursor and running
-  the projector from empty yields exactly the views the incremental live run
-  wrote, for every pilot and every converged sweep row; a corpus with pruned
-  checkpoints pins the head-read and `earlier output not retained` rules
-  instead.
-  `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` compares
-  the complete serialized SQL-cell snapshot before deletion and after a
-  lease-free rebuild for 17 of the 19 registry shapes (all but
-  `leftover_background_job` and `tree_child_submit_adopt`). Its live-schema inventory
-  prevents a new view table from silently escaping the comparison.
-- *Delete-and-reopen*: deleting the product views (and, separately, the tree
-  views) of a sweep row's final home and reopening it yields a decoded summary
-  identical to the undeleted reopen, including transcript keys and counters.
-  The same law runs over an imported session (its imported transcript intent
-  survives exactly and its seeded `Created` record derives nothing) and over a
-  fork and a rebind successor (the rebuild follows the branch lineage through
-  the `Branched` sequence).
-  `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` compares all SQL
-  cells after exactly one ordinary JSONL-host reopen in each of two identical
-  homes, one with intact views and one with every view table deleted, for all
-  the same 17 registry shapes. Each open must reach the feed tail at Ready, before
-  any harness projector pass or subsequent Quit. Cursor equality compares
-  the same logical point, including any facts the open itself commits.
-  The Working busy-quit pilot first recovers once through an ordinary host,
-  reaching the feed tail at Ready, before cloning the comparison homes. This
-  gives both arms identical canonical closure facts instead of independently
-  minted recovery checkpoint ids; no snapshot fields are normalized.
-  The `composite_laws` corpus runs all three product laws over a successful
-  manual compaction, fork and clear source/successor records, a recompiled
-  rebind's source/successor records, a spawned and finished child, an actual
-  export/import archive, and a definitive no-commit compaction whose keyed
-  request was submitted and discarded. It reuses the complete SQL snapshot,
-  retained-page idempotence and byte-copy plain-open twin helpers, with no
-  normalization. Rebind is seeded through the same product intent and public
-  runtime workflow, since JSONL has no profile-fork command; its twins open
-  through the ordinary host. The fork/rebind cases pin inherited user send
-  times and `row_bytes`: deleting successor views must still read the source
-  submission intents, stopping at a clear/import runtime boundary. The normal
-  pending-command join remains limited to the successor's own submissions.
-  `composite_source_deleted_import_obeys_all_three_sqlite_laws` deletes the
-  exported source and the imported views, then requires a read-only reload
-  rehearsal and all three laws to succeed. Carry-forward ancestry stops before
-  loading its source, which may already have been deleted.
-- *Every product cut converges*: the subset asserts the convergence rule above
-  for every `product:<k>` and `subagents:<k>` cut of its four shapes, with no
-  allowlist entry possible.
-- *Indexed tree-store cuts*: `indexed_tree_store_commit_cut_matrix` records
-  every production `TreeDriver` save in a scripted uncut scenario, freezes
-  its exact rows and bounded feed inputs, then cuts the `SQLite` WAL commit
-  sequence at every `tree:<k>`. The scenario covers spawn and mail, a
-  provisional wait acknowledgement and its canonical commit, Park, Nudge
-  and Finalize, a failed child and its snapshot notice, outside cancellation,
-  live and deletion retirement, materialization failure, seals and cleanup.
-  Its oracle comes from the uncut commit-indexed rows, not the reopened store.
-  For class-b cuts it derives the persisted orphan faults from those rows:
-  each pending `seal_effect` becomes terminal faulted, and each in-flight
-  `Adopting`/`Discarding` workspace yields a typed `workspace_fault` for its
-  affected agent and attempt, with the exact request, digest and terminal
-  fields of the fault rule. The row comparisons and minimum cut counts remain
-  unchanged. Class-a cuts additionally assert that reopen creates no fault
-  records. No oracle evidence is read back from the reopened database.
-  Class **a** has no persisted in-flight VCS row. Class **b** applies the
-  chapter 03 §14.1 fault rule to precisely the saved in-flight set; closed
-  occupants of a discarding copy are not faulted. Both classes include the
-  restoration-only pause rule and the bounded canonical wait evidence
-  (an uncommitted provisional acknowledgement returns to unread).
-  One open and a second open must match every column of every tree table,
-  excluding only the intentionally advancing revision and host generation.
-  The snapshot enumerates the live schema and refuses an unknown tree table.
-  Both opens invoke no VCS operation or duplicate effect; the uncut scenario
-  pins one failure notice, one result per settled child and one cleanup.
-  The matrix prints each cut's class and requires at least 35 cuts, including
-  at least 30 class-a and three class-b cuts. This is tree-store boundary
-  evidence with authenticated feed fixtures and a recording VCS port, not
-  hosted child-session relaunch, real VCS subprocess or live-resume evidence.
-- *One code path*: the live host, open, export, `gc` and the rehearsal call the
-  same projector entry point; a structure check refuses any other writer of a
-  view table.
-  `live_and_plain_open_enter_the_same_projector_and_all_view_writes_are_inside_it`
-  counts the common driver entry by live/open caller through a test-only
-  task-local probe. The memory store rejects view writes outside the common
-  entry's blocking-store call for that tracked session, even beside an active
-  pass (`a_view_writer_outside_the_common_entry_is_rejected_even_beside_an_active_pass`).
-  The ordinary host worker drives both
-  the live turn and stored-session reopen; the test does not call the driver
-  directly. `only_the_projector_commit_writes_view_tables` independently pins
-  the SQLite writer boundary.
-  The common-entry probe also requires exactly one `Release` caller pass per
-  published host release. `clean_quit_projects_the_release_record_without_a_harness_pass`
-  checks the runtime tail and `released=true` immediately after a clean quit.
-  `terminal_committed_during_release_is_projected_before_shutdown_returns`
-  proves the pre-release views are Working with an open root, then requires the
-  terminal committed by normal release to clear those views, render Interrupted
-  and reach the tail before any harness pass. The quit-grace regressions pin
-  the different emergency exit: it applies the release record but deliberately
-  leaves a deaf-cancel Working head for runtime recovery (chapter 01 §2.4).
-  `post_release_projection_refusal_is_cleanup_and_preserves_release_failure`
-  proves a refused post-pass is a typed cleanup failure, with any child release
-  failure retained and canonical ownership still reopenable.
-  `post_release_timeout_is_benign_and_plain_open_preserves_all_three_sqlite_laws`
-  holds a healthy SQLite writer through quit, requires successful shutdown and
-  a logged post-pass timeout with unapplied release debt, then requires the next
-  plain open to reach the tail at Ready before any harness projector pass. It
-  runs all three complete SQLite laws after that open. The slow-projector
-  one-shot and interactive regressions retain their successful-exit assertions.
-
-The product schema's construction binding is write-once; the store tests
-`construction_binding_is_write_once` and
-`view_head_wins_without_rewriting_construction_binding` prove that subsequent
-locator inputs leave the binding unchanged and a projected head never overwrites runtime genesis.
-`host_controls_are_intents_not_session_flags` proves pause and wake suppression
-come from the intent/view join, not session columns, including a projected resume.
-
-The crash-sweep summary joins `submissions` and `workflow_requests` to their
-feed-derived views; it does not read a delivery journal or workflow state
-machine. Its classifier checks a closed outcome-to-runtime-verdict table beside
-rehearsal parity; rehearsal and inspection share the runtime's pure predicate,
-so parity alone is not a closure oracle. Abandonment requires
-`RecoversAbandonedTurn`. A cut after the live host recovered its fenced root
-in place (the turn's one terminal is `RecoveryRequired` and nothing is left to
-close) is `FENCED` and requires `OpensQuiescent`, exactly one new fenced turn,
-that turn being the shape's own root turn, and recovered abandonment claims
-equal to exactly the shape's expected claim (`running_tool` for
-`uncertain_mcp_tool`, `model_request` for `node_fenced_turn`). A cut between
-that turn's outcome-unknown `FailTurn` decision commit and its
-`RecoveryRequired` consequence is `FENCED` under `RecoversSavedTerminal`: no
-turn is fenced before the reopen, the reopen fences exactly the shape's own
-root turn, and the same claim is surfaced once. Completion permits `RecoversSavedTerminal`,
-`ResolvesCompactionWorkflow`, `RecoversCommit` or `OpensQuiescent`;
-not-admitted and requeued prompts require `OpensQuiescent`, and refusals require
-the rehearsal's typed `Refused`. If the head belongs to a later root, a distinct
-root submission joined to its accepted runtime command, admission sequence and
-exact working turn must prove that identity. The later root's own running or
-terminal lifecycle selects its table row; the original stays completed.
-That lifecycle includes a dispatched root whose newest same-turn provider has
-a saved `Terminal` or `FailTurn` decision: it is terminal-recorded, not running,
-even before the root command's consequence commit. Intermediate round decisions
-and other turns' providers cannot prove that state.
-Capacity cuts are selected by SQL commit signature and decoded runtime/view
-facts, never transaction ordinals; duplicate signatures are probed at their
-exact cut. Converged reads run the lease-free projector, while reopen evidence
-requires the reopen alone to converge before the harness checks idempotence.
-
-**Recorded-decision regressions.** Offline `plakous-agent` tests pin chapter 01
-§3.5 and §5.5 directly, independent of the sweep:
-
-- Each recorded fact has a codec test and a live-driver test that the fact is
-  written at the decision: every `RoundDecision` variant on its provider outcome
-  record, each `TurnBudgets` field after the decision that changes it, failed-
-  attempt partial usage, `steering-applied` finalization, and the root's direct
-  `Dispatched` to `Finalized` terminal transition. A restored continuation or
-  effect-decision frame resumes with the budgets its last decision recorded,
-  and the content-filter retry stays spent after a fold drops its guidance
-  note: `TurnBudgets` is the only authority.
-- Each atomic transition is cut-tested with the offline crash harness at every
-  commit of the transition's driver path: the checkpoint before the
-  transition's commit and the one after it are the only reachable states, and
-  no reachable state carries an applied steer without its segment, or a retry
-  or `Continue` decision without its note or history. A turn's end has a cut
-  between the decision commit and the consequence commit: the reopen finishes
-  the turn with the recorded answer (or capacity denial) once, with the steers
-  accepted after the decision settled unapplied, and a second reopen is
-  `AlreadyApplied`. A store-full refusal of the consequence commit leaves the
-  decision commit, and the next open finishes the turn the same way.
-  The product's actual-host SIGKILL matrix keys its root finalization cuts on
-  the receipt predecessor's recorded `Terminal` decision, not on obsolete
-  split terminal commits. Both finalization cases leave the root dispatched
-  and the terminal provider completed. Its completed-tool-round cut requires
-  a recorded, finalized `ToolBatch` decision before the next provider is
-  admitted. Relaunch and a second reopen must converge without redispatch.
-  The actual-host matrix also proves exactly one tested root or steer submission
-  per cut and no legacy delivery table. Send-now's `ProductCommitted` cut is
-  distinct: terminal publication saves the record after steering projection.
-  Root-start's corresponding observer adds no write with the matrix's empty
-  tree, so its `ProductPublished` cut already covers that boundary. Toy root
-  and steer recovery implementations are absent; the matrix runs the real
-  handlers and reconcilers and checks a second reopen without redispatch.
-- Each closure-table row has a synthetic-ledger test that pins its claim, its
-  note, the closed operation set and the exact usage sum, and one test per
-  integrity row; reopening the published closure is `AlreadyApplied`. A live
-  turn's recorded usage equals the ledger sum recovery would compute for it.
-- `recovery_verdict` is the predicate's single use: a structure test fails if
-  any production caller decides recovery scope, closure or restoration other
-  than through it, and a parity test runs the live open, SQLite inspection and
-  rehearsal over the same heads and requires identical verdicts.
-- Each session-workflow compaction row (Prepared, uncertain, Completed summary,
-  recorded failure) has a test that the open commits its closure and `WorkflowSettled` in one
-  commit and never redispatches, and that a Completed summary publishes exactly
-  the fold the live workflow would have.
-- An alias regression drives pi's `edit` and `write` through one turn and
-  checks the committed `exposed_name` on both calls, exact replay of each name
-  on every kernel, both history rows' labels and activity kinds, and a
-  previous-document import preserving its exposed name. The synthetic frozen v12 fixture and `current_and_previous_documents_preserve_every_transcript_row_type` pin
-  typed rows; `rejected_exports_do_not_create_state_or_reference_files` pins
-  refusal of v10. The v13 neutral round-trip includes presentation subjects,
-  base64 media, bounded parsing and closed unknown-field refusals. Production-dialect
-  carry fixtures lower sanitized Responses encrypted reasoning, Messages thinking
-  signatures and Codex native compaction without dispatch. Unsupported nested
-  opaque result parts and invalid replay prove successful stripped creation;
-  hosted notice evidence pins the single-line fallback notice. A many-minimal-
-  blocks fixture pins the cumulative block/part budget.
-
-The opt-in live-fact pilots cover `non_stop_finish_length`,
-`empty_length_retry`, `non_stop_finish_refusal`, `steer_accepted_mid_turn`,
-`scheduled_compaction_in_turn`, `scheduled_native_compaction_in_turn`, `scheduled_compaction_workflow`,
-`code_mode_cell_nested_then_final` and `code_mode_cell_final`. They assert
-the committed provider finish, durable accepted/applied steering, finalized
-in-turn compaction, a committed product compaction workflow, and real
-JavaScript cell/nested-call parentage respectively. The workflow pilot seeds
-foldable prior turns and explicitly requests the product compact workflow;
-the in-turn pilots cross the scheduled fence, with the native pilot proving a
-native successor and its retained current-round tail. Cell-final uses a text-only
-cell, while nested-then-final joins a real nested process call. These shapes
-do not widen the durability subset. `non_stop_finish_length` commits a visible
-Length answer and emits its truncation warning; `empty_length_retry` makes two
-dispatches, records P1 as RetryOutputLimit and commits only the successful answer,
-never the discarded reasoning. Both run through strict commit-cut sweeps. Follow-up plans retain each shape's
-descriptor and ScriptPlan dials, replacing only its assistant steps.
-Requeued originals rerun their shape's lifecycle before the follow-up; each
-must publish its answer once and the follow-up once. Durable answer markers
-count only turn-owned provider evidence, never a compaction workflow's
-provider response. Finding rows retain the pre-closure summary, provider
-ownership/marker diagnostics, and the failed fixture directory for inspection.
-The opt-in `hosted_tool_call_final` pilot executes a local tool round, then
-commits a Stop response containing a completed provider-hosted ToolCall, its
-provider-owned result, and final text. It checks the decoded owner/state and proves the hosted call
-never dispatches locally. It has no accepted refusal.
-The opt-in `capacity_overflow` pilot admits a scripted context-overflow fault
-with another prompt queued behind it and disables compaction. The first physical
-provider dispatch is file-gated until the harness observes the second prompt in
-both the queue snapshot and the durable product queue; only then can the scripted
-pre-stream denial proceed. The same gate is installed when an early cut restores
-the unadmitted original prompt and its lifecycle is resumed on relaunch. No timed
-enqueue window is involved. After resuming
-the queued prompt, the pilot quits only after an empty live-drain queue snapshot
-following its `assistant_done`. That model-operation marker alone is not a host
-turn boundary or a face-idle acknowledgement: an early quit can still send an
-interrupt while the JSONL face considers the turn busy. An interrupt is valid
-product behavior, but the pilot must wait for face idle and send only quit
-deterministically, as every completing shape does. If the host has already finished, its
-idle interrupt writes a `wake_suppression` intent; an early quit can therefore add
-a `host_intents` commit in only one twin even with identical runtime commits.
-The harness decides whether to send a frame before releasing the first gate,
-so an early quit deterministically exposes the busy-state race rather than
-relying on the ungated twin to happen to be idle. The full
-per-store twin-pilot divergence assertion is unchanged; a divergent pair retains both fixtures,
-commit traces and JSONL observations for diagnosis. The registry distinguishes expected
-`Answer` and `CapacityDenied` terminals. The pilot proves exactly one capacity
-publication and a paused queue before explicitly resuming the queued prompt.
-Cuts forbid dispatch past an unprojected capacity terminal, preserve the
-terminal across follow-up, and converge to the pilot's drain state. Follow-up
-and queued work require explicit queue resume after a capacity pause (chapter
-02); no automatic retry of the failed original is inference evidence.
-Exact-reopen regressions use a paused clock to pin one stale-head adoption,
-one shared lease deadline and unchanged lease-poll identities across adoption;
-ordinary refusals and a second stale answer never retry. Hosted root races commit
-through a second owner between projection and exact open: one re-projection
-follows a stale answer, a second stale refuses contention, and projection debt
-plus stale refuses without retry. Root startup and child reattach each rejoin a
-certified effect-decision barrier, publish one terminal and settle retained waits
-without repeating the admitted provider request or effect.
-The durability-lane child SIGKILL matrix uses separate real child sessions and
-SQLite runtime/tree stores. It kills the owner mid-turn, during a parked wake,
-while idle before wake, and after a wake intent is prepared. A traced cut follows
-durable wake admission but precedes its first provider dispatch; that admitted
-turn is honestly abandoned, never replayed. Relaunch runs the custody take's
-`recover_node` and a recovery run: every mode leaves the child interrupted with
-its attempt open and dispatches nothing again (a parked child, even one with a
-prepared wake, is not woken). A still-live lost owner exercises the explicit
-recovery lease wait before that owner dies. Repeated recovery preserves the
-attempt count and command rows and sends no result mail.
-`root_stale_open_reprojects_once_then_opens_the_new_head` pins root stale-head
-adoption; `root_second_stale_open_refuses_contention_without_a_third_projection`
-and `root_stale_open_with_projection_debt_refuses_without_retry` pin its refusal
-boundaries. `root_startup_rejoins_certified_decision_once_and_settles_waits` pins
-the root's restored turn; a child's never is: its open closes an effect-decision
-barrier as abandoned
-(`an_owed_child_at_a_decision_barrier_is_closed_as_abandoned_and_marked_owner_lost`).
-A child whose lost turn is a provider program's tool batch is the one shape
-its open still restores; the owner-lost mark abandons that restored turn with
-`process_lost`, or `interrupted` after a handoff, and its one terminal carries
-the abandonment report
-(`an_owed_childs_restored_tool_batch_is_abandoned_with_its_owners_cause`, a
-killed owner reopened directly, since the fixture's loopback runtime has no
-tool projection for the product's own child reopen).
-`operator_recover_waits_for_a_still_held_child_lease` pins the explicit recovery
-wait; `owner_reopen_polls_a_reinstated_lease_with_a_new_operation_id` pins the
-owner's inner lease poll, elapsed wait and incremented open identity. These
-durability tests are separate from enrollment in the single-root sweep.
-Child-turn sweeps remain unenrolled: the ordinary scripted durable tree binder
-aliases the root runtime locator and simulates child completion, while the real
-process-child binder requires multi-branch runtime/dispatch summaries and
-per-child relaunch bindings. Neither is a durable child-turn fixture for this
-single-root sweep.
-Tables include per-shape/per-repeat class counts and each refusal's signature
-and cuts. The sweep found two crash-reachable nested Code Cell states
-whose recovery candidate failed store `MissingChild` integrity; the checkpoint
-codec now publishes only the final reachable candidate DAG, both states close
-as `ABANDONED{running_tool}`, and any recurrence is an ordinary finding.
-
-A compact workflow request with no admitted summary at the cut is withdrawn at
-relaunch with one compaction-not-started notice and explicit compact remedy and is
-never dispatched without a new operator action. A separate fsynced
-`evidence.summary.jsonl` request log pins total physical summary dispatches
-across the pre-cut process and both relaunches to at most one, and to zero after
-the cut for a request withdrawn at relaunch; a workflow already admitted at the
-cut cannot dispatch again. Runtime recovery itself remains offline, and the
-second relaunch performs no inference or publication.
-The current scripted provider emits only local ToolCall blocks; a
-provider-hosted ToolCall final requires an additional output/owner dial.
 
 **Commit trace contract.** The repository-only `plakous-store/test-support`
 feature explicitly forwards `plakous-agent/test-hooks` for its read-only,
@@ -3904,33 +2270,6 @@ pilot. The WAL hook replaces autocheckpoint, so non-killing commits perform a
 best-effort PASSIVE checkpoint at 1000 or more WAL pages, ignoring its result
 just as SQLite's default autocheckpointer does.
 The trace is evidence instrumentation, not a persisted product format.
-
-Signal tests do not sleep to reach the middle of a turn. They wait for the first
-row of the fsynced evidence log, which the model writes when it announces its
-provider dispatch, and which is therefore strictly after the face installed its
-signal watcher. A fixed interval races process start under load, and a signal
-that lands before the watcher is a different test.
-
-**Code Mode enrolment is harness-only and says so in its own identity.** Local
-Code Mode compiles only for a model whose projection target the composition
-enrolment recognises, and the scripted model is not any real provider's model.
-`plakous-compose` therefore carries one extra enrolled target behind the
-`scripted-code-mode-enrolment` feature, which is off by default and reached only
-through the harness. The target's every field is a `scripted` or `offline`
-identifier — `offline.scripted.code-mode.responses`,
-`offline.scripted.code-mode`, `offline-scripted-code-mode-v1`,
-`offline-scripted-code-mode-adapter-v1` — so a scripted session can never be
-mistaken for an enrolled Codex one, and the feature adds exactly one branch to
-the gate while leaving the gate's own conditions byte-identical. No Codex model
-name, adapter revision or route appears anywhere in it.
-
-The harness does not mint a `ResolvedProvider`. It builds the composed
-configuration directly: the provider configuration owns exactly the two markers
-in the `LocalCompositionOnly` presentation, the nested catalog stays in the
-registry, and the harness plan comes from `compile_local_composition_plan`, so
-the provider-visible exposure is empty. A composition deployment exposes its
-catalog through the evaluator, never to the provider, which is why those two
-facts are consistent rather than contradictory.
 
 ### 2.7 The offline performance smoke
 
@@ -5705,808 +4044,144 @@ fixtures are never committed. Live Platform and subscription paths are opt-in,
 fail closed without authority, and live in dedicated test utilities and product
 paths — never in the default workspace green bar.
 
-The product OpenAI credential adapter checks the normalized official origin,
-including equivalent default-port spellings, before credential resolution.
-Offline adapter tests reject foreign origins, non-default ports and foreign
-credential references. Provider-only credential doubles do not replace this
-product-boundary coverage. The offline Platform wire regression sends the actual
-product tool registry through the production OpenAI adapter into a local TLS
-peer. It checks explicit function `strict: false` and exact schema preservation,
-including optional process arguments; binding construction alone does not prove
-provider request compatibility.
+Offline provider tests run the real adapter over synthetic TLS when it is the
+boundary under review. The product OpenAI boundary admits only its normalized
+official origin and scoped reference; the Platform registry proves literal
+schemas and `strict: false` on the wire, not merely that a binding constructs.
+Responses deadline coverage joins a stalled stream and connection without
+authorizing an unfinished tool call. Messages refusal coverage must agree
+across streaming and complete canonical assembly, preserve usage/reason,
+and authorize no refused proposal or invented assistant output after reopen.
+Ordinary empty success and contradictory terminals stay invalid. OpenRouter
+coverage distinguishes HTTP rejection from in-band error after acceptance:
+one physical inference, prefix before the terminal error, no completion or
+extra poll result; attribution headers are exact or absent by route. Tool
+choice and tool support are separate admission facts. None of these fixtures
+qualifies a live account or model.
 
-The JSONL driver is exercised with bounded offline input and the real injected
-host: a failing owned child shutdown returns a fatal process result after the
-parent locator is published and `bye` is emitted. A refused model command
-followed by quit still succeeds, distinguishing diagnostics from the worker
-terminal result.
-
-Offline refusal presentation tests drive the normal hosted loop and production
-one-shot CLI for empty and partial-text refusals, asserting exact stdout, one
-specific note, JSONL projection, durable transcript, and a single provider
-dispatch with no tool effects. Recovered publication tests reopen SQLite sessions,
-retrieve the exact prior command result without redispatch, and preserve the same
-text and note contract. Ordinary empty-success canonical rejection remains.
-
-Messages refusal evidence covers fragmented real SSE for empty content, ordinary
-partial text, and explicit refusal blocks, with and without refusal stop details.
-The canonical complete-response codec and streaming assembler agree on empty
-refusal while ordinary empty success stays invalid. Required-durability agent
-coverage commits and reopens an empty refusal without invented assistant history
-or redispatch. Contradictory stop details, client-tool finishes, and fallback
-remain refused; production Messages transport remains streaming-only.
-
-Responses deadline regression coverage drives an unfinished argument stream
-through the real TLS/SSE and joined model host, asserting one timeout, no
-completed response authorizing tool dispatch, one physical preflight, bounded
-content-free diagnostics and joined connection cleanup. Sustained argument
-observations and last-observation age are tested separately from raw traffic.
-The terminal-before-body-deadline and complete-stream single-terminal tests
-remain the authority for successful cutoff and intended dispatch behavior.
-Messages refusal/tool mismatch tests pin fixed reason/proposal counts and
-retain strict non-execution of refused client proposals.
-
-Keyed spawn replay tests pin immutable input/brief identity across workspace
-rewrites, candidate retirement, changed node briefs, and a real SQLite close and
-reopen. Different requests and cross-caller reuse remain refusals; a replay never
-mints a second child. Tree-schema identity changes require an explicit new schema,
-not a fallback decoder.
-
-OpenRouter Chat TLS qualification distinguishes initial HTTP 403/429 rejection
-from 403/429 in HTTP 200 SSE, asserting exactly one terminal error, no completion,
-and one inference dispatch in each case. Canonical automatic tool choice
-lowering keeps tools but omits the redundant explicit choice parameter; hosted
-admission tests admit tools-capable Chat endpoints without explicit choice
-support and still reject endpoints missing tools. Messages explicit-choice
-admission remains covered separately. Three-wire TLS fixtures assert exact
-plakd URL/title/category headers for attributed routes and their complete absence
-for unattributed routes.
-
-Deterministic OpenRouter Chat and Messages adapter tests complete a physical
-operation in the same poll that queues its response-start prefix and error.
-They prove the prefix precedes the fact-bearing terminal error, subsequent
-polls remain ended, and the operation runs once.
-
-Unified patch regression tests reject unterminated insert, delete, and context
-hunk lines before any file changes, including a later malformed file in a
-multi-file patch. Explicit no-final-newline markers preserve exact content
-whether or not the marker itself has a terminal LF.
-
-Claude native attribution qualification pins first-turn logical prompt IDs,
-provider-issued continuation IDs, field order, native byte-range attestation, and
-UTF-16 version-suffix vectors against the declared native reference. A durable
-agent regression exercises first preparation, tool continuation, human followup,
-and exact reopen; negative cases omit missing, ambiguous, imported, or foreign
-response provenance. This establishes native-profile fidelity, not causality
-for any provider policy refusal. Render fixtures must use stable entry UUIDs;
-new attribution fields and their derived hashes remain visible in golden review.
-Checksum regressions use independently derived expected hashes, retain literal
-serialization bytes, and distinguish excluded routing-field changes from covered
-content changes. They exercise adjacent commas, nested fallback arrays, malformed
-or nonmatching field forms, and bounded billing-marker mutation. A checksum that
-agrees with the implementation's own verifier alone does not establish native
-equivalence; source-derived vectors and native-executed observations are distinct
-evidence classes. Fully authored requests sent by the native client to an
-isolated local Messages endpoint pin exact output bytes and checksum values;
-their metadata is synthetic and they contact no provider. A native-executed
-model/output-limit variant pins the same checksum, while separate source-derived
-vectors cover the field-scanning edge cases.
+Native Claude attribution uses stable entry UUIDs, exact logical prompt and
+provider continuation IDs, field order, byte-range attestation and independently
+derived UTF-16 suffix/checksum vectors. Keep literal native-executed request
+bytes separate from source-derived edge cases; an implementation agreeing
+with its own verifier is not an oracle. Fixtures cover first dispatch, tool
+continuation, user follow-up and exact reopen, while excluding foreign,
+ambiguous or imported prior responses. Provider refusal causality is not
+established. Unified patch losslessness tests likewise use exact bytes:
+unterminated hunks refuse before any write; explicit no-final-newline
+markers preserve content with or without their own final LF.
 
 ### 6.1 Identity, finalization and codec regressions
 
-Claude OAuth identity regressions use synthetic TLS peers to prove that existing
-valid credentials acquire a provider UUID through the profile GET without a new
-login, preserve it across refresh and reopen, and reject missing or conflicting
-identity. Generation-CAS tests reject stale hydration writers. Two independent
-managers hydrate concurrently on a single-thread executor while both retain
-profile-read leases; blocking store acquisition and replacement run off the
-executor. Installation identity tests cover concurrent creation, durable reuse across account-slot
-retirement, malformed files, and symlink rejection. Wire fixtures assert the
-independent account UUID, installation hex ID, and persisted session UUID. These
-offline facts do not qualify provider acceptance or explain a live refusal.
-
-Runtime finalization regressions inject both synchronous composition-session
-shutdown panic and asynchronous integration-shutdown panic, checking subsequent
-integration, lease release and flush. A separate persistent in-memory terminal
-installation fault checks queued failure-channel settlement and cleanup; it is
-not evidence that repeated store refusal alone causes the same escape.
-
-The durable error codec suite covers every closed store invalid reason and
-capacity bound, exact canonical byte roundtrip, and unknown-fact refusal. An
-admitted failed turn persists a typed store refusal, then reopens the exact
-terminal result with no model preparation or redispatch.
-
-Store admission evidence (Plakous section 5.2) runs one admission conformance
-suite against both backends: each class stops exactly at its threshold with a
-typed refusal naming bound, usage, limit and class; archive and delete succeed
-past the limit; and a store whose limit is lowered below its usage opens,
-refuses ordinary writes, and still deletes (`plakous-store`
-`*_admission_classes_stop_at_their_thresholds`,
-`an_over_limit_store_opens_refuses_ordinary_writes_and_deletes`). A seeded
-campaign interleaves ordinary, settlement and recovery writes with deletions
-and requires that settlement and recovery are never stranded by ordinary
-fill (`memory_admission_campaign_never_strands_settlement_or_recovery`).
-Facade tests over SQLite (`plakous` `sessions::tests::capacity::`) drive real
-turns at chosen limits: a running turn refused at the ordinary threshold
-publishes `Failed`, never `recovery_required`, with no provider preparation;
-the next root is refused before admission with `StoragePressure` and writes
-nothing; usage reads through the facade; deleting a session restores service.
-A paid compaction whose dispatch is the last ordinary write completes in the
-settlement reserve and a retry never redispatches; one whose dispatch record is
-refused publishes a failure without reaching the provider. An ordinary
-refusal at any tool fence (the prepare, a mutating effect claim, or the
-atomic dispatch of a read-only group), across a refusal campaign over each
-ordinary commit, fails the turn definitely: a typed `StoragePressure`
-rejection or a `Failed` result of kind `Session`, quiescent, with every
-executed tool call matched by a recorded result. With ordinary work exhausted
-while a Code Cell runs, every nested call is refused definitely with the
-storage-pressure reason, the cell reaches its own result, and the turn fails
-definitely on a quiescent head
-(`a_cell_nested_call_under_storage_pressure_is_refused_and_the_turn_settles`).
-A compaction whose locator commit is refused and which stops after its
-failure-evidence commit recovers to exactly one failure publication, and a
-repeat recovery writes nothing
-(`refused_locator_failure_evidence_recovers_to_one_failure_publication`).
-Hosted spawn under ordinary pressure is a definite `Refused` spawn: a refused
-child create leaves no session, and a child whose first turn start is refused
-is released, archived and deleted, with no provider dispatch and no node in
-recovery (`plakous-hosted` `a_child_*_refused_under_storage_pressure_*`). An archive left by a delete
-that failed after archiving is reclaimed on rerun: usage drops and the
-deletion tombstone exists. A turn whose
-terminal publication meets the settlement threshold ends `recovery_required`,
-the open that recovers it writes into the recovery reserve, repeat opens write
-nothing, and the store reopens under a limit below its usage. The pre-existing
-raised-limit rescue regression still holds for a terminal write larger than
-half the reserve. plakd covers `plakd session delete` end to end (confirmation,
-removal from listing and inspection, refusal of an owned session as open
-with the lease held by a live owner process, and an open root refused before
-its finished child's history is touched
-(`an_open_root_is_refused_deletion_before_its_finished_child_is_touched`), its
-dependency and
-exact-revision deletion in the product store, agent-tree deletion under the
-inspected revision exactly once, the doctor `runtime_store` thresholds, and the
-hosted capacity presentation keyed on the typed refusal class (new work
-refused versus reserve exhausted needing recovery).
-
-Tree custody evidence (chapter 03 §14) runs one custody law against both
-tree stores (`the_memory_store_keeps_the_custody_law`,
-`the_sqlite_store_keeps_the_custody_law`: takes, the holder's own take, the
-refusal by the holder's name, takeover only with a proof for the exact holder
-and fence, fenced saves and deletes refused to unminted, released and
-superseded claims, release and its repeat, the delete taking the record, and
-independent trees) and a seeded 4,000-step random walk over three hosts and two
-trees that drives both stores through every transition, granted and refused,
-and requires the same answer and the same stored record and revision after
-every step (`the_memory_and_sqlite_stores_agree_on_a_random_custody_walk`).
-Liveness is proved across processes: a live holder process keeps the tree and
-a killed one is taken over under the next fence
-(`a_dead_holder_process_is_taken_over_and_a_live_one_is_not`), and removing a
-live holder's lock file or the whole liveness directory proves nothing, before
-or after it exits, until the break-glass
-(`a_removed_liveness_lock_never_proves_a_holder_gone`). A second process's attach
-of a session whose tree a live process holds is refused with exit code 7 and
-the `tree_hosted_elsewhere` JSONL code, bringing no hub up and writing nothing
-(`a_second_process_attach_is_refused_with_exit_7_and_its_jsonl_code`). The
-refusal stays typed through the tree rows a hub-less session writes: the root
-batch written ahead of admission and the projector's tree save both end with
-exit code 7 and the JSONL code and write nothing
-(`another_hosts_custody_stays_typed_through_the_ledger_and_the_projector`).
-A clean quit releases the custody it held on every face: after `plakd run`,
-`plakd agent` each quit, every custody record in the store reads
-released (`a_clean_run_releases_its_tree_custody`,
-`a_clean_agent_quit_releases_its_tree_custody`). A fork request withdrawn at
-reopen takes its seeded genesis tree, or a seed's row-less custody record,
-with it and leaves any other tree under that id alone
-(`a_withdrawn_fork_leaves_no_seeded_tree_or_custody_record`); a fork that
-published keeps its tree and custody record across the source's reopen and
-opens on them
-(`reopening_a_source_after_its_fork_published_keeps_the_forks_tree`).
-
-History retention evidence (Plakous sections 4 and 5.1) runs one prune
-conformance suite against both backends (`memory_prune_conformance`,
-`sqlite_prune_conformance_reopens_exact_and_verified`): the retained set is
-exactly the create checkpoint, the runtime-retained checkpoint, the head's
-parent and the head, and every other checkpoint loads as typed `Pruned`;
-checkpoint usage drops by the receipt; an explicit reclaim drain releases objects and bytes; receipts at or below the horizon recover as
-`Pruned` and replaying a pruned commit is `Pruned`, never `Corrupt`, while the
-head's commit replays exactly; a prune below its minimum or at a moved head
-changes nothing; a repeat reclaims nothing; a fork taken before a second prune
-keeps its source and its receipt replays and recovers exactly; a fork after a
-prune succeeds; and the SQLite store reopens with identical counters under full
-verification, which refuses a surviving checkpoint whose parent is neither
-present nor a recorded pruned id (also a case of
-`bulk_authority_snapshot_rejects_the_same_relational_corruption_classes`).
-`sigkill_prune_cuts_reopen_as_exact_unpruned_or_pruned_history`
-kills a child at `prune-after-enqueue`, `prune-before-commit` and
-`prune-after-commit` and requires a fully verified reopen that is exactly the
-unpruned or the pruned store. Agent lines have one ordered corpus for both
-backends (`memory_backend_satisfies_line_conformance`,
-`sqlite_backend_satisfies_line_conformance`, the latter under full
-verification): a rebind moves the head and generation in its publication; the
-source, its lease still live, is refused `NotLineHead` for a commit, a prune and
-a second rebind and its head is unchanged; a fork of the predecessor starts a
-line whose origin names it; only the head records line job terminals, under its
-current head checkpoint (another checkpoint is `Conflict`), a repeat records
-nothing and appends nothing, and its next commit consumes them; a head advance
-folds the pending terminals instead of waiting for them, and any other folded
-set is refused `LineTerminalsNotFolded` with the head unchanged; a same-store
-carry is refused without a continuation, from a Working head
-(`CarrySourceNotQuiescent`), when it names a head a commit has
-since replaced (`Conflict`), and under a lease a lease-only holder has since
-superseded, then continues the line across sessions under the holder's lease,
-folding its recorded terminal, an exact replay answers from the receipt, and
-the predecessor is fenced even under its live lease; deleting the head's
-session ends the line. `sigkill_line_advance_cuts_reopen_with_exactly_one_head`
-kills a child at `fork-before-commit` and `fork-after-commit` of a rebind's head
-advance, at `carry-before-commit` and `carry-after-commit` of a carry's create,
-and at `record-terminals-before-commit` and `record-terminals-after-commit` of a
-lease-only terminal record, and requires a fully verified reopen with exactly
-one head: the source at generation 1 with no target and still committing, or
-the target at generation 2 with the source fenced; a recording is there wholly
-or not at all. The owner tests
-`a_commit_refused_as_not_line_head_fences_the_owner` and
-`a_prune_refused_as_not_line_head_fences_the_owner` require a driver whose
-commit or prune the head fence refuses to fence itself, so it never reaches the
-store again. The host registry and `LocalJobHost` share one attach-precedence
-case (`*_hands_a_line_service_only_to_a_succeeding_owner`): the line's next
-generation and the same head under a higher fence take the very service; an
-older generation, a lower fence and a sibling branch are refused; a foreign
-line never sees it. The hosted line tests (`agent::live::line_tests::`) drive
-real promoted processes through the host registry: a line-continuing carry and
-a head-advancing rebind each hand the running job, with its number, to the next
-head, the source refuses to open or verify, and the job's exit lands in the new
-head's ledger exactly once and survives a fresh-process reopen; a carry is
-refused as `Ownership` while a lease-only holder holds the head and as
-`NotQuiescent` once the head has an unfinished turn, and a carry after the
-holder released folds its recorded stop (`LineJobTerminalsConsumed` on the
-`Created` record); a lease-only holder records the job's stop, keeps other
-owners off the head, and the head's open answers the recorded stop and folds it
-once (one `LineJobTerminalRecorded`, one `LineJobTerminalsConsumed`); a
-new-line rebind keeps an exited job's pending notice; a transfer release
-without a `JobHost` stops and records its job, so the head advance that follows
-is not refused; a carry of a running job onto a binding without a `JobHost` is
-refused `UnsettledProcesses` and releases the head for the next carry; an exact
-retry of a committed carry's operation returns the same session at the same
-genesis; a Working head opened after a lease-only holder recorded its job's
-stop answers that recorded stop; and a head-advancing rebind whose source head has a running job
-row and no `JobHost` on the target is refused `RunningJobsWithoutJobHost` with
-the job still running. The facade line test carries a released source only
-after its attached driver let go (`Ownership` before), and after the head's
-session is deleted the predecessor opens as `LineEnded` and gc answers
-`PruneHistoryOutcome::LineEnded`. The product law
-`product_carry_cuts_relaunch_to_one_successor_at_the_line_head` (durability
-profile) drives the binding-repair carry (`carry::rebind_session`) and
-settlement of persisted orchestration carry intents in a child process on the
-offline model, and cuts execution (a `carry-cut` file beside the offline
-model's evidence log) before its
-runtime create and after the create returned but before the record that binds
-it is saved. A relaunch settles the workspace's write-ahead intents and opens
-the source through ordinary session open, and must show exactly one carried record,
-bound and with no intent, at the line's head at generation 2, the source's
-open redirected to it with a `carried forward as` note, and one source and one
-successor in the runtime store. The settlement tests (`carry::intent::tests`) withdraw an
-intent whose source's line moved elsewhere, keep an intent pending, untouched,
-while another owner holds the source branch (its open answers with the lease
-period), bind a real carry of the superseded source that publishes between
-the head check and the final published check and refuse, keeping the record,
-a create there that is not a carry of the source (a seam between the two),
-release the source's hold when the settlement fails partway
-(`a_failed_settlement_releases_the_source`), withdraw an intent whose source
-record was deleted or whose source runtime was archived, and refuse deleting
-a source whose carry is still an intent. A host asked to open an intent record
-never creates its runtime
-(`an_interrupted_carry_record_is_never_created_empty`). The headless faces
-are pinned end to end in `offline_e2e::carried_sessions`: `plakd run --session
-<source>` over an interrupted carry finishes it, runs on the successor and
-prints the `carried forward as` note, and `plakd agent --session <intent>`
-finishes the carry and attaches the successor. A store reopened under a limit below its usage
-prunes and then admits an ordinary commit
-(`sqlite_prune_over_the_absolute_limit_frees_ordinary_headroom`), and
-incremental vacuum returns the freed pages to the file system
-(`sqlite_prune_returns_freed_pages_to_the_file_system`). The ignored
-`sqlite_prune_sweep_cost_on_a_large_store` measures prune and no-op cost on a
-large synthetic store (the name is historical; reclaim is deferred; run with `--run-ignored only`; its nextest override
-allows 300-second periods). A failed automatic prune emits `RetentionFinished`
-with status `Failed` and leaves the published result, the head and later turns
-unchanged (`a_failed_automatic_prune_emits_retention_failed_and_changes_nothing`). Facade tests (`sessions::tests::retention::`, and the
-capacity suite) run 144 rounds with automatic retention keeping the checkpoint
-count bounded and retained bytes growing no faster in the second half than the
-first; over SQLite they observe an automatic prune, an explicit prune that
-leaves the export document unchanged and repeats as a no-op, a verified reopen
-and a further turn; an attached session is refused for ownership, a stale
-locator names the current head, archived sessions are listed until deleted, a
-Working head is `RecoveryRequired` at the facade and
-`Invalid(PruneHeadNotQuiescent)` at the store, and a store over its absolute
-limit is pruned. Over 80 SQLite rounds with automatic prunes, an explicit prune
-and an exact reopen, a duplicate of the previous root command replays its exact turn
-and checkpoint, a duplicate of the fourth latest root command replays, and a
-duplicate of the fifth is refused, unrecorded, as `ControlErrorKind::Reclaimed`
-without running or moving the head
-(`duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it`).
-One 200-round Working turn over the memory backend keeps at most 160 checkpoints
-by pruning between rounds
-(`a_long_working_turn_prunes_superseded_checkpoints_between_rounds`); the agent
-suite pins bounded retention and the reclaimed non-head bytes over 128 rounds against a store that
-prunes like a backend (`long_turn_keeps_its_superseded_working_checkpoints_bounded`),
-that every mid-turn prune retains exactly the four latest terminal checkpoints
-(`mid_turn_prunes_keep_exactly_the_four_latest_terminal_checkpoints`), and that
-the owner prunes nothing while a paid fold awaits its receipt
-(`the_owner_never_prunes_while_a_paid_fold_awaits_its_receipt`). Both stores
-refuse an ordinary prune under a Working head and prune one on the owner's
-`at_working_head` assent, keeping a retained checkpoint whose receipt is typed
-`Pruned` (`run_working_prune_conformance`).
-A child recovery whose recorded checkpoint retention reclaimed applies the
-child's feed first and opens the head the feed names, and the create checkpoint
-stays loadable
-(`a_child_recovery_after_retention_opens_the_head_its_feed_names`).
-plakd covers `plakd session gc` end to end (reclaimed counts, a repeat reclaiming
-nothing, a killed owner's Working head skipped as needing recovery after the
-projector applied its feed, and a delete
-cut short after archiving a root with a finished child finished through the
-delete path:
-`gc_finishes_a_delete_cut_short_after_its_archive_through_the_delete_path`), the
-doctor's file size and last retention failure, the `retention_runs`
-telemetry row and `retention` span, and the capacity message naming
-`plakd session gc` before `plakd session delete`.
-`gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`
-kills the real host right after a compaction's runtime commits, before a
-projector transaction applies them, runs `gc --all` (which applies the
-projector itself, skips the killed owner's Working head as needing recovery,
-and after `plakd session recover` prunes at the head the views name, a
-quiescent head), and requires the relaunch to show the compaction once, with
-no workflow request left pending.
-`a_workflow_request_without_a_fact_holds_gc_and_export` writes a workflow
-request no feed fact settles and requires `gc --all` to skip the session as
-`workflow pending` and `session export` to refuse it (`open the session once
-to settle it`); once the request is withdrawn both proceed.
-`host_skeleton::crash::compaction_queue::` cuts the real host after fsynced
-**summary-specific** dispatch evidence, while the paid fold is still pending.
-It correlates the triggering item's id, revision and exact text with a
-read-only `queue_items` query, `DraftAccepted` and an accepted same-UUID
-duplicate for a previously queued follow-up. A further follow-up arriving
-inside that fold has only a mailbox acknowledgement and `DraftPending`, not a
-durable item. SIGKILL and reopen preserve the accepted item, pause its drain,
-and dispatch neither the uncertain summary nor the pending draft. Explicit
-Resume authorizes a new paid workflow and consumes the preserved input once;
-repeated Resume cannot replay it. The test checks distinct workflow identities
-and one physical summary dispatch per workflow, not a false prohibition on
-an explicitly authorized new compaction.
-The small one-answer fixture separately pins that two physical provider
-dispatches can be two ordinary turns, with no paid summary at all. A consumed
-follow-up remains in the canonical transcript even when its joined queue is
-empty. The restored fixture retains the exact model-capability contract;
-changing its context limit would instead exercise a read-only bind refusal.
-`an_unavailable_compaction_endpoint_preserves_the_item_and_names_the_queue_remedy`
-uses a real public driver shutdown to reach the hosted scheduled-pass
-unavailable path. It preserves the exact item without a replacement provider
-dispatch and emits one typed `ResumeQueueOrStartFresh` remedy. This is a
-hosted runtime test of endpoint loss, not evidence that an ordinary
-crash/reopen itself emits that remedy.
-`full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` covers all 14 sweep
-shapes: every SQL view cell equals the incremental lifecycle, including after
-one plain reopen with no harness repair.
-`a_lingering_owner_past_its_lease_changes_nothing_of_the_new_owner` stops a
-real host past its lease, lets an exact reopen take the session over, resumes the
-stopped host and has it prompt: nothing is dispatched, the new owner's views
-are unchanged, and the lingering prompt is never run or resubmitted.
-`a_sealed_reasoning_final_answer_rebuilds_to_its_live_thinking_and_assistant_rows`
-streams synthetic SSE through the real Anthropic Messages and OpenAI Responses
-kernels into the host: one thinking and one assistant row, rebuilt exactly.
-`pause_lines_and_milestones_are_notice_intents_that_survive_a_rebuild` and
-`an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance` pin
-the notice-intent and live-only writer classes.
-
-Inner cleanup regressions inject a local-composition lifecycle panic while a
-yielded process is owned and a synchronous active-cell termination panic. They
-require durable process lifetime retirement and an attempted session shutdown
-respectively, despite the earlier dependency panic.
-
-The terminal error codec also roundtrips every built-in tool error category with
-exact canonical bytes and preserves its category and diagnostic; unknown tool
-categories are refused. This includes `UnsupportedCapability`.
+| Family | Evidence law |
+| --- | --- |
+| Credentials | A synthetic profile GET hydrates a provider UUID without a new login. Hydration/refresh/reopen preserve identity and fence stale writers; malformed, missing and conflicting evidence refuses. Concurrent managers cannot block the executor while reading or replacing shared credentials; account, installation and session identities stay distinct. |
+| Finalization and codecs | Shutdown attempts remaining stages and exact release after an earlier dependency panic; fatal cleanup does not masquerade as a refused model command. Canonical codecs round-trip each closed typed capacity, store and tool failure, reject unknowns, and reopen the same result without preparation or dispatch. |
+| Admission reserves | Both stores enforce exact ordinary, settlement and recovery bounds. Ordinary refusal is definite before effect admission; already dispatched work may settle in reserve. A refused terminal settlement needs recovery and can consume only its own reserve. Repeats are inert; under-limit refusal does not prevent deletion or reclaim. Test doctor and CLI from observable typed classes, not backend failure text. |
+| Custody and deletion | Memory and SQLite run the same custody laws and seeded transition corpus. Only the exact prior holder/fence and independent evidence allow takeover; missing lock files alone prove nothing. A second face must refuse with the typed owner error and write nothing. Clean quit releases every held face. Withdrawal removes exact seeded fork state only; published forks keep their authority. Deleting a root cannot touch a child while the root is still owned. |
+| Lines and carry | Line head and generation publish atomically; old heads refuse even with a live lease. Branch-scoped jobs transfer only to the succeeding head/owner, with terminals and numbers preserved. Only the current head records/folds exact job terminals; duplicate receipts are inert. Carry requires a valid quiescent source and target binding, never creates an empty intent runtime, and after an interruption converges to one successor or an unchanged/withdrawn intent. |
+| History retention | Reclaim preserves the exact retained ancestry, counters and typed receipt window; discarded checkpoints/receipts are `Pruned`, not corrupt. Cut-tests reopen either exact unpruned or exact pruned history. Working-head prune requires owner assent, retains the bounded terminal window and cannot run while a paid fold awaits its receipt. Child recovery consumes feed facts before deciding which retained head to open. |
+| GC and inspection | GC applies the feed before pruning, skips live/recovery/workflow authority and finishes eligible archived deletions. Pending workflows block GC and export until settled or withdrawn. Reopen must derive one compaction row even if the old projection was behind; read-only inspection uses the live recovery predicate without writing. |
+| Compaction queue | Summary-specific evidence distinguishes a paid fold from ordinary turns. At a cut, an accepted item survives in the paused queue and a draft without durable admission does not. Resume may authorize a new workflow, not a second dispatch of an uncertain one. Endpoint loss preserves the exact item and a typed queue remedy; that fixture is not a claim about ordinary reopen. |
 
 ### 6.2 Lease admission regression evidence
 
-`delayed_normal_dispatch_ack_admits_only_before_expiry` and
-`delayed_exact_dispatch_recovery_preserves_receipt_but_not_expired_authority`
-use a deterministic store clock independent of the driver's observation clock,
-a three-second grant and barriers after accepted dispatch publication. Two,
-three and four seconds of acknowledgement delay establish strict pre-expiry
-admission and refusal at/after expiry. The witness counts prepared model start
-capability invocations, not network traffic; exact accepted operation/receipt
-recovery remains byte-semantically equal after refusal. These tests make no
-clock-rollback, reboot or remote-byte timing claim.
+Grant validity is checked on the store authority clock at the actual admission
+boundary, strictly before expiry, not inferred from a heartbeat/response time.
+Drive dispatch after delayed ACK, exact receipt recovery, stale renewal,
+failed clock reads and lease expiry without a heartbeat. Refusal preserves the
+recorded receipt and makes no prepared start. Tools and evaluators recheck
+after waiting for a scheduler permit and before entering the executor; a
+lease, cancellation or policy refusal authorizes no effect. A fake evaluator
+entry witness checks the runtime callback contract, not placement inside each
+interpreter; those placements are separately reviewed and exercised offline.
 
-`store_clock_expiry_without_heartbeat_tick_refuses_recovered_start` advances only
-the store authority clock at the accepted-ACK barrier, so no heartbeat tick can
-substitute for the synchronous expiry predicate. Its mutation control removes
-only that predicate and must fail with one actual start; restoration must pass.
-`unavailable_store_lease_clock_refuses_start_and_preserves_receipt` covers a
-failed clock read. `renewal_ack_after_stamped_expiry_cannot_admit_waiting_executor`
-returns the real renewed grant after its original deadline while a tool waits
-for final admission; receipt arrival cannot mint a new TTL.
+Public cancellation joins a pending compaction start or stream once and never
+dispatches after the cancellation wins, even with a delayed store ACK.
+A successful held fold retains accepted follow-up, prompt and steering records
+in their specified order under both start and streaming schedules. Offline
+prepared-start counters are not provider, billing or network evidence.
 
-`read_only_and_mutating_tool_permit_waits_recheck_exact_lease` holds a real shared
-scheduler permit with a separate ephemeral agent, blocks heartbeat on the durable
-lease gate, then observes zero actual executor entries after expiry. Cancellation
-and mutable policy revision variants exercise the final gate; policy rejection
-remains an ordinary zero-start tool result. The evaluator source-wait test uses
-a fake session with a heap-entry counter after its preparation barrier; it proves
-the runtime callback contract. Built-in QuickJS/Python callback placement is
-source-audited; existing evaluator integration tests exercise normal execution.
+A root turn has no wall-clock ceiling (chapter 01 §3.3). Paused-clock tests
+allow long ordinary turns, end a non-finishing composition at the operation
+round cap after wrap-up, and restore the cap originally admitted without
+a second wrap-up or a retroactive configuration change.
 
-`public_cancellation_during_scheduled_compaction_joins_pending_start_and_stream`
-uses public `request_cancel` against an actual pending prepared start and stream;
-each joins once without another paid start or waiting for the model timeout.
-Delivered-cancellation tests delay the exact compaction ACK and assert zero paid
-starts after that control has won. These are offline
-runtime witnesses, not provider network, billing or external acceptance evidence.
+### 6.3 Tree folds, reopen and measurement
 
-`public_controls_during_scheduled_compaction_survive_successful_fold_in_order`
-accepts an ordinary prompt, targeted follow-up and steering command while the
-prepared compaction start is held. After release, it checks exact command records
-in the terminal checkpoints, applied steering, follow-up-before-prompt ordering,
-and one compaction dispatch. The fixture uses the existing response path; it
-does not substitute cancellation for a successful compaction fold.
+- **Intent publication.** First recording fixes scope and input. A refused
+  consequence restores the acknowledged pre-fold view, without resurrecting
+  released process-local ownership or dispatching a seal or hook. Once the
+  consequence is acknowledged, retry or reopen cannot repeat its effect.
+  Distinguish a saved intent, use/acceptance and an applied intent. In
+  particular a live-only accepted steer publishes no revision and only
+  rebuilds after application.
+- **Row authority.** Live, clear-and-replay, and cold-reopen views agree.
+  Apply a retained page only against its cursor or refold it with its retained
+  seed; a stale page cannot overwrite later retirement. Repeated reads must
+  be inert, with read/refold accounting only for new facts. A deleted fold
+  refuses live writes and rebuilds from saved witnesses, not from inferred
+  terminal/cache state. Cross-agent applier-diff and seeded multi-child
+  corpora prove that unrelated rows, immutable inputs and revisions stay put;
+  debug-build diff checks follow the same rule.
+- **Effects and results.** Mint, seal, adopt, conflict, retire, cancellation
+  and mail have separate exact scope and intent identity. Changed generation,
+  stale or foreign caller terminal, and failed consumption cannot mutate the
+  destination. A Finalize replay starts at the accepted command boundary,
+  consumes a saved consequence once, retains failure/diagnostic or exact
+  submitted output, and cannot repeat a hook, seal or result-mail milestone.
+  Parent/child failure propagation must reach the same result in either
+  projection order. Indexed cuts also cover an intent without its effect.
+- **Reload and inspection.** Reload rehearsal uses an isolated fixture home
+  with WAL backup and a scrubbed environment; no secrets or holder locks are
+  copied. Refusal or signal cleans staging; a live-session race has a typed
+  retry remedy distinct from other failures, without printing path, SQL or
+  config. Pruning concurrency distinguishes legacy holder/SQLite locks, the
+  current product writer and unrelated runtime readers/writers. Inspector
+  tests establish decoded-head predicates and display bounds, not live
+  credential/evaluator construction, actual child recovery or paid execution.
+  A production rehearsal is a separate operator action against backups.
 
-`public_controls_during_returned_compaction_stream_survive_successful_fold`
-exercises the same controls after the prepared start has returned and the actual
-response stream is polled. It verifies a finalized compaction publication,
-retained command records and ordering, and exactly one provider dispatch.
+`just dev coverage` runs the parallel and serial nextest lanes with
+`cargo-llvm-cov` in a separate target and writes HTML/JSON to `target/llvm-cov/`.
+Supply matching executable `PLAK_PY_HOST`, `PLAK_JS_HOST`,
+`PLAK_MCP_SERVER` and `PLAK_TEST_BINARY`; missing or non-executable fixtures
+refuse. Weighted-lane trials derive the same paths from Cargo artifacts.
+Coverage is informational. Product behavior reachable only in another
+process belongs in the spawned suite, not a mock built for coverage.
 
-A root turn has no wall clock (spec 01 §3.3), and three offline tests hold
-that line under paused Tokio time. `a_long_turn_completes_without_a_wall_clock`
-drives nine model rounds that each think for four virtual minutes and requires
-a `Completed` answer after more than half an hour.
-`successive_composition_resumes_are_bounded_by_the_round_cap` resumes a
-never-finishing composition cell for four virtual minutes a resume and requires
-the round cap, not elapsed time, to end it with `RoundLimit` after the wrap-up
-round. `restored_turn_above_its_round_cap_does_not_wrap_up_twice` reopens a
-paused wrap-up under a raised configured cap and requires the resumed turn to
-keep the cap it was admitted under.
+**SQLite reclaim and admission budgets.** Count-based tests exercise
+independent priority lanes, 32-job aging and usage publication without an
+actor dispatch. An independent mark/sweep oracle and pre/post GC SIGKILL cuts
+pin ancestry, exact counter and queue atomicity, and full object verification.
+The real actor's admission budget compares statement and VM-step counts over
+small and large stores; no full scans, automatic indexes, payload reads,
+recursive closure walks or aggregate sum are permitted. The prepublication
+path is renew then commit, with at most one bounded reclaim before that pair
+under pressure. Branch lifecycle reads must not materialize full heads.
+`perf_store --large-store-admission`, `perf_store --branch-reads`, and ignored
+tree-fold/close and retention benches are opt-in measurements, not timing
+gates. Repeated close and idle/deleted-only folds must not clone or write
+unrelated work just to re-establish an existing state.
 
-## Coverage of the offline gate
+### 6.4 Operator console and retained-runner evidence
 
-Second-save refusal laws exercise idle-fork tool close, interrupt, synchronous
-submit and discard, and duplicate child-command projection for both unavailable
-storage and stale revisions. Consequence refusal restores views and cursors,
-records a tool failure receipt, and dispatches no new seal or removal.
-Valid schema-conforming requests and exact store-call counts distinguish
-consequence-save refusal from input-validation refusal.
-Hosted attempt-end and spent-turn close laws refuse their consequence saves,
-then retry. A captured commit cut after closure publication and before seal
-settlement reopens without another seal ticket.
+| Family | Evidence law |
+| --- | --- |
+| Client protocol boundaries | Standalone clients use the exact enrolled protocol, schema and typed bridge-unavailable refusals. Host wire restart matrices drive real sockets and authenticated WebSockets: advisory stop/drain/restart records precede EOF; aborted preparation returns to running. Discovery refuses absent, starting, stopping, incompatible or unverified authority without mutating it. External client/application review is separate; no client repository or runnable UI is a gate input. |
+| Accounts and consent | Read-only status distinguishes settled history, pending refresh and unknown attribution. Write-only keys/challenges are redacted even in subprocess diagnostics. Consent binds exact principal/connection/generation/action, expires and cannot burn quota on refused admission. Login attempts obey per-account and host bounds; disconnect retires them. The effect witness becomes sticky only when recovery/dispatch authority crosses the boundary, not when malformed paste or failed preflight refuses. |
+| Files and Changes | Session-free reads do not create runtime state. Exact bytes, digest/revision-bound cursors, runner generation and ownership prevent cross-target reads and stale writes. No-follow and product/XDG overlap refusals precede I/O. Traversal, whole-file hash, pending result and BuildRead budgets charge the real work; omissions are flagged, not a clean result. Failed reads preserve retryable cursors, successful reads consume them, and dropped calls release guards. |
+| Configuration and profile publication | Etag/exact-byte checks preserve comments and refuse stale forms, invalid values and forbidden writes without mutation. Write/sync/link/rename cuts expose old or complete new bytes; after publication, response loss is not proof of no effect. Use now follows held/remote moves with preserved provenance; only a proven local attachment bootstraps defaults. Missing provenance fails closed, and explicit remote default writes require confirmed etags. |
+| Terminal runner | Quotas, exact offsets, owner/generation checks, binary bytes and bounded rings hold with input/ack loss and output backpressure; refusal cannot enqueue, and loss never replays input. Independent streams have fair, bounded credits. Real PTY serial tests prove job control, raw echo/resize and joined cleanup; death and disappearance are distinct from acknowledged unknown loss. Durability cuts preserve live pins across host loss and never signal a remembered PID after runner replacement. Platform kernel observations, not guessed PID reuse, authorize cleanup. |
+| Terminal host | Live pins and residency block reclamation, including after reconnect/reconciliation and independent of receipt/namespace exhaustion. Principal/controller authority is private; takeover requires confirmation. Host loss or replacement must preserve precise loss/pin semantics, not create agent job/line records. Both serial PTY and durability cuts are outside offline parallel. Client-side scheduling/browser behavior is separate from host rate-limit, stream order and web policy checks. |
+| Retention-only ownership | Frozen v1 fixtures and v2 policy independently check exact verbs, encodings and refusals, including discovery of the previous protocol and rejection outside the supported window. A foreign/stale tuple, insecure parent, peer mismatch or inode change is not authority. Transfer never adopts unsettled foreground work. Multi-build serial fixtures exercise direct delegation, one-time input and terminal consumption, old-controller fencing and no shadow capacity charges. |
+| Retention loss | Durability cuts kill the actual original or receiving daemon and lose an acknowledged transfer reply. Preserve exact receipts without input replay, distinguish missing/unreachable old authority from proved death, and never adopt or kill a surviving child using vanished authority. Expiry uses the original lifetime and terminal time, not the first observer's, and never stops a running child. |
 
-Retirement laws block a scripted child's release while navigator close,
-stop-all, root interrupt and model tools return after durable intent and
-dispatch. Background completion settles the exact prepared operation once,
-including after its requesting future is dropped; replay cannot cancel a
-replacement. A stale startup caller cannot annotate or cancel a successor
-attempt or a replacement turn on the same attempt. Start-failure, attempt-end
-and reopen-reconciliation laws each deliver a fault captured before a followup
-replaces its attempt and require no host decision or changed successor state.
-Process-local fault laws also deliver failures with identical child ids but
-another tree, attempt or turn and require no mutation; the exact report still
-fences its owner. The real-child SIGKILL law cuts after durable close intent,
-after the real runtime releases but before its feed reaches the tree (held by
-an explicit barrier), after the real `close_agent` tool returns while that barrier
-keeps its receipt prepared, and after release/receipt publication, then exact-opens and
-recovers twice without another provider dispatch or result mail for the closed
-child. These retirement-specific cuts supplement `tree_child_submit_adopt`,
-whose natural completed-child release does not guarantee an outstanding close
-at a cut. Pending-indicator coverage consumes scripted child mail, enqueues its
-zero snapshot, saturates the face with admission traffic and proves zero is
-still delivered even though unchanged facts produce no resend.
-Admission saturation also preserves the final idle status and cleared busy
-flag. Real-session dispatch laws hold the delivery barrier and refuse an early
-tool acknowledgement; receipt laws empty the live table before headless exit
-or shutdown and require both paths to join the remaining tool-side settlement.
-Owner observation laws require one recovery detach and transcript notice across
-concurrent joiners, late release failure and each navigator cancellation entry point.
-Idle bound-node laws cover navigator close and stop-all, alone and beside a
-blocked retiring sibling: the idle detach is immediate and the live outcome
-remains owner-published.
-Startup-reserved children closed through either navigator action emit no early
-detach, then exactly one closed detach after successful startup release, including
-when another detach producer runs afterward.
-A synchronous oneshot waker samples the actor's cancelled
-state at the dispatch signal itself, rather than after a requesting task resumes.
-Virtual-time laws require a saved cancellation intent to be acknowledged when
-dispatch exceeds its own allowance or its sender disappears, while its receipt
-remains prepared until the independently owned work finishes. A face registers
-its retirement-notice subscription before its first observation, and an overflow
-law drains the retained notices after the logged lag instead of deferring them.
+Install owns the host upgrade family. Publication SIGKILL cuts belong to
+durability; injected parent-sync failures run offline. Wall-clock discovery
+bounds belong to serial with matching offline exclusions. See §2.2 and
+§2.3 for the complete lane rules.
 
-Tree fold metadata laws cover immutable first recording, distinct insert orders
-for all existing host intent kinds, unbound anchor 0 and cold recording at the
-current tree cursor (not the command acceptance sequence). SQLite laws cover
-anchor/order pair constraints, integer codecs and round-trip, and NULLing the
-node fold position through both view-deletion paths. The generated host-intent
-corpus interleaves cancellation, materialization, retirement, turn failure,
-recovery and Finalize at live cursors, including unbound then bound turns,
-successful and failed seals, producer adoption, and captured interrupts.
-Live views equal clear-and-replay and cold reopen; project-twice is inert and
-replay reserves no effects. Minimized cases cover an old unbound recovery
-or retirement followed by a bound cancellation in the terminal's page, a
-failure followed by retirement projected twice, and late Finalize after
-recovery. Anchored replay crosses more than 64 pages; below-retention folds
-also survive deleted views and a second reopen without another seal.
-Projection-lag laws record cancellation, materialization, retirement, host
-failure/recovery, close, interrupt, submission and Finalize while a committed
-terminal is still unprojected. Their anchor is the tree cursor, not the real-time
-session tail; both deletion paths rebuild the exact recorded rows page by page,
-with no repeated effects.
-Stale-page laws regress the cursor between incremental read and apply: the
-refusal preserves all rows, then a full reread converges. A real hosted session
-exercises the incremental caller's single retry, carries head wait evidence, and
-maps a second refusal to the existing recovery code rather than spinning.
-A synthetic session longer than 64 pages reaches its tail and projects all
-records in one bounded reread without wall-clock waits.
-An old attempt's applied read stays inert after a followup's later retirement;
-the current attempt and newer recovery kind survive both reread and deletion.
-A deleted followup target refuses before allocating any immutable attempt.
-A refused checked feed still settles effects from earlier acknowledged saves,
-exactly once; it neither creates a new effect nor drops the owed queue.
-Retained late-read laws refold in place with the seed and compare both deletion
-rebuilds over the same retained inputs (never resurrecting erased facts).
-Full and retained refold pages extending beyond the old cursor count only new
-records and preserve exactly their terminal usage for acknowledged publication.
-A synthetic repeated turn identity across old and new terminal records proves
-the usage filter follows record sequence and emits only the new usage once.
-Deleted-fold laws refuse live recorders and close/due restarts without mutation;
-a reserved close remains queued until reconstruction. A persisted deletion plus
-an ancestor crash-window cascade installs successfully, then converges after the
-descendant rebuild, without manual fold calls: the rebuild transaction folds
-newly eligible ancestors before computing the restored pause lift.
-Late recovery-read laws compare a synchronous in-place closure refold with its
-own-position rebuild through both deletion paths. Incomplete pages refuse with
-no mutation; a reread from the start converges without publishing deleted views.
-A later retirement retains the current attempt and `turn_recovery_required`.
-The applied-read fold view survives SQLite reopen and later retirement: rereading
-changes neither rows nor revision and never refolds. Deleted views reset the
-set and rebuild it from the reads. Two abandoned turns on the same attempt
-remain inert on every reread, including SQLite reopen and both deletion paths. Explicit deletion uses the existing recovery
-pass, not a process-local late-read callback.
-Explicit repeated older reads preserve exact recorded rows and revision, with
-no new refold or effect tickets.
-Seal-success and seal-failure laws replay anchored completion, including an
-empty seal, with fixed failure end stamps and no repeated effects; SQLite
-view deletion re-derives a failed seal from its outcome intent. Orphaned seals
-after Finalize and submitted cancellation rebuild the completed attempt before
-the VCS fault, including a second cold reopen. Fault recording writes no node
-views; fault and settlement predicates follow the anchored position and replay
-without repeated effects.
-SQLite deletion laws rebuild spawn refusal, producer adoption and a failed
-workspace cleanup, including their diagnostics, through both view-deletion
-paths and a second reopen. Projecting twice is inert and reserves no effects.
-VCS faults replay a captured prior diagnostic even after settlement; a second
-reopen leaves the rebuilt view rows unchanged.
-Operator-intent laws rebuild close (with and without live ownership), effective
-and ineffective interrupts, and recovery abandonment through in-memory and SQL
-view deletion.
-Followup laws rebuild the captured supersession stamp, refuse withdrawal after
-another intent, an authoritative future feed tail, Start rejection, or an empty
-descendant-close reservation, and leave refused rows unchanged. The open-save /
-withdrawal cut reopens with a complete opening; successful withdrawal removes
-its own unfacted Start, opening intent and attempt, and deleting views then
-folding the remaining inputs produces the same rows.
-Topology-only completion and block fixtures record existing finalization and
-host-failure intents, rather than raw view writes; their deletion law rebuilds
-the same node, attempt, blocked reset boundary and fixed end stamp without effects.
-Attempt-view laws reset both in-memory and SQL views to the retry chain root,
-then replay three attempts page by page, comparing complete node prefixes with
-distinct schemas. Per-attempt schema text and digest survive SQL view deletion
-as immutable inputs; no prefix sees a future attempt or schema. Followup
-applier-diff and parent-first/child-first laws rebuild the same rows without
-effects. Restore/resume preserves folded status rows while tree, list and wait
-presentation expose the Paused overlay only for Running nodes.
-Every debug-build intent application checks a generic applier diff: non-target
-node, attempt, workspace (including generation), mail and operation rows stay
-unchanged. Only newly reserved result envelopes and captured descendant-close
-inputs under the applying agent's new fence are exempt; target consequences
-still require their own applier. Negative laws deliberately alter each foreign
-row class and require the assertion to reject it.
-Rebuild laws also preserve all external workspace rows; an adopted followup's
-workspace stays adopted rather than reactivating under a historical opening.
-Retention laws compare a running followup and an older closed, still-unwinding
-turn with their unpruned live views. Older openings precede the head seed;
-binding never lands on the chain root or disappears under a replayed opening.
-Pending-close seal laws rebuild the live `sealing` view before settlement and
-the orphaned reservation's recovery fault through SQL deletion, without another
-seal reservation.
-Same-cursor laws reserve a seal from cancellation, materialization or Finalize,
-then apply an effective interrupt or a host decision after an in-flight
-submission at that cursor. Both deletion paths rebuild the exact pending view
-without another ticket, and the settled outcome also rebuilds exactly.
-The pending SQL comparison reads raw persisted rows to isolate the fold from
-reopen's intentional orphan-seal fault, covered separately above.
-Deferred-close laws replay both the prefix before a failed terminal and the
-pending terminal seal. A future fact's reservation cannot lift the earlier
-close, and replay invents no result mail.
-Feed-failure cascade laws assert both session projection orders leave the same
-rows and exactly the original intent/reservation set, including an unsealed
-inherited parent workspace.
-First-application cascade laws start with an unprojected parent feed failure,
-cancel or Finalize at view deletion. Parent-first projection refuses without
-advancing; descendants followed by parent retry and a post-order rebuild both
-equal no-deletion reopen. Fresh, unfed children have initialized folds and
-remain closable by a live parent.
-The fixed-seed, bounded multi-child corpus includes a parent and two children,
-mixed running/finalized descendants, failure, cancellation and Finalize cascades,
-and cross-session projection permutations. It exercises both in-memory and SQL
-deletion, including a cascade's first application after deletion. Newly minted
-intent identities and insert orders are run-specific recording facts: independent
-first applications compare semantic rows and new intents by target, kind,
-canonical payload and anchor sequence, not revision-derived ids or fold orders.
-Each run then deletes views again through both paths and requires an exact
-rebuild against its own already-recorded intents, including ids and orders.
-Where no new intent is minted, the original full-row comparisons remain exact.
-SQL deletion followed by the real product recovery entry rebuilds a
-parent/child tree in post-order with no explicit fold calls; durable session
-bindings remain intact and sessionless children fold without opening a session.
-Normal reopen selects no new target, and a second recovery run is inert.
-An opt-in ignored tree-fold microbenchmark replays twenty agents with 500
-records and 200 intents each, both with all intents above the window and with
-fenced intents due throughout it. It reports replay time and 100 whole-tree
-clones separately; it has no wall-clock assertion and is not a gate lane.
-A companion ignored close benchmark times twenty agents (four five-node
-subtrees), each with 500 records and 200 future intents, over five samples.
-Test-only per-tree clone counts prove idle due folds and deleted-only close
-drains allocate no scratch tree; an unprojected session allocation still joins.
-Repeated-close tests assert ten closes of an already Closed subtree add no
-intent rows. The regular replay/refusal corpus covers fenced view-only
-snapshots and first-application rollback with effect reservations.
-An injected fenced applier changes either the input count or its own immutable
-row before refusing. Raw `fold_due` and driver consequence boundaries return
-`operation_recovery_required` and retain byte-identical complete tree debug
-snapshots, including operations, views and process-local queues.
-A stale page-intent index law injects a same-agent due intent after indexing
-and requires the debug integrity assertion rather than silently omitting it.
-The applier-diff injection law covers all foreign row and queue categories,
-including commands, cursors, inbound, effects and fault reasons. A malformed
-VCS fold input must make the reopen law's fold propagate the integrity refusal.
-An attach store probe requires the hub entries lock to be available during
-every startup save. An empty started singleton saves only its initial input,
-and reattaching an occupant saves nothing.
-A deletion-parity law combines accepted mail, a withheld admission's returned
-mail and an undeliverable envelope. Both paths produce identical deleted rows
-and rebuild identical live rows, including the derived return receipt.
-Followup withdrawal cuts refuse the consequence save and retain the opening,
-mail and receipt unchanged, then retry one CAS that settles all three. SQLite
-reopen and view deletion preserve the failure receipt and acknowledged opening;
-a later Start's pending mail never includes the withdrawn envelope.
-Startup commit-cut tests publish a Finalize intent without its consequence,
-then assert terminal views after hub reopen alone. Its first application's
-seal dispatches once through acknowledged settlement; the following reopen
-has neither another seal nor an orphaned-VCS fault.
-Result-mail laws fail an attempt, acknowledge its result, close it and
-acknowledge 65 later messages until the original envelope is pruned. Both
-view-deletion paths rebuild identical attempt, node, mail and operation rows
-without another result push; repeat projection is inert.
-Candidate-association laws assert both deletion paths clear the attempt's
-`candidate_id` while retaining the external candidate row, then derive the
-exact association from `seal_outcome` without effects or repeat writes.
-Generation-boundary tests complete a mutating child's attempt on a scratch
-clone and through a refused consequence save. Neither publishes the shared
-Read/Grep stamp; an acknowledged retry publishes exactly the row generation.
-Late Finalize reads retain their bounded acceptance-to-terminal evidence test
-without any fold or view mutation.
-Waiter-boundary tests refuse both unavailable and stale-revision saves after
-Start binding with another waiter registered for the same child. Dropping the
-new registration leaves the concurrent waiter registered; its own drop then
-removes the last count.
-Agent-local fold tests leave another agent's due close untouched and do not
-parse its malformed close payload. Driver boundary tests drain a parent
-applier's cascade in the same commit, and a refused consequence save restores
-the child view and an empty process-local scheduling list without effects.
-Hosted failed-terminal tests retain the fork for rescue snapshots while a
-turn waiter owns it, including a close before terminal projection. SQL close
-rebuild fixtures settle the driver post-pass before deleting views; hub
-reload fixtures use the same durable store for startup CAS.
-Submitted-output laws delete both output and status and derive
-them from the captured intent without reserving effects; repeated projection
-is inert. The generated corpus uses real submission intents, including before
-historical-attempt host outcomes. Close cascade laws assert that the parent applier records target
-intents without changing child rows, and rebuild identically in either session
-projection order without adding intents or effects. Their applier-diff checks
-leave other agents' rows untouched; a descendant abandonment and parent interrupt
-rebuild identically in either session projection order. Abandonment retains its
-fixed end stamp and diagnostic across a second reopen, with no effect reservation.
-Commit-protocol regressions fail exactly the second save with Unavailable or
-StaleRevision: host cancellation, published closure mutation and materialization
-fail-closed paths restore their acknowledged pre-fold views and dispatch no
-seal until retry. Dirty-input and work-refusal laws pin the fold boundary, and
-released process-local ownership stays released after revert. A child-usage
-save failure followed by a successful pass emits exactly once without reload.
-Indexed WAL cuts separately publish a fork child's Finalize and a submitted
-outside cancellation before their consequences. Each reopen applies the saved
-decision once, with at most one seal ticket and no repeated effect on reopen.
-Caller-terminal laws finalize a cold tree without a terminal cache, reject
-foreign turn evidence without mutation, and rebuild the captured terminal after
-view deletion. Hosted late finalization reads start at the exact command's
-accepted sequence; ordinary reopen passes continue from the tree cursor.
-Initial publication refusal dispatches neither seals nor mint hooks.
-Refused hook-result publication retains follow-on removal without dispatch;
-after a later acknowledged save, removal runs once and the hook never repeats.
-
-Reload-rehearsal regressions use fixture homes only. They cover a live-WAL
-SQLite backup, exclusion of secrets/holder locks, unsafe copy inputs, sanitized
-runtime environment, staging cleanup on refusal/HUP/INT/TERM, matching maintainer
-Cargo selection/build identity reporting, a changed-key carry-forward
-rehearsal (installed-build export, scrubbed config refusal, import refusal,
-and an untouched live home), and the two refusal classes: a live-session race
-(`session_busy_retry_when_idle`) versus any other staging failure, with no
-path, SQL, or config on either line.
-Current-holder and idle/committed-write WAL connections do not block legacy
-pruning; legacy holder/SQLite refusals remain. An active current product writer
-refuses pruning without removals, whereas an active runtime SQLite writer does
-not block it. Presentation fixtures cover
-oversized restore projection, invalid snapshots, closed removed-worktree and
-unbound pending nodes, quiescent exact sessions, a projection behind the feed
-(reported as `projects:<n>` and passing, for the root and each child), and a
-runtime head the recovery predicate cannot close (refused).
-Inspector fixtures compare the independent abandoned-turn flag with the runtime
-predicate and distinguish saved-terminal closure. The facade fixtures exercise working-head
-abandonment and saved-terminal inspection without store mutation and recorded
-JS/Python evaluator identity checks, including changed/missing historical
-artifacts. Evidence qualifies pure decoded-head predicates and presentation
-limits only: it does not establish authenticated provider construction,
-harness reconstruction, staged tool descriptor/presentation equivalence,
-actual child recovery or paid execution. A production rehearsal is an explicit
-operator action against backups, not part of the fixture suite or permission
-to mutate a live home.
-
-`just dev coverage` runs the parallel and serial nextest lanes under
-`cargo-llvm-cov` in a separate target directory and writes an HTML report and a
-JSON summary under `target/llvm-cov/`. It requires the caller to provide
-`PLAK_PY_HOST`, `PLAK_JS_HOST`, `PLAK_MCP_SERVER` and `PLAK_TEST_BINARY` from a
-matching workspace test build, and refuses missing or non-executable fixture
-paths before starting coverage. Weighted-lane trials instead derive all four
-paths from their workspace test build's Cargo artifact records.
-Coverage is informational: it does not gate,
-and its purpose is to turn "paths the offline suite never executes" into a list
-rather than a guess. Product paths that only a spawned binary can reach are
-covered by the offline end-to-end harness; anything still uncovered there is a
-candidate for that harness, not for a mocked unit test.
-
-### SQLite Reclaim and Admission Budgets
-
-The runtime schema-25 fixture checks rowid metadata, separate payloads and
-persistent GC candidates. Count-based actor tests pin independent priority
-lanes, 32-job aging, zero actor dispatches for `usage()`, publication of usage
-before the next background step, and one shutdown checkpoint despite a vacuum
-backlog. SIGKILL cuts immediately before and after GC commit verify exact
-counter/queue atomicity; the durability lane includes this campaign. A proptest
-interleaves real commit, fork, prune, delete and bounded GC operations against
-an independent mark/sweep oracle and the root-or-queued ancestry invariant.
-Full verification checks payload length as well as canonical object contents.
-
-`crates/store/src/sqlite/admission_budget_tests.rs` is a unit-test module of
-the private SQLite actor so its real connection can be traced without a public
-test API. The small/large fixture measures a fixed usage/renew/commit delta over
-200 sessions, 2,000 checkpoints, a 64 KiB first-checkpoint payload per session,
-10,000 feed rows and a 5,000-entry GC queue. `trace_v2` profile counters
-require equal statement and VM-step counts, zero full scans and automatic
-indexes, and no payload reads, recursive closure walk or aggregate sum in
-that admission path. Setup and
-explicit reclaim are outside the measured phase; this is not a wall-clock gate.
-
-The agent admission double captures only `[renew, commit]` before the first
-publication; under pressure a single bounded reclaim precedes that pair and
-restored headroom admits the turn.
-
-The opt-in `perf_store --large-store-admission` scenario reports admission and
-actor `queue_wait_ns` over a 200-session/2,000-checkpoint store. Timing is
-informational and never determines gate success.
-
-The opt-in `perf_store --branch-reads` scenario compares cold and warm full
-head loads with history-free lifecycle observations over a synthetic store
-with 44 root sessions and 40 additional independent sessions sized to model
-retained child histories; it does not create a tree. Count-based facade and
-actor tests pin zero materialized loads for the observation path; the
-benchmark's timings are informational.
-
-### Opt-In MCP OAuth Interoperability
+### 6.5 Opt-In MCP OAuth Interoperability
 
 `just live mcp-oauth` (`tests/live/mcp_oauth/`) is a local, zero-inference
 interoperability lane, not a gate or a substitute for owner-account/provider
@@ -6540,152 +4215,3 @@ Compiled-review time is never a qualification precondition: `just full`'s
 package group reports remaining days without failing. Publication dry runs
 and uploads separately require more than a third of each compiled review
 window remaining (chapter 06).
-
-### Job-retention endpoint evidence
-
-Review regressions preserve retention authority through same-instance native
-lease expiry and orphaning; reject stale/foreign tuples on snapshot/read/write/
-stop/ack; refuse unsettled foreground transfer; release idle retention only after
-terminal consumption; fence late snapshots while the original is unreachable;
-reject foreign destination intents; measure lifetime before first observation;
-and exclude forwarded namespaces from the middle worker's capacity. Version-two
-policy tests discover and speak the pinned v1 codec, refusing v0/v3 with a remedy.
-Pinned negative outcomes reject extra fields. UID injection and mode-0666 probes
-pin peer/path checks. Loss probes distinguish unchanged or temporarily absent
-sockets from inode replacement and native-lock-free absence. Ack targets are
-restricted per origin/control ID; a closed watch consumer terminates its pump.
-
-Frozen v1 JSON fixtures pin every verb, status and refusal independently of
-native protocol 9. Tests reject arbitrary native verbs, unsupported versions,
-changed original instances, oversized declared frames, public/symlink parents
-and replacement-inode unlinking. Source CAS tests prove persisted native-control
-refusal and own-tuple-only recovery. Real-child tests exercise direct three-build
-delegation after the middle endpoint stops, once-only accounting, stale
-controllers, number floors, terminal consumption and late-snapshot fencing.
-A consumed original can exit before the next upgrade. The lifetime test passes
-future instants only into the retention decision: it uses real I/O clocks and
-proves that expiry never stops a running child, while terminal-only retention
-expires from the original terminal time. These tests run serially.
-
-Durability cuts kill the actual original daemon, kill the receiving daemon
-while an original input answer is withheld, and lose the transfer reply after
-its CAS. Recovery preserves exact original receipts without repeated input;
-original death reports unknown while an independently observed surviving child
-is neither adopted nor killed. No paid provider or shell startup is involved.
-
-### Protocol-7 operator console evidence
-
-Protocol-8 account-status probes distinguish named/default/sibling refresh
-history, retain the last settled outcome across a later in-flight event, keep
-unattributed history unknown and exclude raw provider descriptions.
-
-Protocol-8 Files evidence exercises exact binary bytes and UTF-8 page splits,
-digest-bound cursor mutation conflicts, principal/target/runner-generation
-ownership, no-follow paths, nonregular inputs, invalid names and the 16 MiB
-ceiling. Containment probes cover product and XDG state overlap both ways,
-including unrestricted local roots. Admission probes reserve whole-file hash
-work even for tiny pages and span connections of one principal. Ignored and
-skipped entries consume independent traversal budgets. Cancellation releases
-in-flight guards and stops shared-backend reads without retrying interrupted
-I/O indefinitely. Protocol fixtures round-trip attachment-free Files/Changes
-requests and product refusals, reject offset-only reads and arbitrary runner
-selection, and require the exact protocol-8 handshake.
-
-Changes host probes exercise saved-session status/diff without attachment or
-runtime-store creation, canonical root-target aliases, exact content conflicts,
-foreign principal and restarted-runner refusals before dispatch, distinct
-equal-path runner results and the five-second BuildRead budget. Token probes
-bind repository, HEAD, index and worktree revision, expire retained authority,
-bound per-principal and process-wide pending results, release cancelled
-reservations and mark byte/entry-limit omissions rather than claiming clean.
-
-Protocol-7 consent contracts deterministically cover replay, expiry, changed
-principal/connection/generation/action, disconnect/restart, four-grant quota,
-mutation single-flight and aggregate per-principal quota with web writes off.
-Refused admission preserves the grant and quota. Real start-handler tests with
-an offline application seam admit two pending logins, perform a key write while
-both wait, refuse a third without burning consent, then admit it after a cancel.
-Corrected-paste contracts drive the same attempt through refusal and success;
-provider preflight tests retain the opaque token after malformed/mismatched input
-without dispatch. Key-store path and logout notice refusals are distinguished
-from post-I/O uncertainty. Missing named-key isolation is tested with a populated
-default key, not an empty home.
-Facade consent tests also pin the one-way completion-effects witness: missing
-or changed consent before recovery I/O leaves it false; recovery arming, device
-polling and failures after that boundary leave it true, including later expiry.
-The witness neither changes nor replaces the existing recovery crash contracts.
-They use synthetic account IDs and no provider traffic. No persisted format
-or binding input changes are introduced by the consent machinery.
-
-Account-write contracts, introduced in protocol 7 (current client protocol 12),
-use temporary isolated homes and synthetic
-secrets to verify write-only replies, Debug/input-bound redaction, exact named
-creation/removal and absent-slot isolation. Attempt-table contracts verify
-connection/principal/generation theft refusal, disconnect cancellation, fresh
-restart state, one-account exclusion and host-wide pending quotas. A subprocess
-captures successful key-write audit output and checks that the synthetic key
-appears in neither output stream; pinned challenge frames separately verify
-that authorize URLs and device codes never appear in Debug. Existing
-facade callback/device/claim/CAS tests remain the provider workflow authority;
-no paid or live login is required by offline gates.
-
-Saved-workspace review contracts exercise ProductSessions dispatch with local
-`roots:null`, independently isolated product and XDG homes in both overlap
-directions, and configured READY remote runners with different bytes at an
-equal pathname. A stalled construction probe must drop its future and release
-its quota slot inside the advertised Files deadline. A framed-client drop
-contract checks that an abandoned unkeyed construction probe removes its
-pending reply and sends Cancel; unrelated call kinds keep their existing
-completion ownership. Audit contracts require
-one bounded content-free record for each action, including capability and rate
-refusals. Listing/search contracts skip and count invalid UTF-8 result names,
-retain valid results, and count a skipped file once even with multiple matches.
-Continuation contracts preserve a cursor after read failure, refuse exhausted
-capacity before I/O, and consume it after success. Changes contracts retain
-2,000 entries independently of client-output truncation; welcome limits are
-compared with live admission buckets and host capacity.
-
-Configuration-write evidence, introduced in protocol 7 (current client
-protocol 10), covers two-connection stale forms, CLI and
-external-byte/comment edits, exact allowlists, invalid values with unchanged
-bytes, referenced definitions, built-in collisions, typed template/profile
-publication and comment preservation. Atomic publication probes cover write,
-file sync, publish and parent-sync boundaries: old or complete new bytes,
-never partial publication or false no-effect after rename. New template
-exclusive-link and replacement-rename paths are checked separately. The
-legacy remote settings/default/credential-refresh path refuses at role
-classification; local-face dispatch remains available. Schema/DTO and public
-compile contracts follow exact client protocol 12 and runner protocol 9.
-Wire-12 lifecycle tests observe real host sockets and authenticated WebSockets through planned stop and
-same/cross-key upgrade, assert advisory notices precede EOF, and assert an
-aborted preparation returns to `running`. A publication-lock observer pins
-`restarting` before a committed ready result can be observed; web tests pin
-`stopping`/`shutdown` and `draining` then `restarting` before transport close. A wire-11 hello receives only
-`version_mismatch`. Bridge discovery tests distinguish typed stdout refusals
-for absence, starting, stopping, incompatible state and unverified authority;
-the schema pin includes typed bridge-unavailable handshake refusals.
-The `host_skeleton::upgrade::` tests run in the install profile; new wall-clock
-discovery budget tests belong to serial and its matching offline exclusion.
-Publication SIGKILL cuts run in the durability lane; injected parent-sync
-failures run offline. Connection-drop and forced-deadline contracts verify
-retirement of pending authority and an explicit unknown outcome for admitted
-writes rather than a false no-effect refusal.
-Real local/remote attachment provenance contracts also verify that Use now
-can bind either session but bootstraps a fresh home default only locally,
-even with a local-looking client correlation and an intervening answer-window
-reset. Remote default publication remains a confirmed etag write.
-The production wire handoff is covered separately for both changed physical
-roots and preserved virtual tree addresses: a remote requester follows `moved`,
-reattaches, and invokes Use now on a fresh home without publishing a default.
-Its continued sender retains remote provenance. Addressed profile-verdict tests
-retain both local and remote faces.
-Missing request provenance fails closed; local faces carry an explicit stamp.
-
-Public evidence covers host wire restart matrices and crash cuts, independent
-control traces, settings/catalog/admission, carry and host-upgrade laws.
-JSONL compaction rebuild assertions run in `offline_e2e::projection_parity`;
-installed-build inspection tests live under `carry::installed`. Publication
-concurrency tests use product fields. Neutral protocol helpers and test-only
-socket drivers remain; no runnable application client or private client
-repository is a public gate prerequisite. External-client review is separate
-from public host evidence.

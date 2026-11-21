@@ -3,6 +3,12 @@
 //! continuation, of a `release_session` that waits on a running turn, and of
 //! a `release_session` of a root whose tree is in custody, and the next host
 //! recovers each cut.
+//!
+//! A durable handoff can authorize one continuation. A cut before that
+//! decision leaves the turn held; another restart must not continue it again.
+//! A busy release is not a handoff and must not make an answered turn look
+//! lost. Tree release is witnessed by the next attachment taking custody,
+//! independently of its runtime lease.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -13,7 +13,7 @@ _profiling:
 # Offline performance smoke over the scripted model, not in any gate tier. It reports
 # six short product metrics, four worker timings and six long-lineage metrics.
 # --check compares four metrics against matching machine/profile seed rows in
-# tests/performance/baselines/offline-perf-smoke.json. See docs/spec/05.
+# tests/performance/baselines/offline-perf-smoke.json (spec 05 §2.7).
 [doc("offline performance smoke against this machine's seed row; not a gate")]
 smoke *ARGS:
     tools/perf/perf-smoke.sh {{ARGS}}

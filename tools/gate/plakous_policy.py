@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -333,6 +334,79 @@ def layout_matches(policy: Policy, package: Package) -> bool:
         elif fnmatch.fnmatchcase(package.directory, pattern):
             return True
     return False
+
+
+RAW_STRING_START = re.compile(r'(?:br|r)(?P<hashes>#{0,255})"')
+RUST_CHARACTER = re.compile(r"(?:b)?'(?:\\(?:.|u\{[0-9A-Fa-f_]+\}|x[0-9A-Fa-f]{2})|[^'\\\n])'")
+
+
+def blank_rust_non_code(source: str) -> str:
+    """Blank comments and literals while preserving offsets and newlines."""
+    masked = list(source)
+
+    def blank(start: int, end: int) -> None:
+        for index in range(start, end):
+            if masked[index] not in "\r\n":
+                masked[index] = " "
+
+    index = 0
+    while index < len(source):
+        if source.startswith("//", index):
+            end = source.find("\n", index + 2)
+            end = len(source) if end == -1 else end
+            blank(index, end)
+            index = end
+            continue
+        if source.startswith("/*", index):
+            depth = 1
+            end = index + 2
+            while end < len(source) and depth:
+                if source.startswith("/*", end):
+                    depth += 1
+                    end += 2
+                elif source.startswith("*/", end):
+                    depth -= 1
+                    end += 2
+                else:
+                    end += 1
+            blank(index, end)
+            index = end
+            continue
+
+        raw = RAW_STRING_START.match(source, index) if source[index] in "br" else None
+        if raw is not None:
+            terminator = '"' + raw.group("hashes")
+            end = source.find(terminator, raw.end())
+            end = len(source) if end == -1 else end + len(terminator)
+            blank(index, end)
+            index = end
+            continue
+
+        prefix = 2 if source.startswith(('b"', 'c"'), index) else 1
+        if source[index : index + prefix].endswith('"'):
+            end = index + prefix
+            escaped = False
+            while end < len(source):
+                character = source[end]
+                end += 1
+                if character == '"' and not escaped:
+                    break
+                if character == "\\" and not escaped:
+                    escaped = True
+                else:
+                    escaped = False
+            blank(index, end)
+            index = end
+            continue
+
+        character = RUST_CHARACTER.match(source, index) if source[index] in "b'" else None
+        if character is not None:
+            end = character.end()
+            blank(index, end)
+            index = end
+            continue
+        index += 1
+    return "".join(masked)
 
 
 def edge_permitted(policy: Policy, source: Package, target: Package) -> bool:

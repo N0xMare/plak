@@ -50,9 +50,9 @@ from plakous_policy import (  # noqa: E402
     BELOW_FACADE_LAYERS,
     L0_LAYERS,
     Workspace,
+    blank_rust_non_code,
     load_workspace,
 )
-from check_workspace import _blank_rust_non_code  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 # Manifests carrying a reviewed security-surface digest.
@@ -560,7 +560,7 @@ def uuid_feature_findings(
 
     errors: list[str] = []
     for path, source in sorted(sources.items()):
-        code = _blank_rust_non_code(source)
+        code = blank_rust_non_code(source)
         names = {"Uuid"}
         for alias in aliases:
             names.update(

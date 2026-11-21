@@ -932,5 +932,57 @@ class QualificationReviewTests(unittest.TestCase):
         )
 
 
+class IncompleteCaptureNamingTests(unittest.TestCase):
+    def test_score_report_names_the_incomplete_scenario_segment_and_exchange(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory) / "segment-001"
+            segment.mkdir()
+            (segment / "exchange-0001.request").write_bytes(b"{}")
+            (segment / "exchange-0001.body").write_bytes(b"")
+            (segment / "exchange-0001.info").write_text(
+                "process_id=1\nexchange=1\nstatus=None\nterminal=pending\n"
+                "recorded_bytes=0\nincomplete=true\n"
+            )
+            empty = Path(directory) / "segment-002"
+            empty.mkdir()
+            report = {
+                "capture_complete": False,
+                "binary_sha256_start": "a",
+                "binary_sha256_end": "a",
+                "results": [],
+                "evidence": {
+                    "cli_task": {
+                        "segments": [str(segment)],
+                        "capture_complete": False,
+                        "provider_pending": [],
+                    },
+                    "agent": {
+                        "segments": [str(empty)],
+                        "capture_complete": False,
+                        "provider_pending": [],
+                    },
+                    "cancel": {"segments": [], "capture_complete": False},
+                    "jsonl_task": {"segments": [str(segment)], "capture_complete": True},
+                },
+            }
+            self.assertEqual(
+                qualification.score_report(1, report),
+                (
+                    live.HARNESS,
+                    "raw exchange evidence missing or incomplete: cli_task: segment-001 "
+                    "exchange-0001 pending; agent: segment-002 has no exchange; "
+                    "cancel: no capture segment",
+                ),
+            )
+            report["evidence"]["cli_task"]["provider_pending"] = [str(segment)]
+            report["evidence"]["cli_task"]["capture_complete"] = True
+            report["capture_complete"] = True
+            self.assertEqual(
+                qualification.score_report(1, report)[1],
+                "scenario capture missing or incomplete: agent: segment-002 has no "
+                "exchange; cancel: no capture segment",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

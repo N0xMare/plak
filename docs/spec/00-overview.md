@@ -189,75 +189,38 @@ neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade or worke
 
 ## Persisted versions
 
-The latest workspace release is **0.0.4**. The current versions below are
-this build's state key, not the released key (`r28.e38.p38.t11`);
-foreign keys are not opened as native authority. This build writes export v13,
-imports v13 and v12, and refuses v11 and older (§2.5.1 of chapter 02). The
-0.0.3 release wrote v11, so its exports cannot be carried into this build
-directly. Older native state remains untouched for its matching build.
+The latest workspace release is **0.0.4**. This build opens only its current
+state key, `r28.e39.p39.t11`, as native authority (chapter 02 §2.5).
+Other keys are left untouched; explicit legacy pruning may take schema-blind
+SQLite and holder locks to prove a directory is unused. Use settled export
+and import across keys, not a native reopen.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39** (location-independent Codex and SuperGrok credential authority; retains context codec **4** for semantic imported-compaction selections and recorded strategy/count facts) |
-| Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** (adds `sessions.account_choices`, the `last_root_turn` view and the `sessions_node` index; retains permanent identity claims) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39**, context codec **4** |
+| Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **11** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
-| Session export document | plakd | version **13** (closed portable-session and reserved host-upgrade kinds), imports **13** and **12**; 0.0.3 v11 exports cannot be carried directly |
-| Host-upgrade ownership receipt | plakd | version **1**, outside state keys; operation identities, export digests, source archival intent, placement and per-successor Ready/abandoned disposition only |
+| Session export document | plakd | writes **13**, imports **13** and **12**, refuses **11** and older |
+| Host-upgrade ownership receipt | plakd | version **1**, outside state keys; surrender/reconnect authority only |
 
-Tree schema 10 adds the node's line, epoch and runner placement, successor
-epochs, fork provenance, runner ancestors and the tree custody record (chapter
-03 §14). Child placement and bundle stages use those existing records.
-Tree schema 9 records candidate `target_before` provenance and each workspace's
-`input_candidate_id`; retained snapshots have independent Git-backend pins.
-Candidate rows also record work/conflict kind, source and resolver lineage,
-conflict ownership and paths, and acceptance through a resolution candidate.
-Copy names use an eight-hex tree prefix, protected by immutable full-digest
-ownership evidence in the shared Git directory.
-Submitted intents own exact child outputs; attempt outputs are derived on load
-and submit-result replay receipts keep a digest summary. Provisional wait
-receipts retain the exact views they returned.
-Product schema 37 and exports v12 and v13 retain closed notice-remedy codes
-and typed targets. Their frontend command spelling is rendered only by plakd.
+The runtime schema and epoch are never migrated; checkpoint component
+revisions are frozen. A runtime format change or breaking product/tree store
+change requires a new key and settled carry. Empty move tables are reserved;
+non-empty move tables and group-bearing upgrade receipts are unsupported
+test-only state. Upgrade receipts coordinate exports and carry no histories,
+bindings, topology or job registries. No destination opens the source
+databases (chapter 02 §4.6).
 
-The canonical `seal_outcome` payload includes the durable
-`history_left_base` boolean used by replayed result-mail notices. Builds open
-only their current state key as native authority. Export v13 carries
-conversation history, CarryBinding (including `py-sdk`), session-owned named
-state, the session's runner and its profile, not tree seal outcomes. Its
-history preserves exact account/model replay scope. The v12 importer preserves
-named state and saved placement/profile; v11 and older are refused. Version 13
-introduces the closed `portable_session` / `host_upgrade` kind. Ordinary import
-accepts only portable sessions; `host_upgrade` remains a reserved kind.
-
-The unused move tables in runtime schema 28, product generation 39, and tree
-generation 11 are reserved until the next planned state-key bump. Non-empty
-move tables and group-bearing upgrade receipts are unsupported test-only state
-with no compatibility claim.
-
-Host-upgrade receipts do not carry history, bindings, topology or job registries.
-They coordinate the versioned export carrier and record surrender/reconnect
-authority; no destination opens the source key's databases (chapter 02 §4.6).
-Receipts remain operational authority, not a second session-data carrier.
-
-The runtime store has one supported schema and format epoch and is never
-migrated; the per-component revision constants inside the checkpoint graph are
-frozen. Product and tree stores may advance by forward-only additive revisions
-within a generation. The session export document is the first cross-build
-exception: a build imports documents of its own version and of the one before.
-Any change to runtime formats or breaking change to a product or tree store
-changes the state key and requires settled carry. plakd keeps each build's
-stores in a state directory named by the runtime schema, runtime format epoch,
-product generation and tree generation
-(chapter 02 §2.5), currently `r28.e39.p39.t11`. Product schema 39 stores session
-account choices (chapter 02 §4.4.1). Runtime epoch 39 removes the store path
-from Codex and SuperGrok credential-authority digests, changing persisted
-binding bytes without changing checkpoint fields. A build never opens another
-state key as session authority. Exact reopen of an epoch-38 session refuses;
-use export and import to carry it (chapter 01 §5.4). Explicit legacy pruning may
-take schema-blind SQLite and holder locks to prove a directory is unused
-(chapter 02 §2.5).
+The first exception is the session export document. A build imports its
+version and the immediately previous one. Changes to the document, including
+history or binding encodings, bump the version; the previous importer is
+kept for one bump. The carrier preserves conversation history and exact
+account/model replay scope, CarryBinding, named state, runner and profile,
+not tree seal outcomes. Version 13 distinguishes `portable_session` from
+the reserved `host_upgrade` kind; ordinary import accepts only portable
+sessions (chapter 02 §2.5.1).
 
 The second exception is the runner job-retention endpoint: a runner daemon MUST
 serve, and the next build's daemon MUST speak, the retention endpoint of its own
@@ -274,18 +237,19 @@ gateway MUST serve, and the next build's callers MUST speak, the gateway
 protocol of its own version and of the immediately previous version, so that
 a planned upgrade of either side keeps inference and account operations
 working. Its endpoints are fixed and path-versioned; it relays one upstream
-exchange per request, never retries, translates or fails over, and grants no
-session or store authority. Any change to its endpoints, encodings or
-binding facts bumps its version; the previous version's speaker is kept for
+exchange per request and grants no session or store authority. It never
+retries, translates or fails over; the pre-plaintext idle-socket replacement
+rule in chapter 01 §7.5 stays within that exchange. Changes to endpoints,
+encodings or binding facts bump its version; the previous version's speaker is kept for
 one bump only. The gateway serves v2 and v1. Only v1 reports the former
 path-based Codex and SuperGrok credential authority and selection digests.
 Upgrade the gateway first so the old host can keep speaking v1 and the new
 host can use v2 authority when carrying its sessions.
 
 The fourth exception is in-place product and tree store revisions. A build
-can advance an older revision of its own generation after exclusive owner
-admission, a consistent copy, and exact schema validation. Neither store
-reads the other; each moves in a single transaction, and older builds refuse
+can advance an older revision of its own generation by additive changes only,
+after exclusive owner admission, a consistent copy, and exact schema validation.
+Neither store reads the other; each moves in a single transaction, and older builds refuse
 newer revisions without writing. The first real revision can ship only when
 no build that predates revision admission can run against that key; those
 builds may write before their version checks. Generation changes discard the

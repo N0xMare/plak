@@ -196,6 +196,8 @@ pub(super) fn script(shape: &str) -> Value {
     }
 }
 
+/// Compare unsolicited live rows with cold projection after deleting the
+/// derived views, not with a second rendering of the live in-memory view.
 #[test]
 fn real_jsonl_rows_equal_exact_resume_rebuilt_from_deleted_views_without_redispatch() {
     for shape in [

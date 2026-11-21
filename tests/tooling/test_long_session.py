@@ -1594,5 +1594,205 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
             agent.stderr.close()
 
 
+class GrowthPromptTests(unittest.TestCase):
+    def test_codex_growth_uses_neutral_digits_and_explicit_child_paging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bulk = Path(directory) / "bulk.txt"
+            with (
+                patch.object(long_session, "digit_line", return_value="12345 67890"),
+                patch.object(long_session, "base64_line", return_value="secretish"),
+            ):
+                long_session.write_bulk(bulk, 1, "codex")
+            self.assertEqual(set(bulk.read_text()), set("12345 67890\n"))
+        plant = long_session.plant_prompt("codex")
+        for pack in ("codex", "claude", "grok"):
+            self.assertNotIn("Do not print", long_session.plant_prompt(pack))
+            self.assertNotIn("token", long_session.plant_prompt(pack))
+        prompt = long_session.child_prompt("codex", 5)
+        child = json.loads(
+            prompt.split("Give the child exactly this prompt: ", 1)[1].split(
+                "\nWait for the child", 1
+            )[0]
+        )
+        self.assertIn(plant.split(" Reply with exactly:", 1)[0], child)
+        self.assertIn("python3 page.py k 1", child)
+        self.assertIn("notify(a.output)", child)
+        self.assertIn("recalled.txt", child)
+        self.assertTrue(child.endswith("Reply with exactly: done"))
+        self.assertEqual(child.count("Reply with exactly:"), 1)
+
+    def test_child_reply_directive_follows_all_plant_paging_and_recall_steps(self):
+        for pack in ("codex", "claude", "grok", "pi"):
+            with self.subTest(pack=pack):
+                prompt = long_session.child_prompt(pack, 5)
+                child = json.loads(
+                    prompt.split("Give the child exactly this prompt: ", 1)[1].split(
+                        "\nWait for the child", 1
+                    )[0]
+                )
+                self.assertNotIn("Reply with exactly: ok", child)
+                self.assertTrue(child.endswith("Reply with exactly: done"))
+                self.assertLess(child.index("acknowledged.txt"), child.index("bulk.txt"))
+                self.assertLess(child.index("bulk.txt"), child.index("recalled.txt"))
+                self.assertLess(child.index("recalled.txt"), child.index("Reply with exactly:"))
+
+
+class InTurnEarlyStopTests(unittest.TestCase):
+    def judge(self, repo, words):
+        session = long_session.LongSession.__new__(long_session.LongSession)
+        with (
+            patch.object(long_session, "bulk_windows", return_value=[(0, 1)]),
+            patch.object(long_session, "scheduled_in_window", return_value=[{}]),
+            patch.object(long_session, "assert_shrunk"),
+            patch.object(long_session, "reread_after_commit", return_value=[]),
+        ):
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                session._require_in_turn([], "rel-token", repo, words)
+        return raised.exception
+
+    def test_an_early_stop_names_the_pages_before_the_recall(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            (repo / long_session.PAGE_DIR).mkdir()
+            words = [f"check-{index}" for index in range(1, 53)]
+            for index, word in enumerate(words[:37], 1):
+                (repo / long_session.PAGE_DIR / f"{index}.txt").write_text(word + "\n")
+            failure = self.judge(repo, words)
+            self.assertEqual(
+                (failure.outcome, str(failure)),
+                (live.MODEL, "growth turn ended after 37/52 pages without writing recalled.txt"),
+            )
+            (repo / "recalled.txt").write_text("rel-token\n")
+            failure = self.judge(repo, words)
+            self.assertEqual(str(failure), "growth turn wrote check words for 37/52 pages")
+            for index, word in enumerate(words, 1):
+                (repo / long_session.PAGE_DIR / f"{index}.txt").write_text(word + "\n")
+            (repo / "recalled.txt").write_text("other\n")
+            failure = self.judge(repo, words)
+            self.assertEqual(
+                str(failure), "recalled.txt does not match the pre-compaction code word"
+            )
+            (repo / "recalled.txt").unlink()
+            self.assertEqual(
+                str(self.judge(repo, [])), "growth turn ended without writing recalled.txt"
+            )
+
+
+PLANNED_LONG_SESSION_ROUTES = (
+    "codex",
+    "codex-luna-medium",
+    "codex-sol",
+    "codex-astra",
+    "grok",
+    "grok-46",
+    "claude-sonnet55-low",
+    "claude-sonnet55-medium",
+    "claude-haiku55-low",
+    "claude-haiku55-medium",
+    "claude-opus-low",
+    "claude-opus-medium",
+    "claude-fable",
+    "deepseek",
+    "deepseek-messages",
+)
+
+
+class LongSessionRoundCapTests(unittest.TestCase):
+    def test_every_planned_route_plans_under_its_pinned_cap(self):
+        with patch.dict(
+            os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232", "PLAK_LIVE_GROWTH_PAGES": ""}
+        ):
+            for name in PLANNED_LONG_SESSION_ROUTES:
+                route = live.ROUTES[name]
+                for scenario, _surface in long_session.CATALOG:
+                    with self.subTest(route=name, scenario=scenario):
+                        planned = long_session.planned_rounds(route, scenario)
+                        cap = long_session.round_cap(route, scenario)
+                        self.assertLessEqual(planned + long_session.ROUND_HEADROOM, cap)
+                        self.assertGreaterEqual(cap, long_session.ROUND_CAP)
+                        self.assertLessEqual(cap, long_session.ROUND_CAP_CEILING)
+            sol = live.ROUTES["codex-sol"]
+            # 69 check-word pages: 63 of them used the old fixed 128 rounds.
+            self.assertEqual(long_session.planned_rounds(sol, "in_turn_compaction"), 138)
+            self.assertEqual(long_session.round_cap(sol, "in_turn_compaction"), 170)
+            self.assertEqual(long_session.round_cap(sol, "kill_reopen"), long_session.ROUND_CAP)
+
+    def test_the_largest_growth_dial_still_fits_the_spec_07_ceiling(self):
+        with patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": str(long_session.MAX_GROWTH_PAGES)}):
+            for name in ("codex", "grok", "claude-sonnet55-low"):
+                route = live.ROUTES[name]
+                self.assertLessEqual(
+                    long_session.planned_rounds(route, "in_turn_compaction")
+                    + long_session.ROUND_HEADROOM,
+                    long_session.ROUND_CAP_CEILING,
+                )
+
+    def test_the_wrap_up_is_seen_in_the_session_log_or_a_childs_requests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            (segment / "exchange-0001.request").write_bytes(b'{"input":[]}')
+            self.assertFalse(long_session.round_cap_reached([], [segment]))
+            self.assertTrue(
+                long_session.round_cap_reached([{"kind": "turn.operation_budget_exhausted"}], [])
+            )
+            (segment / "exchange-0002.request").write_bytes(
+                b'{"input":[{"text":"[harness] This turn has used its entire model-operation '
+                b'budget, so no further tool calls are possible."}]}'
+            )
+            self.assertTrue(long_session.round_cap_reached([], [segment]))
+            failure = long_session.round_cap_failure("growth turn", 170, "63/69 pages")
+            self.assertEqual(
+                (failure.outcome, str(failure)),
+                (
+                    live.HARNESS,
+                    "growth turn ended on the operation-budget wrap-up at the pinned "
+                    "round cap 170 after 63/69 pages (driver sizing)",
+                ),
+            )
+
+    def test_the_cap_explains_a_miss_only_when_the_plan_exceeds_it(self):
+        session = long_session.LongSession.__new__(long_session.LongSession)
+        session.window, session.route, session.caps = (
+            272_000,
+            live.ROUTES["codex"],
+            {"overflow": 128},
+        )
+        turn = live.Turn(phase="completed")
+        wrapped = [{"kind": "turn.operation_budget_exhausted"}]
+        with (
+            patch.object(long_session, "overflow_remedy", return_value=None),
+            patch.object(long_session, "reached_trigger", return_value=False),
+        ):
+            # The plan fits: the model spent the cap, so the miss stays model.
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                session._require_overflow(turn, wrapped, "check words for 40/36 pages")
+            self.assertEqual(
+                (raised.exception.outcome, str(raised.exception)),
+                (
+                    live.MODEL,
+                    "overflow turn did not reach the compaction trigger (check words for "
+                    "40/36 pages); the turn spent the pinned round cap 128, and its plan "
+                    "needs 72 rounds",
+                ),
+            )
+            # A plan that does not fit under the pinned cap is driver sizing.
+            with patch.object(long_session, "planned_rounds", return_value=138):
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    session._require_overflow(turn, wrapped, "check words for 63/69 pages")
+            self.assertEqual(
+                (raised.exception.outcome, str(raised.exception)),
+                (
+                    live.HARNESS,
+                    "overflow turn ended on the operation-budget wrap-up at the pinned "
+                    "round cap 128 after 63/69 pages (driver sizing)",
+                ),
+            )
+            # No wrap-up: the oracle's own miss.
+            with patch.object(long_session, "planned_rounds", return_value=138):
+                with self.assertRaises(live.ScenarioFailure) as raised:
+                    session._require_overflow(turn, [], "check words for 63/69 pages")
+            self.assertEqual(raised.exception.outcome, live.MODEL)
+
+
 if __name__ == "__main__":
     unittest.main()

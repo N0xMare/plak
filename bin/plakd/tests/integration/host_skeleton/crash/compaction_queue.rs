@@ -1,4 +1,10 @@
 //! Correlate durable queue identities with wire admission at a paid-fold cut.
+//!
+//! Kill only after fsynced summary-specific dispatch evidence. Match the
+//! triggering item's ID, revision and text across the store and wire; a
+//! mailbox acknowledgement or DraftPending is not durable queue admission.
+//! Explicit Resume may authorize a new workflow, but must not replay the
+//! uncertain summary or consume the accepted item twice.
 
 use super::*;
 use plakd::store::session_records::SessionRecordStore as _;
