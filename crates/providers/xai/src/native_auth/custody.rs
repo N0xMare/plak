@@ -2,9 +2,11 @@
 //! caller binds to, the credential fields under the exact Ready lease, and
 //! the single writer's refresh after a rejection.
 
+use plakous_auth::ReadyCredentialLease;
+use plakous_auth::custody::local::{self, LocalCustody, Snapshot};
 use plakous_auth::custody::{
-    AccountFacts, CredentialField, CredentialFields, CredentialHold, CustodyError, CustodySlot,
-    CustodyStatus, ExpectedFence, IdentityDigest,
+    AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
+    ExpectedFence, IdentityDigest,
 };
 
 use super::{
@@ -24,25 +26,9 @@ pub const SUPERGROK_SUBJECT_IDENTITY: &str = "grok_subject";
 /// (non-secret identity).
 pub const SUPERGROK_AUTHORITY_ID_IDENTITY: &str = "grok_authority_id";
 
-/// How often a facts read retries when the record moves under it.
-const SNAPSHOT_ATTEMPTS: usize = 3;
-
-/// How often a fields read judges the record when it moves between the
-/// facts read and the Ready lease.
-const FENCE_READS: usize = 2;
-
-/// How long a refresh after a rejection waits for another caller's claimed
-/// refresh to settle before it judges the record, and how often it looks.
-const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
-
 fn store_error(error: XaiNativeAuthError) -> CustodyError {
     match error {
-        XaiNativeAuthError::Store(plakous_auth::PrivateStoreError::StoreBusy) => {
-            CustodyError::Busy {
-                retry_after_ms: 100,
-            }
-        }
+        XaiNativeAuthError::Store(error) => local::store_error(&error),
         _ => CustodyError::Store,
     }
 }
@@ -82,28 +68,44 @@ impl XaiNativeAuthManager {
     /// # Errors
     /// [`CustodyError::Store`] for unsafe or unreadable storage.
     pub async fn custody_facts(&self, slot: &CustodySlot) -> Result<AccountFacts, CustodyError> {
-        Ok(self.custody_snapshot(slot).await?.0)
+        local::facts(self, slot).await
     }
 
-    /// The snapshot, read again when the record moved between its reads
-    /// (a concurrent refresh), at most [`SNAPSHOT_ATTEMPTS`] times.
-    async fn custody_snapshot(
+    /// The credential fields of one request prepared against `expected`:
+    /// `authorization` and `x-userid`, read under the exact Ready lease they
+    /// came from, which they hold until the caller drops it.
+    ///
+    /// # Errors
+    /// [`AccountFacts::check_fence`]'s refusals, and
+    /// [`CustodyError::NotReady`] outside the compatibility window.
+    pub async fn custody_fields(
         &self,
         slot: &CustodySlot,
-    ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
-        let mut attempts = 1;
-        loop {
-            match self.custody_snapshot_once(slot).await {
-                Err(CustodyError::Store) if attempts < SNAPSHOT_ATTEMPTS => attempts += 1,
-                result => return result,
-            }
-        }
+        expected: &ExpectedFence,
+    ) -> Result<CredentialFields, CustodyError> {
+        local::fields(self, slot, expected).await
     }
 
-    async fn custody_snapshot_once(
+    /// The single writer's refresh after the provider answered `rejected`
+    /// with HTTP 401, then the current facts. A generation another caller
+    /// already rotated is refreshed only if due; another login is never refreshed.
+    ///
+    /// # Errors
+    /// Returns a storage or selection refusal.
+    pub async fn custody_refresh_after_rejection(
         &self,
         slot: &CustodySlot,
-    ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
+        rejected: &ExpectedFence,
+        selection_epoch_digest: Option<IdentityDigest>,
+    ) -> Result<AccountFacts, CustodyError> {
+        local::after_rejection(self, slot, rejected, selection_epoch_digest).await
+    }
+}
+
+impl LocalCustody for XaiNativeAuthManager {
+    type Selection = String;
+
+    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot<String>, CustodyError> {
         let core = Arc::clone(&self.core);
         let read = tokio::task::spawn_blocking(move || {
             let store = core.store()?;
@@ -164,53 +166,23 @@ impl XaiNativeAuthManager {
         Ok((facts, Some((fence, epoch))))
     }
 
-    /// The credential fields of one request prepared against `expected`:
-    /// `authorization` and `x-userid`, read under the exact Ready lease they
-    /// came from, which they hold until the caller drops it.
-    ///
-    /// # Errors
-    /// [`AccountFacts::check_fence`]'s refusals, and
-    /// [`CustodyError::NotReady`] outside the compatibility window.
-    pub async fn custody_fields(
+    fn profile_active(&self) -> bool {
+        self.core.ensure_active().is_ok()
+    }
+
+    async fn fields_lease(
         &self,
-        slot: &CustodySlot,
-        expected: &ExpectedFence,
-    ) -> Result<CredentialFields, CustodyError> {
-        let mut reads = 1;
-        let lease = loop {
-            // A record that moved after the first read is judged again once
-            // any claimed refresh settles, so a refusal names current facts.
-            let (facts, fence) = if reads == 1 {
-                self.custody_snapshot(slot).await?
-            } else {
-                self.settled_snapshot(slot).await?
-            };
-            facts.check_fence(expected)?;
-            if self.core.ensure_active().is_err() {
-                return Err(CustodyError::NotReady {
-                    facts: Box::new(facts),
-                });
-            }
-            let (fence, _) = fence.ok_or(CustodyError::Internal)?;
-            #[cfg(test)]
-            between_reads::run(fence.account_binding().as_str());
-            let core = Arc::clone(&self.core);
-            let leased = tokio::task::spawn_blocking(move || {
-                let lease = core.store().ok()?.acquire_ready(&fence).ok()?;
-                (lease.fence() == fence).then_some(lease)
-            })
+        fence: CredentialFence,
+    ) -> Result<Option<ReadyCredentialLease>, CustodyError> {
+        #[cfg(test)]
+        between_reads::run(fence.account_binding().as_str());
+        let core = Arc::clone(&self.core);
+        tokio::task::spawn_blocking(move || core.store().ok()?.acquire_ready(&fence).ok())
             .await
-            .map_err(|_| CustodyError::Internal)?;
-            match leased {
-                Some(lease) => break lease,
-                None if reads < FENCE_READS => reads += 1,
-                None => {
-                    return Err(CustodyError::Busy {
-                        retry_after_ms: 100,
-                    });
-                }
-            }
-        };
+            .map_err(|_| CustodyError::Internal)
+    }
+
+    fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError> {
         let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
             .map_err(|_| CustodyError::Store)?;
         stored
@@ -225,38 +197,24 @@ impl XaiNativeAuthManager {
             "x-userid",
             CredentialField::exact(stored.subject.as_bytes().to_vec()),
         );
-        Ok(fields.holding(CredentialHold::new(lease)))
+        Ok(fields)
     }
 
-    /// The single writer's refresh after the provider answered `rejected`
-    /// with HTTP 401: one claimed refresh, only while the store still holds
-    /// that generation of the same account and login selection, then the
-    /// current facts. A generation another caller already rotated is
-    /// refreshed only if due; another login is never refreshed. A failed
-    /// refresh is reported through the facts' status.
-    ///
-    /// # Errors
-    /// [`CustodyError::Store`] for unsafe or unreadable storage.
-    pub async fn custody_refresh_after_rejection(
+    async fn refresh_rejected(
         &self,
-        slot: &CustodySlot,
+        facts: &AccountFacts,
+        (fence, epoch): &(CredentialFence, String),
         rejected: &ExpectedFence,
         selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<AccountFacts, CustodyError> {
-        let (facts, current) = self.settled_snapshot(slot).await?;
-        let Some((fence, epoch)) = current else {
-            return Ok(facts);
-        };
-        if facts.status != CustodyStatus::Ready
-            || facts.account_binding != Some(rejected.account_binding)
-        {
-            return Ok(facts);
+    ) -> Result<bool, CustodyError> {
+        if facts.status != CustodyStatus::Ready {
+            return Ok(false);
         }
         if selection_epoch_digest
             .is_some_and(|selection| facts.selection_epoch_digest != Some(selection))
         {
             return Err(CustodyError::FenceMoved {
-                facts: Box::new(facts),
+                facts: Box::new(facts.clone()),
             });
         }
         let authority = self.core.authority_id().map_err(store_error)?;
@@ -264,7 +222,7 @@ impl XaiNativeAuthManager {
             .core
             .refresh_with_force(
                 Some(fence.account_binding()),
-                Some(&epoch),
+                Some(epoch),
                 Some(&authority),
                 RefreshForce::WhileCurrent(rejected.generation),
             )
@@ -272,25 +230,7 @@ impl XaiNativeAuthManager {
         {
             return Err(store_error(error));
         }
-        Ok(self.settled_snapshot(slot).await?.0)
-    }
-
-    /// The snapshot once no claimed refresh is in flight, waiting at most
-    /// [`SETTLE_WAIT`].
-    async fn settled_snapshot(
-        &self,
-        slot: &CustodySlot,
-    ) -> Result<(AccountFacts, Option<(CredentialFence, String)>), CustodyError> {
-        let deadline = tokio::time::Instant::now() + SETTLE_WAIT;
-        loop {
-            let snapshot = self.custody_snapshot(slot).await?;
-            if snapshot.0.status != CustodyStatus::Refreshing
-                || tokio::time::Instant::now() >= deadline
-            {
-                return Ok(snapshot);
-            }
-            tokio::time::sleep(SETTLE_POLL).await;
-        }
+        Ok(true)
     }
 }
 

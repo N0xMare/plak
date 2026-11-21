@@ -1,5 +1,7 @@
 //! Claimed refresh and revoke hooks and their cancellation and restore helpers.
 
+use plakous_auth::oauth_orchestrator::select_refresh_fence;
+
 use super::{
     ACCESS_REFRESH_LEAD_SECONDS, AccountBinding, BuildRequestFailure, ClaimedHttpDisposition,
     ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks, ClaimedRevokeHooks,
@@ -21,19 +23,9 @@ pub(super) struct XaiRefreshPrepared {
     pub(super) selection_epoch: String,
 }
 
-/// Shared-orchestrator hooks for SuperGrok claimed refresh (form body, ES256).
-/// When a claimed refresh runs although the stored expiry is outside the lead.
-#[derive(Clone, Copy)]
-pub(super) enum RefreshForce {
-    /// Only inside the lead.
-    IfDue,
-    /// Always (an operator refresh, or the provider rejected the access token).
-    Always,
-    /// Only while the store still holds this rejected generation; a
-    /// generation another refresher already rotated is refreshed if due.
-    WhileCurrent(CredentialGeneration),
-}
+pub(super) type RefreshForce = plakous_auth::oauth_orchestrator::RefreshForce<CredentialGeneration>;
 
+/// Shared-orchestrator hooks for SuperGrok claimed refresh (form body, ES256).
 pub(super) struct XaiRefreshHooks<'a> {
     /// Declared first so a dropped refresh restores its claim before the
     /// in-process flight is released.
@@ -87,12 +79,7 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 {
                     return Err(XaiNativeAuthError::SelectionChanged);
                 }
-                let forced = match force {
-                    RefreshForce::IfDue => false,
-                    RefreshForce::Always => true,
-                    RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
-                };
-                Ok(forced
+                Ok(force.forces(fence.generation())
                     || access_needs_refresh(
                         stored.expires_at,
                         system_unix_seconds()?,
@@ -119,17 +106,16 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         {
             return Err(XaiNativeAuthError::AccountChanged);
         }
-        // Unknown/RefreshRequired keep the payload, but only the claim
-        // may read its selection epoch in build_refresh_request.
-        match ready_due {
-            Some(false) => return Ok(None),
-            Some(true) => {}
-            None if matches!(
-                fence.status(),
-                CredentialStatus::RefreshRequired | CredentialStatus::RefreshOutcomeUnknown
-            ) => {}
-            _ => return Err(XaiNativeAuthError::NotLoggedIn),
-        }
+        let Some(fence) = select_refresh_fence(
+            fence,
+            ready_due,
+            false,
+            self.reclaim_unknown_refresh(),
+            XaiNativeAuthError::NotLoggedIn,
+        )?
+        else {
+            return Ok(None);
+        };
         self.request_permit = self
             .core
             .request_gate
