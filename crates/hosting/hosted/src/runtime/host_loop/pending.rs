@@ -71,6 +71,7 @@ pub(super) struct PendingTrack {
     root_reason: Option<AttentionReason>,
     root_paused: bool,
     root_revision: Option<u64>,
+    root_controls_dirty: bool,
     reason_read_at: Option<(Instant, bool)>,
     attention: Option<SessionAttention>,
     warned_at: Option<Instant>,
@@ -92,7 +93,7 @@ impl PendingTrack {
     }
 
     pub(super) fn invalidate_root_controls(&mut self) {
-        self.root_revision = None;
+        self.root_controls_dirty = true;
     }
 
     fn should_warn(&mut self, entered: bool, at: Instant) -> bool {
@@ -204,13 +205,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let now = Instant::now();
         let track = &mut self.role.pending_track;
         let revision = self.role.config.session.store_revision;
-        if changed
-            || track.root_revision != Some(revision)
-            || track.reason_read_at.is_none_or(|(last, work)| {
-                work != has_work || (!idle && now.duration_since(last) >= TREE_OBSERVE_INTERVAL)
-            })
-        {
-            track.invalidate_root_controls();
+        if changed || track.root_revision != Some(revision) {
+            track.root_revision = Some(revision);
+            track.root_controls_dirty = true;
+        }
+        // Work becoming visible refreshes the reason immediately. Otherwise
+        // keep the idle observation cadence even when a write dirtied it.
+        if track.reason_read_at.is_none_or(|(last, work)| {
+            work != has_work
+                || ((!idle || track.root_controls_dirty)
+                    && now.duration_since(last) >= TREE_OBSERVE_INTERVAL)
+        }) {
+            track.reason_read_at = Some((now, has_work));
+            track.root_controls_dirty = true;
             let reason = if has_work {
                 self.role.config.store.load_attention_reason(
                     &self.role.config.session.id,
@@ -228,8 +235,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 track.root_paused = controls.paused;
                 if let Ok(reason) = reason {
                     track.root_reason = reason;
-                    track.reason_read_at = Some((now, has_work));
-                    track.root_revision = Some(revision);
+                    track.root_controls_dirty = false;
                 }
             }
         }
