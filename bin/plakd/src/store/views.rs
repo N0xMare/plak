@@ -783,7 +783,7 @@ fn commit_views(
     let head = views.projected_locator(recorded);
     let state_changed = tx.execute(
             "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id) DO UPDATE SET head_locator=excluded.head_locator,root_turn_count=excluded.root_turn_count,tool_call_count=excluded.tool_call_count,compaction_count=excluded.compaction_count,state=excluded.state
-            WHERE session_views.head_locator IS NOT excluded.head_locator
+            WHERE ?7 OR session_views.head_locator IS NOT excluded.head_locator
                OR session_views.root_turn_count != excluded.root_turn_count
                OR session_views.tool_call_count != excluded.tool_call_count
                OR session_views.compaction_count != excluded.compaction_count
@@ -795,6 +795,7 @@ fn commit_views(
                 to_i64(counters.tool_calls)?,
                 to_i64(counters.compactions)?,
                 state,
+                next != expected,
             ],
         )
         .map_err(|error| super::write_error(error, "product store write failed"))?;

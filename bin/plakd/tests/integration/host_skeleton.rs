@@ -1855,6 +1855,7 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
         panic!("healthy session not created");
     };
     assert_ne!(healthy, node);
+    client.rows_until(3, |rows| rows.len() == 2);
     rusqlite::Connection::open(paths.subagents_database())
         .unwrap()
         .execute(
@@ -1862,36 +1863,10 @@ fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
             [&node.tree_id],
         )
         .unwrap();
-    // The fixture wrote directly to SQLite, bypassing all product notices.
-    // Deliver an unkeyed invalidation to exercise directory gap recovery.
-    std::os::unix::net::UnixDatagram::unbound()
-        .unwrap()
-        .send_to(b"gap unknown", host.socket.with_extension("dir"))
-        .unwrap();
-    let deadline = std::time::Instant::now() + WAIT;
-    while client.rows(3).len() != 1 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "directory did not rebuild"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
-    match client.request(
-        3,
-        Op::ListSessions {
-            workspace: None,
-            runner: None,
-            include_archived: false,
-        },
-    ) {
-        Outcome::Ok(Answer::Sessions { rows }) => {
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].node, healthy);
-            assert_eq!(rows[0].profile.as_deref(), Some("custom"));
-            assert_eq!(rows[0].activity_seq, 0);
-        }
-        other => panic!("one broken row failed the directory: {other:?}"),
-    }
+    // The raw write sent no notice; the timed check must omit only this row.
+    let rows = client.rows_until(3, |rows| rows.len() == 1 && rows[0].node == healthy);
+    assert_eq!(rows[0].profile.as_deref(), Some("custom"));
+    assert_eq!(rows[0].activity_seq, 0);
     let attachment = client.attach(4, &node);
     assert!(
         matches!(
