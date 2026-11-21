@@ -6,8 +6,6 @@
 #[cfg(test)]
 mod principal_tests;
 
-use std::collections::VecDeque;
-use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -15,22 +13,24 @@ use tokio::time::Instant;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
-use futures_util::{SinkExt as _, StreamExt as _};
+use futures_util::{Sink, SinkExt as _, Stream, StreamExt as _};
 use http_body_util::Full;
 use hyper::header::{self, HeaderMap, HeaderValue};
 use hyper::upgrade::Upgraded;
 use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use plakous_host_protocol::wire::MAX_LINE_BYTES;
-use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, HostConnection, handshake};
+use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, handshake};
+use tokio::task::JoinSet;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, Role, WebSocketConfig};
+use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 
 use super::Served;
 use super::auth::ConnectionSlot;
-use crate::host::send::{self as progress, MAX_PENDING_BYTES, ProgressIo};
+use crate::host::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
+use crate::host::send::ProgressIo;
 use crate::surface_protocol::PlakExtension;
 
 /// The RFC 6455 key suffix.
@@ -40,8 +40,6 @@ const STOP_POLL: Duration = Duration::from_millis(200);
 /// How often the host pings, and how long a ping may go unanswered.
 const PING_EVERY: Duration = Duration::from_secs(15);
 const PONG_DEADLINE: Duration = Duration::from_secs(30);
-/// The most frames waiting for one client before it is dropped as slow.
-const MAX_PENDING_FRAMES: usize = 8192;
 /// Client messages per second a connection may send, with this burst.
 const MESSAGES_PER_SECOND: f64 = 20.0;
 const MESSAGE_BURST: f64 = 60.0;
@@ -87,63 +85,6 @@ pub(crate) fn switching_protocols(accept: &str) -> Response<Full<Bytes>> {
     response
 }
 
-/// The frames one connection has written and not yet sent: the connection
-/// writes whole lines, and each line goes out as one text message.
-#[derive(Clone, Default)]
-struct Outbox(Arc<Mutex<Pending>>);
-
-#[derive(Default)]
-struct Pending {
-    partial: Vec<u8>,
-    lines: VecDeque<String>,
-    overflowed: bool,
-    bytes: usize,
-}
-
-impl Outbox {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Pending> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn take(&self) -> (VecDeque<String>, bool) {
-        let mut pending = self.lock();
-        pending.bytes = 0;
-        (std::mem::take(&mut pending.lines), pending.overflowed)
-    }
-}
-
-impl Write for Outbox {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut pending = self.lock();
-        if pending
-            .bytes
-            .saturating_add(pending.partial.len())
-            .saturating_add(buf.len())
-            > MAX_PENDING_BYTES
-        {
-            pending.overflowed = true;
-            return Err(std::io::Error::other("the client fell behind"));
-        }
-        pending.partial.extend_from_slice(buf);
-        while let Some(end) = pending.partial.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = pending.partial.drain(..=end).collect();
-            let text = String::from_utf8(line[..end].to_vec())
-                .map_err(|_| std::io::Error::other("a frame is not UTF-8"))?;
-            if pending.lines.len() >= MAX_PENDING_FRAMES {
-                pending.overflowed = true;
-                return Err(std::io::Error::other("the client fell behind"));
-            }
-            pending.lines.push_back(text);
-            pending.bytes += line.len();
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// A token bucket over a connection's messages.
 struct Rate {
     tokens: f64,
@@ -179,32 +120,19 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_LINE_BYTES))
         .max_frame_size(Some(MAX_LINE_BYTES));
-    let mut socket = WebSocketStream::from_raw_socket(
+    let socket = WebSocketStream::from_raw_socket(
         ProgressIo::new(TokioIo::new(upgraded)),
         Role::Server,
         Some(config),
     )
     .await;
-    let reason = drive(&mut socket, &served, slot.login()).await;
-    let code = match reason {
-        Ended::Left | Ended::Stopping => CloseCode::Normal,
-        Ended::Policy(_) => CloseCode::Policy,
-        Ended::Unsupported => CloseCode::Unsupported,
-        Ended::Lost(_) => CloseCode::Away,
-    };
-    let _ = tokio::time::timeout(
-        progress::IDLE,
-        socket.close(Some(CloseFrame {
-            code,
-            reason: "".into(),
-        })),
-    )
-    .await;
+    let reason = drive(socket, &served, slot.login()).await;
     tracing::info!(target: "plak::web", ended = reason.as_str(), "web connection closed");
     drop(slot);
 }
 
 /// How a connection ended; the log's words.
+#[derive(Clone, Copy)]
 enum Ended {
     Left,
     Stopping,
@@ -224,10 +152,112 @@ impl Ended {
     }
 }
 
+impl From<SendError> for Ended {
+    fn from(error: SendError) -> Self {
+        match error {
+            SendError::Full => Self::Lost("client fell behind"),
+            SendError::Stalled => Self::Lost("client too slow"),
+            SendError::Disconnected => Self::Lost("send failed"),
+        }
+    }
+}
+
+async fn close<S>(sink: &mut S, reason: Ended)
+where
+    S: Sink<Message> + Unpin,
+{
+    let code = match reason {
+        Ended::Left | Ended::Stopping => CloseCode::Normal,
+        Ended::Policy(_) => CloseCode::Policy,
+        Ended::Unsupported => CloseCode::Unsupported,
+        Ended::Lost(_) => CloseCode::Away,
+    };
+    let _ = tokio::time::timeout(
+        Duration::from_secs(1),
+        sink.send(Message::Close(Some(CloseFrame {
+            code,
+            reason: "".into(),
+        }))),
+    )
+    .await;
+}
+
+#[derive(Default)]
+enum Ping {
+    #[default]
+    Idle,
+    Queued,
+    Sent(Instant),
+}
+
+#[derive(Clone, Default)]
+struct Heartbeat(Arc<PingState>);
+
+#[derive(Default)]
+struct PingState {
+    ping: Mutex<Ping>,
+    changed: tokio::sync::Notify,
+}
+
+impl Heartbeat {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Ping> {
+        self.0.ping.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn tick(&self, outbox: &Outbox) -> Result<(), Ended> {
+        let mut ping = self.lock();
+        match *ping {
+            Ping::Idle => {
+                outbox
+                    .ping()
+                    .map_err(|_| Ended::Lost("client fell behind"))?;
+                *ping = Ping::Queued;
+            }
+            Ping::Queued | Ping::Sent(_) => {}
+        }
+        Ok(())
+    }
+
+    fn sent(&self) {
+        *self.lock() = Ping::Sent(Instant::now());
+        self.0.changed.notify_one();
+    }
+
+    fn pong(&self) {
+        let mut ping = self.lock();
+        if matches!(*ping, Ping::Sent(_)) {
+            *ping = Ping::Idle;
+            self.0.changed.notify_one();
+        }
+    }
+
+    async fn expired(&self) {
+        loop {
+            let deadline = match *self.lock() {
+                Ping::Sent(sent) => Some(sent + PONG_DEADLINE),
+                Ping::Idle | Ping::Queued => None,
+            };
+            if deadline.is_some_and(|at| at <= Instant::now()) {
+                return;
+            }
+            tokio::select! {
+                () = self.0.changed.notified() => {}
+                () = async {
+                    if let Some(at) = deadline {
+                        tokio::time::sleep_until(at).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
+            }
+        }
+    }
+}
+
 /// The next text message, or how the connection ended instead.
-async fn next_text<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    socket: &mut WebSocketStream<S>,
-    pong: &mut Option<Instant>,
+async fn next_text(
+    socket: &mut (impl Stream<Item = Result<Message, WebSocketError>> + Unpin),
+    heartbeat: &Heartbeat,
 ) -> Result<String, Ended> {
     loop {
         match socket.next().await {
@@ -236,7 +266,7 @@ async fn next_text<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
                 return Ok(text.strip_suffix('\n').unwrap_or(text).to_owned());
             }
             Some(Ok(Message::Binary(_))) => return Err(Ended::Unsupported),
-            Some(Ok(Message::Pong(_))) => *pong = None,
+            Some(Ok(Message::Pong(_))) => heartbeat.pong(),
             Some(Ok(Message::Ping(_) | Message::Frame(_))) => {}
             Some(Ok(Message::Close(_))) | None => return Err(Ended::Left),
             Some(Err(_)) => return Err(Ended::Policy("malformed or oversized message")),
@@ -244,44 +274,54 @@ async fn next_text<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     }
 }
 
-/// Sends what the connection wrote; `Err` when the client is too slow.
-async fn send_pending<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    socket: &mut WebSocketStream<ProgressIo<S>>,
-    outbox: &Outbox,
-    stopped: impl Fn() -> bool,
-) -> Result<(), Ended> {
-    let (lines, overflowed) = outbox.take();
-    if overflowed {
-        return Err(Ended::Lost("client fell behind"));
-    }
-    let progress = socket.get_ref().progress.clone();
-    match progress
-        .finishing(
-            async {
-                for line in lines {
-                    socket
-                        .send(Message::text(line))
-                        .await
-                        .map_err(|_| Ended::Lost("send failed"))?;
-                }
-                Ok(())
-            },
-            &stopped,
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(()) => Err(Ended::Lost("client too slow")),
+struct WebWriter<S> {
+    sink: S,
+    heartbeat: Heartbeat,
+}
+
+impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
+    async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
+        let message = match frame {
+            Frame::Line(mut line) => {
+                line.pop(); // the outbox holds newline-terminated frames
+                Message::text(String::from_utf8(line).map_err(|_| SendError::Disconnected)?)
+            }
+            Frame::Ping => {
+                // A queued ping does not start its reply deadline while a large
+                // text message is still being written ahead of it.
+                self.heartbeat.sent();
+                Message::Ping(Bytes::new())
+            }
+        };
+        self.sink
+            .send(message)
+            .await
+            .map_err(|_| SendError::Disconnected)
     }
 }
 
-async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended {
-    let mut pong = None;
+async fn drive(mut socket: Socket, served: &Served, login: &str) -> Ended {
     let outbox = Outbox::default();
-    let hello = match tokio::time::timeout(HELLO_DEADLINE, next_text(socket, &mut pong)).await {
+    match admit(&mut socket, served, login, &outbox).await {
+        Ok(mut connection) => attached(socket, served, &mut connection, &outbox).await,
+        Err(reason) => {
+            close(&mut socket, reason).await;
+            reason
+        }
+    }
+}
+
+async fn admit(
+    socket: &mut Socket,
+    served: &Served,
+    login: &str,
+    outbox: &Outbox,
+) -> Result<Connection, Ended> {
+    let heartbeat = Heartbeat::default();
+    let hello = match tokio::time::timeout(HELLO_DEADLINE, next_text(socket, &heartbeat)).await {
         Ok(Ok(hello)) => hello,
-        Ok(Err(ended)) => return ended,
-        Err(_) => return Ended::Policy("no hello"),
+        Ok(Err(ended)) => return Err(ended),
+        Err(_) => return Err(Ended::Policy("no hello")),
     };
     let (lines, first) = plakous_hosted::host_service::wire::lines(1);
     let _ = lines.send(Ok(hello));
@@ -294,125 +334,126 @@ async fn drive(socket: &mut Socket, served: &Arc<Served>, login: &str) -> Ended 
         &mut outbox.clone(),
         &move || stop.stopped(),
     );
-    if let Err(ended) = send_pending(socket, &outbox, || served.stop.stopped()).await {
-        return ended;
-    }
+    let progress = socket.get_ref().progress.clone();
+    outbox
+        .send_batch(
+            &progress,
+            || stop.stopped(),
+            &mut WebWriter {
+                sink: socket,
+                heartbeat,
+            },
+        )
+        .await?;
     if !matches!(admitted, Ok(true)) {
-        return Ended::Policy("handshake refused");
+        return Err(Ended::Policy("handshake refused"));
     }
     // The web endpoint is never a local face, however its client
     // authenticated: it may not exec or hand off the host's build.
-    let mut connection = served
+    Ok(served
         .host
         .connect(outbox.clone(), Face::Remote, principal, move || {
             stop.stopped()
         })
-        .buffered_output();
-    let ended = attached(socket, served, &mut connection, &outbox, &mut pong).await;
-    if matches!(ended, Ended::Stopping) {
-        crate::host::lifecycle::stopping(&served.host);
-        let _ = connection.flush_lifecycle();
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            send_pending(socket, &outbox, || false),
-        )
-        .await;
-        connection.output_sent();
-    }
-    // Every way out detaches, so no session holds a dead attachment.
-    connection.leave();
-    ended
+        .buffered_output())
 }
 
-type Connection = HostConnection<PlakExtension, Outbox>;
-
 /// Serves an admitted connection until it ends.
-async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    socket: &mut WebSocketStream<ProgressIo<S>>,
+async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(
+    socket: WebSocketStream<ProgressIo<S>>,
     served: &Served,
     connection: &mut Connection,
     outbox: &Outbox,
-    pong: &mut Option<Instant>,
 ) -> Ended {
-    let mut pinger = tokio::time::interval(PING_EVERY);
+    let progress = socket.get_ref().progress.clone();
+    let (sink, mut reader) = socket.split();
+    let heartbeat = Heartbeat::default();
+    let mut transport = WebWriter {
+        sink,
+        heartbeat: heartbeat.clone(),
+    };
+    let queue = outbox.clone();
+    let stop = served.stop;
+    let mut writer = JoinSet::new();
+    writer.spawn(async move {
+        let result = queue
+            .write_to(&progress, || stop.stopped(), &mut transport)
+            .await;
+        (transport.sink, result)
+    });
+
+    let mut pinger = tokio::time::interval_at(Instant::now() + PING_EVERY, PING_EVERY);
     pinger.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    pinger.tick().await;
     let mut rate = Rate::new();
-    loop {
-        // A flush may read the session directory from the stores.
+    let mut finished = None;
+    let ended = loop {
         if served.stop.stopped() {
-            return Ended::Stopping;
+            connection_work(|| {
+                crate::host::lifecycle::stopping(&served.host);
+                let _ = connection.flush_lifecycle();
+            });
+            break Ended::Stopping;
         }
-        if connection_work(|| connection.flush()).is_err() {
-            return Ended::Lost("client fell behind");
-        }
-        let began = Instant::now();
-        let sent = send_pending(socket, outbox, || served.stop.stopped()).await;
-        connection.output_sent();
-        if let Err(ended) = sent {
-            return ended;
-        }
-        if served.stop.stopped() {
-            continue;
-        }
-        if began.elapsed() >= PING_EVERY {
-            if let Some(sent) = pong {
-                *sent = Instant::now();
-            }
-        }
-        if served.stop.stopped() {
-            return Ended::Stopping;
+        if connection_work(|| outbox.flush_connection(connection)).is_err() {
+            break Ended::Lost("client fell behind");
         }
         tokio::select! {
             biased;
-            message = next_text(socket, pong) => {
-                let mut line = match message {
-                    Ok(line) => zeroize::Zeroizing::new(line),
-                    Err(ended) => return ended,
+            result = writer.join_next() => {
+                let Some(Ok((sink, result))) = result else {
+                    break Ended::Lost("send failed");
+                };
+                finished = Some((sink, result));
+                break result.map_or_else(Ended::from, |()| Ended::Left);
+            }
+            message = next_text(&mut reader, &heartbeat) => {
+                let line = match message {
+                    Ok(line) => line,
+                    Err(ended) => break ended,
                 };
                 if !Connection::is_host_request(&line) && !rate.admit() {
-                    return Ended::Policy("message rate");
+                    let _line = zeroize::Zeroizing::new(line);
+                    break Ended::Policy("message rate");
                 }
-                // An attach may open a session, which takes a while.
-                if !connection_work(|| connection.frame(Ok(std::mem::take(&mut *line)))).unwrap_or(false) {
-                    let _ = connection.flush();
-                    let _ = send_pending(socket, outbox, || served.stop.stopped()).await;
-                    connection.output_sent();
-                    return Ended::Left;
+                match connection_work(|| connection.frame(Ok(line))) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = connection_work(|| outbox.flush_connection(connection));
+                        break Ended::Left;
+                    }
+                    Err(_) if outbox.overflowed() => break Ended::Lost("client fell behind"),
+                    Err(_) => break Ended::Lost("request failed"),
+                }
+            }
+            () = heartbeat.expired() => break Ended::Lost("no pong"),
+            _ = pinger.tick() => {
+                if let Err(ended) = heartbeat.tick(outbox) {
+                    break ended;
                 }
             }
             () = connection.changed() => {}
-            // A stop ends the connection as a leaving client's.
+            () = outbox.drained() => {}
             () = tokio::time::sleep(STOP_POLL) => {}
-            _ = pinger.tick() => {
-                if pong.is_some_and(|sent| sent.elapsed() >= PONG_DEADLINE) {
-                    return Ended::Lost("no pong");
-                }
-                if pong.is_none() {
-                    *pong = Some(Instant::now());
-                }
-                // A peer that stopped reading must not hold the slot: the
-                // ping is bounded like every other send.
-                match socket.get_ref().progress.clone().finishing(socket.send(Message::Ping(Bytes::new())), || served.stop.stopped())
-                    .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => return Ended::Lost("ping failed"),
-                    Err(()) => return Ended::Lost("client too slow"),
-                }
-            }
+        }
+    };
+    outbox.close();
+    if finished.is_none()
+        && let Ok(Some(Ok(result))) =
+            tokio::time::timeout(Duration::from_secs(1), writer.join_next()).await
+    {
+        finished = Some(result);
+    }
+    if let Some((mut sink, result)) = finished {
+        if result.is_ok() {
+            connection.output_sent();
+        }
+        // A failed or cancelled frame may already have been partly written.
+        if matches!(result, Ok(()) | Err(SendError::Full)) {
+            close(&mut sink, ended).await;
         }
     }
-}
-
-fn connection_work<T>(run: impl FnOnce() -> T) -> T {
-    #[cfg(test)]
-    if tokio::runtime::Handle::current().runtime_flavor()
-        == tokio::runtime::RuntimeFlavor::CurrentThread
-    {
-        return run();
-    }
-    tokio::task::block_in_place(run)
+    connection_work(|| connection.leave());
+    ended
 }
 
 #[cfg(test)]

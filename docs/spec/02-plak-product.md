@@ -4517,6 +4517,16 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   at most 8 MiB. A presentation snapshot travels as `snapshot` pages of one
   revision and scope, in order, the last one completing it; the receiver
   validates the reassembled snapshot as the host does before it emits one.
+  On the control socket (including the stdio bridge) and WebSocket, a
+  connection reads and handles client frames independently of its transport
+  writer. Between complete frames the writer prefers independent replies
+  such as pongs, mailbox acknowledgements and console reads. Attachment
+  boundaries, snapshot pages, blobs and their events, numbered directory
+  and terminal output, and picker progress with its final answer keep their
+  existing order. The writer never interrupts an in-flight frame to send a
+  reply. When ordered output is backed up, the driver leaves further
+  observations in the bounded attachment queues but continues handling
+  requests and polling console replies.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`
@@ -4527,7 +4537,7 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   id; a host of many sessions names none, below) or
   `refused` with `version_mismatch`, `malformed`, `busy` or `unavailable`
   (the session could not be opened, with why), and closes. The version must
-  match exactly; it is 9 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
+  match exactly; it is 12 (`WIRE_VERSION`), with no negotiation. The session opens before the welcome is sent, so any
   failure before dispatch, `plakd agent --wire v2` included, is that
   `unavailable` frame and never a JSONL record. Its detail is the failure's
   own text only for an authenticated peer (stdio's parent process, a web
@@ -5484,11 +5494,12 @@ does not inherit another connection's pending answers.
   and its sessions run on for the next connection. A `quit` intent on a
   root attachment detaches it as well (§4.4, quit and stop). A login holds
   at most 4 connections and opens at most 30 a minute.
-  After a send lasting at least one 15 s heartbeat interval, an outstanding
-  pong deadline is re-armed. Buffered
-  client text/control frames are polled before overdue heartbeat ticks,
-  so a pong buffered during the send cannot lose a select race to timeout.
-  Missed heartbeat intervals are skipped rather than burst-replayed.
+  The native ping goes ahead of queued bulk at the next frame boundary;
+  its pong deadline starts when the writer reaches it, not while queued
+  behind an in-flight message. The reader polls buffered text/control
+  frames before overdue heartbeat ticks. Missed heartbeat intervals are
+  skipped rather than burst-replayed. The endpoint does not negotiate
+  WebSocket compression.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
@@ -5499,6 +5510,12 @@ does not inherit another connection's pending answers.
   that is not under `/_app/` gets `index.html` (the app's own routes), a
   missing `/_app/` file is `404`. `/_app/immutable/*` is `Cache-Control:
   public, max-age=31536000, immutable`, everything else `no-cache`. Every
+  asset can use a precompressed `.br` or `.gz` sibling within the same
+  build caps, selected by `Accept-Encoding` with `Vary: Accept-Encoding`.
+  The original asset supplies the media type. The index (including the
+  route fallback) and the build's service worker have representation-specific
+  strong ETags; matching `If-None-Match` on GET or HEAD returns a bodyless
+  `304`. Every
   response carries the build's `Content-Security-Policy` (and
   `Content-Security-Policy-Report-Only`), `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
@@ -5947,18 +5964,21 @@ settles asynchronously after endpoint binding, before local admission.
   most 16 connections wait for their hello at once; another is closed
   unanswered, and a failed accept is retried after 100 ms. A client that
   leaves, or one whose write makes no byte progress for 10 s, detaches;
-  its sessions run on. A pending batch retains the 64 MiB limit and a hard
-  30-minute total send bound. A large baseline that continues making byte
+  its sessions run on. A connection is detached if its outbox exceeds 8192
+  frames or 64 MiB, including the frame being sent. A pending batch retains
+  a hard 30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.
   Sending checks host stop within 50 ms and abandons the connection
   on stop, including idle-exit stop; the hard batch bound cannot delay the
   planned 45 s session handoff. The WebSocket sender obeys the same stop
-  rule. Client frames on that same connection are processed only after
-  its current send completes (or the transport is abandoned); a progressing
-  large baseline can therefore delay intent answers beyond the client's
-  30 s deadline. Such a write has unknown outcome, not permission to mint
-  another submission id. Other connections remain independent.
+  rule. The reader can admit an intent while a baseline is in flight; its
+  answer can pass queued pages but still waits for the current frame.
+  An intent whose answer is lost or timed out has unknown outcome, not
+  permission to mint another submission id. Other connections remain
+  independent. The host sizes the asynchronous worker pool from available
+  parallelism (four to sixteen workers). Synchronous connection work and
+  gateway account-key status do not occupy async workers.
 - **Sessions.** A session opens in its own workspace's product context
   (section 1), as `plakd agent` opens it with no overrides, when a client first
   attaches it, and stays resident while anything keeps it (§4.4, residency

@@ -320,6 +320,109 @@ fn static_files_carry_their_cache_rules_and_security_headers() {
     );
 }
 
+#[tokio::test]
+async fn precompressed_assets_and_revalidation_use_the_selected_representation() {
+    use http_body_util::BodyExt as _;
+    let dir = ui_dir();
+    std::fs::write(dir.path().join("index.html.br"), "br-index").unwrap();
+    std::fs::write(dir.path().join("index.html.gz"), "gz-index").unwrap();
+    std::fs::write(dir.path().join("_app/immutable/a.js.gz"), "gz-asset").unwrap();
+    let ui = Ui::load(dir.path(), false, false).unwrap();
+
+    let encoded = get(&ui, "/sessions/abc", &[("accept-encoding", "gzip, br")]);
+    let br_tag = header(&encoded, "etag").unwrap().to_owned();
+    assert_eq!(header(&encoded, "content-encoding"), Some("br"));
+    assert_eq!(header(&encoded, "vary"), Some("Accept-Encoding"));
+    assert_eq!(
+        header(&encoded, "content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    assert_eq!(
+        encoded.into_body().collect().await.unwrap().to_bytes(),
+        "br-index"
+    );
+
+    let head = hyper::Request::head("/index.html")
+        .header("accept-encoding", "br;q=0, gzip;q=0.5")
+        .body(())
+        .unwrap();
+    let gzip = respond(Some(&ui), &head);
+    assert_eq!(header(&gzip, "content-encoding"), Some("gzip"));
+    assert_eq!(header(&gzip, "content-length"), Some("8"));
+    assert_ne!(header(&gzip, "etag"), Some(br_tag.as_str()));
+    assert!(
+        gzip.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty()
+    );
+
+    let request = hyper::Request::get("/")
+        .header("accept-encoding", "br")
+        .header("if-none-match", format!("\"other\", W/{br_tag}"))
+        .body(())
+        .unwrap();
+    let current = respond(Some(&ui), &request);
+    assert_eq!(current.status(), 304);
+    assert_eq!(header(&current, "etag"), Some(br_tag.as_str()));
+    assert_eq!(header(&current, "vary"), Some("Accept-Encoding"));
+    assert!(header(&current, "content-security-policy").is_some());
+    assert!(
+        current
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty()
+    );
+
+    let identity = respond(
+        Some(&ui),
+        &hyper::Request::get("/")
+            .header("if-none-match", br_tag)
+            .body(())
+            .unwrap(),
+    );
+    assert_eq!(identity.status(), 200);
+    assert_eq!(header(&identity, "content-encoding"), None);
+    let worker = get(
+        &ui,
+        "/service-worker.js",
+        &[("service-worker", "script"), ("if-none-match", "*")],
+    );
+    assert_eq!(worker.status(), 304);
+    assert_eq!(header(&worker, "cache-control"), Some("no-cache"));
+    let stray = get(
+        &ui,
+        "/old-worker.js",
+        &[("service-worker", "script"), ("if-none-match", "*")],
+    );
+    assert_eq!(stray.status(), 200);
+    assert!(header(&stray, "clear-site-data").is_some());
+
+    let asset = get(
+        &ui,
+        "/_app/immutable/a.js",
+        &[("accept-encoding", "*;q=1, br;q=0")],
+    );
+    assert_eq!(header(&asset, "content-encoding"), Some("gzip"));
+    assert_eq!(
+        header(&asset, "content-type"),
+        Some("text/javascript; charset=utf-8")
+    );
+    assert_eq!(
+        header(&asset, "cache-control"),
+        Some("public, max-age=31536000, immutable")
+    );
+    assert_eq!(
+        get(&ui, "/service-worker.js", &[("accept-encoding", "*;q=0")]).status(),
+        406
+    );
+}
+
 /// A worker registered from any path but /service-worker.js gets the kill
 /// switch and Clear-Site-Data; the real worker is served from the build.
 #[test]

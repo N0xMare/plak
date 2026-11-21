@@ -13,10 +13,9 @@
 //! progress for 10 s, detaches; its sessions run on.
 
 use std::collections::VecDeque;
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use plakous_host_protocol::wire::{HandshakeRefusal, LineReader, WireError};
@@ -26,9 +25,11 @@ use plakous_hosted::host_service::wire::{
 };
 use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::task::JoinSet;
 
+use super::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
 use super::lock::HostLock;
-use super::send::{MAX_PENDING_BYTES, ProgressIo};
+use super::send::ProgressIo;
 use crate::surface_protocol::PlakExtension;
 
 /// How often the accept loop and every connection look for a stop.
@@ -128,7 +129,7 @@ impl Bound {
         let admitted = Arc::new(AtomicUsize::new(0));
         let mut next_idle_check = Instant::now();
         let mut idle = idle.map(super::idle::IdleGuard::new);
-        let mut connections = tokio::task::JoinSet::new();
+        let mut connections = JoinSet::new();
         let stopping = 'accepting: loop {
             tokio::select! {
                 _ = connections.join_next(), if !connections.is_empty() => {}
@@ -292,51 +293,25 @@ fn check_length(path: &Path) -> CliResult<()> {
     )))
 }
 
-/// The frames one connection has written and not yet sent.
-#[derive(Clone, Default)]
-struct Outbox(Arc<Mutex<Vec<u8>>>);
-
-impl Outbox {
-    fn take(&self) -> Vec<u8> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
-    }
-}
-
-impl Write for Outbox {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut pending = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if pending.len() + buf.len() > MAX_PENDING_BYTES {
-            return Err(std::io::Error::other("the client fell behind"));
+impl<W: AsyncWrite + Unpin + Send> FrameWriter for ProgressIo<W> {
+    async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
+        match frame {
+            Frame::Line(line) => self
+                .write_all(&line)
+                .await
+                .map_err(|_| SendError::Disconnected),
+            Frame::Ping => Err(SendError::Disconnected),
         }
-        pending.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 
-/// Sends what the connection wrote; `Err` when the client is gone or too
-/// slow.
 async fn send(
-    write: &mut ProgressIo<impl AsyncWrite + Unpin>,
+    write: &mut ProgressIo<impl AsyncWrite + Unpin + Send>,
     outbox: &Outbox,
-    stopped: impl Fn() -> bool,
-) -> Result<(), ()> {
-    let bytes = outbox.take();
-    if bytes.is_empty() {
-        return Ok(());
-    }
-    match write
-        .progress
-        .clone()
-        .finishing(write.write_all(&bytes), stopped)
-        .await
-    {
-        Ok(Ok(())) => Ok(()),
-        _ => Err(()),
-    }
+    stopped: impl Fn() -> bool + Send + Sync,
+) -> Result<(), SendError> {
+    let progress = write.progress.clone();
+    outbox.send_batch(&progress, stopped, write).await
 }
 
 /// The client's lines as they arrive.
@@ -357,6 +332,17 @@ impl Drop for Reader {
 }
 
 impl Reader {
+    async fn next(&mut self) -> Option<Result<String, WireError>> {
+        loop {
+            if let Some(line) = self.queued.pop_front() {
+                return Some(line);
+            }
+            if !self.fill().await {
+                return None;
+            }
+        }
+    }
+
     /// Reads once; `false` at the end of input.
     async fn fill(&mut self) -> bool {
         use zeroize::Zeroize as _;
@@ -393,15 +379,7 @@ async fn connection(
         buffer: zeroize::Zeroizing::new(vec![0; 64 * 1024]),
     };
     let outbox = Outbox::default();
-    let hello = tokio::time::timeout(HELLO_DEADLINE, async {
-        while reader.queued.is_empty() {
-            if !reader.fill().await {
-                return None;
-            }
-        }
-        reader.queued.pop_front()
-    })
-    .await;
+    let hello = tokio::time::timeout(HELLO_DEADLINE, reader.next()).await;
     let hello = match hello {
         Ok(Some(hello)) => hello,
         Ok(None) => return,
@@ -440,58 +418,65 @@ async fn connection(
     let mut connection = host
         .connect(outbox.clone(), Face::Remote, principal, move || stop())
         .buffered_output();
+    attached(reader, write, &mut connection, &outbox, host, &stopped).await;
+    drop(place);
+}
+
+async fn attached(
+    mut reader: Reader,
+    mut write: ProgressIo<tokio::net::unix::OwnedWriteHalf>,
+    connection: &mut Connection,
+    outbox: &Outbox,
+    host: &SessionHost<PlakExtension>,
+    stopped: &Arc<dyn Fn() -> bool + Send + Sync>,
+) {
+    let mut writer = JoinSet::new();
+    let queue = outbox.clone();
+    let stop = Arc::clone(stopped);
+    writer.spawn(async move {
+        let progress = write.progress.clone();
+        let result = queue.write_to(&progress, &*stop, &mut write).await;
+        let _ = write.shutdown().await;
+        result
+    });
+
     loop {
         if stopped() {
-            close_planned(host, &mut connection, &mut write, &outbox).await;
+            connection_work(|| {
+                super::lifecycle::stopping(host);
+                let _ = connection.flush_lifecycle();
+            });
             break;
         }
-        // A flush may read the session directory from the stores.
-        let flushed = tokio::task::block_in_place(|| connection.flush());
-        let sent = send(&mut write, &outbox, &*stopped).await;
-        connection.output_sent();
-        if flushed.is_err() || sent.is_err() {
+        if connection_work(|| outbox.flush_connection(connection)).is_err() {
             break;
-        }
-        if stopped() {
-            continue;
-        }
-        if let Some(line) = reader.queued.pop_front() {
-            // An attach may open a session, which takes a while.
-            let reading = tokio::task::block_in_place(|| connection.frame(line));
-            if !matches!(reading, Ok(true)) {
-                let _ = connection.flush();
-                let _ = send(&mut write, &outbox, &*stopped).await;
-                connection.output_sent();
-                break;
-            }
-            continue;
         }
         tokio::select! {
-            more = reader.fill() => {
-                if !more {
+            _ = writer.join_next() => break,
+            line = reader.next() => {
+                let Some(line) = line else { break };
+                if !matches!(connection_work(|| connection.frame(line)), Ok(true)) {
+                    let _ = connection_work(|| outbox.flush_connection(connection));
                     break;
                 }
             }
             () = connection.changed() => {}
+            () = outbox.drained() => {}
             () = tokio::time::sleep(STOP_POLL) => {}
         }
     }
+    if outbox.overflowed() {
+        tracing::info!(target: "plak::host", "socket client fell behind");
+    }
+    outbox.close();
+    if matches!(
+        tokio::time::timeout(Duration::from_secs(1), writer.join_next()).await,
+        Ok(Some(Ok(Ok(()))))
+    ) {
+        connection.output_sent();
+    }
     // Every way out detaches, so no session holds a dead attachment.
-    connection.leave();
-    let _ = write.shutdown().await;
-    drop(place);
-}
-
-async fn close_planned(
-    host: &SessionHost<PlakExtension>,
-    connection: &mut plakous_hosted::host_service::wire::HostConnection<PlakExtension, Outbox>,
-    write: &mut ProgressIo<impl AsyncWrite + Unpin>,
-    outbox: &Outbox,
-) {
-    super::lifecycle::stopping(host);
-    let _ = connection.flush_lifecycle();
-    let _ = tokio::time::timeout(Duration::from_secs(1), send(write, outbox, || false)).await;
-    connection.output_sent();
+    connection_work(|| connection.leave());
 }
 
 #[cfg(test)]

@@ -1,32 +1,5 @@
 use super::*;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
-#[test]
-fn slow_link_web_outbox_caps_partial_and_completed_bytes_and_resets_on_take() {
-    let mut outbox = Outbox::default();
-    let chunk = vec![b'x'; 1024 * 1024 - 1];
-    for _ in 0..64 {
-        outbox.write_all(&chunk).unwrap();
-        outbox.write_all(b"\n").unwrap();
-    }
-    assert!(outbox.write_all(b"x").is_err());
-    let (lines, overflowed) = outbox.take();
-    assert_eq!(lines.len(), 64);
-    assert!(overflowed);
-    drop(lines);
-    let mut outbox = Outbox::default();
-    for _ in 0..2 {
-        for _ in 0..64 {
-            outbox.write_all(&chunk).unwrap();
-            outbox.write_all(b"\n").unwrap();
-        }
-        assert!(!outbox.take().1);
-    }
-    outbox.write_all(&vec![b'x'; MAX_PENDING_BYTES]).unwrap();
-    assert!(outbox.write_all(b"x").is_err());
-}
+use std::io::Write as _;
 
 fn context() -> (tempfile::TempDir, Served) {
     let home = tempfile::tempdir().unwrap();
@@ -34,7 +7,7 @@ fn context() -> (tempfile::TempDir, Served) {
     paths.ensure_layout().unwrap();
     let host = principal_tests::empty_host();
     let context = Served {
-        host: Arc::clone(&host),
+        host,
         stop: super::super::StopProbe::armed(),
         ui: None,
         gate: super::super::auth::Gate::new(
@@ -49,204 +22,101 @@ fn context() -> (tempfile::TempDir, Served) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn slow_link_attached_rearms_outstanding_pong_after_throttled_baseline() {
+async fn slow_link_web_reads_ping_during_a_blocked_send_and_answers_before_the_next_page() {
     let (_home, context) = context();
-    let host = Arc::clone(&context.host);
     let outbox = Outbox::default();
-    outbox
-        .clone()
-        .write_all(format!("{}\n", "x".repeat(512 * 1024)).as_bytes())
-        .unwrap();
-    let mut connection = host.connect(
-        outbox.clone(),
-        Face::Remote,
-        plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
-        || false,
-    );
-    let (server, client) = tokio::io::duplex(8192);
-    let mut server =
-        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
-    let reading = tokio::spawn(async move {
-        let mut client = WebSocketStream::from_raw_socket(
-            Throttled {
-                io: client,
-                next: Box::pin(tokio::time::sleep(Duration::ZERO)),
-            },
-            Role::Client,
-            None,
-        )
-        .await;
-        assert!(matches!(
-            client.next().await.unwrap().unwrap(),
-            Message::Text(_)
-        ));
-        tokio::time::sleep(Duration::from_secs(20)).await;
-        client.send(Message::Pong(Bytes::new())).await.unwrap();
-        client
-            .send(Message::text("{\"frame\":\"bye\"}"))
-            .await
+    let first = "x".repeat(64 * 1024);
+    let second = "second page";
+    for page in [&*first, second] {
+        outbox
+            .clone()
+            .write_all(format!("{page}\n").as_bytes())
             .unwrap();
-        client
-    });
-    let began = Instant::now();
-    let mut pong = Some(began);
-    let ended = attached(&mut server, &context, &mut connection, &outbox, &mut pong).await;
-    assert_eq!(ended.as_str(), "client left");
-    assert!(began.elapsed() > PONG_DEADLINE);
-    assert!(
-        pong.is_none(),
-        "buffered pong must be read before overdue ping ticks"
-    );
-    drop(reading.await.unwrap());
-    connection.leave();
-}
-
-#[tokio::test(start_paused = true)]
-async fn slow_link_buffered_pong_and_bye_precede_missed_heartbeat_tick() {
-    let (_home, context) = context();
-    let outbox = Outbox::default();
-    outbox
-        .clone()
-        .write_all(format!("{}\n", "x".repeat(512 * 1024)).as_bytes())
-        .unwrap();
-    let mut connection = context.host.connect(
-        outbox.clone(),
-        Face::Remote,
-        plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
-        || false,
-    );
-    let (server, client) = tokio::io::duplex(8192);
-    let mut socket =
-        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
-    let reading = tokio::spawn(async move {
-        let mut client = WebSocketStream::from_raw_socket(
-            Throttled {
-                io: client,
-                next: Box::pin(tokio::time::sleep(Duration::ZERO)),
-            },
-            Role::Client,
-            None,
+    }
+    let mut connection = context
+        .host
+        .connect(
+            outbox.clone(),
+            Face::Remote,
+            plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
+            || false,
         )
-        .await;
+        .buffered_output();
+    let (server, client) = tokio::io::duplex(4096);
+    let server =
+        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
+    let mut client = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+    let reading = async {
+        // Let the writer fill the pipe with a frame the client hasn't read.
         tokio::time::sleep(Duration::from_secs(1)).await;
-        client.send(Message::Pong(Bytes::new())).await.unwrap();
         client
-            .send(Message::text("{\"frame\":\"bye\"}"))
+            .send(Message::text(
+                r#"{"frame":"request","id":42,"op":{"op":"ping"}}"#,
+            ))
             .await
             .unwrap();
-        let buffered_at = Instant::now();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(client.next().await.unwrap().unwrap(), Message::text(first));
+        let reply = client.next().await.unwrap().unwrap().into_text().unwrap();
         assert!(matches!(
-            client.next().await.unwrap().unwrap(),
-            Message::Text(_)
+            plakous_host_protocol::wire::decode_line::<
+                plakous_host_protocol::wire::HostFrame<PlakExtension>,
+            >(&reply),
+            Ok(plakous_host_protocol::wire::HostFrame::Response {
+                id: 42,
+                outcome: plakous_host_protocol::wire::Outcome::Ok(
+                    plakous_host_protocol::wire::Answer::Pong
+                )
+            })
         ));
-        while let Some(Ok(message)) = client.next().await {
-            assert!(
-                !matches!(message, Message::Ping(_)),
-                "a ready heartbeat must not overtake buffered Pong/Bye"
-            );
-        }
-        buffered_at
-    });
-    let began = Instant::now();
-    let mut pong = Some(began);
-    let ended = attached(&mut socket, &context, &mut connection, &outbox, &mut pong).await;
-    let finished = Instant::now();
-    assert_eq!(ended.as_str(), "client left");
-    assert!(pong.is_none());
-    assert!(finished.duration_since(began) > PONG_DEADLINE);
-    drop(socket);
-    let buffered_at = reading.await.unwrap();
-    assert!(
-        buffered_at > began && buffered_at < finished,
-        "Pong must have arrived while the baseline send was blocked"
+        assert_eq!(client.next().await.unwrap().unwrap(), Message::text(second));
+        client
+            .send(Message::text(r#"{"frame":"bye"}"#))
+            .await
+            .unwrap();
+        assert!(matches!(client.next().await, Some(Ok(Message::Close(_)))));
+    };
+    let (ended, ()) = tokio::join!(
+        attached(server, &context, &mut connection, &outbox),
+        reading
     );
-    connection.leave();
+    assert!(matches!(ended, Ended::Left));
 }
 
 #[tokio::test(start_paused = true)]
-async fn slow_link_web_send_pending_stop_preempts_progressing_baseline() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+async fn slow_link_web_queued_heartbeat_has_no_deadline_until_the_writer_reaches_it() {
+    let heartbeat = Heartbeat::default();
     let outbox = Outbox::default();
-    outbox
-        .clone()
-        .write_all(format!("{}\n", "x".repeat(512 * 1024)).as_bytes())
-        .unwrap();
-    let (server, client) = tokio::io::duplex(8192);
-    let mut socket =
+    heartbeat
+        .tick(&outbox)
+        .unwrap_or_else(|_| panic!("first heartbeat was refused"));
+    tokio::time::advance(PONG_DEADLINE + PING_EVERY).await;
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), heartbeat.expired())
+            .await
+            .is_err()
+    );
+    let (server, client) = tokio::io::duplex(4096);
+    let server =
         WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
-    let reading = tokio::spawn(async move {
-        let mut client = WebSocketStream::from_raw_socket(
-            Throttled {
-                io: client,
-                next: Box::pin(tokio::time::sleep(Duration::ZERO)),
+    let mut client = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+    let progress = server.get_ref().progress.clone();
+    outbox
+        .send_batch(
+            &progress,
+            || false,
+            &mut WebWriter {
+                sink: server,
+                heartbeat: heartbeat.clone(),
             },
-            Role::Client,
-            None,
         )
-        .await;
-        while let Some(Ok(_)) = client.next().await {}
-    });
-    let stop = Arc::new(AtomicBool::new(false));
-    let stopping = Arc::clone(&stop);
-    let stop_task = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        stopping.store(true, Ordering::Release);
-    });
-    let began = Instant::now();
-    let ended = send_pending(&mut socket, &outbox, || stop.load(Ordering::Acquire))
         .await
-        .unwrap_err();
-    assert_eq!(ended.as_str(), "client too slow");
-    assert!(began.elapsed() >= Duration::from_secs(3));
-    assert!(began.elapsed() <= Duration::from_millis(3050));
-    drop(socket);
-    stop_task.await.unwrap();
-    reading.await.unwrap();
-}
-
-struct Throttled {
-    io: tokio::io::DuplexStream,
-    next: Pin<Box<tokio::time::Sleep>>,
-}
-
-impl AsyncRead for Throttled {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        use std::future::Future as _;
-        if self.next.as_mut().poll(cx).is_pending() {
-            return Poll::Pending;
-        }
-        let mut chunk = [0; 8192];
-        let count = buf.remaining().min(chunk.len());
-        let mut limited = ReadBuf::new(&mut chunk[..count]);
-        match Pin::new(&mut self.io).poll_read(cx, &mut limited) {
-            Poll::Ready(Ok(())) => {
-                buf.put_slice(limited.filled());
-                self.next
-                    .as_mut()
-                    .reset(Instant::now() + Duration::from_secs(1));
-                Poll::Ready(Ok(()))
-            }
-            other => other,
-        }
-    }
-}
-
-impl AsyncWrite for Throttled {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        Pin::new(&mut self.io).poll_write(cx, bytes)
-    }
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.io).poll_flush(cx)
-    }
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.io).poll_shutdown(cx)
-    }
+        .unwrap();
+    assert!(matches!(client.next().await, Some(Ok(Message::Ping(_)))));
+    tokio::time::advance(PONG_DEADLINE).await;
+    assert!(
+        tokio::time::timeout(Duration::ZERO, heartbeat.expired())
+            .await
+            .is_ok()
+    );
 }

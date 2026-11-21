@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
+use base64::Engine as _;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::header::{self, HeaderMap, HeaderValue};
@@ -15,6 +16,7 @@ use plakous_hosted::error::{CliFailure, CliResult};
 use serde::Deserialize;
 
 mod csp;
+mod encoding;
 
 /// The largest file the UI serves.
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
@@ -23,6 +25,7 @@ const MAX_FILES: usize = 4096;
 const MAX_BUILD_BYTES: u64 = 128 * 1024 * 1024;
 /// The one path a service worker may be registered from.
 const SERVICE_WORKER: &str = "/service-worker.js";
+const INDEX: &str = "/index.html";
 /// What a worker registered from any path the build does not hold is
 /// answered with: it unregisters itself and reloads its pages.
 const KILL_SWITCH: &str = "self.addEventListener('install', () => self.skipWaiting());\n\
@@ -39,6 +42,7 @@ magnetometer=(), microphone=(), payment=(), usb=()";
 struct File {
     bytes: Bytes,
     content_type: HeaderValue,
+    etag: Option<HeaderValue>,
 }
 
 /// A loaded UI build: its files by URL path and its CSP.
@@ -208,11 +212,25 @@ fn collect(
             )));
         }
         let bytes = std::fs::read(&resolved).map_err(|_| unreadable())?;
+        let url = format!("/{relative}");
+        let logical = url
+            .strip_suffix(".br")
+            .or_else(|| url.strip_suffix(".gz"))
+            .unwrap_or(&url);
+        let etag = matches!(logical, INDEX | SERVICE_WORKER)
+            .then(|| {
+                let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+                let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+                HeaderValue::from_str(&format!("\"{encoded}\""))
+            })
+            .transpose()
+            .map_err(|_| unreadable())?;
         files.insert(
-            format!("/{relative}"),
+            url,
             File {
                 bytes: Bytes::from(bytes),
                 content_type: content_type(&path),
+                etag,
             },
         );
     }
@@ -269,14 +287,14 @@ pub(crate) fn respond<B>(ui: Option<&Ui>, request: &Request<B>) -> Response<Full
     if worker && (path != SERVICE_WORKER || ui.file(path).is_none()) {
         return kill_switch(ui, head);
     }
-    let (file, fallback) = match ui.file(path) {
-        Some(file) => (file, false),
+    let (file, logical) = match ui.file(path) {
+        Some(file) => (file, path),
         // A missing build asset is missing; only app routes fall back.
         None if path.starts_with("/_app/") => {
             return plain(StatusCode::NOT_FOUND, "not found\n", Some(ui), head);
         }
-        None => match ui.file("/index.html") {
-            Some(index) => (index, true),
+        None => match ui.file(INDEX) {
+            Some(index) => (index, INDEX),
             None => {
                 return plain(
                     StatusCode::NOT_FOUND,
@@ -287,15 +305,54 @@ pub(crate) fn respond<B>(ui: Option<&Ui>, request: &Request<B>) -> Response<Full
             }
         },
     };
-    let body = if head {
+    serve_file(ui, file, logical, request)
+}
+
+fn serve_file<B>(
+    ui: &Ui,
+    identity: &File,
+    logical: &str,
+    request: &Request<B>,
+) -> Response<Full<Bytes>> {
+    let head = request.method() == Method::HEAD;
+    let Some((file, coding)) = encoding::choose(ui, identity, logical, request.headers()) else {
+        let mut response = plain(
+            StatusCode::NOT_ACCEPTABLE,
+            "no acceptable content encoding\n",
+            Some(ui),
+            head,
+        );
+        response
+            .headers_mut()
+            .insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+        return response;
+    };
+    let etag = file
+        .etag
+        .as_ref()
+        .filter(|_| matches!(logical, INDEX | SERVICE_WORKER));
+    let unchanged = etag.is_some_and(|etag| etag_matches(request.headers(), etag));
+    let mut response = Response::new(Full::new(if head || unchanged {
         Bytes::new()
     } else {
         file.bytes.clone()
-    };
-    let mut response = Response::new(Full::new(body));
+    }));
+    if unchanged {
+        *response.status_mut() = StatusCode::NOT_MODIFIED;
+    }
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_TYPE, file.content_type.clone());
-    let immutable = !fallback && path.starts_with("/_app/immutable/");
+    headers.insert(header::CONTENT_TYPE, identity.content_type.clone());
+    headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    if let Some(coding) = coding {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+    }
+    if let Some(etag) = etag {
+        headers.insert(header::ETAG, etag.clone());
+    }
+    if !unchanged {
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file.bytes.len()));
+    }
+    let immutable = logical.starts_with("/_app/immutable/");
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(if immutable {
@@ -306,6 +363,15 @@ pub(crate) fn respond<B>(ui: Option<&Ui>, request: &Request<B>) -> Response<Full
     );
     security_headers(headers, Some(ui));
     response
+}
+
+fn etag_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+    headers.get_all(header::IF_NONE_MATCH).iter().any(|value| {
+        value.as_bytes().split(|&byte| byte == b',').any(|tag| {
+            let tag = tag.trim_ascii();
+            tag == b"*" || tag.strip_prefix(b"W/").unwrap_or(tag) == etag.as_bytes()
+        })
+    })
 }
 
 fn kill_switch(ui: &Ui, head: bool) -> Response<Full<Bytes>> {

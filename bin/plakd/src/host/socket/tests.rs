@@ -1,8 +1,8 @@
-use std::io::{BufRead as _, BufReader};
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::fs::MetadataExt as _;
 use std::os::unix::fs::PermissionsExt as _;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::wire::{
     Answer, ClientFrame, Hello, HostFrame, Op, Outcome, WIRE_VERSION,
@@ -19,10 +19,9 @@ async fn slow_link_stop_preempts_a_progressing_host_send() {
     let (write, mut read) = tokio::io::duplex(8192);
     let mut write = ProgressIo::new(write);
     let outbox = Outbox::default();
-    outbox
-        .clone()
-        .write_all(&vec![42; 2 * 1024 * 1024])
-        .unwrap();
+    let mut baseline = vec![42; 2 * 1024 * 1024];
+    baseline.push(b'\n');
+    outbox.clone().write_all(&baseline).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let stopping = Arc::clone(&stop);
     let reader = tokio::spawn(async move {
@@ -36,10 +35,10 @@ async fn slow_link_stop_preempts_a_progressing_host_send() {
         stopping.store(true, Ordering::Release);
     });
     let began = tokio::time::Instant::now();
-    assert_eq!(
+    assert!(matches!(
         super::send(&mut write, &outbox, || stop.load(Ordering::Acquire)).await,
-        Err(())
-    );
+        Err(SendError::Stalled)
+    ));
     assert!(began.elapsed() >= Duration::from_secs(3));
     assert!(began.elapsed() <= Duration::from_millis(3050));
     drop(write);
@@ -51,30 +50,34 @@ async fn slow_link_socket_stalled_reader_detaches_without_affecting_healthy_clie
     let (write, _unread) = tokio::io::duplex(1);
     let mut write = ProgressIo::new(write);
     let outbox = Outbox::default();
-    outbox.clone().write_all(&[42; 100]).unwrap();
+    outbox
+        .clone()
+        .write_all(&[&[42; 100][..], b"\n"].concat())
+        .unwrap();
     let (healthy, mut reading) = tokio::io::duplex(64);
     let mut healthy = ProgressIo::new(healthy);
     let healthy_outbox = Outbox::default();
-    healthy_outbox.clone().write_all(b"healthy").unwrap();
+    healthy_outbox.clone().write_all(b"healthy\n").unwrap();
     let began = tokio::time::Instant::now();
     let (stalled, delivered) = tokio::join!(
         super::send(&mut write, &outbox, || false),
         super::send(&mut healthy, &healthy_outbox, || false)
     );
-    assert_eq!(stalled, Err(()));
-    assert_eq!(delivered, Ok(()));
+    assert!(matches!(stalled, Err(SendError::Stalled)));
+    assert!(delivered.is_ok());
     assert_eq!(
         tokio::time::Instant::now().duration_since(began),
         super::super::send::IDLE
     );
-    let mut received = [0; 7];
+    let mut received = [0; 8];
     reading.read_exact(&mut received).await.unwrap();
-    assert_eq!(&received, b"healthy");
+    assert_eq!(&received, b"healthy\n");
 }
 
 #[tokio::test(start_paused = true)]
 async fn slow_link_socket_large_baseline_completes_at_low_bandwidth() {
-    let baseline = vec![42; 2 * 1024 * 1024];
+    let mut baseline = vec![42; 2 * 1024 * 1024];
+    baseline.push(b'\n');
     let outbox = Outbox::default();
     outbox.clone().write_all(&baseline).unwrap();
     let (write, mut read) = tokio::io::duplex(8192);
@@ -96,6 +99,74 @@ async fn slow_link_socket_large_baseline_completes_at_low_bandwidth() {
     assert!(tokio::time::Instant::now().duration_since(began) > super::super::send::IDLE);
     drop(write);
     assert_eq!(draining.await.unwrap(), baseline);
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_link_socket_reads_ping_during_a_blocked_send_and_answers_before_the_next_page() {
+    use tokio::io::AsyncBufReadExt as _;
+
+    let outbox = Outbox::default();
+    let first = format!("{}\n", "x".repeat(4 * 1024 * 1024));
+    let second = "second page\n";
+    for page in [&*first, second] {
+        outbox.clone().write_all(page.as_bytes()).unwrap();
+    }
+    let host = SessionHost::new(NoSessions::default(), "fixture", 0);
+    let mut connection = host
+        .connect(
+            outbox.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(0),
+            || false,
+        )
+        .buffered_output();
+    let (server, client) = UnixStream::pair().unwrap();
+    let (read, write) = server.into_split();
+    let reader = Reader {
+        read,
+        lines: LineReader::default(),
+        queued: VecDeque::new(),
+        buffer: zeroize::Zeroizing::new(vec![0; 8192]),
+    };
+    let read = async {
+        let mut client = tokio::io::BufReader::new(client);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let ping =
+            plakous_host_protocol::wire::encode_line(&ClientFrame::<PlakExtension>::Request {
+                id: 42,
+                op: Op::Ping,
+            })
+            .unwrap();
+        client.get_mut().write_all(ping.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut line = String::new();
+        client.read_line(&mut line).await.unwrap();
+        assert_eq!(line, first);
+        line.clear();
+        client.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            plakous_host_protocol::wire::decode_line::<HostFrame<PlakExtension>>(&line),
+            Ok(HostFrame::Response {
+                id: 42,
+                outcome: Outcome::Ok(Answer::Pong)
+            })
+        ));
+        line.clear();
+        client.read_line(&mut line).await.unwrap();
+        assert_eq!(line, second);
+    };
+    let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| false);
+    tokio::join!(
+        attached(
+            reader,
+            ProgressIo::new(write),
+            &mut connection,
+            &outbox,
+            &host,
+            &stop
+        ),
+        read
+    );
 }
 
 fn mode(path: &Path) -> u32 {

@@ -12,6 +12,7 @@
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
 mod bridge;
+pub(crate) mod connection;
 mod console;
 mod gateway_startup;
 mod idle;
@@ -95,8 +96,9 @@ fn startup_runtime() -> CliResult<(
     tokio::signal::unix::Signal,
     crate::web::StopProbe,
 )> {
+    let workers = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(workers.clamp(4, 16))
         .enable_all()
         .build()
         .map_err(|_| CliFailure::new("plakd host could not start its runtime"))?;

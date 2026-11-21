@@ -145,13 +145,14 @@ fn custody(host: &crate::gateway::HostCustody) -> AccountCustody {
         })
 }
 
-fn key_status(
-    application: &Reader,
-    _paths: &PlakPaths,
-    account: &AccountRef,
-) -> Result<KeyStatus, ()> {
-    let link = application.custody.admin().ok_or(())?;
-    gateway_key(link, account).map(gateway_key_status)
+async fn key_status(application: &Reader, account: &AccountRef) -> Result<KeyStatus, ()> {
+    let custody = application.custody.clone();
+    let account = account.clone();
+    tokio::task::spawn_blocking(move || {
+        gateway_key(custody.admin().ok_or(())?, &account).map(gateway_key_status)
+    })
+    .await
+    .map_err(|_| ())?
 }
 
 pub(super) async fn status(
@@ -177,7 +178,7 @@ pub(super) async fn status(
         custody: custody(&application.custody),
     };
     if vertical.is_api() {
-        match key_status(application, paths, account) {
+        match key_status(application, account).await {
             Ok(key) => {
                 if key.source == KeySource::Missing {
                     row.remedies.push(remedy(ReadAction::SetKey, account));
@@ -216,11 +217,18 @@ pub(super) async fn status(
         ));
     }
     if !vertical.is_api() {
-        match crate::telemetry_store::TelemetryStore::latest_account_refresh_outcome(paths, account)
-        {
-            Ok(Some(refresh)) => row.last_refresh = refresh_observation(refresh),
-            Ok(None) => {}
-            Err(_) => row.diagnostics.push(diagnostic(
+        let paths = paths.clone();
+        let selected = account.clone();
+        let latest = tokio::task::spawn_blocking(move || {
+            crate::telemetry_store::TelemetryStore::latest_account_refresh_outcome(
+                &paths, &selected,
+            )
+        })
+        .await;
+        match latest {
+            Ok(Ok(Some(refresh))) => row.last_refresh = refresh_observation(refresh),
+            Ok(Ok(None)) => {}
+            _ => row.diagnostics.push(diagnostic(
                 "refresh_history_unavailable",
                 Some(account.as_str()),
                 "retained refresh history could not be read",
@@ -346,7 +354,6 @@ fn date(seconds: u64) -> Option<String> {
 
 pub(super) async fn exists(
     application: &Reader,
-    paths: &PlakPaths,
     account: &AccountRef,
 ) -> Result<bool, ReadRefusal> {
     if !account.is_named() {
@@ -361,7 +368,8 @@ pub(super) async fn exists(
             .await
             .map_err(|_| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     } else {
-        key_status(application, paths, account)
+        key_status(application, account)
+            .await
             .map(|key| key.source != KeySource::Missing)
             .map_err(|()| unavailable(ReadScope::Accounts, UnavailableCode::Storage))
     }
@@ -397,7 +405,7 @@ impl super::Console {
     ) -> Result<plakd_wire_types::console::HostResponse, ReadRefusal> {
         let reader = reader_at(&self.state, &self.custody)?;
         if let Some(selected) = selected.as_deref()
-            && !exists(&reader, &self.paths, &exact(selected)?).await?
+            && !exists(&reader, &exact(selected)?).await?
         {
             return Err(validation("account_id", ValidationCode::UnknownAccount));
         }

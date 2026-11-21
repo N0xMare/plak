@@ -170,13 +170,13 @@ async fn web_drive_binds_the_verified_login_before_welcome_and_host_dispatch()
                             let upgrade = hyper::upgrade::on(&mut request);
                             tokio::spawn(async move {
                                 if let Ok(upgraded) = upgrade.await {
-                                    let mut socket = WebSocketStream::from_raw_socket(
+                                    let socket = WebSocketStream::from_raw_socket(
                                         ProgressIo::new(TokioIo::new(upgraded)),
                                         Role::Server,
                                         None,
                                     )
                                     .await;
-                                    let _ = drive(&mut socket, &served, "verified-operator").await;
+                                    let _ = drive(socket, &served, "verified-operator").await;
                                 }
                                 if let Some(done) =
                                     done.lock().unwrap_or_else(PoisonError::into_inner).take()

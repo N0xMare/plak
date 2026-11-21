@@ -194,7 +194,13 @@ where
         Forwarded::Reading(true)
     }
 
-    pub(super) fn flush_host_reads(&mut self) -> CliResult<()> {
+    /// Polls independent product requests even while the transport is
+    /// backpressuring attachment output.
+    ///
+    /// # Errors
+    ///
+    /// The transport outbox cannot accept a response.
+    pub fn flush_host_reads(&mut self) -> CliResult<()> {
         let mut ready = std::mem::take(
             &mut *self
                 .read_ready
