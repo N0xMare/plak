@@ -26,7 +26,7 @@ class NextestLayoutTests(unittest.TestCase):
         ]:
             whole = "num-test-threads"
             for profile, weights, priorities in (
-                ("durability", [whole, quarter], [-50, 90]),
+                ("durability", [quarter], [90]),
                 ("install", [whole, whole, whole, quarter, quarter], [-50, 100, -50, 95, 90]),
             ):
                 with self.subTest(profile=profile, available=available):
