@@ -6,8 +6,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let control = &self.role.events.step_control;
         control.observe_agent(self.opened.agent());
         loop {
-            let changed = control.changed.notified();
-            tokio::pin!(changed);
+            let mut changed = Box::pin(control.changed.notified());
             changed.as_mut().enable();
             if !control.requested() {
                 break;

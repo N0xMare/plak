@@ -99,8 +99,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .as_ref()
             .map(|release| release.attachments.changed());
         let step = &self.role.events.step_control;
-        let step_changed = step.changed.notified();
-        tokio::pin!(step_changed);
+        let mut step_changed = Box::pin(step.changed.notified());
         step_changed.as_mut().enable();
         loop {
             if step.requested() {

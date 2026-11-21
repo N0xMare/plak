@@ -78,4 +78,7 @@ fn poll(
             )));
     }
     listeners.retain(|id, _| resident.contains(id));
+    if !resident.is_empty() {
+        policy.refresh_if_due(paths);
+    }
 }

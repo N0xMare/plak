@@ -103,6 +103,14 @@ impl TreeSnapshotPush {
         rows: &dyn TopologyRows,
         session: &SessionRecord,
     ) -> Option<std::sync::Arc<crate::topology_runtime::ProductTopologyRuntime>> {
+        if let Some(hint) = self.resolve(rows, session) {
+            return crate::topology_runtime::lookup(&hint);
+        }
+        self.cached_runtime(session)
+    }
+
+    /// Bind a resolved identity, or return an uncached hint if storage failed.
+    fn resolve(&mut self, rows: &dyn TopologyRows, session: &SessionRecord) -> Option<String> {
         if self.session_id.as_deref() != Some(session.id.as_str()) {
             self.child_live = super::child_live::ChildObservers::default();
             self.session_id = Some(session.id.clone());
@@ -115,10 +123,17 @@ impl TreeSnapshotPush {
         if self.tree_id.is_none() {
             let (tree_id, resolved) = super::topology_state::resolve_tree_id(rows, session);
             if !resolved {
-                return crate::topology_runtime::lookup(&tree_id);
+                return Some(tree_id);
             }
             self.tree_id = Some(tree_id);
         }
+        None
+    }
+
+    fn cached_runtime(
+        &mut self,
+        session: &SessionRecord,
+    ) -> Option<std::sync::Arc<crate::topology_runtime::ProductTopologyRuntime>> {
         let cached = self.tree_id.as_mut()?;
         if let Some(runtime) = crate::topology_runtime::lookup(cached) {
             self.retirement_faults
@@ -140,13 +155,16 @@ impl TreeSnapshotPush {
         self.tree_id.as_deref()
     }
 
-    pub(super) fn resolved_id<'a>(
-        &'a mut self,
+    pub(super) fn resolved_id(
+        &mut self,
         rows: &dyn TopologyRows,
-        session: &'a SessionRecord,
-    ) -> &'a str {
-        let _ = self.runtime(rows, session);
-        self.tree_id().unwrap_or(&session.id)
+        session: &SessionRecord,
+    ) -> String {
+        if let Some(hint) = self.resolve(rows, session) {
+            return hint;
+        }
+        let _ = self.cached_runtime(session);
+        self.tree_id().unwrap_or(&session.id).to_owned()
     }
 }
 

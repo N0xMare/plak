@@ -70,25 +70,38 @@ type Sources = Vec<(PathBuf, Option<FileStamp>)>;
 const FULL_RELOAD_INTERVAL: Duration = Duration::from_mins(3);
 
 #[derive(Default)]
-pub(crate) struct ReloadPolicy(Option<(Sources, bool, Instant)>);
+pub(crate) struct ReloadPolicy {
+    checked: Option<(Sources, bool)>,
+    next_full_load: Option<Instant>,
+}
 
 impl ReloadPolicy {
+    pub(crate) fn refresh_if_due(&mut self, paths: &PlakPaths) {
+        let now = Instant::now();
+        if self.next_full_load.is_some_and(|at| now >= at) {
+            self.refresh(paths, now, sources(paths).ok());
+        }
+    }
+
     pub(crate) fn enabled(&mut self, paths: &PlakPaths) -> bool {
         self.enabled_at(paths, Instant::now())
     }
 
     fn enabled_at(&mut self, paths: &PlakPaths, now: Instant) -> bool {
         let stamps = sources(paths).ok();
-        if let Some((prior, allow, until)) = &self.0
-            && now < *until
+        if let Some((prior, allow)) = &self.checked
+            && self.next_full_load.is_some_and(|at| now < at)
             && stamps.as_ref() == Some(prior)
         {
             return *allow;
         }
+        self.refresh(paths, now, stamps)
+    }
+
+    fn refresh(&mut self, paths: &PlakPaths, now: Instant, stamps: Option<Sources>) -> bool {
         let (allow, cacheable) = ProductConfig::reload_policy(paths);
-        self.0 = stamps
-            .filter(|_| cacheable)
-            .map(|stamps| (stamps, allow, now + FULL_RELOAD_INTERVAL));
+        self.checked = stamps.filter(|_| cacheable).map(|stamps| (stamps, allow));
+        self.next_full_load = Some(now + FULL_RELOAD_INTERVAL);
         allow
     }
 }
@@ -160,7 +173,7 @@ mod tests {
             !policy.enabled(&paths),
             "a malformed template refuses the load"
         );
-        assert!(policy.0.is_some(), "a parse failure is cacheable");
+        assert!(policy.checked.is_some(), "a parse failure is cacheable");
         fs::remove_file(template).unwrap();
         assert!(policy.enabled(&paths));
         fs::remove_file(config).unwrap();
@@ -179,14 +192,18 @@ mod tests {
             !policy.enabled_at(&paths, now),
             "a directory cannot be read as configuration"
         );
-        assert!(policy.0.is_none(), "the I/O refusal must be tried again");
+        assert!(
+            policy.checked.is_none(),
+            "the I/O refusal must be tried again"
+        );
 
         fs::remove_dir(&config).unwrap();
         fs::write(&config, "[host]\nreload_requests = true\n").unwrap();
         let stamps = sources(&paths).unwrap();
         let expires = now + FULL_RELOAD_INTERVAL;
         // Simulate a change invisible to the metadata stamp.
-        policy.0 = Some((stamps, false, expires));
+        policy.checked = Some((stamps, false));
+        policy.next_full_load = Some(expires);
         assert!(!policy.enabled_at(&paths, now));
         assert!(policy.enabled_at(&paths, expires));
     }

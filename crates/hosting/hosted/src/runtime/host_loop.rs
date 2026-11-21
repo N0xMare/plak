@@ -249,8 +249,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             tree_id: self
                 .role
                 .last_tree_revision
-                .resolved_id(&rows, &self.role.config.session)
-                .to_owned(),
+                .resolved_id(&rows, &self.role.config.session),
             emit_settled: std::sync::Arc::new(move |row| {
                 let _ = events.send(ContentEvent::Row(row));
             }),
