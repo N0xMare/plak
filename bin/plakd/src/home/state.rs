@@ -327,10 +327,40 @@ pub(crate) struct PruneOptions {
 
 struct LockedPruneInventory {
     inventory: PruneInventory,
-    holders: Vec<fs::File>,
+    holders: Vec<PruneHolder>,
     databases: Vec<(PathBuf, rusqlite::Connection)>,
     sidecars: Vec<PathBuf>,
     references: Vec<PathBuf>,
+}
+
+struct PruneHolder(fs::File);
+
+impl PruneHolder {
+    fn acquire(path: &Path, file: fs::File) -> Result<Self, String> {
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).map_err(
+            |error| {
+                if error == rustix::io::Errno::WOULDBLOCK {
+                    format!("legacy state {} is in use (holder lock)", path.display())
+                } else {
+                    format!(
+                        "cannot probe legacy state holder lock {}: {error}",
+                        path.display()
+                    )
+                }
+            },
+        )?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for PruneHolder {
+    fn drop(&mut self) {
+        // Closing this descriptor alone does not unlock a file description
+        // still pinned by another reference (e.g. across fork).
+        let _ = rustix::io::retry_on_intr(|| {
+            rustix::fs::flock(&self.0, rustix::fs::FlockOperation::Unlock)
+        });
+    }
 }
 
 fn old_telemetry_files(paths: &PlakPaths) -> Result<Vec<PathBuf>, String> {
@@ -747,7 +777,7 @@ fn orphaned_references(
 
 fn probe_legacy_locks(
     path: &Path,
-    holders: &mut Vec<fs::File>,
+    holders: &mut Vec<PruneHolder>,
     databases: &mut Vec<(PathBuf, rusqlite::Connection)>,
 ) -> Result<(), String> {
     probe_state_locks(path, holders, databases, None)
@@ -762,11 +792,10 @@ fn probe_legacy_locks(
 )]
 fn probe_state_locks(
     path: &Path,
-    holders: &mut Vec<fs::File>,
+    holders: &mut Vec<PruneHolder>,
     databases: &mut Vec<(PathBuf, rusqlite::Connection)>,
     current_job_outputs: Option<&Path>,
 ) -> Result<(), String> {
-    use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
     #[cfg(test)]
     tests::before_probe(path)?;
@@ -826,40 +855,12 @@ fn probe_state_locks(
                 .write(!record)
                 .open(path)
                 .map_err(|error| format!("cannot prove legacy state is unused: {error}"))?;
-            if !record {
-                rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-                    .map_err(|error| {
-                        if error == rustix::io::Errno::WOULDBLOCK {
-                            format!("legacy state {} is in use (holder lock)", path.display())
-                        } else {
-                            format!(
-                                "cannot probe legacy state holder lock {}: {error}",
-                                path.display()
-                            )
-                        }
-                    })?;
-            }
-            let mut identity = String::new();
-            file.read_to_string(&mut identity)
-                .map_err(|error| error.to_string())?;
-            let uname = rustix::system::uname();
-            let host = uname
-                .nodename()
-                .to_str()
-                .map_err(|error| error.to_string())?;
-            // Every holder format names its host after the format tag;
-            // process locks are empty.
-            let local = ["plak-holder-v1", "plak-holder-v2", "plak-holder-v3"]
-                .iter()
-                .any(|format| identity.starts_with(&format!("{format} {host} ")));
-            if !identity.is_empty() && !local {
-                return Err(format!(
-                    "cannot prove legacy holder {} is local and unused",
-                    path.display()
-                ));
-            }
-            if !record {
-                holders.push(file);
+            if record {
+                verify_legacy_holder(path, &mut file)?;
+            } else {
+                let mut holder = PruneHolder::acquire(path, file)?;
+                verify_legacy_holder(path, &mut holder.0)?;
+                holders.push(holder);
             }
         }
     }
@@ -917,6 +918,29 @@ fn probe_state_locks(
                 )
             })?;
         databases.push((path.to_path_buf(), connection));
+    }
+    Ok(())
+}
+
+fn verify_legacy_holder(path: &Path, file: &mut fs::File) -> Result<(), String> {
+    let mut identity = String::new();
+    file.read_to_string(&mut identity)
+        .map_err(|error| error.to_string())?;
+    let uname = rustix::system::uname();
+    let host = uname
+        .nodename()
+        .to_str()
+        .map_err(|error| error.to_string())?;
+    // Every holder format names its host after the format tag;
+    // process locks are empty.
+    let local = ["plak-holder-v1", "plak-holder-v2", "plak-holder-v3"]
+        .iter()
+        .any(|format| identity.starts_with(&format!("{format} {host} ")));
+    if !identity.is_empty() && !local {
+        return Err(format!(
+            "cannot prove legacy holder {} is local and unused",
+            path.display()
+        ));
     }
     Ok(())
 }
@@ -990,7 +1014,7 @@ pub(crate) fn confirm_prune_legacy_options(
     }
     // Confirmation must not keep a running session blocked behind maintenance.
     drop(databases);
-    release_confirmation_holders(holders)?;
+    drop(holders);
     if options.forget_missing_launches {
         writeln!(stderr, "Explicit --forget-missing-launches: forget ownership only for missing launches (ENOENT) whose parent directory exists, unless a retained group shares that inventory; no repository artifacts are removed for those groups.")
             .map_err(|error| error.to_string())?;
@@ -1010,16 +1034,6 @@ pub(crate) fn confirm_prune_legacy_options(
     } else {
         Err("state prune-legacy confirmation declined".to_owned())
     }
-}
-
-fn release_confirmation_holders(holders: Vec<fs::File>) -> Result<(), String> {
-    for holder in holders {
-        // Closing this descriptor alone cannot release the lock if another
-        // reference still pins its open file description (e.g. across fork).
-        rustix::fs::flock(&holder, rustix::fs::FlockOperation::Unlock)
-            .map_err(|error| format!("cannot release legacy state holder lock: {error}"))?;
-    }
-    Ok(())
 }
 
 /// The refusal for a session id this build's state does not hold but another

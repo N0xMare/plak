@@ -1270,8 +1270,9 @@ independent targets: another connection's last-close checkpoint can remove
 them between inspections. A sidecar already absent at removal is treated as reclaimed; other removal
 errors still refuse. All locks are acquired and the fenced comparison passes
 before any removal. Legacy database and holder locks remain through database
-and artifact removal; legacy connections and holders are then closed before
-final sidecar cleanup, including any WAL paths recreated by last-close cleanup.
+and artifact removal. Legacy connections close and holder files explicitly
+unlock before final sidecar cleanup, including any WAL paths recreated by
+last-close cleanup. An aborted probe or prune also unlocks its holder files.
 Legacy inspection disables last-close checkpoint cleanup so a retained
 database's WAL/SHM remains. Final cleanup skips a removed database's sidecars
 if any entry now exists at its database path, including a symlink; inspection

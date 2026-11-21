@@ -6473,10 +6473,11 @@ Full verification checks payload length as well as canonical object contents.
 `crates/store/src/sqlite/admission_budget_tests.rs` is a unit-test module of
 the private SQLite actor so its real connection can be traced without a public
 test API. The small/large fixture measures a fixed usage/renew/commit delta over
-200 sessions, 2,000 checkpoints, 64 KiB payloads, 10,000 feed rows and a
-5,000-entry GC queue. `trace_v2` profile counters require equal statement and
-VM-step counts, zero full scans and automatic indexes, and no payload reads,
-recursive closure walk or aggregate sum in that admission path. Setup and
+200 sessions, 2,000 checkpoints, a 64 KiB first-checkpoint payload per session,
+10,000 feed rows and a 5,000-entry GC queue. `trace_v2` profile counters
+require equal statement and VM-step counts, zero full scans and automatic
+indexes, and no payload reads, recursive closure walk or aggregate sum in
+that admission path. Setup and
 explicit reclaim are outside the measured phase; this is not a wall-clock gate.
 
 The agent admission double captures only `[renew, commit]` before the first

@@ -752,7 +752,7 @@ fn confirmation_releases_holder_lock_with_a_lingering_descriptor() {
     let [holder] = holders.as_slice() else {
         panic!("expected one legacy inspection holder");
     };
-    let lingering = holder.try_clone().unwrap();
+    let lingering = holder.0.try_clone().unwrap();
     let independent = fs::File::open(&lock).unwrap();
     assert_eq!(
         rustix::fs::flock(
@@ -763,7 +763,7 @@ fn confirmation_releases_holder_lock_with_a_lingering_descriptor() {
     );
 
     drop(databases);
-    release_confirmation_holders(holders).unwrap();
+    drop(holders);
     assert_eq!(prune_confirmed(&paths, &inventory).unwrap(), 1);
     assert!(!old.exists());
     drop(lingering);
