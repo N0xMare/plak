@@ -3,23 +3,24 @@
 use super::authorization::AuthorizationMaterial;
 use super::custodied::CustodiedLogin;
 use super::{
-    ACCESS_REFRESH_SKEW, Arc, AuthSingleFlightGuard, BuildRequestFailure, CancellationToken,
-    ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks,
-    ClaimedRevokeHooks, Client, CodexCredentialStatus, CodexSubscriptionCredentialManager,
-    CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshDetail,
-    CredentialRefreshFailureReason, CredentialRefreshObserver, CredentialStatus, Digest, Duration,
-    ExchangeControl, ExpectedSelection, Instant, MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, Method,
-    NativeCodexAuthError, NativeCodexAuthorization, NativeCodexCatalogWitness,
-    NativeCodexCredentialAuthority, NativeCodexPreflightRequest, OAuthRefreshTokenResponse,
-    OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_NATIVE_CLIENT_ID,
-    OPENAI_CODEX_OAUTH_SCOPES, PROFILE_EXPIRES_AT, PrivateCredentialStore, PrivateStoreError,
-    PullBodyError, REVOKE_PATH, ReadyCredentialLease, RefreshClaim, Request,
-    ResolvedModelDescriptor, RuntimeModelAuthority, RuntimeModelAuthorityError, Serialize,
-    StatusCode, StoredCredential, SubscriptionRequestClass, SubscriptionRequestPermit, TOKEN_PATH,
-    Timestamp, access_needs_refresh, claimed_request, credential_selection_epoch, json_headers,
-    local_logout, network_failure, parse_stored, parse_strict_json, pull_claimed_body,
-    pull_claimed_body_cancellable, run_blocking, run_claimed_refresh, run_claimed_revoke,
-    stored_record, validate_exact_scopes, validate_profile, validate_profile_at,
+    ACCESS_REFRESH_SKEW, AccountBinding, Arc, AuthSingleFlightGuard, BuildRequestFailure,
+    CancellationToken, ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse,
+    ClaimedRefreshHooks, ClaimedRevokeHooks, Client, CodexCredentialStatus,
+    CodexSubscriptionCredentialManager, CredentialFence, CredentialGeneration, CredentialRecord,
+    CredentialRefreshDetail, CredentialRefreshFailureReason, CredentialRefreshObserver,
+    CredentialStatus, Digest, Duration, ExchangeControl, ExpectedSelection, Instant,
+    MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, Method, NativeCodexAuthError, NativeCodexAuthorization,
+    NativeCodexCatalogWitness, NativeCodexCredentialAuthority, NativeCodexPreflightRequest,
+    OAuthRefreshTokenResponse, OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
+    OPENAI_CODEX_NATIVE_CLIENT_ID, OPENAI_CODEX_OAUTH_SCOPES, PROFILE_EXPIRES_AT,
+    PrivateCredentialStore, PrivateStoreError, PullBodyError, REVOKE_PATH, ReadyCredentialLease,
+    RefreshClaim, Request, ResolvedModelDescriptor, RuntimeModelAuthority,
+    RuntimeModelAuthorityError, Serialize, StatusCode, StoredCredential, SubscriptionRequestClass,
+    SubscriptionRequestPermit, TOKEN_PATH, Timestamp, access_needs_refresh, claimed_request,
+    credential_selection_epoch, json_headers, local_logout, network_failure, parse_stored,
+    parse_strict_json, pull_claimed_body, pull_claimed_body_cancellable, run_blocking,
+    run_claimed_refresh, run_claimed_revoke, stored_record, validate_exact_scopes,
+    validate_profile, validate_profile_at,
 };
 use plakous_auth::custody::{CustodyStatus, IdentityDigest, RefreshRequest as CustodyRefresh};
 
@@ -52,6 +53,13 @@ pub(super) struct CodexRefreshHooks<'a> {
     pub(super) force: RefreshForce<'a>,
     /// Numbers and rejecting check of the received response, for diagnostics.
     pub(super) detail: CredentialRefreshDetail,
+}
+
+#[cfg(test)]
+pub(super) struct RefreshProbePause {
+    pub(super) after_flight: bool,
+    pub(super) reached: Arc<tokio::sync::Notify>,
+    pub(super) resume: Arc<tokio::sync::Notify>,
 }
 
 /// When a claimed refresh runs although the stored access token is not yet
@@ -96,6 +104,87 @@ impl CodexRefreshHooks<'_> {
             )?,
         )
     }
+
+    async fn refresh_candidate(
+        &mut self,
+        selected: &AccountBinding,
+    ) -> Result<Option<CredentialFence>, NativeCodexAuthError> {
+        let account = selected.clone();
+        let expected = self
+            .expected
+            .map(|expected| (expected.account.clone(), expected.selection_epoch));
+        let route_account = super::manager::codex_account_digest(Some(selected));
+        let authority = self.manager.authority_binding;
+        let clock = Arc::clone(&self.manager.clock);
+        let (fence, ready_due) = self
+            .manager
+            .store()?
+            .inspect_for_refresh(move |fence, payload| {
+                if fence.account_binding() != &account {
+                    return Err(NativeCodexAuthError::AccountChanged);
+                }
+                let credential = parse_stored(payload)?;
+                if let Some((account, selection_epoch)) = &expected {
+                    ExpectedSelection {
+                        account,
+                        selection_epoch: *selection_epoch,
+                    }
+                    .check(
+                        fence.account_binding(),
+                        credential_selection_epoch(
+                            route_account,
+                            authority,
+                            &credential.selection_epoch,
+                        )?,
+                    )?;
+                }
+                Ok(access_needs_refresh(
+                    credential.access_expires_at,
+                    clock.now().seconds(),
+                    ACCESS_REFRESH_SKEW,
+                ))
+            })
+            .await
+            .map_err(|_| NativeCodexAuthError::Store)??
+            .ok_or(NativeCodexAuthError::Unavailable)?;
+        #[cfg(test)]
+        if fence.status() == CredentialStatus::Ready {
+            self.pause_after_probe().await?;
+        }
+        if fence.account_binding() != selected {
+            return Err(NativeCodexAuthError::AccountChanged);
+        }
+        match ready_due {
+            Some(false) if !self.force.forces(&fence) => Ok(None),
+            Some(_) => Ok(Some(fence)),
+            None if fence.status() == CredentialStatus::RefreshRequired => Ok(Some(fence)),
+            None => Err(NativeCodexAuthError::Unavailable),
+        }
+    }
+
+    #[cfg(test)]
+    async fn pause_after_probe(&mut self) -> Result<(), NativeCodexAuthError> {
+        let pause = {
+            let mut slot = self
+                .manager
+                .refresh_probe_pause
+                .lock()
+                .map_err(|_| NativeCodexAuthError::Coordination)?;
+            if slot
+                .as_ref()
+                .is_some_and(|pause| pause.after_flight == self.flight.is_some())
+            {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if let Some(pause) = pause {
+            pause.reached.notify_one();
+            pause.resume.notified().await;
+        }
+        Ok(())
+    }
 }
 
 #[allow(
@@ -113,54 +202,16 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         self.request_permit = None;
-        let initial = self.manager.load_fence().await?;
         let selected = self.manager.selected_account()?;
-        if initial.account_binding() != &selected {
-            return Err(NativeCodexAuthError::AccountChanged);
-        }
-        if initial.status() == CredentialStatus::Ready {
-            let lease = self.manager.acquire_ready_lease(initial.clone()).await?;
-            let credential = parse_stored(lease.payload())?;
-            self.check_expected(&initial, &credential)?;
-            let fresh = !access_needs_refresh(
-                credential.access_expires_at,
-                self.manager.clock.now().seconds(),
-                ACCESS_REFRESH_SKEW,
-            );
-            drop(credential);
-            drop(lease);
-            if fresh && !self.force.forces(&initial) {
-                return Ok(None);
-            }
-        } else if initial.status() != CredentialStatus::RefreshRequired {
-            return Err(NativeCodexAuthError::Unavailable);
-        }
-
+        let Some(initial) = self.refresh_candidate(&selected).await? else {
+            return Ok(None);
+        };
         if self.flight.is_none() {
             self.flight = Some(self.manager.enter_flight(&initial).await?);
         }
-        let current = self.manager.load_fence().await?;
-        if current.account_binding() != &selected {
-            return Err(NativeCodexAuthError::AccountChanged);
-        }
-        if current.status() == CredentialStatus::Ready {
-            let lease = self.manager.acquire_ready_lease(current.clone()).await?;
-            let credential = parse_stored(lease.payload())?;
-            self.check_expected(&current, &credential)?;
-            let fresh = !access_needs_refresh(
-                credential.access_expires_at,
-                self.manager.clock.now().seconds(),
-                ACCESS_REFRESH_SKEW,
-            );
-            drop(credential);
-            drop(lease);
-            if fresh && !self.force.forces(&current) {
-                return Ok(None);
-            }
-        } else if current.status() != CredentialStatus::RefreshRequired {
-            return Err(NativeCodexAuthError::Unavailable);
-        }
-
+        let Some(current) = self.refresh_candidate(&selected).await? else {
+            return Ok(None);
+        };
         self.request_permit = self
             .manager
             .request_gate

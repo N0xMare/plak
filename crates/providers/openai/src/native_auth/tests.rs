@@ -7463,6 +7463,90 @@ async fn two_managers_renew_concurrently_to_the_same_generation() -> TestResult 
 }
 
 #[tokio::test]
+async fn codex_renewal_adopts_peer_rotation_after_either_ready_probe() -> TestResult {
+    for after_flight in [false, true] {
+        renew_after_peer_advances_read_fence(after_flight).await?;
+    }
+    Ok(())
+}
+
+async fn renew_after_peer_advances_read_fence(after_flight: bool) -> TestResult {
+    let subject = "probe-rotation-subject";
+    let endpoint = test_endpoint().await?;
+    let client = endpoint.client.clone();
+    let (_directory, slot) = private_slot()?;
+    seed_ready_credential(
+        &slot,
+        "probe-rotation-account",
+        subject,
+        now_unix_secs() + 3_600,
+    )?;
+    let first = manager_for_endpoint(&slot, &endpoint)?;
+    let second = manager_for_endpoint(&slot, &endpoint)?;
+    let mut responses = vec![catalog_reply()?, catalog_reply()?];
+    responses.extend(refresh_exchange(subject)?);
+    responses.extend([catalog_reply()?, catalog_reply()?]);
+    let server = spawn_sequence_then_probe(endpoint, responses);
+    let mut models = Vec::new();
+    for manager in [&first, &second] {
+        let resolver = CodexModelResolver::new_for_test(
+            Arc::clone(manager),
+            client.clone(),
+            saturated_observation_config()?,
+        )?;
+        resolver.refresh_catalog().await?;
+        models.push(resolver.resolve_with_evidence(RENEW_MODEL)?.0);
+    }
+    // Expire the same login after admission, without advancing wall time.
+    let store = first.store()?;
+    let before = first.load_fence().await?;
+    let mut stored = parse_stored(store.acquire_ready(&before)?.payload())?;
+    stored.access_expires_at = 1;
+    let due = before.generation().next()?;
+    store.replace(before.generation(), &stored_record(&stored, due)?)?;
+    drop(stored);
+
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *second
+        .refresh_probe_pause
+        .lock()
+        .map_err(|_| "probe lock poisoned")? = Some(super::refresh::RefreshProbePause {
+        after_flight,
+        reached: Arc::clone(&reached),
+        resume: Arc::clone(&resume),
+    });
+    let checked_at = review_timestamp();
+    let (left, right) = tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::join!(
+            async {
+                reached.notified().await;
+                let renewed = Arc::clone(&models[0])
+                    .revalidate_runtime_authority(checked_at)
+                    .await;
+                resume.notify_one();
+                renewed
+            },
+            Arc::clone(&models[1]).revalidate_runtime_authority(checked_at),
+        )
+    })
+    .await?;
+    let generation = first.load_fence().await?.generation().get();
+    assert_eq!(generation, due.get() + 2, "one claim and one completion");
+    assert_eq!(left?.credential_generation(), generation);
+    assert_eq!(right?.credential_generation(), generation);
+    let (requests, unexpected) = server.await??;
+    assert_eq!(
+        request_kinds(&requests),
+        [
+            "catalog", "catalog", "refresh", "userinfo", "catalog", "catalog"
+        ]
+    );
+    assert!(!unexpected);
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_generation_move_between_preparation_and_dispatch_refuses_without_dispatch() -> TestResult
 {
     let subject = "renew-prepared-subject";

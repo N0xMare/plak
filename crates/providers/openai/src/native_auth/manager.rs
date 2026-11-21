@@ -34,6 +34,8 @@ pub struct CodexSubscriptionCredentialManager {
     pub(super) authority_binding: Digest,
     pub(super) request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     pub(super) refresh_observer: Option<Arc<dyn CredentialRefreshObserver>>,
+    #[cfg(test)]
+    pub(super) refresh_probe_pause: Mutex<Option<super::refresh::RefreshProbePause>>,
 }
 
 impl CodexSubscriptionCredentialManager {
@@ -153,6 +155,8 @@ impl CodexSubscriptionCredentialManager {
             authority_binding,
             request_gate: None,
             refresh_observer: None,
+            #[cfg(test)]
+            refresh_probe_pause: Mutex::new(None),
         })
     }
 
@@ -230,6 +234,8 @@ impl CodexSubscriptionCredentialManager {
             jwks: JwksCache::new(JwksResolvePolicy::codex(), MAX_JWKS_NEGATIVE_KEYS),
             request_gate: None,
             refresh_observer: None,
+            #[cfg(test)]
+            refresh_probe_pause: Mutex::new(None),
         })
     }
 
