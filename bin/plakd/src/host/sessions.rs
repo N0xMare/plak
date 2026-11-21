@@ -1255,23 +1255,7 @@ mod tests {
                 .runtime_inspections
                 .load(std::sync::atomic::Ordering::Relaxed)
         };
-        let previous = runtime_inspections();
-        assert!(previous > 0, "the published revision required inspection");
-        tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
-        product.directory.settle();
-        assert_eq!(
-            runtime_inspections(),
-            previous,
-            "an unchanged tree save is not a revision refresh"
-        );
-        tree.revision += 1;
-        tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
-        product.directory.settle();
-        assert_eq!(
-            runtime_inspections(),
-            previous,
-            "a new tree revision is not a product activity refresh"
-        );
+        assert_tree_saves_do_not_inspect_runtime(&product, &mut tree, runtime_inspections);
         // Save through the filesystem, not through a product config notice.
         std::fs::write(
             context.project_agents_dir().unwrap().join("codex-default-root.toml"),
@@ -1290,6 +1274,27 @@ mod tests {
             .unwrap();
         product.directory.settle();
         assert_eq!(runtime_inspections(), before_record + 1);
+    }
+
+    fn assert_tree_saves_do_not_inspect_runtime(
+        product: &ProductSessions,
+        tree: &mut plakous_recursive_subagents::tree::ProductAgentTree,
+        inspections: impl Fn() -> usize,
+    ) {
+        use plakous_recursive_subagents::tree::TreeStore as _;
+
+        let before = inspections();
+        assert!(before > 0, "the product revision required inspection");
+        for advance in [0, 1] {
+            tree.revision += advance;
+            tree.acknowledge_revision(product.tree.save_in_custody(tree).unwrap());
+            product.directory.settle();
+            assert_eq!(
+                inspections(),
+                before,
+                "a tree save is not a product activity refresh"
+            );
+        }
     }
 
     #[test]
