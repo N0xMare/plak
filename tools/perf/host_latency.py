@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import math
 import os
@@ -118,6 +119,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
     try:
         while time.monotonic() < stop_at:
             began = time.monotonic()
+            big = attempt % 2 == 0
             if (
                 terminal.failure
                 or observer.failure
@@ -133,7 +135,6 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
                     current = await Client(fixture, "web").__aenter__()
                     replacements += 1
                 await current.detach()
-                big = attempt % 2 == 0
                 sent = asyncio.Event()
                 opening = asyncio.create_task(current.attach(heavy if big else stream, sent=sent))
                 send_notice = asyncio.create_task(sent.wait())
@@ -198,8 +199,9 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
             except Detached:
                 # The next iteration requests a new attachment without
                 # conflating an attachment resync and a transport replacement.
-                pass
+                first_pages.lost += big
             except ConnectionError:
+                first_pages.lost += big
                 gone += 1
                 if current:
                     resyncs += current.resyncs
@@ -207,7 +209,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
                     await current.close()
                     current = None
             except TimeoutError:
-                first_pages.deadlines += 1
+                first_pages.deadlines += big
             attempt += 1
             await asyncio.sleep(
                 max(0, min(stop_at, began + args.switch_interval) - time.monotonic())
@@ -261,14 +263,15 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
         disconnected=gone,
         replaced=replacements,
     )
+    if args.history_turns * args.prompt_bytes > 8 << 20 and not multi_page:
+        raise RuntimeError("large fixture did not deliver a multi-page baseline")
 
 
 async def run(args):
-    import websockets
-
     if not sys.platform.startswith("linux"):
         raise SystemExit("the workload requires Linux /proc")
-    del websockets  # Fail before making a fixture if the client library is absent.
+    if importlib.util.find_spec("websockets") is None:
+        raise SystemExit("install websockets==15.0.1 in the probe's Python environment")
     fixture = Fixture(args.scratch.resolve(), args.binary.resolve(strict=True))
     fixture.init()
     info = await fixture.spawn("version", "--build-info", pipes=True)
@@ -277,7 +280,7 @@ async def run(args):
     build = json.loads(raw)
     if info.returncode or not build["test_hooks"] or build["wire"]["number"] != 12:
         raise RuntimeError("expected a wire-12 plakd built with test-support")
-    emit("build", revision=build["revision"], flavor=build["flavor"])
+    emit("build", revision=build["revision"], flavor=build["flavor"], wire=build["wire"])
     try:
         pid, batches = await start_fixture(fixture, args)
         stream_time = args.switch_seconds + 90
@@ -296,7 +299,10 @@ async def run(args):
                 live, _ = await observer.attach(stream)
                 await turn(observer, live, "initialize the stream root")
                 await browser.attach(stream)
-                emit("fixture_idle", **fixture.counts(heavy))
+                idle = fixture.counts(heavy)
+                if idle["retained_children"] != args.children - 1 or idle["active_children"] != 0:
+                    raise RuntimeError(f"idle child shape did not settle: {idle}")
+                emit("fixture_idle", **idle)
                 await rates(pid, args.io_seconds, "idle_clients")
                 await terminal.intent("wait for the final synthetic child")
                 emit("fixture_waiting", **await fixture.witness_wait(heavy, args.children))

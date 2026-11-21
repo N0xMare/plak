@@ -134,7 +134,12 @@ class Client:
     async def send(self, frame):
         data = json.dumps(frame, separators=(",", ":"))
         if self.ws:
-            await self.ws.send(data)
+            from websockets.exceptions import ConnectionClosed
+
+            try:
+                await self.ws.send(data)
+            except ConnectionClosed as error:
+                raise ConnectionError("websocket closed while sending") from error
         else:
             self.bridge.stdin.write(data.encode() + b"\n")
             await self.bridge.stdin.drain()
@@ -159,6 +164,9 @@ class Client:
                         future.set_result((frame["outcome"], stamp))
                 elif kind in ("snapshot", "event", "resync_required", "moved"):
                     state = self.attachments.setdefault(frame["attachment"], Attachment())
+                    if kind == "snapshot" and frame["page"] == 0:
+                        # One snapshot observation consumes one sequence position.
+                        state.seq += 1
                     if kind == "snapshot" and not state.last:
                         state.first = state.first or stamp
                         state.pages += 1
