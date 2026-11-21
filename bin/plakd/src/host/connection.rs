@@ -203,12 +203,15 @@ impl Outbox {
         if let Some(frame) = queue.control.pop_front() {
             return Ok(Some((frame, false)));
         }
-        if let Some(Ordered::Snapshot(job)) = queue.ordered.front() {
-            if !job.ready() {
+        loop {
+            if queue.ordered.front().is_some_and(|entry| !entry.ready()) {
                 return Ok(None);
             }
-            let pages = job.take()?;
-            queue.ordered.pop_front();
+            let pages = match queue.ordered.pop_front() {
+                Some(Ordered::Snapshot(job)) => job.take()?,
+                Some(Ordered::Line(line)) => return Ok(Some((Some(line), true))),
+                None => return Ok(None),
+            };
             queue.bytes = queue.bytes - snapshot::BYTES + pages.bytes;
             queue.frames = queue.frames - snapshot::FRAMES + pages.lines.len();
             queue.ordered_frames = queue.ordered_frames - snapshot::FRAMES + pages.lines.len();
@@ -216,10 +219,6 @@ impl Outbox {
                 queue.ordered.push_front(Ordered::Line(line));
             }
         }
-        Ok(queue.ordered.pop_front().and_then(|entry| match entry {
-            Ordered::Line(line) => Some((Some(line), true)),
-            Ordered::Snapshot(_) => None,
-        }))
     }
 
     fn sent(&self, len: usize, ordered: bool) -> bool {
@@ -368,5 +367,39 @@ mod tests {
         assert!(outbox.pop().unwrap().is_some());
         assert!(outbox.write_all(b"{}\n").is_err());
         assert!(matches!(outbox.pop(), Err(SendError::Full)));
+    }
+
+    #[tokio::test]
+    async fn a_pending_snapshot_leaves_control_writable_but_fences_following_events() {
+        let encoders = snapshot::ENCODERS.acquire_many(4).await.unwrap();
+        let mut outbox = Outbox::default();
+        let event = b"{\"frame\":\"event\"}\n";
+        outbox.snapshot(4, PresentationSnapshot::default()).unwrap();
+        outbox.write_all(event).unwrap();
+        let pong = encode_line(&HostFrame::<PlakExtension>::Response {
+            id: 42,
+            outcome: Outcome::Ok(Answer::Pong),
+        })
+        .unwrap();
+        outbox.write_all(pong.as_bytes()).unwrap();
+        let (line, ordered) = outbox.pop().unwrap().unwrap();
+        assert_eq!(line.unwrap(), pong.as_bytes());
+        assert!(!ordered);
+        outbox.sent(pong.len(), ordered);
+        assert!(outbox.pop().unwrap().is_none());
+        // Discard the notifications for the two lines already enqueued.
+        outbox.0.ready.notified().await;
+        drop(encoders);
+        tokio::time::timeout(std::time::Duration::from_secs(3), outbox.0.ready.notified())
+            .await
+            .unwrap();
+        let (page, ordered) = outbox.pop().unwrap().unwrap();
+        let page = page.unwrap();
+        assert!(page.starts_with(br#"{"frame":"snapshot","attachment":4,"#));
+        assert!(ordered);
+        outbox.sent(page.len(), ordered);
+        let (line, ordered) = outbox.pop().unwrap().unwrap();
+        assert_eq!(line.unwrap(), event);
+        assert!(ordered);
     }
 }

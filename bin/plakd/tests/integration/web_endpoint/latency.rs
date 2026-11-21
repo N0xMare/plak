@@ -1,6 +1,7 @@
 //! Opt-in latency probe, using only the real host and an offline scripted model.
 //! Run with the `test-support` build and `--run-ignored`;
-//! `PLAK_LATENCY_SECONDS` overrides the ten-minute default.
+//! `PLAK_LATENCY_SECONDS` overrides the ten-minute default. Set
+//! `PLAK_LATENCY_DIRECTORY=0` to isolate transport from directory rebuilds.
 
 use super::*;
 use std::time::{Duration, Instant};
@@ -278,16 +279,19 @@ fn host_latency_probe() {
     let mut streaming = upgrade(&web, &cookie);
     welcome(&mut browsing);
     welcome(&mut streaming);
-    send(
-        &mut browsing,
-        &ClientFrame::Request {
-            id: 1,
-            op: Op::WatchSessions {
-                include_archived: true,
+    let watch = std::env::var("PLAK_LATENCY_DIRECTORY").as_deref() != Ok("0");
+    if watch {
+        send(
+            &mut browsing,
+            &ClientFrame::Request {
+                id: 1,
+                op: Op::WatchSessions {
+                    include_archived: true,
+                },
             },
-        },
-    );
-    assert_eq!(response(&mut browsing, 1)["ok"]["answer"], "watching");
+        );
+        assert_eq!(response(&mut browsing, 1)["ok"]["answer"], "watching");
+    }
     let attachment = attach(&mut streaming, &live, 1);
     let mut samples = Samples::default();
     let start = Instant::now();
@@ -310,7 +314,7 @@ fn host_latency_probe() {
     let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap();
     assert!(!log.contains("client fell behind"));
     eprintln!(
-        "{round} switches, {} pages, {:.1}s, no resync, no replacement, no console deadline",
+        "{round} switches, {} pages, {:.1}s, watch={watch}, no resync, no replacement, no console deadline",
         samples.pages,
         start.elapsed().as_secs_f64()
     );

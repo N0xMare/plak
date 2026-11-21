@@ -17,7 +17,7 @@ pub(super) const FRAMES: usize = MAX_SNAPSHOT_PAGES as usize;
 
 // An idle connection may wait for a slot, but a closed connection must not
 // leave queued work behind. A running encoder holds its slot until it ends.
-static ENCODERS: Semaphore = Semaphore::const_new(4);
+pub(super) static ENCODERS: Semaphore = Semaphore::const_new(4);
 
 #[derive(Default)]
 pub(super) struct Pages {
