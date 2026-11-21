@@ -248,3 +248,36 @@ impl ProductStore {
         Ok((standing, reason, wakes))
     }
 }
+
+#[cfg(test)]
+#[test]
+#[allow(clippy::unwrap_used, reason = "isolated store fixture")]
+fn projector_replay_notifies_only_when_the_cursor_or_view_changes() {
+    use std::time::Instant;
+
+    use plakous_hosted::sessions::projector::{ProjectionCommit, ViewWrites};
+
+    let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut record = super::sessions::SessionRecord::new(paths.home().to_owned());
+    store.commit(&mut record).unwrap();
+    let (_inbox, mailbox) = super::directory_notice::local::Inbox::register(&paths);
+    let mut view = SessionViews::empty();
+    let writes = ViewWrites::between(&view, &view);
+    let notified = || mailbox.take_until(Instant::now()).unwrap().records;
+    let mut publish = |view: &SessionViews| {
+        assert_eq!(
+            store
+                .commit_projection_views(&record.id, &writes, &view.state)
+                .unwrap(),
+            ProjectionCommit::Applied
+        );
+    };
+    publish(&view);
+    assert_eq!(notified(), BTreeSet::from([record.id.clone()]));
+    publish(&view);
+    assert_eq!(notified(), BTreeSet::new());
+    view.state.counters.root_turns = 1;
+    publish(&view);
+    assert_eq!(notified(), BTreeSet::from([record.id.clone()]));
+}

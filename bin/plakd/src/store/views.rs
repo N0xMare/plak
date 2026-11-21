@@ -588,9 +588,9 @@ impl ProductStore {
         }
         joined.consume_before_retention(&intents);
         let views = &joined;
-        if commit_views(&tx, session_id, writes, views)? == ProjectionCommit::CursorMoved {
+        let Some(directory_changed) = commit_views(&tx, session_id, writes, views)? else {
             return Ok(ProjectionCommit::CursorMoved);
-        }
+        };
         let mut changed = Vec::new();
         if views
             .created_operation_id
@@ -616,8 +616,9 @@ impl ProductStore {
                         .insert(operation.to_owned(), completion);
                     source_views.consume_before_retention(&intents);
                     let writes = ViewWrites::between(&previous, &source_views);
-                    commit_views(&tx, source_id, &writes, &source_views.state)?;
-                    changed.push(source_id.to_owned());
+                    if commit_views(&tx, source_id, &writes, &source_views.state)? == Some(true) {
+                        changed.push(source_id.to_owned());
+                    }
                 }
             }
         }
@@ -689,7 +690,9 @@ impl ProductStore {
         }
         match tx.commit() {
             Ok(()) => {
-                self.session_changed(session_id);
+                if directory_changed {
+                    self.session_changed(session_id);
+                }
                 for id in changed {
                     self.session_changed(&id);
                 }
@@ -732,12 +735,14 @@ impl ProductStore {
     clippy::too_many_lines,
     reason = "View commit keeps session revision CAS, transcript replacement, queue publication, and transaction completion together."
 )]
-pub(super) fn commit_views(
+// None means the cursor moved. Otherwise report whether the directory's
+// cursor or view facts changed, even when a join stays at the same cursor.
+fn commit_views(
     tx: &Connection,
     session_id: &str,
     writes: &ViewWrites,
     views: &SessionViewState,
-) -> Result<ProjectionCommit, RecordStoreError> {
+) -> Result<Option<bool>, RecordStoreError> {
     let runtime_session = views
         .runtime_session_id
         .map_or_default(|session| session.to_string());
@@ -756,7 +761,7 @@ pub(super) fn commit_views(
         }
         .map_err(|error| super::write_error(error, "product store write failed"))?;
     if moved != 1 {
-        return Ok(ProjectionCommit::CursorMoved);
+        return Ok(None);
     }
     let state = serde_json::to_string(&views).map_err(|error| {
         super::write_error(error, "product session views are not encodable".to_owned())
@@ -776,8 +781,13 @@ pub(super) fn commit_views(
             super::write_error(error, "product session locator is invalid".to_owned())
         })?;
     let head = views.projected_locator(recorded);
-    tx.execute(
-            "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id) DO UPDATE SET head_locator=excluded.head_locator,root_turn_count=excluded.root_turn_count,tool_call_count=excluded.tool_call_count,compaction_count=excluded.compaction_count,state=excluded.state",
+    let state_changed = tx.execute(
+            "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id) DO UPDATE SET head_locator=excluded.head_locator,root_turn_count=excluded.root_turn_count,tool_call_count=excluded.tool_call_count,compaction_count=excluded.compaction_count,state=excluded.state
+            WHERE session_views.head_locator IS NOT excluded.head_locator
+               OR session_views.root_turn_count != excluded.root_turn_count
+               OR session_views.tool_call_count != excluded.tool_call_count
+               OR session_views.compaction_count != excluded.compaction_count
+               OR session_views.state != excluded.state",
             params![
                 session_id,
                 head.map(|head| head.to_string()),
@@ -846,7 +856,7 @@ pub(super) fn commit_views(
             )
             .map_err(|error| super::write_error(error, "could not write a transcript row".to_owned()))?;
     }
-    Ok(ProjectionCommit::Applied)
+    Ok(Some(state_changed != 0 || next != expected))
 }
 
 fn write_keyed<K: rusqlite::ToSql, V: serde::Serialize>(
