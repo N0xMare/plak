@@ -140,8 +140,8 @@ fn interrupted() -> Step {
     )
 }
 
-fn busy() -> Step {
-    let Some(failure) = RetryFailure::status(503, true, Some(Duration::ZERO), String::new()) else {
+fn busy(retry_after: Duration) -> Step {
+    let Some(failure) = RetryFailure::status(503, true, Some(retry_after), String::new()) else {
         panic!("503 must be replayable")
     };
     (
@@ -171,7 +171,12 @@ async fn renewal_runs_once_and_the_next_dispatch_keeps_its_start_time() {
 
 #[tokio::test(start_paused = true)]
 async fn a_401_does_not_renew_after_the_physical_retry_budget_is_spent() {
-    let mut script = Script::new([busy(), busy(), busy(), renewed("last 401")]);
+    let mut script = Script::new([
+        busy(Duration::ZERO),
+        busy(Duration::ZERO),
+        busy(Duration::ZERO),
+        renewed("last 401"),
+    ]);
     let outcome = host(RetryDelivery::BeforeDelay)
         .run(&mut script, &CancellationToken::new())
         .await;
@@ -195,7 +200,7 @@ async fn a_saturated_sink_cannot_miss_a_discard_and_then_see_a_replay() {
     assert_eq!(outcome, Outcome::Finished("stream cut", true));
     assert_eq!(script.notices.len(), 1);
     assert!(script.notices[0].output_discarded());
-    assert!(script.reauthorizations.is_empty());
+    assert_eq!(script.reauthorizations, [false; 0]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -217,7 +222,8 @@ async fn a_closed_sink_does_not_prevent_discarding_replay() {
 async fn the_hard_deadline_can_expire_while_a_retry_notice_waits_for_capacity() {
     let (mut sink, receiver) = mpsc::channel(0);
     assert!(sink.try_send(()).is_ok());
-    let mut script = Script::new([busy()]);
+    let retry_delay = Duration::from_millis(100);
+    let mut script = Script::new([busy(retry_delay)]);
     let mut driver = host(RetryDelivery::DuringDelay);
     driver.hard_deadline = Some(Instant::now() + Duration::from_millis(500));
     script.sink = Some(sink);
@@ -226,8 +232,8 @@ async fn the_hard_deadline_can_expire_while_a_retry_notice_waits_for_capacity() 
 
     assert_eq!(outcome, Outcome::Deadline("busy"));
     assert_eq!(script.notices.len(), 1);
-    assert_eq!(script.notices[0].delay(), Duration::ZERO);
-    assert!(script.reauthorizations.is_empty());
+    assert_eq!(script.notices[0].delay(), retry_delay);
+    assert_eq!(script.reauthorizations, [false; 0]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -239,7 +245,7 @@ async fn record_rejection_forces_a_fresh_connection_for_only_the_next_generation
             failure: RetryFailure::record_rejection_fixture(),
         },
     );
-    let mut script = Script::new([rejected_record, busy(), finished()]);
+    let mut script = Script::new([rejected_record, busy(Duration::ZERO), finished()]);
     let outcome = host(RetryDelivery::BeforeDelay)
         .run(&mut script, &CancellationToken::new())
         .await;
