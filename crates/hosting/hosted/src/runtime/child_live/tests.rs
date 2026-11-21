@@ -652,6 +652,13 @@ pub(in crate::runtime) struct LiveFixture {
     admission: plakous::agent::EventSubscription,
 }
 
+impl LiveFixture {
+    fn start_reducer(mut self) -> Self {
+        self.owner = self.owner.drive_in(&crate::TaskSet::new());
+        self
+    }
+}
+
 pub(in crate::runtime) fn start_attach_probe(
     sessions: Arc<AgentSessions>,
     session: &plakous::sessions::OpenedSession,
@@ -843,6 +850,19 @@ pub(in crate::runtime) async fn fixture_with(
     plakous::agent::Turn,
     LiveFixture,
 ) {
+    let (root, sessions, session, turn, live) = fixture_with_pending_reducer(steps).await;
+    (root, sessions, session, turn, live.start_reducer())
+}
+
+async fn fixture_with_pending_reducer(
+    steps: serde_json::Value,
+) -> (
+    tempfile::TempDir,
+    Arc<AgentSessions>,
+    plakous::sessions::OpenedSession,
+    plakous::agent::Turn,
+    LiveFixture,
+) {
     use plakous::sessions::{
         AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
         SessionOperationId,
@@ -898,8 +918,7 @@ pub(in crate::runtime) async fn fixture_with(
         .unwrap()
         .into_parts();
     let mut turn = agent.prompt("live").await.unwrap();
-    let owner = super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent)
-        .drive_in(&crate::TaskSet::new());
+    let owner = super::super::child_projection::ChildTurnProjection::admitted(&mut turn, &agent);
     (
         root,
         sessions,

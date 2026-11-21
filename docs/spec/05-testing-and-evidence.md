@@ -3429,6 +3429,12 @@ in 16-event batches, requiring the reducer to consume each batch before the next
 128-update buffer is intentionally overrun, not the core feed serving the
 reducer. The fixture checks the attach gap, one later resync gap, the
 256-update barrier and convergence on committed history.
+The coverage-cursor fixture holds back the child reducer until the provider
+reaches its first gate, proving that provider progress alone does not make
+the attach gap available. It waits for the reducer to publish the text prefix
+before attaching the face, and for the intervening delta before capturing the
+history cursor. It requires one gap, only the post-attachment delta in the
+live tail, and a canonical refresh that retires the gap at terminal.
 
 **Feed and projector laws.** The always-on offline lanes pin:
 

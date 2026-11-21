@@ -1,14 +1,36 @@
 //! The canonical attach cursor separates unavailable prefixes from live appends.
 
 use super::*;
+use crate::runtime::child_projection::Tail;
 use plakous_offline_crash_harness::gate::GateHandle;
+
+async fn reduced_delta(tail: &mut Tail, expected: &str) -> u64 {
+    let wait = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(update) = tail
+            .recv()
+            .await
+            .expect("the reducer witness must not fall behind")
+        {
+            if update
+                .ops
+                .iter()
+                .any(|op| matches!(op, HostEvent::AssistantDelta(text) if text == expected))
+            {
+                return update.cursor;
+            }
+        }
+        panic!("the reducer closed before publishing {expected}");
+    });
+    wait.await
+        .unwrap_or_else(|_| panic!("the reducer did not publish {expected}"))
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn coverage_starts_at_the_history_cursor_and_retires_at_terminal() {
     let before = Arc::new(GateHandle::new());
     let during = Arc::new(GateHandle::new());
     let finish = GateHandle::new();
-    let (_root, sessions, attached, turn, live) = fixture_with(serde_json::json!([
+    let (_root, sessions, attached, turn, live) = fixture_with_pending_reducer(serde_json::json!([
         {"output":{"text":"committed prefix"}},
         {"output":{"text":"before-attachduring-attachafter-attach"}, "stream":[
             {"text":"before-attach"}, {"gate":before.script()},
@@ -18,16 +40,31 @@ async fn coverage_starts_at_the_history_cursor_and_retires_at_terminal() {
     ]))
     .await;
     before.entered().await;
+    let (snapshot, mut tail) = live.owner.observation.attach();
+    assert_eq!(
+        snapshot.cursor, 0,
+        "the provider gate can be reached before the reducer publishes anything"
+    );
+    let live = live.start_reducer();
+    assert!(
+        reduced_delta(&mut tail, "before-attach").await > 1,
+        "the face must attach after the reducer has published the uncommitted prefix"
+    );
+
     let release = Arc::clone(&before);
     let reached = Arc::clone(&during);
+    let observation = Arc::downgrade(&live.owner.observation);
     hooks::set_before_attach(
         "coverage",
         Arc::new(move || {
             let release = Arc::clone(&release);
             let reached = Arc::clone(&reached);
+            let observation = observation.upgrade().expect("the turn is live");
             Box::pin(async move {
+                let (_, mut tail) = observation.attach();
                 release.release();
                 reached.entered().await;
+                reduced_delta(&mut tail, "during-attach").await;
             })
         }),
     );
