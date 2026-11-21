@@ -4,7 +4,7 @@ use super::super::restart_matrix::{self, Pilot};
 
 use super::*;
 
-fn pilot(child: bool, switching: bool) -> (Vec<Commit>, Signature) {
+fn pilot(child: bool, switching: bool) -> (Pilot, Vec<Value>) {
     let fixture = fixture().unwrap();
     cold_script(&fixture, child);
     let trace = fixture.root.join("pilot.jsonl");
@@ -16,12 +16,18 @@ fn pilot(child: bool, switching: bool) -> (Vec<Commit>, Signature) {
         &session,
         &fixture_trace(child, switching),
         child,
-        ReplayMode::Pilot,
+        ReplayMode::Pilot(&trace),
     )
     .unwrap();
     host.child.as_mut().unwrap().kill().unwrap();
     host.child.take().unwrap().wait().unwrap();
-    (indexed_commits(&trace), signature(&trace))
+    (
+        Pilot {
+            commits: indexed_commits(&trace),
+            expected: signature(&trace),
+        },
+        indexed_trace_rows(&std::fs::read_to_string(&trace).unwrap()).collect(),
+    )
 }
 
 fn recover(fixture: &Fixture, host: &Host, session: &str, trace: &Value, child: bool) {
@@ -188,7 +194,7 @@ fn cut_case(
                 &session,
                 &stimulus,
                 child,
-                ReplayMode::Cut,
+                ReplayMode::Cut(&trace),
             );
             if let Err(error) = result {
                 assert!(
@@ -268,13 +274,18 @@ fn matrix(switching: bool, child: bool, group: usize) {
         child,
         group,
         || {
-            let (commits, expected) = pilot(child, switching);
+            let (first, first_rows) = pilot(child, switching);
+            let (second, second_rows) = pilot(child, switching);
+            if first.expected != second.expected {
+                eprintln!(
+                    "first indexed trace: {first_rows:?}\nsecond indexed trace: {second_rows:?}"
+                );
+            }
             assert_eq!(
-                expected,
-                pilot(child, switching).1,
+                first.expected, second.expected,
                 "twin complete indexed signatures"
             );
-            Pilot { commits, expected }
+            first
         },
         |store, ordinal, expected| cut_case(child, switching, store, ordinal, expected),
     );

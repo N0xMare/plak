@@ -9,6 +9,7 @@ use std::os::unix::fs::MetadataExt as _;
 
 const GROUPS: usize = 8;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct Pilot {
     pub(super) commits: Vec<Commit>,
     pub(super) expected: Signature,
@@ -141,27 +142,50 @@ fn cache_root() -> PathBuf {
     root
 }
 
-fn shared_pilot(root: &Path, shape: &str, child: bool, prepare: impl FnOnce() -> Pilot) -> Pilot {
+fn shared_pilot(
+    root: &Path,
+    shape: &str,
+    child: bool,
+    prepare: impl FnOnce() -> Pilot,
+) -> Result<Pilot, String> {
     let path = root.join(format!("{shape}-{child}-pilot.json"));
     let mut lock = lock(&path.with_extension("lock"));
     if path.exists() {
-        let (commits, expected) = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        return Pilot { commits, expected };
+        return serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     }
     // A failed or killed builder poisons this run's pilot instead of making
     // every remaining test retry an expensive, already-failing setup.
-    assert_eq!(
-        lock.metadata().unwrap().len(),
-        0,
-        "the shared pilot did not finish"
-    );
+    if lock.metadata().unwrap().len() != 0 {
+        return Err("pilot builder exited before publishing a result".to_owned());
+    }
     lock.write_all(b"started\n").unwrap();
-    let pilot = prepare();
-    publish(
-        &path,
-        &serde_json::to_vec(&(&pilot.commits, &pilot.expected)).unwrap(),
-    );
-    pilot
+    let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(prepare));
+    let result = attempt.as_ref().map_err(|error| {
+        error
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| error.downcast_ref::<&str>().copied())
+            .unwrap_or("non-string pilot panic")
+    });
+    publish(&path, &serde_json::to_vec(&result).unwrap());
+    match attempt {
+        Ok(pilot) => Ok(pilot),
+        Err(error) => std::panic::resume_unwind(error),
+    }
+}
+
+#[test]
+fn a_failed_pilot_reports_its_cause_without_restarting_for_another_group() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let cause = "twin product signatures differ";
+    let first =
+        std::panic::catch_unwind(|| shared_pilot(root, "fixture", false, || panic!("{cause}")));
+    assert!(first.is_err(), "the pilot builder must fail its test");
+    let second = shared_pilot(root, "fixture", false, || {
+        panic!("the dependent group must not re-run the pilot")
+    });
+    assert!(matches!(second, Err(reason) if reason == cause));
 }
 
 pub(super) fn run_group(
@@ -176,7 +200,9 @@ pub(super) fn run_group(
     let Pilot {
         mut commits,
         expected,
-    } = shared_pilot(&root, shape, child, prepare);
+    } = shared_pilot(&root, shape, child, prepare).unwrap_or_else(|reason| {
+        panic!("{shape}: child={child} group={group} blocked by shared pilot: {reason}")
+    });
     commits.sort_by(|left, right| (&left.1, left.2).cmp(&(&right.1, right.2)));
     let inventory: Vec<_> = commits
         .iter()

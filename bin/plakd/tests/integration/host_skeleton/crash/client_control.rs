@@ -228,12 +228,8 @@ pub(super) fn stopped_notice_committed(fixture: &Fixture, session: &str) -> bool
 }
 
 pub(super) fn signature(trace: &Path) -> Signature {
-    let mut commits = std::fs::read_to_string(trace)
-        .unwrap()
-        .split_inclusive('\n')
-        .filter(|line| line.ends_with('\n'))
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .filter(|row| row["indexed"] == true)
+    let trace = std::fs::read_to_string(trace).unwrap();
+    let mut commits = indexed_trace_rows(&trace)
         .map(|row| {
             (
                 row["store"].as_str().unwrap().to_owned(),
@@ -244,4 +240,12 @@ pub(super) fn signature(trace: &Path) -> Signature {
         .collect::<Vec<_>>();
     commits.sort();
     commits
+}
+
+pub(super) fn indexed_trace_rows(trace: &str) -> impl Iterator<Item = serde_json::Value> {
+    trace
+        .split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|row| row["indexed"] == true)
 }

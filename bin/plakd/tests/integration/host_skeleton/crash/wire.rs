@@ -13,11 +13,24 @@ mod directory_tests;
 mod legal_reads;
 pub(super) mod transcript;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ReplayMode {
+#[derive(Clone, Copy)]
+enum ReplayMode<'a> {
     Journey,
-    Pilot,
-    Cut,
+    Pilot(&'a Path),
+    Cut(&'a Path),
+}
+
+impl<'a> ReplayMode<'a> {
+    fn trace(self) -> Option<&'a Path> {
+        match self {
+            Self::Journey => None,
+            Self::Pilot(trace) | Self::Cut(trace) => Some(trace),
+        }
+    }
+
+    fn cut(self) -> bool {
+        matches!(self, Self::Cut(_))
+    }
 }
 
 fn fixture_trace(child: bool, switching: bool) -> Value {
@@ -243,13 +256,13 @@ impl Connection {
         writeln!(writer, "{frame}")
     }
 
-    fn closed(&mut self, mode: ReplayMode) -> io::Result<()> {
+    fn closed(&mut self, mode: ReplayMode<'_>) -> io::Result<()> {
         drop(self.writer.take());
         let until = Instant::now() + WAIT;
         loop {
             if let Some(status) = self.child.try_wait()? {
                 assert!(
-                    mode == ReplayMode::Cut || status.success(),
+                    mode.cut() || status.success(),
                     "bridge did not close cleanly: {status}"
                 );
                 self.child.wait()?;
@@ -260,7 +273,7 @@ impl Connection {
         }
     }
 
-    fn eof(&mut self, mode: ReplayMode) -> io::Result<()> {
+    fn eof(&mut self, mode: ReplayMode<'_>) -> io::Result<()> {
         loop {
             match self.read() {
                 Ok(_) => {}
@@ -307,15 +320,16 @@ fn replay(
     session: &str,
     trace: &Value,
     child: bool,
-    mode: ReplayMode,
+    mode: ReplayMode<'_>,
 ) -> io::Result<()> {
     let mut bindings = Bindings::new(session, &fixture.workspace());
     let mut connections: BTreeMap<u64, Connection> = BTreeMap::new();
     let mut before = None;
+    let mut notices_before_stop = None;
     for entry in trace["entries"].as_array().unwrap() {
         if let Some(barrier) = entry["barrier"].as_str() {
             if barrier == "host-restarted" {
-                if mode != ReplayMode::Journey {
+                if !matches!(mode, ReplayMode::Journey) {
                     break;
                 }
                 before = Some((dispatches(fixture), child_dispatches(fixture)));
@@ -331,16 +345,15 @@ fn replay(
                 connections.get_mut(&1).unwrap().answer_barrier()?;
                 let until = Instant::now() + WAIT;
                 while child && child_dispatches(fixture) == 0 {
-                    if mode == ReplayMode::Cut && host.child.as_mut().unwrap().try_wait()?.is_some()
-                    {
+                    if mode.cut() && host.child.as_mut().unwrap().try_wait()?.is_some() {
                         return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
                     }
                     assert!(Instant::now() < until, "child never dispatched");
                     std::thread::sleep(Duration::from_millis(5));
                 }
             } else if barrier == "stopped" {
-                wait_stopped_notice(fixture, host, session, mode)?;
-                if mode != ReplayMode::Cut {
+                wait_stopped_notice(fixture, host, session, mode, notices_before_stop)?;
+                if !mode.cut() {
                     wait_stopped_tree(fixture, host, session, child);
                 }
             } else if barrier == "reconnected-without-replay" {
@@ -370,6 +383,15 @@ fn replay(
             }
             let value = bindings.outgoing(&entry["frame"], "");
             let frame: ClientFrame<PlakExtension> = serde_json::from_value(value)?;
+            if matches!(
+                &frame,
+                ClientFrame::Request {
+                    op: Op::StopSession { .. },
+                    ..
+                }
+            ) {
+                notices_before_stop = mode.trace().map(notice_trace_ordinal).transpose()?;
+            }
             connections
                 .get_mut(&id)
                 .unwrap()
@@ -391,17 +413,78 @@ fn wait_stopped_notice(
     fixture: &Fixture,
     host: &mut Host,
     session: &str,
-    mode: ReplayMode,
+    mode: ReplayMode<'_>,
+    notices_before_stop: Option<u64>,
 ) -> io::Result<()> {
     let until = Instant::now() + WAIT;
-    while !stopped_notice_committed(fixture, session) {
-        if mode == ReplayMode::Cut && host.child.as_mut().unwrap().try_wait()?.is_some() {
+    loop {
+        if mode.cut() && host.child.as_mut().unwrap().try_wait()?.is_some() {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
         }
-        assert!(Instant::now() < until, "the stop notice was not committed");
+        if stopped_notice_committed(fixture, session) {
+            // Other SQLite connections can see the notice before its WAL
+            // callback publishes the trace line. Do not kill a complete
+            // pilot until the stop's indexed notice write is in the trace.
+            if let Some(trace) = mode.trace() {
+                let before = notices_before_stop.expect("recorded stop request");
+                if notice_trace_ordinal(trace)? > before {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+        }
+        assert!(
+            Instant::now() < until,
+            "the stop notice was not committed and traced"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
-    Ok(())
+}
+
+fn notice_trace_ordinal(trace: &Path) -> io::Result<u64> {
+    Ok(indexed_trace_rows(&std::fs::read_to_string(trace)?)
+        .filter(|row| {
+            row["store"] == "product"
+                && row["tables"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|table| table == "operator_notices")
+        })
+        .last()
+        .map_or(0, |row| row["store_ordinal"].as_u64().unwrap()))
+}
+
+#[test]
+fn the_stop_trace_requires_a_complete_indexed_product_notice() {
+    let directory = tempfile::tempdir().unwrap();
+    let trace = directory.path().join("trace.jsonl");
+    let mut file = std::fs::File::create(&trace).unwrap();
+    for (store, index, indexed, table) in [
+        ("product", 1, true, "operator_notices"),
+        ("runtime", 2, true, "operator_notices"),
+        ("product", 3, false, "operator_notices"),
+        ("product", 4, true, "sessions"),
+    ] {
+        writeln!(
+            file,
+            "{}",
+            json!({"store": store, "store_ordinal": index,
+            "indexed": indexed, "tables": [table]})
+        )
+        .unwrap();
+    }
+    write!(
+        file,
+        "{}",
+        json!({"store": "product", "store_ordinal": 5,
+        "indexed": true, "tables": ["sessions", "operator_notices"]})
+    )
+    .unwrap();
+    assert_eq!(notice_trace_ordinal(&trace).unwrap(), 1);
+    writeln!(file).unwrap();
+    assert_eq!(notice_trace_ordinal(&trace).unwrap(), 5);
 }
 
 #[test]

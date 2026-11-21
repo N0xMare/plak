@@ -4617,7 +4617,10 @@ or duplicate cuts, and the final completed group checks the union of actual
 per-group cut manifests. Per-cut assertions and twin-pilot signatures are
 unchanged. A file lock shares each family/child twin pilot once per nextest
 run, under that run's isolated temporary directory, keyed to the exact test
-and product executables and fixture inputs. `NEXTEST_RUN_ID` is shared only
+and product executables and fixture inputs. A pilot panic publishes its
+reason for the dependent groups, which report blocked cuts rather than
+retrying or passing without evidence. A builder that exits before publishing
+a result also blocks the dependents. `NEXTEST_RUN_ID` is shared only
 when `NEXTEST=1`; Cargo test and crash-sweep invocations use a process ID and
 start-time identity even if an earlier run ID was inherited. No pilot survives
 across runs or checkouts. All sixteen tests of a family must run in the same nextest
@@ -4627,11 +4630,13 @@ coverage requirement, not an isolation requirement; the cases run concurrently.
 The strict sweep selects these families by prefix, runs the complete selection
 with `--test-threads <jobs>`, and refuses an
 incomplete or empty group listing rather than succeeding with zero cuts.
-In wire replay, the `stopped` barrier likewise waits for that durable stop
-notice before sending bye, in both pilots and cuts (a killed host ends the
-cut's wait). This pins the final notice-intent commit rather than racing the
-pilot's host kill against it. Twin signatures and every reached per-store
-prefix remain exact; only the cross-face parity comparison merges runs.
+In wire replay, the `stopped` barrier waits for the durable stop notice
+before sending bye, in both pilots and cuts. Traced runs also wait for the
+complete indexed product notice write after the stop request: a reader can
+see the durable notice before the WAL callback publishes its trace line.
+A killed host ends the cut's wait. Both twins report indexed table writes
+when they diverge. Twin signatures and every reached per-store prefix
+remain exact; only the cross-face parity comparison merges runs.
 
 Protocol-4 attention is tested while busy; clients keep queueing with
 `follow_up`. Child counts exercise live, parked, completed and held-loss
