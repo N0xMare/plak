@@ -157,6 +157,15 @@ impl RetryFailure {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn record_rejection_fixture() -> Self {
+        Self::new(
+            FailurePoint::RecordRejectedInTransit,
+            ModelRetryCause::RecordRejectedInTransit,
+            String::new(),
+        )
+    }
+
     /// Retains the exact phase, including phases without neutral names.
     #[must_use]
     pub const fn with_phase(mut self, phase: Option<ModelRetryPhase>) -> Self {

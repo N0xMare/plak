@@ -239,3 +239,6 @@ pub(super) async fn wait_deadline(deadline: Option<Instant>) {
         None => std::future::pending().await,
     }
 }
+
+#[cfg(test)]
+mod tests;
