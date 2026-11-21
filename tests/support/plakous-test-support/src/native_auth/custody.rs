@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -67,13 +68,13 @@ pub async fn fields_hold_exact_fence(
 pub async fn fields_name_the_moved_fence(
     manager: &impl LocalCustody,
     slot: &CustodySlot,
-    advance_between_reads: impl FnOnce() -> TestResult,
+    path: &Path,
 ) -> TestResult {
     let expected = local::facts(manager, slot)
         .await?
         .expected_fence()
         .ok_or("no fence")?;
-    advance_between_reads()?;
+    install_before_lease(path, LeaseRead::Fields, Box::new(advance_ready_unchanged));
     let refusal = local::fields(manager, slot, &expected).await;
     let Err(CustodyError::FenceMoved { facts }) = refusal else {
         return Err(format!("the moved record was not named: {refusal:?}").into());
@@ -87,6 +88,136 @@ pub async fn fields_name_the_moved_fence(
             .take_hold()
             .is_some()
     );
+    Ok(())
+}
+
+/// Repeatedly move the Ready fence before the snapshot can lease its payload.
+///
+/// # Errors
+/// Returns a fixture read or generation error.
+///
+/// # Panics
+/// Panics if bounded retries report a storage fault or expose a stale snapshot.
+pub async fn moving_snapshots_are_busy(
+    manager: &impl LocalCustody,
+    slot: &CustodySlot,
+    store: &PrivateCredentialStore,
+) -> TestResult {
+    let before = local::facts(manager, slot)
+        .await?
+        .generation
+        .ok_or("no generation")?;
+    for _ in 0..3 {
+        install_before_lease(
+            store.path(),
+            LeaseRead::Snapshot,
+            Box::new(advance_ready_unchanged),
+        );
+    }
+    assert!(matches!(
+        local::facts(manager, slot).await,
+        Err(CustodyError::Busy {
+            retry_after_ms: 100
+        })
+    ));
+    assert_eq!(
+        local::facts(manager, slot).await?.generation,
+        Some(before.next()?.next()?.next()?)
+    );
+    Ok(())
+}
+
+/// A rejection naming another login selection must not claim the current record.
+///
+/// # Errors
+/// Returns a fixture read error.
+///
+/// # Panics
+/// Panics if the refusal does not name the current, unchanged fence.
+pub async fn rejection_names_current_selection(
+    manager: &impl LocalCustody,
+    slot: &CustodySlot,
+) -> TestResult {
+    let before = local::facts(manager, slot).await?;
+    let fence = before.expected_fence().ok_or("no fence")?;
+    let mut other = *before
+        .selection_epoch_digest
+        .ok_or("no selection")?
+        .as_bytes();
+    other[0] ^= 1;
+    let refusal = local::after_rejection(
+        manager,
+        slot,
+        &fence,
+        Some(IdentityDigest::from_bytes(other)),
+    )
+    .await;
+    assert_eq!(
+        refusal,
+        Err(CustodyError::FenceMoved {
+            facts: Box::new(before.clone())
+        })
+    );
+    assert_eq!(local::facts(manager, slot).await?, before);
+    Ok(())
+}
+
+/// A Ready record cannot deliver fields under an inactive profile.
+///
+/// # Errors
+/// Returns a fixture read error.
+///
+/// # Panics
+/// Panics if profile inactivity does not block a lease.
+pub async fn inactive_profile_refuses_fields(
+    manager: &impl LocalCustody,
+    slot: &CustodySlot,
+) -> TestResult {
+    let before = local::facts(manager, slot).await?;
+    let fence = before.expected_fence().ok_or("no fence")?;
+    assert!(matches!(
+        local::fields(manager, slot, &fence).await,
+        Err(CustodyError::NotReady { facts }) if *facts == before
+    ));
+    Ok(())
+}
+
+/// An outstanding peer claim is observed as Refreshing after the bounded
+/// settle wait, without making a second claim. Call on unpaused current-thread Tokio.
+///
+/// # Errors
+/// Returns a fixture read, claim, or restoration error.
+///
+/// # Panics
+/// Panics if the reader skips its wait, exceeds the bound, or moves the claim.
+pub async fn rejection_waits_for_peer_refresh(
+    manager: &impl LocalCustody,
+    slot: &CustodySlot,
+    store: &PrivateCredentialStore,
+) -> TestResult {
+    let before = local::facts(manager, slot).await?;
+    let rejected = before.expected_fence().ok_or("no fence")?;
+    let claim = store
+        .on_disk(|store| {
+            let fence = store
+                .load()?
+                .ok_or(plakous_auth::PrivateStoreError::RecordMissing)?;
+            store.begin_refresh(&fence)
+        })
+        .await?;
+    tokio::time::pause();
+    let start = tokio::time::Instant::now();
+    let answer =
+        local::after_rejection(manager, slot, &rejected, before.selection_epoch_digest).await?;
+    assert!((Duration::from_secs(30)..Duration::from_secs(31)).contains(&start.elapsed()));
+    assert_eq!(answer.status, CustodyStatus::Refreshing);
+    assert_eq!(answer.generation, Some(claim.fence().generation()));
+    let restored = store
+        .on_disk(move |store| store.restore_refresh_definitely_not_started(claim))
+        .await?;
+    let after = local::facts(manager, slot).await?;
+    assert_eq!(after.status, CustodyStatus::Ready);
+    assert_eq!(after.generation, Some(restored.generation()));
     Ok(())
 }
 
@@ -181,28 +312,38 @@ pub async fn concurrent_rejections_adopt_one_replacement<D: LocalCustody + Send 
     Ok(())
 }
 
-type Hook = Box<dyn FnOnce() + Send>;
-static BEFORE_LEASE: Mutex<Vec<(String, Hook)>> = Mutex::new(Vec::new());
+/// The custody read whose lease a fixture can race.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum LeaseRead {
+    /// The payload read that projects the snapshot's facts.
+    Snapshot,
+    /// The exact Ready lease that keeps the returned fields live.
+    Fields,
+}
 
-/// Installs a one-shot action before the next fields lease for this account.
-pub fn install_before_lease(account: &str, hook: Hook) {
+type Hook = Box<dyn FnOnce(&PrivateCredentialStore) + Send>;
+type InstalledHook = (PathBuf, LeaseRead, Hook);
+static BEFORE_LEASE: Mutex<Vec<InstalledHook>> = Mutex::new(Vec::new());
+
+/// Installs a one-shot action before the next matching lease on this store.
+pub fn install_before_lease(path: &Path, read: LeaseRead, hook: Hook) {
     BEFORE_LEASE
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .push((account.to_owned(), hook));
+        .push((path.to_owned(), read, hook));
 }
 
 /// Runs the one-shot action, outside the hook registry lock.
-pub fn run_before_lease(account: &str) {
+pub fn run_before_lease(store: &PrivateCredentialStore, read: LeaseRead) {
     let hook = {
         let mut hooks = BEFORE_LEASE.lock().unwrap_or_else(PoisonError::into_inner);
         hooks
             .iter()
-            .position(|(owner, _)| owner == account)
-            .map(|index| hooks.remove(index).1)
+            .position(|(path, point, _)| path == store.path() && *point == read)
+            .map(|index| hooks.remove(index).2)
     };
     if let Some(hook) = hook {
-        hook();
+        hook(store);
     }
 }
 

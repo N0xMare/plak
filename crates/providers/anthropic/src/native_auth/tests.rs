@@ -2,6 +2,26 @@ use super::*;
 use plakous_auth::CredentialRecord;
 
 #[tokio::test]
+async fn custody_refusal_and_settlement() -> plakous_test_support::native_auth::TestResult {
+    use plakous_auth::custody::CustodySlot;
+    use plakous_test_support::native_auth::custody as suite;
+
+    let temp = tempfile::tempdir()?;
+    let mut manager = manager(private_store(&temp));
+    manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+    let slot = CustodySlot::new("claude")?;
+    let store = manager.core.store()?;
+    suite::moving_snapshots_are_busy(&manager, &slot, store).await?;
+    suite::rejection_names_current_selection(&manager, &slot).await?;
+    suite::rejection_waits_for_peer_refresh(&manager, &slot, store).await?;
+    Arc::get_mut(&mut manager.core)
+        .ok_or("shared manager")?
+        .acceptance
+        .accepted_at = u64::MAX;
+    suite::inactive_profile_refuses_fields(&manager, &slot).await
+}
+
+#[tokio::test]
 async fn usage_expired_access_reports_refresh_required_without_claiming_refresh() {
     use plakous_auth::subscription_limit::{
         InMemorySubscriptionRequestGate, SubscriptionRequestLimits, SystemSubscriptionGateClock,

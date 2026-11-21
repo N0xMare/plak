@@ -2,16 +2,14 @@
 //! caller binds to, the credential fields under the exact Ready lease, and
 //! the single writer's refresh after a rejection.
 
-use plakous_auth::ReadyCredentialLease;
-use plakous_auth::custody::local::{self, LocalCustody, Snapshot};
+use plakous_auth::custody::local::{LeaseSource, LocalCustody, Snapshot};
 use plakous_auth::custody::{
     AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
+use plakous_auth::{PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease};
 #[cfg(test)]
-use plakous_test_support::native_auth::custody::{
-    advance_ready_unchanged, install_before_lease, run_before_lease,
-};
+use plakous_test_support::native_auth::custody::{LeaseRead, run_before_lease};
 
 use super::{
     Arc, CredentialFence, RefreshForce, StoredTokens, XaiNativeAuthError, XaiNativeAuthManager,
@@ -32,7 +30,7 @@ pub const SUPERGROK_AUTHORITY_ID_IDENTITY: &str = "grok_authority_id";
 
 fn store_error(error: XaiNativeAuthError) -> CustodyError {
     match error {
-        XaiNativeAuthError::Store(error) => local::store_error(&error),
+        XaiNativeAuthError::Store(error) => error.into(),
         _ => CustodyError::Store,
     }
 }
@@ -60,65 +58,25 @@ pub(super) fn identity(digest: plakous_model::Digest) -> IdentityDigest {
     IdentityDigest::from_bytes(*digest.bytes())
 }
 
-impl XaiNativeAuthManager {
-    /// Non-secret facts of the stored login, reported for `slot`.
-    ///
-    /// The identity digests are the exact account and credential-authority
-    /// bindings (model-binding digests, version 1) the SuperGrok route binds
-    /// a session to; the selection digest names the login selection epoch,
-    /// which a refresh keeps and a new login changes. The profile is the
-    /// caller's to report.
-    ///
-    /// # Errors
-    /// [`CustodyError::Store`] for unsafe or unreadable storage.
-    pub async fn custody_facts(&self, slot: &CustodySlot) -> Result<AccountFacts, CustodyError> {
-        local::facts(self, slot).await
-    }
-
-    /// The credential fields of one request prepared against `expected`:
-    /// `authorization` and `x-userid`, read under the exact Ready lease they
-    /// came from, which they hold until the caller drops it.
-    ///
-    /// # Errors
-    /// [`AccountFacts::check_fence`]'s refusals, and
-    /// [`CustodyError::NotReady`] outside the compatibility window.
-    pub async fn custody_fields(
-        &self,
-        slot: &CustodySlot,
-        expected: &ExpectedFence,
-    ) -> Result<CredentialFields, CustodyError> {
-        local::fields(self, slot, expected).await
-    }
-
-    /// The single writer's refresh after the provider answered `rejected`
-    /// with HTTP 401, then the current facts. A generation another caller
-    /// already rotated is refreshed only if due; another login is never refreshed.
-    ///
-    /// # Errors
-    /// Returns a storage or selection refusal.
-    pub async fn custody_refresh_after_rejection(
-        &self,
-        slot: &CustodySlot,
-        rejected: &ExpectedFence,
-        selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<AccountFacts, CustodyError> {
-        local::after_rejection(self, slot, rejected, selection_epoch_digest).await
-    }
-}
-
 impl LocalCustody for XaiNativeAuthManager {
-    type Selection = String;
-
-    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot<String>, CustodyError> {
+    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot, CustodyError> {
         let core = Arc::clone(&self.core);
         let read = tokio::task::spawn_blocking(move || {
             let store = core.store()?;
             let lifecycle = store.offline_lifecycle()?;
+            let ready = lifecycle == plakous_auth::OfflineCredentialLifecycle::Ready;
             let Some(fence) = store.load()? else {
+                if ready {
+                    return Err(PrivateStoreError::RecordMissing.into());
+                }
                 return Ok::<_, XaiNativeAuthError>((lifecycle, None));
             };
-            let stored = (lifecycle == plakous_auth::OfflineCredentialLifecycle::Ready)
-                .then(|| core.read_stored(&fence))
+            let stored = ready
+                .then(|| {
+                    #[cfg(test)]
+                    run_before_lease(store, LeaseRead::Snapshot);
+                    core.read_stored(&fence)
+                })
                 .transpose();
             Ok((lifecycle, Some((fence, stored))))
         })
@@ -166,26 +124,20 @@ impl LocalCustody for XaiNativeAuthManager {
         facts
             .wire_identity
             .insert(SUPERGROK_AUTHORITY_ID_IDENTITY.to_owned(), authority);
-        let epoch = stored.selection_epoch.clone();
-        Ok((facts, Some((fence, epoch))))
+        Ok((facts, Some(fence)))
     }
 
     fn profile_active(&self) -> bool {
         self.core.ensure_active().is_ok()
     }
 
-    async fn fields_lease(
-        &self,
-        fence: CredentialFence,
-    ) -> Result<Option<ReadyCredentialLease>, CustodyError> {
-        let core = Arc::clone(&self.core);
-        tokio::task::spawn_blocking(move || {
-            #[cfg(test)]
-            run_before_lease(fence.account_binding().as_str());
-            core.store().ok()?.acquire_ready(&fence).ok()
-        })
-        .await
-        .map_err(|_| CustodyError::Internal)
+    fn lease_source(&self) -> Option<LeaseSource<'_>> {
+        self.core.store().ok().map(LeaseSource::new)
+    }
+
+    #[cfg(test)]
+    fn before_fields_lease(store: &PrivateCredentialStore) {
+        run_before_lease(store, LeaseRead::Fields);
     }
 
     fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError> {
@@ -209,55 +161,30 @@ impl LocalCustody for XaiNativeAuthManager {
     async fn refresh_rejected(
         &self,
         facts: &AccountFacts,
-        (fence, epoch): &(CredentialFence, String),
+        fence: &CredentialFence,
         rejected: &ExpectedFence,
-        selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<bool, CustodyError> {
-        if facts.status != CustodyStatus::Ready {
-            return Ok(false);
-        }
-        if selection_epoch_digest
-            .is_some_and(|selection| facts.selection_epoch_digest != Some(selection))
-        {
-            return Err(CustodyError::FenceMoved {
-                facts: Box::new(facts.clone()),
-            });
-        }
-        let authority = self.core.authority_id().map_err(store_error)?;
+        _selection: IdentityDigest,
+    ) -> Result<(), CustodyError> {
+        let epoch = facts
+            .wire_identity
+            .get(SUPERGROK_SELECTION_EPOCH_IDENTITY)
+            .ok_or(CustodyError::Internal)?;
+        let authority = facts
+            .wire_identity
+            .get(SUPERGROK_AUTHORITY_ID_IDENTITY)
+            .ok_or(CustodyError::Internal)?;
         if let Err(error @ XaiNativeAuthError::Store(_)) = self
             .core
             .refresh_with_force(
                 Some(fence.account_binding()),
                 Some(epoch),
-                Some(&authority),
+                Some(authority),
                 RefreshForce::WhileCurrent(rejected.generation),
             )
             .await
         {
             return Err(store_error(error));
         }
-        Ok(true)
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "a test fixture's store write")]
-impl XaiNativeAuthManager {
-    /// Commits a refresh of the stored login between the next fields read's
-    /// facts and its Ready lease.
-    pub(super) fn refresh_between_custody_reads(&self) -> Result<(), XaiNativeAuthError> {
-        let fence = self
-            .core
-            .store()?
-            .load()?
-            .ok_or(XaiNativeAuthError::NotLoggedIn)?;
-        let core = Arc::clone(&self.core);
-        install_before_lease(
-            fence.account_binding().as_str(),
-            Box::new(move || {
-                advance_ready_unchanged(core.store().expect("a local store"));
-            }),
-        );
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 //! Local custody of the subscription logins under one store (spec 01 §7.1):
 //! what a gateway serves for the Codex, Claude and SuperGrok kinds.
 
+use plakous_auth::custody::local::{self, LocalCustody};
 use plakous_auth::custody::{
     AccountFacts, Consent, CredentialCustodian, CredentialFields, CustodyError, CustodyFuture,
     CustodySlot, CustodyStatus, ExpectedFence, IdentityDigest, ProfileFacts, RefreshRequest,
@@ -15,43 +16,6 @@ use super::{
 /// settle before it judges due-ness, and how often it looks.
 const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
-
-/// Implements [`LoginCustody`] for one provider manager over its custody methods.
-macro_rules! login_custody {
-    ($manager:ty) => {
-        impl super::custody::LoginCustody for $manager {
-            fn facts<'a>(
-                &'a self,
-                slot: &'a plakous_auth::custody::CustodySlot,
-            ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::AccountFacts> {
-                Box::pin(self.custody_facts(slot))
-            }
-
-            fn fields<'a>(
-                &'a self,
-                slot: &'a plakous_auth::custody::CustodySlot,
-                expected: &'a plakous_auth::custody::ExpectedFence,
-            ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::CredentialFields>
-            {
-                Box::pin(self.custody_fields(slot, expected))
-            }
-
-            fn refresh_after_rejection<'a>(
-                &'a self,
-                slot: &'a plakous_auth::custody::CustodySlot,
-                rejected: &'a plakous_auth::custody::ExpectedFence,
-                selection_epoch_digest: Option<plakous_auth::custody::IdentityDigest>,
-            ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::AccountFacts> {
-                Box::pin(self.custody_refresh_after_rejection(
-                    slot,
-                    rejected,
-                    selection_epoch_digest,
-                ))
-            }
-        }
-    };
-}
-pub(super) use login_custody;
 
 /// What a gateway needs of one opened provider login manager.
 pub(super) trait LoginCustody: Send + Sync {
@@ -69,6 +33,29 @@ pub(super) trait LoginCustody: Send + Sync {
         rejected: &'a ExpectedFence,
         selection_epoch_digest: Option<IdentityDigest>,
     ) -> CustodyFuture<'a, AccountFacts>;
+}
+
+impl<D: LocalCustody + Send> LoginCustody for D {
+    fn facts<'a>(&'a self, slot: &'a CustodySlot) -> CustodyFuture<'a, AccountFacts> {
+        Box::pin(local::facts(self, slot))
+    }
+
+    fn fields<'a>(
+        &'a self,
+        slot: &'a CustodySlot,
+        expected: &'a ExpectedFence,
+    ) -> CustodyFuture<'a, CredentialFields> {
+        Box::pin(local::fields(self, slot, expected))
+    }
+
+    fn refresh_after_rejection<'a>(
+        &'a self,
+        slot: &'a CustodySlot,
+        rejected: &'a ExpectedFence,
+        selection: Option<IdentityDigest>,
+    ) -> CustodyFuture<'a, AccountFacts> {
+        Box::pin(local::after_rejection(self, slot, rejected, selection))
+    }
 }
 
 /// Local custody of one subscription kind's logins under a store: the

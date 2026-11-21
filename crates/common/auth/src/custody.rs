@@ -567,7 +567,7 @@ pub enum CustodyError {
         /// The versions it speaks.
         supported: Vec<u16>,
     },
-    /// The custodian is at capacity.
+    /// The custodian is at capacity, or the credential is contended or moving.
     #[error("credential custodian is busy")]
     Busy {
         /// Advised wait.
@@ -582,6 +582,21 @@ pub enum CustodyError {
     /// The custodian failed internally.
     #[error("credential custodian failed")]
     Internal,
+}
+
+impl From<crate::PrivateStoreError> for CustodyError {
+    fn from(error: crate::PrivateStoreError) -> Self {
+        use crate::PrivateStoreError as Store;
+        match error {
+            Store::StoreBusy
+            | Store::FenceMismatch
+            | Store::RecordMissing
+            | Store::CredentialNotReady => Self::Busy {
+                retry_after_ms: 100,
+            },
+            _ => Self::Store,
+        }
+    }
 }
 
 /// A boxed custody future.

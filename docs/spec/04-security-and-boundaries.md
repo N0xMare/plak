@@ -1602,6 +1602,15 @@ fence and judges the Ready payload in one shared-lock inspection. The claimed
 HTTP ladder consumes that exact fence. Dialects own payload formats, account
 and selection evidence, request and response validation, and refusal mapping.
 
+For all three dialects, a snapshot that still moves after the bounded rereads
+reports retryable `Busy` (`AccountBusy` at the facade), not `Store` or
+`UnsafeStorage`. A genuine storage failure is not contention. An inactive
+profile cannot hand out a Ready field lease. Rejection refresh waits
+asynchronously up to 30 seconds for an observed claim to settle; if it is
+still refreshing, no new claim is attempted. A different login selection
+for the same account returns `FenceMoved` with current facts and does not
+authorize a claim on the new login.
+
 Confirmed host refresh enters this same claimed workflow. Host login workers
 retain the same ArmedLoginRecovery drop behavior: cancel before exchange
 creates no credential; cancellation or process loss during exchange leaves

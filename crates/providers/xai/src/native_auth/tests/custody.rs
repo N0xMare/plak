@@ -1,6 +1,7 @@
 //! Local custody of the stored SuperGrok login: facts equal to the route
 //! binding, fields under the Ready lease, and the single writer's refresh.
 
+use plakous_auth::custody::local;
 use plakous_auth::custody::{CustodySlot, CustodyStatus};
 
 use super::*;
@@ -37,10 +38,27 @@ mod conformance {
             ],
         )
         .await?;
-        suite::fields_name_the_moved_fence(&manager, &slot, || {
-            Ok(manager.refresh_between_custody_reads()?)
-        })
-        .await?;
+        suite::fields_name_the_moved_fence(&manager, &slot, manager.core.store()?.path()).await?;
+        peer.shutdown().await
+    }
+
+    #[tokio::test]
+    async fn custody_refusal_and_settlement() -> TestResult {
+        let _serial = AUTH_TEST_GATE.lock().await;
+        let temp = tempdir()?;
+        let peer = mock_peer().await?;
+        let manager = manager(&temp, &peer)?;
+        seed(&manager, "conformance-refusal")?;
+        let slot = CustodySlot::new("grok")?;
+        let store = manager.core.store()?;
+        suite::moving_snapshots_are_busy(&manager, &slot, store).await?;
+        suite::rejection_names_current_selection(&manager, &slot).await?;
+        suite::rejection_waits_for_peer_refresh(&manager, &slot, store).await?;
+        manager
+            .core
+            .compatibility_expires_unix
+            .store(COMPATIBILITY_REVIEWED_UNIX, Ordering::Relaxed);
+        suite::inactive_profile_refuses_fields(&manager, &slot).await?;
         peer.shutdown().await
     }
 
@@ -124,7 +142,7 @@ async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
         )
         .await?;
     let slot = CustodySlot::new("grok")?;
-    let facts = manager.custody_facts(&slot).await?;
+    let facts = local::facts(&manager, &slot).await?;
     assert_eq!(facts.status, CustodyStatus::Ready);
     assert_eq!(
         facts.account_binding.map(|digest| *digest.as_bytes()),

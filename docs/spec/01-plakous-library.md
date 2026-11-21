@@ -5736,6 +5736,15 @@ the name of the environment variable that won, and there is no revocation call.
 
 ### 7.3 Refresh, generations, and quarantine
 
+Local native custody retries a moving snapshot up to three reads in total.
+Exhausting those reads reports retryable `Busy` (`AccountBusy` at the facade),
+not unsafe storage. Field delivery under an inactive profile is `NotReady`
+even when the stored record is Ready. Before acting on a rejection, custody
+waits asynchronously up to 30 seconds for a peer's claimed refresh to settle.
+If it is still refreshing, custody returns the current facts without claiming.
+A different login selection for the same account returns `FenceMoved`
+with current facts; the rejection does not authorize a claim on the new login.
+
 Refresh and remote revoke share one claimed HTTP ladder. A request-build
 failure either restores a definitely unstarted claim or, when the payload or
 binding is already corrupt (`LeaveQuarantined`), drops the claim and leaves

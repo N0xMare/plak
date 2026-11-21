@@ -1,6 +1,7 @@
 //! Local custody of the stored Codex login: facts equal to the route
 //! binding, fields under the Ready lease, and the single writer's refresh.
 
+use plakous_auth::custody::local;
 use plakous_auth::custody::{CustodySlot, CustodyStatus, ExpectedFence};
 
 use super::*;
@@ -15,9 +16,10 @@ mod conformance {
 
     #[tokio::test]
     async fn exact_lease_and_moved_fence() -> TestResult {
-        let account = "custody-conformance-fields";
+        let account = "custody-conformance-fields-account";
+        let subject = "custody-conformance-fields-subject";
         let (fixture, _peers, server) =
-            renew_fixture(account, account, now_unix_secs() + 3_600, 0, Vec::new()).await?;
+            renew_fixture(account, subject, now_unix_secs() + 3_600, 0, Vec::new()).await?;
         let slot = slot()?;
         suite::fields_hold_exact_fence(
             fixture.manager.as_ref(),
@@ -28,14 +30,32 @@ mod conformance {
             ],
         )
         .await?;
-        suite::fields_name_the_moved_fence(fixture.manager.as_ref(), &slot, || {
-            Ok(fixture.manager.refresh_between_custody_reads()?)
-        })
-        .await?;
+        suite::fields_name_the_moved_fence(fixture.manager.as_ref(), &slot, &fixture.slot).await?;
         let (requests, unexpected) = server.await??;
         assert_eq!(request_kinds(&requests), ["catalog"]);
         assert!(!unexpected);
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn custody_refusal_and_settlement() -> TestResult {
+        let (fixture, mut peers, _server) = renew_fixture(
+            "custody-refusal-account",
+            "custody-refusal-subject",
+            now_unix_secs() + 3_600,
+            1,
+            Vec::new(),
+        )
+        .await?;
+        let mut manager = peers.pop().ok_or("no peer")?;
+        let slot = slot()?;
+        let active = manager.as_ref();
+        suite::moving_snapshots_are_busy(active, &slot, active.store()?).await?;
+        suite::rejection_names_current_selection(active, &slot).await?;
+        suite::rejection_waits_for_peer_refresh(active, &slot, active.store()?).await?;
+        Arc::get_mut(&mut manager).ok_or("shared manager")?.clock =
+            Arc::new(FixedClock::new(Timestamp::new(PROFILE_EXPIRES_AT, 0)?));
+        suite::inactive_profile_refuses_fields(manager.as_ref(), &slot).await
     }
 
     #[tokio::test]
@@ -49,13 +69,14 @@ mod conformance {
 
     #[tokio::test]
     async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> TestResult {
-        let account = "custody-conformance-single-writer";
+        let account = "custody-conformance-single-writer-account";
+        let subject = "custody-conformance-single-writer-subject";
         let (fixture, peers, server) = renew_fixture(
             account,
-            account,
+            subject,
             now_unix_secs() + 3_600,
             1,
-            refresh_exchange(account)?,
+            refresh_exchange(subject)?,
         )
         .await?;
         suite::concurrent_rejections_adopt_one_replacement(
@@ -79,7 +100,7 @@ async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
     let subject = "custody-facts-subject";
     let (fixture, _peers, server) =
         renew_fixture(account, subject, now_unix_secs() + 3_600, 0, Vec::new()).await?;
-    let facts = fixture.manager.custody_facts(&slot()?).await?;
+    let facts = local::facts(fixture.manager.as_ref(), &slot()?).await?;
     assert_eq!(facts.status, CustodyStatus::Ready);
     assert_eq!(
         facts.account_binding.map(|digest| *digest.as_bytes()),
@@ -165,9 +186,7 @@ mod relayed {
                     generation: CredentialGeneration::new(envelope.expected.generation)
                         .map_err(|_| GatewayRefusal::EnvelopeInvalid {})?,
                 };
-                let mut fields = self
-                    .manager
-                    .custody_fields(&slot, &expected)
+                let mut fields = local::fields(self.manager.as_ref(), &slot, &expected)
                     .await
                     .map_err(|error| gateway_refusal(&error, &self.instance))?;
                 let values = envelope
@@ -241,9 +260,7 @@ mod relayed {
         )
         .await?;
         let slot = slot()?;
-        let expected = fixture
-            .manager
-            .custody_facts(&slot)
+        let expected = local::facts(fixture.manager.as_ref(), &slot)
             .await?
             .expected_fence()
             .ok_or("no fence")?;
@@ -279,7 +296,14 @@ mod relayed {
                 )?,
             );
         }
-        fixture.manager.refresh_between_custody_reads()?;
+        use plakous_test_support::native_auth::custody::{
+            LeaseRead, advance_ready_unchanged, install_before_lease,
+        };
+        install_before_lease(
+            &fixture.slot,
+            LeaseRead::Fields,
+            Box::new(advance_ready_unchanged),
+        );
         let response = client
             .execute(
                 Request::new(

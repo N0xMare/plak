@@ -64,7 +64,6 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         let authority_matches = self
             .expected_authority
             .is_some_and(|expected| self.core.authority_is(expected));
-        let force = self.force;
         let (fence, ready_due) = store
             .inspect_for_refresh(move |fence, payload| {
                 if account
@@ -79,12 +78,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 {
                     return Err(XaiNativeAuthError::SelectionChanged);
                 }
-                Ok(force.forces(fence.generation())
-                    || access_needs_refresh(
-                        stored.expires_at,
-                        system_unix_seconds()?,
-                        ACCESS_REFRESH_LEAD_SECONDS,
-                    ))
+                Ok(access_needs_refresh(
+                    stored.expires_at,
+                    system_unix_seconds()?,
+                    ACCESS_REFRESH_LEAD_SECONDS,
+                ))
             })
             .await??
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
@@ -106,10 +104,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         {
             return Err(XaiNativeAuthError::AccountChanged);
         }
+        let forced = self.force.forces(fence.generation());
         let Some(fence) = select_refresh_fence(
             fence,
             ready_due,
-            false,
+            forced,
             self.reclaim_unknown_refresh(),
             XaiNativeAuthError::NotLoggedIn,
         )?

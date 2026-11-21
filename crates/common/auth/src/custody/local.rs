@@ -7,29 +7,24 @@ use super::{
     AccountFacts, CredentialFields, CredentialHold, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
-use crate::{CredentialFence, PrivateStoreError, ReadyCredentialLease};
+use crate::{CredentialFence, PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease};
 
 const SNAPSHOT_ATTEMPTS: usize = 3;
 const FENCE_READS: usize = 2;
 const SETTLE_WAIT: Duration = Duration::from_secs(30);
 const SETTLE_POLL: Duration = Duration::from_millis(100);
 
-/// Facts and their local fence, with the dialect's selection identity if needed.
-pub type Snapshot<K> = (AccountFacts, Option<(CredentialFence, K)>);
+/// Facts and their local fence.
+pub type Snapshot = (AccountFacts, Option<CredentialFence>);
 
-#[must_use]
-pub const fn busy() -> CustodyError {
-    CustodyError::Busy {
-        retry_after_ms: 100,
-    }
-}
+/// A dialect's store for exact Ready field leases. The handle is not exposed
+/// to callers of the dialect.
+pub struct LeaseSource<'a>(&'a PrivateCredentialStore);
 
-#[must_use]
-pub fn store_error(error: &PrivateStoreError) -> CustodyError {
-    if *error == PrivateStoreError::StoreBusy {
-        busy()
-    } else {
-        CustodyError::Store
+impl<'a> LeaseSource<'a> {
+    #[must_use]
+    pub const fn new(store: &'a PrivateCredentialStore) -> Self {
+        Self(store)
     }
 }
 
@@ -37,60 +32,50 @@ pub fn store_error(error: &PrivateStoreError) -> CustodyError {
 /// off the async executor. The dialect owns lifecycle/format refusal, account
 /// and selection digests, field parsing, and the claimed grant itself.
 pub trait LocalCustody: Sync {
-    type Selection: Send + Sync;
-
     fn snapshot_once<'a>(
         &'a self,
         slot: &'a CustodySlot,
-    ) -> impl Future<Output = Result<Snapshot<Self::Selection>, CustodyError>> + Send + 'a;
-
-    /// Whether a snapshot error can mean its reads straddled a replacement.
-    #[must_use]
-    fn retry_snapshot(error: &CustodyError) -> bool {
-        matches!(error, CustodyError::Store)
-    }
+    ) -> impl Future<Output = Result<Snapshot, CustodyError>> + Send + 'a;
 
     fn profile_active(&self) -> bool;
 
-    fn fields_lease(
-        &self,
-        fence: CredentialFence,
-    ) -> impl Future<Output = Result<Option<ReadyCredentialLease>, CustodyError>> + Send;
+    fn lease_source(&self) -> Option<LeaseSource<'_>>;
+
+    /// Fixture seam, called on the blocking worker before an exact fields lease.
+    fn before_fields_lease(_store: &PrivateCredentialStore) {}
 
     /// Decode only from the lease; the common flow attaches it to the fields.
     fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError>;
 
-    /// Apply the dialect's selection and lifecycle policy and, if eligible,
-    /// run the claimed refresh. Report whether the outcome must be read again.
+    /// Run the claimed refresh pinned to this account and login selection.
     fn refresh_rejected<'a>(
         &'a self,
         facts: &'a AccountFacts,
-        current: &'a (CredentialFence, Self::Selection),
+        current: &'a CredentialFence,
         rejected: &'a ExpectedFence,
-        selection: Option<IdentityDigest>,
-    ) -> impl Future<Output = Result<bool, CustodyError>> + Send + 'a;
+        selection: IdentityDigest,
+    ) -> impl Future<Output = Result<(), CustodyError>> + Send + 'a;
 }
 
 async fn snapshot<D: LocalCustody>(
     dialect: &D,
     slot: &CustodySlot,
-) -> Result<Snapshot<D::Selection>, CustodyError> {
-    retry_snapshot(|| dialect.snapshot_once(slot), D::retry_snapshot).await
+) -> Result<Snapshot, CustodyError> {
+    retry_snapshot(|| dialect.snapshot_once(slot)).await
 }
 
-/// Retry a snapshot under a dialect's read policy. Also used to reread
+/// Retry a moving snapshot. Also used to reread
 /// after a once-only identity hydration without starting another hydration.
 ///
 /// # Errors
 /// Returns the first non-retryable or last retryable refusal.
 pub async fn retry_snapshot<T, F: Future<Output = Result<T, CustodyError>>>(
     mut read: impl FnMut() -> F,
-    retry: impl Fn(&CustodyError) -> bool,
 ) -> Result<T, CustodyError> {
     let mut attempts = 1;
     loop {
         match read().await {
-            Err(error) if attempts < SNAPSHOT_ATTEMPTS && retry(&error) => attempts += 1,
+            Err(CustodyError::Busy { .. }) if attempts < SNAPSHOT_ATTEMPTS => attempts += 1,
             result => return result,
         }
     }
@@ -99,7 +84,7 @@ pub async fn retry_snapshot<T, F: Future<Output = Result<T, CustodyError>>>(
 async fn settled_snapshot<D: LocalCustody>(
     dialect: &D,
     slot: &CustodySlot,
-) -> Result<Snapshot<D::Selection>, CustodyError> {
+) -> Result<Snapshot, CustodyError> {
     let deadline = tokio::time::Instant::now() + SETTLE_WAIT;
     loop {
         let current = snapshot(dialect, slot).await?;
@@ -144,14 +129,42 @@ pub async fn fields<D: LocalCustody>(
                 facts: Box::new(facts),
             });
         }
-        let (fence, _) = current.ok_or(CustodyError::Internal)?;
-        if let Some(lease) = dialect.fields_lease(fence.clone()).await?
-            && lease.fence() == fence
+        let fence = current.ok_or(CustodyError::Internal)?;
+        let source = dialect.lease_source().ok_or(CustodyError::Store)?;
+        match source
+            .0
+            .on_disk(move |store| {
+                D::before_fields_lease(store);
+                store.acquire_ready(&fence)
+            })
+            .await
+            .map_err(CustodyError::from)
         {
-            return Ok(D::fields_from_lease(&lease)?.holding(CredentialHold::new(lease)));
+            Ok(lease) => {
+                return Ok(D::fields_from_lease(&lease)?.holding(CredentialHold::new(lease)));
+            }
+            Err(CustodyError::Busy { .. }) => {}
+            Err(error) => return Err(error),
         }
     }
-    Err(busy())
+    Err(PrivateStoreError::StoreBusy.into())
+}
+
+fn check_selection(
+    facts: &AccountFacts,
+    rejected: &ExpectedFence,
+    selection: IdentityDigest,
+) -> Result<(), CustodyError> {
+    if facts.account_binding == Some(rejected.account_binding)
+        && facts
+            .selection_epoch_digest
+            .is_some_and(|current| current != selection)
+    {
+        return Err(CustodyError::FenceMoved {
+            facts: Box::new(facts.clone()),
+        });
+    }
+    Ok(())
 }
 
 /// Settle a peer's claim before judging a rejection, and again after this
@@ -166,13 +179,21 @@ pub async fn after_rejection<D: LocalCustody>(
     selection: Option<IdentityDigest>,
 ) -> Result<AccountFacts, CustodyError> {
     let (facts, current) = settled_snapshot(dialect, slot).await?;
-    if let Some(current) = &current
-        && facts.account_binding == Some(rejected.account_binding)
-        && dialect
-            .refresh_rejected(&facts, current, rejected, selection)
-            .await?
-    {
-        return Ok(settled_snapshot(dialect, slot).await?.0);
+    let (Some(current), Some(selection)) = (current, selection.or(facts.selection_epoch_digest))
+    else {
+        return Ok(facts);
+    };
+    if facts.account_binding != Some(rejected.account_binding) {
+        return Ok(facts);
     }
-    Ok(facts)
+    check_selection(&facts, rejected, selection)?;
+    if facts.status == CustodyStatus::Refreshing {
+        return Ok(facts);
+    }
+    dialect
+        .refresh_rejected(&facts, &current, rejected, selection)
+        .await?;
+    let (current, _) = settled_snapshot(dialect, slot).await?;
+    check_selection(&current, rejected, selection)?;
+    Ok(current)
 }

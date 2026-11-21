@@ -29,6 +29,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+# The shared custody conformance helpers pause Tokio time in consumers'
+# unit tests; this dev-only dependency unifies their Tokio test-util feature.
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "test-util", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 

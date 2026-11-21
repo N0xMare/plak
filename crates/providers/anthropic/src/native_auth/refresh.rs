@@ -17,6 +17,7 @@ use super::{
 
 pub(super) struct ClaudeRefreshHooks<'a> {
     pub(super) core: &'a ManagerCore,
+    pub(super) expected_grant: Option<&'a super::AccountBinding>,
     pub(super) request_gate: Option<&'a Arc<dyn SubscriptionRequestGate>>,
     pub(super) observer: Option<&'a dyn CredentialRefreshObserver>,
     pub(super) _flight: futures_util::lock::MutexGuard<'a, ()>,
@@ -57,18 +58,14 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         self.request_permit = None;
         let store = self.core.store()?;
-        let force = self.force;
         let (fence, ready_due) = store
             .inspect_for_refresh(move |fence, payload| {
                 let stored = decode_current_ready_payload(fence, payload)?;
-                Ok::<_, ClaudeNativeAuthError>(
-                    force.forces(fence.generation())
-                        || access_needs_refresh(
-                            stored.expires_at,
-                            system_unix_seconds()?,
-                            REFRESH_SKEW_SECONDS,
-                        ),
-                )
+                Ok::<_, ClaudeNativeAuthError>(access_needs_refresh(
+                    stored.expires_at,
+                    system_unix_seconds()?,
+                    REFRESH_SKEW_SECONDS,
+                ))
             })
             .await??
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
@@ -85,10 +82,17 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
                 pause.resume.notified().await;
             }
         }
+        if self
+            .expected_grant
+            .is_some_and(|grant| grant != fence.account_binding())
+        {
+            return Err(ClaudeNativeAuthError::NotReady);
+        }
+        let forced = self.force.forces(fence.generation());
         let Some(fence) = select_refresh_fence(
             fence,
             ready_due,
-            false,
+            forced,
             false,
             ClaudeNativeAuthError::NotReady,
         )?

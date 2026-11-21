@@ -3,7 +3,8 @@ use super::super::{
     ClaudeNativeAuthManager, CredentialSlotId, CredentialStatus, PrivateCredentialStore,
     auth_profile_id,
 };
-use super::{CustodyError, advance_ready_unchanged, store_error};
+use super::{CustodyError, store_error};
+use plakous_test_support::native_auth::custody::advance_ready_unchanged;
 
 #[test]
 fn local_revoke_rereads_once_and_maps_a_second_generation_move_to_custody_busy() {

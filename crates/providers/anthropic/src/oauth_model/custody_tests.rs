@@ -4,6 +4,7 @@
 use super::tests::{local_peer, local_response, manager_with_client, private_store};
 use super::*;
 use crate::oauth::CLAUDE_OAUTH_INFERENCE_SCOPE;
+use plakous_auth::custody::local;
 use plakous_auth::custody::{CustodySlot, CustodyStatus, ExpectedFence};
 use std::time::Duration;
 
@@ -28,18 +29,16 @@ mod conformance {
     #[tokio::test]
     async fn exact_lease_and_moved_fence() -> TestResult {
         let temp = tempfile::tempdir()?;
+        let path = private_store(&temp);
         let manager = manager_with_client(
-            private_store(&temp),
+            path.clone(),
             Client::new_http1(plakous_http::Limits::default())?,
         );
         manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
         let slot = CustodySlot::new("claude")?;
         suite::fields_hold_exact_fence(&manager, &slot, &[("authorization", b"Bearer access")])
             .await?;
-        suite::fields_name_the_moved_fence(&manager, &slot, || {
-            Ok(manager.refresh_between_custody_reads()?)
-        })
-        .await?;
+        suite::fields_name_the_moved_fence(&manager, &slot, &path).await?;
         Ok(())
     }
 
@@ -100,7 +99,7 @@ async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
             SessionLineage::Root,
         )
         .await?;
-    let facts = manager.custody_facts(&CustodySlot::new("claude")?).await?;
+    let facts = local::facts(&manager, &CustodySlot::new("claude")?).await?;
     assert_eq!(facts.status, CustodyStatus::Ready);
     assert_eq!(
         facts.account_binding.map(|digest| *digest.as_bytes()),
@@ -140,7 +139,7 @@ impl plakous_auth::custody::CredentialCustodian for Served {
         &'a self,
         slot: &'a CustodySlot,
     ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::AccountFacts> {
-        Box::pin(self.0.custody_facts(slot))
+        Box::pin(local::facts(&self.0, slot))
     }
 
     fn refresh<'a>(
@@ -154,12 +153,10 @@ impl plakous_auth::custody::CredentialCustodian for Served {
                 selection_epoch_digest,
             } = request
             {
-                self.0
-                    .custody_refresh_after_rejection(slot, &rejected, selection_epoch_digest)
-                    .await
+                local::after_rejection(&self.0, slot, &rejected, selection_epoch_digest).await
             } else {
                 let _ = self.0.refresh_if_needed().await;
-                self.0.custody_facts(slot).await
+                local::facts(&self.0, slot).await
             }
         })
     }
@@ -169,7 +166,7 @@ impl plakous_auth::custody::CredentialCustodian for Served {
         slot: &'a CustodySlot,
         expected: &'a ExpectedFence,
     ) -> plakous_auth::custody::CustodyFuture<'a, plakous_auth::custody::CredentialFields> {
-        Box::pin(self.0.custody_fields(slot, expected))
+        Box::pin(local::fields(&self.0, slot, expected))
     }
 }
 

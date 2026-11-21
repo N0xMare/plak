@@ -2,16 +2,14 @@
 //! caller binds to, the credential field under the exact Ready lease, and the
 //! single writer's refresh after a rejection.
 
-use plakous_auth::ReadyCredentialLease;
-use plakous_auth::custody::local::{self, LocalCustody, Snapshot};
+use plakous_auth::custody::local::{self, LeaseSource, LocalCustody, Snapshot};
 use plakous_auth::custody::{
     AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
+use plakous_auth::{PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease};
 #[cfg(test)]
-use plakous_test_support::native_auth::custody::{
-    advance_ready_unchanged, install_before_lease, run_before_lease,
-};
+use plakous_test_support::native_auth::custody::{LeaseRead, run_before_lease};
 
 use super::refresh::RefreshForce;
 use super::{
@@ -38,7 +36,7 @@ fn store_error(error: ClaudeNativeAuthError) -> CustodyError {
         ClaudeNativeAuthError::Store(plakous_auth::PrivateStoreError::ForeignAccount) => {
             CustodyError::AccountChanged
         }
-        ClaudeNativeAuthError::Store(error) => local::store_error(&error),
+        ClaudeNativeAuthError::Store(error) => error.into(),
         _ => CustodyError::Store,
     }
 }
@@ -52,56 +50,11 @@ fn identity(digest: plakous_model::Digest) -> IdentityDigest {
 mod revoke_tests;
 
 impl ClaudeNativeAuthManager {
-    /// Non-secret facts of the stored login, reported for `slot`.
-    ///
-    /// The identity digests are the exact account and credential-authority
-    /// bindings (model-binding digests, version 1) a Claude route binds a
-    /// session to; the selection digest names the login grant, so a refresh
-    /// keeps it and a new login changes it. The account UUID and the client
-    /// device id travel as wire identity. A Ready login whose account UUID
-    /// is not yet stored is hydrated first, as resolution does. The profile
-    /// is the caller's to report.
-    ///
-    /// # Errors
-    /// [`CustodyError::Store`] for unsafe or unreadable storage.
-    pub async fn custody_facts(&self, slot: &CustodySlot) -> Result<AccountFacts, CustodyError> {
-        local::facts(self, slot).await
-    }
-
-    /// The credential field of one request prepared against `expected`:
-    /// `authorization`, read under the exact Ready lease it came from, which
-    /// it holds until the caller drops it.
-    ///
-    /// # Errors
-    /// [`AccountFacts::check_fence`]'s refusals.
-    pub async fn custody_fields(
-        &self,
-        slot: &CustodySlot,
-        expected: &ExpectedFence,
-    ) -> Result<CredentialFields, CustodyError> {
-        local::fields(self, slot, expected).await
-    }
-
-    /// The single writer's refresh after the provider answered `rejected`
-    /// with HTTP 401, then the current facts. A generation another caller
-    /// already rotated is refreshed only if due; another login is never refreshed.
-    ///
-    /// # Errors
-    /// Returns a storage refusal.
-    pub async fn custody_refresh_after_rejection(
-        &self,
-        slot: &CustodySlot,
-        rejected: &ExpectedFence,
-        selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<AccountFacts, CustodyError> {
-        local::after_rejection(self, slot, rejected, selection_epoch_digest).await
-    }
-
     async fn custody_snapshot_once(
         &self,
         slot: &CustodySlot,
         hydration: Hydration,
-    ) -> Result<Snapshot<()>, CustodyError> {
+    ) -> Result<Snapshot, CustodyError> {
         let mut facts = AccountFacts::signed_out(slot.clone());
         let core = std::sync::Arc::clone(&self.core);
         let read = tokio::task::spawn_blocking(move || {
@@ -123,11 +76,14 @@ impl ClaudeNativeAuthManager {
         let (status, fence) = read.map_err(store_error)?;
         facts.status = status;
         let Some(fence) = fence else {
+            if status == CustodyStatus::Ready {
+                return Err(PrivateStoreError::RecordMissing.into());
+            }
             return Ok((facts, None));
         };
         facts.generation = Some(fence.generation());
         if facts.status != CustodyStatus::Ready {
-            return Ok((facts, Some((fence, ()))));
+            return Ok((facts, Some(fence)));
         }
         let mut stored = self.custody_stored(&fence).await?;
         if stored.account_uuid.is_none() {
@@ -139,10 +95,9 @@ impl ClaudeNativeAuthManager {
             self.ensure_account_identity()
                 .await
                 .map_err(|_| CustodyError::Unavailable)?;
-            return Box::pin(local::retry_snapshot(
-                || self.custody_snapshot_once(slot, Hydration::Done),
-                Self::retry_snapshot,
-            ))
+            return Box::pin(local::retry_snapshot(|| {
+                self.custody_snapshot_once(slot, Hydration::Done)
+            }))
             .await;
         }
         let account = stored.account_uuid.take().ok_or(CustodyError::Internal)?;
@@ -164,23 +119,25 @@ impl ClaudeNativeAuthManager {
             CLAUDE_DEVICE_ID_IDENTITY.to_owned(),
             self.core.device_id.as_str().to_owned(),
         );
-        Ok((facts, Some((fence, ()))))
+        Ok((facts, Some(fence)))
     }
 
     async fn custody_stored(&self, fence: &CredentialFence) -> Result<StoredTokens, CustodyError> {
         let core = std::sync::Arc::clone(&self.core);
         let fence = fence.clone();
-        tokio::task::spawn_blocking(move || core.read_stored(&fence))
-            .await
-            .map_err(|_| CustodyError::Internal)?
-            .map_err(store_error)
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            run_before_lease(core.store()?, LeaseRead::Snapshot);
+            core.read_stored(&fence)
+        })
+        .await
+        .map_err(|_| CustodyError::Internal)?
+        .map_err(store_error)
     }
 }
 
 impl LocalCustody for ClaudeNativeAuthManager {
-    type Selection = ();
-
-    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot<()>, CustodyError> {
+    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot, CustodyError> {
         self.custody_snapshot_once(slot, Hydration::Once).await
     }
 
@@ -188,18 +145,13 @@ impl LocalCustody for ClaudeNativeAuthManager {
         self.core.ensure_active().is_ok()
     }
 
-    async fn fields_lease(
-        &self,
-        fence: CredentialFence,
-    ) -> Result<Option<ReadyCredentialLease>, CustodyError> {
-        let core = std::sync::Arc::clone(&self.core);
-        tokio::task::spawn_blocking(move || {
-            #[cfg(test)]
-            run_before_lease(fence.account_binding().as_str());
-            core.store().ok()?.acquire_ready(&fence).ok()
-        })
-        .await
-        .map_err(|_| CustodyError::Internal)
+    fn lease_source(&self) -> Option<LeaseSource<'_>> {
+        self.core.store().ok().map(LeaseSource::new)
+    }
+
+    #[cfg(test)]
+    fn before_fields_lease(store: &PrivateCredentialStore) {
+        run_before_lease(store, LeaseRead::Fields);
     }
 
     fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError> {
@@ -218,45 +170,20 @@ impl LocalCustody for ClaudeNativeAuthManager {
 
     async fn refresh_rejected(
         &self,
-        facts: &AccountFacts,
-        _current: &(CredentialFence, ()),
+        _facts: &AccountFacts,
+        current: &CredentialFence,
         rejected: &ExpectedFence,
-        selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<bool, CustodyError> {
-        if facts.status != CustodyStatus::Ready
-            || selection_epoch_digest
-                .is_some_and(|selection| facts.selection_epoch_digest != Some(selection))
-        {
-            return Ok(false);
-        }
+        _selection: IdentityDigest,
+    ) -> Result<(), CustodyError> {
         if let Err(error @ ClaudeNativeAuthError::Store(_)) = self
-            .refresh_with_force(RefreshForce::WhileCurrent(rejected.generation))
+            .refresh_with_force(
+                RefreshForce::WhileCurrent(rejected.generation),
+                Some(current.account_binding()),
+            )
             .await
         {
             return Err(store_error(error));
         }
-        Ok(true)
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "a test fixture's store write")]
-impl ClaudeNativeAuthManager {
-    /// Commits a refresh of the stored login between the next fields read's
-    /// facts and its Ready lease.
-    pub(crate) fn refresh_between_custody_reads(&self) -> Result<(), ClaudeNativeAuthError> {
-        let fence = self
-            .core
-            .store()?
-            .load()?
-            .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
-        let core = std::sync::Arc::clone(&self.core);
-        install_before_lease(
-            fence.account_binding().as_str(),
-            Box::new(move || {
-                advance_ready_unchanged(core.store().expect("a local store"));
-            }),
-        );
         Ok(())
     }
 }
