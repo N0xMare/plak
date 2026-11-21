@@ -8,6 +8,10 @@ use plakous_auth::custody::{
     AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
+#[cfg(test)]
+use plakous_test_support::native_auth::custody::{
+    advance_ready_unchanged, install_before_lease, run_before_lease,
+};
 
 use super::refresh::RefreshForce;
 use super::{
@@ -188,12 +192,14 @@ impl LocalCustody for ClaudeNativeAuthManager {
         &self,
         fence: CredentialFence,
     ) -> Result<Option<ReadyCredentialLease>, CustodyError> {
-        #[cfg(test)]
-        between_reads::run(fence.account_binding().as_str());
         let core = std::sync::Arc::clone(&self.core);
-        tokio::task::spawn_blocking(move || core.store().ok()?.acquire_ready(&fence).ok())
-            .await
-            .map_err(|_| CustodyError::Internal)
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            run_before_lease(fence.account_binding().as_str());
+            core.store().ok()?.acquire_ready(&fence).ok()
+        })
+        .await
+        .map_err(|_| CustodyError::Internal)
     }
 
     fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError> {
@@ -245,66 +251,12 @@ impl ClaudeNativeAuthManager {
             .load()?
             .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
         let core = std::sync::Arc::clone(&self.core);
-        between_reads::install(
+        install_before_lease(
             fence.account_binding().as_str(),
             Box::new(move || {
-                between_reads::commit_refresh(core.store().expect("a local store"));
+                advance_ready_unchanged(core.store().expect("a local store"));
             }),
         );
         Ok(())
-    }
-}
-
-/// A test's action between a fields read's facts and its Ready lease, such
-/// as committing a refresh there.
-#[cfg(test)]
-#[allow(clippy::expect_used, reason = "a test fixture's store write")]
-pub(super) mod between_reads {
-    type Hook = Box<dyn FnOnce() + Send>;
-
-    static HOOKS: std::sync::Mutex<Vec<(String, Hook)>> = std::sync::Mutex::new(Vec::new());
-
-    /// Runs `hook` once, in the next fields read of `account`.
-    pub(super) fn install(account: &str, hook: Hook) {
-        HOOKS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((account.to_owned(), hook));
-    }
-
-    pub(super) fn run(account: &str) {
-        let hook = {
-            let mut hooks = HOOKS
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            hooks
-                .iter()
-                .position(|(owner, _)| owner == account)
-                .map(|index| hooks.remove(index).1)
-        };
-        if let Some(hook) = hook {
-            hook();
-        }
-    }
-
-    /// Commits `store`'s next generation with its payload unchanged, as
-    /// another holder's completed refresh leaves the record.
-    pub(super) fn commit_refresh(store: &plakous_auth::PrivateCredentialStore) {
-        let fence = store.load().ok().flatten().expect("a stored record");
-        let payload = {
-            let lease = store.acquire_ready(&fence).expect("a Ready record");
-            plakous_auth::SecretBytes::new(lease.payload().expose_secret().to_vec())
-        };
-        let record = plakous_auth::CredentialRecord::new(
-            fence.profile_id().clone(),
-            fence.account_binding().clone(),
-            fence.generation().next().expect("a next generation"),
-            plakous_auth::CredentialStatus::Ready,
-            payload,
-        )
-        .expect("a record");
-        store
-            .replace(fence.generation(), &record)
-            .expect("the refresh commits");
     }
 }

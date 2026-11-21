@@ -3,7 +3,7 @@ use super::super::{
     ClaudeNativeAuthManager, CredentialSlotId, CredentialStatus, PrivateCredentialStore,
     auth_profile_id,
 };
-use super::{CustodyError, between_reads, store_error};
+use super::{CustodyError, advance_ready_unchanged, store_error};
 
 #[test]
 fn local_revoke_rereads_once_and_maps_a_second_generation_move_to_custody_busy() {
@@ -26,7 +26,7 @@ fn local_revoke_rereads_once_and_maps_a_second_generation_move_to_custody_busy()
         let outcome = ClaudeNativeAuthManager::revoke_from_store(store, || {
             let fence = store.load().unwrap().unwrap();
             if moves > 0 {
-                between_reads::commit_refresh(&peer);
+                advance_ready_unchanged(&peer);
                 moves -= 1;
             }
             Ok(fence)

@@ -13,6 +13,9 @@ use super::TestResult;
 ///
 /// # Errors
 /// Returns any fixture credential-read or fence-construction error.
+///
+/// # Panics
+/// Panics if the credential fields or their lease do not match the fence.
 pub async fn fields_hold_exact_fence(
     manager: &impl LocalCustody,
     slot: &CustodySlot,
@@ -58,6 +61,9 @@ pub async fn fields_hold_exact_fence(
 ///
 /// # Errors
 /// Returns a fixture error or the unexpected outcome of the stale read.
+///
+/// # Panics
+/// Panics if the stale request does not name the new Ready fence.
 pub async fn fields_name_the_moved_fence(
     manager: &impl LocalCustody,
     slot: &CustodySlot,
@@ -91,7 +97,7 @@ pub async fn fields_name_the_moved_fence(
 /// Returns a fixture read error or failure to set up the exact lease.
 ///
 /// # Panics
-/// Panics if the runtime cannot pause time.
+/// Panics if the runtime cannot pause time or contention changes the fence.
 pub async fn rejected_while_leased_is_busy(
     manager: &impl LocalCustody,
     slot: &CustodySlot,
@@ -121,6 +127,10 @@ pub async fn rejected_while_leased_is_busy(
 ///
 /// # Errors
 /// Returns a fixture read, task join, or refresh error.
+///
+/// # Panics
+/// Panics if the record moves for a foreign rejection or the concurrent
+/// rejections do not converge on one replacement of the original login.
 pub async fn concurrent_rejections_adopt_one_replacement<D: LocalCustody + Send + 'static>(
     observer: &D,
     refresher: &Arc<D>,
