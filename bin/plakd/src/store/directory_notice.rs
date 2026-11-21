@@ -37,10 +37,8 @@ fn send(paths: &PlakPaths, event: Change<'_>) {
     }
     let (kind, id) = match event {
         Change::Record(id) => ("record", id),
-        Change::Tree(id, change) => {
-            let _ = change;
-            ("tree", id)
-        }
+        Change::Tree(id, TreeChange::Custody) => ("custody", id),
+        Change::Tree(id, TreeChange::Saved(_) | TreeChange::Deleted) => ("tree", id),
         Change::Input(kind) => (kind, "changed"),
     };
     external(paths, kind, id);

@@ -268,6 +268,7 @@ fn external_notice(bytes: &[u8]) -> Notice {
     match kind {
         "record" => Notice::Record(id.into()),
         "tree" => Notice::InspectTree(id.into()),
+        "custody" => Notice::Custody(id.into()),
         "config" => Notice::Configuration,
         "visibility" => Notice::Visibility,
         _ => Notice::Gap,
