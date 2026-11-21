@@ -263,10 +263,22 @@ impl ProductAgentTree {
             })
     }
 
+    #[cfg(test)]
     pub(crate) fn prepare_child_retention(
         &mut self,
         now: u64,
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
+        self.prepare_child_retention_guarded(now, |_| {})
+    }
+
+    /// Calls `before_change` once, before the first mutation. A read-only
+    /// retention check needs no rollback copy of the live tree.
+    pub(crate) fn prepare_child_retention_guarded(
+        &mut self,
+        now: u64,
+        before_change: impl FnOnce(&Self),
+    ) -> Result<Vec<RetirementTicket>, TopologyError> {
+        let mut before_change = Some(before_change);
         let tickets: Vec<_> = self
             .operations
             .values()
@@ -300,6 +312,9 @@ impl ProductAgentTree {
                     continue;
                 }
                 ticket.collected = false;
+                if let Some(snapshot) = before_change.take() {
+                    snapshot(self);
+                }
                 self.write_retention(
                     Self::retirement_id(&ticket.agent_id),
                     ticket.agent_id.clone(),
@@ -341,6 +356,9 @@ impl ProductAgentTree {
                 locator: node.session_locator.clone(),
                 collected: false,
             };
+            if let Some(snapshot) = before_change.take() {
+                snapshot(self);
+            }
             self.write_retention(Self::retirement_id(&agent), agent.clone(), &ticket)?;
             self.nodes
                 .get_mut(&agent)

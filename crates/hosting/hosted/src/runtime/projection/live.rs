@@ -7,9 +7,9 @@
 //! itself. Projection debt is safe: every write is CAS'd on the cursor and
 //! the next open catches up.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 
 use plakous::sessions::{AgentSessions, SessionLocator};
 use tokio::sync::{Notify, oneshot, watch};
@@ -78,8 +78,8 @@ impl LiveTarget {
     }
 
     /// Reclaims dormant checkouts and collects dormant children. This is
-    /// not a pass over the root's feed, so the idle loop may run it on its
-    /// observation tick.
+    /// not a pass over the root's feed. Between turns it runs on tree changes
+    /// and the housekeeping clock, not on every idle observation.
     pub(crate) async fn tree_housekeeping(&self) -> Result<(), String> {
         if let Some(runtime) = crate::topology_runtime::lookup(&self.tree_id) {
             runtime
@@ -94,6 +94,49 @@ impl LiveTarget {
                 .map_err(|error| error.message)?;
         }
         Ok(())
+    }
+}
+
+/// The clock covers expiry without tree changes (for example, an old child's
+/// conversation passing its retention age).
+const IDLE_TREE_HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Default)]
+pub(in crate::runtime) struct IdleTreeHousekeeping(Option<HousekeepingObservation>);
+
+struct HousekeepingObservation {
+    runtime: Weak<crate::topology_runtime::ProductTopologyRuntime>,
+    changes: watch::Receiver<()>,
+    next_check: Instant,
+}
+
+impl IdleTreeHousekeeping {
+    pub(in crate::runtime) fn due(&mut self, tree_id: &str, now: Instant) -> bool {
+        let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
+            self.0 = None;
+            return false;
+        };
+        let key = Arc::downgrade(&runtime);
+        if let Some(observed) = &mut self.0
+            && observed.runtime.ptr_eq(&key)
+        {
+            if now < observed.next_check && !observed.changes.has_changed().unwrap_or(true) {
+                return false;
+            }
+            observed.changes.borrow_and_update();
+            observed.next_check = now + IDLE_TREE_HOUSEKEEPING_INTERVAL;
+        } else {
+            self.0 = Some(HousekeepingObservation {
+                runtime: key,
+                changes: runtime.observe_changes(),
+                next_check: now + IDLE_TREE_HOUSEKEEPING_INTERVAL,
+            });
+        }
+        true
+    }
+
+    pub(in crate::runtime) fn retry(&mut self) {
+        self.0 = None;
     }
 }
 

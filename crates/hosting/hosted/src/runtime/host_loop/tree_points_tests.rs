@@ -44,6 +44,32 @@ fn insert_tree(
         .unwrap()
 }
 
+#[test]
+fn idle_housekeeping_waits_for_tree_change_or_expiry() {
+    let root = tempfile::tempdir().unwrap();
+    let (config, _) = scripted_host_with(root.path(), script(&serde_json::json!([])));
+    let runtime = insert_tree(&config);
+    let id = &config.session.id;
+    let mut housekeeping = super::super::projection::live::IdleTreeHousekeeping::default();
+    let now = Instant::now();
+    let idle_tick = now + Duration::from_millis(100);
+    assert!(housekeeping.due(id, now));
+    assert!(!housekeeping.due(id, idle_tick));
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.spawn_agent(
+                "root",
+                &crate::agent_tree_protocol::SpawnAgentRequest::test_review(),
+                None,
+            )
+        })
+        .block()
+        .unwrap();
+    assert!(housekeeping.due(id, idle_tick));
+    assert!(!housekeeping.due(id, idle_tick + Duration::from_millis(100)));
+    assert!(housekeeping.due(id, idle_tick + Duration::from_secs(1)));
+}
+
 /// One two-round turn runs the admission pass at the tail, the
 /// post-acknowledgement pass, one pass per round at its `ModelStarted`
 /// prefix and the settled-turn pass. Idle ticks and intents alone run none;

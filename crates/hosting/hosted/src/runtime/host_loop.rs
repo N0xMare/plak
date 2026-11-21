@@ -185,6 +185,7 @@ struct RootRole<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The actor entered idle without a settled turn's tree pass (a
     /// workflow); the next idle pass runs the root's settled tree pass.
     idle_entry_pass_due: bool,
+    idle_tree_housekeeping: super::projection::live::IdleTreeHousekeeping,
     /// The root's continuation after a lost host is due at the next idle
     /// boundary: consent was given (a Resume, `resume_after_loss =
     /// "continue"`, or a decision a crash left pending).
@@ -296,18 +297,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
         // The root's tree pass runs here only at idle entry (spec 03 §4.4):
         // after open, a recovery or a workflow, never on a tick or an intent
-        // alone. A turn settles its own pass. The tick keeps the tree's
-        // housekeeping.
+        // alone. A turn settles its own pass. Housekeeping has separate
+        // tree-change and expiry triggers.
         if self.policy.tree_passes && self.role.config.session.store_revision != 0 {
             let due = std::mem::take(&mut self.role.idle_entry_pass_due);
+            let housekeeping = self
+                .role
+                .idle_tree_housekeeping
+                .due(&target.tree_id, Instant::now());
             let passed = if due {
                 target.tree_pass().await
-            } else {
+            } else if housekeeping {
                 target.tree_housekeeping().await
+            } else {
+                Ok(())
             };
             if let Err(error) = passed {
                 // A refused idle-entry pass stays due: the next tick retries it.
                 self.role.idle_entry_pass_due = due;
+                self.role.idle_tree_housekeeping.retry();
                 self.log_projector_debt(&error);
             }
         }

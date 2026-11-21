@@ -259,23 +259,24 @@ impl TreeDriver {
         let driver = self.clone();
         let tickets = self
             .write(move |tree| {
-                let snapshot = (**tree).clone();
-                match tree
-                    .prepare_child_retention(plakous::model::now_unix_millis())
-                    .and_then(|tickets| {
-                        // Even an old ticket needs the custody check before
-                        // dispatch. An empty, unchanged check has no effect.
-                        if !tickets.is_empty() || tree.revision != snapshot.revision {
-                            driver.save_guarded(tree)?;
-                        }
-                        Ok(tickets)
-                    }) {
-                    Ok(tickets) => Ok(tickets),
-                    Err(error) => {
-                        **tree = snapshot;
-                        Err(error)
+                let mut snapshot = None;
+                let result = tree
+                    .prepare_child_retention_guarded(plakous::model::now_unix_millis(), |before| {
+                        snapshot = Some(before.clone())
+                    });
+                let result = result.and_then(|tickets| {
+                    // Even an old ticket needs the custody check before dispatch.
+                    if !tickets.is_empty() || snapshot.is_some() {
+                        driver.save_guarded(tree)?;
                     }
+                    Ok(tickets)
+                });
+                if result.is_err()
+                    && let Some(snapshot) = snapshot
+                {
+                    **tree = snapshot;
                 }
+                result
             })
             .await?;
         for ticket in tickets? {
@@ -328,6 +329,9 @@ impl TreeDriver {
 
     async fn cleanup_candidate_pins(&self) -> Result<(), TopologyError> {
         let pending = self.read(ProductAgentTree::pending_pin_cleanup)??;
+        if pending.is_empty() {
+            return Ok(());
+        }
         let (namespace, launch, vcs) = self.read(|tree| {
             (
                 plakous::model::sha256_hex(&[tree.tree_id.as_bytes()]),

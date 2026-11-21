@@ -1166,10 +1166,11 @@ four points, structurally, in the root's actor: per model round at the
 (and host-wake admission), to the tail; and when a turn settles or the actor
 enters idle without one (open, in-place recovery, an idle-only workflow,
 release), to the tail. Nothing else runs it: neither a child's notification,
-an intent, nor an idle observation tick. That tick still reclaims dormant
-checkouts and collects dormant children, which is tree housekeeping, not a
-pass over the root's feed. A retention check with no changes or tickets to
-dispatch does not save the tree. Each running pass stops at the committed
+an intent, nor an idle observation tick. The idle actor still reclaims dormant
+checkouts and collects dormant children on tree changes and on a one-second
+housekeeping check for expiry. This is not a pass over the root's feed. A
+retention check with no changes or tickets to dispatch does not save the
+tree. Each running pass stops at the committed
 prefix captured by that round's `ModelStarted` event, even when the runtime
 has advanced before the host observes it. Observation latency cannot coalesce
 later rounds into an earlier cursor publication. A prefix behind retention is
