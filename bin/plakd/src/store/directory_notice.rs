@@ -99,7 +99,6 @@ pub(crate) mod local {
         Configuration,
         Visibility,
         Revalidate,
-        #[cfg(test)]
         Gap,
         #[cfg(test)]
         Barrier(std::sync::mpsc::SyncSender<()>),
@@ -141,7 +140,6 @@ pub(crate) mod local {
                 Notice::Configuration => self.configuration = true,
                 Notice::Visibility => self.visibility = true,
                 Notice::Revalidate => self.revalidate = true,
-                #[cfg(test)]
                 Notice::Gap => self.gap = true,
                 #[cfg(test)]
                 Notice::Barrier(sender) => self.barriers.push(sender),

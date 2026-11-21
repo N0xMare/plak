@@ -112,17 +112,23 @@ impl Directory {
         let notify = self.changes.clone();
         let input = runtime.spawn(async move {
             let mut bytes = [0; 512];
+            let mut receive_failed = false;
             loop {
                 let result = socket.recv(&mut bytes).await;
                 let Some(recipient) = inbox.upgrade() else {
                     return;
                 };
                 if let Ok(count) = result {
+                    receive_failed = false;
                     if let Some(notice) = external_notice(&bytes[..count]) {
                         recipient.send_external(notice);
                     }
                 } else {
-                    recipient.send_external(Notice::Revalidate);
+                    // A receive interruption can hide changed keys. Request
+                    // one rebuild per interruption, not one on every retry.
+                    if !std::mem::replace(&mut receive_failed, true) {
+                        recipient.send_external(Notice::Gap);
+                    }
                     drop(recipient);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
