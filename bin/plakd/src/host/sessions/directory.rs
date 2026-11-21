@@ -46,6 +46,7 @@ impl Directory {
             tree,
             store: ProductStore::open(paths).map_err(|error| CliFailure::new(error.to_string()))?,
             metadata: BTreeMap::new(),
+            revisions: BTreeMap::new(),
             trees: BTreeMap::new(),
             profiles: BTreeMap::new(),
             withheld: BTreeSet::new(),
@@ -70,6 +71,9 @@ impl Directory {
                             gap.store(true, Ordering::Release);
                         }
                     } else {
+                        // Live child state is overlaid separately from the
+                        // durable roster/wake projection.
+                        let tree_changed = !batch.trees.is_empty() || !batch.custody.is_empty();
                         let updates = source.apply(&mut batch);
                         let mut rows = shared.write().unwrap_or_else(PoisonError::into_inner);
                         let mut published = false;
@@ -84,7 +88,7 @@ impl Directory {
                             }
                         }
                         drop(rows);
-                        if published {
+                        if published || tree_changed {
                             bump(&notify);
                         }
                     }
@@ -274,6 +278,7 @@ fn external_notice(bytes: &[u8]) -> Notice {
 struct Batch {
     records: BTreeSet<String>,
     trees: BTreeMap<String, TreeUpdate>,
+    custody: BTreeSet<String>,
     gap: bool,
     configuration: bool,
     visibility: bool,
@@ -294,8 +299,11 @@ impl Batch {
             Notice::Tree(id, facts) => {
                 self.trees.insert(id, TreeUpdate::Image(facts));
             }
-            Notice::InspectTree(id) | Notice::Custody(id) => {
+            Notice::InspectTree(id) => {
                 self.trees.insert(id, TreeUpdate::Inspect);
+            }
+            Notice::Custody(id) => {
+                self.custody.insert(id);
             }
             Notice::Configuration => self.configuration = true,
             Notice::Visibility => self.visibility = true,
@@ -318,6 +326,7 @@ struct Source {
     tree: Arc<SqliteTreeStore>,
     store: ProductStore,
     metadata: BTreeMap<String, DirectoryMetadata>,
+    revisions: BTreeMap<String, u64>,
     trees: BTreeMap<String, Result<Option<Box<TreeFacts>>, ()>>,
     profiles: BTreeMap<Option<PathBuf>, Option<Profiles>>,
     withheld: BTreeSet<String>,
@@ -362,7 +371,7 @@ impl Source {
     }
 
     fn apply(&mut self, batch: &mut Batch) -> Vec<(String, Option<Summary>)> {
-        let mut affected = BTreeSet::new();
+        let mut affected = std::mem::take(&mut batch.custody);
         if batch.configuration {
             self.profiles.clear();
             affected.extend(self.metadata.values().map(|row| row.node.tree_id.clone()));
@@ -389,6 +398,7 @@ impl Source {
         self.withheld = crate::carry::upgrade::receipt::withheld_targets(&self.paths)
             .map_err(|error| error.message().to_owned())?;
         self.metadata.clear();
+        self.revisions.clear();
         self.trees.clear();
         self.profiles.clear();
         self.holders.clear();
@@ -410,18 +420,25 @@ impl Source {
                 TreeUpdate::Image(facts) => Ok(facts),
                 TreeUpdate::Inspect => inspect_tree(&self.paths, &id),
             };
-            affected.insert(id.clone());
-            self.trees.insert(id, facts);
+            if self.trees.get(&id) != Some(&facts) {
+                affected.insert(id.clone());
+                self.trees.insert(id, facts);
+            }
         }
         let mut changes = Vec::new();
+        let mut locators = Vec::new();
         for id in ids {
             self.holders.remove(&id);
+            self.revisions.remove(&id);
             if let Some(previous) = self.metadata.remove(&id) {
                 affected.insert(previous.node.tree_id);
             }
             match self.store.directory_metadata(&id) {
                 Ok(Some(metadata)) => {
                     affected.insert(metadata.node.tree_id.clone());
+                    if let Some(locator) = metadata.locator {
+                        locators.push((id.clone(), locator));
+                    }
                     self.metadata.insert(id, metadata);
                 }
                 Ok(None) => changes.push((id, None)),
@@ -431,8 +448,30 @@ impl Source {
                 }
             }
         }
+        self.refresh_revisions(locators);
         changes.extend(self.project(&affected));
         changes
+    }
+
+    fn refresh_revisions(&mut self, located: Vec<(String, plakous::sessions::SessionLocator)>) {
+        if located.is_empty() {
+            return;
+        }
+        let locators = located
+            .iter()
+            .map(|(_, locator)| *locator)
+            .collect::<Vec<_>>();
+        if let Ok(revisions) = plakous::sessions::AgentSessions::inspect_branch_revisions_sqlite(
+            self.paths.runtime_database(),
+            &locators,
+        ) {
+            self.revisions.extend(
+                located
+                    .into_iter()
+                    .zip(revisions)
+                    .filter_map(|((id, _), revision)| revision.map(|revision| (id, revision))),
+            );
+        }
     }
 
     fn project(&mut self, affected: &BTreeSet<String>) -> Vec<(String, Option<Summary>)> {
@@ -441,27 +480,10 @@ impl Source {
             .iter()
             .filter(|(_, meta)| affected.contains(&meta.node.tree_id))
             .collect::<Vec<_>>();
-        let locators = entries
-            .iter()
-            .filter_map(|(_, meta)| meta.locator)
-            .collect::<Vec<_>>();
-        let mut revisions = if locators.is_empty() {
-            Vec::new()
-        } else {
-            plakous::sessions::AgentSessions::inspect_branch_revisions_sqlite(
-                self.paths.runtime_database(),
-                &locators,
-            )
-            .unwrap_or_else(|_| vec![None; locators.len()])
-        }
-        .into_iter();
         let mut heads = BTreeMap::new();
         let mut updates = Vec::with_capacity(entries.len());
         for (id, meta) in entries {
-            let revision = meta
-                .locator
-                .and_then(|_| revisions.next().flatten())
-                .unwrap_or(0);
+            let revision = self.revisions.get(id).copied().unwrap_or(0);
             let tree_id = &meta.node.tree_id;
             let head = heads
                 .entry(tree_id)

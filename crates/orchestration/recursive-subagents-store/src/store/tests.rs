@@ -67,6 +67,54 @@ fn commit_trace_frameless_tree_child() -> Result<(), Box<dyn std::error::Error>>
 use super::*;
 
 #[test]
+#[allow(clippy::unwrap_used, reason = "isolated SQLite custody fixture")]
+fn custody_notices_distinguish_renewal_from_placement_changes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let root = tempfile::tempdir().unwrap();
+    let notices = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&notices);
+    let store = SqliteTreeStore::open(&root.path().join("tree.sqlite3"))
+        .unwrap()
+        .with_commit_notice(move |tree, change| {
+            assert_eq!(tree, "root");
+            assert!(matches!(change, TreeChange::Custody));
+            observed.fetch_add(1, Ordering::Relaxed);
+        });
+    let claim = store
+        .take_custody(
+            "root",
+            plakous_recursive_subagents::tree::custody_host(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(notices.load(Ordering::Relaxed), 1);
+    store
+        .with_connection(|connection| {
+            connection
+                .execute(
+                    "UPDATE agent_tree_custody SET claimed_at=1, renewed_at=1 WHERE tree_id='root'",
+                    [],
+                )
+                .map_err(|error| sqlite_unavailable("could not backdate test custody", &error))
+        })
+        .unwrap();
+    store.renew_custody(&claim).unwrap();
+    assert!(
+        store
+            .custody("root")
+            .unwrap()
+            .unwrap()
+            .holding
+            .renewed_at_ms
+            > 1
+    );
+    assert_eq!(notices.load(Ordering::Relaxed), 1);
+    store.release_custody(&claim).unwrap();
+    assert_eq!(notices.load(Ordering::Relaxed), 2);
+}
+
+#[test]
 #[allow(clippy::unwrap_used, reason = "isolated SQLite inspection fixture")]
 fn inspection_distinguishes_missing_store_and_tree_without_creating_state() {
     let root = tempfile::tempdir().unwrap();

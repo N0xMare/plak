@@ -4,11 +4,14 @@ use plakous_hosted::runtime::{
     ResumeAfterLoss,
     operator_attention::{AttentionReason, root_reason},
 };
-use plakous_hosted::sessions::projector::SessionViews;
+use plakous_hosted::sessions::projector::{ProductIntents, RootInterruptCause, SessionViews};
 use rusqlite::OptionalExtension as _;
 use std::path::PathBuf;
 
-use super::views::{intents::read_intents, unavailable, view_cursor_and_state};
+use super::views::{
+    intents::{read_host_intents, read_intents},
+    unavailable, view_cursor_and_state,
+};
 use super::{ProductStore, decode_node, from_i64};
 
 pub(crate) struct DirectoryMetadata {
@@ -89,7 +92,29 @@ impl ProductStore {
             .connection
             .unchecked_transaction()
             .map_err(unavailable)?;
-        let intents = read_intents(&tx, &mut self.verified_submissions, id, false)?;
+        let mut intents = ProductIntents::default();
+        read_host_intents(
+            &tx,
+            "SELECT kind,anchor,ordinal,value FROM host_intents WHERE session_id=?1 AND kind IN ('pause_cause','interrupt_cause','continuation_decision') ORDER BY anchor,ordinal",
+            id,
+            &mut intents,
+        )?;
+        // Only a recorded loss needs submission evidence to decide standing.
+        // Reading all submitted prompt bodies on an ordinary idle update is
+        // proportional to the session's history, not its directory row.
+        let loss = intents
+            .root_interrupts
+            .iter()
+            .max_by_key(|interrupt| (interrupt.anchor, interrupt.ordinal))
+            .is_some_and(|interrupt| {
+                matches!(
+                    interrupt.value.cause,
+                    RootInterruptCause::OwnerLost | RootInterruptCause::Handoff,
+                )
+            });
+        if loss {
+            intents = read_intents(&tx, &mut self.verified_submissions, id, false)?;
+        }
         let mut views = SessionViews::empty();
         if let Some((cursor, state)) = view_cursor_and_state(&tx, id)? {
             views.cursor = cursor;
@@ -99,9 +124,16 @@ impl ProductStore {
         let reason = root_reason(&views, &intents, policy);
         let mut wakes = 0_u32;
         if reason.is_some() {
+            let items = super::load_queue(&tx, id)?;
+            if items.is_empty() {
+                return Ok((standing, reason, 0));
+            }
+            if !loss {
+                intents = read_intents(&tx, &mut self.verified_submissions, id, false)?;
+            }
             let commands =
                 plakous_hosted::sessions::QueueCommands::from_join(&intents, Some(&views));
-            for item in super::load_queue(&tx, id)? {
+            for item in items {
                 if commands.pending_for(&item).is_some_and(|submission| {
                     submission.kind == plakous_hosted::sessions::projector::SubmissionKind::HostWake
                         && !plakous_hosted::runtime::is_root_loss_command(&submission.command_id)

@@ -141,7 +141,7 @@ impl SqliteTreeStore {
                 })?;
                 if !current.is_some_and(|current| {
                     current.fence == record.fence
-                        && current.holding == record.holding
+                        && current.holding.host == record.holding.host
                         && current.released == record.released
                 }) {
                     self.notify_commit(tree_id, crate::store::TreeChange::Custody);

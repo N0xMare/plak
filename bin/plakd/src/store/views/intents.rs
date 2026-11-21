@@ -252,7 +252,7 @@ fn read_notices(connection: &Connection, session_id: &str) -> Result<Vec<Operato
         .map_err(invalid)
 }
 
-fn read_host_intents(
+pub(in crate::store) fn read_host_intents(
     connection: &Connection,
     query: &str,
     session_id: &str,

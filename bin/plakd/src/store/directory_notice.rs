@@ -76,6 +76,7 @@ pub(crate) mod local {
 
     use super::{Change, PathBuf, PlakPaths, TreeChange};
 
+    #[derive(PartialEq, Eq)]
     pub(crate) struct TreeFacts {
         pub(crate) roster: OrchestrationSnapshot,
         pub(crate) hold: PendingTreeWork,
