@@ -2,56 +2,52 @@ use super::super::test_wire::TestWire;
 use super::*;
 use futures_util::StreamExt as _;
 use plakous_model::{
-    AttemptId, CancellationToken, Digest, DigestDomain, FixedClock, ModelCallContext, Timestamp,
+    AttemptId, CancellationToken, Digest, DigestDomain, ModelCallContext, ModelRetryLoss,
 };
 use std::{error::Error, num::NonZeroUsize};
 
-#[derive(Clone)]
-struct UnusedHooks;
+struct DeclineHooks {
+    attempt: FamilyAttempt<TestWire>,
+    failure: Option<RetryFailure>,
+}
 
-impl FamilyHttpHooks<TestWire> for UnusedHooks {
-    type ErrorMetadata = ();
+impl FamilyExchangeHooks for DeclineHooks {
+    type Result = bool;
+    type Terminal = ();
 
-    fn build_request(
-        &self,
-        _: &Client,
-        _: Origin,
-        _: &FamilyAttempt<TestWire>,
-        _: &PreparedFamilyHttpOperation<TestWire>,
-    ) -> Result<HttpRequest, FamilyAttemptProtocolError<TestWire>> {
-        unreachable!("declined retry does not dispatch")
+    fn ledger(&self) -> &crate::attempt::PhysicalRequestLedger {
+        self.attempt.ledger()
     }
 
-    fn classify_response_head(
-        &self,
-        _: &Response,
-    ) -> Result<FamilyHttpResponseHead<()>, FamilyAttemptProtocolError<TestWire>> {
-        unreachable!("declined retry does not exchange")
+    async fn exchange(&mut self, _: Generation) -> GenerationEnd<()> {
+        if let Some(failure) = self.failure.take() {
+            GenerationEnd::Retry {
+                terminal: (),
+                failure,
+            }
+        } else {
+            panic!("declined retry does not dispatch")
+        }
     }
 
-    fn classify_error_response(
-        &self,
-        (): (),
-        _: &[u8],
-        _: FamilyHttpSafety,
-    ) -> FamilyAttemptProtocolError<TestWire> {
-        unreachable!("declined retry does not exchange")
+    async fn announce_retry(&mut self, retry: ModelRetry) -> bool {
+        self.attempt.events_mut().send_retry(retry).await.is_ok()
     }
 
-    fn classify_transport_failure(
-        &self,
-        _: HttpFailure,
-        _: Option<&str>,
-    ) -> FamilyAttemptProtocolError<TestWire> {
-        unreachable!("declined retry does not exchange")
+    async fn reauthorize(&mut self, _: bool) -> Reauthorization {
+        panic!("declined retry does not reauthorize")
     }
 
-    fn cancellation_error(&self) -> FamilyAttemptProtocolError<TestWire> {
-        unreachable!("fixture is not cancelled")
+    async fn finish(&mut self, (): (), deferred: bool) -> bool {
+        deferred
     }
 
-    fn classify_stream_error(&self, (): ()) -> FamilyAttemptProtocolError<TestWire> {
-        unreachable!("declined retry does not exchange")
+    fn cancelled(&mut self) -> bool {
+        false
+    }
+
+    async fn deadline(&mut self, (): ()) -> bool {
+        false
     }
 }
 
@@ -66,47 +62,44 @@ async fn assert_decline(
         digest(DigestDomain::ProviderOperation)?,
         crate::attempt::ReplaySafety::CostOnly,
     );
+    let cancellation = CancellationToken::new();
     let context = ModelCallContext::new(
         AttemptId::try_from(uuid::Uuid::from_u128(100))?,
-        CancellationToken::new(),
+        cancellation.clone(),
         None,
     );
-    let (mut attempt, mut receiver) = FamilyAttempt::<TestWire>::with_event_channel(
+    let (attempt, mut receiver) = FamilyAttempt::<TestWire>::with_event_channel(
         operation,
         context,
         NonZeroUsize::new(1).ok_or("nonzero")?,
     );
-    let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(Timestamp::new(1_700_000_000, 0)?));
-    let mut failure = Retryable::new(
-        FailurePoint::MidStream,
-        ModelRetryCause::StreamInterrupted {
-            fault: ModelTransportFault::EndOfStream,
+    let failure = RetryFailure::interrupted(
+        ModelTransportFault::EndOfStream,
+        "short stream".into(),
+        true,
+        ModelRetryLoss {
+            assistant_text_bytes: 7,
+            ..ModelRetryLoss::default()
         },
-    );
-    failure.output_discarded = true;
-    failure.loss.assistant_text_bytes = 7;
-    let mut waited = Duration::ZERO;
-    let step = retry_step(
-        &mut attempt,
-        RetryContext {
-            hooks: &UnusedHooks,
-            redispatch: None,
-            turn_rooted: false,
-            clock: &clock,
-            hard_deadline,
-            hook_budget: Duration::from_secs(5),
-            request: &("fixture.invalid".into(), "/messages".into(), 2),
-        },
-        failure,
-        RetryProgress {
-            waited: &mut waited,
-            long_stream_replays: &mut crate::attempt::LongStreamReplayBudget::default(),
-            unreachable: &mut crate::attempt::UnreachableRideOut::default(),
-        },
-        Duration::from_secs(1),
     )
-    .await;
-    assert!(matches!(step, RetryStep::End));
+    .with_request(("fixture.invalid".into(), "/messages".into(), 2));
+    let host = FamilyExchange {
+        timeout: Duration::from_secs(5),
+        hard_deadline,
+        turn_rooted: false,
+        redispatch_available: false,
+        retry_delivery: RetryDelivery::BeforeDelay,
+    };
+    assert!(
+        host.run(
+            &mut DeclineHooks {
+                attempt,
+                failure: Some(failure)
+            },
+            &cancellation
+        )
+        .await
+    );
     let event = receiver.next().await.ok_or("decline event")??;
     let ModelEvent::Retry(retry) = event else {
         panic!("expected retry observation")

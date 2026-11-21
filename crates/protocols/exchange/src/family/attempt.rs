@@ -677,6 +677,9 @@ impl<W: FamilyWire> FamilyAttempt<W> {
             .observations_ref()
             .record_failure(point, phase, refusal, proven_unsent, decline);
     }
+    pub(super) fn ledger(&self) -> &crate::attempt::PhysicalRequestLedger {
+        self.core.observations_ref()
+    }
     /// Returns current conservative facts.
     #[must_use]
     pub fn terminal_facts(&self) -> TerminalFacts {

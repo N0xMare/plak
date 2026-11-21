@@ -24,35 +24,31 @@ pub(crate) use dispatch::body_wraps_upstream_overload;
 #[cfg(test)]
 use dispatch::{
     CollectorFailure, ObservationDelivery, RawTerminal, StreamCollector, classify_status,
+    status_outcome,
 };
-use dispatch::{
-    admit_attempt, event_starts_visible_output, execute_admitted, refusal_status, status_outcome,
-};
+use dispatch::{admit_attempt, event_starts_visible_output};
+use family::ResponsesExchange;
 use identity::{
     authority_target, dialect_execution_identity, host_behavior_identity, inspect_serialized_body,
     lowered_replay_safety, physical_request_digest, prepared_wire_digest, request_body_digest,
     target_identity,
 };
 use plakous_exchange::attempt::{
-    AdmissionFirstFuture, AttemptBinding, AuthReservationMask, FailurePoint, FailureRisk,
-    FamilyAttemptCore, FamilyCoreError, Jitter, LedgerPolicy, LifecycleLedgerAdmission,
-    PhysicalRequestBinding, PhysicalRequestOutcome, ReplaySafety, RetryPolicy, TerminalFacts,
-    retry_after_seconds,
+    AdmissionFirstFuture, AttemptBinding, AuthReservationMask, FailurePoint, FamilyAttemptCore,
+    FamilyCoreError, LedgerPolicy, LifecycleLedgerAdmission, PhysicalRequestBinding,
+    PhysicalRequestOutcome, ReplaySafety, RetryPolicy, TerminalFacts, retry_after_seconds,
 };
-use plakous_exchange::{RetryDeclineInput, retry_decline, retry_phase};
+use plakous_exchange::family::{FamilyExchange, RetryDelivery};
 use plakous_http::{
     Bytes, CancellationToken as HttpCancellationToken, Client, ErrorKind as HttpErrorKind,
     ExchangeControl, Failure as HttpFailure, HeaderName, Request, ResponseBody, StatusCode,
 };
-use plakous_model::ModelRetryDeclineReason as Decline;
 use plakous_model::{
     AttemptId, CancellationToken, Digest, DigestDomain, ModelOperationRoot, ModelProviderRequestId,
-    ModelRequest, ModelRetry, ModelRetryCause, ModelTransportFault, ResolvedModelDescriptor,
+    ModelRequest, ModelRetry, ModelTransportFault, ResolvedModelDescriptor,
 };
-use retry::{
-    RetryStep, credential_rejection_retry_eligible, in_band_retryable, refresh_credential,
-    refused_connection, retryable, wait_to_retry,
-};
+#[cfg(test)]
+use plakous_model::{ModelRetryCause, ModelRetryDeclineReason as Decline};
 use tokio::sync::mpsc;
 
 use crate::CredentialGenerationFingerprint;
@@ -83,8 +79,8 @@ pub use error::{ResponsesAttemptBuildError, ResponsesAttemptError, ResponsesHttp
 
 mod authority;
 mod dispatch;
+mod family;
 mod identity;
-mod retry;
 
 const REQUEST_DIGEST_REVISION: u32 = 2;
 const PREPARED_WIRE_DIGEST_REVISION: u32 = 1;
@@ -581,17 +577,13 @@ pub struct ResponsesAttempt {
     cancellation: CancellationToken,
     deadline: Instant,
     dispatch_timeout: Duration,
-    next_dispatch_started: Option<Instant>,
     hard_deadline: Option<Instant>,
-    long_stream_replays: plakous_exchange::attempt::LongStreamReplayBudget,
-    unreachable: plakous_exchange::attempt::UnreachableRideOut,
     observations: Option<mpsc::Sender<ResponsesObservation>>,
     physical: Option<ResponsesPhysicalDispatchBinding>,
     stream: StreamProgress,
     core: FamilyAttemptCore,
     retry_permitted: bool,
     request_log: Option<(String, String, usize)>,
-    fresh_connection: bool,
 }
 
 impl ResponsesAttempt {
@@ -629,16 +621,12 @@ impl ResponsesAttempt {
             deadline,
             dispatch_timeout: deadline.saturating_duration_since(monotonic_now()),
             hard_deadline: None,
-            next_dispatch_started: None,
-            long_stream_replays: plakous_exchange::attempt::LongStreamReplayBudget::default(),
-            unreachable: plakous_exchange::attempt::UnreachableRideOut::default(),
             observations: None,
             physical: None,
             stream: StreamProgress::default(),
             core: FamilyAttemptCore::new_with_policy(ledger_policy),
             retry_permitted,
             request_log: None,
-            fresh_connection: false,
         }
     }
 
@@ -1237,10 +1225,6 @@ where
     /// shares the policy's physical budget; a hosted effect or a second 401
     /// ends the attempt as-is. Session workflows retry only exact transport
     /// evidence that the request was not fully sent, never an HTTP response.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one linear host step whose ordering is the invariant"
-    )]
     pub fn execute(&self, attempt: ResponsesAttempt) -> ResponsesAttemptFuture {
         if attempt.binding.operation().execution() != self.data.execution
             || attempt.binding.operation().ledger_policy() != self.data.ledger_policy
@@ -1267,120 +1251,25 @@ where
         }
         let admission =
             LifecycleLedgerAdmission::new(attempt.core.lifecycle(), attempt.core.observations());
-        let retry_permitted = attempt.retry_permitted;
-        let hook = self
-            .authorization
-            .credential_rejected
-            .filter(|_| retry_permitted);
-        let client = self.client.clone();
-        let dialect = Arc::clone(&self.dialect);
-        let data = self.data.clone();
-        let authorization = self.authorization;
-        let future = async move {
-            let mut attempt = attempt;
-            // The 401 refresh runs at most once; every re-send shares the
-            // policy's physical budget.
-            let mut hook = hook;
-            let mut waited = Duration::ZERO;
-            loop {
-                let now = attempt
-                    .next_dispatch_started
-                    .take()
-                    .unwrap_or_else(monotonic_now);
-                attempt.deadline = now.checked_add(attempt.dispatch_timeout).unwrap_or(now);
-                if let Some(hard) = attempt.hard_deadline {
-                    attempt.deadline = attempt.deadline.min(hard);
-                }
-                attempt.stream.physical_started = Some(now);
-                let error = match execute_admitted(
-                    client.clone(),
-                    Arc::clone(&dialect),
-                    data.clone(),
-                    authorization,
-                    &mut attempt,
-                    true,
-                )
-                .await
-                {
-                    Ok(response) => {
-                        let Some(fault) = attempt.stream.refused_in_band else {
-                            return Ok(response);
-                        };
-                        let failure = in_band_retryable(fault, attempt.stream);
-                        match wait_to_retry(&mut attempt, failure, &mut waited).await {
-                            RetryStep::Send => {
-                                attempt.physical = None;
-                                attempt.reset_stream();
-                                continue;
-                            }
-                            RetryStep::Cancelled => {
-                                attempt.core.mark_failed();
-                                return Err(ResponsesAttemptError::Cancelled {
-                                    physical: attempt.physical(),
-                                    facts: attempt.facts(),
-                                });
-                            }
-                            RetryStep::Deadline | RetryStep::End => {
-                                attempt.core.mark_failed();
-                                return Ok(ResponsesAttemptResponse {
-                                    facts: attempt.facts(),
-                                    ..response
-                                });
-                            }
-                        }
-                    }
-                    Err(error) => error,
-                };
-                if matches!(
-                    &error,
-                    ResponsesAttemptError::HttpStatus {
-                        retry_disabled: true,
-                        ..
-                    }
-                ) {
-                    attempt.stream.retry_disabled = true;
-                }
-                let step = if retry_permitted
-                    && credential_rejection_retry_eligible(&error, &attempt.unreachable)
-                {
-                    match hook.take() {
-                        Some(hook) => refresh_credential(hook, &dialect, &mut attempt).await,
-                        None => RetryStep::End,
-                    }
-                } else if let Some(failure) = retryable(&error, attempt.stream) {
-                    wait_to_retry(&mut attempt, failure, &mut waited).await
-                } else {
-                    RetryStep::End
-                };
-                match step {
-                    RetryStep::Send => {
-                        attempt.physical = None;
-                        attempt.reset_stream();
-                    }
-                    RetryStep::Cancelled => {
-                        attempt.core.mark_failed();
-                        return Err(ResponsesAttemptError::Cancelled {
-                            physical: attempt.physical(),
-                            facts: attempt.facts(),
-                        });
-                    }
-                    RetryStep::Deadline => {
-                        attempt.core.mark_failed();
-                        return Err(ResponsesAttemptError::Deadline {
-                            physical: attempt.physical(),
-                            facts: attempt.facts(),
-                        });
-                    }
-                    RetryStep::End => {
-                        attempt.core.mark_failed();
-                        return Err(
-                            error.with_summary(attempt.core.observations_ref().attempt_summary())
-                        );
-                    }
-                }
-            }
+        let host = FamilyExchange {
+            timeout: attempt.dispatch_timeout,
+            hard_deadline: attempt.hard_deadline.map(tokio::time::Instant::from_std),
+            turn_rooted: attempt.retry_permitted,
+            redispatch_available: true,
+            retry_delivery: RetryDelivery::DuringDelay,
         };
-        Box::pin(AdmissionFirstFuture::new(future, Some(admission)))
+        let cancellation = attempt.cancellation.clone();
+        let mut hooks = ResponsesExchange {
+            client: self.client.clone(),
+            dialect: Arc::clone(&self.dialect),
+            data: self.data.clone(),
+            authorization: self.authorization,
+            attempt,
+        };
+        Box::pin(AdmissionFirstFuture::new(
+            async move { host.run(&mut hooks, &cancellation).await },
+            Some(admission),
+        ))
     }
 }
 

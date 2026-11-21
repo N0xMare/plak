@@ -8,11 +8,8 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time::Instant;
 
-use crate::attempt::{ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy};
-use crate::{
-    RetryDeclineInput, cancellable, read_bounded_body, retry_cause_refusal, retry_decline,
-    retry_phase, time_until,
-};
+use crate::attempt::{ExchangeBreak, FailurePoint, PhysicalRequestOutcome};
+use crate::{cancellable, read_bounded_body, retry_phase, time_until};
 use plakous_http::{
     CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
     Origin, Request as HttpRequest, Response, ResponseBody, StatusCode,
@@ -20,13 +17,15 @@ use plakous_http::{
 use plakous_model::ModelRetryDeclineReason as Decline;
 use plakous_model::{
     Clock, IdGenerator, ModelEvent, ModelProviderRequestId, ModelResponse, ModelRetry,
-    ModelRetryCause, ModelTransportFault,
+    ModelTransportFault,
 };
 use tower_service::Service;
 
 use super::{
     FamilyAttempt, FamilyAttemptError, FamilyAttemptProtocolError, FamilyAttemptResponse,
-    FamilyOperationBinding, FamilyWire,
+    FamilyExchange, FamilyExchangeHooks, FamilyOperationBinding, FamilyWire, Generation,
+    GenerationEnd, Reauthorization, RetryDelivery, RetryFailure, TransportRejection,
+    transport_fault,
 };
 
 /// Credential-free, exact input to one family HTTP operation.
@@ -175,8 +174,9 @@ pub type FamilyRedispatchFn<W, H> = for<'a> fn(
 
 /// Shared exchange service. A provider may install a 401 renewal hook and a
 /// redispatch hook. The renewal re-sends only a definitely refused
-/// turn request; the redispatch hook enables [`RetryPolicy::TURN`]. Both share its
+/// turn request; the redispatch hook enables [`crate::attempt::RetryPolicy::TURN`]. Both share its
 /// physical budget.
+#[derive(Clone)]
 pub struct FamilyHttpAttemptService<W: FamilyWire, H> {
     client: Client,
     dial_origin: Origin,
@@ -268,85 +268,152 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> Service<FamilyAttempt<W>>
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut attempt: FamilyAttempt<W>) -> Self::Future {
-        let client = self.client.clone();
-        let dial_origin = self.dial_origin.clone();
-        let operation = self.operation.clone();
-        let hooks = self.hooks.clone();
-        let clock = Arc::clone(&self.clock);
-        let ids = Arc::clone(&self.ids);
-        let timeout = self.timeout;
-        let max_error_body_bytes = self.max_error_body_bytes;
-        let credential_rejected = self.credential_rejected;
-        let redispatch = self.redispatch;
-        let turn_rooted = self.turn_rooted;
+    fn call(&mut self, attempt: FamilyAttempt<W>) -> Self::Future {
+        let service = self.clone();
         Box::pin(async move {
             attempt.ensure_service_admitted()?;
-            if attempt.binding().operation() != operation.binding() {
+            if attempt.binding().operation() != service.operation.binding() {
                 return Err(FamilyAttemptError::<W>::Binding {
                     facts: attempt.terminal_facts(),
                 });
             }
-            execute(
-                &client,
-                dial_origin,
-                &operation,
-                hooks,
-                clock,
-                ids,
+            let timeout = attempt
+                .context()
+                .dispatch_timeout()
+                .map_or(service.timeout, |budget| service.timeout.min(budget));
+            let hard_deadline = attempt
+                .context()
+                .deadline()
+                .map(|deadline| Instant::now() + time_until(deadline, service.clock.now()));
+            let host = FamilyExchange {
                 timeout,
-                max_error_body_bytes,
-                credential_rejected,
-                redispatch,
-                turn_rooted,
-                &mut attempt,
+                hard_deadline,
+                turn_rooted: service.turn_rooted,
+                redispatch_available: service.redispatch.is_some(),
+                retry_delivery: RetryDelivery::BeforeDelay,
+            };
+            let cancellation = attempt.context().cancellation().clone();
+            host.run(
+                &mut HttpGeneration {
+                    service,
+                    attempt,
+                    timeout,
+                    hard_deadline,
+                    provider_deadline_replayed: false,
+                },
+                &cancellation,
             )
             .await
         })
     }
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "one physical exchange keeps lifecycle facts adjacent"
-)]
-async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
-    client: &Client,
-    dial_origin: Origin,
-    operation: &PreparedFamilyHttpOperation<W>,
-    hooks: H,
-    clock: Arc<dyn Clock>,
-    ids: Arc<dyn IdGenerator>,
+struct HttpGeneration<W: FamilyWire, H> {
+    service: FamilyHttpAttemptService<W, H>,
+    attempt: FamilyAttempt<W>,
     timeout: Duration,
-    max_error_body_bytes: usize,
-    credential_rejected: Option<FamilyCredentialRejectedFn<W, H>>,
-    redispatch: Option<FamilyRedispatchFn<W, H>>,
-    turn_rooted: bool,
-    attempt: &mut FamilyAttempt<W>,
-) -> Result<FamilyAttemptResponse<W>, FamilyAttemptError<W>> {
-    let mut hooks = hooks;
-    // The 401 renewal runs at most once. Every re-send, renewal or policy
-    // retry, shares the policy's physical budget; each generation gets its own
-    // exchange deadline so a backoff never eats the stream time of the attempt
-    // that succeeds.
-    let mut credential_retry = credential_rejected;
-    let mut provider_deadline_replayed = false;
-    let mut waited = Duration::ZERO;
-    let mut long_stream_replays = crate::attempt::LongStreamReplayBudget::default();
-    let mut unreachable = crate::attempt::UnreachableRideOut::default();
-    let timeout = attempt
-        .context()
-        .dispatch_timeout()
-        .map_or(timeout, |budget| timeout.min(budget));
-    let mut next_dispatch_started = None;
-    let mut fresh_connection = false;
-    let hard_deadline = attempt
-        .context()
-        .deadline()
-        .map(|deadline| Instant::now() + time_until(deadline, clock.now()));
-    loop {
-        let physical_started = next_dispatch_started.take().unwrap_or_else(Instant::now);
+    hard_deadline: Option<Instant>,
+    provider_deadline_replayed: bool,
+}
+
+type HttpResult<W> = Result<FamilyAttemptResponse<W>, FamilyAttemptError<W>>;
+
+enum HttpTerminal<W: FamilyWire> {
+    Finished(HttpResult<W>),
+    Deferred(FamilyAttemptProtocolError<W>),
+}
+
+impl<W: FamilyWire, H: FamilyHttpHooks<W>> FamilyExchangeHooks for HttpGeneration<W, H> {
+    type Result = HttpResult<W>;
+    type Terminal = HttpTerminal<W>;
+
+    fn ledger(&self) -> &crate::attempt::PhysicalRequestLedger {
+        self.attempt.ledger()
+    }
+
+    async fn exchange(&mut self, generation: Generation) -> GenerationEnd<Self::Terminal> {
+        match self.exchange_one(generation).await {
+            Ok(end) => end,
+            Err(error) => GenerationEnd::Finished(HttpTerminal::Finished(Err(error))),
+        }
+    }
+
+    async fn announce_retry(&mut self, retry: ModelRetry) -> bool {
+        self.attempt.events_mut().send_retry(retry).await.is_ok()
+    }
+
+    async fn reauthorize(&mut self, renew: bool) -> Reauthorization {
+        let service = &mut self.service;
+        let hook = if renew {
+            service.credential_rejected
+        } else {
+            service.redispatch
+        };
+        let Some(hook) = hook else {
+            return Reauthorization::End;
+        };
+        let started = Instant::now();
+        let cancellation = self.attempt.context().cancellation();
+        let bound = self
+            .attempt
+            .context()
+            .deadline()
+            .map_or(self.timeout, |deadline| {
+                time_until(deadline, service.clock.now()).min(self.timeout)
+            });
+        if bound.is_zero() {
+            return Reauthorization::End;
+        }
+        // Dropping the bounded refresh leaves the claimed-refresh store's
+        // durable Unknown fence in place and never detaches provider I/O.
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Reauthorization::Cancelled,
+            () = tokio::time::sleep(bound) => Reauthorization::End,
+            result = hook(&service.hooks) => match result {
+                Ok(refreshed) if !cancellation.is_cancelled() => {
+                    service.hooks = refreshed;
+                    Reauthorization::Send(Some(started))
+                }
+                Ok(_) => Reauthorization::Cancelled,
+                Err(_) => Reauthorization::End,
+            },
+        }
+    }
+
+    async fn finish(&mut self, terminal: Self::Terminal, _deferred: bool) -> Self::Result {
+        match terminal {
+            HttpTerminal::Finished(result) => result,
+            HttpTerminal::Deferred(error) => emit_error(&mut self.attempt, error).await,
+        }
+    }
+
+    fn cancelled(&mut self) -> Self::Result {
+        Err(FamilyAttemptError::Cancelled {
+            facts: Some(self.attempt.terminal_facts()),
+        })
+    }
+
+    async fn deadline(&mut self, terminal: Self::Terminal) -> Self::Result {
+        self.finish(terminal, true).await
+    }
+}
+
+impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one generation has ordered authorization, response-head and stream phases"
+    )]
+    async fn exchange_one(
+        &mut self,
+        generation: Generation,
+    ) -> Result<GenerationEnd<HttpTerminal<W>>, FamilyAttemptError<W>> {
+        let service = &self.service;
+        let attempt = &mut self.attempt;
+        let client = &service.client;
+        let hooks = &service.hooks;
+        let operation = &service.operation;
+        let dial_origin = &service.dial_origin;
         if attempt.context().cancellation().is_cancelled() {
             return Err(FamilyAttemptError::<W>::Cancelled {
                 facts: Some(attempt.terminal_facts()),
@@ -373,22 +440,14 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                     .await;
             }
         };
-        let request_log = (
-            request.origin().host().to_owned(),
-            request.path_and_query().path().to_owned(),
-            request.body().len(),
-        );
+        let request_log = RetryFailure::request_log(&request);
         let cancellation = HttpCancellationToken::new();
-        let deadline = physical_started
-            .checked_add(timeout)
-            .unwrap_or(physical_started);
-        let deadline = hard_deadline.map_or(deadline, |hard| deadline.min(hard));
         let exchanged = cancellable(
             client.execute(
                 request,
-                ExchangeControl::streaming(deadline.into_std(), cancellation.clone())
-                    .with_body_deadline(hard_deadline.map(Instant::into_std))
-                    .with_fresh_connection(std::mem::take(&mut fresh_connection)),
+                ExchangeControl::streaming(generation.deadline.into_std(), cancellation.clone())
+                    .with_body_deadline(self.hard_deadline.map(Instant::into_std))
+                    .with_fresh_connection(generation.fresh_connection),
             ),
             attempt.context().cancellation(),
             &cancellation,
@@ -398,9 +457,7 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
             Ok(response) => response,
             Err(failure) => {
                 hooks.transport_failed(failure);
-                fresh_connection = failure.cause() == Some("peer_rejected_record");
-                let transmission = failure.transmission();
-                let outcome = if transmission.peer_cannot_have_acted() {
+                let outcome = if failure.transmission().peer_cannot_have_acted() {
                     PhysicalRequestOutcome::DefiniteRejection
                 } else {
                     PhysicalRequestOutcome::AmbiguousPostSend
@@ -417,71 +474,12 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                 let error = hooks
                     .classify_transport_failure(failure, None)
                     .with_exchange_break(ExchangeBreak::Transport);
-                let retryable = if failure.cause() == Some("peer_rejected_record") {
-                    Some(Retryable::new(
-                        FailurePoint::RecordRejectedInTransit,
-                        ModelRetryCause::RecordRejectedInTransit,
-                    ))
-                } else if transmission == plakous_http::TransmissionFact::RequestIncomplete
-                    || (transmission == plakous_http::TransmissionFact::NotStarted
-                        && matches!(
-                            failure.phase(),
-                            plakous_http::Phase::Resolution
-                                | plakous_http::Phase::Connect
-                                | plakous_http::Phase::Tls
-                        ))
-                {
-                    Some(Retryable::new(
-                        if transmission == plakous_http::TransmissionFact::NotStarted {
-                            FailurePoint::Unreachable
-                        } else {
-                            FailurePoint::RequestIncomplete
-                        },
-                        ModelRetryCause::Connect,
-                    ))
-                } else {
-                    transport_fault(failure).map(|fault| {
-                        Retryable::new(
-                            FailurePoint::AfterSend,
-                            ModelRetryCause::TransportAfterSend { fault },
-                        )
-                    })
-                };
                 attempt.observe_physical_request_finished(outcome)?;
-                let Some(retryable) = retryable else {
-                    return emit_error(attempt, error).await;
-                };
-                let step = retry_step(
-                    attempt,
-                    RetryContext {
-                        hooks: &hooks,
-                        redispatch,
-                        turn_rooted,
-                        clock: &clock,
-                        hard_deadline,
-                        hook_budget: timeout,
-                        request: &request_log,
-                    },
-                    retryable
-                        .with_phase(failure.phase())
-                        .with_detail(format!("{failure:?}")),
-                    RetryProgress {
-                        waited: &mut waited,
-                        long_stream_replays: &mut long_stream_replays,
-                        unreachable: &mut unreachable,
-                    },
-                    physical_started.elapsed(),
-                )
-                .await;
-                hooks = match step {
-                    RetryStep::Send(refreshed, started) => {
-                        next_dispatch_started = Some(started);
-                        refreshed
-                    }
-                    RetryStep::Cancelled => return Err(cancelled(attempt)),
-                    RetryStep::End => return emit_error(attempt, error).await,
-                };
-                continue;
+                return Ok(retry_or_end(
+                    error,
+                    RetryFailure::transport(failure, TransportRejection::from_failure(failure)),
+                    request_log,
+                ));
             }
         };
         let status = response.status();
@@ -506,7 +504,7 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                     response.into_body(),
                     attempt.context().cancellation(),
                     &cancellation,
-                    max_error_body_bytes,
+                    service.max_error_body_bytes,
                 )
                 .await;
                 let body = match body {
@@ -546,78 +544,42 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                     false,
                     None,
                 );
-                let step = if error.usage_limit()
-                    || (retry_disabled && !W::STATUS_RETRY_DECLINE_NOTICE)
-                {
-                    RetryStep::End
-                } else if status == StatusCode::UNAUTHORIZED
+                if error.usage_limit() || (retry_disabled && !W::STATUS_RETRY_DECLINE_NOTICE) {
+                    return Ok(GenerationEnd::Finished(HttpTerminal::Deferred(error)));
+                }
+                if status == StatusCode::UNAUTHORIZED
                     && refused
                     && !retry_disabled
-                    && turn_rooted
+                    && service.turn_rooted
                 {
-                    // The 401 generation is closed without emitting an
-                    // observation: the caller sees one logical attempt.
-                    match credential_retry.take() {
-                        Some(renew) => {
-                            renew_credential(renew, &hooks, attempt, &clock, timeout, &unreachable)
-                                .await
-                        }
-                        None => RetryStep::End,
-                    }
-                } else if let Some(point) = RetryPolicy::status_failure_point(status.as_u16()) {
-                    // A refusal status the provider did not prove refused is
-                    // as ambiguous as any other failure after the send.
-                    let point = if refused {
-                        point
-                    } else {
-                        FailurePoint::AfterSend
-                    };
-                    let mut retryable = Retryable::new(
-                        point,
-                        ModelRetryCause::HttpStatus {
-                            status: status.as_u16(),
+                    return Ok(
+                        if attempt.terminal_facts().replay_safety()
+                            == crate::attempt::ReplaySafety::ServerEffect
+                        {
+                            GenerationEnd::Finished(HttpTerminal::Deferred(error))
+                        } else {
+                            GenerationEnd::Renew(HttpTerminal::Deferred(error))
                         },
-                    )
-                    .with_detail(error.message());
-                    retryable.retry_after = error
-                        .retry_after()
-                        .map(|advice| Duration::from_millis(advice.as_millis()))
-                        .or(retry_after);
+                    );
+                }
+                let advice = error
+                    .retry_after()
+                    .map(|advice| Duration::from_millis(advice.as_millis()))
+                    .or(retry_after);
+                let failure = RetryFailure::status(
+                    status.as_u16(),
+                    refused,
+                    advice,
+                    error.message().to_owned(),
+                )
+                .map(|failure| {
                     if retry_disabled {
-                        retryable.loss.declined_reason =
-                            Some(plakous_model::ModelRetryDeclineReason::RetryDisabled);
+                        failure.with_decline(Decline::RetryDisabled)
+                    } else {
+                        failure
                     }
-                    retry_step(
-                        attempt,
-                        RetryContext {
-                            hooks: &hooks,
-                            redispatch,
-                            turn_rooted,
-                            clock: &clock,
-                            hard_deadline,
-                            hook_budget: timeout,
-                            request: &request_log,
-                        },
-                        retryable,
-                        RetryProgress {
-                            waited: &mut waited,
-                            long_stream_replays: &mut long_stream_replays,
-                            unreachable: &mut unreachable,
-                        },
-                        physical_started.elapsed(),
-                    )
-                    .await
-                } else {
-                    RetryStep::End
-                };
-                hooks = match step {
-                    RetryStep::Send(refreshed, started) => {
-                        next_dispatch_started = Some(started);
-                        refreshed
-                    }
-                    RetryStep::Cancelled => return Err(cancelled(attempt)),
-                    RetryStep::End => return emit_error(attempt, error).await,
-                };
+                });
+                Ok(retry_or_end(error, failure, request_log))
             }
             Ok(
                 head @ (FamilyHttpResponseHead::Stream(_)
@@ -631,30 +593,35 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                 let interrupted = match stream_response(
                     response.into_body(),
                     operation,
-                    &hooks,
+                    hooks,
                     request_id,
-                    Arc::clone(&clock),
-                    Arc::clone(&ids),
+                    Arc::clone(&service.clock),
+                    Arc::clone(&service.ids),
                     cancellation,
                     attempt,
                 )
                 .await
                 {
-                    StreamOutcome::<W>::Finished(result) => return result,
+                    StreamOutcome::<W>::Finished(result) => {
+                        return Ok(GenerationEnd::Finished(HttpTerminal::Finished(result)));
+                    }
                     StreamOutcome::<W>::Interrupted(interrupted) => interrupted,
                 };
                 attempt.observe_physical_request_finished(
                     PhysicalRequestOutcome::AcceptedDisconnect,
                 )?;
-                let mut retryable = Retryable::new(
-                    FailurePoint::MidStream,
-                    ModelRetryCause::StreamInterrupted {
-                        fault: interrupted.fault,
-                    },
+                let mut failure = RetryFailure::interrupted(
+                    interrupted.fault,
+                    interrupted.detail,
+                    interrupted.delivered,
+                    interrupted.loss,
                 )
-                .with_detail(interrupted.detail);
-                retryable.output_discarded = interrupted.delivered;
-                retryable.loss = interrupted.loss;
+                .with_phase(
+                    interrupted
+                        .loss
+                        .transport_phase
+                        .or(Some(plakous_model::ModelRetryPhase::ResponseBody)),
+                );
                 if W::PROVIDER_DEADLINE_REPLAY_ONCE
                     && matches!(
                         interrupted
@@ -666,301 +633,33 @@ async fn execute<W: FamilyWire, H: FamilyHttpHooks<W>>(
                     && interrupted.error.refusal()
                         == Some(crate::attempt::ProviderRefusal::Deadline)
                 {
-                    retryable.provider_refusal = Some(crate::attempt::ProviderRefusal::Deadline);
-                    if provider_deadline_replayed {
-                        retryable.loss.declined_reason = Some(Decline::Budget);
+                    failure = failure.with_refusal(crate::attempt::ProviderRefusal::Deadline);
+                    if self.provider_deadline_replayed {
+                        failure = failure.with_decline(Decline::Budget);
                     }
-                    provider_deadline_replayed = true;
+                    self.provider_deadline_replayed = true;
                 }
                 if retry_disabled {
-                    retryable.loss.declined_reason =
-                        Some(plakous_model::ModelRetryDeclineReason::RetryDisabled);
+                    failure = failure.with_decline(Decline::RetryDisabled);
                 }
-                retryable
-                    .loss
-                    .transport_phase
-                    .get_or_insert(plakous_model::ModelRetryPhase::ResponseBody);
-                let step = retry_step(
-                    attempt,
-                    RetryContext {
-                        hooks: &hooks,
-                        redispatch,
-                        turn_rooted,
-                        clock: &clock,
-                        hard_deadline,
-                        hook_budget: timeout,
-                        request: &request_log,
-                    },
-                    retryable,
-                    RetryProgress {
-                        waited: &mut waited,
-                        long_stream_replays: &mut long_stream_replays,
-                        unreachable: &mut unreachable,
-                    },
-                    physical_started.elapsed(),
-                )
-                .await;
-                hooks = match step {
-                    RetryStep::Send(refreshed, started) => {
-                        next_dispatch_started = Some(started);
-                        refreshed
-                    }
-                    RetryStep::Cancelled => return Err(cancelled(attempt)),
-                    RetryStep::End => return emit_error(attempt, interrupted.error).await,
-                };
+                Ok(retry_or_end(interrupted.error, Some(failure), request_log))
             }
         }
     }
 }
 
-/// What a refused generation leads to.
-enum RetryStep<H> {
-    /// Send the next generation with these (possibly re-authorized) hooks.
-    Send(H, Instant),
-    /// The caller cancelled while waiting.
-    Cancelled,
-    /// End the logical attempt with the refusal it has.
-    End,
-}
-
-fn cancelled<W: FamilyWire>(attempt: &FamilyAttempt<W>) -> FamilyAttemptError<W> {
-    FamilyAttemptError::<W>::Cancelled {
-        facts: Some(attempt.terminal_facts()),
-    }
-}
-
-/// One failed physical request the turn retry policy may replay.
-struct Retryable {
-    point: FailurePoint,
-    cause: ModelRetryCause,
-    retry_after: Option<Duration>,
-    output_discarded: bool,
-    detail: String,
-    loss: plakous_model::ModelRetryLoss,
-    provider_refusal: Option<crate::attempt::ProviderRefusal>,
-}
-
-impl Retryable {
-    const fn new(point: FailurePoint, cause: ModelRetryCause) -> Self {
-        Self {
-            point,
-            cause,
-            retry_after: None,
-            output_discarded: false,
-            detail: String::new(),
-            provider_refusal: None,
-            loss: plakous_model::ModelRetryLoss {
-                assistant_text_bytes: 0,
-                reasoning_bytes: 0,
-                completed_items: 0,
-                elapsed_ms: 0,
-                declined_reason: None,
-                server_effect: false,
-                transport_phase: Some(match cause {
-                    ModelRetryCause::Connect => plakous_model::ModelRetryPhase::Connect,
-                    ModelRetryCause::StreamInterrupted { .. } => {
-                        plakous_model::ModelRetryPhase::ResponseBody
-                    }
-                    _ => plakous_model::ModelRetryPhase::ResponseHead,
-                }),
-            },
-        }
-    }
-
-    fn with_phase(mut self, phase: plakous_http::Phase) -> Self {
-        self.loss.transport_phase = retry_phase(phase);
-        self
-    }
-
-    fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = detail.into();
-        self
-    }
-}
-
-/// The transport faults a turn may replay; cancellation, local limits, an
-/// invalid response and internal failures are not transient.
-const fn transport_fault(failure: HttpFailure) -> Option<ModelTransportFault> {
-    match failure.kind() {
-        plakous_http::ErrorKind::Io => Some(ModelTransportFault::Io),
-        plakous_http::ErrorKind::Protocol => Some(ModelTransportFault::Protocol),
-        plakous_http::ErrorKind::Tls => Some(ModelTransportFault::Tls),
-        plakous_http::ErrorKind::DeadlineExceeded => Some(ModelTransportFault::Timeout),
-        _ => None,
-    }
-}
-
-struct RetryContext<'a, W: FamilyWire, H: FamilyHttpHooks<W>> {
-    hooks: &'a H,
-    redispatch: Option<FamilyRedispatchFn<W, H>>,
-    turn_rooted: bool,
-    clock: &'a Arc<dyn Clock>,
-    hard_deadline: Option<Instant>,
-    hook_budget: Duration,
-    request: &'a (String, String, usize),
-}
-
-struct RetryProgress<'a> {
-    waited: &'a mut Duration,
-    long_stream_replays: &'a mut crate::attempt::LongStreamReplayBudget,
-    unreachable: &'a mut crate::attempt::UnreachableRideOut,
-}
-
-/// Applies [`RetryPolicy::TURN`] to a failed generation: announces the retry
-/// as a typed event, waits the policy's delay, then re-authorizes the next
-/// generation. A workflow retries only on typed evidence that the request
-/// was not fully sent; every resend requires a revalidation hook.
-async fn retry_step<W: FamilyWire, H: FamilyHttpHooks<W>>(
-    attempt: &mut FamilyAttempt<W>,
-    context: RetryContext<'_, W, H>,
-    failure: Retryable,
-    progress: RetryProgress<'_>,
-    elapsed: Duration,
-) -> RetryStep<H> {
-    let RetryContext {
-        hooks,
-        redispatch,
-        turn_rooted,
-        clock,
-        hard_deadline,
-        hook_budget,
-        request,
-    } = context;
-    let RetryProgress {
-        waited,
-        long_stream_replays,
-        unreachable,
-    } = progress;
-    let facts = attempt.terminal_facts();
-    let wait = unreachable.next_wait(
-        facts,
-        failure.point,
-        failure.retry_after,
-        *waited,
-        Jitter::random(),
-    );
-    let delay = wait.delay();
-    let advice_beyond_budget = wait == crate::attempt::RetryWait::AdviceBeyondBudget;
-    let reason = retry_decline(
-        &RetryDeclineInput {
-            deadline_remaining: hard_deadline
-                .map(|hard| hard.saturating_duration_since(Instant::now())),
-            established: failure.loss.declined_reason,
-            redispatch_available: redispatch.is_some(),
-            turn_retry: turn_rooted,
-            cause: failure.cause,
-            point: failure.point,
-            facts,
-            elapsed,
-            delay,
-            advice_beyond_budget,
+fn retry_or_end<W: FamilyWire>(
+    error: FamilyAttemptProtocolError<W>,
+    failure: Option<RetryFailure>,
+    request_log: (String, String, usize),
+) -> GenerationEnd<HttpTerminal<W>> {
+    let terminal = HttpTerminal::Deferred(error);
+    match failure {
+        Some(failure) => GenerationEnd::Retry {
+            terminal,
+            failure: failure.with_request(request_log),
         },
-        long_stream_replays,
-    );
-    let phase = failure.loss.transport_phase;
-    let unsent = matches!(
-        failure.point,
-        FailurePoint::Unreachable
-            | FailurePoint::RequestIncomplete
-            | FailurePoint::RecordRejectedInTransit
-    );
-    attempt.record_failure(
-        failure.point,
-        phase.map(plakous_model::ModelRetryPhase::as_str),
-        failure
-            .provider_refusal
-            .or_else(|| retry_cause_refusal(failure.cause)),
-        unsent,
-        reason.map(Decline::as_str),
-    );
-    let delay = delay.unwrap_or_default();
-    let retry = ModelRetry::new(
-        facts.physical_attempts().saturating_add(1),
-        unreachable.max_physical(facts, failure.point),
-        if reason.is_some() {
-            Duration::ZERO
-        } else {
-            delay
-        },
-        failure.cause,
-        failure.output_discarded && reason.is_none(),
-        failure.detail,
-    )
-    .with_loss(plakous_model::ModelRetryLoss {
-        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
-        server_effect: facts.replay_safety() == crate::attempt::ReplaySafety::ServerEffect,
-        declined_reason: reason,
-        ..failure.loss
-    })
-    .with_request(&request.0, &request.1, request.2);
-    if reason.is_some() {
-        let _ = attempt.events_mut().send_retry(retry).await;
-        return RetryStep::End;
-    }
-    if attempt.events_mut().send_retry(retry).await.is_err() {
-        return RetryStep::Cancelled;
-    }
-    let cancellation = attempt.context().cancellation().clone();
-    tokio::select! {
-        biased;
-        () = cancellation.cancelled() => return RetryStep::Cancelled,
-        () = tokio::time::sleep(delay) => {}
-    }
-    *waited = waited.saturating_add(delay);
-    match redispatch {
-        Some(redispatch) => run_hook(redispatch, hooks, attempt, clock, hook_budget).await,
-        None => RetryStep::End,
-    }
-}
-
-/// Forces one credential renewal after a 401, within the same physical budget.
-async fn renew_credential<W: FamilyWire, H: FamilyHttpHooks<W>>(
-    renew: FamilyCredentialRejectedFn<W, H>,
-    hooks: &H,
-    attempt: &FamilyAttempt<W>,
-    clock: &Arc<dyn Clock>,
-    hook_budget: Duration,
-    unreachable: &crate::attempt::UnreachableRideOut,
-) -> RetryStep<H> {
-    let facts = attempt.terminal_facts();
-    if facts.failure_risk() != crate::attempt::FailureRisk::None
-        || facts.replay_safety() == crate::attempt::ReplaySafety::ServerEffect
-        || unreachable.ordinary_physical(facts) >= RetryPolicy::TURN.max_physical()
-    {
-        return RetryStep::End;
-    }
-    run_hook(renew, hooks, attempt, clock, hook_budget).await
-}
-
-/// Runs a re-authorization hook, bounded by one exchange budget and the
-/// caller's deadline. The claimed-refresh store persists Unknown before any
-/// provider I/O. If cancellation or the bound drops the hook, that durable
-/// fence remains conservative; no detached refresh or late inference survives
-/// the logical attempt.
-async fn run_hook<W: FamilyWire, H: FamilyHttpHooks<W>>(
-    hook: FamilyRedispatchFn<W, H>,
-    hooks: &H,
-    attempt: &FamilyAttempt<W>,
-    clock: &Arc<dyn Clock>,
-    budget: Duration,
-) -> RetryStep<H> {
-    let started = Instant::now();
-    let cancellation = attempt.context().cancellation().clone();
-    let bound = attempt.context().deadline().map_or(budget, |deadline| {
-        time_until(deadline, clock.now()).min(budget)
-    });
-    if bound.is_zero() {
-        return RetryStep::End;
-    }
-    tokio::select! {
-        biased;
-        () = cancellation.cancelled() => RetryStep::Cancelled,
-        () = tokio::time::sleep(bound) => RetryStep::End,
-        result = hook(hooks) => match result {
-            Ok(refreshed) if !cancellation.is_cancelled() => RetryStep::Send(refreshed, started),
-            Ok(_) => RetryStep::Cancelled,
-            Err(_) => RetryStep::End,
-        },
+        None => GenerationEnd::Finished(terminal),
     }
 }
 

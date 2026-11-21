@@ -3617,7 +3617,7 @@ and OpenAI manifest. Hosted listing-cache policy is specified in spec 02 §2.3.
 Plakous has one neutral runtime and three wire-family kernels:
 
 - **Responses** — OpenAI Responses-shaped routes: shared request construction,
-  streaming projector, attempt lifecycle, continuation, and reconnect.
+  streaming projector, continuation, and Responses-specific attempt hooks.
 - **Messages** — Anthropic Messages semantics: its own ordering, tool-result
   adjacency, thinking and signature handling, cache prefixes, and compaction
   behavior.
@@ -12837,9 +12837,13 @@ rather than a provider and model label.
 
 ### 13.1 Errors and retry
 
-Chat Completions and Messages use one admitted family attempt and HTTP/SSE
-host. Each family retains its own grammar, terminal projection and ledger
+Chat Completions, Messages and Responses share one physical-generation host,
+including retry budgets, backoff and the retry decision recorded in the attempt
+ledger. Each family retains its own grammar, terminal projection and ledger
 policy; providers retain exact-route authorization and error interpretation.
+Responses keeps synchronous final authorization immediately before the first
+transport poll, typed-terminal stream cutoff where the route admits it, and
+its raw observation channel. Chat and Messages share the canonical event sink.
 Chat uses the Messages seal-before-publish rule: a successful terminal
 observation is published only after projection, binding and single-terminal
 validation have sealed the response, and a dialect cannot publish an unsealed

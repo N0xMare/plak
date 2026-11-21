@@ -8,8 +8,9 @@
 //! It also owns the family-agnostic attempt lifecycle, observation ledger,
 //! retry decision table and admitted await core, plus bounded catalog
 //! transport and ordered row projection.
-//! Chat and Messages share the admitted attempt and HTTP/SSE host here;
-//! their wire grammars and terminal projections remain in the family kernels.
+//! All three families share the physical-generation host here. Chat and
+//! Messages also share the canonical attempt sink. Wire grammars and terminal
+//! projections remain in the family kernels.
 //!
 //! ## Not in this crate
 //!

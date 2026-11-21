@@ -13,7 +13,9 @@ use crate::attempt::LedgerPolicy;
 use plakous_model::{Clock, IdGenerator, ModelEvent, ModelProviderRequestId, ModelResponse};
 
 mod attempt;
+mod host;
 mod http;
+mod retry;
 
 #[cfg(test)]
 mod test_wire;
@@ -23,10 +25,14 @@ pub use attempt::{
     FamilyAttemptEventSink, FamilyAttemptProtocolError, FamilyAttemptResponse,
     FamilyOperationBinding, FamilyPhysicalRequestBinding, call_family_operation,
 };
+pub use host::{
+    FamilyExchange, FamilyExchangeHooks, Generation, GenerationEnd, Reauthorization, RetryDelivery,
+};
 pub use http::{
     FamilyCredentialRejectedFn, FamilyHttpAttemptService, FamilyHttpErrorHead, FamilyHttpHooks,
     FamilyHttpResponseHead, FamilyHttpSafety, FamilyRedispatchFn, PreparedFamilyHttpOperation,
 };
+pub use retry::{RetryFailure, TransportRejection, transport_fault};
 
 /// Grammar and projection facts, never credentials or provider policy.
 pub trait FamilyWire: Clone + Copy + Debug + Eq + Send + Sync + 'static {

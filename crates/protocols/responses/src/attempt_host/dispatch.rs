@@ -1,5 +1,7 @@
 //! Physical dispatch of one admitted attempt: preflight, send, body decode and stream collection.
 
+use plakous_exchange::family::{RetryFailure, TransportRejection};
+
 use super::{
     Arc, Bytes, Client, Digest, DigestDomain, ExchangeControl, FailurePoint, FamilyCoreError,
     HeaderName, HttpCancellationToken, HttpErrorKind, HttpFailure, Instant, ModelProviderRequestId,
@@ -16,8 +18,8 @@ use super::{
     ResponsesStreamDialectData, ResponsesStreamEventKind, ResponsesStreamLimits, RetryPolicy,
     StatusCode, TERMINAL_RESPONSE_DIGEST_REVISION, monotonic_now, mpsc,
     parse_provider_error_with_policy, physical_request_digest, poll_fn,
-    project_terminal_response_with_model_binding, provider_error_object, refused_connection,
-    request_body_digest, retry_after_seconds,
+    project_terminal_response_with_model_binding, provider_error_object, request_body_digest,
+    retry_after_seconds,
 };
 
 pub(super) fn admit_attempt(attempt: &ResponsesAttempt) -> Result<(), FamilyCoreError> {
@@ -43,7 +45,7 @@ pub(super) async fn execute_admitted<D, G>(
     data: ResponsesAttemptDialectData,
     authorization: ResponsesAuthorizationAdapter<D, G>,
     attempt: &mut ResponsesAttempt,
-    retain: bool,
+    fresh_connection: bool,
 ) -> Result<ResponsesAttemptResponse, ResponsesAttemptError>
 where
     D: Send + Sync + 'static,
@@ -150,14 +152,10 @@ where
         mut response_head_guard,
         ..
     } = prepared;
-    attempt.request_log = Some((
-        request.origin().host().to_owned(),
-        request.path_and_query().path().to_owned(),
-        request.body().len(),
-    ));
+    attempt.request_log = Some(RetryFailure::request_log(&request));
     let http_cancellation = HttpCancellationToken::new();
     let control = ExchangeControl::streaming(attempt.deadline, http_cancellation.clone())
-        .with_fresh_connection(std::mem::take(&mut attempt.fresh_connection));
+        .with_fresh_connection(fresh_connection);
     let revalidation = ResponsesRevalidationRequest {
         authority: &attempt.authority,
         binding: &dispatch_binding,
@@ -232,12 +230,12 @@ where
     let response = match response {
         Ok(response) => response,
         Err(source) => {
-            let outcome = if refused_connection(source) {
+            let outcome = if TransportRejection::from_failure(source).is_some() {
                 PhysicalRequestOutcome::DefiniteRejection
             } else {
                 PhysicalRequestOutcome::AmbiguousPostSend
             };
-            retain_or_finish(attempt, outcome, retain)?;
+            finish_generation(attempt, outcome)?;
             return Err(ResponsesAttemptError::Transport {
                 physical: attempt.physical(),
                 source,
@@ -274,7 +272,7 @@ where
         }) {
             Ok(provider) => provider,
             Err(source) => {
-                retain_or_finish(attempt, outcome, retain)?;
+                finish_generation(attempt, outcome)?;
                 return Err(ResponsesAttemptError::Transport {
                     physical: attempt.physical(),
                     source,
@@ -282,7 +280,7 @@ where
                 });
             }
         };
-        retain_or_finish(attempt, outcome, retain)?;
+        finish_generation(attempt, outcome)?;
         if provider
             .as_ref()
             .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota)
@@ -364,7 +362,6 @@ where
         dispatch_binding.request(),
         provider_request_id,
         attempt,
-        retain,
     )
     .await;
     attempt.stream.observe_gap(monotonic_now());
@@ -392,7 +389,6 @@ pub(super) async fn decode_body(
     physical_request: Digest,
     provider_request_id: Option<ModelProviderRequestId>,
     attempt: &mut ResponsesAttempt,
-    retain: bool,
 ) -> Result<ResponsesAttemptResponse, ResponsesAttemptError> {
     let model_binding = data.stream.model_binding();
     let stop_at_typed_terminal = data.stream.typed_terminal_cutoff();
@@ -411,7 +407,7 @@ pub(super) async fn decode_body(
                 attempt.stream.observe_comments(&bytes);
                 let events = collector
                     .push(&bytes)
-                    .map_err(|failure| fail_decoded_stream(attempt, failure, retain))?;
+                    .map_err(|failure| fail_decoded_stream(attempt, failure))?;
                 deliver(attempt, &mut delivery, events);
                 if stop_at_typed_terminal && collector.terminal.is_some() {
                     break;
@@ -427,14 +423,14 @@ pub(super) async fn decode_body(
                         }
                     }
                     HttpErrorKind::DeadlineExceeded => {
-                        close_interrupted_stream(attempt, retain);
+                        close_interrupted_stream(attempt);
                         ResponsesAttemptError::Deadline {
                             physical: attempt.physical(),
                             facts: attempt.facts(),
                         }
                     }
                     _ => {
-                        close_interrupted_stream(attempt, retain);
+                        close_interrupted_stream(attempt);
                         ResponsesAttemptError::Transport {
                             physical: attempt.physical(),
                             source,
@@ -452,7 +448,7 @@ pub(super) async fn decode_body(
                 });
             }
             BodyPull::Deadline => {
-                close_interrupted_stream(attempt, retain);
+                close_interrupted_stream(attempt);
                 return Err(ResponsesAttemptError::Deadline {
                     physical: attempt.physical(),
                     facts: attempt.facts(),
@@ -462,7 +458,7 @@ pub(super) async fn decode_body(
     }
     let (residual, terminal) = collector
         .finish()
-        .map_err(|failure| fail_decoded_stream(attempt, failure, retain))?;
+        .map_err(|failure| fail_decoded_stream(attempt, failure))?;
     deliver(attempt, &mut delivery, residual);
     if model_binding == crate::ResponseModelBinding::ExactRequest
         && terminal
@@ -474,11 +470,7 @@ pub(super) async fn decode_body(
             CollectorFailure::Stream(ResponsesFamilyStreamError::InvalidField("response.model")),
         ));
     }
-    let refused_in_band = if retain {
-        in_band_refusal(&terminal)
-    } else {
-        None
-    };
+    let refused_in_band = in_band_refusal(&terminal);
     // Observation may name protocol completion only after aggregate and model
     // binding validation. Other early closes retain incomplete evidence.
     if stop_at_typed_terminal
@@ -545,7 +537,7 @@ pub(super) async fn decode_body(
             .map_err(|source| fail_observation(attempt, source))?;
     } else if let Some(fault) = refused_in_band {
         // The retry loop replays it, or ends it with this terminal.
-        close_interrupted_stream(attempt, true);
+        close_interrupted_stream(attempt);
         if attempt.stream.interrupted {
             attempt.stream.refused_in_band = Some(fault);
         }
@@ -842,11 +834,9 @@ pub(super) fn emit_activity(attempt: &mut ResponsesAttempt, force: bool) {
 
 /// Closes a generation whose stream broke. A logical attempt that may retry
 /// stays open for the replay; the retry loop fails it if it ends.
-pub(super) fn close_interrupted_stream(attempt: &mut ResponsesAttempt, retain: bool) {
+fn close_interrupted_stream(attempt: &mut ResponsesAttempt) {
     attempt.stream.observe_gap(monotonic_now());
-    if !retain {
-        let _ = attempt.core.claim_and_close_protocol_failure();
-    } else if attempt.core.interrupt_stream().is_ok() {
+    if attempt.core.interrupt_stream().is_ok() {
         attempt.stream.interrupted = true;
     } else {
         attempt.core.mark_failed();
@@ -858,7 +848,6 @@ pub(super) fn close_interrupted_stream(attempt: &mut ResponsesAttempt, retain: b
 pub(super) fn fail_decoded_stream(
     attempt: &mut ResponsesAttempt,
     failure: CollectorFailure,
-    retain: bool,
 ) -> ResponsesAttemptError {
     let CollectorFailure::Stream(
         source @ (ResponsesFamilyStreamError::Truncated
@@ -867,7 +856,7 @@ pub(super) fn fail_decoded_stream(
     else {
         return fail_stream(attempt, failure);
     };
-    close_interrupted_stream(attempt, retain);
+    close_interrupted_stream(attempt);
     ResponsesAttemptError::Stream {
         physical: attempt.physical(),
         source,
@@ -939,15 +928,10 @@ pub(super) fn finish_after_authorization(attempt: &mut ResponsesAttempt) {
     clippy::result_large_err,
     reason = "closed attempt errors retain exact physical dispatch and terminal facts"
 )]
-pub(super) fn retain_or_finish(
+fn finish_generation(
     attempt: &mut ResponsesAttempt,
     outcome: PhysicalRequestOutcome,
-    retain: bool,
 ) -> Result<(), ResponsesAttemptError> {
-    if !retain {
-        finish_physical(attempt, outcome);
-        return Ok(());
-    }
     attempt
         .core
         .physical_request_finished(outcome)

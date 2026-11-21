@@ -1,6 +1,7 @@
 //! Injected multi-minute incomplete-write outage followed by an authoritative head.
 
 use super::*;
+use plakous_exchange::attempt::FailureRisk;
 
 #[tokio::test]
 async fn revision_twelve_to_thirteen_changes_attempt_execution_not_history_authority() -> TestResult
