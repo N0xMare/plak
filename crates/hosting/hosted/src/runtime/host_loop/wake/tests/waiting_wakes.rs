@@ -257,9 +257,8 @@ fn run_case(case: Wake) {
                                 output_schema_json: None,
                             }, None).map_err(|error| error.message)
                         })).await.unwrap();
-                        until(case, drive.as_mut(), || mail_replies.get() > 0).await;
                         if retry {
-                            assert!(writes.tree_refusals.load(Ordering::Relaxed) > 0);
+                            until(case, drive.as_mut(), || writes.tree_refusals.load(Ordering::Relaxed) > 0).await;
                             let question = |event| matches!(
                                 event,
                                 HostEvent::Row(TranscriptRow::Milestone(row)) if row.text.as_deref() == Some(QUESTION)
@@ -268,6 +267,8 @@ fn run_case(case: Wake) {
                             writes.refuse_tree_notices.store(false, Ordering::Relaxed);
                             tokio::time::advance(Duration::from_millis(251)).await;
                             until(case, drive.as_mut(), || observed.try_iter().any(question)).await;
+                        } else {
+                            until(case, drive.as_mut(), || mail_replies.get() > 0).await;
                         }
                     }
                     Wake::JobTerminal => {
