@@ -3385,6 +3385,7 @@ dependencies = [
  "futures",
  "futures-core",
  "futures-util",
+ "plakous-auth",
  "plakous-gateway-protocol",
  "plakous-http",
  "plakous-model",

@@ -9,6 +9,9 @@ use tokio::io::AsyncReadExt as _;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
+/// Local custody laws exercised against all native subscription dialects.
+pub mod custody;
+
 /// Subscription fixture clock anchored just after the compiled review, advancing
 /// monotonically so access-token refresh deadlines remain meaningful offline.
 pub struct ReviewClock<const REVIEWED: u64>;

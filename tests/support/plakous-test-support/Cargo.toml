@@ -19,6 +19,7 @@ reason = "Existing lint and size debt, frozen at the counts on main; ratchet dow
 [dependencies]
 futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
+plakous-auth = { workspace = true, features = ["http-refresh"] }
 plakous-model.workspace = true
 plakous-gateway-protocol.workspace = true
 plakous-http = { workspace = true, features = ["fault-injection", "gateway-client", "gateway-server"] }
@@ -28,7 +29,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "test-util", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [dev-dependencies]

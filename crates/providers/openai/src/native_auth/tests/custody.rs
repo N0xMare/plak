@@ -9,6 +9,70 @@ fn slot() -> TestResult<CustodySlot> {
     Ok(CustodySlot::new("codex")?)
 }
 
+mod conformance {
+    use super::*;
+    use plakous_test_support::native_auth::custody as suite;
+
+    #[tokio::test]
+    async fn exact_lease_and_moved_fence() -> TestResult {
+        let account = "custody-conformance-fields";
+        let (fixture, _peers, server) =
+            renew_fixture(account, account, now_unix_secs() + 3_600, 0, Vec::new()).await?;
+        let slot = slot()?;
+        suite::fields_hold_exact_fence(
+            fixture.manager.as_ref(),
+            &slot,
+            &[
+                ("authorization", b"Bearer opaque-seeded-access"),
+                ("chatgpt-account-id", account.as_bytes()),
+            ],
+        )
+        .await?;
+        suite::fields_name_the_moved_fence(fixture.manager.as_ref(), &slot, || {
+            Ok(fixture.manager.refresh_between_custody_reads()?)
+        })
+        .await?;
+        let (requests, unexpected) = server.await??;
+        assert_eq!(request_kinds(&requests), ["catalog"]);
+        assert!(!unexpected);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejection_refresh_returns_busy_while_an_exchange_holds_the_ready_lease() -> TestResult
+    {
+        let account = "custody-conformance-busy";
+        let (fixture, _peers, _server) =
+            renew_fixture(account, account, now_unix_secs() + 3_600, 0, Vec::new()).await?;
+        suite::rejected_while_leased_is_busy(fixture.manager.as_ref(), &slot()?).await
+    }
+
+    #[tokio::test]
+    async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> TestResult {
+        let account = "custody-conformance-single-writer";
+        let (fixture, peers, server) = renew_fixture(
+            account,
+            account,
+            now_unix_secs() + 3_600,
+            1,
+            refresh_exchange(account)?,
+        )
+        .await?;
+        suite::concurrent_rejections_adopt_one_replacement(
+            fixture.manager.as_ref(),
+            peers.first().ok_or("no peer")?,
+            &slot()?,
+        )
+        .await?;
+        let (requests, unexpected) = tokio::time::timeout(Duration::from_secs(15), server)
+            .await
+            .map_err(|_| "custody refresh server stalled after all four refreshes returned")???;
+        assert_eq!(request_kinds(&requests), ["catalog", "refresh", "userinfo"]);
+        assert!(!unexpected, "a second grant reached the token endpoint");
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
     let account = "custody-facts-account";

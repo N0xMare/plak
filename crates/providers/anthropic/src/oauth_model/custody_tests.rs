@@ -20,6 +20,70 @@ fn token_reply(access: &str) -> Vec<u8> {
     )
 }
 
+mod conformance {
+    use super::*;
+    use plakous_test_support::native_auth::custody as suite;
+
+    #[tokio::test]
+    async fn exact_lease_and_moved_fence() -> TestResult {
+        let temp = tempfile::tempdir()?;
+        let manager = manager_with_client(
+            private_store(&temp),
+            Client::new_http1(plakous_http::Limits::default())?,
+        );
+        manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+        let slot = CustodySlot::new("claude")?;
+        suite::fields_hold_exact_fence(&manager, &slot, &[("authorization", b"Bearer access")])
+            .await?;
+        suite::fields_name_the_moved_fence(&manager, &slot, || {
+            Ok(manager.refresh_between_custody_reads()?)
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejection_refresh_returns_busy_while_an_exchange_holds_the_ready_lease() -> TestResult
+    {
+        let temp = tempfile::tempdir()?;
+        let manager = manager_with_client(
+            private_store(&temp),
+            Client::new_http1(plakous_http::Limits::default())?,
+        );
+        manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+        suite::rejected_while_leased_is_busy(&manager, &CustodySlot::new("claude")?).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_rejections_of_one_generation_claim_exactly_one_grant() -> TestResult {
+        let temp = tempfile::tempdir()?;
+        // A second scripted grant stays unserved unless a second refresh runs.
+        let (client, origin, peer) =
+            local_peer(vec![token_reply("rotated-access"), token_reply("second")]).await;
+        let manager = Arc::new(
+            manager_with_client(private_store(&temp), client).with_test_token_origin(&origin)?,
+        );
+        manager.persist_test_grant("access", "refresh", 3600, CLAUDE_OAUTH_INFERENCE_SCOPE)?;
+        let slot = CustodySlot::new("claude")?;
+        suite::concurrent_rejections_adopt_one_replacement(manager.as_ref(), &manager, &slot)
+            .await?;
+        suite::fields_hold_exact_fence(
+            manager.as_ref(),
+            &slot,
+            &[("authorization", b"Bearer rotated-access")],
+        )
+        .await?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), peer)
+                .await
+                .is_err(),
+            "a second grant reached the token endpoint"
+        );
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn custody_facts_carry_the_exact_route_binding() -> TestResult {
     let temp = tempfile::tempdir()?;
