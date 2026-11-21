@@ -5736,8 +5736,8 @@ the name of the environment variable that won, and there is no revocation call.
 
 ### 7.3 Refresh, generations, and quarantine
 
-Local native custody retries a moving snapshot up to three reads in total.
-Exhausting those reads reports retryable `Busy` (`AccountBusy` at the facade),
+Local native custody makes up to three attempts at a moving snapshot.
+Exhausting those attempts reports retryable `Busy` (`AccountBusy` at the facade),
 not unsafe storage. Field delivery under an inactive profile is `NotReady`
 even when the stored record is Ready. Before acting on a rejection, custody
 waits asynchronously up to 30 seconds for a peer's claimed refresh to settle.

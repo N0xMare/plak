@@ -39,7 +39,7 @@ mod conformance {
 
     #[tokio::test]
     async fn custody_refusal_and_settlement() -> TestResult {
-        let (fixture, mut peers, _server) = renew_fixture(
+        let (_fixture, mut peers, _server) = renew_fixture(
             "custody-refusal-account",
             "custody-refusal-subject",
             now_unix_secs() + 3_600,

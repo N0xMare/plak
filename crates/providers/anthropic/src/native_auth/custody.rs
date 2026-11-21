@@ -2,12 +2,14 @@
 //! caller binds to, the credential field under the exact Ready lease, and the
 //! single writer's refresh after a rejection.
 
+#[cfg(test)]
+use plakous_auth::PrivateCredentialStore;
 use plakous_auth::custody::local::{self, LeaseSource, LocalCustody, Snapshot};
 use plakous_auth::custody::{
     AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
-use plakous_auth::{PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease};
+use plakous_auth::{PrivateStoreError, ReadyCredentialLease};
 #[cfg(test)]
 use plakous_test_support::native_auth::custody::{LeaseRead, run_before_lease};
 
@@ -33,7 +35,7 @@ enum Hydration {
 
 fn store_error(error: ClaudeNativeAuthError) -> CustodyError {
     match error {
-        ClaudeNativeAuthError::Store(plakous_auth::PrivateStoreError::ForeignAccount) => {
+        ClaudeNativeAuthError::Store(PrivateStoreError::ForeignAccount) => {
             CustodyError::AccountChanged
         }
         ClaudeNativeAuthError::Store(error) => error.into(),

@@ -536,7 +536,7 @@ impl ClaudeNativeAuthManager {
     pub(super) async fn refresh_with_force(
         &self,
         force: RefreshForce,
-        expected_grant: Option<&super::AccountBinding>,
+        expected_grant: Option<&AccountBinding>,
     ) -> Result<(), ClaudeNativeAuthError> {
         if let Some(login) = &self.custodied {
             match force {

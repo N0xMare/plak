@@ -2,12 +2,14 @@
 //! caller binds to, the credential fields under the exact Ready lease, and
 //! the single writer's refresh after a rejection.
 
+#[cfg(test)]
+use plakous_auth::PrivateCredentialStore;
 use plakous_auth::custody::local::{LeaseSource, LocalCustody, Snapshot};
 use plakous_auth::custody::{
     AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
     ExpectedFence, IdentityDigest,
 };
-use plakous_auth::{PrivateCredentialStore, PrivateStoreError, ReadyCredentialLease};
+use plakous_auth::{PrivateStoreError, ReadyCredentialLease};
 #[cfg(test)]
 use plakous_test_support::native_auth::custody::{LeaseRead, run_before_lease};
 
