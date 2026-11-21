@@ -1,4 +1,4 @@
-//! Prepares a baseline without occupying the request driver or the writer.
+//! Encodes baselines for the background jobs and the driver's bounded fallback.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -85,7 +85,10 @@ impl Drop for Job {
     }
 }
 
-fn encode(attachment: AttachmentId, snapshot: PresentationSnapshot) -> Result<Pages, SendError> {
+pub(super) fn encode(
+    attachment: AttachmentId,
+    snapshot: PresentationSnapshot,
+) -> Result<Pages, SendError> {
     let mut output = Pages::default();
     let pages = page_snapshot(snapshot, attachment).map_err(|_| SendError::Disconnected)?;
     if pages.len() > FRAMES {

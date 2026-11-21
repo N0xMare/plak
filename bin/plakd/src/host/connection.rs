@@ -136,9 +136,10 @@ impl Outbox {
     ) -> CliResult<()> {
         let mut queue = self.lock();
         if queue.snapshots == MAX_SNAPSHOT_JOBS {
-            queue.overflowed = true;
-            self.0.ready.notify_one();
-            return Err(CliFailure::new("the client fell behind on snapshots"));
+            // The driver is the sole producer of ordered output. Let the
+            // writer drain earlier frames while the driver encodes this one.
+            drop(queue);
+            return self.snapshot_inline(attachment, snapshot);
         }
         self.reserve(&mut queue, 0, 1)
             .map_err(|error| CliFailure::new(error.to_string()))?;
@@ -160,6 +161,25 @@ impl Outbox {
                 },
             )));
         // Preparation wakes the writer once this entry can be taken.
+        Ok(())
+    }
+
+    fn snapshot_inline(
+        &self,
+        attachment: AttachmentId,
+        snapshot: PresentationSnapshot,
+    ) -> CliResult<()> {
+        let pages = snapshot::encode(attachment, snapshot).map_err(|_| {
+            CliFailure::new("the snapshot exceeded its wire bounds or could not be encoded")
+        })?;
+        let mut queue = self.lock();
+        self.reserve(&mut queue, pages.bytes, pages.lines.len())
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        queue.ordered_frames += pages.lines.len();
+        queue
+            .ordered
+            .extend(pages.lines.into_iter().map(Ordered::Line));
+        self.0.ready.notify_one();
         Ok(())
     }
 
@@ -530,6 +550,71 @@ mod tests {
             assert!(matches!(page, HostFrame::Snapshot(page) if page.scope == scope && page.last));
         }
         assert!(outbox.pop().unwrap().is_none());
+    }
+
+    async fn assert_inline_snapshot_order(
+        encoders: &'static tokio::sync::Semaphore,
+        scopes: [TranscriptScope; 3],
+    ) {
+        let permit = encoders.try_acquire().unwrap();
+        let outbox = Outbox::default();
+        for (revision, scope) in (0..).zip(&scopes) {
+            outbox
+                .snapshot_with(
+                    4,
+                    PresentationSnapshot {
+                        scope: scope.clone(),
+                        revision,
+                        ..PresentationSnapshot::default()
+                    },
+                    encoders,
+                )
+                .unwrap();
+        }
+        assert!(
+            outbox.pop().unwrap().is_none(),
+            "inline output must not bypass an earlier snapshot"
+        );
+        drop(permit);
+        for (revision, scope) in (0..).zip(scopes) {
+            let line = next_ordered(&outbox).await;
+            let page: HostFrame<PlakExtension> = serde_json::from_slice(&line).unwrap();
+            assert!(
+                matches!(page, HostFrame::Snapshot(page) if page.scope == scope
+                && page.revision == revision && page.last)
+            );
+        }
+        assert!(outbox.pop().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_third_snapshot_in_one_flush_uses_the_ordered_inline_path() {
+        static ENCODER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        assert_inline_snapshot_order(
+            &ENCODER,
+            [
+                TranscriptScope::Root,
+                TranscriptScope::Agent("current".into()),
+                TranscriptScope::Root,
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_for_a_retired_agent_does_not_block_a_new_scope() {
+        static ENCODER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        // The first child was already queued before the client selected the
+        // second one. Its ordered output does not make that switch overflow.
+        assert_inline_snapshot_order(
+            &ENCODER,
+            [
+                TranscriptScope::Agent("retired".into()),
+                TranscriptScope::Root,
+                TranscriptScope::Agent("selected".into()),
+            ],
+        )
+        .await;
     }
 
     #[tokio::test]

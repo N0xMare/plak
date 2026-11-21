@@ -4531,10 +4531,13 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   another intent to it, even while its final frames wait their turn. Terminal
   replies, refusals and unknown outcomes stay FIFO because a refusal or
   unknown outcome can belong to a terminal operation.
-  Snapshot pagination and encoding run on bounded blocking jobs; at most
-  two snapshot jobs per connection hold ordered positions. A pending job
-  counts as one frame until encoding completes and the actual page bytes
-  and count are charged against the outbox caps, including output in flight.
+  Snapshot pagination and encoding normally run on bounded blocking jobs.
+  Two pending jobs per connection can hold ordered positions; a pending job
+  counts as one frame until encoding completes. If both job slots are in use,
+  the driver encodes the next snapshot in its blocking section rather than
+  refusing it. Its pages follow previously queued output even if an agent
+  view has since retired. The actual page bytes and count are charged against
+  the outbox caps, including output in flight.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`
@@ -5974,7 +5977,8 @@ settles asynchronously after endpoint binding, before local admission.
   leaves, or one whose write makes no byte progress for 10 s, detaches;
   its sessions run on. A connection is detached if its outbox exceeds 8192
   frames or 64 MiB of encoded output, including the frame being sent; up to
-  two unexpanded snapshot jobs may occupy placeholders (§4.4). A pending batch retains
+  two unexpanded snapshot jobs may occupy placeholders, after which the
+  driver encodes additional snapshots inline (§4.4). A pending batch retains
   a hard 30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.

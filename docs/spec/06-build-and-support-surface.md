@@ -2384,4 +2384,7 @@ resume remains supported. The runnable Python example is test-only support.
 The product has no terminal/clipboard features. The 2n+3 witnesses, standalone checks,
 portable builds and contracts run per batch; package verification runs at RC.
 Public host tests do not build or require any external client repository.
+The product's outbox tests cover the two pending snapshot jobs and exercise
+inline encoding of later snapshots in order under the same caps, including
+when output for a retired agent view is already queued (chapter 02 §4.4).
 Human client review is independent evidence, not a public gate dependency.
