@@ -124,75 +124,99 @@ fn host_crash_cuts_of_the_start_scan_continue_once_or_hold() {
     stop(&mut host);
     let commits = indexed_commits(&trace);
     assert!(!commits.is_empty(), "the scan committed nothing");
-    let mut outcomes = std::collections::BTreeMap::<&str, usize>::new();
-    for (_, store, store_ordinal) in &commits {
-        let cut = format!("cut {store}:{store_ordinal}");
-        let fixture = fixture().unwrap();
-        let (session, node, before) = handed_off(&fixture);
-        let cut_trace = fixture.root.join("cut-trace.jsonl");
-        if let Some(mut host) =
-            try_start(&fixture, &[], &cut_env(&cut_trace, store, *store_ordinal))
-        {
-            let deadline = Instant::now() + WAIT;
-            while !was_cut(&mut host) {
-                if continued(&fixture, &session, before) {
-                    // The cut falls in the stop, if anywhere.
-                    stop_or_cut(&mut host);
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "{cut}: neither cut nor continued"
-                );
-                std::thread::sleep(Duration::from_millis(20));
+    // Match the quarter-pool reservation. Each cut owns its entire fixture;
+    // only the immutable list from the baseline scan is shared.
+    let jobs = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(16)
+        .div_ceil(4);
+    let outcomes = std::thread::scope(|scope| {
+        let workers: Vec<_> = commits
+            .chunks(commits.len().div_ceil(jobs))
+            .map(|chunk| {
+                scope.spawn(|| {
+                    chunk
+                        .iter()
+                        .map(|(_, store, ordinal)| check_start_scan_cut(store, *ordinal))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let mut outcomes = std::collections::BTreeMap::<&str, usize>::new();
+        for worker in workers {
+            for outcome in worker.join().unwrap() {
+                *outcomes.entry(outcome).or_default() += 1;
             }
         }
-        let mut host = start(&fixture);
-        let mut client = Client::connect(&host);
-        client.attach(1, &node);
+        outcomes
+    });
+    eprintln!("start scan cuts: {outcomes:?}");
+}
+
+fn check_start_scan_cut(store: &str, store_ordinal: u64) -> &'static str {
+    let cut = format!("cut {store}:{store_ordinal}");
+    let fixture = fixture().unwrap();
+    let (session, node, before) = handed_off(&fixture);
+    let cut_trace = fixture.root.join("cut-trace.jsonl");
+    if let Some(mut host) = try_start(&fixture, &[], &cut_env(&cut_trace, store, store_ordinal)) {
         let deadline = Instant::now() + WAIT;
-        let mut id = 2;
-        let outcome = loop {
-            id += 1;
-            let activity = client.rows(id)[0].activity;
-            if activity == SessionActivity::HeldAfterLoss {
-                break "held";
-            }
-            if activity == SessionActivity::Idle && continued(&fixture, &session, before) {
-                break "continued";
+        while !was_cut(&mut host) {
+            if continued(&fixture, &session, before) {
+                // The cut falls in the stop, if anywhere.
+                stop_or_cut(&mut host);
+                break;
             }
             assert!(
                 Instant::now() < deadline,
-                "{cut}: never settled ({activity:?})"
+                "{cut}: neither cut nor continued"
             );
-            std::thread::sleep(Duration::from_millis(50));
-        };
-        drop(client);
-        stop(&mut host);
-        let decisions = root_record(&fixture, &session).1;
-        assert!(decisions <= 1, "{cut}: {decisions} decisions");
-        let dispatched = dispatches(&fixture);
-        assert!(
-            dispatched <= before + 1,
-            "{cut}: {} continuation dispatches",
-            dispatched - before
-        );
-        let mut host = start(&fixture);
-        Client::connect(&host).rows(1);
-        std::thread::sleep(Duration::from_millis(300));
-        assert!(
-            !host
-                .lines
-                .try_iter()
-                .any(|line| line.starts_with("plakd host: continuing session ")),
-            "{cut}: a settled root was continued again"
-        );
-        stop(&mut host);
-        assert_eq!(root_record(&fixture, &session).1, decisions, "{cut}");
-        assert_eq!(dispatches(&fixture), dispatched, "{cut}");
-        *outcomes.entry(outcome).or_default() += 1;
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
-    eprintln!("start scan cuts: {outcomes:?}");
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    client.attach(1, &node);
+    let deadline = Instant::now() + WAIT;
+    let mut id = 2;
+    let outcome = loop {
+        id += 1;
+        let activity = client.rows(id)[0].activity;
+        if activity == SessionActivity::HeldAfterLoss {
+            break "held";
+        }
+        if activity == SessionActivity::Idle && continued(&fixture, &session, before) {
+            break "continued";
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{cut}: never settled ({activity:?})"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    stop(&mut host);
+    let decisions = root_record(&fixture, &session).1;
+    assert!(decisions <= 1, "{cut}: {decisions} decisions");
+    let dispatched = dispatches(&fixture);
+    assert!(
+        dispatched <= before + 1,
+        "{cut}: {} continuation dispatches",
+        dispatched - before
+    );
+    let mut host = start(&fixture);
+    Client::connect(&host).rows(1);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        !host
+            .lines
+            .try_iter()
+            .any(|line| line.starts_with("plakd host: continuing session ")),
+        "{cut}: a settled root was continued again"
+    );
+    stop(&mut host);
+    assert_eq!(root_record(&fixture, &session).1, decisions, "{cut}");
+    assert_eq!(dispatches(&fixture), dispatched, "{cut}");
+    outcome
 }
 
 /// Whether the session's durable transcript holds the turn's answer.

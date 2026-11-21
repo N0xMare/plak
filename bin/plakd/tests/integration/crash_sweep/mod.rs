@@ -102,35 +102,6 @@ fn soak_ledger_retirement_yielded_cell() {
     );
 }
 
-#[test]
-fn durability_ledger_retirement_pilots() {
-    for shape in [
-        "ledger_retirement_live_child_process",
-        "ledger_retirement_yielded_cell",
-    ] {
-        let (seed, session) = driver::setup(shape);
-        driver::pilot(&seed, &session, shape);
-    }
-}
-
-#[test]
-fn durability_ledger_retirement_early_relaunches() {
-    for shape in [
-        "ledger_retirement_live_child_process",
-        "ledger_retirement_yielded_cell",
-    ] {
-        let (seed, session) = driver::setup(shape);
-        let baseline = summary::read_converged(&seed);
-        let pilot = driver::pilot(&seed, &session, shape);
-        let target = pilot
-            .iter()
-            .find(|commit| commit.store == "product")
-            .unwrap();
-        let row = driver::cut(&seed, &session, shape, &baseline, &pilot, target);
-        assert_eq!(row["invariants"], true, "{shape}: {row}");
-    }
-}
-
 /// Every shape the strict sweep cuts must replay its twin pilots to identical
 /// per-store commit sequences, or its cuts are not comparable. The subset's
 /// shapes prove it inside `durability_subset`; this proves it for the rest
@@ -433,6 +404,18 @@ fn prepare<'a>(
     };
     let indices = if bounded {
         let indices = trace::representative_cuts(&pilot);
+        // These two shapes must relaunch at the first product publication,
+        // not merely cover its publication class at a later cut.
+        if matches!(
+            shape,
+            "ledger_retirement_live_child_process" | "ledger_retirement_yielded_cell"
+        ) {
+            let first = pilot.iter().position(|commit| commit.store == "product");
+            assert!(
+                first.is_some_and(|first| indices.contains(&first)),
+                "{shape}: missing first product relaunch"
+            );
+        }
         eprintln!(
             "{shape}: {} representative cuts of {} indexed publications",
             indices.len(),

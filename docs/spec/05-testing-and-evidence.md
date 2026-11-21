@@ -1014,7 +1014,7 @@ exports all four for the test process.
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
 | Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of thirteen standalone library profiles (eleven facade profiles, including API-only and standalone provider and tool profiles; hosted without optional features and with all features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
-| Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per selected `tests/tooling` module, four at a time |
+| Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers. Up to four `python3 -m unittest` processes run at once; the mock gate-driver module is divided by test case, and other selected modules run whole |
 
 Nested-failure regressions cover exact successful string delivery, caught and
 uncaught JavaScript rejection, `Promise.allSettled`, retained earlier output,
@@ -2192,21 +2192,24 @@ Priority alone is not a barrier; the whole-pool reservation also requires all
 earlier running work to finish. Independent cuts normally use one slot. The
 sixteen non-switch restart cut groups have priority 90 and reserve
 `ceil(N/4)` slots each, limiting simultaneous real-process restarts
-without serializing them.
+without serializing them. The host start-scan campaign uses the same
+reservation: it shares its immutable baseline commit list while each cut
+creates its own fixture.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
 
 **The install lane** uses the same host-scaled width. The closed-cell ledger
 twin-pilot campaign reserves the whole pool at priority 100 because competing
 load changed its per-store signatures. Its isolation rule precedes the general
-quarter-pool ledger weight. Image residency and former serial families reserve
+quarter-pool ledger weight, which starts the other ledger campaigns early
+to avoid a long tail. Image residency and former serial families reserve
 the whole pool at priority -50. Switch restart groups, the redial test and the
 busy-root absence test reserve `ceil(N/4)` slots at priority 90.
 
 | Install family | Evidence | Batch trigger |
 | --- | --- | --- |
 | Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices | Upgrade, carry, deploy, host move, revisions, credential gateway and runner-retention protocol paths |
-| Ledger retirement | Six bounded retirement campaigns, including pilots and early relaunches | Ledger or retirement paths |
+| Ledger retirement | Four bounded retirement campaigns, including twin pilots and first-product-publication relaunches | Ledger or retirement paths |
 | Image residency | Indexed image-residency recovery cuts | Image or residency paths |
 | Runner startup | Redial bound, broken or obsolete daemon, slow user manager, surviving busy-root child and surviving child daemon job | Runner or daemon paths |
 | Wire restart switch | All sixteen switch restart groups | Switch and wire code, session switch code and switch client-trace fixtures |
@@ -2835,8 +2838,12 @@ with both a live child and process, and a LocatorBound cell spanning rounds
 with delivered children below P. The corresponding
 `crash_sweep::durability_ledger_retirement_*` tests run each bounded campaign separately;
 the ignored `crash_sweep::soak_ledger_retirement_*` tests cut every indexed
-publication on demand and in the full tier;
-`_pilots` and `_early_relaunches` check the special fixtures and initial cuts.
+publication on demand and in the full tier. The live-child/process and
+yielded-cell campaigns each run the same twin pilots as their standalone
+pilot checks and the same relaunch at their first indexed product commit as
+their standalone early-relaunch checks. Representative selection always
+includes the first commit of each store; both campaigns explicitly require
+the product cut to exist and pass the same invariants in the strict run.
 Their twin pilots compare final operation ids/states and tagged counter bytes,
 alpha-renaming only independently minted root UUIDs after checking their binding.
 A test-support build accepts `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048,

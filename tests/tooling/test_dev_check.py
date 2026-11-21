@@ -332,7 +332,9 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 
     def executable(self, name, source):
         path = self.bin / name
-        path.write_text('#!' + sys.executable + '\n' + source)
+        # These stand-ins import only the standard library. The dispatcher
+        # still execs the real interpreter for scripts it does not mock.
+        path.write_text('#!' + sys.executable + ' -S\n' + source)
         path.chmod(0o700)
 
     def run_gate(self, *args):

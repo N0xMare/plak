@@ -100,11 +100,14 @@ fn populate(b: &mut Backend) -> TestResult {
         let mut head = created.branch();
         let mut lease = created.lease().clone();
         for revision in 1..10 {
+            // Keep the same distinct history and GC cardinalities, but only
+            // the first checkpoint of each branch needs a large body. This
+            // law measures admission work, not the cost of inserting bodies.
             let next = checkpoint(
                 base,
                 revision,
                 Some(&bundle),
-                &format!("{session}:{revision}:{padding}"),
+                &format!("{session}:{revision}"),
             )?;
             head = commit(b, &CommitCheckpoint::new(lease.clone(), head, next.clone()))?.head();
             bundle = next;

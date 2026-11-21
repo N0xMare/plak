@@ -205,6 +205,8 @@ fn lifecycle(
     let mut deadline = start + WAIT;
     let mut progress = (0, 0);
     let mut state = shapes::Lifecycle::default();
+    let mut read = 0;
+    let mut records = Vec::new();
     loop {
         if agent.child.try_wait().unwrap().is_some() {
             break;
@@ -212,11 +214,7 @@ fn lifecycle(
         if let Some(gates) = round_gates.as_mut() {
             gates.poll();
         }
-        let lines = agent.snapshot();
-        let records = lines
-            .iter()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .collect::<Vec<_>>();
+        agent.extend_records(&mut read, &mut records);
         if let Some(terminal) = unexpected_pilot_terminal(shape, cut.is_some(), &records) {
             fixture.preserve();
             panic!(
@@ -253,7 +251,7 @@ fn lifecycle(
             std::fs::rename(pending, release).unwrap();
         }
         let observed = (
-            lines.len(),
+            read,
             trace::progress(&fixture.root.join("commit-trace.jsonl")),
         );
         if step_deadline(&mut deadline, absolute, Instant::now(), progress, observed) {
@@ -993,12 +991,10 @@ fn resume_original(
 ) -> Value {
     let deadline = Instant::now() + WAIT;
     let mut commands = Vec::new();
+    let mut read = 0;
+    let mut records = Vec::new();
     loop {
-        let records = agent
-            .snapshot()
-            .iter()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .collect::<Vec<_>>();
+        agent.extend_records(&mut read, &mut records);
         if let Some(frame) = (shapes::get(shape).lifecycle)(fixture, &records, &mut state) {
             if frame["kind"] == "quit" {
                 let acknowledgements = records

@@ -2755,13 +2755,7 @@ async fn sequential_page_filled_starts_never_exhaust_the_executor_handle_table()
             .session_for_number(u32::try_from(handle)?)
             .ok_or("job handle")?;
         sessions.write_stdin(id, b"finish\n", JoinedProcessInputDisposition::KeepOpen)?;
-        // A liveness bound only: generous, so load never trips it.
-        tokio::time::timeout(std::time::Duration::from_secs(30), async {
-            while sessions.joined_terminal_status(id).is_none() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await?;
+        wait_for_joined_process(&sessions, id).await?;
     }
     assert!(
         retained > MAX_JOINED_PROCESS_SESSIONS,

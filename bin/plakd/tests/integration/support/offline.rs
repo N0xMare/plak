@@ -648,6 +648,18 @@ impl AgentProcess {
         self.lines.lock().unwrap().clone()
     }
 
+    /// Extend a poller's view of the append-only, line-buffered stdout.
+    /// Keep the line cursor separate: even an undecodable line was read.
+    pub(super) fn extend_records(&self, read: &mut usize, records: &mut Vec<Value>) {
+        let new_lines = self.lines.lock().unwrap()[*read..].to_vec();
+        *read += new_lines.len();
+        records.extend(
+            new_lines
+                .iter()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok()),
+        );
+    }
+
     /// Waits until a decoded record satisfies `predicate`, or fails.
     pub(super) fn wait_for(&self, what: &str, predicate: impl Fn(&Value) -> bool) -> Value {
         let deadline = Instant::now() + WAIT;
@@ -916,17 +928,18 @@ fn daemon_openers(path: &Path) -> Vec<i32> {
     else {
         return Vec::new();
     };
-    opened_by(path)
-        .into_iter()
-        .filter(|pid| *pid == holder)
-        .collect()
+    if has_open_descriptor(holder, path) {
+        vec![holder]
+    } else {
+        Vec::new()
+    }
 }
 
 fn wait_for_daemons(path: &Path, daemons: &[i32]) {
     let deadline = Instant::now() + WAIT;
     // The live host may already have redialed and started a successor. Only
     // the processes we killed must disappear, not every future opener.
-    while opened_by(path).iter().any(|pid| daemons.contains(pid)) {
+    while daemons.iter().any(|&pid| has_open_descriptor(pid, path)) {
         assert!(Instant::now() < deadline, "the old daemon did not exit");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -962,6 +975,20 @@ fn daemon_exit_wait_ignores_a_successor_and_a_startup_probe() {
     drop(probe);
 }
 
+#[cfg(target_os = "linux")]
+fn has_open_descriptor(pid: i32, path: &Path) -> bool {
+    std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == path))
+}
+
+#[cfg(target_os = "macos")]
+fn has_open_descriptor(pid: i32, path: &Path) -> bool {
+    opened_by(path).contains(&pid)
+}
+
 /// The processes that have `path` open, from their descriptor tables.
 #[cfg(target_os = "linux")]
 pub(super) fn opened_by(path: &Path) -> Vec<i32> {
@@ -971,11 +998,7 @@ pub(super) fn opened_by(path: &Path) -> Vec<i32> {
         .flatten()
         .filter_map(|entry| {
             let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
-            std::fs::read_dir(entry.path().join("fd"))
-                .ok()?
-                .flatten()
-                .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == path))
-                .then_some(pid)
+            has_open_descriptor(pid, path).then_some(pid)
         })
         .collect()
 }

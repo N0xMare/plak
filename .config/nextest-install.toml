@@ -10,8 +10,6 @@ test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)
 | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
-| test(crash_sweep::durability_ledger_retirement_pilots)
-| test(crash_sweep::durability_ledger_retirement_early_relaunches)
 '''
 
 [image-residency]

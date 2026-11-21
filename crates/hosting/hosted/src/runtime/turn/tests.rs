@@ -150,7 +150,7 @@ fn saturated_observation_channel_resnapshots_authoritative_assistant() {
     let initial = SessionRecord::new(PathBuf::from("/workspace"));
     assert!(events.replace_transcript(logging::project_session_snapshot(&initial)));
     let _ = rx.try_iter().count();
-    for index in 0..2_000 {
+    for index in 0..plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY {
         assert!(events.notice(TranscriptRow::error(
             NoticeScope::Host,
             format!("diagnostic-{index}")

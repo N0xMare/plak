@@ -364,9 +364,7 @@ not (
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)
-| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
-| test(crash_sweep::durability_ledger_retirement_pilots)
-| test(crash_sweep::durability_ledger_retirement_early_relaunches))
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch))
 | (test(image_residency_crash_cuts_recover_without_redispatch))
 | (test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
 | test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
@@ -693,7 +691,10 @@ threads-required = "num-test-threads"
 priority = -50
 
 [[profile.durability.overrides]]
-filter = 'test(/::wire_host_restart::(root|child)_[0-7]$/)'
+filter = '''
+test(/::wire_host_restart::(root|child)_[0-7]$/)
+| test(=host_skeleton::crash::host_crash_cuts_of_the_start_scan_continue_once_or_hold)
+'''
 priority = 90
 threads-required = 4
 
@@ -706,9 +707,7 @@ default-filter = '''
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)
-| test(crash_sweep::durability_ledger_retirement_interrupted_batch)
-| test(crash_sweep::durability_ledger_retirement_pilots)
-| test(crash_sweep::durability_ledger_retirement_early_relaunches))
+| test(crash_sweep::durability_ledger_retirement_interrupted_batch))
 | (test(image_residency_crash_cuts_recover_without_redispatch))
 | (test(=host_skeleton::runner::a_childs_daemon_job_survives_host_loss_and_handoff)
 | test(=host_skeleton::runner::recovery::a_broken_daemon_blocks_local_placement_without_terminating_the_host)
@@ -779,6 +778,7 @@ priority = -50
 [[profile.install.overrides]]
 filter = 'test(/^crash_sweep::durability_ledger_retirement_/)'
 threads-required = 4
+priority = 95
 
 [[profile.install.overrides]]
 filter = '''
