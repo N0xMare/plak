@@ -89,16 +89,21 @@ pub(super) fn map_offline_lifecycle(
     }
 }
 
-pub(super) async fn run_refresh<E: Send + 'static>(
+pub(super) async fn run_refresh<E, Forced, IfDue>(
     force: bool,
-    forced: impl Future<Output = Result<(), E>> + Send + 'static,
-    if_due: impl Future<Output = Result<(), E>>,
+    forced: impl FnOnce() -> Forced,
+    if_due: impl FnOnce() -> IfDue,
     map_error: fn(E) -> NativeSubscriptionError,
-) -> Result<(), NativeSubscriptionError> {
+) -> Result<(), NativeSubscriptionError>
+where
+    E: Send + 'static,
+    Forced: Future<Output = Result<(), E>> + Send + 'static,
+    IfDue: Future<Output = Result<(), E>>,
+{
     if force {
-        detached(forced).await?
+        detached(Box::pin(forced())).await?
     } else {
-        if_due.await
+        Box::pin(if_due()).await
     }
     .map_err(map_error)
 }

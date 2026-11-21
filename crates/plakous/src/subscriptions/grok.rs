@@ -545,8 +545,8 @@ impl NativeVertical for Vertical {
             let forced = Arc::clone(&manager);
             run_refresh(
                 force,
-                async move { forced.refresh_now().await },
-                manager.refresh_if_needed(),
+                || async move { forced.refresh_now().await },
+                || manager.refresh_if_needed(),
                 map_xai_error,
             )
             .await?;
