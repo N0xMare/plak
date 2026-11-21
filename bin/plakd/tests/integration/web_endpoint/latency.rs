@@ -80,11 +80,19 @@ fn seed_history(fixture: &Fixture, sessions: [&str; 2]) {
                 .unwrap(),
             1
         );
+        let anchor: i64 = tx
+            .query_row(
+                "SELECT applied_seq FROM projector_cursors WHERE session_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
         let mut put = tx.prepare(
-            "INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row) VALUES (?1,1,0,?2,?3)"
+            "INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row) VALUES (?1,?2,0,?3,?4)"
         ).unwrap();
         for ordinal in 1..=640 {
-            put.execute(rusqlite::params![id, ordinal, row]).unwrap();
+            put.execute(rusqlite::params![id, anchor, 1000 + ordinal, row])
+                .unwrap();
         }
     }
     tx.commit().unwrap();
@@ -100,6 +108,35 @@ struct Samples {
 
 const READS: [&str; 3] = ["profiles_list", "templates_list", "accounts_status"];
 
+fn prompt(socket: &mut WebSocket<UnixStream>, attachment: u64, id: u64) -> Duration {
+    let sent = Instant::now();
+    send(
+        socket,
+        &ClientFrame::Request {
+            id,
+            op: Op::Intent {
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("stream fixture")),
+                blobs: Vec::new(),
+            },
+        },
+    );
+    let acceptance = response(socket, id);
+    assert_eq!(acceptance["ok"]["answer"], "accepted", "{acceptance}");
+    sent.elapsed()
+}
+
+fn wait_finished(socket: &mut WebSocket<UnixStream>) {
+    loop {
+        let frame = next_frame(socket);
+        assert_ne!(frame["frame"], "resync_required");
+        if frame["frame"] == "event" && frame.to_string().contains("probe stream finished") {
+            return;
+        }
+    }
+}
+
 impl Samples {
     fn measure(
         &mut self,
@@ -114,22 +151,7 @@ impl Samples {
         let read_id = attach_id + 2;
         let send_id = attach_id + 3;
         let command = READS[round % READS.len()];
-        let send_at = Instant::now();
-        send(
-            streaming,
-            &ClientFrame::Request {
-                id: send_id,
-                op: Op::Intent {
-                    client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
-                    attachment,
-                    intent: SessionIntent::Prompt(Draft::from("stream fixture")),
-                    blobs: Vec::new(),
-                },
-            },
-        );
-        let acceptance = response(streaming, send_id);
-        assert_eq!(acceptance["ok"]["answer"], "accepted", "{acceptance}");
-        self.accepted.push(send_at.elapsed());
+        self.accepted.push(prompt(streaming, attachment, send_id));
         let node = attach(browsing, root, attach_id);
         let ping_at = Instant::now();
         send(
@@ -149,15 +171,7 @@ impl Samples {
             [(ping_id, ping_at), (read_id, console_at)],
             round,
         );
-        loop {
-            let observation = next_frame(streaming);
-            if observation["frame"] == "event"
-                && observation.to_string().contains("probe stream finished")
-            {
-                break;
-            }
-            assert_ne!(observation["frame"], "resync_required");
-        }
+        wait_finished(streaming);
     }
 
     fn receive(
@@ -249,6 +263,11 @@ fn host_latency_probe() {
     let (first, a) = create(&mut seed, 1);
     let (second, b) = create(&mut seed, 2);
     let (_, live) = create(&mut seed, 3);
+    for (id, root) in [(4, &a), (6, &b)] {
+        let attachment = attach(&mut seed, root, id);
+        prompt(&mut seed, attachment, id + 1);
+        wait_finished(&mut seed);
+    }
     drop(seed);
     interrupt_and_wait(&mut web);
     seed_history(&fixture, [&first, &second]);
