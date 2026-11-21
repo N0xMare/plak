@@ -42,6 +42,8 @@ pub(super) struct Directory {
     rows: Arc<RwLock<Rows>>,
     changes: watch::Sender<u64>,
     external: Option<External>,
+    #[cfg(test)]
+    pub(super) runtime_inspections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Directory {
@@ -66,8 +68,12 @@ impl Directory {
             retry_rows: BTreeSet::new(),
             retry_visibility: false,
             holders: BTreeMap::new(),
+            #[cfg(test)]
+            runtime_inspections: Arc::default(),
         };
         let rows = Arc::new(RwLock::new(source.rebuild().map_err(CliFailure::new)?));
+        #[cfg(test)]
+        let runtime_inspections = Arc::clone(&source.runtime_inspections);
         let shared = Arc::clone(&rows);
         let notify = changes.clone();
         std::thread::Builder::new()
@@ -81,6 +87,8 @@ impl Directory {
             rows,
             changes,
             external: None,
+            #[cfg(test)]
+            runtime_inspections,
         })
     }
 
@@ -296,6 +304,8 @@ struct Source {
     retry_rows: BTreeSet<String>,
     retry_visibility: bool,
     holders: BTreeMap<String, Holder>,
+    #[cfg(test)]
+    runtime_inspections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Source {
@@ -439,6 +449,14 @@ impl Source {
     ) -> Vec<(String, Option<Summary>)> {
         let mut activity_trees = BTreeSet::new();
         for (id, update) in trees {
+            // Actors can acknowledge a save without advancing its revision
+            // or changing any directory facts. Do not query either store
+            // for a presentation image the directory already has.
+            if let TreeUpdate::Image(facts) = &update
+                && matches!(self.trees.get(&id), Some(Ok(previous)) if previous == facts)
+            {
+                continue;
+            }
             let facts = match update {
                 TreeUpdate::Image(facts)
                     if self.tree_probe.revision(&id).is_ok_and(|current| {
@@ -449,15 +467,15 @@ impl Source {
                 }
                 TreeUpdate::Image(_) | TreeUpdate::Inspect => inspect_tree(&self.paths, &id),
             };
+            if self.trees.get(&id) == Some(&facts) {
+                continue;
+            }
             if let Ok(facts) = &facts {
                 self.tree_probe
                     .note_image(&id, facts.as_ref().map(|facts| facts.revision));
             }
             activity_trees.insert(id.clone());
-            if self.trees.get(&id) != Some(&facts) {
-                affected.insert(id.clone());
-                self.trees.insert(id, facts);
-            }
+            self.trees.insert(id, facts);
         }
         let mut changes = Vec::new();
         let mut locators = Vec::new();
@@ -506,6 +524,9 @@ impl Source {
         if located.is_empty() {
             return;
         }
+        #[cfg(test)]
+        self.runtime_inspections
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let locators = located
             .iter()
             .map(|(_, locator)| *locator)

@@ -4662,7 +4662,9 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   The startup scan below is separate recovery authority.
   The host seeds one in-memory summary per session from storage at startup.
   Product and tree commit notices update affected summaries; residency,
-  observation and runner changes wake directory watches. Mutations do not
+  observation and runner changes wake directory watches. A repeated tree
+  image at the same revision with the same directory facts does not cause
+  another store read. Mutations do not
   wait for publication. Local notices coalesce by key. A sibling product
   process can send a bounded, best-effort private presentation notice, which
   names changed facts but conveys no admission or write authority. Every

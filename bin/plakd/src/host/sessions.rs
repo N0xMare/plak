@@ -1202,6 +1202,16 @@ mod tests {
         record.account = Some(prepared.root.account.clone());
         record.model = Some(prepared.root.model.clone());
         record.effort = prepared.root.effort.clone();
+        record.plakous_locator = Some(
+            format!(
+                "{}/{}/{}",
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4()
+            )
+            .parse()
+            .unwrap(),
+        );
         services
             .session_records()
             .unwrap()
@@ -1239,6 +1249,29 @@ mod tests {
         let actual = product.rows(None, None, false).unwrap().remove(0);
         assert_eq!(actual.profile.as_deref(), Some(expected.id.as_str()));
         assert_eq!(actual.differences, expected.differences);
+        let runtime_inspections = || {
+            product
+                .directory
+                .runtime_inspections
+                .load(std::sync::atomic::Ordering::Relaxed)
+        };
+        let previous = runtime_inspections();
+        assert!(previous > 0, "the published revision required inspection");
+        tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
+        product.directory.settle();
+        assert_eq!(
+            runtime_inspections(),
+            previous,
+            "an unchanged tree save is not a revision refresh"
+        );
+        tree.revision += 1;
+        tree.acknowledge_revision(product.tree.save_in_custody(&tree).unwrap());
+        product.directory.settle();
+        assert_eq!(
+            runtime_inspections(),
+            previous + 1,
+            "a new tree revision refreshes activity"
+        );
         // Save through the filesystem, not through a product config notice.
         std::fs::write(
             context.project_agents_dir().unwrap().join("codex-default-root.toml"),
