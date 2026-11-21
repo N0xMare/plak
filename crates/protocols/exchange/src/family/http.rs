@@ -11,8 +11,8 @@ use tokio::time::Instant;
 use crate::attempt::{ExchangeBreak, FailurePoint, PhysicalRequestOutcome};
 use crate::{cancellable, read_bounded_body, retry_phase, time_until};
 use plakous_http::{
-    CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
-    Origin, Request as HttpRequest, Response, ResponseBody, StatusCode,
+    CancellationToken as HttpCancellationToken, Client, Failure as HttpFailure, Origin,
+    Request as HttpRequest, Response, ResponseBody, StatusCode,
 };
 use plakous_model::ModelRetryDeclineReason as Decline;
 use plakous_model::{
@@ -24,8 +24,8 @@ use tower_service::Service;
 use super::{
     FamilyAttempt, FamilyAttemptError, FamilyAttemptProtocolError, FamilyAttemptResponse,
     FamilyExchange, FamilyExchangeHooks, FamilyOperationBinding, FamilyWire, Generation,
-    GenerationEnd, Reauthorization, RetryDelivery, RetryFailure, TransportRejection,
-    transport_fault,
+    GenerationEnd, GenerationTransport, Reauthorization, RetryDelivery, RetryFailure,
+    TransportRejection, transport_fault,
 };
 
 /// Credential-free, exact input to one family HTTP operation.
@@ -420,8 +420,7 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
             });
         }
         let physical = attempt.observe_physical_request_started()?;
-        let reserved = attempt.reserve_authorization()?;
-        if physical != reserved {
+        if !attempt.authorize_generation(physical.generation())? {
             return finish_error(
                 attempt,
                 PhysicalRequestOutcome::DefiniteRejection,
@@ -432,7 +431,6 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
             )
             .await;
         }
-        attempt.validate_authorization(&reserved)?;
         let request = match hooks.build_request(client, dial_origin.clone(), attempt, operation) {
             Ok(request) => request,
             Err(error) => {
@@ -441,18 +439,11 @@ impl<W: FamilyWire, H: FamilyHttpHooks<W>> HttpGeneration<W, H> {
             }
         };
         let request_log = RetryFailure::request_log(&request);
-        let cancellation = HttpCancellationToken::new();
-        let exchanged = cancellable(
-            client.execute(
-                request,
-                ExchangeControl::streaming(generation.deadline.into_std(), cancellation.clone())
-                    .with_body_deadline(self.hard_deadline.map(Instant::into_std))
-                    .with_fresh_connection(generation.fresh_connection),
-            ),
-            attempt.context().cancellation(),
-            &cancellation,
-        )
-        .await;
+        let transport = GenerationTransport::new(&generation, self.hard_deadline);
+        let cancellation = transport.cancellation().clone();
+        let exchanged = transport
+            .send(client, request, attempt.context().cancellation())
+            .await;
         let response = match exchanged.value {
             Ok(response) => response,
             Err(failure) => {

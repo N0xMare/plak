@@ -1,13 +1,17 @@
 //! Physical dispatch of one admitted attempt: preflight, send, body decode and stream collection.
 
-use plakous_exchange::family::{RetryFailure, TransportRejection};
+use plakous_exchange::family::{
+    AuthorizedHead, BodyPull, Generation, GenerationTransport, RetryFailure, TransportRejection,
+    pull_body, read_complete_error_body,
+};
+use plakous_http::Response;
 
 use super::{
-    Arc, Bytes, Client, Digest, DigestDomain, ExchangeControl, FailurePoint, FamilyCoreError,
-    HeaderName, HttpCancellationToken, HttpErrorKind, HttpFailure, Instant, ModelProviderRequestId,
-    ModelTransportFault, PhysicalRequestBinding, PhysicalRequestOutcome, Poll, ReplaySafety,
-    ResponseBody, ResponsesAttempt, ResponsesAttemptDialectData, ResponsesAttemptError,
-    ResponsesAttemptResponse, ResponsesAttemptTerminal, ResponsesAuthorizationAdapter,
+    Client, Digest, DigestDomain, FailurePoint, FamilyCoreError, HeaderName, HttpCancellationToken,
+    HttpErrorKind, HttpFailure, Instant, ModelProviderRequestId, ModelTransportFault,
+    PhysicalRequestBinding, PhysicalRequestOutcome, ReplaySafety, ResponseBody, ResponsesAttempt,
+    ResponsesAttemptDialectData, ResponsesAttemptError, ResponsesAttemptResponse,
+    ResponsesAttemptTerminal, ResponsesAuthSlots, ResponsesAuthorizationAdapter,
     ResponsesContentPart, ResponsesDispatchRejection, ResponsesFamilySseDecoder,
     ResponsesFamilyStreamError, ResponsesFamilyStreamEvent, ResponsesHttpStatusClass,
     ResponsesObservation, ResponsesOutputItem, ResponsesPhysicalDispatchBinding,
@@ -17,7 +21,7 @@ use super::{
     ResponsesResponse, ResponsesResponseLimits, ResponsesRevalidationRequest, ResponsesStorageMode,
     ResponsesStreamDialectData, ResponsesStreamEventKind, ResponsesStreamLimits, RetryPolicy,
     StatusCode, TERMINAL_RESPONSE_DIGEST_REVISION, monotonic_now, mpsc,
-    parse_provider_error_with_policy, physical_request_digest, poll_fn,
+    parse_provider_error_with_policy, physical_request_digest,
     project_terminal_response_with_model_binding, provider_error_object, request_body_digest,
     retry_after_seconds,
 };
@@ -35,22 +39,131 @@ pub(super) fn admit_attempt(attempt: &ResponsesAttempt) -> Result<(), FamilyCore
     clippy::result_large_err,
     reason = "the attempt error is returned once per attempt from a future that already holds it"
 )]
-#[allow(
-    clippy::too_many_lines,
-    reason = "one linear host step whose ordering is the invariant"
-)]
 pub(super) async fn execute_admitted<D, G>(
-    client: Client,
-    dialect: Arc<D>,
+    client: &Client,
+    dialect: &D,
     data: ResponsesAttemptDialectData,
     authorization: ResponsesAuthorizationAdapter<D, G>,
     attempt: &mut ResponsesAttempt,
-    fresh_connection: bool,
+    generation: Generation,
 ) -> Result<ResponsesAttemptResponse, ResponsesAttemptError>
 where
     D: Send + Sync + 'static,
     G: Send + 'static,
 {
+    let (prepared, dispatch_binding) =
+        prepare_dispatch(dialect, authorization.preflight, data.auth_slots, attempt).await?;
+    let ResponsesPreparedPhysicalRequest {
+        request,
+        mut response_head_guard,
+        ..
+    } = prepared;
+    attempt.request_log = Some(RetryFailure::request_log(&request));
+    let transport = GenerationTransport::new(&generation, None);
+    let http_cancellation = transport.cancellation().clone();
+    let revalidation = ResponsesRevalidationRequest {
+        authority: &attempt.authority,
+        binding: &dispatch_binding,
+        request: &request,
+        cancellation: &attempt.cancellation,
+        deadline: attempt.deadline,
+        response_head_guard: &mut response_head_guard,
+    };
+    if let Err(rejection) = (authorization.revalidate)(dialect, revalidation) {
+        finish_definite_rejection(attempt);
+        if attempt.cancellation.is_cancelled() {
+            return Err(ResponsesAttemptError::Cancelled {
+                physical: attempt.physical(),
+                facts: attempt.facts(),
+            });
+        }
+        if monotonic_now() >= attempt.deadline {
+            return Err(ResponsesAttemptError::Deadline {
+                physical: attempt.physical(),
+                facts: attempt.facts(),
+            });
+        }
+        return Err(ResponsesAttemptError::Revalidation {
+            physical: attempt.physical(),
+            rejection,
+            facts: attempt.facts(),
+        });
+    }
+    let response = match transport
+        .send_authorized(client, request, &attempt.cancellation)
+        .await
+    {
+        AuthorizedHead::Resolved(response) => response,
+        AuthorizedHead::Cancelled => {
+            finish_after_authorization(attempt);
+            return Err(ResponsesAttemptError::Cancelled {
+                physical: attempt.physical(),
+                facts: attempt.facts(),
+            });
+        }
+        AuthorizedHead::Deadline => {
+            finish_after_authorization(attempt);
+            return Err(ResponsesAttemptError::Deadline {
+                physical: attempt.physical(),
+                facts: attempt.facts(),
+            });
+        }
+    };
+    // The credential/authorization lease is deliberately retained until the
+    // exact response-head outcome (including transport failure) is known.
+    if let Err(failure) = &response
+        && let Some(settle) = authorization.transport_failed
+    {
+        settle(&mut response_head_guard, *failure);
+    }
+    drop(response_head_guard);
+    let response = match response {
+        Ok(response) => response,
+        Err(source) => {
+            let outcome = if TransportRejection::from_failure(source).is_some() {
+                PhysicalRequestOutcome::DefiniteRejection
+            } else {
+                PhysicalRequestOutcome::AmbiguousPostSend
+            };
+            finish_generation(attempt, outcome)?;
+            return Err(ResponsesAttemptError::Transport {
+                physical: attempt.physical(),
+                source,
+                facts: attempt.facts(),
+            });
+        }
+    };
+
+    attempt.stream.retry_disabled = plakous_http::retry_disabled(response.headers());
+    if response.status() != StatusCode::OK {
+        return classify_error_response(response, attempt, &http_cancellation, &data).await;
+    }
+    decode_response(
+        response,
+        attempt,
+        &http_cancellation,
+        data,
+        dispatch_binding.request(),
+    )
+    .await
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "closed attempt errors retain physical authority"
+)]
+async fn prepare_dispatch<D: Send + Sync + 'static, G: Send + 'static>(
+    dialect: &D,
+    preflight: ResponsesPreflightFn<D, G>,
+    auth_slots: ResponsesAuthSlots,
+    attempt: &mut ResponsesAttempt,
+) -> Result<
+    (
+        ResponsesPreparedPhysicalRequest<G>,
+        ResponsesPhysicalDispatchBinding,
+    ),
+    ResponsesAttemptError,
+> {
     let Some(generation) = attempt
         .core
         .observation_snapshot()
@@ -68,7 +181,7 @@ where
         cancellation: &attempt.cancellation,
         deadline: attempt.deadline,
     };
-    let prepared = run_preflight(dialect.as_ref(), authorization.preflight, request)
+    let prepared = run_preflight(dialect, preflight, request)
         .await
         .map_err(|error| {
             finish_before_dispatch(attempt);
@@ -117,7 +230,7 @@ where
         physical: expected,
         route: route_digest,
         credential_authority: prepared.credential_authority.clone(),
-        auth_slots: data.auth_slots,
+        auth_slots,
         request: request_digest,
     };
     attempt.physical = Some(dispatch_binding.clone());
@@ -125,116 +238,58 @@ where
         .core
         .physical_request_started()
         .map_err(|source| fail_observation(attempt, source))?;
-    let auth_mask = data.auth_slots.mask();
-    let observed_generation = attempt
+    if !attempt
         .core
-        .observations_ref()
-        .reserve_auth(auth_mask)
-        .map_err(FamilyCoreError::from)
-        .map_err(|source| fail_definite_rejection(attempt, source))?;
-    if observed_generation != generation {
+        .authorize_generation(generation, auth_slots.mask())
+        .map_err(|source| fail_definite_rejection(attempt, source))?
+    {
         finish_definite_rejection(attempt);
         return Err(ResponsesAttemptError::RequestBinding {
             physical: attempt.physical(),
             facts: attempt.facts(),
         });
     }
-    attempt
-        .core
-        .observations_ref()
-        .validate_auth(generation, auth_mask)
-        .map_err(FamilyCoreError::from)
-        .map_err(|source| fail_definite_rejection(attempt, source))?;
     ensure_running_after_start(attempt)?;
+    Ok((prepared, dispatch_binding))
+}
 
-    let ResponsesPreparedPhysicalRequest {
-        request,
-        mut response_head_guard,
-        ..
-    } = prepared;
-    attempt.request_log = Some(RetryFailure::request_log(&request));
-    let http_cancellation = HttpCancellationToken::new();
-    let control = ExchangeControl::streaming(attempt.deadline, http_cancellation.clone())
-        .with_fresh_connection(fresh_connection);
-    let revalidation = ResponsesRevalidationRequest {
-        authority: &attempt.authority,
-        binding: &dispatch_binding,
-        request: &request,
-        cancellation: &attempt.cancellation,
-        deadline: attempt.deadline,
-        response_head_guard: &mut response_head_guard,
-    };
-    if let Err(rejection) = (authorization.revalidate)(&dialect, revalidation) {
-        finish_definite_rejection(attempt);
-        if attempt.cancellation.is_cancelled() {
-            return Err(ResponsesAttemptError::Cancelled {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
-        }
-        if monotonic_now() >= attempt.deadline {
-            return Err(ResponsesAttemptError::Deadline {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
-        }
-        return Err(ResponsesAttemptError::Revalidation {
-            physical: attempt.physical(),
-            rejection,
-            facts: attempt.facts(),
-        });
-    }
-    // The dialect's final function may irreversibly authorize the opaque
-    // lease. The exact transport future is constructed and synchronously
-    // polled once before cancellation/deadline can win. From this point a
-    // cancelled or expired exchange is conservatively may-have-transmitted;
-    // only a transport failure that reports its write never started (a
-    // refused connection) is a definite rejection. A retry spends a fresh
-    // preflight lease, never this one.
-    let exchange = client.execute(request, control);
-    tokio::pin!(exchange);
-    let first_poll = poll_fn(|context| Poll::Ready(exchange.as_mut().poll(context))).await;
-    let response = match first_poll {
-        Poll::Ready(response) => response,
-        Poll::Pending => tokio::select! {
-            biased;
-            () = attempt.cancellation.cancelled() => {
-                http_cancellation.cancel();
-                let _ = exchange.await;
-                finish_after_authorization(attempt);
-                return Err(ResponsesAttemptError::Cancelled {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                });
-            }
-            () = tokio::time::sleep_until(tokio::time::Instant::from_std(attempt.deadline)) => {
-                http_cancellation.cancel();
-                let _ = exchange.await;
-                finish_after_authorization(attempt);
-                return Err(ResponsesAttemptError::Deadline {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                });
-            }
-            response = &mut exchange => response,
-        },
-    };
-    // The credential/authorization lease is deliberately retained until the
-    // exact response-head outcome (including transport failure) is known.
-    if let Err(failure) = &response
-        && let Some(settle) = authorization.transport_failed
+#[allow(
+    clippy::result_large_err,
+    reason = "closed attempt errors retain physical authority"
+)]
+async fn classify_error_response(
+    response: Response,
+    attempt: &mut ResponsesAttempt,
+    http_cancellation: &HttpCancellationToken,
+    data: &ResponsesAttemptDialectData,
+) -> Result<ResponsesAttemptResponse, ResponsesAttemptError> {
+    let status = response.status();
+    let retry_disabled = plakous_http::retry_disabled(response.headers());
+    let mut class = classify_status(status);
+    let outcome = status_outcome(status);
+    let retry_after = response
+        .headers()
+        .get(&HeaderName::from_static("retry-after"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(retry_after_seconds);
+    let provider = match read_complete_error_body(
+        response.into_body(),
+        &attempt.cancellation,
+        attempt.deadline.into(),
+        http_cancellation,
+    )
+    .await
     {
-        settle(&mut response_head_guard, *failure);
-    }
-    drop(response_head_guard);
-    let response = match response {
-        Ok(response) => response,
+        Ok(bytes) => bytes.as_ref().and_then(|bytes| {
+            let value = serde_json::from_slice(bytes).ok()?;
+            parse_provider_error_with_policy(
+                provider_error_object(&value),
+                data.error_limits,
+                data.provider_error_policy,
+            )
+            .ok()
+        }),
         Err(source) => {
-            let outcome = if TransportRejection::from_failure(source).is_some() {
-                PhysicalRequestOutcome::DefiniteRejection
-            } else {
-                PhysicalRequestOutcome::AmbiguousPostSend
-            };
             finish_generation(attempt, outcome)?;
             return Err(ResponsesAttemptError::Transport {
                 physical: attempt.physical(),
@@ -243,90 +298,64 @@ where
             });
         }
     };
-
-    attempt.stream.retry_disabled = plakous_http::retry_disabled(response.headers());
-    let status = response.status();
-    if status != StatusCode::OK {
-        let retry_disabled = plakous_http::retry_disabled(response.headers());
-        let mut class = classify_status(status);
-        let outcome = status_outcome(status);
-        let retry_after = response
-            .headers()
-            .get(&HeaderName::from_static("retry-after"))
-            .and_then(|value| value.to_str().ok())
-            .and_then(retry_after_seconds);
-        let mut body = response.into_body();
-        let provider = read_error_body(
-            &mut body,
-            attempt,
-            &http_cancellation,
-            data.provider_error_policy,
-            data.error_limits,
-        )
-        .await;
-        let closed = body.close().await;
-        // Required observation failures must not become retryable status refusals.
-        let provider = match provider.and_then(|provider| match closed {
-            Err(source) if source.kind() == HttpErrorKind::Internal => Err(source),
-            _ => Ok(provider),
-        }) {
-            Ok(provider) => provider,
-            Err(source) => {
-                finish_generation(attempt, outcome)?;
-                return Err(ResponsesAttemptError::Transport {
-                    physical: attempt.physical(),
-                    source,
-                    facts: attempt.facts(),
-                });
-            }
-        };
-        finish_generation(attempt, outcome)?;
-        if provider
-            .as_ref()
-            .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota)
-        {
-            class = ResponsesHttpStatusClass::Quota;
-        } else if data.wrapped_overload
-            && status == StatusCode::UNAUTHORIZED
-            && provider.as_ref().is_some_and(wraps_upstream_overload)
-        {
-            class = ResponsesHttpStatusClass::WrappedOverload;
-        }
-        let retry_disabled = retry_disabled
-            || provider
-                .as_ref()
-                .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota);
-        // The status ends this request whether or not a retry follows; a
-        // retry evaluation overwrites it with its decision. Exhausted quota
-        // names no refusal class.
-        attempt.core.observations_ref().record_failure(
-            if outcome == PhysicalRequestOutcome::DefiniteRejection {
-                FailurePoint::Refused
-            } else {
-                FailurePoint::AfterSend
-            },
-            Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
-            (class != ResponsesHttpStatusClass::Quota)
-                .then(|| {
-                    plakous_exchange::attempt::ProviderRefusal::from_http_status(
-                        refusal_status(status, class).as_u16(),
-                    )
-                })
-                .flatten(),
-            false,
-            None,
-        );
-        return Err(ResponsesAttemptError::HttpStatus {
-            physical: attempt.physical(),
-            status,
-            class,
-            provider,
-            retry_after,
-            retry_disabled,
-            facts: attempt.facts(),
-        });
+    finish_generation(attempt, outcome)?;
+    if provider
+        .as_ref()
+        .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota)
+    {
+        class = ResponsesHttpStatusClass::Quota;
+    } else if data.wrapped_overload
+        && status == StatusCode::UNAUTHORIZED
+        && provider.as_ref().is_some_and(wraps_upstream_overload)
+    {
+        class = ResponsesHttpStatusClass::WrappedOverload;
     }
+    let retry_disabled = retry_disabled
+        || provider
+            .as_ref()
+            .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota);
+    // The status ends this request whether or not a retry follows; a
+    // retry evaluation overwrites it with its decision. Exhausted quota
+    // names no refusal class.
+    attempt.core.observations_ref().record_failure(
+        if outcome == PhysicalRequestOutcome::DefiniteRejection {
+            FailurePoint::Refused
+        } else {
+            FailurePoint::AfterSend
+        },
+        Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
+        (class != ResponsesHttpStatusClass::Quota)
+            .then(|| {
+                plakous_exchange::attempt::ProviderRefusal::from_http_status(
+                    refusal_status(status, class).as_u16(),
+                )
+            })
+            .flatten(),
+        false,
+        None,
+    );
+    Err(ResponsesAttemptError::HttpStatus {
+        physical: attempt.physical(),
+        status,
+        class,
+        provider,
+        retry_after,
+        retry_disabled,
+        facts: attempt.facts(),
+    })
+}
 
+#[allow(
+    clippy::result_large_err,
+    reason = "closed attempt errors retain physical authority"
+)]
+async fn decode_response(
+    response: Response,
+    attempt: &mut ResponsesAttempt,
+    http_cancellation: &HttpCancellationToken,
+    data: ResponsesAttemptDialectData,
+    physical_request: Digest,
+) -> Result<ResponsesAttemptResponse, ResponsesAttemptError> {
     attempt
         .core
         .observe_provider_accepted()
@@ -357,9 +386,9 @@ where
     let mut body = Some(response.into_body());
     let result = decode_body(
         &mut body,
-        &http_cancellation,
+        http_cancellation,
         data,
-        dispatch_binding.request(),
+        physical_request,
         provider_request_id,
         attempt,
     )
@@ -402,8 +431,15 @@ pub(super) async fn decode_body(
             (Some(semantic), Some(hard)) => Some(semantic.min(hard)),
             (semantic, hard) => semantic.or(hard),
         };
-        match next_body_chunk(body, attempt, deadline, http_cancellation).await {
-            BodyPull::Next(Some(Ok(bytes))) => {
+        match pull_body(
+            body,
+            &attempt.cancellation,
+            deadline.map(Into::into),
+            http_cancellation,
+        )
+        .await
+        {
+            BodyPull::Ready(Some(Ok(bytes))) => {
                 attempt.stream.observe_comments(&bytes);
                 let events = collector
                     .push(&bytes)
@@ -413,7 +449,7 @@ pub(super) async fn decode_body(
                     break;
                 }
             }
-            BodyPull::Next(Some(Err(source))) => {
+            BodyPull::Ready(Some(Err(source))) => {
                 return Err(match source.kind() {
                     HttpErrorKind::Cancelled => {
                         let _ = attempt.core.claim_and_close_protocol_failure();
@@ -439,7 +475,7 @@ pub(super) async fn decode_body(
                     }
                 });
             }
-            BodyPull::Next(None) => break,
+            BodyPull::Ready(None) => break,
             BodyPull::Cancelled => {
                 let _ = attempt.core.claim_and_close_protocol_failure();
                 return Err(ResponsesAttemptError::Cancelled {
@@ -987,73 +1023,6 @@ pub(super) fn ensure_running_after_start(
         });
     }
     Ok(())
-}
-
-/// Pulls one body chunk under the logical attempt's cancellation. A success
-/// stream passes no `deadline`: past its response head it is bounded only by
-/// the transport's per-pull idle bound. A bounded error body keeps the
-/// attempt deadline.
-pub(super) async fn next_body_chunk(
-    body: &mut ResponseBody,
-    attempt: &ResponsesAttempt,
-    deadline: Option<Instant>,
-    http_cancellation: &HttpCancellationToken,
-) -> BodyPull {
-    let mut pull = Box::pin(body.next_chunk());
-    let expired = async {
-        match deadline {
-            Some(deadline) => {
-                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-            }
-            None => std::future::pending().await,
-        }
-    };
-    tokio::select! {
-        biased;
-        () = attempt.cancellation.cancelled() => {
-            http_cancellation.cancel();
-            let _ = pull.await;
-            BodyPull::Cancelled
-        }
-        () = expired => {
-            http_cancellation.cancel();
-            let _ = pull.await;
-            BodyPull::Deadline
-        }
-        result = &mut pull => BodyPull::Next(result),
-    }
-}
-
-pub(super) enum BodyPull {
-    Next(Option<Result<Bytes, HttpFailure>>),
-    Cancelled,
-    Deadline,
-}
-
-pub(super) async fn read_error_body(
-    body: &mut ResponseBody,
-    attempt: &ResponsesAttempt,
-    http_cancellation: &HttpCancellationToken,
-    policy: ResponsesProviderErrorPolicy,
-    limits: ResponsesResponseLimits,
-) -> Result<Option<ResponsesProviderError>, HttpFailure> {
-    let mut bytes = Vec::new();
-    loop {
-        match next_body_chunk(body, attempt, Some(attempt.deadline), http_cancellation).await {
-            BodyPull::Next(Some(Ok(chunk))) => bytes.extend_from_slice(&chunk),
-            BodyPull::Next(Some(Err(source))) if source.kind() == HttpErrorKind::Internal => {
-                return Err(source);
-            }
-            BodyPull::Next(Some(Err(_))) | BodyPull::Cancelled | BodyPull::Deadline => {
-                return Ok(None);
-            }
-            BodyPull::Next(None) => break,
-        }
-    }
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return Ok(None);
-    };
-    Ok(parse_provider_error_with_policy(provider_error_object(&value), limits, policy).ok())
 }
 
 pub(super) fn classify_status(status: StatusCode) -> ResponsesHttpStatusClass {

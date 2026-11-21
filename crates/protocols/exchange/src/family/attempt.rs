@@ -680,6 +680,14 @@ impl<W: FamilyWire> FamilyAttempt<W> {
     pub(super) fn ledger(&self) -> &crate::attempt::PhysicalRequestLedger {
         self.core.observations_ref()
     }
+    pub(super) fn authorize_generation(
+        &self,
+        generation: u32,
+    ) -> Result<bool, FamilyAttemptError<W>> {
+        self.core
+            .authorize_generation(generation, crate::attempt::AuthReservationMask::PRIMARY)
+            .map_err(|source| self.observation(source))
+    }
     /// Returns current conservative facts.
     #[must_use]
     pub fn terminal_facts(&self) -> TerminalFacts {

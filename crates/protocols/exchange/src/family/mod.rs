@@ -16,6 +16,7 @@ mod attempt;
 mod host;
 mod http;
 mod retry;
+mod transport;
 
 #[cfg(test)]
 mod test_wire;
@@ -33,6 +34,9 @@ pub use http::{
     FamilyHttpResponseHead, FamilyHttpSafety, FamilyRedispatchFn, PreparedFamilyHttpOperation,
 };
 pub use retry::{RetryFailure, TransportRejection, transport_fault};
+pub use transport::{
+    AuthorizedHead, BodyPull, GenerationTransport, pull_body, read_complete_error_body,
+};
 
 /// Grammar and projection facts, never credentials or provider policy.
 pub trait FamilyWire: Clone + Copy + Debug + Eq + Send + Sync + 'static {

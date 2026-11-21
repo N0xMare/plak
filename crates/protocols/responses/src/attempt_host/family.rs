@@ -40,12 +40,12 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
         attempt.deadline = generation.deadline.into_std();
         attempt.stream.physical_started = Some(generation.started.into_std());
         let terminal = execute_admitted(
-            self.client.clone(),
-            Arc::clone(&self.dialect),
+            &self.client,
+            self.dialect.as_ref(),
             self.data.clone(),
             self.authorization,
             attempt,
-            generation.fresh_connection,
+            generation,
         )
         .await;
         if let Err(ResponsesAttemptError::HttpStatus {

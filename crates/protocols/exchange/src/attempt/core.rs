@@ -125,6 +125,20 @@ impl FamilyAttemptCore {
             .validate_auth(generation, AuthReservationMask::PRIMARY)?)
     }
 
+    /// Reserves and validates the wire family's exact slot set. A different
+    /// generation returns false without granting dispatch authority.
+    pub fn authorize_generation(
+        &self,
+        generation: u32,
+        slots: AuthReservationMask,
+    ) -> Result<bool, FamilyCoreError> {
+        if self.observations.reserve_auth(slots)? != generation {
+            return Ok(false);
+        }
+        self.observations.validate_auth(generation, slots)?;
+        Ok(true)
+    }
+
     pub fn declare_server_effect(&self) -> Result<(), FamilyCoreError> {
         Ok(self.observations.declare_server_effect()?)
     }

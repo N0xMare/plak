@@ -1,17 +1,17 @@
 //! Closed admitted physical-attempt host for the Responses family.
 //!
-//! The host owns one exact request, one physical generation, one bounded HTTP
-//! exchange, and one bounded Responses SSE terminal. Dialects supply immutable
-//! execution data plus two ordinary function pointers: an asynchronous
-//! credential/route preflight and a synchronous final revalidation fence. It
-//! deliberately defines no plugin, auth-provider, retry, or callback trait.
+//! Responses binds the request and projects the raw SSE terminal. The shared
+//! exchange host drives physical generations. Dialects supply immutable data,
+//! an asynchronous credential/route preflight and a synchronous revalidation
+//! fence.
 
 use std::fmt;
-use std::future::{Future, poll_fn};
+use std::future::Future;
+#[cfg(test)]
+use std::future::poll_fn;
 use std::num::NonZeroU32;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use crate::{ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits};
@@ -41,7 +41,7 @@ use plakous_exchange::attempt::{
 use plakous_exchange::family::{FamilyExchange, RetryDelivery};
 use plakous_http::{
     Bytes, CancellationToken as HttpCancellationToken, Client, ErrorKind as HttpErrorKind,
-    ExchangeControl, Failure as HttpFailure, HeaderName, Request, ResponseBody, StatusCode,
+    Failure as HttpFailure, HeaderName, Request, ResponseBody, StatusCode,
 };
 use plakous_model::{
     AttemptId, CancellationToken, Digest, DigestDomain, ModelOperationRoot, ModelProviderRequestId,
@@ -1218,7 +1218,7 @@ where
     /// cancellation or panic. The host performs no redirect, route fallback,
     /// or credential fallback. When the attempt permits retry (an ordinary
     /// turn), the same logical attempt is re-sent under
-    /// [`RetryPolicy::TURN`]: after a refusal or an unsent request, after a
+    /// [`plakous_exchange::attempt::RetryPolicy::TURN`]: after a refusal or an unsent request, after a
     /// failure past send or a stream cut, including a begun local tool call, when the
     /// request is cost-only, and after one HTTP 401 head through the
     /// credential-rejection hook, which forces one refresh. Every re-send
