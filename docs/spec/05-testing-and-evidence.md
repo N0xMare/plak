@@ -1936,13 +1936,21 @@ test cannot prove these. There is no provider network or credential authority.
   scripted-child fault/hold dials, use the actual child path for bind/reopen and
   append requests to `child-evidence.jsonl` alongside root evidence.
 - `PLAK_TEST_PROVIDER_RELEASE` gates first physical dispatch and respects
-  cancellation. `PLAK_TEST_ASSISTANT_DONE_RELEASE` gates after publishing
-  `assistant_done`: `quit` waits for input, `release` continues without
-  input, and `idle` drains through the real busy-false record. The
-  script's `identity_hash_delay_ms` delays hashing, not identity or bounds.
+  cancellation. The script's `identity_hash_delay_ms` delays hashing, not
+  identity or bounds.
   With `--timeout`, an existing `PLAK_TEST_RUN_DEADLINE` file reaches the
   ordinary interrupt/deadline path; without `--timeout` it does nothing.
   These are scheduling controls, not product policy.
+
+| Fixture control | Effect or witness |
+| --- | --- |
+| ScriptPlan `fold` | Answers or refuses a semantic-summary request. A refusal takes the offline placeholder rung. |
+| ScriptPlan `effect_decision_timeout_ms` | Overrides the scripted runtime's effect-decision deadline for expiry/refusal cases, never the production default. |
+| ScriptPlan `child_hold_ms` / `child_hold_after` | Hold a scripted child for the given milliseconds after publishing its locator, once that many earlier children have bound. A count of zero holds the first child; a zero duration disables the hold. |
+| ScriptPlan `fail_child_after_successes` | After the selected number of successful child binds, return recovery-required at the next bind. |
+| ScriptPlan `stall_ignores_cancellation` | Opts a scripted stall out of its normal cancellation observation. |
+| `plakous-mcp-fake-server --call-log PATH` / `--list-log PATH` | Append the called tool's name before it runs, or one `list` line per `tools/list` request, respectively. These cross-process witnesses distinguish dispatch from listing and recovery from replay. |
+| `PLAK_TEST_ASSISTANT_DONE_RELEASE` | Only applies with the offline model. Gates the face after writing `assistant_done`, before checking stdin. Atomically release with `quit` to wait for the already-sent input, `release` to continue without input, or `idle` to drain through the real `busy:false` observation first. |
 
 Two explicit client-test producers require `test-support`. The setup-only
 `plakd --test-seed-abandoned-open without-submission|with-submission` command
@@ -2036,7 +2044,8 @@ facts are consistent rather than contradictory.
 | Product bind and residency | Rebind/retry-attach restart from the actual custody fence, release, carried history or opened target; keep one canonical terminal and one actor, without replay. Explicit retry after pressure keeps exact input/mail and submission identity. Full capacity refusal and image-residency fallback preserve the paid guard and cannot publish unstaged authority. |
 | Durable tree and process work | Spawn, refreshed workspace, adoption and conflict resolution use real intent/feed boundaries. Retained copies keep pinned provenance, sealed artifacts and exact result mail once; live remote jobs retain their owner. The single-root sweep cannot enroll real child-turn recovery without multi-branch summaries and child-specific relaunch binding; the durability child matrix is separate. |
 | Recorded decisions | A checkpoint atomically records each decision and its history, control, usage and budget facts. Completion races may leave a durable decision without its consequence, never half a consequence. Open publishes it once; `recovery_verdict` is the sole predicate for live open, inspection and rehearsal. Every closure-table row has a synthetic witness for claim, note, closed operations and exact usage. |
-| Feed and projection | A commit appends its facts atomically; event and fact witnesses agree. Each row has an owning source; a stale cursor cannot overwrite newer derived rows or admit foreign work. Incremental, clear-and-replay, and plain reopen produce exactly the same views; a second projection is inert. Export, GC, open and rehearsal share the same reconciliation path. |
+| Feed and projection | A commit appends its facts atomically; event and fact witnesses agree. Each row has an owning source; a stale cursor cannot overwrite newer derived rows or admit foreign work. A lingering owner's intents are revision-fenced, and its submissions cannot reach the provider. Incremental, clear-and-replay, and plain reopen produce exactly the same views. Export, GC, open and rehearsal share the same reconciliation path. |
+| Projector idempotence | Apply every pilot feed and a generated corpus of well-formed feeds twice in both projectors, exercising every page boundary and a replayed page. The second application leaves byte-identical views and plans no further writes or successors; on converged real-host memory and SQLite views the cursor advances zero. Compare all SQLite view cells, including head and keyed bookkeeping, and refuse unknown tables in the snapshot inventory. |
 | Capture versus inference | Read-only inspection must preserve main/WAL bytes. Runtime/test hooks and append-only dispatch evidence distinguish root, child, tool and paid summary operations. Provider-hosted tool results never cause local dispatch. A new explicit work request is distinct from replaying a recorded dispatch. |
 
 The named hosted cuts are the variants of
@@ -2107,6 +2116,11 @@ store; inter-store ordinal and non-target progress may differ. Two
 divergence retries precede a reported failure with the trace diff. Setup
 authority is excluded from classification of the cut original.
 
+| Sweep shape family | Additional obligation |
+| --- | --- |
+| `image_residency_admission`, `image_residency_tool_batch`, `image_residency_continue` | Seed protected image history and cross the mandatory aggregate-image fence with optional scheduled compaction disabled. Require `ResidencyPlaceholdersV1`, exactly one Finalized compaction and no paid compact dispatch. Cut every indexed runtime/product commit around the offline one-CAS publication; the install lane repeats these cuts and direct receipt tests independently check v3 source/selection/successor evidence. |
+| `residency_dormant_materialize` | Run `plakd host --web unix:<path> --idle-release 1`. First attach answers once; after detach and loss of the live owner, a second attach rematerializes the session. Require one provider dispatch and two open/opened pairs. Cut every indexed endpoint commit, including idle release and wake, then recover through an ordinary `plakd agent` relaunch. |
+
 **Reopen oracle.** Read-only rehearsal of the exact runtime head, recovery
 obligations and ordered ledger, feed/cursors, product/tree views, sealed
 artifacts and physical dispatches predicts closure and projection lag and
@@ -2126,9 +2140,14 @@ A refused relaunch must leave the entire decoded summary unchanged.
 | `FENCED` | One `RecoveryRequired` terminal/claim for the original, from live closure or from its recorded outcome-unknown decision. |
 | `REFUSED{name}` | Typed exit 5 and unchanged durable authority. No signature is allowlisted; any refusal is a finding. |
 
-`UNCLASSIFIED`, divergences and invariant violations fail all runs. **All
-product and tree cuts MUST converge.** After relaunch one, cursors equal
-their feed tails and the head view equals the runtime head; submissions and
+`UNCLASSIFIED`, divergences and invariant violations fail all runs. A refusal
+can be accepted only by adding an allowlist row to this chapter naming its
+exact signature and the genuinely uncertain external effect that no closure
+can honestly settle. The allowlist is empty; product and tree signatures are
+never eligible.
+
+**All product and tree cuts MUST converge.** After relaunch one, cursors
+equal their feed tails and the head view equals the runtime head; submissions and
 workflow requests have a fact or remain pending behind a paused queue.
 Relaunch two changes no views. A durable provider terminal/failure decision
 finishes once; partial local evaluation/tool evidence is retained honestly
@@ -4079,7 +4098,10 @@ markers preserve content with or without their own final LF.
 | Admission reserves | Both stores enforce exact ordinary, settlement and recovery bounds. Ordinary refusal is definite before effect admission; already dispatched work may settle in reserve. A refused terminal settlement needs recovery and can consume only its own reserve. Repeats are inert; under-limit refusal does not prevent deletion or reclaim. Test doctor and CLI from observable typed classes, not backend failure text. |
 | Custody and deletion | Memory and SQLite run the same custody laws and seeded transition corpus. Only the exact prior holder/fence and independent evidence allow takeover; missing lock files alone prove nothing. A second face must refuse with the typed owner error and write nothing. Clean quit releases every held face. Withdrawal removes exact seeded fork state only; published forks keep their authority. Deleting a root cannot touch a child while the root is still owned. |
 | Lines and carry | Line head and generation publish atomically; old heads refuse even with a live lease. Branch-scoped jobs transfer only to the succeeding head/owner, with terminals and numbers preserved. Only the current head records/folds exact job terminals; duplicate receipts are inert. Carry requires a valid quiescent source and target binding, never creates an empty intent runtime, and after an interruption converges to one successor or an unchanged/withdrawn intent. |
+| Line conformance | Run one ordered corpus against memory and fully verified SQLite. A predecessor's commit, prune or second rebind refuses as `NotLineHead` without moving the head, even under a live lease. The driver self-fences after that refusal from commit or prune and makes no further store calls. An incorrect terminal fold refuses as `LineTerminalsNotFolded` without changing the head; same-store carry from a Working head refuses as `CarrySourceNotQuiescent`. Hosted carry refuses as `Ownership` under a lease-only holder and `NotQuiescent` for an unfinished turn. |
+| Line SIGKILL cuts | Cut rebind at `fork-before-commit` / `fork-after-commit`, carry at `carry-before-commit` / `carry-after-commit`, and lease-only terminal recording at `record-terminals-before-commit` / `record-terminals-after-commit`. Fully verified reopen has one committing head: the generation-1 source with no target, or the generation-2 successor with the source fenced. The terminal record is wholly present or absent. |
 | History retention | Reclaim preserves the exact retained ancestry, counters and typed receipt window; discarded checkpoints/receipts are `Pruned`, not corrupt. Cut-tests reopen either exact unpruned or exact pruned history. Working-head prune requires owner assent, retains the bounded terminal window and cannot run while a paid fold awaits its receipt. Child recovery consumes feed facts before deciding which retained head to open. |
+| Prune SIGKILL cuts | Cut at `prune-after-enqueue`, `prune-before-commit` and `prune-after-commit`. Fully verified reopen must see the exact unpruned or pruned store, not an intermediate state. |
 | GC and inspection | GC applies the feed before pruning, skips live/recovery/workflow authority and finishes eligible archived deletions. Pending workflows block GC and export until settled or withdrawn. Reopen must derive one compaction row even if the old projection was behind; read-only inspection uses the live recovery predicate without writing. |
 | Compaction queue | Summary-specific evidence distinguishes a paid fold from ordinary turns. At a cut, an accepted item survives in the paused queue and a draft without durable admission does not. Resume may authorize a new workflow, not a second dispatch of an uncertain one. Endpoint loss preserves the exact item and a typed queue remedy; that fixture is not a claim about ordinary reopen. |
 

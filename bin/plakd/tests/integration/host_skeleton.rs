@@ -1066,8 +1066,7 @@ fn host_lifecycle(fixture: &Fixture, host: &Host, trace: &std::path::Path) -> Op
     .ok()
 }
 
-/// `host_crash_mid_new_session`, `host_crash_mid_materialize` and
-/// `host_crash_mid_release` (spec 05): the real host is killed at every
+/// Creation, first open and release (spec 05 §2.6): kill the real host at every
 /// indexed commit of a new session's creation, its first open, a turn and
 /// its release, and a restarted host recovers each cut: the replayed
 /// request answers one session (never two), the crashed host reads gone,
@@ -1422,7 +1421,7 @@ fn a_released_session_is_dormant_but_keeps_its_daemon_line() {
     embedded(&fixture, &session).expect("plakd agent opened the released session");
 }
 
-/// `host_sigkill_mid_handoff` (spec 05): a host stopping with a root turn
+/// Planned handoff (spec 05 §2.6): a host stopping with a root turn
 /// running is killed during its handoff, once at once and once after the
 /// handoff is durable. A session whose handoff was recorded is continued
 /// once by the next host's start scan; one whose handoff was not is not

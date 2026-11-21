@@ -58,16 +58,17 @@ just live RECIPE          # smoke, soak, jobs, mcp-oauth, census, estimate, dail
 just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
 just prompts RECIPE       # render, diff, pins, native-compare
 just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat, weighted-lanes
-just dev RECIPE           # coverage, crash-sweep, reload-rehearsal and other dev helpers
 just harbor RECIPE        # opt-in bakeoff; `test` is the zero-inference adapter suite
 ```
+
 Finish worker changes with `just fast <packages>` and any affected groups. Set
 `PLAK_BATCH_BASE` to the pre-batch commit for integration. Neither batch runs
 the install profile. For changes to install-family tests or code they exercise
 (including crash-sweep shapes), run `just steps tests-install` before handoff.
-See spec 05 §1 and §2.3 for gate selection, lane membership and isolation;
-spec 06 §8 for exact-tree integration, install and release evidence. Production
-install includes the complete install profile, Mac suite and strict crash sweep.
+See spec 05 §1 and §2.3 for gate selection, lane membership and isolation.
+Production install requires exact-tree batch evidence plus the install tier
+(spec 06 §8), including the complete install profile, Mac suite and strict
+crash sweep.
 Publication requires clean-tree full evidence; inert docs can reuse it, but a
 `README.md` change needs fresh archive verification (spec 06 §6.5).
 `just musl container` is maintainer-only and needs the unpublished pinned image.
@@ -82,8 +83,8 @@ in-code sha256 pins when reviewed prompt output changes.
 There is no CI; the tag release workflow and manual dry run are in spec 06 §6.6.
 Harbor and its adapter tests are outside all tiers. Follow the pinned
 architecture-matched vendor install and interactive subscription OAuth rules
-in `eval/README.md` and spec 05 §1.2; do not use `claude --print` for native-home
-subscription comparisons.
+in `eval/README.md` and [spec 05, “The Harbor bakeoff plane”](docs/spec/05-testing-and-evidence.md#the-harbor-bakeoff-plane);
+do not use `claude --print` for native-home subscription comparisons.
 
 Declare dependency features (including test UUID generation) at the point of
 use; do not rely on workspace feature unification. Keep facade selections

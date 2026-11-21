@@ -1,4 +1,4 @@
-//! The lingering owner (spec 05 feed and projector laws; spec 02 §2.6): a
+//! The lingering owner (spec 05 §2.6, “Feed and projection”; spec 02 §2.6): a
 //! host stopped past its runtime lease keeps running beside the owner that
 //! took the session over. Nothing it does reaches the new owner's views or the
 //! provider.

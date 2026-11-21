@@ -1,4 +1,4 @@
-//! The product carry crash law (spec 05): the real `/rebind` carry
+//! Product carry cuts (spec 05 §6.1, “Lines and carry”): the real `/rebind` carry
 //! (`carry::rebind::session::rebind_session`) and settlement of an already
 //! persisted orchestration carry intent, each killed before its runtime create and
 //! after the create returned but before the record that binds it is saved.

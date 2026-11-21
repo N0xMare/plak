@@ -3,7 +3,7 @@
     reason = "projector scenarios retain feed sequences, host intents and rebuild oracles through complete interleavings"
 )]
 
-//! The tree projector's laws (spec 05) and the derivations it owns (spec 03
+//! The tree projector's laws (spec 05 §§2.6, 6.3) and its derivations (spec 03
 //! §4.4, §8, §14.1): wait settlement, the withheld-mail return, a discarded
 //! host wake's batch, and child command binding.
 
@@ -4084,7 +4084,7 @@ fn live_child_run(steps: &[ChildStep]) -> (tempfile::TempDir, ProductAgentTree, 
     (tmp, tree, child, feed)
 }
 
-/// The rebuild laws for one child's feed (spec 05).
+/// Tree fold and reopen laws for one child's feed (spec 05 §6.3).
 fn assert_child_rebuild_laws(
     live: &ProductAgentTree,
     child: &str,

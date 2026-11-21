@@ -1,8 +1,7 @@
-//! `plakd host`'s crash windows past a session's creation (spec 05): the host
-//! is killed at every indexed commit of its start scan's open and
-//! continuation, of a `release_session` that waits on a running turn, and of
-//! a `release_session` of a root whose tree is in custody, and the next host
-//! recovers each cut.
+//! Crash windows after creation (spec 05 §2.6, “Host loss, release and handoff”):
+//! kill the host at every indexed commit of start-scan open and continuation,
+//! of a `release_session` waiting on a running turn, and of a `release_session`
+//! for a root whose tree is in custody. The next host recovers each cut.
 //!
 //! A durable handoff can authorize one continuation. A cut before that
 //! decision leaves the turn held; another restart must not continue it again.
@@ -109,9 +108,8 @@ fn continued(fixture: &Fixture, session: &str, before: usize) -> bool {
     root_record(fixture, session).1 == 1 && dispatches(fixture) > before
 }
 
-/// `host_crash_mid_start_scan` (spec 05): the host after a planned handoff
-/// is killed at every indexed commit of its start scan's open of the session
-/// and of the continuation that runs, and a third host settles the root:
+/// Cut the successor after a planned handoff at every indexed commit of its
+/// start-scan open and its continuation. A third host settles the root:
 /// the continuation runs, or its turn is held as a loss, never with two
 /// decisions or a second dispatch, and a fourth host continues nothing.
 #[test]
@@ -276,8 +274,7 @@ fn busy_script() -> serde_json::Value {
     })
 }
 
-/// `host_crash_mid_busy_release` (spec 05): a `release_session` that arrives
-/// while a root turn runs waits for the turn; the host is killed at every
+/// A `release_session` that arrives during a root turn waits for it. Kill at every
 /// indexed commit from the request on, and the next host reads the dead
 /// host gone and opens the session, with no handoff, no decision, no second
 /// dispatch of the turn, and an answered turn never read as lost.
@@ -362,8 +359,7 @@ fn host_crash_cuts_of_a_busy_release_lose_no_answered_turn() {
     eprintln!("busy release cuts: {outcomes:?}");
 }
 
-/// `host_crash_mid_custody_release` (spec 05): a `release_session` of a
-/// root whose tree is in custody (its turn spawned a sub-agent) is cut at
+/// Cut a `release_session` for a root whose tree is in custody at
 /// every indexed commit of the release, and the next host reads the dead
 /// host gone and its attach takes the tree's custody, with no handoff, no
 /// decision and no lost turn.

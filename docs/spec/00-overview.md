@@ -194,6 +194,8 @@ state key, `r28.e39.p39.t11`, as native authority (chapter 02 §2.5).
 Other keys are left untouched; explicit legacy pruning may take schema-blind
 SQLite and holder locks to prove a directory is unused. Use settled export
 and import across keys, not a native reopen.
+The 0.0.4 release uses `r28.e38.p38.t11`; carrying its epoch-38 sessions into
+this build requires export and import.
 
 | Store | Owner | Current version |
 | --- | --- | --- |
@@ -239,10 +241,11 @@ a planned upgrade of either side keeps inference and account operations
 working. Its endpoints are fixed and path-versioned; it relays one upstream
 exchange per request and grants no session or store authority. It never
 retries, translates or fails over; the pre-plaintext idle-socket replacement
-rule in chapter 01 §7.5 stays within that exchange. Changes to endpoints,
-encodings or binding facts bump its version; the previous version's speaker is kept for
-one bump only. The gateway serves v2 and v1. Only v1 reports the former
-path-based Codex and SuperGrok credential authority and selection digests.
+rule (chapters 02 §4.7 and 04 §3.4) stays within that exchange. Changes to
+endpoints, encodings or binding facts bump its version; the previous version's
+speaker is kept for one bump only. The gateway serves v2 and v1. Only v1
+reports the former path-based Codex and SuperGrok credential authority and
+selection digests.
 Upgrade the gateway first so the old host can keep speaking v1 and the new
 host can use v2 authority when carrying its sessions.
 
