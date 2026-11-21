@@ -5,7 +5,10 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-const CONSOLE_CSP: &str = "default-src 'self'; script-src 'self'; connect-src 'self'; +    require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+const CONSOLE_CSP: &str = concat!(
+    "default-src 'self'; script-src 'self'; connect-src 'self'; ",
+    "require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
+);
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 fn welcome(socket: &mut WebSocket<UnixStream>) {
@@ -256,6 +259,16 @@ fn host_latency_probe() {
     let mut streaming = upgrade(&web, &cookie);
     welcome(&mut browsing);
     welcome(&mut streaming);
+    send(
+        &mut browsing,
+        &ClientFrame::Request {
+            id: 1,
+            op: Op::WatchSessions {
+                include_archived: true,
+            },
+        },
+    );
+    assert_eq!(response(&mut browsing, 1)["ok"]["answer"], "watching");
     let attachment = attach(&mut streaming, &live, 1);
     let mut samples = Samples::default();
     let start = Instant::now();
