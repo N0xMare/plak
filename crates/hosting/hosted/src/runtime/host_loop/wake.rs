@@ -262,9 +262,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         if !paused {
             self.prune_consumed_queue();
         }
-        let parked = self
-            .wake_park_reason(paused)
-            .or_else(|| (!self.role.pending_track.wake_candidates()).then_some("no_batch"));
+        let parked = self.wake_park_reason(paused).or_else(|| {
+            let tree_is_live = self
+                .role
+                .last_tree_revision
+                .tree_id()
+                .and_then(crate::topology_runtime::lookup)
+                .is_some();
+            // The indicator can show mail from a stored tree, but only a
+            // live tree can deliver it to a wake.
+            (!self.role.pending_track.wake_candidates(tree_is_live)).then_some("no_batch")
+        });
         if let Some(reason) = parked {
             self.role.child_wake.park();
             self.wake_decision("parked", reason, now);

@@ -47,6 +47,13 @@ impl TreeFacts {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RootControlRead {
+    #[default]
+    Due,
+    Current(u64),
+}
+
 /// The indicator state of one bound session.
 ///
 /// Keyed by session id, so an in-place switch (`/new`, `/resume`) starts
@@ -70,8 +77,7 @@ pub(super) struct PendingTrack {
     baseline: bool,
     root_reason: Option<AttentionReason>,
     root_paused: bool,
-    root_revision: Option<u64>,
-    root_controls_dirty: bool,
+    root_controls: RootControlRead,
     reason_read_at: Option<(Instant, bool)>,
     attention: Option<SessionAttention>,
     warned_at: Option<Instant>,
@@ -84,8 +90,8 @@ impl PendingTrack {
         })
     }
 
-    pub(super) fn wake_candidates(&self) -> bool {
-        self.unread_count() > 0 || self.process_exits > 0
+    pub(super) fn wake_candidates(&self, tree_is_live: bool) -> bool {
+        self.process_exits > 0 || (tree_is_live && self.unread_count() > 0)
     }
 
     pub(super) fn wake_paused(&self) -> bool {
@@ -93,7 +99,7 @@ impl PendingTrack {
     }
 
     pub(super) fn invalidate_root_controls(&mut self) {
-        self.root_controls_dirty = true;
+        self.root_controls = RootControlRead::Due;
     }
 
     fn should_warn(&mut self, entered: bool, at: Instant) -> bool {
@@ -205,19 +211,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let now = Instant::now();
         let track = &mut self.role.pending_track;
         let revision = self.role.config.session.store_revision;
-        if changed || track.root_revision != Some(revision) {
-            track.root_revision = Some(revision);
-            track.root_controls_dirty = true;
+        if changed || track.root_controls != RootControlRead::Current(revision) {
+            track.invalidate_root_controls();
         }
         // Work becoming visible refreshes the reason immediately. Otherwise
         // keep the idle observation cadence even when a write dirtied it.
         if track.reason_read_at.is_none_or(|(last, work)| {
             work != has_work
-                || ((!idle || track.root_controls_dirty)
+                || ((!idle || track.root_controls == RootControlRead::Due)
                     && now.duration_since(last) >= TREE_OBSERVE_INTERVAL)
         }) {
             track.reason_read_at = Some((now, has_work));
-            track.root_controls_dirty = true;
+            track.invalidate_root_controls();
             let reason = if has_work {
                 self.role.config.store.load_attention_reason(
                     &self.role.config.session.id,
@@ -235,7 +240,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 track.root_paused = controls.paused;
                 if let Ok(reason) = reason {
                     track.root_reason = reason;
-                    track.root_controls_dirty = false;
+                    track.root_controls = RootControlRead::Current(revision);
                 }
             }
         }
