@@ -281,17 +281,14 @@ struct WebWriter<S> {
 
 impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
     async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
-        let message = match frame {
-            Some(mut line) => {
-                line.pop(); // the outbox holds newline-terminated frames
-                Message::text(String::from_utf8(line).map_err(|_| SendError::Disconnected)?)
-            }
-            None => {
-                // A queued ping does not start its reply deadline while a large
-                // text message is still being written ahead of it.
-                self.heartbeat.sent();
-                Message::Ping(Bytes::new())
-            }
+        let message = if let Some(mut line) = frame {
+            line.pop(); // the outbox holds newline-terminated frames
+            Message::text(String::from_utf8(line).map_err(|_| SendError::Disconnected)?)
+        } else {
+            // A queued ping does not start its reply deadline while a large
+            // text message is still being written ahead of it.
+            self.heartbeat.sent();
+            Message::Ping(Bytes::new())
         };
         self.sink
             .send(message)
