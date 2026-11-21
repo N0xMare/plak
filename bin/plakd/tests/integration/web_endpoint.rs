@@ -29,6 +29,7 @@ use tungstenite::protocol::{Role, WebSocketConfig};
 use tungstenite::{Message, WebSocket};
 
 use super::offline_support::*;
+mod latency;
 mod lifecycle;
 
 const LOGIN: &str = "a@example.com";
