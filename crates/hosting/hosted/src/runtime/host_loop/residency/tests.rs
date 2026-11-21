@@ -166,11 +166,14 @@ fn idle_observation_windows_do_not_read_a_resident_session() {
             let _runtime = install_idle_topology_hub(&ancestor.id, &config.session.workspace_root);
         },
         |host, attachments| {
-            assert!(matches!(observed_tick(host), Next::Again));
             let drain = async |host: &mut RootActor<'_, TestExtension>| {
                 host.role.live.as_mut().unwrap().drain_ticks().await;
             };
+            host.block(async |host| host.project().await);
             host.block(drain);
+            // Observe the startup projection before measuring quiescent
+            // windows; its notification can legitimately refresh controls.
+            assert!(matches!(observed_tick(host), Next::Again));
             let reads = || {
                 (
                     store.record_read_count(),

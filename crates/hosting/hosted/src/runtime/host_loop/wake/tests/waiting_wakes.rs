@@ -227,10 +227,7 @@ fn run_case(case: Wake) {
                 .unwrap();
             clock.block_on(async {
                 let mail_replies = Rc::new(Cell::new(0));
-                let engine = Rc::new(RefCell::new(WaitingEngine {
-                    cancel_pending: case == Wake::CancelSettlement,
-                    ..WaitingEngine::default()
-                }));
+                let engine = Rc::new(RefCell::new(WaitingEngine::new(case == Wake::CancelSettlement)));
                 let drive = MAIL_REPLIES.scope(mail_replies.clone(), host.run_prompt(text, item, echoed, None));
                 let mut drive = Box::pin(WAITING_ENGINE.scope(engine.clone(), drive));
                 until(case, drive.as_mut(), || observed.try_iter().any(|event| {
@@ -336,7 +333,9 @@ fn run_case(case: Wake) {
                     }).await.unwrap();
                 }
                 events.notice(TranscriptRow::info(NoticeScope::Session, "resume engine observation"));
-                tokio::time::timeout(Duration::from_secs(15), drive).await.unwrap().unwrap();
+                tokio::time::timeout(Duration::from_secs(15), drive).await
+                    .unwrap_or_else(|_| panic!("{case:?}: root did not finish after restoring runtime observations"))
+                    .unwrap();
             });
         },
     );

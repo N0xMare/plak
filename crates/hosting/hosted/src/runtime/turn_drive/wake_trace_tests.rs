@@ -14,10 +14,20 @@ tokio::task_local! {
 
 /// Hold back engine observations once its real wait is running, so none of
 /// the tested wakes can ride on a runtime event or terminal result.
-#[derive(Default)]
 pub(in crate::runtime) struct WaitingEngine {
-    pub(in crate::runtime) cancel_pending: bool,
+    isolate_next_wait: bool,
+    cancel_pending: bool,
     pub(in crate::runtime) control: Option<plakous::agent::TurnControl>,
+}
+
+impl WaitingEngine {
+    pub(in crate::runtime) fn new(cancel_pending: bool) -> Self {
+        Self {
+            isolate_next_wait: true,
+            cancel_pending,
+            control: None,
+        }
+    }
 }
 
 pub(super) fn isolate_wait<P: plakous_host_protocol::ProtocolExtension>(
@@ -28,8 +38,10 @@ pub(super) fn isolate_wait<P: plakous_host_protocol::ProtocolExtension>(
     {
         let _ = WAITING_ENGINE.try_with(|probe| {
             let mut probe = probe.borrow_mut();
-            probe.control = Some(turn.control.clone());
-            turn.cancel_pending = probe.cancel_pending;
+            if std::mem::take(&mut probe.isolate_next_wait) {
+                probe.control = Some(turn.control.clone());
+                turn.cancel_pending = probe.cancel_pending;
+            }
         });
     }
 }
