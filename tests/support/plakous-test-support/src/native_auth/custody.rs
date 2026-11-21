@@ -151,17 +151,17 @@ pub async fn concurrent_rejections_adopt_one_replacement<D: LocalCustody + Send 
         "another account's rejection cannot claim this record"
     );
 
-    let mut refreshes = tokio::task::JoinSet::new();
+    let mut callers = tokio::task::JoinSet::new();
     for _ in 0..4 {
         let (refresher, slot) = (Arc::clone(refresher), slot.clone());
-        refreshes.spawn(async move {
+        callers.spawn(async move {
             local::after_rejection(refresher.as_ref(), &slot, &rejected, selection).await
         });
     }
     let generation = Some(rejected.generation.next()?.next()?);
     let mut count = 0;
     tokio::time::timeout(Duration::from_secs(30), async {
-        while let Some(refresh) = refreshes.join_next().await {
+        while let Some(refresh) = callers.join_next().await {
             let answer = refresh??;
             assert_eq!(answer.status, CustodyStatus::Ready);
             assert_eq!(answer.generation, generation);
