@@ -677,10 +677,16 @@ pub(in crate::runtime) fn start_attach_probe(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     use plakous_offline_crash_harness::gate::GateHandle;
+    const PREFIX: &str = "uncommitted prefix";
+    let start_prefix = GateHandle::new();
     let release_burst = GateHandle::new();
     let finish = GateHandle::new();
     let batches: Vec<_> = (0..16).map(|_| GateHandle::new()).collect();
-    let mut stream = vec![serde_json::json!({"gate":release_burst.script()})];
+    let mut stream = vec![
+        serde_json::json!({"gate":start_prefix.script()}),
+        serde_json::json!({"text":PREFIX}),
+        serde_json::json!({"gate":release_burst.script()}),
+    ];
     for batch in &batches {
         stream.extend((0..16).map(|_| serde_json::json!({"text":"burst"})));
         stream.push(serde_json::json!({"gate":batch.script()}));
@@ -690,7 +696,23 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
         {"output":{"text":"prefix"}}, {"stream":stream, "output":{"text":"committed end"}}
     ]))
     .await;
+    let observation = &live.owner.observation;
+    let (_, mut reduced) = observation.attach();
+    start_prefix.release();
     release_burst.entered().await;
+    // A provider gate proves the prefix was emitted, not that the hosted
+    // reducer has received it. Attach the face after the reducer saw it.
+    let prefix_cursor = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let update = reduced.recv().await.unwrap().unwrap();
+            if update.ops.iter().any(|op| carries_text(op, PREFIX)) {
+                break update.cursor;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(prefix_cursor > 1);
     let entered = Arc::new(tokio::sync::Notify::new());
     let resume = Arc::new(tokio::sync::Notify::new());
     let notified = entered.clone();
@@ -727,37 +749,25 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     let mut state = plakous_host_protocol::views::transcript::TranscriptState::default();
     let mut ops = Vec::new();
     next_agent_transcript(&received, &mut state, &mut ops).await;
-    // Discard the honest attach-prefix notice; only the later lag is counted.
+    // Apply the attach-prefix notice separately from the later lag.
     for event in received.try_iter() {
         if let HostEvent::TranscriptPatch(patch) = event {
             state.apply(patch).unwrap();
         }
     }
-    let before = live.owner.observation.snapshot().cursor;
+    assert_eq!(coverage_gaps(&state), 1, "attach starts a coverage segment");
+    let before = observation.snapshot().cursor;
     release_burst.release();
     // Lag the face's 128-update buffer, not the core event feed that the
     // shared reducer itself follows. Every batch must be reduced before
     // another is emitted, even when that reducer is descheduled under load.
     for (index, batch) in batches.iter().enumerate() {
         batch.entered().await;
-        // A liveness bound only: generous, so load never trips it.
-        tokio::time::timeout(Duration::from_secs(30), async {
-            while live.owner.observation.snapshot().cursor < before + ((index + 1) * 16) as u64 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        wait_for_reduced_cursor(observation, before + ((index + 1) * 16) as u64).await;
         batch.release();
     }
     finish.entered().await;
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while live.owner.observation.snapshot().cursor < before + 256 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    assert!(observation.snapshot().cursor >= before + 256);
     resume.notify_one();
     let gap = next_event(&received).await;
     assert!(carries_text(&gap, GAP), "{gap:?}");
@@ -765,12 +775,7 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
         state.apply(patch).unwrap();
     }
     assert_eq!(
-        state
-            .items()
-            .values()
-            .filter(|row| row.text()
-                == Some("Live view starts here · earlier streaming output not shown"))
-            .count(),
+        coverage_gaps(&state),
         2,
         "attach and lag each start one coverage segment"
     );
@@ -793,6 +798,26 @@ async fn lagged_face_emits_one_resync_gap_and_converges_to_committed_history() {
     );
     drop(observers);
     attached.release().await.unwrap();
+}
+
+fn coverage_gaps(state: &plakous_host_protocol::views::transcript::TranscriptState) -> usize {
+    state
+        .items()
+        .values()
+        .filter(|row| row.text() == Some(GAP))
+        .count()
+}
+
+async fn wait_for_reduced_cursor(observation: &Arc<ChildObservation>, target: u64) {
+    let (snapshot, mut tail) = observation.attach();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let mut cursor = snapshot.cursor;
+        while cursor < target {
+            cursor = tail.recv().await.unwrap().unwrap().cursor;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 async fn fixture() -> (

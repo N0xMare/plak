@@ -3425,11 +3425,12 @@ Unstored attachments also defer background passes until the product session
 exists, rather than racing a refused pre-storage pass against the first prompt.
 A counted-read law drains the idle ticks without requesting an extra pass:
 zero view reads before storage, exactly one cold load after the first prompt.
-The lagged-face fixture gates its 256 deltas in 16-event batches, requiring
-the shared reducer to consume each batch before the next. Only the face's
+The lagged-face fixture waits for the shared reducer to observe an
+uncommitted text prefix before attaching the face, then gates its 256 deltas
+in 16-event batches, requiring the reducer to consume each batch before the next. Only the face's
 128-update buffer is intentionally overrun, not the core feed serving the
-reducer. The original 256-update barrier, one resync gap and committed-history
-checks remain exact under host load.
+reducer. The fixture checks the attach gap, one later resync gap, the
+256-update barrier and convergence on committed history.
 
 **Feed and projector laws.** The always-on offline lanes pin:
 
