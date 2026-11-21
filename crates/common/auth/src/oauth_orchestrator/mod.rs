@@ -62,6 +62,52 @@ pub use jwks::{FetchedJwks, JwksCache, JwksResolvePolicy, parse_cache_control_ma
 pub use refresh::{run_claimed_refresh, run_claimed_refresh_from_claim};
 pub use revoke::run_claimed_revoke;
 
+/// An operator refresh or the exact rejected credential may force a refresh
+/// even when its access token is not yet due.
+#[derive(Clone, Copy)]
+pub enum RefreshForce<F> {
+    IfDue,
+    Always,
+    WhileCurrent(F),
+}
+
+impl<F: PartialEq> RefreshForce<F> {
+    #[must_use]
+    pub fn forces(self, current: F) -> bool {
+        match self {
+            Self::IfDue => false,
+            Self::Always => true,
+            Self::WhileCurrent(rejected) => rejected == current,
+        }
+    }
+}
+
+/// Decide whether to claim the fence returned by the store's single
+/// shared-lock inspection. A non-Ready payload must not be read to decide:
+/// only the exact claim may open it.
+///
+/// # Errors
+/// Returns the dialect's refusal when this record cannot be refreshed.
+pub fn select_refresh_fence<E>(
+    fence: crate::CredentialFence,
+    ready_due: Option<bool>,
+    force: bool,
+    reclaim_unknown: bool,
+    not_refreshable: E,
+) -> Result<Option<crate::CredentialFence>, E> {
+    use crate::CredentialStatus;
+    match ready_due {
+        Some(false) if !force => Ok(None),
+        Some(_) => Ok(Some(fence)),
+        None if fence.status() == CredentialStatus::RefreshRequired
+            || (reclaim_unknown && fence.status() == CredentialStatus::RefreshOutcomeUnknown) =>
+        {
+            Ok(Some(fence))
+        }
+        None => Err(not_refreshable),
+    }
+}
+
 struct RefreshAttempt {
     generation: u64,
     started: Instant,

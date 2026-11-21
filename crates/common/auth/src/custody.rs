@@ -22,6 +22,9 @@ use crate::CredentialGeneration;
 /// Custody through a credential gateway (feature `gateway`).
 #[cfg(feature = "gateway")]
 pub mod gateway;
+#[cfg(feature = "http-refresh")]
+#[doc(hidden)]
+pub mod local;
 mod local_key;
 mod pins;
 
