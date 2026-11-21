@@ -140,6 +140,7 @@ where
             super::super::Leave::Detach,
         )
         .face(self.face)
+        .with_snapshot_output(self.snapshot_output.clone())
         .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)))
         .session_baseline_follows(true);
         if let Some(login) = &self.login {

@@ -415,9 +415,11 @@ async fn connection(
         return;
     }
     let stop = Arc::clone(&stopped);
+    let snapshots = outbox.clone();
     let mut connection = host
         .connect(outbox.clone(), Face::Remote, principal, move || stop())
-        .buffered_output();
+        .buffered_output()
+        .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot));
     attached(reader, write, &mut connection, &outbox, host, &stopped).await;
     drop(place);
 }

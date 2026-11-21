@@ -334,6 +334,7 @@ where
             host_changes: self.changes.subscribe(),
             out,
             buffered_output: false,
+            snapshot_output: None,
             face,
             stopped: Arc::new(stopped),
             node: None,
@@ -524,6 +525,7 @@ struct Watch {
 /// One connection to a host of many sessions.
 pub struct HostConnection<P: ProtocolExtension, W: Write> {
     buffered_output: bool,
+    snapshot_output: Option<super::SnapshotOutput>,
     connection_id: u64,
     principal: HostPrincipal,
     principal_budget: Arc<admission::PrincipalBudget>,
@@ -1067,6 +1069,7 @@ where
         let mut connection = session
             .connect(self.out.clone(), self.face, move || stopped())
             .with_buffered_output(self.buffered_output)
+            .with_snapshot_output(self.snapshot_output.clone())
             .with_drafts(self.host.drafts.clone())
             .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
         if let Some(login) = &self.login {

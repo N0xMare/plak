@@ -347,12 +347,14 @@ async fn admit(
     }
     // The web endpoint is never a local face, however its client
     // authenticated: it may not exec or hand off the host's build.
+    let snapshots = outbox.clone();
     Ok(served
         .host
         .connect(outbox.clone(), Face::Remote, principal, move || {
             stop.stopped()
         })
-        .buffered_output())
+        .buffered_output()
+        .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot)))
 }
 
 /// Serves an admitted connection until it ends.

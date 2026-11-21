@@ -21,6 +21,7 @@ use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use plakous_host_protocol::views::presentation::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{
     Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, NodeAddress, Op,
@@ -51,6 +52,9 @@ pub const HELLO_DEADLINE: Duration = Duration::from_secs(10);
 /// The `unavailable` detail a transport sends before it authenticated its
 /// peer: a failure's own text can name state paths, accounts and sessions.
 pub const UNAVAILABLE_UNAUTHENTICATED: &str = "the session could not be opened";
+
+type SnapshotOutput =
+    std::sync::Arc<dyn Fn(AttachmentId, PresentationSnapshot) -> CliResult<()> + Send + Sync>;
 
 /// Writes `frame` as one line and flushes it.
 ///
@@ -267,6 +271,7 @@ impl Face {
 pub struct WireConnection<P: ProtocolExtension, W: Write> {
     drafts: Option<super::drafts::DraftRegistry>,
     buffered_drafts: Option<Vec<super::drafts::DraftDelivery>>,
+    snapshot_output: Option<SnapshotOutput>,
     stdout: W,
     actions: IntentSender<P>,
     service: HostService<P>,
@@ -485,6 +490,7 @@ where
         Self {
             drafts: None,
             buffered_drafts: None,
+            snapshot_output: None,
             stdout,
             service,
             actions,
@@ -1353,8 +1359,11 @@ where
     fn write_snapshot(
         &mut self,
         attachment: AttachmentId,
-        snapshot: plakous_host_protocol::views::PresentationSnapshot,
+        snapshot: PresentationSnapshot,
     ) -> CliResult<()> {
+        if let Some(write) = &self.snapshot_output {
+            return write(attachment, snapshot);
+        }
         for page in page_snapshot(snapshot, attachment)
             .map_err(|error| CliFailure::new(error.to_string()))?
         {
@@ -1388,6 +1397,11 @@ where
 
     fn with_buffered_output(mut self, buffered: bool) -> Self {
         self.buffered_drafts = buffered.then(Vec::new);
+        self
+    }
+
+    fn with_snapshot_output(mut self, output: Option<SnapshotOutput>) -> Self {
+        self.snapshot_output = output;
         self
     }
 

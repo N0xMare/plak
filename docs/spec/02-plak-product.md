@@ -4526,7 +4526,9 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   existing order. The writer never interrupts an in-flight frame to send a
   reply. When ordered output is backed up, the driver leaves further
   observations in the bounded attachment queues but continues handling
-  requests and polling console replies.
+  requests and polling console replies. Snapshot pagination and encoding run
+  on bounded blocking jobs; an unprepared snapshot reserves its ordered
+  position without blocking independent replies.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`

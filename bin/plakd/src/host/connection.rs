@@ -4,12 +4,16 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use plakous_hosted::error::CliResult;
+use plakous_host_protocol::views::presentation::PresentationSnapshot;
+use plakous_host_protocol::wire::AttachmentId;
+use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::HostConnection;
 use tokio::sync::Notify;
 
 use super::send::{MAX_PENDING_BYTES, Progress};
 use crate::surface_protocol::PlakExtension;
+
+mod snapshot;
 
 const MAX_PENDING_FRAMES: usize = 8192;
 
@@ -21,20 +25,34 @@ pub(crate) struct Outbox(Arc<Shared>);
 #[derive(Default)]
 struct Shared {
     pending: Mutex<Pending>,
-    ready: Notify,
+    ready: Arc<Notify>,
     drained: Notify,
 }
 
 #[derive(Default)]
 struct Pending {
     control: VecDeque<Frame>,
-    ordered: VecDeque<Frame>,
+    ordered: VecDeque<Ordered>,
     bytes: usize,
     frames: usize,
     // The transport still owns a frame until its send completes.
     ordered_frames: usize,
     overflowed: bool,
     closed: bool,
+}
+
+enum Ordered {
+    Line(Vec<u8>),
+    Snapshot(snapshot::Job),
+}
+
+impl Ordered {
+    fn ready(&self) -> bool {
+        match self {
+            Self::Line(_) => true,
+            Self::Snapshot(job) => job.ready(),
+        }
+    }
 }
 
 /// A complete wire line, or a transport-native heartbeat (no wire payload).
@@ -59,33 +77,46 @@ impl Outbox {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn push(&self, frame: Frame, control: bool) -> io::Result<()> {
-        let len = frame.as_ref().map_or(0, Vec::len);
-        let mut queue = self.lock();
+    fn reserve(&self, queue: &mut Pending, bytes: usize, frames: usize) -> io::Result<()> {
         if queue.closed || queue.overflowed {
             return Err(io::Error::other("the client fell behind or left"));
         }
-        if queue.bytes + len > MAX_PENDING_BYTES || queue.frames == MAX_PENDING_FRAMES {
+        if queue.bytes + bytes > MAX_PENDING_BYTES || queue.frames + frames > MAX_PENDING_FRAMES {
             queue.overflowed = true;
-            drop(queue);
             self.0.ready.notify_one();
             return Err(io::Error::other("the client fell behind"));
         }
-        queue.bytes += len;
-        queue.frames += 1;
-        if control {
-            queue.control.push_back(frame);
-        } else {
-            queue.ordered_frames += 1;
-            queue.ordered.push_back(frame);
-        }
-        drop(queue);
-        self.0.ready.notify_one();
+        queue.bytes += bytes;
+        queue.frames += frames;
         Ok(())
     }
 
     pub(crate) fn control(&self, frame: Frame) -> io::Result<()> {
-        self.push(frame, true)
+        let mut queue = self.lock();
+        self.reserve(&mut queue, frame.as_ref().map_or(0, Vec::len), 1)?;
+        queue.control.push_back(frame);
+        self.0.ready.notify_one();
+        Ok(())
+    }
+
+    pub(crate) fn snapshot(
+        &self,
+        attachment: AttachmentId,
+        snapshot: PresentationSnapshot,
+    ) -> CliResult<()> {
+        let mut queue = self.lock();
+        self.reserve(&mut queue, snapshot::BYTES, snapshot::FRAMES)
+            .map_err(|error| CliFailure::new(error.to_string()))?;
+        queue.ordered_frames += snapshot::FRAMES;
+        queue
+            .ordered
+            .push_back(Ordered::Snapshot(snapshot::Job::start(
+                attachment,
+                snapshot,
+                Arc::clone(&self.0.ready),
+            )));
+        // Preparation wakes the writer once this entry can be taken.
+        Ok(())
     }
 
     pub(crate) fn close(&self) {
@@ -119,14 +150,19 @@ impl Outbox {
     ) -> Result<(), SendError> {
         loop {
             self.send_batch(progress, &stopped, writer).await?;
-            let (pending, closed) = {
+            let (runnable, drained) = {
                 let queue = self.lock();
-                (queue.frames > 0 || queue.overflowed, queue.closed)
+                (
+                    queue.overflowed
+                        || !queue.control.is_empty()
+                        || queue.ordered.front().is_some_and(Ordered::ready),
+                    queue.closed && queue.frames == 0,
+                )
             };
-            if pending {
+            if runnable {
                 continue;
             }
-            if closed {
+            if drained {
                 return Ok(());
             }
             self.0.ready.notified().await;
@@ -164,11 +200,26 @@ impl Outbox {
         if queue.overflowed {
             return Err(SendError::Full);
         }
-        Ok(queue
-            .control
-            .pop_front()
-            .map(|frame| (frame, false))
-            .or_else(|| queue.ordered.pop_front().map(|frame| (frame, true))))
+        if let Some(frame) = queue.control.pop_front() {
+            return Ok(Some((frame, false)));
+        }
+        if let Some(Ordered::Snapshot(job)) = queue.ordered.front() {
+            if !job.ready() {
+                return Ok(None);
+            }
+            let pages = job.take()?;
+            queue.ordered.pop_front();
+            queue.bytes = queue.bytes - snapshot::BYTES + pages.bytes;
+            queue.frames = queue.frames - snapshot::FRAMES + pages.lines.len();
+            queue.ordered_frames = queue.ordered_frames - snapshot::FRAMES + pages.lines.len();
+            for line in pages.lines.into_iter().rev() {
+                queue.ordered.push_front(Ordered::Line(line));
+            }
+        }
+        Ok(queue.ordered.pop_front().and_then(|entry| match entry {
+            Ordered::Line(line) => Some((Some(line), true)),
+            Ordered::Snapshot(_) => None,
+        }))
     }
 
     fn sent(&self, len: usize, ordered: bool) -> bool {
@@ -192,11 +243,14 @@ impl Write for Outbox {
         if !line.ends_with(b"\n") {
             return Err(io::Error::other("incomplete wire frame"));
         }
-        let frame = Some(line.to_vec());
         if independent_reply(line) {
-            self.control(frame)?;
+            self.control(Some(line.to_vec()))?;
         } else {
-            self.push(frame, false)?;
+            let mut queue = self.lock();
+            self.reserve(&mut queue, line.len(), 1)?;
+            queue.ordered_frames += 1;
+            queue.ordered.push_back(Ordered::Line(line.to_vec()));
+            self.0.ready.notify_one();
         }
         Ok(line.len())
     }
