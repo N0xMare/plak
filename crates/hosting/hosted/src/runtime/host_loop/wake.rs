@@ -244,24 +244,61 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     }
 
     pub(super) async fn idle_child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
-        self.refresh_child_wake_policy();
-        let role = &self.role;
-        if !role.child_wake.pending(&role.config.session.id)
-            && (!role.pending_track.wake_candidates()
-                || !role.config.prompt_host_facts().host_wakes
-                || role.config.session.child_wake_suppressed
-                || role.pending_track.wake_paused()
-                || role.recovery.blocked()
-                || !role.config.session.pending_queue.is_empty()
-                || role.config.session.queue_commands.has_pending())
-        {
-            self.role
-                .child_wake
-                .diagnostics
-                .checked(&self.role.config.session.id, now);
-            return Ok(HostStep::Continue);
+        self.check_child_wake(now, true).await
+    }
+
+    /// Check the usual parking reasons without opening the store. A possible
+    /// admission, a coalescing window or outstanding retry still takes the
+    /// authoritative path below.
+    fn skip_idle_child_wake(&mut self, now: Instant) -> bool {
+        if self.role.child_wake.pending(&self.role.config.session.id) {
+            return false;
         }
-        self.check_child_wake(now).await
+        if self.role.config.state_roots.runner_pending() {
+            self.wake_decision("deferred", "placement_pending", now);
+            return true;
+        }
+        let paused = self.role.pending_track.wake_paused();
+        if !paused {
+            self.prune_consumed_queue();
+        }
+        let parked = self
+            .wake_park_reason(paused)
+            .or_else(|| (!self.role.pending_track.wake_candidates()).then_some("no_batch"));
+        if let Some(reason) = parked {
+            self.role.child_wake.park();
+            self.wake_decision("parked", reason, now);
+        }
+        parked.is_some()
+    }
+
+    fn prune_consumed_queue(&mut self) {
+        let session = &mut self.role.config.session;
+        session
+            .pending_queue
+            .retain(|item| !session.queue_commands.is_consumed(item));
+    }
+
+    fn wake_park_reason(&self, paused: bool) -> Option<&'static str> {
+        let role = &self.role;
+        let session = &role.config.session;
+        if paused {
+            Some("pause_cause")
+        } else if !role.config.prompt_host_facts().host_wakes {
+            Some("host_wakes_off")
+        } else if role.recovery.blocked() {
+            Some("recovery_blocked")
+        } else if session.child_wake_suppressed {
+            Some("suppressed")
+        } else if role.pending_start.is_some() {
+            Some("pending_start")
+        } else if !session.pending_queue.is_empty() {
+            Some("queue_nonempty")
+        } else if session.queue_commands.has_pending() {
+            Some("submission_pending")
+        } else {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -269,15 +306,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         &mut self,
         now: Instant,
     ) -> CliResult<HostStep> {
-        self.refresh_child_wake_policy();
-        self.check_child_wake(now).await
+        self.check_child_wake(now, false).await
     }
 
-    async fn check_child_wake(&mut self, now: Instant) -> CliResult<HostStep> {
+    async fn check_child_wake(&mut self, now: Instant, idle: bool) -> CliResult<HostStep> {
+        self.refresh_child_wake_policy();
         self.role
             .child_wake
             .diagnostics
             .checked(&self.role.config.session.id, now);
+        if idle && self.skip_idle_child_wake(now) {
+            return Ok(HostStep::Continue);
+        }
         if self.role.child_wake.suppression_pending
             && self
                 .suppress_child_wake(self.role.child_wake.pause_pending.clone())
@@ -465,37 +505,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         // Suppression is the refusal. A later root turn's admission clears
         // it, so a child result after that prompt wakes the root again.
         self.role.config.session.child_wake_suppressed = controls.suppressed;
-        if controls.paused {
-            self.role.child_wake.park();
-            self.wake_decision("parked", "pause_cause", now);
-            return Ok(HostStep::Continue);
+        if !controls.paused {
+            self.prune_consumed_queue();
         }
-        self.role
-            .config
-            .session
-            .pending_queue
-            .retain(|item| !self.role.config.session.queue_commands.is_consumed(item));
-        let session = &self.role.config.session;
-        let parked = if !self.role.config.prompt_host_facts().host_wakes {
-            Some("host_wakes_off")
-        } else if self.role.recovery.blocked() {
-            Some("recovery_blocked")
-        } else if session.child_wake_suppressed {
-            Some("suppressed")
-        } else if self.role.pending_start.is_some() {
-            Some("pending_start")
-        } else if !session.pending_queue.is_empty() {
-            Some("queue_nonempty")
-        } else if session.queue_commands.has_pending() {
-            Some("submission_pending")
-        } else {
-            None
-        };
-        if let Some(reason) = parked {
+        if let Some(reason) = self.wake_park_reason(controls.paused) {
             self.role.child_wake.park();
             self.wake_decision("parked", reason, now);
             return Ok(HostStep::Continue);
         }
+        let session = &self.role.config.session;
         let rows = self.role.config.topology_rows();
         let runtime = self.role.last_tree_revision.runtime(&rows, session);
         let notices: Vec<_> = jobs
