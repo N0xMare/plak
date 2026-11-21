@@ -1821,7 +1821,8 @@ the candidate's `version --build-info` facts, including full revision,
 `maintainer release` flavor, the current product version, no omitted
 features, disabled test hooks and state key. Linux GNU
 installer runs require `readelf` to measure the three images' maximum
-versioned GLIBC requirement; deploy checks it against target
+numeric GLIBC requirement (non-version `GLIBC_ABI_*` markers are not
+version numbers); deploy checks it against target
 `getconf GNU_LIBC_VERSION` before transferring a bootstrap, and the
 target remeasures it before installation. Each manifest names the same exact
 source revision; each SSH target executes the candidate for its own platform.

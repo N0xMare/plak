@@ -80,7 +80,7 @@ async fn slow_link_web_reads_ping_during_a_blocked_send_and_answers_before_the_n
         attached(server, &context, &mut connection, &outbox),
         reading
     );
-    assert!(matches!(ended, Ended::Left));
+    assert!(matches!(ended, Ended::Bye));
 }
 
 #[tokio::test(start_paused = true)]

@@ -4526,9 +4526,15 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   existing order. The writer never interrupts an in-flight frame to send a
   reply. When ordered output is backed up, the driver leaves further
   observations in the bounded attachment queues but continues handling
-  requests and polling console replies. Snapshot pagination and encoding run
-  on bounded blocking jobs; an unprepared snapshot reserves its ordered
-  position without blocking independent replies.
+  requests and polling console replies, lifecycle advisories, stops and
+  attachment ends. The host settles an attachment end before forwarding
+  another intent to it, even while its final frames wait their turn. Terminal
+  replies, refusals and unknown outcomes stay FIFO because a refusal or
+  unknown outcome can belong to a terminal operation.
+  Snapshot pagination and encoding run on bounded blocking jobs; at most
+  two snapshot jobs per connection hold ordered positions. A pending job
+  counts as one frame until encoding completes and the actual page bytes
+  and count are charged against the outbox caps, including output in flight.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`
@@ -5517,7 +5523,7 @@ does not inherit another connection's pending answers.
   The original asset supplies the media type. The index (including the
   route fallback) and the build's service worker have representation-specific
   strong ETags; matching `If-None-Match` on GET or HEAD returns a bodyless
-  `304`. Every
+  `304` without content type or encoding headers. Every
   response carries the build's `Content-Security-Policy` (and
   `Content-Security-Policy-Report-Only`), `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
@@ -5967,7 +5973,8 @@ settles asynchronously after endpoint binding, before local admission.
   unanswered, and a failed accept is retried after 100 ms. A client that
   leaves, or one whose write makes no byte progress for 10 s, detaches;
   its sessions run on. A connection is detached if its outbox exceeds 8192
-  frames or 64 MiB, including the frame being sent. A pending batch retains
+  frames or 64 MiB of encoded output, including the frame being sent; up to
+  two unexpanded snapshot jobs may occupy placeholders (§4.4). A pending batch retains
   a hard 30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.

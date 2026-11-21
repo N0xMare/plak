@@ -12,8 +12,8 @@ use tokio::sync::{Notify, Semaphore};
 use super::SendError;
 use crate::surface_protocol::PlakExtension;
 
-pub(super) const BYTES: usize = MAX_SNAPSHOT_BYTES + 64 * 1024; // page envelopes
-pub(super) const FRAMES: usize = MAX_SNAPSHOT_PAGES as usize;
+const BYTES: usize = MAX_SNAPSHOT_BYTES + 64 * 1024; // page envelopes
+const FRAMES: usize = MAX_SNAPSHOT_PAGES as usize;
 
 // An idle connection may wait for a slot, but a closed connection must not
 // leave queued work behind. A running encoder holds its slot until it ends.
@@ -34,12 +34,14 @@ impl Job {
     pub(super) fn start(
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
+        encoders: &'static Semaphore,
         ready: Arc<Notify>,
+        charge: impl FnOnce(&Pages) -> Result<(), SendError> + Send + 'static,
     ) -> Self {
         let result = Arc::new(Mutex::new(None));
         let output = Arc::clone(&result);
         let task = tokio::spawn(async move {
-            let pages = match ENCODERS.acquire().await {
+            let pages = match encoders.acquire().await {
                 Ok(permit) => tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     encode(attachment, snapshot)
@@ -47,7 +49,11 @@ impl Job {
                 .await
                 .unwrap_or(Err(SendError::Disconnected)),
                 Err(_) => Err(SendError::Disconnected),
-            };
+            }
+            .and_then(|pages| {
+                charge(&pages)?;
+                Ok(pages)
+            });
             *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(pages);
             ready.notify_one();
         });

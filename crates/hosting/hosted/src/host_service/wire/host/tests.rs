@@ -1687,6 +1687,52 @@ fn an_attachment_whose_session_ended_is_detached() {
     handed_off(&host);
 }
 
+#[test]
+fn a_queued_move_settles_before_an_intent_on_the_old_attachment() {
+    let (host, _) = host(&["s1", "s2"]);
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let old = attached(&out.take(), 1);
+    connection
+        .node
+        .as_ref()
+        .unwrap()
+        .connection
+        .service
+        .move_attachments(&node("s2"), None);
+    request(
+        &mut connection,
+        2,
+        Op::Intent {
+            attachment: old,
+            intent: SessionIntent::Prompt(plakous_host_protocol::intent::Draft::from(
+                "must not be admitted",
+            )),
+            client_id: None,
+            blobs: Vec::new(),
+        },
+    );
+    let frames = out.take();
+    let [
+        ..,
+        HostFrame::Moved { attachment, .. },
+        HostFrame::Response { id: 2, outcome },
+    ] = frames.as_slice()
+    else {
+        panic!("expected moved before the stale-intent reply: {frames:?}");
+    };
+    assert_eq!(*attachment, old);
+    assert_eq!(*outcome, Outcome::Refused(RequestRefusal::NotAttached));
+    connection.leave();
+    handed_off(&host);
+}
+
 /// `new_session` answers the session the stores created, and a replay of
 /// the same request id answers the same session without a second create;
 /// the directory reads again after it.

@@ -120,8 +120,8 @@ async fn slow_link_socket_reads_ping_during_a_blocked_send_and_answers_before_th
             || false,
         )
         .buffered_output();
-    let (server, client) = UnixStream::pair().unwrap();
-    let (read, write) = server.into_split();
+    let (server, client) = tokio::io::duplex(8192);
+    let (read, write) = tokio::io::split(server);
     let reader = Reader {
         read,
         lines: LineReader::default(),

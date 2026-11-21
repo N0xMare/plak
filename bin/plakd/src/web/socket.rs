@@ -30,7 +30,7 @@ use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 use super::Served;
 use super::auth::ConnectionSlot;
 use crate::host::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
-use crate::host::send::ProgressIo;
+use crate::host::send::{ProgressIo, STOP_JOIN, TOTAL};
 use crate::surface_protocol::PlakExtension;
 
 /// The RFC 6455 key suffix.
@@ -135,6 +135,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
 #[derive(Clone, Copy)]
 enum Ended {
     Left,
+    Bye,
     Stopping,
     Policy(&'static str),
     Unsupported,
@@ -144,7 +145,7 @@ enum Ended {
 impl Ended {
     const fn as_str(&self) -> &'static str {
         match self {
-            Self::Left => "client left",
+            Self::Left | Self::Bye => "client left",
             Self::Stopping => "host stopping",
             Self::Policy(reason) | Self::Lost(reason) => reason,
             Self::Unsupported => "binary message",
@@ -167,7 +168,7 @@ where
     S: Sink<Message> + Unpin,
 {
     let code = match reason {
-        Ended::Left | Ended::Stopping => CloseCode::Normal,
+        Ended::Left | Ended::Bye | Ended::Stopping => CloseCode::Normal,
         Ended::Policy(_) => CloseCode::Policy,
         Ended::Unsupported => CloseCode::Unsupported,
         Ended::Lost(_) => CloseCode::Away,
@@ -418,7 +419,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                     Ok(true) => {}
                     Ok(false) => {
                         let _ = connection_work(|| outbox.flush_connection(connection));
-                        break Ended::Left;
+                        break Ended::Bye;
                     }
                     Err(_) => break Ended::Lost("request failed"),
                 }
@@ -435,9 +436,13 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
         }
     };
     outbox.close();
+    let join = if matches!(ended, Ended::Bye) && !served.stop.stopped() {
+        TOTAL
+    } else {
+        STOP_JOIN
+    };
     if finished.is_none()
-        && let Ok(Some(Ok(result))) =
-            tokio::time::timeout(Duration::from_secs(1), writer.join_next()).await
+        && let Ok(Some(Ok(result))) = tokio::time::timeout(join, writer.join_next()).await
     {
         finished = Some(result);
     }

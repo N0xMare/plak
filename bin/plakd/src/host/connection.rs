@@ -16,6 +16,7 @@ use crate::surface_protocol::PlakExtension;
 mod snapshot;
 
 const MAX_PENDING_FRAMES: usize = 8192;
+const MAX_SNAPSHOT_JOBS: usize = 2;
 
 pub(crate) type Connection = HostConnection<PlakExtension, Outbox>;
 
@@ -37,6 +38,7 @@ struct Pending {
     frames: usize,
     // The transport still owns a frame until its send completes.
     ordered_frames: usize,
+    snapshots: usize,
     overflowed: bool,
     closed: bool,
 }
@@ -52,6 +54,25 @@ impl Ordered {
             Self::Line(_) => true,
             Self::Snapshot(job) => job.ready(),
         }
+    }
+}
+
+impl Shared {
+    fn charge_snapshot(&self, pages: &snapshot::Pages) -> Result<(), SendError> {
+        let mut queue = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        // Replace the placeholder before publishing the completed job. The
+        // writer may have drained preceding lines while encoding was running.
+        let frames = queue.frames - 1 + pages.lines.len();
+        let bytes = queue.bytes + pages.bytes;
+        if queue.overflowed || frames > MAX_PENDING_FRAMES || bytes > MAX_PENDING_BYTES {
+            queue.overflowed = true;
+            return Err(SendError::Full);
+        }
+        queue.frames = frames;
+        queue.bytes = bytes;
+        queue.ordered_frames = queue.ordered_frames - 1 + pages.lines.len();
+        queue.snapshots -= 1;
+        Ok(())
     }
 }
 
@@ -104,16 +125,39 @@ impl Outbox {
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
     ) -> CliResult<()> {
+        self.snapshot_with(attachment, snapshot, &snapshot::ENCODERS)
+    }
+
+    fn snapshot_with(
+        &self,
+        attachment: AttachmentId,
+        snapshot: PresentationSnapshot,
+        encoders: &'static tokio::sync::Semaphore,
+    ) -> CliResult<()> {
         let mut queue = self.lock();
-        self.reserve(&mut queue, snapshot::BYTES, snapshot::FRAMES)
+        if queue.snapshots == MAX_SNAPSHOT_JOBS {
+            queue.overflowed = true;
+            self.0.ready.notify_one();
+            return Err(CliFailure::new("the client fell behind on snapshots"));
+        }
+        self.reserve(&mut queue, 0, 1)
             .map_err(|error| CliFailure::new(error.to_string()))?;
-        queue.ordered_frames += snapshot::FRAMES;
+        queue.ordered_frames += 1;
+        queue.snapshots += 1;
+        let output = Arc::downgrade(&self.0);
         queue
             .ordered
             .push_back(Ordered::Snapshot(snapshot::Job::start(
                 attachment,
                 snapshot,
+                encoders,
                 Arc::clone(&self.0.ready),
+                move |pages| {
+                    output
+                        .upgrade()
+                        .ok_or(SendError::Disconnected)?
+                        .charge_snapshot(pages)
+                },
             )));
         // Preparation wakes the writer once this entry can be taken.
         Ok(())
@@ -138,7 +182,7 @@ impl Outbox {
             // Leave attachment observations in their bounded service queues
             // while the previous batch drains. Those queues can coalesce and
             // signal a gap; the outbox must not become a second replay store.
-            connection.flush_host_reads()
+            connection.flush_control()
         }
     }
 
@@ -212,9 +256,6 @@ impl Outbox {
                 Some(Ordered::Line(line)) => return Ok(Some((Some(line), true))),
                 None => return Ok(None),
             };
-            queue.bytes = queue.bytes - snapshot::BYTES + pages.bytes;
-            queue.frames = queue.frames - snapshot::FRAMES + pages.lines.len();
-            queue.ordered_frames = queue.ordered_frames - snapshot::FRAMES + pages.lines.len();
             for line in pages.lines.into_iter().rev() {
                 queue.ordered.push_front(Ordered::Line(line));
             }
@@ -261,8 +302,9 @@ impl Write for Outbox {
 
 /// Classify only the short, fixed prefix of our canonical serializer's
 /// output, not untrusted client JSON or the body of large frames. Unknown
-/// frames default to FIFO, as do any replies that open, end or move an
-/// attachment or terminal stream, and picker progress with its final reply.
+/// frames default to FIFO. Ambiguous, refused and terminal replies stay
+/// FIFO because the same refusal or unknown outcome can answer a terminal
+/// operation. Attachment boundaries and picker progress also stay FIFO.
 fn independent_reply(line: &[u8]) -> bool {
     let Some(id) = line.strip_prefix(br#"{"frame":"response","id":"#) else {
         return false;
@@ -275,24 +317,18 @@ fn independent_reply(line: &[u8]) -> bool {
     let Some(outcome) = id[digits..].strip_prefix(br#","outcome":{"#) else {
         return false;
     };
-    if let Some(answer) = outcome.strip_prefix(br#""ok":{"answer":""#) {
-        return answer.starts_with(b"pong\"")
-            || answer.starts_with(b"accepted\"")
-            || answer
-                .strip_prefix(br#"host","response":{"response":""#)
-                .is_some_and(|response| !response.starts_with(b"terminal"));
-    }
-    outcome
-        .strip_prefix(br#""refused":{"refusal":""#)
-        .is_some_and(|refusal| {
-            [
-                b"rate_limited\"".as_slice(),
-                b"capability_disabled\"",
-                b"deadline_exceeded\"",
-            ]
-            .iter()
-            .any(|prefix| refusal.starts_with(prefix))
-        })
+    let Some(answer) = outcome.strip_prefix(br#""ok":{"answer":""#) else {
+        return false;
+    };
+    answer.starts_with(b"pong\"")
+        || answer.starts_with(b"accepted\"")
+        || answer
+            .strip_prefix(br#"host","response":{"response":""#)
+            .is_some_and(|response| {
+                !response.starts_with(b"terminal")
+                    && !response.starts_with(b"refused\"")
+                    && !response.starts_with(b"operation_outcome_unknown\"")
+            })
 }
 
 // A frame handler can open a session; a flush can still read product state.
@@ -312,7 +348,10 @@ pub(crate) fn connection_work<T>(run: impl FnOnce() -> T) -> T {
 #[allow(clippy::unwrap_used, reason = "canonical wire fixtures")]
 mod tests {
     use super::*;
-    use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, encode_line};
+    use plakd_wire_types::console::{HostResponse, ReadRefusal};
+    use plakous_host_protocol::views::transcript::TranscriptScope;
+    use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, RequestRefusal, encode_line};
+    use std::time::Duration;
 
     #[test]
     fn control_overtakes_bulk_without_crossing_ordered_attachment_boundaries() {
@@ -342,20 +381,61 @@ mod tests {
             reply(
                 5,
                 Answer::Host {
-                    response: plakd_wire_types::console::HostResponse::OperationOutcomeUnknown {},
+                    response: HostResponse::TerminalList { terminals: vec![] },
+                },
+            ),
+            reply(
+                6,
+                Answer::Host {
+                    response: HostResponse::ProfilesList {
+                        etag: String::new(),
+                        current: None,
+                        rows: vec![],
+                        diagnostics: vec![],
+                        page: plakd_wire_types::console::Page {
+                            next: None,
+                            truncated: false,
+                        },
+                    },
                 },
             ),
         ];
         for line in &with_bulk {
             outbox.write_all(line.as_bytes()).unwrap();
         }
-        for index in [6, 7, 9, 0, 1, 2, 3, 4, 5, 8] {
+        for index in [6, 7, 10, 0, 1, 2, 3, 4, 5, 8, 9] {
             let (line, ordered) = outbox.pop().unwrap().unwrap();
             let line = line.unwrap();
             assert_eq!(line, with_bulk[index].as_bytes());
             outbox.sent(line.len(), ordered);
         }
         assert!(outbox.pop().unwrap().is_none());
+    }
+
+    #[test]
+    fn terminal_and_ambiguous_refusals_cannot_pass_ordered_output() {
+        let outcomes = [
+            Outcome::Refused(RequestRefusal::RateLimited { retry_after_ms: 1 }),
+            Outcome::Refused(RequestRefusal::CapabilityDisabled {
+                capability: plakous_host_protocol::wire::ConsoleCapability::AccountsRead,
+            }),
+            Outcome::Refused(RequestRefusal::DeadlineExceeded),
+            Outcome::Ok(Answer::Host {
+                response: HostResponse::OperationOutcomeUnknown {},
+            }),
+            Outcome::Ok(Answer::Host {
+                response: HostResponse::Refused {
+                    reason: ReadRefusal::TerminalBackpressure {
+                        retry_after_ms: Some(1),
+                    },
+                },
+            }),
+        ];
+        for outcome in outcomes {
+            let line =
+                encode_line(&HostFrame::<PlakExtension>::Response { id: 1, outcome }).unwrap();
+            assert!(!independent_reply(line.as_bytes()), "{line}");
+        }
     }
 
     #[test]
@@ -371,10 +451,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_pending_snapshot_leaves_control_writable_but_fences_following_events() {
-        let encoders = snapshot::ENCODERS.acquire_many(4).await.unwrap();
+        static TEST_ENCODER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let encoders = TEST_ENCODER.try_acquire().unwrap();
         let mut outbox = Outbox::default();
         let event = b"{\"frame\":\"event\"}\n";
-        outbox.snapshot(4, PresentationSnapshot::default()).unwrap();
+        outbox
+            .snapshot_with(4, PresentationSnapshot::default(), &TEST_ENCODER)
+            .unwrap();
         outbox.write_all(event).unwrap();
         let pong = encode_line(&HostFrame::<PlakExtension>::Response {
             id: 42,
@@ -388,9 +471,11 @@ mod tests {
         outbox.sent(pong.len(), ordered);
         assert!(outbox.pop().unwrap().is_none());
         // Discard the notifications for the two lines already enqueued.
-        outbox.0.ready.notified().await;
+        tokio::time::timeout(Duration::from_secs(3), outbox.0.ready.notified())
+            .await
+            .unwrap();
         drop(encoders);
-        tokio::time::timeout(std::time::Duration::from_secs(3), outbox.0.ready.notified())
+        tokio::time::timeout(Duration::from_secs(3), outbox.0.ready.notified())
             .await
             .unwrap();
         let (page, ordered) = outbox.pop().unwrap().unwrap();
@@ -401,5 +486,83 @@ mod tests {
         let (line, ordered) = outbox.pop().unwrap().unwrap();
         assert_eq!(line.unwrap(), event);
         assert!(ordered);
+    }
+
+    async fn next_ordered(outbox: &Outbox) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some((line, ordered)) = outbox.pop().unwrap() {
+                    let line = line.unwrap();
+                    assert!(ordered);
+                    outbox.sent(line.len(), ordered);
+                    return line;
+                }
+                outbox.0.ready.notified().await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn one_flush_can_queue_root_and_agent_snapshots() {
+        let outbox = Outbox::default();
+        for scope in [
+            TranscriptScope::Root,
+            TranscriptScope::Agent("child".into()),
+        ] {
+            outbox
+                .snapshot(
+                    4,
+                    PresentationSnapshot {
+                        scope,
+                        ..PresentationSnapshot::default()
+                    },
+                )
+                .unwrap();
+        }
+        for scope in [
+            TranscriptScope::Root,
+            TranscriptScope::Agent("child".into()),
+        ] {
+            let line = next_ordered(&outbox).await;
+            let page: HostFrame<PlakExtension> = serde_json::from_slice(&line).unwrap();
+            assert!(matches!(page, HostFrame::Snapshot(page) if page.scope == scope && page.last));
+        }
+        assert!(outbox.pop().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_small_snapshot_fits_after_thirty_mib_of_ordered_lines() {
+        let mut outbox = Outbox::default();
+        let mut bulk = vec![b'x'; 10 * 1024 * 1024];
+        bulk.push(b'\n');
+        for _ in 0..3 {
+            outbox.write_all(&bulk).unwrap();
+        }
+        outbox.snapshot(4, PresentationSnapshot::default()).unwrap();
+        // Wait for the encoder while all the earlier bytes still count.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                {
+                    let queue = outbox.lock();
+                    if queue.ordered.back().is_some_and(Ordered::ready) {
+                        assert!(queue.bytes > bulk.len() * 3);
+                        break;
+                    }
+                }
+                outbox.0.ready.notified().await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..3 {
+            assert_eq!(next_ordered(&outbox).await, bulk);
+        }
+        assert!(
+            next_ordered(&outbox)
+                .await
+                .starts_with(br#"{"frame":"snapshot","#)
+        );
     }
 }

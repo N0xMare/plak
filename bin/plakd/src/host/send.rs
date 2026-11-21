@@ -13,6 +13,8 @@ use tokio::time::Instant;
 pub(crate) const IDLE: Duration = Duration::from_secs(10);
 pub(crate) const TOTAL: Duration = Duration::from_secs(30 * 60);
 pub(crate) const MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
+const STOP_GRACE: Duration = Duration::from_secs(1);
+pub(crate) const STOP_JOIN: Duration = STOP_GRACE.saturating_add(Duration::from_millis(250));
 
 #[derive(Clone)]
 pub(crate) struct Progress(Arc<Mutex<Instant>>);
@@ -29,7 +31,7 @@ impl Progress {
             while !stopped() {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(STOP_GRACE).await;
         };
         tokio::select! {
             result = self.stoppable(send, || false) => result,

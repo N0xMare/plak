@@ -366,6 +366,8 @@ async fn precompressed_assets_and_revalidation_use_the_selected_representation()
         .unwrap();
     let current = respond(Some(&ui), &request);
     assert_eq!(current.status(), 304);
+    assert_eq!(header(&current, "content-type"), None);
+    assert_eq!(header(&current, "content-encoding"), None);
     assert_eq!(header(&current, "etag"), Some(br_tag.as_str()));
     assert_eq!(header(&current, "vary"), Some("Accept-Encoding"));
     assert!(header(&current, "content-security-policy").is_some());

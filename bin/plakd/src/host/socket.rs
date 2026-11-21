@@ -29,7 +29,7 @@ use tokio::task::JoinSet;
 
 use super::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
 use super::lock::HostLock;
-use super::send::ProgressIo;
+use super::send::{ProgressIo, STOP_JOIN, TOTAL};
 use crate::surface_protocol::PlakExtension;
 
 /// How often the accept loop and every connection look for a stop.
@@ -315,14 +315,14 @@ async fn send(
 }
 
 /// The client's lines as they arrive.
-struct Reader {
-    read: tokio::net::unix::OwnedReadHalf,
+struct Reader<R> {
+    read: R,
     lines: LineReader,
     queued: VecDeque<Result<String, WireError>>,
     buffer: zeroize::Zeroizing<Vec<u8>>,
 }
 
-impl Drop for Reader {
+impl<R> Drop for Reader<R> {
     fn drop(&mut self) {
         use zeroize::Zeroize as _;
         for text in self.queued.iter_mut().flatten() {
@@ -331,7 +331,7 @@ impl Drop for Reader {
     }
 }
 
-impl Reader {
+impl<R: tokio::io::AsyncRead + Unpin> Reader<R> {
     async fn next(&mut self) -> Option<Result<String, WireError>> {
         loop {
             if let Some(line) = self.queued.pop_front() {
@@ -425,8 +425,8 @@ async fn connection(
 }
 
 async fn attached(
-    mut reader: Reader,
-    mut write: ProgressIo<tokio::net::unix::OwnedWriteHalf>,
+    mut reader: Reader<impl tokio::io::AsyncRead + Unpin>,
+    mut write: ProgressIo<impl AsyncWrite + Unpin + Send + 'static>,
     connection: &mut Connection,
     outbox: &Outbox,
     host: &SessionHost<PlakExtension>,
@@ -442,34 +442,38 @@ async fn attached(
         result
     });
 
-    loop {
+    let join = loop {
         if stopped() {
             connection_work(|| {
                 super::lifecycle::stopping(host);
                 let _ = connection.flush_lifecycle();
             });
-            break;
+            break STOP_JOIN;
         }
         if connection_work(|| outbox.flush_connection(connection)).is_err() {
-            break;
+            break STOP_JOIN;
         }
         tokio::select! {
-            _ = writer.join_next() => break,
+            _ = writer.join_next() => break STOP_JOIN,
             line = reader.next() => {
-                let Some(line) = line else { break };
-                if !matches!(connection_work(|| connection.frame(line)), Ok(true)) {
-                    let _ = connection_work(|| outbox.flush_connection(connection));
-                    break;
+                let Some(line) = line else { break STOP_JOIN };
+                match connection_work(|| connection.frame(line)) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = connection_work(|| outbox.flush_connection(connection));
+                        break if stopped() { STOP_JOIN } else { TOTAL };
+                    }
+                    Err(_) => break STOP_JOIN,
                 }
             }
             () = connection.changed() => {}
             () = outbox.drained() => {}
             () = tokio::time::sleep(STOP_POLL) => {}
         }
-    }
+    };
     outbox.close();
     if matches!(
-        tokio::time::timeout(Duration::from_secs(1), writer.join_next()).await,
+        tokio::time::timeout(join, writer.join_next()).await,
         Ok(Some(Ok(Ok(()))))
     ) {
         connection.output_sent();

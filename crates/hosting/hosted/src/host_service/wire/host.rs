@@ -626,6 +626,16 @@ where
                 Ok(true)
             };
         };
+        if matches!(
+            op,
+            Op::Intent { .. }
+                | Op::Detach { .. }
+                | Op::ResumeSession { .. }
+                | Op::Rebind { .. }
+                | Op::RetryAttach { .. }
+        ) {
+            self.flush_attachments(false)?;
+        }
         match self.request(id, op, &text)? {
             Forwarded::Answered(outcome) => {
                 write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
@@ -1253,9 +1263,37 @@ where
     /// A lost output, a snapshot that cannot be paged, or a directory that
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
+        self.flush_replies()?;
+        self.flush_attachments(true)?;
+        self.flush_directory()?;
+        let context = self.host_context();
+        for _ in 0..4 {
+            let Some(frame) = self.host.sessions.host_stream(&context) else {
+                break;
+            };
+            write_frame(&mut self.out, &frame)?;
+        }
+        Ok(())
+    }
+
+    /// Settles replies, stops and ended attachments without draining live
+    /// observations or refreshing the directory behind a backed-up writer.
+    ///
+    /// # Errors
+    ///
+    /// The transport outbox cannot accept output.
+    pub fn flush_control(&mut self) -> CliResult<()> {
+        self.flush_replies()?;
+        self.flush_attachments(false)
+    }
+
+    fn flush_replies(&mut self) -> CliResult<()> {
         self.flush_lifecycle()?;
         self.flush_host_reads()?;
-        self.flush_draining()?;
+        self.flush_draining()
+    }
+
+    fn flush_attachments(&mut self, bulk: bool) -> CliResult<()> {
         if let Some(link) = &mut self.readonly {
             if !matches!(link.refusal, RequestRefusal::SessionArchived { .. }) {
                 let root = self.host.lock().iter().find_map(|slot| {
@@ -1270,28 +1308,20 @@ where
                     link.connection.service.move_attachments(&root, None);
                 }
             }
-            link.connection.flush()?;
+            link.connection.flush_pending(bulk)?;
         }
         if let Some(link) = &mut self.node {
             // A session that ended, or one a `release_session` since the
             // link asked for, is no longer this connection's.
-            link.connection.flush()?;
+            let detach = !link.session.reopening()
+                && (link.session.ended() || link.session.releases() > link.releases);
+            link.connection.flush_pending(bulk || detach)?;
             if !link.connection.holding() {
                 self.unlink();
-            } else if !link.session.reopening()
-                && (link.session.ended() || link.session.releases() > link.releases)
-            {
+            } else if detach {
                 self.detach_link()?;
                 self.host.changed();
             }
-        }
-        self.flush_directory()?;
-        let context = self.host_context();
-        for _ in 0..4 {
-            let Some(frame) = self.host.sessions.host_stream(&context) else {
-                break;
-            };
-            write_frame(&mut self.out, &frame)?;
         }
         Ok(())
     }

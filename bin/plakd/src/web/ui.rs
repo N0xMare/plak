@@ -344,15 +344,15 @@ fn serve_file<B>(
         *response.status_mut() = StatusCode::NOT_MODIFIED;
     }
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_TYPE, identity.content_type.clone());
     headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
-    if let Some(coding) = coding {
-        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
-    }
     if let Some(etag) = etag {
         headers.insert(header::ETAG, etag.clone());
     }
     if !unchanged {
+        headers.insert(header::CONTENT_TYPE, identity.content_type.clone());
+        if let Some(coding) = coding {
+            headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+        }
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file.bytes.len()));
     }
     let immutable = logical.starts_with("/_app/immutable/");

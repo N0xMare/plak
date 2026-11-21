@@ -216,6 +216,7 @@ fn required_glibc(text: &str) -> CliResult<[u32; 3]> {
     for version in text
         .lines()
         .filter_map(|line| line.split_once("Name: GLIBC_")?.1.split_whitespace().next())
+        .filter(|version| !version.starts_with("ABI_"))
     {
         let version = glibc_version(version)?;
         ceiling = Some(ceiling.map_or(version, |lower: [u32; 3]| lower.max(version)));

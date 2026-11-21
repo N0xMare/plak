@@ -971,7 +971,7 @@ where
         client_id: Option<plakous_host_protocol::wire::ClientDraftId>,
     ) -> Option<Outcome<P>> {
         let refused = |refusal| Some(Outcome::Refused(refusal));
-        if self.attachment != Some(attachment) {
+        if self.attachment != Some(attachment) || !self.service.attached(attachment) {
             return refused(RequestRefusal::NotAttached);
         }
         if self.face == Face::Remote
@@ -1253,8 +1253,7 @@ where
     ///
     /// A lost output, or a snapshot that cannot be paged.
     pub fn flush(&mut self) -> CliResult<()> {
-        self.settle_stop();
-        self.flush_settled()?;
+        self.flush_answers()?;
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
@@ -1354,6 +1353,25 @@ where
             }
         }
         Ok(())
+    }
+
+    fn flush_pending(&mut self, bulk: bool) -> CliResult<()> {
+        if bulk
+            || self
+                .attachment
+                .is_some_and(|attachment| !self.service.attached(attachment))
+        {
+            // Moved follows observations still owed by the ended attachment.
+            // Retain that order rather than extracting its boundary alone.
+            self.flush()
+        } else {
+            self.flush_answers()
+        }
+    }
+
+    fn flush_answers(&mut self) -> CliResult<()> {
+        self.settle_stop();
+        self.flush_settled()
     }
 
     fn write_snapshot(
