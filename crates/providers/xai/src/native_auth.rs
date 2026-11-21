@@ -384,9 +384,17 @@ struct CatalogReceiptCore {
 
 #[cfg(test)]
 #[derive(Clone)]
-struct ResolutionPause {
+struct ManagerPause {
     reached: Arc<tokio::sync::Notify>,
     resume: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl ManagerPause {
+    async fn wait(self) {
+        self.reached.notify_one();
+        self.resume.notified().await;
+    }
 }
 
 struct ManagerCore {
@@ -408,7 +416,9 @@ struct ManagerCore {
     request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     refresh_observer: Option<Arc<dyn CredentialRefreshObserver>>,
     #[cfg(test)]
-    resolution_pause: Mutex<Option<ResolutionPause>>,
+    resolution_pause: Mutex<Option<ManagerPause>>,
+    #[cfg(test)]
+    refresh_probe_pause: Mutex<Option<ManagerPause>>,
 }
 
 fn headers_are_json(headers: &Headers) -> bool {

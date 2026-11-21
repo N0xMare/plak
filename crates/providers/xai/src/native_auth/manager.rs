@@ -79,6 +79,8 @@ impl XaiNativeAuthManager {
                 catalog_observer: None,
                 #[cfg(test)]
                 resolution_pause: Mutex::new(None),
+                #[cfg(test)]
+                refresh_probe_pause: Mutex::new(None),
             }),
         })
     }
@@ -121,6 +123,8 @@ impl XaiNativeAuthManager {
                 catalog_observer: None,
                 #[cfg(test)]
                 resolution_pause: Mutex::new(None),
+                #[cfg(test)]
+                refresh_probe_pause: Mutex::new(None),
             }),
         })
     }
@@ -907,6 +911,7 @@ impl XaiNativeAuthManager {
                 refresh_observer: None,
                 catalog_observer: None,
                 resolution_pause: Mutex::new(None),
+                refresh_probe_pause: Mutex::new(None),
             }),
         })
     }

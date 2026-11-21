@@ -67,10 +67,27 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
         self.request_permit = None;
         let store = self.core.store()?;
-        let fence = store
-            .on_disk(PrivateCredentialStore::load)
+        let (fence, stored) = store
+            .on_disk(|store| {
+                store.inspect_for_refresh(|fence, payload| {
+                    let stored = payload.map(|payload| ManagerCore::decode_stored(&fence, payload));
+                    (fence, stored)
+                })
+            })
             .await?
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        #[cfg(test)]
+        if fence.status() == CredentialStatus::Ready {
+            let pause = self
+                .core
+                .refresh_probe_pause
+                .lock()
+                .map_err(|_| XaiNativeAuthError::NotReady)?
+                .take();
+            if let Some(pause) = pause {
+                pause.wait().await;
+            }
+        }
         if self
             .expected_account
             .is_some_and(|account| account != fence.account_binding())
@@ -82,15 +99,11 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
             RefreshForce::Always => true,
             RefreshForce::WhileCurrent(rejected) => fence.generation() == rejected,
         };
-        // Ready still pre-reads under a Ready lease. Unknown/RefreshRequired keep
-        // the payload but cannot acquire_ready; epoch is checked from the claim
-        // payload in build_refresh_request.
-        match fence.status() {
-            CredentialStatus::Ready => {
-                let expected = fence.clone();
-                let stored = store
-                    .on_disk(move |store| Ok(ManagerCore::read_stored_from(store, &expected)))
-                    .await??;
+        // Unknown/RefreshRequired keep the payload, but only the claim
+        // may read its selection epoch in build_refresh_request.
+        match stored {
+            Some(stored) => {
+                let stored = stored?;
                 if self.expected_selection_epoch.is_some_and(|epoch| {
                     epoch != stored.selection_epoch
                         || !self
@@ -109,7 +122,10 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                     return Ok(None);
                 }
             }
-            CredentialStatus::RefreshRequired | CredentialStatus::RefreshOutcomeUnknown => {}
+            None if matches!(
+                fence.status(),
+                CredentialStatus::RefreshRequired | CredentialStatus::RefreshOutcomeUnknown
+            ) => {}
             _ => return Err(XaiNativeAuthError::NotLoggedIn),
         }
         self.request_permit = self

@@ -3202,7 +3202,7 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
         .resolution_pause
         .lock()
         .map_err(|_| std::io::Error::other("resolution pause lock poisoned"))? =
-        Some(ResolutionPause {
+        Some(ManagerPause {
             reached: Arc::clone(&reached),
             resume: Arc::clone(&resume),
         });
@@ -3283,7 +3283,7 @@ async fn resolver_rejects_catalog_receipt_mutation_before_return() -> TestResult
         .resolution_pause
         .lock()
         .map_err(|_| std::io::Error::other("resolution pause lock poisoned"))? =
-        Some(ResolutionPause {
+        Some(ManagerPause {
             reached: Arc::clone(&reached),
             resume: Arc::clone(&resume),
         });
@@ -5034,6 +5034,15 @@ async fn past_admitted_window_renews_nothing_and_fetches_no_catalog() -> TestRes
 /// store claim lets one refresh reach the issuer and the other adopts it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_managers_renew_concurrently_with_one_claimed_refresh() -> TestResult {
+    concurrent_renewals_over_one_slot(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn renewal_adopts_peer_rotation_after_reading_old_ready_fence() -> TestResult {
+    concurrent_renewals_over_one_slot(true).await
+}
+
+async fn concurrent_renewals_over_one_slot(rotate_after_peer_read: bool) -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
     let temp = tempdir()?;
     let auth = mock_peer().await?;
@@ -5086,10 +5095,32 @@ async fn two_managers_renew_concurrently_with_one_claimed_refresh() -> TestResul
     enqueue_admitted_catalog(&auth).await?;
     enqueue_admitted_catalog(&auth).await?;
     let checked_at = now_timestamp()?;
+    let pause = rotate_after_peer_read.then(|| ManagerPause {
+        reached: Arc::new(Notify::new()),
+        resume: Arc::new(Notify::new()),
+    });
+    *second_manager
+        .core
+        .refresh_probe_pause
+        .lock()
+        .map_err(|_| std::io::Error::other("refresh probe pause lock poisoned"))? = pause.clone();
     // A liveness bound only: generous, so load never trips it.
     let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
         tokio::join!(
-            Arc::clone(&models[0]).revalidate_runtime_authority(checked_at),
+            async {
+                // Rotate the grant only after the other manager has read
+                // the Ready fence of the old generation.
+                if let Some(pause) = &pause {
+                    pause.reached.notified().await;
+                }
+                let first = Arc::clone(&models[0])
+                    .revalidate_runtime_authority(checked_at)
+                    .await;
+                if let Some(pause) = pause {
+                    pause.resume.notify_one();
+                }
+                first
+            },
             Arc::clone(&models[1]).revalidate_runtime_authority(checked_at)
         )
     })

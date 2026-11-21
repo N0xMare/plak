@@ -1613,6 +1613,12 @@ failure. Readers and Ready leases hold only the shared record lock, so a status
 read never waits behind a peer's provider round-trip. Only a *started* claim may
 reach the network, and a started claim has no restore path.
 
+SuperGrok reads the Ready payload and fence together when deciding whether a
+refresh is due. A peer rotation after that read is settled by the claim's
+fence comparison, which makes renewal check the current grant's selection and
+expiry instead of failing on the outdated read. The read grants no dispatch
+authority.
+
 The outcome is classified by what actually crossed the wire:
 
 | Transmission fact | Result |

@@ -9,8 +9,8 @@ use super::{
     CredentialFence, CredentialGeneration, CredentialRefreshDetail, CredentialStatus, Duration,
     Endpoint, ExchangeControl, Failure, HEADER_ACCEPT, HEADER_AUTHORIZATION, HeaderValue, Instant,
     LoginHttpStage, MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore, Method, Ordering, Origin,
-    PkceS256, PrivateCredentialStore, REQUEST_TIMEOUT, ReadyCredentialLease, Request, SecretString,
-    SensitiveBytes, StatusCode, StoredTokens, Timestamp, TokenResponse,
+    PkceS256, PrivateCredentialStore, REQUEST_TIMEOUT, ReadyCredentialLease, Request, SecretBytes,
+    SecretString, SensitiveBytes, StatusCode, StoredTokens, Timestamp, TokenResponse,
     XAI_GROK_COMPATIBILITY_PROFILE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError,
     XaiNativeCatalogReceipt, XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks,
     XaiSubscriptionStatus, Zeroizing, access_needs_refresh, authorization_code_token_form,
@@ -303,8 +303,7 @@ impl ManagerCore {
             .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?
             .clone();
         if let Some(pause) = pause {
-            pause.reached.notify_one();
-            pause.resume.notified().await;
+            pause.wait().await;
         }
         Ok(())
     }
@@ -564,7 +563,14 @@ impl ManagerCore {
         fence: &CredentialFence,
     ) -> Result<StoredTokens, XaiNativeAuthError> {
         let lease = store.acquire_ready(fence)?;
-        let stored: StoredTokens = serde_json::from_slice(lease.payload().expose_secret())
+        Self::decode_stored(fence, lease.payload())
+    }
+
+    pub(super) fn decode_stored(
+        fence: &CredentialFence,
+        payload: &SecretBytes,
+    ) -> Result<StoredTokens, XaiNativeAuthError> {
+        let stored: StoredTokens = serde_json::from_slice(payload.expose_secret())
             .map_err(|_| XaiNativeAuthError::InvalidStoredCredential)?;
         stored.validate(fence.account_binding())?;
         Ok(stored)

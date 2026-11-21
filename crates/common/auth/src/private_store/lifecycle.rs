@@ -10,10 +10,9 @@ use crate::{
 impl PrivateCredentialStore {
     /// Loads only the credential-free fence under the shared record lock.
     ///
-    /// This method never returns provider payload bytes. A Ready payload is
-    /// available only through [`Self::acquire_ready`], whose returned lease
-    /// retains the shared cross-process lock. A read waits only for a
-    /// writer's brief record replacement; it never waits behind a refresh
+    /// This method never returns provider payload bytes. The lease from
+    /// [`Self::acquire_ready`] retains the shared cross-process lock. A read
+    /// waits only for a writer's brief record replacement, not a refresh
     /// exchange, whose claim owns the execution lock rather than the record
     /// lock, so the durable Unknown fence of an in-flight refresh is visible.
     ///
@@ -25,6 +24,26 @@ impl PrivateCredentialStore {
         self.with_shared_lock(
             |store| Ok(platform::load_record(store)?.map(|record| record.fence())),
         )
+    }
+
+    /// Examines a refresh candidate's fence and, only when Ready, its payload
+    /// from the same record under the shared lock. The lock is not retained
+    /// by the result: an exchange still requires a claim on the exact fence.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::load`].
+    pub fn inspect_for_refresh<T>(
+        &self,
+        inspect: impl FnOnce(CredentialFence, Option<&SecretBytes>) -> T,
+    ) -> Result<Option<T>, PrivateStoreError> {
+        self.with_shared_lock(|store| {
+            Ok(platform::load_record(store)?.map(|record| {
+                let payload =
+                    (record.status() == CredentialStatus::Ready).then(|| record.payload());
+                inspect(record.fence(), payload)
+            }))
+        })
     }
 
     /// Reports whether a durable [`CredentialStatus::RefreshOutcomeUnknown`]
