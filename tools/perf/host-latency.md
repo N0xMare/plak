@@ -22,8 +22,9 @@ transcript and 60 retained children. After sampling the idle phase, the
 fixture spawns the final, held child and verifies a durable open root
 `wait_agent`. One terminal client uses `host connect --stdio`; two web clients
 use real WebSocket upgrades over the private Unix listener. One web client
-keeps another resident root streaming while the other alternates between the
-two roots, detaching and attaching on the same connection.
+keeps another resident root streaming with queued follow-ups and bounded
+model rounds. The other alternates between the two roots, detaching and
+attaching on the same connection.
 
 The JSON lines report these measurements separately:
 

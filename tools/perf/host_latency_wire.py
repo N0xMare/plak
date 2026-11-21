@@ -42,6 +42,7 @@ class Attachment:
     seq: int = 0
     ended: bool = False
     deltas: int = 0
+    last_delta: float = 0
     terminal: int = 0
     phase: str | None = None
 
@@ -184,6 +185,7 @@ class Client:
                             and "assistant" in observation["body"]["delta"]
                         ):
                             state.deltas += 1
+                            state.last_delta = stamp
                         if observation.get("kind") == "turn_lifecycle":
                             phase = observation["body"]["phase"]
                             if phase != "admitted":

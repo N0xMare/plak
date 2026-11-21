@@ -108,7 +108,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
     first_pages, pings, intent = (Distribution() for _ in range(3))
     console = {kind: Distribution() for kind in CONSOLE}
     gone = replacements = resyncs = gaps = completed = pages = baseline_bytes = 0
-    multi_page = pings_outside_baseline = 0
+    multi_page = pings_outside_baseline = pings_without_stream = 0
     stop_at = time.monotonic() + args.switch_seconds
     stream_before = live.deltas
     stream_terminals = live.terminal
@@ -125,7 +125,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
                 or observer.failure
                 or waiting.ended
                 or live.ended
-                or live.terminal != stream_terminals
+                or (live.terminal != stream_terminals and live.phase != "completed")
             ):
                 raise RuntimeError(
                     "a pinned attachment or the scripted stream ended during switching"
@@ -144,6 +144,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
                     opening.result()
 
                 chores = []
+                last_delta_before_ping = live.last_delta
                 if big:
                     chores.append(
                         asyncio.create_task(
@@ -191,10 +192,12 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
                     baseline_bytes += state.bytes
                     multi_page += state.pages > 1
                     if ping := outcomes[1]:
-                        if ping[0] <= state.last:
+                        if ping[0] > state.last:
+                            pings_outside_baseline += 1
+                        elif ping[0] - last_delta_before_ping <= 0.25 or live.last_delta >= ping[0]:
                             pings.record(*ping)
                         else:
-                            pings_outside_baseline += 1
+                            pings_without_stream += 1
                 completed += 1
             except Detached:
                 # The next iteration requests a new attachment without
@@ -230,6 +233,8 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
         99,
         stream_deltas=stream_deltas,
         sent_after_baseline=pings_outside_baseline,
+        no_recent_stream_delta=pings_without_stream,
+        completed_stream_turns=live.terminal - stream_terminals,
     )
     intent.report("intent_accepted", 99)
     for kind, distribution in console.items():
@@ -283,7 +288,9 @@ async def run(args):
     emit("build", revision=build["revision"], flavor=build["flavor"], wire=build["wire"])
     try:
         pid, batches = await start_fixture(fixture, args)
-        stream_time = args.switch_seconds + 90
+        # The normal model operation deadline is shorter than a full soak.
+        # Queue follow-ups to keep successive bounded streams running.
+        stream_time = min(args.switch_seconds / 3, 120)
         events = [{"text": " synthetic stream delta"}, {"stall": 50}] * math.ceil(stream_time * 20)
         # Each worker reads its script when it opens. Keep the seeded heavy
         # worker resident while installing the separate stream worker's plan.
@@ -293,7 +300,8 @@ async def run(args):
                 [
                     answer("synthetic warm stream root"),
                     {"stream": events, "output": {"text": "stream done"}},
-                ]
+                ],
+                repeat_last_step=True,
             )
             async with Client(fixture, "web") as observer, Client(fixture, "web") as browser:
                 live, _ = await observer.attach(stream)
