@@ -47,9 +47,9 @@ offline image `plak-qual-base:86ab9e67`, which is not published (spec 06).
 
 ```text
 just fast [--rdeps] [PKG...] # static and changed-package parallel tests
-just batch                # standalone lint, contracts, tooling and scoped integration tests
+just batch                # standalone lint, contracts, tooling and core integration tests
 just batch-mac            # Mac workspace clippy and platform-sensitive tests
-just install              # Linux install supplement: builds, rustdoc and install tests
+just install              # Linux supplement: builds, rustdoc, full parallel and install tests
 just install-checks       # exact-tree Mac install supplement: full offline suite
 just steps GROUPS         # exactly those comma-separated groups, in canonical order
 just full                 # every group, including archive verification and long soaks
@@ -86,14 +86,17 @@ uses the changed packages' reverse dependencies plus runtime-binary edges
 for parallel tests; Mac batch intersects that scope with the platform-sensitive
 filters. Linux batch overlaps tree checks and independent compile groups with
 test preparation, and tooling with the parallel lane before timed test lanes.
+Neither batch runs the install profile, even when an install test changes.
+The integration batch targets eight minutes warm, with a 15-minute ceiling
+for a cold run; install evidence is timed separately.
 
 Production install uses exact-tree batch evidence plus the install groups,
 full Mac suite and strict crash sweep (spec 06 §8). Full adds standalone
 rustdoc, archive verification and ignored retirement soaks. A passing full
 run on a clean tree records the evidence publication requires. Inert
 documentation changes can reuse it; a `README.md` change
-needs new archive verification (spec 06 §6.5). Linux batch runs install
-families triggered by its base diff, or all families when no base is set.
+needs new archive verification (spec 06 §6.5). The install profile always runs
+in full, including the two exclusive indexed crash-sweep campaigns.
 
 The nextest profiles partition the offline suite. Edit the owning budget or
 crash filter (install families are in `.config/nextest-install.toml`), then

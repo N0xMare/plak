@@ -2237,8 +2237,8 @@ tree passes the integration batch gate, with the Linux and Mac runs concurrent:
 - Linux x86_64 musl runs workspace and standalone lint, the test build, and
   the rdeps-scoped parallel, core serial and core durability lanes
   (`just musl native --batch`). The parallel lane includes runtime-binary
-  edges (chapter 05 §1). Direct changes to install-only families run a
-  separate pass over those families.
+  edges (chapter 05 §1). Batch does not select the install profile, even
+  when its tests change.
 - Shared formatting, workspace/feature structure, public compile contracts
   and path-scoped tooling run once per batch. The dependency audit runs when `Cargo.lock`
   or `.config/deny.toml` changes and at RC.
@@ -2262,10 +2262,12 @@ tree and does not require it. Only a matching cohort verification receipt
 
 Commits inside a batch are not gated individually. A production install
 requires the batch gate **and** the install tier on the exact tree: the
-complete macOS suite (`just install-checks`), the full Linux parallel lane,
-the install-tier serial and durability rows, full tooling, workspace rustdoc, the
-release-resolution and maintainer builds with the linkage check, and the
-strict crash sweep. Run the Linux install groups with `just install` or
+complete macOS suite (`just install-checks`), the full Linux parallel and
+install profiles, full tooling, workspace rustdoc, the release-resolution and
+maintainer builds with the linkage check, and the strict crash sweep. The
+Linux batch supplies core serial and durability; the Linux install profile
+runs unconditionally, including the two exclusive indexed crash-sweep
+campaigns (chapter 05 §2.3). Run the Linux install groups with `just install` or
 `just musl native --install` for the shipped target; strict crash sweep is a
 separate command. An explicit `release` or `maintainer` argument to
 `just install` installs a snapshot instead of running the gate.
@@ -2280,6 +2282,8 @@ reuse matching Cargo units between the feature checks and standalone lint;
 each command still resolves its own features. Linux batch also overlaps
 independent static checks with test preparation and tooling with the parallel
 lane, never with the wall-clock or weighted lanes (chapter 05 §1).
+The batch targets an eight-minute warm wall time and a fifteen-minute cold
+ceiling. Install and release evidence are timed separately.
 
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
@@ -2292,8 +2296,8 @@ The test lanes remain sequential. Serial uses four threads on Linux and one
 on macOS. The durability and install pools have
 `N = max(1, min(16, available_parallelism))`
 slots, using Rust's host, affinity and quota count. Internally parallel crash
-campaigns reserve the whole pool at late priority -50; other tests cannot
-overlap that reservation. Ledger and restart/recovery groups reserve
+campaigns in the install profile reserve the whole pool at late priority -50;
+other tests cannot overlap that reservation. Ledger and restart/recovery groups reserve
 `ceil(N/4)` slots, and the signature-sensitive closed-cell campaign reserves
 the whole pool at early priority. The gate pins reviewed thread counts
 against environment overrides. Ignored soaks run one at a time

@@ -24,9 +24,7 @@ SOURCE_ROOTS = ("crates", "bin", "tests")
 PREDICATE = re.compile(r"test\(([^)]+)\)")
 sys.path.insert(0, str(ROOT / "tools/gate"))
 from check_workspace import _inline_modules, all_rust_tokens  # noqa: E402
-from changed_packages import INSTALL_FAMILY_PATHS  # noqa: E402
 from nextest_layout import SPECIAL_LANES, install_catalog, sync_membership  # noqa: E402
-import vcs_listing  # noqa: E402
 
 
 @cache
@@ -228,7 +226,6 @@ class NextestLaneTests(unittest.TestCase):
 
     def test_generated_offline_exclusion_partitions_the_suite(self) -> None:
         source, catalog = CONFIG.read_text(), install_catalog(CONFIG)
-        self.assertEqual(set(catalog), set(INSTALL_FAMILY_PATHS))
         self.assertEqual(source, sync_membership(source, catalog), "run nextest_layout.py --sync")
         selectors = {name: predicates(name) for name in SPECIAL_LANES}
         offline = profiles()["offline"]["default-filter"]
@@ -251,18 +248,6 @@ class NextestLaneTests(unittest.TestCase):
             )
             membership.update(dict.fromkeys(matches, name))
 
-    def test_each_install_trigger_matches_a_tracked_path(self) -> None:
-        # Source exports contain only staged source files and have no Git index.
-        if vcs_listing.kind(ROOT) == "git":
-            paths = vcs_listing.run(ROOT, "git", "ls-files", "-z", "--cached").split("\0")
-        else:
-            paths = vcs_listing.listed_files(ROOT)
-        for family, patterns in INSTALL_FAMILY_PATHS.items():
-            for pattern in patterns:
-                with self.subTest(family=family, pattern=pattern):
-                    matches = re.compile(pattern).search
-                    self.assertTrue(any(matches(path) for path in paths))
-
     def test_lane_profiles_keep_reviewed_thread_counts_and_budget_timeout(self) -> None:
         self.assertEqual(profiles()["serial"]["test-threads"], 4)
         self.assertEqual(profiles()["durability"]["test-threads"], 16)
@@ -283,10 +268,15 @@ class NextestLaneTests(unittest.TestCase):
         no_retry_setting(tomllib.loads(CONFIG.read_text()))
 
     def test_durability_weights_protect_internal_workers_and_pilot_isolation(self) -> None:
-        heavy, first = profiles()["durability"]["overrides"]
-        former_serial, isolated, image, ledger, install_first = profiles()["install"]["overrides"]
-        self.assertEqual(former_serial["threads-required"], "num-test-threads")
-        self.assertEqual(former_serial["priority"], -50)
+        (first,) = profiles()["durability"]["overrides"]
+        late, isolated, image, ledger, install_first = profiles()["install"]["overrides"]
+        self.assertEqual(late["threads-required"], "num-test-threads")
+        self.assertEqual(late["priority"], -50)
+        for campaign in ("crash_sweep::durability_subset", "crash_sweep::durability_twin_pilots"):
+            selector = f"={campaign}"
+            self.assertIn(selector, predicates("install"))
+            self.assertIn(selector, PREDICATE.findall(late["filter"]))
+            self.assertFalse(any(test_match(term, campaign) for term in predicates("durability")))
         self.assertEqual(
             isolated,
             {
@@ -295,18 +285,14 @@ class NextestLaneTests(unittest.TestCase):
                 "priority": 100,
             },
         )
-        self.assertEqual(heavy["threads-required"], "num-test-threads")
-        self.assertEqual(heavy["priority"], -50)
         self.assertEqual(ledger["threads-required"], 4)
         self.assertEqual(ledger["priority"], 95)
-        self.assertIn("durability_subset", heavy["filter"])
-        self.assertIn("durability_twin_pilots", heavy["filter"])
         self.assertIn("image_residency_crash_cuts", image["filter"])
         self.assertEqual(image["threads-required"], "num-test-threads")
         self.assertEqual(first["priority"], 90)
         self.assertEqual(first["threads-required"], 4)
         self.assertIn("host_crash_cuts_of_the_start_scan_continue_once_or_hold", first["filter"])
-        for override in (heavy, first, former_serial, isolated, image, ledger, install_first):
+        for override in (late, first, isolated, image, ledger, install_first):
             self.assertLessEqual(-100, override.get("priority", 0))
             self.assertLessEqual(override.get("priority", 0), 100)
         for family, rule in (

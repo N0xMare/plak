@@ -12,6 +12,13 @@ test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_interrupted_batch)
 '''
 
+[indexed-durability]
+isolated = true
+filter = '''
+test(=crash_sweep::durability_subset)
+| test(=crash_sweep::durability_twin_pilots)
+'''
+
 [image-residency]
 filter = "test(image_residency_crash_cuts_recover_without_redispatch)"
 

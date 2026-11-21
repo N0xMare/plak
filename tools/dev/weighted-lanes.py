@@ -6,13 +6,12 @@ A trial layout, not a gate. It writes a copy of `.config/nextest.toml` that adds
 `durability` membership, thread counts above one and per-test weights, and runs
 them through nextest's `--config-file`. The copy is generated on every run, so
 it always holds the current lanes. Ordinary durability is already weighted;
-this trial varies widths without changing the gate profiles or dropping their
-full-pool isolation rules.
+this trial varies widths without changing the gate profiles.
 
 The durability width is capped by the host and sixteen slots. Reservations
-come from the gate layout: internal-worker campaigns stay exclusive at late
-priority, and quarter-pool weights round upward. Long shared tests start first. Each
-profile writes `target/nextest/<profile>/junit.xml`, and the run ends with
+come from the gate layout: quarter-pool weights round upward. Long shared
+tests start first. Each profile writes `target/nextest/<profile>/junit.xml`,
+and the run ends with
 `tools/perf/nextest_timing.py` over them.
 
 The run shares the build and uses its own scratch directory (the per-checkout

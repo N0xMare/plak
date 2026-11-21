@@ -86,7 +86,6 @@ supported_packages=(plakous plakous-agent plakous-model plakous-tools plakd)
 scope=''
 mac_scope=''
 mac_serial_scope=''
-install_scope=''
 tooling_args=(-v)
 worker_clippy=()
 worker_features=()
@@ -128,12 +127,6 @@ batch_scoped=false
 if [[ "$tier" == batch || ( "$tier" == steps && -n "${PLAK_BATCH_BASE:-}" ) ]]; then
   batch_scoped=true
   tooling_args+=(--batch)
-  # The serial runner owns this extra pass even when the other lanes are
-  # fanned out. An explicit tests-install is always the complete profile.
-  if [[ ",$selection," == *",tests-serial,"* && ",$selection," != *",tests-install,"* ]]; then
-    install_scope="$(python3 tools/gate/changed_packages.py --install-filter)"
-    if [[ -n "$install_scope" ]]; then selection+=,tests-install; fi
-  fi
 fi
 if [[ "$tier" == batch-mac || ( "$batch_scoped" == true && ",$selection," == *",tests-parallel,"* ) ]]; then
   scope="$(python3 tools/gate/changed_packages.py --batch-filter)"
@@ -738,13 +731,7 @@ run_group() {
       fi
       return "$durability_status" ;;
     tests-install)
-      if [[ -n "$install_scope" ]]; then
-        echo "-- nextest: install families triggered by changed paths --"
-        run_weighted_lane install -E "$install_scope"
-      else
-        run_weighted_lane install
-      fi
-      ;;
+      run_weighted_lane install ;;
     contracts)
       echo "== positive/negative public compile contracts =="
       nice -n 5 python3 tools/gate/check_public_compile.py ;;

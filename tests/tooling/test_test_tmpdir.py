@@ -280,7 +280,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
                 self.assertIn("--unset-names", source)
                 self.assertNotIn("PLAK_TEST_SESSION_LEASE_SECONDS", source)
 
-    def test_weighted_trials_preserve_full_pool_isolation_before_scaled_weights(self):
+    def test_weighted_durability_trial_scales_core_restart_reservations(self):
         spec = importlib.util.spec_from_file_location(
             "weighted_lanes", ROOT / "tools/dev/weighted-lanes.py"
         )
@@ -288,10 +288,7 @@ class TestTmpdirSelectorTests(unittest.TestCase):
         spec.loader.exec_module(lanes)
         profile = tomllib.loads(lanes.weighted_config(4, 8))["profile"]["weighted-durability"]
         self.assertEqual(profile["test-threads"], 8)
-        heavy, restarts = profile["overrides"]
-        self.assertEqual(heavy["threads-required"], "num-test-threads")
-        self.assertIn("durability_twin_pilots", heavy["filter"])
-        self.assertEqual(heavy["priority"], -50)
+        (restarts,) = profile["overrides"]
         self.assertIn("::wire_host_restart::(root|child)_[0-7]$/)", restarts["filter"])
         self.assertEqual(restarts["threads-required"], 2)
 

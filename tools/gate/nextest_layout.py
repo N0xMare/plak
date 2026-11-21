@@ -26,10 +26,6 @@ def union(filters: list[str]) -> str:
     return "\n| ".join(f"({expression.strip()})" for expression in filters)
 
 
-def install_filter(families: dict, selected: list[str]) -> str:
-    return union([families[name]["filter"] for name in selected])
-
-
 def generated_block(source: str, name: str, content: str) -> str:
     begin = f"# BEGIN generated {name} (tools/gate/nextest_layout.py)\n"
     end = f"# END generated {name}\n"
@@ -42,11 +38,9 @@ def generated_block(source: str, name: str, content: str) -> str:
 
 def sync_membership(source: str, families: dict) -> str:
     profiles = tomllib.loads(source)["profile"]
-    install = install_filter(families, list(families))
+    install = union([row["filter"] for row in families.values()])
     excluded = union([profiles[lane]["default-filter"] for lane in SPECIAL_LANES[:-1]] + [install])
-    isolated = install_filter(
-        families, [name for name, row in families.items() if row.get("isolated")]
-    )
+    isolated = union([row["filter"] for row in families.values() if row.get("isolated")])
     generated = f"default-filter = '''\n{install}\n'''\n"
     if isolated:
         generated += (

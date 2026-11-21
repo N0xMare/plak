@@ -229,49 +229,6 @@ class TouchedPackagesTests(unittest.TestCase):
         self.assertEqual(CHANGED.batch_filter(["--workspace"], packages), "all()")
         self.assertEqual(CHANGED.batch_filter([], packages), "none()")
 
-    def test_install_path_triggers_nominate_the_directly_affected_families(self):
-        for path, name in (
-            ("bin/plakd/src/host/upgrade/carry.rs", "upgrade"),
-            ("bin/plakd/tests/integration/host_skeleton/upgrade/verdicts.rs", "upgrade"),
-            ("crates/store/src/sqlite/host_move.rs", "upgrade"),
-            ("bin/plakd/src/store/revisions.rs", "upgrade"),
-            (
-                "crates/core/agent/src/runtime/operation_record/retirement/tests.rs",
-                "ledger-retirement",
-            ),
-            ("bin/plakd/tests/integration/crash_sweep/mod.rs", "ledger-retirement"),
-            ("crates/common/image/src/lib.rs", "image-residency"),
-            ("crates/hosting/hosted/src/runtime/host_loop/residency.rs", "image-residency"),
-            ("bin/plakd/src/commands/runner/services.rs", "runner-startup"),
-            ("crates/common/runner-protocol/src/lib.rs", "runner-startup"),
-            ("bin/plakd/tests/integration/host_skeleton/crash/wire/cuts.rs", "wire-restart-switch"),
-            ("bin/plakd/src/host/bridge.rs", "bridge"),
-            ("bin/plakd/src/terminal_registry/pins.rs", "operator-pins-rate"),
-            ("bin/plakd/src/commands/session/lifecycle/keepalive.rs", "lifecycle-deletion"),
-            ("crates/hosting/hosted/src/agent/park/tests.rs", "placement-hold"),
-            ("crates/harness/tool-process/src/placement_hold_tests.rs", "placement-hold"),
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(CHANGED.install_families([path], {}), [name])
-        self.assertEqual(CHANGED.install_families(["AGENTS.md"], {}), [])
-        for path, family in (
-            ("bin/plakd/src/gateway/mod.rs", "upgrade"),
-            ("bin/plakd/src/host/gateway_startup.rs", "upgrade"),
-            ("crates/runtimes/runner/src/retention/codec.rs", "upgrade"),
-            ("crates/common/runner-protocol/src/retention.rs", "upgrade"),
-            ("crates/common/runner-protocol/src/pinned/retention-v1-invalid.jsonl", "upgrade"),
-            (
-                "bin/plakd/tests/fixtures/client-traces/host-control-switch-root.json",
-                "wire-restart-switch",
-            ),
-            ("bin/plakd/src/host/sessions.rs", "wire-restart-switch"),
-            ("crates/hosting/hosted/src/runtime/clear.rs", "wire-restart-switch"),
-            ("bin/plakd/src/host/idle.rs", "bridge"),
-        ):
-            with self.subTest(path=path):
-                self.assertIn(family, CHANGED.install_families([path], {}))
-
-    def test_rust_only_batches_keep_tree_readers_and_inputs_trigger_full_tooling(self):
         scoped = selected_modules(["bin/plakd/src/lib.rs", "toolshed/unrelated.py"])
         self.assertEqual({module.stem for module in scoped}, TREE_READERS)
         full = selected_modules(None)

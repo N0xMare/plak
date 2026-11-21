@@ -788,13 +788,13 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 | `tests-parallel` | Nextest `offline` profile |
 | `tests-durability` | Nextest `durability` profile: core crash-law rows and the SQLite SIGKILL campaign in a host-scaled weighted pool |
 | `tests-serial` | Nextest `serial` profile: wall-clock budgets, four threads on Linux and one on macOS |
-| `tests-install` | Additional install families in a host-scaled weighted pool; former serial families retain exclusive reservations |
+| `tests-install` | Complete install profile in a host-scaled weighted pool, including two exclusive indexed crash-sweep campaigns |
 | `package` | `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, then package and verify the staged cohort strictly offline (chapter 06 §6.5); requires a repository tree |
 
 | Tier | Groups |
 | --- | --- |
 | fast | `static`, scoped `tests-parallel` if any package is touched |
-| batch | `static`, `standalone`, `contracts`, path-scoped `tooling`, scoped `tests-parallel`, core `tests-durability` and `tests-serial`; an install pass only for path-triggered families |
+| batch | `static`, `standalone`, `contracts`, path-scoped `tooling`, scoped `tests-parallel`, core `tests-durability` and `tests-serial` |
 | batch-mac | Workspace clippy, a shared test build and three platform-sensitive passes: parallel, durability, serial |
 | install | `builds`, `rustdoc`, full `tooling`, full `tests-parallel`, `tests-install`. The named `just install-checks` supplement runs all four Mac test lanes, without packaging or batch scoping |
 | full | Every group and both ignored retirement soaks |
@@ -812,9 +812,9 @@ skips a check names the skip in its final summary and writes neither file.
 Chapter 06 §6.5 specifies when evidence covers later trees.
 
 `--steps` runs its named groups and rejects unknown or empty groups. When
-given a batch base it shares the batch scoping policy: the runner owning
-`tests-serial` also runs any triggered install families unless
-`tests-install` was explicitly selected in full. Test lanes and tooling still prepare the shared
+given a batch base it shares the parallel and tooling batch scoping policy.
+It never adds the install profile implicitly; an explicit `tests-install`
+always runs the full profile. Test lanes and tooling still prepare the shared
 test artifacts. Independent runners use separate checkout, target and scratch
 roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
@@ -873,12 +873,9 @@ select their consumers too.
 The Mac intersects that same scope with the platform-sensitive predicates in
 `tools/gate/mac-selection.filter`: F for parallel and durability, F_SERIAL
 for serial. Nextest intersects each expression with the lane profile and an
-empty intersection passes. `changed_packages.py --install-families` identifies
-directly touched install-only families. Linux batch runs the corresponding
-union from `.config/nextest-install.toml` in the `install` profile, separately
-from core serial and durability. If no batch comparison can establish scope,
-all families are eligible. Mac batch keeps its three passes; Mac install
-checks and full run the complete install profile.
+empty intersection passes. Neither batch runs the install profile.
+The Linux install tier, Mac install checks and full each run the complete
+install profile regardless of the changed paths.
 
 Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
 `test_pinned_callback_ports`, `test_configuration_placement`,
@@ -1808,7 +1805,7 @@ groups and overrides. A lane supplies membership, scheduling and timeout.
 | `offline` | Everything not assigned to serial, durability or install | The parallel lane: `tests-parallel`, `just fast`, `just steps tests-parallel` |
 | `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just steps tests-serial` |
 | `durability` | Core crash matrices and the SQLite SIGKILL campaign (§2.3) | Batch core durability and explicit `tests-durability` |
-| `install` | Additional upgrade, runner, restart, residency, retirement and timing families (§2.3) | Exact-tree install checks, full, and the subset triggered by direct changes in Linux batch |
+| `install` | Additional upgrade, runner, restart, residency, retirement and timing families, and the two exclusive indexed crash-sweep campaigns (§2.3) | Linux install, Mac install checks, full, and explicit `tests-install` |
 
 The three `ledger_retirement_5000_*` tests are ignored long-turn evidence, not
 routine serial work. `just soak` builds the real workers and selects those
@@ -1848,9 +1845,9 @@ early relaunches and the bounded campaigns run together in the install profile;
 the existing small anchor/refusal/closure tests remain routine.
 
 Every profile is hermetic: no test in the workspace reaches a network or reads a
-credential. Batch runs the parallel, durability and serial lanes and any
-triggered install families; full runs all four lanes. Mac batch filters the
-three core lanes to platform-sensitive tests. An `-E` filterset on the command line narrows a
+credential. Batch runs the parallel, durability and serial lanes; full runs all
+four lanes. Mac batch filters the three core lanes to platform-sensitive tests.
+An `-E` filterset on the command line narrows a
 profile's membership (nextest intersects them), so
 `--profile offline -E 'rdeps(=<pkg>)'` runs a package's parallel-lane tests and
 never its serial ones. `fail-fast` is off. The workspace slow timeout is 60
@@ -1875,10 +1872,8 @@ lane is already weighted; the trial varies pool sizes and serial concurrency.
 On every run it writes
 `<target>/nextest-weighted.toml`: `.config/nextest.toml` plus `weighted-serial`
 and `weighted-durability` profiles with the `serial` and `durability`
-membership and settings, 4 and at most 16 threads by default. In `weighted-durability`
-the two campaigns that run cuts on their own workers (`durability_subset`
-and `durability_twin_pilots`) retain whole-pool reservations and
-priority -50. Restart reservations scale to one quarter rounded up.
+membership and settings, 4 and at most 16 threads by default.
+Restart reservations scale to one quarter rounded up.
 The trial reuses the
 gate's scaling implementation and caps its width by the host. It refuses a
 weight filter that matches no test, builds the workers as the gate does, runs
@@ -2184,12 +2179,7 @@ a gate-local copy with N slots and proportionally scaled integer reservations.
 It verifies that every non-resource setting, including membership, watchdogs
 and priorities, remains identical. The gate pins the rendered width on the
 command line against environment overrides.
-The two core internally parallel campaigns (`durability_subset` and
-`durability_twin_pilots`) reserve the whole pool at priority
--50. They already fan out to N internal workers: full reservations prevent
-oversubscription, while their lower priority starts them after shared work.
-Priority alone is not a barrier; the whole-pool reservation also requires all
-earlier running work to finish. Independent cuts normally use one slot. The
+Independent cuts normally use one slot. The
 sixteen non-switch restart cut groups have priority 90 and reserve
 `ceil(N/4)` slots each, limiting simultaneous real-process restarts
 without serializing them. The host start-scan campaign uses the same
@@ -2198,7 +2188,11 @@ creates its own fixture.
 Weights are scheduling reservations, not fewer cuts, extra retries or relaxed
 assertions. The existing extended watchdogs for host-restart matrices remain.
 
-**The install lane** uses the same host-scaled width. The closed-cell ledger
+**The install lane** uses the same host-scaled width. The internally parallel
+`durability_subset` and `durability_twin_pilots` campaigns reserve the whole pool
+at priority -50. They fan out to N internal workers: the full reservation
+prevents oversubscription and requires all earlier running work to finish;
+the low priority starts the campaigns after shared work. The closed-cell ledger
 twin-pilot campaign reserves the whole pool at priority 100 because competing
 load changed its per-store signatures. Its isolation rule precedes the general
 quarter-pool ledger weight, which starts the other ledger campaigns early
@@ -2206,21 +2200,21 @@ to avoid a long tail. Image residency and former serial families reserve
 the whole pool at priority -50. Switch restart groups, the redial test and the
 busy-root absence test reserve `ceil(N/4)` slots at priority 90.
 
-| Install family | Evidence | Batch trigger |
-| --- | --- | --- |
-| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices | Upgrade, carry, deploy, host move, revisions, credential gateway and runner-retention protocol paths |
-| Ledger retirement | Four bounded retirement campaigns, including twin pilots and first-product-publication relaunches | Ledger or retirement paths |
-| Image residency | Indexed image-residency recovery cuts | Image or residency paths |
-| Runner startup | Redial bound, broken or obsolete daemon, slow user manager, surviving busy-root child and surviving child daemon job | Runner or daemon paths |
-| Wire restart switch | All sixteen switch restart groups | Switch and wire code, session switch code and switch client-trace fixtures |
-| Bridge | Auto-start idle exit, log-lock retry and typed readiness/stopping refusals | Bridge, host startup and host idle paths |
-| Operator pins and rate | Runner pin/control reconciliation and the real console-rate fixture | Terminal registry, console, or runner operator paths |
-| Lifecycle deletion | Lease keepalive and archive/delete admission | Session lifecycle/deletion paths |
-| Placement hold | Reservation, instruction-drain and rebind cuts (`placement_hold_cut_`) | Placement, park or placement-hold paths |
+| Install family | Evidence |
+| --- | --- |
+| Upgrade | `host_skeleton::upgrade::`: planned handoff and recovery, compatibility preflight, stopped residents and lifecycle notices |
+| Ledger retirement | Four bounded retirement campaigns, including twin pilots and first-product-publication relaunches |
+| Indexed durability | `crash_sweep::durability_subset` cuts every indexed commit in four shapes; `crash_sweep::durability_twin_pilots` checks equal per-store commit sequences for the other shapes without cutting |
+| Image residency | Indexed image-residency recovery cuts |
+| Runner startup | Redial bound, broken or obsolete daemon, slow user manager, surviving busy-root child and surviving child daemon job |
+| Wire restart switch | All sixteen switch restart groups |
+| Bridge | Auto-start idle exit, log-lock retry and typed readiness/stopping refusals |
+| Operator pins and rate | Runner pin/control reconciliation and the real console-rate fixture |
+| Lifecycle deletion | Lease keepalive and archive/delete admission |
+| Placement hold | Reservation, instruction-drain and rebind cuts (`placement_hold_cut_`) |
 
-`.config/nextest-install.toml` owns family membership;
-`tools/gate/changed_packages.py` owns their path triggers. The trigger pass
-selects only those families. Normal install and full run all of them.
+`.config/nextest-install.toml` owns family membership. Every gate run of the
+install profile selects all families; path changes do not select a subset.
 
 Fixed absence/liveness observation windows retain their lengths under this
 layout. `a_busy_roots_child_job_survives_attach_after_host_loss` observes a
@@ -2269,8 +2263,6 @@ macOS; ignored full-tier retirement soaks in both profiles still run alone.
 
 | Kind | Predicates |
 | --- | --- |
-| Indexed crash-point sweep | `crash_sweep::durability_subset` — `final_only`, `direct_tool_then_final`, `promoted_background_job`, and `sealed_family_artifacts`, every indexed commit, up to sixteen internal workers |
-| Twin-pilot determinism | `crash_sweep::durability_twin_pilots` — every other registered shape's twin pilots, which must commit identical per-store sequences; no cuts |
 | Real SIGKILL relaunch | `actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers` |
 | Continue on another account | `account_continue_sigkill_cuts_reopen_without_resubmitting` — a real SQLite home, the root's first turn failed on its usage limit, then `ChooseAccount` with `continue_failed`; SIGKILL after the rebind's `ProductPublished`, the root-start's `Prepared` and its `RuntimeReturned`, then two relaunches on the root line's head: one rebind, no physical dispatch and no submission by either reopen, a published-but-unqueued continue has no submission and one warning per open with the derived command id, a prepared root-start stays queued with its one written submission, and a returned one has exactly one accepted submission and no queued copy (chapter 02 §4.4.1). `account_continue_crash_cuts::` cuts the same boundaries in process |
 | Spawn on a chosen account | `spawn_account_receipt_replays_after_relaunch` — cut the caller after the SQLite tree publishes the receipt and before child binding, reopen the persisted tree after a choice change, then replay the exact receipt: no new node, and the bound runtime account equals the node's original frozen reference (chapter 03 §2.1) |
@@ -2306,7 +2298,10 @@ of either lane; they run in the parallel lane.
 
 **One partition.** The `offline` profile excludes the union of serial,
 durability and install. A run of all four lanes executes every non-ignored
-test once. Change the owning filter or install family once, then run
+test once. Production always requires the complete install profile on its
+exact tree, alongside Linux core durability and serial from batch, the full
+Linux parallel profile at install, and all four profiles at Mac install
+checks. Change the owning filter or install family once, then run
 `python3 tools/gate/nextest_layout.py --sync` to regenerate the offline and
 install filter blocks in the checked-in nextest config. Tooling verifies the
 blocks are current, proves their predicates resolve and do not overlap on
@@ -2825,12 +2820,12 @@ notice through that same loop. A corrupt zero saved round refuses without
 panicking; the command-id validity assertion remains in force.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
-[--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the always-on
+[--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the install
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with up to sixteen workers.
 `crash_sweep::durability_twin_pilots` runs the twin pilots of every other
 registered shape without cutting, so a change that makes any strict shape's
-per-store commit sequence differ between twins fails in the durability lane.
+per-store commit sequence differ between twins fails in the install lane.
 The `ledger_retirement_closed_cells`, `ledger_retirement_interrupted_batch`,
 `ledger_retirement_live_child_process` and `ledger_retirement_yielded_cell`
 shapes exercise closed debt, interrupted slots, a parent
@@ -5646,7 +5641,7 @@ the assertion. Open investigations name their current containment explicitly.
 | Inherited git config | Fixture git read the host's global config; a global `commit.gpgsign` spawned `gpg` per fixture commit, which failed with ENOMEM under gate load | Test entry points export an empty `GIT_CONFIG_GLOBAL` under `TMPDIR` and `GIT_CONFIG_NOSYSTEM=1` (§1); fixtures set their own identity |
 | Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
-| Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3) uses a host-scaled pool of at most sixteen slots, running internal-worker campaigns exclusively at late priority and isolating the signature-sensitive closed-cell campaign. It stays separate from the serial budget lane, under the existing 240-second slow timeout and explicit matrix watchdogs. Child reply and exit watchdogs are hang bounds, not timing assertions. Outcome assertions are unchanged |
+| Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | Durability and install (§2.3) use host-scaled pools of at most sixteen slots, separate from each other and the serial budget lane. Install runs the internal-worker campaigns exclusively at late priority and isolates the signature-sensitive closed-cell campaign. The 240-second slow timeout and explicit matrix watchdogs are unchanged. Child reply and exit watchdogs are hang bounds, not timing assertions |
 | Open: closed-cell retirement twin signatures under load | `crash_sweep::durability_ledger_retirement_closed_cells` has produced different per-store commit signatures under competing load; twin-pilot determinism is itself the invariant, so isolation does not establish a root cause | Whole-pool reservation at priority 100 remains containment, not a correctness fix. A bounded probe with four CPU busy loops passed three campaign invocations, each with matching 109-publication twin pilots and 32 representative cuts; it captured no divergence and cannot classify harness timing versus product ordering. The harness deliberately varies answer-before-idle versus drained-idle delivery and gates quit on the subsequent idle observation. Investigate both retained `commit-trace.jsonl` pilots on reproduction; stop and report product-ordering evidence rather than change isolation or the oracle |
 | Wall-clock budgets read as contention | Interactive PTY budgets, the 250 ms yield floor, lease and cancellation windows are measurements on an idle machine | The same serial budget lane, assertions unchanged |
 | Scripted response windows | A sleeping model can finish before the test's submission, mail claim or crash cut under load | Offline scripts use explicit registry gates for in-process streams and file-sentinel gates for process cuts. Gates preserve cancellation; park predicates register tree notifications before inspecting state |

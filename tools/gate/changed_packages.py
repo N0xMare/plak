@@ -17,22 +17,18 @@ Usage:
   changed_packages.py PATH...    # map the given repository-relative paths
   changed_packages.py --dependents PACKAGE...  # conservative workspace rdeps
   changed_packages.py --batch-filter          # nextest filter, using PLAK_BATCH_BASE
-  changed_packages.py --install-families [PATH...]  # triggered install test family names
-  changed_packages.py --install-filter        # filter for just the triggered install families
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import vcs_listing  # noqa: E402
-from nextest_layout import install_catalog, install_filter  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = "--workspace"
@@ -72,52 +68,6 @@ RUNTIME_EDGES = {
     "plakous-cell": CELL_WORKER_CONSUMERS,
     "plakd": ("plakous-offline-crash-harness",),
     "plakous-mcp-fake-server": ("plakous-mcp", "plakous-hosted", "plakd"),
-}
-
-# The install profile owns membership; these paths only nominate extra
-# families for a batch. Prefixes include file stems for flat Rust modules.
-INSTALL_FAMILY_PATHS = {
-    "upgrade": (
-        r"^bin/plakd/src/(?:host/(?:upgrade|store_revisions|gateway_startup[^/]*)|carry|deploy|gateway|store/revisions)(?:/|\.rs$)",
-        r"^bin/plakd/tests/integration/host_skeleton/upgrade(?:/|\.rs$)",
-        r"/(?:host_move|[^/]*revisions?)(?:/|[_.])",
-        r"^crates/runtimes/runner/src/retention[^/]*(?:/|\.rs$)",
-        r"^crates/common/runner-protocol/src/(?:retention\.rs|pinned/retention-v1[^/]*\.jsonl)$",
-    ),
-    "ledger-retirement": (
-        r"/[^/]*(?:ledger|retirement)[^/]*(?:/|\.rs$)",
-        r"^bin/plakd/tests/integration/crash_sweep/mod\.rs$",
-    ),
-    "image-residency": (r"/[^/]*(?:image|residency)[^/]*(?:/|\.rs$)",),
-    "runner-startup": (
-        r"^crates/(?:runtimes/runner|common/runner-protocol)/",
-        r"^bin/plakd/(?:src/(?:commands/)?runner|tests/integration/host_skeleton/runner)(?:/|\.rs$)",
-        r"/daemon(?:/|\.rs$)",
-    ),
-    "wire-restart-switch": (
-        r"/[^/]*(?:switch|wire)[^/]*(?:/|\.rs$)",
-        r"^bin/plakd/tests/fixtures/client-traces/host-control-switch-[^/]+\.json$",
-        r"^bin/plakd/src/(?:host/sessions(?:/|\.rs$)|carry/intent\.rs$)",
-        r"^crates/hosting/hosted/src/runtime/(?:clear|rebind|topology_state)(?:/|\.rs$)",
-    ),
-    "bridge": (
-        r"^bin/plakd/src/(?:host/(?:bridge|starter|idle)|commands/application/host)(?:/|\.rs$)",
-        r"^bin/plakd/tests/integration/host_skeleton/bridge(?:/|\.rs$)",
-    ),
-    "operator-pins-rate": (
-        r"^bin/plakd/src/(?:terminal_registry|host/console)(?:/|\.rs$)",
-        r"^crates/runtimes/runner/src/operator(?:/|\.rs$)",
-    ),
-    "lifecycle-deletion": (
-        r"^bin/plakd/src/(?:commands/session/(?:delete|lifecycle)|host/(?:sessions/)?lifecycle|store/lifecycle)(?:/|\.rs$)",
-        r"^bin/plakd/src/commands/session_delete_tests\.rs$",
-    ),
-    "placement-hold": (
-        r"^crates/hosting/hosted/src/agent/(?:park|placement)(?:/|\.rs$)",
-        r"^crates/core/agent/src/runtime/(?:durable/tests/placement_hold|driver/placement_wait)(?:/|\.rs$)",
-        r"^crates/harness/tool-process/src/placement_hold_tests\.rs$",
-        r"^bin/plakd/src/host/sessions/placement(?:/|\.rs$)",
-    ),
 }
 
 
@@ -211,16 +161,6 @@ def batch_filter(touched: list[str], packages: list[dict]) -> str:
     return " | ".join(terms) or "none()"
 
 
-def install_families(paths: list[str], dirs: dict[str, str]) -> list[str]:
-    if touched_packages(paths, dirs) == [WORKSPACE]:
-        return sorted(INSTALL_FAMILY_PATHS)
-    return sorted(
-        family
-        for family, patterns in INSTALL_FAMILY_PATHS.items()
-        if any(re.search(pattern, path) for path in paths for pattern in patterns)
-    )
-
-
 def main(argv: list[str]) -> int:
     if argv[:1] == ["--dependents"]:
         try:
@@ -237,20 +177,6 @@ def main(argv: list[str]) -> int:
             return 0
         packages = workspace_packages()
         print(batch_filter(touched_packages(paths, package_dirs(packages=packages)), packages))
-        return 0
-    if argv[:1] == ["--install-families"] or argv == ["--install-filter"]:
-        paths = argv[1:] or batch_changes(REPO_ROOT, base)
-        names = (
-            sorted(INSTALL_FAMILY_PATHS)
-            if paths is None
-            else (install_families(paths, package_dirs()) if paths else [])
-        )
-        if argv[0] == "--install-filter":
-            if names:
-                print(install_filter(install_catalog(), names))
-        else:
-            for family in names:
-                print(family)
         return 0
     paths = argv or changed_paths()
     for name in touched_packages(paths, package_dirs()):
