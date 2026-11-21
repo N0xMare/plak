@@ -2,9 +2,11 @@
 //! binds to, the credential fields under the exact Ready lease, and the
 //! single writer's refresh after a rejection.
 
+use plakous_auth::ReadyCredentialLease;
+use plakous_auth::custody::local::{self, LocalCustody, Snapshot};
 use plakous_auth::custody::{
-    AccountFacts, CredentialField, CredentialFields, CredentialHold, CustodyError, CustodySlot,
-    CustodyStatus, ExpectedFence, IdentityDigest,
+    AccountFacts, CredentialField, CredentialFields, CustodyError, CustodySlot, CustodyStatus,
+    ExpectedFence, IdentityDigest,
 };
 
 use super::manager::codex_account_digest;
@@ -14,27 +16,13 @@ use super::{
     parse_stored, run_blocking,
 };
 
-/// How often a facts read retries when the record moves under it.
-const SNAPSHOT_ATTEMPTS: usize = 3;
-
-/// How often a fields read judges the record when it moves between the
-/// facts read and the Ready lease.
-const FENCE_READS: usize = 2;
-
-/// How long a refresh after a rejection waits for another caller's claimed
-/// refresh to settle before it judges the record, and how often it looks.
-const SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
-
 fn identity(digest: Digest) -> IdentityDigest {
     IdentityDigest::from_bytes(*digest.bytes())
 }
 
 fn store_error(error: NativeCodexAuthError) -> CustodyError {
     match error {
-        NativeCodexAuthError::StoreBusy => CustodyError::Busy {
-            retry_after_ms: 100,
-        },
+        NativeCodexAuthError::StoreBusy => local::busy(),
         _ => CustodyError::Store,
     }
 }
@@ -53,72 +41,7 @@ impl CodexSubscriptionCredentialManager {
     /// # Errors
     /// [`CustodyError::Store`] for unsafe or unreadable storage.
     pub async fn custody_facts(&self, slot: &CustodySlot) -> Result<AccountFacts, CustodyError> {
-        Ok(self.custody_snapshot(slot).await?.0)
-    }
-
-    async fn custody_snapshot(
-        &self,
-        slot: &CustodySlot,
-    ) -> Result<(AccountFacts, Option<CredentialFence>), CustodyError> {
-        let mut attempts = 0;
-        loop {
-            attempts += 1;
-            let store = Arc::clone(self.store().map_err(store_error)?);
-            let lifecycle = run_blocking(move || local_credential_status(&store))
-                .await
-                .map_err(store_error)?;
-            let mut facts = AccountFacts::signed_out(slot.clone());
-            facts.status = CustodyStatus::from_lifecycle(lifecycle);
-            let fence = match self.load_fence().await {
-                Ok(fence) => fence,
-                Err(NativeCodexAuthError::Unavailable) => return Ok((facts, None)),
-                Err(error) => return Err(store_error(error)),
-            };
-            let account = codex_account_digest(Some(fence.account_binding()));
-            facts.generation = Some(fence.generation());
-            facts.account_binding = Some(identity(account));
-            facts.credential_authority = Some(identity(self.authority_binding));
-            if facts.status != CustodyStatus::Ready {
-                return Ok((facts, Some(fence)));
-            }
-            let Ok(lease) = self.acquire_ready_lease(fence.clone()).await else {
-                // The record moved between the two reads.
-                if attempts < SNAPSHOT_ATTEMPTS {
-                    continue;
-                }
-                return Err(CustodyError::Busy {
-                    retry_after_ms: 100,
-                });
-            };
-            let stored = parse_stored(lease.payload()).map_err(store_error)?;
-            facts.access_expires_at_unix_ms = Some(stored.access_expires_at.saturating_mul(1000));
-            let epoch = credential_selection_epoch(
-                account,
-                self.authority_binding,
-                &stored.selection_epoch,
-            )
-            .map_err(|_| CustodyError::Internal)?;
-            facts.selection_epoch_digest = Some(identity(epoch));
-            return Ok((facts, Some(fence)));
-        }
-    }
-
-    /// The snapshot once no claimed refresh is in flight, waiting at most
-    /// [`SETTLE_WAIT`].
-    async fn settled_snapshot(
-        &self,
-        slot: &CustodySlot,
-    ) -> Result<(AccountFacts, Option<CredentialFence>), CustodyError> {
-        let deadline = tokio::time::Instant::now() + SETTLE_WAIT;
-        loop {
-            let snapshot = self.custody_snapshot(slot).await?;
-            if snapshot.0.status != CustodyStatus::Refreshing
-                || tokio::time::Instant::now() >= deadline
-            {
-                return Ok(snapshot);
-            }
-            tokio::time::sleep(SETTLE_POLL).await;
-        }
+        local::facts(self, slot).await
     }
 
     /// The credential fields of one request prepared against `expected`:
@@ -133,34 +56,79 @@ impl CodexSubscriptionCredentialManager {
         slot: &CustodySlot,
         expected: &ExpectedFence,
     ) -> Result<CredentialFields, CustodyError> {
-        let mut reads = 1;
-        let lease = loop {
-            // A record that moved after the first read is judged again once
-            // any claimed refresh settles, so a refusal names current facts.
-            let (facts, fence) = if reads == 1 {
-                self.custody_snapshot(slot).await?
-            } else {
-                self.settled_snapshot(slot).await?
-            };
-            facts.check_fence(expected)?;
-            if self.validate_profile_admission().is_err() {
-                return Err(CustodyError::NotReady {
-                    facts: Box::new(facts),
-                });
-            }
-            let fence = fence.ok_or(CustodyError::Internal)?;
-            #[cfg(test)]
-            between_reads::run(fence.account_binding().as_str());
-            match self.acquire_ready_lease(fence.clone()).await {
-                Ok(lease) if lease.fence() == fence => break lease,
-                _ if reads < FENCE_READS => reads += 1,
-                _ => {
-                    return Err(CustodyError::Busy {
-                        retry_after_ms: 100,
-                    });
-                }
-            }
+        local::fields(self, slot, expected).await
+    }
+
+    /// The single writer's refresh after the provider answered `rejected`
+    /// with HTTP 401, then the current facts. A generation another caller
+    /// already rotated is refreshed only if due, and a newer login is never
+    /// claimed, rotated or quarantined.
+    ///
+    /// # Errors
+    /// Returns a storage or selection refusal.
+    pub async fn custody_refresh_after_rejection(
+        &self,
+        slot: &CustodySlot,
+        rejected: &ExpectedFence,
+        selection_epoch_digest: Option<IdentityDigest>,
+    ) -> Result<AccountFacts, CustodyError> {
+        local::after_rejection(self, slot, rejected, selection_epoch_digest).await
+    }
+}
+
+impl LocalCustody for CodexSubscriptionCredentialManager {
+    type Selection = ();
+
+    async fn snapshot_once(&self, slot: &CustodySlot) -> Result<Snapshot<()>, CustodyError> {
+        let store = Arc::clone(self.store().map_err(store_error)?);
+        let lifecycle = run_blocking(move || local_credential_status(&store))
+            .await
+            .map_err(store_error)?;
+        let mut facts = AccountFacts::signed_out(slot.clone());
+        facts.status = CustodyStatus::from_lifecycle(lifecycle);
+        let fence = match self.load_fence().await {
+            Ok(fence) => fence,
+            Err(NativeCodexAuthError::Unavailable) => return Ok((facts, None)),
+            Err(error) => return Err(store_error(error)),
         };
+        let account = codex_account_digest(Some(fence.account_binding()));
+        facts.generation = Some(fence.generation());
+        facts.account_binding = Some(identity(account));
+        facts.credential_authority = Some(identity(self.authority_binding));
+        if facts.status != CustodyStatus::Ready {
+            return Ok((facts, Some((fence, ()))));
+        }
+        let lease = self
+            .acquire_ready_lease(fence.clone())
+            .await
+            .map_err(|_| local::busy())?;
+        let stored = parse_stored(lease.payload()).map_err(store_error)?;
+        facts.access_expires_at_unix_ms = Some(stored.access_expires_at.saturating_mul(1000));
+        let epoch =
+            credential_selection_epoch(account, self.authority_binding, &stored.selection_epoch)
+                .map_err(|_| CustodyError::Internal)?;
+        facts.selection_epoch_digest = Some(identity(epoch));
+        Ok((facts, Some((fence, ()))))
+    }
+
+    fn retry_snapshot(error: &CustodyError) -> bool {
+        matches!(error, CustodyError::Busy { .. })
+    }
+
+    fn profile_active(&self) -> bool {
+        self.validate_profile_admission().is_ok()
+    }
+
+    async fn fields_lease(
+        &self,
+        fence: CredentialFence,
+    ) -> Result<Option<ReadyCredentialLease>, CustodyError> {
+        #[cfg(test)]
+        between_reads::run(fence.account_binding().as_str());
+        Ok(self.acquire_ready_lease(fence).await.ok())
+    }
+
+    fn fields_from_lease(lease: &ReadyCredentialLease) -> Result<CredentialFields, CustodyError> {
         let fence = lease.fence();
         let stored = parse_stored(lease.payload()).map_err(store_error)?;
         if stored.account_id != fence.account_binding().as_str() {
@@ -175,40 +143,25 @@ impl CodexSubscriptionCredentialManager {
             "chatgpt-account-id",
             CredentialField::exact(stored.account_id.as_bytes().to_vec()),
         );
-        Ok(fields.holding(CredentialHold::new(lease)))
+        Ok(fields)
     }
 
-    /// The single writer's refresh after the provider answered `rejected`
-    /// with HTTP 401: one claimed refresh, only while the store still holds
-    /// that generation of the same account and login selection, then the
-    /// current facts. A generation another caller already rotated is
-    /// refreshed only if due, and a newer login is never claimed, rotated or
-    /// quarantined. A failed refresh is reported through the facts' status.
-    ///
-    /// # Errors
-    /// [`CustodyError::Store`] for unsafe or unreadable storage.
-    pub async fn custody_refresh_after_rejection(
+    async fn refresh_rejected(
         &self,
-        slot: &CustodySlot,
+        facts: &AccountFacts,
+        (fence, ()): &(CredentialFence, ()),
         rejected: &ExpectedFence,
-        selection_epoch_digest: Option<IdentityDigest>,
-    ) -> Result<AccountFacts, CustodyError> {
-        let (facts, fence) = self.settled_snapshot(slot).await?;
-        let Some(fence) = fence else {
-            return Ok(facts);
+        selection: Option<IdentityDigest>,
+    ) -> Result<bool, CustodyError> {
+        let Some(selection) = selection.or(facts.selection_epoch_digest) else {
+            return Ok(false);
         };
-        let Some(selection) = selection_epoch_digest.or(facts.selection_epoch_digest) else {
-            return Ok(facts);
-        };
-        if facts.account_binding != Some(rejected.account_binding) {
-            return Ok(facts);
-        }
         if facts
             .selection_epoch_digest
             .is_some_and(|current| current != selection)
         {
             return Err(CustodyError::FenceMoved {
-                facts: Box::new(facts),
+                facts: Box::new(facts.clone()),
             });
         }
         let selection =
@@ -225,7 +178,7 @@ impl CodexSubscriptionCredentialManager {
         {
             return Err(store_error(error));
         }
-        Ok(self.settled_snapshot(slot).await?.0)
+        Ok(true)
     }
 }
 

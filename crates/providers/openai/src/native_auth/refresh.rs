@@ -23,6 +23,7 @@ use super::{
     validate_profile, validate_profile_at,
 };
 use plakous_auth::custody::{CustodyStatus, IdentityDigest, RefreshRequest as CustodyRefresh};
+use plakous_auth::oauth_orchestrator::select_refresh_fence;
 
 #[derive(Serialize)]
 pub(super) struct RefreshRequest<'a> {
@@ -62,29 +63,8 @@ pub(super) struct RefreshProbePause {
     pub(super) resume: Arc<tokio::sync::Notify>,
 }
 
-/// When a claimed refresh runs although the stored access token is not yet
-/// inside its refresh lead (the provider rejected it with HTTP 401).
-#[derive(Clone, Copy)]
-pub(super) enum RefreshForce<'a> {
-    /// Only when the access token is due.
-    IfDue,
-    /// Always (an explicit refresh).
-    Always,
-    /// Only while the store, read under the flight, still holds this exact
-    /// rejected generation: a concurrent rotation of the same login is not
-    /// rotated again.
-    WhileCurrent(&'a CredentialFence),
-}
-
-impl RefreshForce<'_> {
-    pub(super) fn forces(self, current: &CredentialFence) -> bool {
-        match self {
-            Self::IfDue => false,
-            Self::Always => true,
-            Self::WhileCurrent(rejected) => rejected == current,
-        }
-    }
-}
+pub(super) type RefreshForce<'a> =
+    plakous_auth::oauth_orchestrator::RefreshForce<&'a CredentialFence>;
 
 impl CodexRefreshHooks<'_> {
     pub(super) fn check_expected(
@@ -154,12 +134,14 @@ impl CodexRefreshHooks<'_> {
         if fence.account_binding() != selected {
             return Err(NativeCodexAuthError::AccountChanged);
         }
-        match ready_due {
-            Some(false) if !self.force.forces(&fence) => Ok(None),
-            Some(_) => Ok(Some(fence)),
-            None if fence.status() == CredentialStatus::RefreshRequired => Ok(Some(fence)),
-            None => Err(NativeCodexAuthError::Unavailable),
-        }
+        let forced = self.force.forces(&fence);
+        select_refresh_fence(
+            fence,
+            ready_due,
+            forced,
+            false,
+            NativeCodexAuthError::Unavailable,
+        )
     }
 
     #[cfg(test)]
