@@ -1,6 +1,6 @@
-use super::common_error::map_credential_status;
+use super::common_error::{map_credential_status, map_optional_credential_status};
 use super::login::{PendingCompatibilityConsent, complete_pending_with_consent};
-use super::online::{LocalLogin, auth_client, map_offline_lifecycle, run_refresh};
+use super::online::{LocalLogin, auth_client, map_offline_lifecycle, refresh_status};
 use super::vertical::{NativeFuture, NativeVertical, NativeVerticalEntry};
 use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, ModelId,
@@ -541,26 +541,19 @@ impl NativeVertical for Vertical {
         force: bool,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            let manager = subscriptions.xai_online().await?.manager;
-            let forced = Arc::clone(&manager);
-            run_refresh(
+            refresh_status(
+                subscriptions.xai_online().await?.manager,
                 force,
-                || async move { forced.refresh_now().await },
-                || manager.refresh_if_needed(),
+                |manager| async move { manager.refresh_now().await },
+                |manager| async move { manager.refresh_if_needed().await },
+                |manager| {
+                    manager.status().map(|status| {
+                        map_optional_credential_status(status.map(|value| value.status()))
+                    })
+                },
                 map_xai_error,
             )
-            .await?;
-            run_blocking(move || {
-                manager
-                    .status()
-                    .map(|status| {
-                        status.map_or(NativeAuthStatus::SignedOut, |value| {
-                            map_credential_status(value.status())
-                        })
-                    })
-                    .map_err(map_xai_error)
-            })
-            .await?
+            .await
         })
     }
     fn revoke<'a>(
@@ -823,5 +816,3 @@ pub(super) static ENTRY: NativeVerticalEntry = NativeVerticalEntry {
     provider: NativeProvider::Xai,
     vertical: &Vertical,
 };
-
-super::custody::login_custody!(plakous_xai::XaiNativeAuthManager);

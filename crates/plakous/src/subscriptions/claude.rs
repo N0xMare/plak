@@ -1,6 +1,6 @@
-use super::common_error::map_credential_status;
+use super::common_error::{map_credential_status, map_optional_credential_status};
 use super::login::{PendingCompatibilityConsent, complete_pending_with_consent};
-use super::online::{LocalLogin, auth_client, run_refresh};
+use super::online::{LocalLogin, auth_client, refresh_status};
 use super::vertical::{NativeFuture, NativeVertical, NativeVerticalEntry};
 use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, NativeAuthStatus,
@@ -442,26 +442,19 @@ impl NativeVertical for Vertical {
         force: bool,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            let manager = subscriptions.claude_online().await?.manager;
-            let forced = Arc::clone(&manager);
-            run_refresh(
+            refresh_status(
+                subscriptions.claude_online().await?.manager,
                 force,
-                || async move { forced.refresh_after_rejection().await },
-                || manager.refresh_if_needed(),
+                |manager| async move { manager.refresh_after_rejection().await },
+                |manager| async move { manager.refresh_if_needed().await },
+                |manager| {
+                    manager.status().map(|status| {
+                        map_optional_credential_status(status.map(|value| value.status()))
+                    })
+                },
                 map_claude_error,
             )
-            .await?;
-            run_blocking(move || {
-                manager
-                    .status()
-                    .map(|status| {
-                        status.map_or(NativeAuthStatus::SignedOut, |value| {
-                            map_credential_status(value.status())
-                        })
-                    })
-                    .map_err(map_claude_error)
-            })
-            .await?
+            .await
         })
     }
     fn revoke<'a>(
@@ -791,5 +784,3 @@ mod tests {
         }
     }
 }
-
-super::custody::login_custody!(plakous_anthropic::ClaudeNativeAuthManager);

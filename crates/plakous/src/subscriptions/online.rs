@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use plakous_auth::CredentialSlotId;
 
@@ -89,21 +90,25 @@ pub(super) fn map_offline_lifecycle(
     }
 }
 
-pub(super) async fn run_refresh<E, Forced, IfDue>(
+pub(super) async fn refresh_status<M, E, Forced, IfDue>(
+    manager: Arc<M>,
     force: bool,
-    forced: impl FnOnce() -> Forced,
-    if_due: impl FnOnce() -> IfDue,
+    forced: impl FnOnce(Arc<M>) -> Forced,
+    if_due: impl FnOnce(Arc<M>) -> IfDue,
+    status: impl FnOnce(&M) -> Result<NativeAuthStatus, E> + Send + 'static,
     map_error: fn(E) -> NativeSubscriptionError,
-) -> Result<(), NativeSubscriptionError>
+) -> Result<NativeAuthStatus, NativeSubscriptionError>
 where
+    M: Send + Sync + 'static,
     E: Send + 'static,
     Forced: Future<Output = Result<(), E>> + Send + 'static,
     IfDue: Future<Output = Result<(), E>>,
 {
     if force {
-        detached(Box::pin(forced())).await?
+        detached(Box::pin(forced(Arc::clone(&manager)))).await?
     } else {
-        Box::pin(if_due()).await
+        Box::pin(if_due(Arc::clone(&manager))).await
     }
-    .map_err(map_error)
+    .map_err(map_error)?;
+    run_blocking(move || status(&manager).map_err(map_error)).await?
 }

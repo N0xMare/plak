@@ -1,5 +1,11 @@
 use super::NativeAuthStatus;
 
+pub(super) fn map_optional_credential_status(
+    status: Option<plakous_auth::CredentialStatus>,
+) -> NativeAuthStatus {
+    status.map_or(NativeAuthStatus::SignedOut, map_credential_status)
+}
+
 #[allow(
     clippy::match_same_arms,
     reason = "unknown non-exhaustive lifecycle states fail closed as quarantined"
