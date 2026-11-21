@@ -411,6 +411,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             self.host.home,
                             self.host.log,
                             self.host.session,
+                            true,
                         );
                         #[cfg(test)]
                         if self.host.session.store_revision != revision {

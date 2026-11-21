@@ -573,7 +573,12 @@ type AccountDispatch<P, E> = (Result<AccountDelivery<P>, E>, Option<AccountReadi
 struct PendingAccountRead<P: ProtocolExtension> {
     session: String,
     delivery: AccountDelivery<P>,
-    answer: tokio::sync::oneshot::Receiver<AccountReadiness>,
+    answer: AccountAnswer,
+}
+
+enum AccountAnswer {
+    Reading(tokio::sync::oneshot::Receiver<AccountReadiness>),
+    Ready(AccountReadiness),
 }
 
 /// Readiness never owns the root driver. Retain the original intent (including
@@ -592,6 +597,21 @@ impl<P: ProtocolExtension> Default for AccountReads<P> {
 impl<P: ProtocolExtension> AccountReads<P> {
     pub(super) fn pending(&self) -> bool {
         !self.0.is_empty()
+    }
+
+    pub(super) async fn ready(&mut self) {
+        if let Some(next) = self.0.front_mut() {
+            if let AccountAnswer::Reading(answer) = &mut next.answer {
+                next.answer =
+                    AccountAnswer::Ready(answer.await.unwrap_or_else(|_| Self::read_incomplete()));
+            }
+        } else {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    fn read_incomplete() -> AccountReadiness {
+        Err("the account readiness read did not complete".into())
     }
 
     /// Give incoming controls priority over a completed read. `None` means
@@ -647,7 +667,7 @@ impl<P: ProtocolExtension> AccountReads<P> {
         self.0.push_back(PendingAccountRead {
             session: session.to_owned(),
             delivery,
-            answer,
+            answer: AccountAnswer::Reading(answer),
         });
         None
     }
@@ -655,17 +675,23 @@ impl<P: ProtocolExtension> AccountReads<P> {
     fn take_ready(&mut self, session: &str) -> Option<(AccountDelivery<P>, AccountReadiness)> {
         use tokio::sync::oneshot::error::TryRecvError;
         let next = self.0.front_mut()?;
-        let answer = match next.answer.try_recv() {
-            Ok(answer) => answer,
-            Err(TryRecvError::Empty) => return None,
-            Err(TryRecvError::Closed) => Err("the account readiness read did not complete".into()),
+        if let AccountAnswer::Reading(answer) = &mut next.answer {
+            next.answer = AccountAnswer::Ready(match answer.try_recv() {
+                Ok(answer) => answer,
+                Err(TryRecvError::Empty) => return None,
+                Err(TryRecvError::Closed) => Self::read_incomplete(),
+            });
+        }
+        let ready = self.0.pop_front()?;
+        let AccountAnswer::Ready(answer) = ready.answer else {
+            unreachable!("the front read was settled");
         };
-        let answer = if next.session == session {
+        let answer = if ready.session == session {
             answer
         } else {
             Err("the session moved while reading account readiness".into())
         };
-        self.0.pop_front().map(|ready| (ready.delivery, answer))
+        Some((ready.delivery, answer))
     }
 }
 

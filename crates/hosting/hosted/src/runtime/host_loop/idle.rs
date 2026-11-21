@@ -79,7 +79,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .state_roots
             .job_registry()
             .observations_ready();
-        let mut tree = self.role.idle_tree_housekeeping.observe_changes();
+        // Keep the change for the first project pass after storage recovers.
+        // While project() is blocked, it cannot advance the original receiver.
+        let mut tree =
+            if self.role.storage_interrupted && self.role.config.store.storage_unavailable() {
+                None
+            } else {
+                self.role.idle_tree_housekeeping.observe_changes()
+            };
         let mut projected = self
             .role
             .live
@@ -91,7 +98,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .idle_release
             .as_ref()
             .map(|release| release.attachments.changed());
+        let step = &self.role.events.step_control;
+        let step_changed = step.changed.notified();
+        tokio::pin!(step_changed);
+        step_changed.as_mut().enable();
         loop {
+            if step.requested() {
+                return Ok(None);
+            }
             match self.role.actions.try_recv() {
                 Ok(delivery) => return Ok(Some(delivery)),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -102,7 +116,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             tokio::select! {
                 biased;
                 () = self.role.actions.ready() => {}
-                () = self.role.events.step_control.changed.notified() => return Err(RecvTimeoutError::Timeout),
+                () = &mut step_changed => {
+                    return if step.requested() { Ok(None) } else { Err(RecvTimeoutError::Timeout) };
+                }
                 () = async {
                     match residency {
                         Some(change) => change.notified().await,

@@ -5,8 +5,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) async fn wait_step_hold(&self) -> bool {
         let control = &self.role.events.step_control;
         control.observe_agent(self.opened.agent());
-        while control.requested() {
+        loop {
             let changed = control.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if !control.requested() {
+                break;
+            }
             let tree_id = super::super::rebind::durable_tree_id(
                 &self.role.config.topology_rows(),
                 &self.role.config.session,
@@ -38,7 +43,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 break;
             }
             tokio::select! {
-                () = changed => {},
+                () = &mut changed => {},
                 () = self.role.actions.ready() => {},
             }
         }

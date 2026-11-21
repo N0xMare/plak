@@ -1,11 +1,12 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
+use crate::product_config::ProductConfig;
 use crate::product_config::metadata::{FileStamp, file_stamp};
 
 use super::{
-    Listener, PlakPaths, ReloadRequest, enabled, fs, listener_path, private_directory,
-    read_announcement,
+    Listener, PlakPaths, ReloadRequest, fs, listener_path, private_directory, read_announcement,
 };
 
 pub(crate) struct HostedListener {
@@ -66,22 +67,28 @@ impl HostedListener {
 
 type Sources = Vec<(PathBuf, Option<FileStamp>)>;
 
+const FULL_RELOAD_INTERVAL: Duration = Duration::from_mins(3);
+
 #[derive(Default)]
-pub(crate) struct ReloadPolicy(Option<(Sources, bool)>);
+pub(crate) struct ReloadPolicy(Option<(Sources, bool, Instant)>);
 
 impl ReloadPolicy {
     pub(crate) fn enabled(&mut self, paths: &PlakPaths) -> bool {
-        let Ok(sources) = sources(paths) else {
-            self.0 = None;
-            return enabled(paths);
-        };
-        if let Some((prior, allow)) = &self.0
-            && *prior == sources
+        self.enabled_at(paths, Instant::now())
+    }
+
+    fn enabled_at(&mut self, paths: &PlakPaths, now: Instant) -> bool {
+        let stamps = sources(paths).ok();
+        if let Some((prior, allow, until)) = &self.0
+            && now < *until
+            && stamps.as_ref() == Some(prior)
         {
             return *allow;
         }
-        let allow = enabled(paths);
-        self.0 = Some((sources, allow));
+        let (allow, cacheable) = ProductConfig::reload_policy(paths);
+        self.0 = stamps
+            .filter(|_| cacheable)
+            .map(|stamps| (stamps, allow, now + FULL_RELOAD_INTERVAL));
         allow
     }
 }
@@ -153,10 +160,35 @@ mod tests {
             !policy.enabled(&paths),
             "a malformed template refuses the load"
         );
+        assert!(policy.0.is_some(), "a parse failure is cacheable");
         fs::remove_file(template).unwrap();
         assert!(policy.enabled(&paths));
         fs::remove_file(config).unwrap();
         assert!(!policy.enabled(&paths));
+    }
+
+    #[test]
+    fn unchanged_stamps_expire_and_io_refusals_are_not_cached() {
+        let (_home, paths) = PlakPaths::isolated_test_home();
+        let config = paths.config_file();
+        fs::create_dir_all(&config).unwrap();
+        let now = Instant::now();
+        let mut policy = ReloadPolicy::default();
+        assert!(sources(&paths).is_ok(), "metadata lookup did not fail");
+        assert!(
+            !policy.enabled_at(&paths, now),
+            "a directory cannot be read as configuration"
+        );
+        assert!(policy.0.is_none(), "the I/O refusal must be tried again");
+
+        fs::remove_dir(&config).unwrap();
+        fs::write(&config, "[host]\nreload_requests = true\n").unwrap();
+        let stamps = sources(&paths).unwrap();
+        let expires = now + FULL_RELOAD_INTERVAL;
+        // Simulate a change invisible to the metadata stamp.
+        policy.0 = Some((stamps, false, expires));
+        assert!(!policy.enabled_at(&paths, now));
+        assert!(policy.enabled_at(&paths, expires));
     }
 
     #[test]

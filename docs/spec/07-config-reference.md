@@ -170,9 +170,10 @@ must satisfy TOML syntax and schema validation; invalid values are load errors
 even in a home-scoped section.
 
 When deciding whether to announce a hosted session for reload requests, the
-service reuses its last validated `host.reload_requests` decision while the
-configuration sources are unchanged. A changed configuration or template is
-subject to the usual full-load validation.
+service reuses its last `host.reload_requests` decision while the source
+metadata is unchanged, for at most three minutes. Changed sources and expired
+decisions go through the usual full load and validation. An I/O error does not
+leave a cached decision.
 
 A project-scope `config set orchestration.*` fails with a hint
 to use `--scope user`. A

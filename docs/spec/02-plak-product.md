@@ -2105,9 +2105,9 @@ invented queue flags. Until the background projector supplies the missing
 command fact, the next queue admission is deferred; it never resends a command
 on a stale join. Queue edits remain locked for submissions without a fact.
 Busy turns request a background projector pass and refresh the submission/fact
-join at most once every 250 ms, including while a tool is parked. Only one
-join read may be outstanding; neither periodic pass nor periodic join read holds
-the streaming/control loop. An asynchronous join cannot replace a submission
+join on new submission or projection facts. A refused join arms a one-shot
+retry after 250 ms, including while a tool is parked. Only one join read may
+be outstanding; it does not hold the streaming/control loop. An asynchronous join cannot replace a submission
 snapshot that changed while it was in flight. Send-now also refreshes the applied join before checking
 its guard. Caught-up facts clear the live debt without waiting for turn settlement.
 A feed page with no records still reads the submission and workflow authority
@@ -2406,6 +2406,9 @@ deadline or sooner at a response boundary. Rate-limited child progress and
 unsettled tree notices can also arm a one-shot publication deadline. Neither
 clock runs without pending output. A root waiting on unchanged children does
 not poll the store; child results, mail and notices wake the owner on publication.
+An account-readiness reply also wakes the owner without waiting for another
+intent or runtime event. A failed notice-intent write or live projector feed
+arms a 250 ms retry while the failure remains unresolved.
 Tree notices and child milestones are reconciled on a new revision (or
 when retrying a revision whose notices did not settle), not on text deltas
 or progress-only changes. Cancellation and quit retain their own bounded
@@ -6807,8 +6810,9 @@ to resend input with a new identity.
 `host.reload_requests` enables the existing same-user reload-request channel.
 A hosted session's service owns announcements and records the existing
 host-restart refusal, even without an attached client. The service checks the
-channel every 250 ms; a check of unchanged configuration or an unchanged
-announcement uses file metadata, not a content read. This authority does not
+channel every 250 ms. Unchanged announcements use file metadata, not a content
+read. So do unchanged configuration inputs between full reloads, which run at
+least every three minutes; I/O failures are not cached. This authority does not
 depend on an attached application client.
 Build identity/reopen/carry probes remain product services; client reload is
 not host upgrade. The host upgrade coordinator and its receipts remain §4.6's

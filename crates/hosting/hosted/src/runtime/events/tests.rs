@@ -686,6 +686,7 @@ fn notice_intents_commit_by_scope_and_session_not_by_observation() {
         &SessionHome::new(root.path().join("sessions")),
         None,
         &mut session,
+        false,
     );
     let mut expected: Vec<_> = scopes
         .into_iter()
@@ -728,7 +729,7 @@ fn storage_notice_operator_path_never_reaches_session_log_or_exportable_transcri
     events.notice(TranscriptRow::info(NoticeScope::Settings,
         format!("storage unavailable · {private_path}; existing work retained; retrying writes every 5 s")));
     assert!(format!("{:?}", receiver.try_iter().collect::<Vec<_>>()).contains(private_path));
-    commit_notice_intents(&events, &store, &home, Some(&log), &mut session);
+    commit_notice_intents(&events, &store, &home, Some(&log), &mut session, false);
     let stored = store.load(&session.id).unwrap();
     let exported_rows =
         serde_json::to_string(&stored.transcript.iter().collect::<Vec<_>>()).unwrap();

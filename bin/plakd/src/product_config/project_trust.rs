@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::home::paths::PlakPaths;
 
 use super::atomic::{AtomicStage, atomic_file};
-use super::load::ConfigSaveError;
+use super::load::{ConfigLoadError, ConfigSaveError};
 
 /// Whether `root`'s `.plak` may contribute configuration. A root that cannot
 /// be canonicalized, or a registry that cannot be read, is untrusted: the
@@ -26,7 +26,14 @@ pub(super) fn is_trusted(paths: &PlakPaths, root: &Path) -> bool {
     let Ok(root) = canonical(root) else {
         return false;
     };
-    trusted_roots(paths).is_ok_and(|roots| roots.contains(&root))
+    is_canonical_trusted(paths, &root).unwrap_or(false)
+}
+
+pub(super) fn is_canonical_trusted(
+    paths: &PlakPaths,
+    root: &Path,
+) -> Result<bool, ConfigLoadError> {
+    trusted_roots(paths).map(|roots| roots.contains(root))
 }
 
 /// Records `root` as trusted. Returns the canonical path recorded.
@@ -61,24 +68,32 @@ fn canonical(root: &Path) -> Result<PathBuf, String> {
     })
 }
 
-fn trusted_roots(paths: &PlakPaths) -> Result<BTreeSet<PathBuf>, String> {
+fn trusted_roots(paths: &PlakPaths) -> Result<BTreeSet<PathBuf>, ConfigLoadError> {
     let file = paths.trusted_projects_file();
     let text = match fs::read_to_string(&file) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(BTreeSet::new());
         }
-        Err(_) => return Err(format!("could not read {}", file.display())),
+        Err(_) => {
+            return Err(ConfigLoadError::Io(format!(
+                "could not read {}",
+                file.display()
+            )));
+        }
     };
-    let document: toml::Value =
-        toml::from_str(&text).map_err(|_| format!("{} is not valid TOML", file.display()))?;
+    let document: toml::Value = toml::from_str(&text)
+        .map_err(|_| ConfigLoadError::Invalid(format!("{} is not valid TOML", file.display())))?;
     let mut roots = BTreeSet::new();
     let Some(entries) = document.get("roots").and_then(toml::Value::as_array) else {
         return Ok(roots);
     };
     for entry in entries {
         let Some(path) = entry.as_str() else {
-            return Err(format!("{} has a non-string root", file.display()));
+            return Err(ConfigLoadError::Invalid(format!(
+                "{} has a non-string root",
+                file.display()
+            )));
         };
         roots.insert(PathBuf::from(path));
     }

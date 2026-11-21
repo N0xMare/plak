@@ -229,6 +229,16 @@ impl JobRegistry {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_test_observation(&self, key: BranchKey, job: plakous::tools::JobView) {
+        assert!(
+            self.events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .record(key, job)
+        );
+    }
+
     /// A registry of one session's jobs under `capacity`, the process's
     /// bound on running process starts.
     pub(crate) fn under(capacity: Arc<JobHostCapacity>) -> Self {

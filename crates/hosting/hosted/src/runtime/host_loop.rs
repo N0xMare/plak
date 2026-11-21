@@ -557,6 +557,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             &self.role.config.home,
             self.role.log.as_ref(),
             &mut self.role.config.session,
+            true,
         );
     }
 

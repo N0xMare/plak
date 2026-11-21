@@ -6,6 +6,9 @@ use crate::runtime::projection::live::{Applied, LiveProjector};
 use crate::topology_runtime::ProductTopologyRuntime;
 use std::sync::Arc;
 use tokio::sync::{Notify, watch};
+use tokio::time::Instant as Deadline;
+
+pub(super) const RETRY_BACKOFF: super::Duration = super::Duration::from_millis(250);
 
 pub(super) struct Housekeeping {
     pub(super) tree: Option<watch::Receiver<()>>,
@@ -16,6 +19,9 @@ pub(super) struct Housekeeping {
     pub(super) jobs: Arc<Notify>,
     pub(super) projection: Option<watch::Receiver<Applied>>,
     queue_due: bool,
+    pub(super) queue_retry_at: Option<Deadline>,
+    projection_retry_at: Option<Deadline>,
+    notice_retry_at: Option<Deadline>,
     pub(super) usage_not_before: Instant,
     pub(super) mailbox_closed: bool,
 }
@@ -42,9 +48,23 @@ impl Housekeeping {
                 .as_deref()
                 .map(LiveProjector::observe_applied),
             queue_due: true,
+            queue_retry_at: None,
+            projection_retry_at: None,
+            notice_retry_at: None,
             usage_not_before: Instant::now(),
             mailbox_closed: false,
         }
+    }
+
+    pub(super) fn retry_deadline(&self) -> Option<Deadline> {
+        [
+            self.queue_retry_at,
+            self.projection_retry_at,
+            self.notice_retry_at,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 }
 
@@ -57,6 +77,23 @@ pub(super) async fn changed<T>(receiver: Option<&mut watch::Receiver<T>>) -> boo
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
+    pub(super) fn commit_turn_notices(&mut self) {
+        let retry = &mut self.housekeeping.notice_retry_at;
+        let now = Deadline::now();
+        if retry.is_some_and(|at| at > now) {
+            return;
+        }
+        let settled = super::super::events::commit_notice_intents(
+            self.host.events,
+            self.host.store,
+            self.host.home,
+            self.host.log,
+            self.host.session,
+            retry.is_some(),
+        );
+        *retry = (!settled).then(|| Deadline::now() + RETRY_BACKOFF);
+    }
+
     pub(super) fn runtime_housekeeping(&mut self, event: &plakous::agent::AgentEvent) {
         // A model/tool boundary can re-open notice delivery at a new
         // checkpoint or begin a repeat process observation.
@@ -88,7 +125,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 if matches!(wake, RootWake::Intent) {
                     self.last_wake = "intent";
                 }
-                if let Some(live) = self.host.live_projector.as_mut() {
+                if state.projection_retry_at.is_none()
+                    && let Some(live) = self.host.live_projector.as_mut()
+                {
                     live.tick(self.host.live_target.clone());
                 }
                 state.queue_due = true;
@@ -114,12 +153,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 state.tree_due = state.tree_due.max(TreeCheck::Progress);
             }
             RootWake::NoticeReply => {
+                #[cfg(test)]
+                let _ = super::wake_trace::MAIL_REPLIES
+                    .try_with(|replies| replies.set(replies.get() + 1));
                 self.notice_reply = None;
                 state.mail_due = true;
             }
             RootWake::Projection(open) => {
                 if !open {
                     state.projection = None;
+                }
+                if !open
+                    || self
+                        .host
+                        .live_projector
+                        .as_deref()
+                        .is_some_and(LiveProjector::retry_needed)
+                {
+                    state
+                        .projection_retry_at
+                        .get_or_insert_with(|| Deadline::now() + RETRY_BACKOFF);
                 }
                 state.queue_due = true;
             }
@@ -143,13 +196,35 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 );
                 state.usage_not_before = Instant::now() + std::time::Duration::from_secs(1);
             }
-            RootWake::Notice | RootWake::Jobs | RootWake::StepControl | RootWake::Cancel => {}
+            RootWake::Notice
+            | RootWake::Jobs
+            | RootWake::StepControl
+            | RootWake::Cancel
+            | RootWake::AccountRead
+            | RootWake::Retry => {}
         }
     }
 
     pub(super) fn observe_housekeeping(&mut self) {
         let state = &mut self.housekeeping;
-        if state.queue_due && self.queue_refresh.is_none() {
+        let now = Deadline::now();
+        if state.projection_retry_at.is_some_and(|at| at <= now) {
+            state.projection_retry_at = None;
+            if let Some(live) = self.host.live_projector.as_mut() {
+                if state.projection.is_none() || live.stopped() {
+                    live.restart();
+                    state.projection = Some(live.observe_applied());
+                    live.tick(self.host.live_target.clone());
+                } else {
+                    live.ensure_following(self.host.live_target.clone(), false);
+                }
+            }
+        }
+        if state.queue_retry_at.is_some_and(|at| at <= now) {
+            state.queue_retry_at = None;
+            state.queue_due = true;
+        }
+        if state.queue_due && state.queue_retry_at.is_none() && self.queue_refresh.is_none() {
             state.queue_due = false;
             self.start_queue_projection();
         }
@@ -193,6 +268,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             self.poll_mail_notice();
         }
     }
+}
+
+pub(super) async fn wait_projection(
+    receiver: Option<&mut watch::Receiver<Applied>>,
+    queue_pending: bool,
+) -> bool {
+    let Some(receiver) = receiver else {
+        return std::future::pending().await;
+    };
+    while receiver.changed().await.is_ok() {
+        if queue_pending || receiver.borrow_and_update().failed() {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) async fn wait_children(tree: Option<&ProductTopologyRuntime>) -> Vec<ObservedChild> {

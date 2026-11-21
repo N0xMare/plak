@@ -153,6 +153,12 @@ pub(in crate::runtime) struct Applied {
     subscription_lost: bool,
 }
 
+impl Applied {
+    pub(in crate::runtime) fn failed(&self) -> bool {
+        self.error.is_some() || self.subscription_lost
+    }
+}
+
 /// A request is answered once even when a feed wake repeats it.
 type Reply<T> = Arc<std::sync::Mutex<Option<oneshot::Sender<Result<T, String>>>>>;
 
@@ -233,14 +239,14 @@ impl LiveProjector {
             .borrow()
             .as_ref()
             .is_none_or(|request| !request.target.same_session(&target));
-        let retry = {
-            let applied = self.applied.borrow();
-            applied.generation == self.generation
-                && (applied.error.is_some() || applied.subscription_lost)
-        };
-        if entry || retarget || retry {
+        if entry || retarget || self.retry_needed() {
             self.tick(target);
         }
+    }
+
+    pub(in crate::runtime) fn retry_needed(&self) -> bool {
+        let applied = self.applied.borrow();
+        applied.generation == self.generation && applied.failed()
     }
 
     pub(crate) fn take_change(&mut self) -> bool {
@@ -279,7 +285,7 @@ impl LiveProjector {
     /// Replaces a stopped task with a fresh one, which loads the views
     /// again and reconciles every retained settled row once. Call it inside
     /// the host's executor.
-    fn restart(&mut self) {
+    pub(in crate::runtime) fn restart(&mut self) {
         let generation = self.generation;
         *self = Self::spawn(&self.tasks);
         self.generation = generation;

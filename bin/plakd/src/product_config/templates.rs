@@ -1,7 +1,9 @@
 //! Agent template files: render, parse, and the first-run config.
 
 use super::atomic::atomic_file;
-use super::load::{ConfigSaveError, ConfigValueOrigin, ProductConfig};
+use super::load::{
+    ConfigLoadError, ConfigSaveError, ConfigValueOrigin, ProductConfig, optional_input,
+};
 use super::policy::{AgentTemplate, validate_template_name};
 use super::toml_file;
 use crate::home::paths::PlakPaths;
@@ -337,44 +339,58 @@ type TaggedTemplates = (
 pub(super) fn load_templates_dir(
     dir: &Path,
     origin: ConfigValueOrigin,
-) -> Result<TaggedTemplates, String> {
+    cacheable: &mut bool,
+) -> Result<TaggedTemplates, ConfigLoadError> {
     let mut templates = BTreeMap::new();
     let mut origins = BTreeMap::new();
-    for (name, path) in template_files(dir)? {
-        let text = fs::read_to_string(&path)
-            .map_err(|_| format!("could not read template {}", path.display()))?;
-        let template =
-            parse_template(&text, &name).map_err(|error| format!("{}: {error}", path.display()))?;
+    for (name, path) in template_files(dir, cacheable)? {
+        let text = fs::read_to_string(&path).map_err(|_| {
+            ConfigLoadError::Io(format!("could not read template {}", path.display()))
+        })?;
+        let template = parse_template(&text, &name)
+            .map_err(|error| ConfigLoadError::Invalid(format!("{}: {error}", path.display())))?;
         templates.insert(name.clone(), template);
         origins.insert(name, origin);
     }
     Ok((templates, origins))
 }
 
-fn template_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+fn template_files(
+    dir: &Path,
+    cacheable: &mut bool,
+) -> Result<Vec<(String, PathBuf)>, ConfigLoadError> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err(format!("could not read {}", dir.display())),
+        Err(_) => {
+            return Err(ConfigLoadError::Io(format!(
+                "could not read {}",
+                dir.display()
+            )));
+        }
     };
     let mut files = Vec::new();
     for entry in entries {
         let path = entry
-            .map_err(|_| format!("could not read {}", dir.display()))?
+            .map_err(|_| ConfigLoadError::Io(format!("could not read {}", dir.display())))?
             .path();
-        if path.extension().is_none_or(|extension| extension != "toml") || !path.is_file() {
+        if path.extension().is_none_or(|extension| extension != "toml")
+            || !optional_input(fs::metadata(&path), cacheable)
+                .is_some_and(|metadata| metadata.is_file())
+        {
             continue;
         }
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            return Err(format!(
+            return Err(ConfigLoadError::Invalid(format!(
                 "template file {} has no UTF-8 name",
                 path.display()
-            ));
+            )));
         };
         if stem.starts_with('.') {
             continue;
         }
-        validate_template_name(stem).map_err(|error| format!("{}: {error}", path.display()))?;
+        validate_template_name(stem)
+            .map_err(|error| ConfigLoadError::Invalid(format!("{}: {error}", path.display())))?;
         files.push((stem.to_owned(), path));
     }
     files.sort();

@@ -70,7 +70,8 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
     home: &SessionHome,
     log: Option<&SessionLog>,
     session: &mut SessionRecord,
-) {
+    retry_pending: bool,
+) -> bool {
     let mut rows = Vec::new();
     for kept in events.take_notice_intents() {
         match kept.session_id {
@@ -83,13 +84,13 @@ pub(super) fn commit_notice_intents<P: plakous_host_protocol::ProtocolExtension>
             _ => rows.push(kept.row),
         }
     }
-    if rows.is_empty() {
-        return;
+    if rows.is_empty() && (!retry_pending || session.transcript.pending_notices().is_empty()) {
+        return true;
     }
     for row in rows {
         session.record_notice(row);
     }
-    let _ = commit_session_update(store, home, session, |_| true);
+    commit_session_update(store, home, session, |_| true).is_ok()
 }
 
 #[allow(

@@ -103,7 +103,7 @@ impl StepControl {
 
     pub(crate) fn interrupt(&self) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.generation.is_some() {
+        if state.generation.is_some() && !state.interrupted {
             state.interrupted = true;
             self.changed.notify_waiters();
         }

@@ -144,26 +144,39 @@ pub trait TopologyRows: TreeRows {
 /// `source_product_session_id`
 /// until a hub or stored tree exists, then that genesis id.
 pub fn durable_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> String {
+    resolve_tree_id(rows, session).0
+}
+
+/// A usable lookup hint plus whether the entire walk was authoritative.
+pub(super) fn resolve_tree_id(rows: &dyn TopologyRows, session: &SessionRecord) -> (String, bool) {
     let mut candidate = session.id.clone();
     let mut next_source = session.inherited_tree_source().map(str::to_owned);
     let mut seen = std::collections::BTreeSet::new();
+    let mut resolved = true;
     loop {
         if !seen.insert(candidate.clone()) {
             break;
         }
         if lookup(&candidate).is_some() {
-            return candidate;
+            return (candidate, resolved);
         }
-        if rows.tree_exists(&candidate).unwrap_or(false) {
-            return candidate;
+        match rows.tree_exists(&candidate) {
+            Ok(true) => return (candidate, resolved),
+            Ok(false) => {}
+            Err(_) => resolved = false,
         }
         let Some(source) = next_source else {
             break;
         };
-        next_source = rows.tree_source(&source).ok().flatten();
+        next_source = if let Ok(source) = rows.tree_source(&source) {
+            source
+        } else {
+            resolved = false;
+            None
+        };
         candidate = source;
     }
-    session.id.clone()
+    (session.id.clone(), resolved)
 }
 
 /// Operator-facing reason when rebind is blocked.

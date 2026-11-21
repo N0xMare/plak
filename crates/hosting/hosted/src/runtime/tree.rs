@@ -95,7 +95,7 @@ impl TreeSnapshotPush {
 
     /// The topology runtime this session's canvas is watching, if any.
     ///
-    /// Resolution is at most one lineage walk per bound session. Both recovery
+    /// Cache the lineage walk only once it succeeds. Both recovery
     /// paths below are hub-map lookups, never a store open, so the streamed-event
     /// cost stays a single `HashMap` probe.
     pub(super) fn runtime(
@@ -112,9 +112,14 @@ impl TreeSnapshotPush {
             self.last_notice_revision = None;
             self.notified_results.clear();
         }
-        let cached = self
-            .tree_id
-            .get_or_insert_with(|| durable_tree_id(rows, session));
+        if self.tree_id.is_none() {
+            let (tree_id, resolved) = super::topology_state::resolve_tree_id(rows, session);
+            if !resolved {
+                return crate::topology_runtime::lookup(&tree_id);
+            }
+            self.tree_id = Some(tree_id);
+        }
+        let cached = self.tree_id.as_mut()?;
         if let Some(runtime) = crate::topology_runtime::lookup(cached) {
             self.retirement_faults
                 .get_or_insert_with(|| runtime.observe_retirement_faults());

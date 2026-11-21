@@ -178,7 +178,7 @@ mod finish;
 mod prefix_tests;
 mod queue_projection;
 mod wakes;
-use wakes::{changed, wait_children, wait_queue, wait_reply};
+use wakes::{changed, wait_children, wait_projection, wait_queue, wait_reply};
 
 pub(in crate::runtime) async fn drive_recovered_turn<
     P: plakous_host_protocol::ProtocolExtension,
@@ -304,12 +304,14 @@ enum RootWake {
     ChildTable(Vec<super::child_live::ObservedChild>),
     ChildProgress,
     NoticeReply,
+    AccountRead,
     Notice,
     Jobs,
     StepControl,
     Cancel,
     Projection(bool),
     Queue(Option<sessions::QueueCommands>),
+    Retry,
     Usage,
 }
 
@@ -326,13 +328,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
             #[cfg(test)]
             prefix_tests::after_round_pass(&self.host.live_target, through);
         }
-        super::events::commit_notice_intents(
-            self.host.events,
-            self.host.store,
-            self.host.home,
-            self.host.log,
-            self.host.session,
-        );
+        self.commit_turn_notices();
         for row in self
             .host
             .job_events
@@ -371,10 +367,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
     }
 
     fn awaits_result(&self) -> bool {
+        #[cfg(test)]
+        if !wake_trace::engine_observations_enabled() {
+            return false;
+        }
         self.turn_result.is_none()
     }
 
     fn awaits_events(&self) -> bool {
+        #[cfg(test)]
+        if !wake_trace::engine_observations_enabled() {
+            return false;
+        }
         !self.events_done
     }
 
@@ -402,6 +406,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
             .then(|| (self.last_flush + super::turn::ASSISTANT_DELTA_WINDOW).into());
         let state = &mut self.housekeeping;
         let tree_output_at = state.tree_output_deadline;
+        let retry_at = state.retry_deadline();
         let progress_ready = &self.host.last_tree_revision.child_live.progress_ready;
         let usage_at = surface::usage_watch_armed(self.host.surface.as_deref()).then(|| {
             self.host
@@ -411,6 +416,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         });
         let cancel_at = self.cancel_settle_deadline;
         let reply = self.notice_reply.as_mut();
+        let accounts = &mut *self.host.account_reads;
         let queue = self.queue_refresh.as_mut();
         let queue_pending = self.host.session.queue_projection_debt
             || self.host.session.queue_commands.has_pending();
@@ -433,9 +439,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                 children = wait_children(state.resync_children.as_deref()) => RootWake::ChildTable(children),
                 () = progress_ready.notified(), if tree_output_at.is_none() => RootWake::ChildProgress,
                 () = wait_deadline(tree_output_at) => RootWake::ChildProgress,
-                open = changed(state.projection.as_mut()), if queue_pending => RootWake::Projection(open),
+                open = wait_projection(state.projection.as_mut(), queue_pending) => RootWake::Projection(open),
+                () = accounts.ready(), if takes_actions => RootWake::AccountRead,
                 () = wait_reply(reply) => RootWake::NoticeReply,
                 commands = wait_queue(queue) => RootWake::Queue(commands),
+                () = wait_deadline(retry_at) => RootWake::Retry,
                 () = wait_deadline(usage_at) => RootWake::Usage,
             }
         }
@@ -463,6 +471,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
             crate::node::TurnWake::Event(ev) => {
                 match ev {
                     Ok(event) => {
+                        #[cfg(test)]
+                        wake_trace::isolate_wait(self, &event);
                         self.runtime_housekeeping(&event);
                         if matches!(event.kind(), AgentEventKind::SteeringApplied) {
                             self.steering_projection_due = true;

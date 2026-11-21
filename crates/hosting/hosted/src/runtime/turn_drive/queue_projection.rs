@@ -64,6 +64,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             && refresh.is_some_and(|refresh| refresh.expected == self.host.session.queue_commands)
         {
             self.apply_queue_join(commands);
+        } else {
+            self.housekeeping.queue_retry_at =
+                Some(tokio::time::Instant::now() + super::wakes::RETRY_BACKOFF);
         }
     }
 

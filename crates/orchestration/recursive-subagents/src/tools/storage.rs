@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct TreeMutationGuard<'a> {
     live: &'a Mutex<ProductAgentTree>,
     observations: &'a tokio::sync::watch::Sender<()>,
-    previous_revision: u64,
+    previous_revision: (u64, u64),
     locked: Option<MutexGuard<'a, ProductAgentTree>>,
     candidate: Option<ProductAgentTree>,
 }
@@ -30,7 +30,7 @@ impl<'a> TreeMutationGuard<'a> {
         Ok(Self {
             live,
             observations,
-            previous_revision: locked.stored_revision,
+            previous_revision: (locked.revision, locked.stored_revision),
             locked: Some(locked),
             candidate: None,
         })
@@ -64,7 +64,7 @@ impl DerefMut for TreeMutationGuard<'_> {
 }
 impl Drop for TreeMutationGuard<'_> {
     fn drop(&mut self) {
-        let advanced = self.previous_revision != self.stored_revision;
+        let advanced = self.previous_revision != (self.revision, self.stored_revision);
         if let Some(candidate) = &mut self.candidate {
             let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
             std::mem::swap(&mut *live, candidate);
