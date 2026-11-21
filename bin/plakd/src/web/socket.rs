@@ -209,7 +209,7 @@ impl Heartbeat {
         match *ping {
             Ping::Idle => {
                 outbox
-                    .ping()
+                    .control(None)
                     .map_err(|_| Ended::Lost("client fell behind"))?;
                 *ping = Ping::Queued;
             }
@@ -282,11 +282,11 @@ struct WebWriter<S> {
 impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
     async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
         let message = match frame {
-            Frame::Line(mut line) => {
+            Some(mut line) => {
                 line.pop(); // the outbox holds newline-terminated frames
                 Message::text(String::from_utf8(line).map_err(|_| SendError::Disconnected)?)
             }
-            Frame::Ping => {
+            None => {
                 // A queued ping does not start its reply deadline while a large
                 // text message is still being written ahead of it.
                 self.heartbeat.sent();
@@ -386,7 +386,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
     pinger.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut rate = Rate::new();
     let mut finished = None;
-    let ended = loop {
+    let mut ended = loop {
         if served.stop.stopped() {
             connection_work(|| {
                 crate::host::lifecycle::stopping(&served.host);
@@ -421,7 +421,6 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                         let _ = connection_work(|| outbox.flush_connection(connection));
                         break Ended::Left;
                     }
-                    Err(_) if outbox.overflowed() => break Ended::Lost("client fell behind"),
                     Err(_) => break Ended::Lost("request failed"),
                 }
             }
@@ -446,6 +445,8 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
     if let Some((mut sink, result)) = finished {
         if result.is_ok() {
             connection.output_sent();
+        } else if matches!(result, Err(SendError::Full)) {
+            ended = Ended::Lost("client fell behind");
         }
         // A failed or cancelled frame may already have been partly written.
         if matches!(result, Ok(()) | Err(SendError::Full)) {

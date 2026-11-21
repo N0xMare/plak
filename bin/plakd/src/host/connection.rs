@@ -37,21 +37,8 @@ struct Pending {
     closed: bool,
 }
 
-pub(crate) enum Frame {
-    Line(Vec<u8>),
-    #[cfg(feature = "web")]
-    Ping,
-}
-
-impl Frame {
-    fn len(&self) -> usize {
-        match self {
-            Self::Line(line) => line.len(),
-            #[cfg(feature = "web")]
-            Self::Ping => 0,
-        }
-    }
-}
+/// A complete wire line, or a transport-native heartbeat (no wire payload).
+pub(crate) type Frame = Option<Vec<u8>>;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SendError {
@@ -73,7 +60,7 @@ impl Outbox {
     }
 
     fn push(&self, frame: Frame, control: bool) -> io::Result<()> {
-        let len = frame.len();
+        let len = frame.as_ref().map_or(0, Vec::len);
         let mut queue = self.lock();
         if queue.closed || queue.overflowed {
             return Err(io::Error::other("the client fell behind or left"));
@@ -97,19 +84,13 @@ impl Outbox {
         Ok(())
     }
 
-    #[cfg(feature = "web")]
-    pub(crate) fn ping(&self) -> io::Result<()> {
-        self.push(Frame::Ping, true)
+    pub(crate) fn control(&self, frame: Frame) -> io::Result<()> {
+        self.push(frame, true)
     }
 
     pub(crate) fn close(&self) {
         self.lock().closed = true;
         self.0.ready.notify_one();
-    }
-
-    #[cfg(feature = "web")]
-    pub(crate) fn overflowed(&self) -> bool {
-        self.lock().overflowed
     }
 
     pub(crate) async fn drained(&self) {
@@ -162,7 +143,7 @@ impl Outbox {
             .finishing(
                 async {
                     while let Some((frame, ordered)) = self.pop()? {
-                        let len = frame.len();
+                        let len = frame.as_ref().map_or(0, Vec::len);
                         writer.send_frame(frame).await?;
                         if self.sent(len, ordered) {
                             // The actor can now produce another ordered batch.
@@ -211,7 +192,12 @@ impl Write for Outbox {
         if !line.ends_with(b"\n") {
             return Err(io::Error::other("incomplete wire frame"));
         }
-        self.push(Frame::Line(line.to_vec()), independent_reply(line))?;
+        let frame = Some(line.to_vec());
+        if independent_reply(line) {
+            self.control(frame)?;
+        } else {
+            self.push(frame, false)?;
+        }
         Ok(line.len())
     }
 
@@ -311,12 +297,8 @@ mod tests {
             outbox.write_all(line.as_bytes()).unwrap();
         }
         for index in [6, 7, 9, 0, 1, 2, 3, 4, 5, 8] {
-            let (frame, ordered) = outbox.pop().unwrap().unwrap();
-            let line = match frame {
-                Frame::Line(line) => line,
-                #[cfg(feature = "web")]
-                Frame::Ping => panic!("expected a text frame"),
-            };
+            let (line, ordered) = outbox.pop().unwrap().unwrap();
+            let line = line.unwrap();
             assert_eq!(line, with_bulk[index].as_bytes());
             outbox.sent(line.len(), ordered);
         }

@@ -296,12 +296,11 @@ fn check_length(path: &Path) -> CliResult<()> {
 impl<W: AsyncWrite + Unpin + Send> FrameWriter for ProgressIo<W> {
     async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
         match frame {
-            Frame::Line(line) => self
+            Some(line) => self
                 .write_all(&line)
                 .await
                 .map_err(|_| SendError::Disconnected),
-            #[cfg(feature = "web")]
-            Frame::Ping => Err(SendError::Disconnected),
+            None => Err(SendError::Disconnected),
         }
     }
 }
