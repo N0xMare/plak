@@ -623,7 +623,7 @@ fn readiness_reads_run_off_the_loop_and_only_the_newest_applies() {
     readiness.apply_settled(&mut host, &events);
     assert_eq!(host.catalog.accounts, []);
 
-    let settle = |host: &mut Host, readiness: &ReadinessRefresh| {
+    let settle = |host: &mut Host, readiness: &mut ReadinessRefresh| {
         // A liveness bound only: generous, so load never trips it.
         let deadline = Instant::now() + Duration::from_secs(30);
         while host.catalog.accounts.is_empty() {
@@ -633,7 +633,7 @@ fn readiness_reads_run_off_the_loop_and_only_the_newest_applies() {
         }
     };
     newer_tx.send(()).unwrap();
-    settle(&mut host, &readiness);
+    settle(&mut host, &mut readiness);
     assert_eq!(host.catalog.accounts[0].account, "read-1");
     older_tx.send(()).unwrap();
     thread::sleep(Duration::from_millis(50));

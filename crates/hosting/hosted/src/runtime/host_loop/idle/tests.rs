@@ -445,14 +445,10 @@ fn the_idle_wait_wakes_on_an_intent_and_not_before() {
         "an empty mailbox woke the idle wait {} times",
         polls.get()
     );
-    assert!(
-        host.role
-            .events
-            .notice(crate::sessions::TranscriptRow::info(
-                crate::sessions::NoticeScope::Session,
-                "notice while idle",
-            ))
-    );
+    assert!(host.role.events.notice(TranscriptRow::info(
+        NoticeScope::Session,
+        "notice while idle",
+    )));
     assert!(matches!(
         host.block(async |host| host.receive(window).await),
         Ok(None)
