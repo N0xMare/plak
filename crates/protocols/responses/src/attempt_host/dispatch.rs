@@ -8,8 +8,8 @@ use plakous_http::Response;
 
 use super::{
     Client, Digest, DigestDomain, FailurePoint, FamilyCoreError, HeaderName, HttpCancellationToken,
-    HttpErrorKind, HttpFailure, Instant, ModelProviderRequestId, ModelTransportFault,
-    PhysicalRequestBinding, PhysicalRequestOutcome, ReplaySafety, ResponseBody, ResponsesAttempt,
+    HttpErrorKind, ModelProviderRequestId, ModelTransportFault, PhysicalRequestBinding,
+    PhysicalRequestOutcome, ReplaySafety, ResponseBody, ResponsesAttempt,
     ResponsesAttemptDialectData, ResponsesAttemptError, ResponsesAttemptResponse,
     ResponsesAttemptTerminal, ResponsesAuthSlots, ResponsesAuthorizationAdapter,
     ResponsesContentPart, ResponsesDispatchRejection, ResponsesFamilySseDecoder,

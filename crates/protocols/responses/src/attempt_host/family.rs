@@ -146,12 +146,11 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
     }
 
     fn deadline(&mut self, terminal: Self::Terminal) -> impl Future<Output = Self::Result> + Send {
-        ready(match terminal {
-            Ok(_) => finish_attempt(&self.attempt, terminal, true),
-            Err(_) => {
-                self.attempt.core.mark_failed();
-                Err(self.attempt.deadline_error())
-            }
+        ready(if terminal.is_ok() {
+            finish_attempt(&self.attempt, terminal, true)
+        } else {
+            self.attempt.core.mark_failed();
+            Err(self.attempt.deadline_error())
         })
     }
 }
