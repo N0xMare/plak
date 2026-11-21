@@ -22,7 +22,10 @@ fn directory_creation_time_survives_a_turn_and_host_reopen() {
         created_at > 1_500_000_000,
         "a new session must not report an epoch sentinel"
     );
-    assert_eq!(client.rows(2)[0].created_at, created_at);
+    assert_eq!(
+        client.rows_until(2, |rows| !rows.is_empty())[0].created_at,
+        created_at
+    );
     let attachment = client.attach(3, &node);
     client.prompt(4, attachment, "exercise the directory timestamp", ANSWER);
     profiles::wait_idle(&mut client, &session);

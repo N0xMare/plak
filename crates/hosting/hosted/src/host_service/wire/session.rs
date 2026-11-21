@@ -340,6 +340,11 @@ impl<P: ProtocolExtension> WireSession<P> {
         self.reopening.store(false, Ordering::Release);
     }
 
+    pub(super) fn retire_for_lifecycle(&self) {
+        self.ended.store(true, Ordering::Release);
+        self.reopening.store(false, Ordering::Release);
+    }
+
     /// Asks the session to quit; it ends once it has.
     pub fn quit(&self) {
         let _ = self.actions.send(SessionIntent::Quit);

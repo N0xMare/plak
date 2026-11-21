@@ -1174,10 +1174,14 @@ async fn archive_wins_over_an_undelivered_buffered_attach() {
     })
     .await
     .unwrap();
-    assert!(matches!(
-        outcome(&out.take(), 1),
-        Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
-    ));
+    let refused = outcome(&out.take(), 1);
+    assert!(
+        matches!(
+            refused,
+            Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+        ),
+        "{refused:?}"
+    );
     assert!(attach.node.is_none());
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
 }

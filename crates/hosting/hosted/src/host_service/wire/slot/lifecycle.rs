@@ -43,7 +43,9 @@ where
                 unreachable!("the slot lock retains its worker");
             };
             let result = join(worker, self.release_join);
-            old.end_reopen(None);
+            // The slot and any prepared attach must agree before the
+            // product commits the new metadata, even if the relay is late.
+            old.retire_for_lifecycle();
             self.busy.store(BUSY_NONE, Ordering::Release);
             result.map_err(|failure| RequestRefusal::SessionUnavailable {
                 detail: failure.message().to_owned(),

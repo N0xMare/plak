@@ -390,6 +390,25 @@ impl Client {
         }
     }
 
+    fn rows_until(
+        &mut self,
+        id: RequestId,
+        ready: impl Fn(&[SessionRow]) -> bool,
+    ) -> Vec<SessionRow> {
+        let deadline = std::time::Instant::now() + WAIT;
+        loop {
+            let rows = self.rows(id);
+            if ready(&rows) {
+                return rows;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "directory did not converge: {rows:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     fn attach(&mut self, id: RequestId, node: &NodeAddress) -> u64 {
         match self.request(id, Op::Attach { node: node.clone() }) {
             Outcome::Ok(Answer::Attached { attachment }) => attachment,
@@ -559,7 +578,7 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
     else {
         panic!("session not created");
     };
-    client.attach(2, &node);
+    let attachment = client.attach(2, &node);
     let mut admin = Client::connect(&host);
     let until = std::time::Instant::now() + WAIT;
     loop {
@@ -590,7 +609,13 @@ fn lifecycle_real_product_archive_delete_releases_idle_actor_without_reopen() {
             archived: true
         })
     );
-    assert_eq!(admin.rows(5), []);
+    admin.rows_until(5, <[SessionRow]>::is_empty);
+    loop {
+        if matches!(client.next(), HostFrame::Detached { attachment: ended } if ended == attachment)
+        {
+            break;
+        }
+    }
     assert_eq!(
         admin.request(
             6,
@@ -687,7 +712,7 @@ fn a_client_creates_attaches_and_prompts_a_session_across_host_restarts() {
         client.request(2, new_session(&fixture.workspace())),
         created
     );
-    let rows = client.rows(3);
+    let rows = client.rows_until(3, |rows| !rows.is_empty());
     assert_eq!(rows.len(), 1, "one session for one request: {rows:?}");
     assert_eq!(rows[0].session, session);
     assert_eq!(rows[0].node, node);
@@ -1630,7 +1655,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
     );
     std::fs::remove_dir(&made).unwrap();
     assert_eq!(client.request(6, new_session(&made)), created);
-    assert_eq!(client.rows(7).len(), 1);
+    assert_eq!(client.rows_until(7, |rows| !rows.is_empty()).len(), 1);
     // The same request id with another workspace asks for something else.
     assert!(matches!(
         client.request(8, new_session(&fixture.workspace())),
@@ -1670,7 +1695,7 @@ fn a_new_session_that_cannot_be_made_creates_nothing() {
                 kind: plakous_host_protocol::wire::WorkspaceRefusalKind::NotDirectory, ..
             })
     ));
-    assert_eq!(client.rows(10).len(), 2);
+    assert_eq!(client.rows_until(10, |rows| rows.len() >= 2).len(), 2);
 }
 
 /// Replays of one request racing on several connections make one session,
