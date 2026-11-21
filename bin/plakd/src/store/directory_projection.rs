@@ -23,11 +23,14 @@ type Stamp = (
     Option<String>,
     Option<String>,
     Option<i64>,
-    Option<i64>,
+    String,
+    String,
 );
 
 const STAMP_FIELDS: &str = "s.revision,s.updated_at,s.archived,s.title_override,s.runner_display,
-    v.head_locator,p.applied_seq,(SELECT max(i.rowid) FROM host_intents i WHERE i.session_id=s.id)";
+    v.head_locator,p.applied_seq,
+    (SELECT json_array(count(*),max(i.rowid)) FROM host_intents i WHERE i.session_id=s.id),
+    (SELECT json_array(count(*),max(q.rowid)) FROM queue_items q WHERE q.session_id=s.id)";
 
 fn stamp(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Stamp> {
     Ok((
@@ -39,6 +42,7 @@ fn stamp(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Stamp> {
         row.get(at + 5)?,
         row.get(at + 6)?,
         row.get(at + 7)?,
+        row.get(at + 8)?,
     ))
 }
 
@@ -280,4 +284,45 @@ fn projector_replay_notifies_only_when_the_cursor_or_view_changes() {
     view.state.counters.root_turns = 1;
     publish(&view);
     assert_eq!(notified(), BTreeSet::from([record.id.clone()]));
+}
+
+#[cfg(test)]
+#[test]
+#[allow(clippy::unwrap_used, reason = "isolated store fixture")]
+fn revalidation_detects_queue_only_writes_and_non_last_intent_deletion() {
+    let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut record = super::sessions::SessionRecord::new(paths.home().to_owned());
+    store.commit(&mut record).unwrap();
+    let mut probe = ProductDirectoryProbe::open(&paths).unwrap();
+    let connection = &store.connection;
+    connection
+        .execute(
+            "INSERT INTO queue_items(session_id,item_id,revision,position,text,submitted_at)
+         VALUES(?1,'first',1,0,'one',0),(?1,'second',1,1,'two',0)",
+            [&record.id],
+        )
+        .unwrap();
+    let changed = BTreeSet::from([record.id.clone()]);
+    assert_eq!(probe.changes().unwrap(), changed);
+    connection
+        .execute("DELETE FROM queue_items WHERE item_id='first'", [])
+        .unwrap();
+    assert_eq!(probe.changes().unwrap(), changed);
+    connection
+        .execute(
+            "INSERT INTO host_intents(session_id,kind,anchor,ordinal,value)
+         VALUES(?1,'wake_suppression',1,0,'null'),(?1,'wake_suppression',2,0,'null')",
+            [&record.id],
+        )
+        .unwrap();
+    assert_eq!(probe.changes().unwrap(), changed);
+    connection
+        .execute(
+            "DELETE FROM host_intents WHERE session_id=?1 AND anchor=1",
+            [&record.id],
+        )
+        .unwrap();
+    assert_eq!(probe.changes().unwrap(), changed);
+    assert_eq!(probe.changes().unwrap(), BTreeSet::new());
 }

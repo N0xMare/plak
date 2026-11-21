@@ -89,6 +89,10 @@ pub(crate) mod local {
                 resume: PendingTreeWork::read(tree, ResumeAfterLoss::Continue),
             }
         }
+
+        pub(crate) fn same_projection(&self, other: &Self) -> bool {
+            self.roster == other.roster && self.hold == other.hold && self.resume == other.resume
+        }
     }
 
     pub(crate) enum Notice {

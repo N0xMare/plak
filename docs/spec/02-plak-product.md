@@ -4652,8 +4652,13 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   of a node of another session ends the old attachment only when the new
   attachment succeeds. On buffered transports, attach preparation, including
   a dormant open, runs outside frame handling; the connection can still
-  answer control requests while it waits. Attaches on one connection finish
-  in request order. If a connection leaves during an open, the host asks the
+  answer control requests while it waits. One preparation runs at a time,
+  with up to four more attaches queued per connection. Accepted attaches finish
+  in request order; an attach beyond the queue limit receives `backpressure`.
+  If a lifecycle change retires the prepared actor before delivery, the host
+  prepares the same attach one more time before serving the next queued request.
+  If archive won, it serves the archived read-only view.
+  If a connection leaves during an open, the host asks the
   new actor to release as soon as it has no other reason to stay resident.
   An already resident session uses
   the live service without opening a store. For a nonresident session, the
@@ -4664,7 +4669,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   Product and tree commit notices update affected summaries; residency,
   observation and runner changes wake directory watches. A repeated tree
   image at the same revision with the same directory facts does not cause
-  another store read. Mutations do not
+  another store read. Tree notices do not refresh runtime activity revisions;
+  product-record notices already carry that invalidation. Mutations do not
   wait for publication. Local notices coalesce by key. A sibling product
   process can send a bounded, best-effort private presentation notice, which
   names changed facts but conveys no admission or write authority. Every

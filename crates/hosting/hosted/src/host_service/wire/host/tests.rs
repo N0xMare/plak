@@ -1036,7 +1036,9 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
         )
         .buffered_output();
     request(&mut connection, 1, Op::Attach { node: node("s1") });
-    request(&mut connection, 4, Op::Attach { node: node("s2") });
+    for id in 4..=8 {
+        request(&mut connection, id, Op::Attach { node: node("s2") });
+    }
     request(&mut connection, 2, Op::Ping);
     request(
         &mut connection,
@@ -1048,7 +1050,11 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
         },
     );
     let frames = out.take();
-    assert_eq!(frames.len(), 2);
+    assert_eq!(frames.len(), 3);
+    assert_eq!(
+        outcome(&frames, 8),
+        Outcome::Refused(RequestRefusal::Backpressure)
+    );
     assert!(matches!(outcome(&frames, 2), Outcome::Ok(Answer::Pong)));
     assert!(matches!(
         outcome(&frames, 3),
@@ -1057,7 +1063,7 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
     release.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut replies = Vec::new();
-        while replies.len() != 2 {
+        while replies.len() != 5 {
             connection.flush().unwrap();
             let frames = out.take();
             for frame in &frames {
@@ -1066,11 +1072,11 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
                     replies.push(*id);
                 }
             }
-            if replies.len() < 2 {
+            if replies.len() < 5 {
                 connection.changed().await;
             }
         }
-        assert_eq!(replies, [1, 4]);
+        assert_eq!(replies, [1, 4, 5, 6, 7]);
     })
     .await
     .unwrap();
@@ -1174,15 +1180,24 @@ async fn archive_wins_over_an_undelivered_buffered_attach() {
     })
     .await
     .unwrap();
-    let refused = outcome(&out.take(), 1);
-    assert!(
-        matches!(
-            refused,
-            Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
-        ),
-        "{refused:?}"
-    );
+    let attachment = attached(&out.take(), 1);
     assert!(attach.node.is_none());
+    request(
+        &mut attach,
+        3,
+        Op::Intent {
+            attachment,
+            client_id: None,
+            intent: SessionIntent::Interrupt,
+            blobs: Vec::new(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 3),
+        Outcome::Refused(RequestRefusal::SessionArchived {
+            session: "s1".into(),
+        })
+    );
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
 }
 

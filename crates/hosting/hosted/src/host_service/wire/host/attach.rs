@@ -9,6 +9,8 @@ use super::{
     SessionHost, Write, stopping, write_frame,
 };
 
+const MAX_QUEUED_ATTACHES: usize = 4;
+
 enum Target<P: ProtocolExtension> {
     Resident(Undelivered<P>),
     Stored(StoredAttachment<P>),
@@ -39,9 +41,10 @@ pub(super) struct AttachRequest {
 }
 
 pub(super) struct PendingAttach<P: ProtocolExtension> {
-    id: RequestId,
-    text: String,
+    request: AttachRequest,
     result: oneshot::Receiver<CliResult<Target<P>>>,
+    runtime: tokio::runtime::Handle,
+    retry: bool,
 }
 
 impl<P: ProtocolExtension> SessionHost<P>
@@ -157,7 +160,7 @@ where
     pub(super) fn attach_in_flight(&self, id: RequestId) -> bool {
         self.attaching
             .as_ref()
-            .is_some_and(|attach| attach.id == id)
+            .is_some_and(|attach| attach.request.id == id)
             || self.attach_queue.iter().any(|attach| attach.id == id)
     }
 
@@ -175,6 +178,11 @@ where
             )));
         }
         if self.attaching.is_some() {
+            if self.attach_queue.len() >= MAX_QUEUED_ATTACHES {
+                return Ok(Forwarded::Answered(Outcome::Refused(
+                    RequestRefusal::Backpressure,
+                )));
+            }
             self.attach_queue.push_back(AttachRequest {
                 id,
                 node,
@@ -187,16 +195,37 @@ where
             .filter(|_| self.buffered_output)
         else {
             let target = self.host.prepare_attach(&node)?;
-            return self.finish_attach(target, text);
+            if let Some(done) = self.finish_attach(target, text, true)? {
+                return Ok(done);
+            }
+            let target = self.host.prepare_attach(&node)?;
+            let Some(done) = self.finish_attach(target, text, false)? else {
+                unreachable!("the second preparation answers");
+            };
+            return Ok(done);
         };
+        self.prepare_buffered(
+            AttachRequest {
+                id,
+                node,
+                text: text.to_owned(),
+            },
+            runtime,
+            true,
+        );
+        Ok(Forwarded::Reading(true))
+    }
+
+    fn prepare_buffered(
+        &mut self,
+        request: AttachRequest,
+        runtime: tokio::runtime::Handle,
+        retry: bool,
+    ) {
         let (send, result) = oneshot::channel();
         let host = Arc::clone(&self.host);
         let wake = Arc::clone(&self.read_ready);
-        self.attaching = Some(PendingAttach {
-            id,
-            text: text.to_owned(),
-            result,
-        });
+        let node = request.node.clone();
         runtime.spawn_blocking(move || {
             let paused = host
                 .upgrade_admission
@@ -218,7 +247,12 @@ where
             let _ = send.send(result);
             wake.notify.notify_one();
         });
-        Ok(Forwarded::Reading(true))
+        self.attaching = Some(PendingAttach {
+            request,
+            result,
+            runtime,
+            retry,
+        });
     }
 
     pub(super) fn flush_attach(&mut self) -> CliResult<()> {
@@ -230,11 +264,20 @@ where
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Closed) => return Err(CliFailure::new("attach worker ended")),
         };
-        let Some(PendingAttach { id, text, .. }) = self.attaching.take() else {
+        let Some(PendingAttach {
+            request,
+            runtime,
+            retry,
+            ..
+        }) = self.attaching.take()
+        else {
             unreachable!("the connection owns its pending attach");
         };
-        let finished = self.finish_attach(target, &text)?;
-        self.complete_attach(id, finished)?;
+        let Some(finished) = self.finish_attach(target, &request.text, retry)? else {
+            self.prepare_buffered(request, runtime, false);
+            return Ok(());
+        };
+        self.complete_attach(request.id, finished)?;
         while let Some(AttachRequest { id, node, text }) = self.attach_queue.pop_front() {
             let started = self.start_attach(id, node, &text)?;
             self.complete_attach(id, started)?;
@@ -252,19 +295,39 @@ where
         Ok(())
     }
 
-    fn finish_attach(&mut self, target: Target<P>, text: &str) -> CliResult<Forwarded<P>> {
+    // None asks for one fresh preparation without yielding the current
+    // request's place to another queued attach.
+    fn finish_attach(
+        &mut self,
+        target: Target<P>,
+        text: &str,
+        retry: bool,
+    ) -> CliResult<Option<Forwarded<P>>> {
         match target {
             Target::Resident(mut resident) => {
                 if self.host.closed() {
-                    return Ok(Forwarded::Answered(Outcome::Refused(stopping())));
+                    return Ok(Some(Forwarded::Answered(Outcome::Refused(stopping()))));
+                }
+                let Some((session, _, releases)) = &resident.held else {
+                    unreachable!("a prepared attach owns its session hold");
+                };
+                if session.ended() || session.releases() != *releases {
+                    if retry && session.lifecycle_retired() {
+                        return Ok(None);
+                    }
+                    return Ok(Some(Forwarded::Answered(Outcome::Refused(
+                        RequestRefusal::SessionUnavailable {
+                            detail: "the session released during attach".into(),
+                        },
+                    ))));
                 }
                 let Some(held) = resident.held.take() else {
                     unreachable!("a prepared attach owns its session hold");
                 };
-                self.attach_resident(held, text)
+                self.attach_resident(held, text).map(Some)
             }
-            Target::Stored(stored) => self.attach_stored(stored, text),
-            Target::Refused(refusal) => Ok(Forwarded::Answered(Outcome::Refused(refusal))),
+            Target::Stored(stored) => self.attach_stored(stored, text).map(Some),
+            Target::Refused(refusal) => Ok(Some(Forwarded::Answered(Outcome::Refused(refusal)))),
         }
     }
 }

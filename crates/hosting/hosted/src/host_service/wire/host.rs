@@ -1029,13 +1029,6 @@ where
         (session, hold, releases): super::slot::HeldSession<P>,
         text: &str,
     ) -> CliResult<Forwarded<P>> {
-        if session.ended() || session.releases() != releases {
-            return Ok(Forwarded::Answered(Outcome::Refused(
-                RequestRefusal::SessionUnavailable {
-                    detail: "the session released during attach".into(),
-                },
-            )));
-        }
         if self
             .node
             .as_ref()

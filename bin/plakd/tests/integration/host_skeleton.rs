@@ -894,7 +894,11 @@ fn cross_process_record_notice_publishes_directory_row() {
         return;
     }
     let Some(fixture) = fixture() else { return };
-    let host = start(&fixture);
+    let host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_DIRECTORY_REVALIDATE_MS", "60000".into())],
+    );
     let mut client = Client::connect(&host);
     assert_eq!(client.rows(1), [] as [SessionRow; 0]);
     let spawned = std::process::Command::new(std::env::current_exe().unwrap())
@@ -906,7 +910,7 @@ fn cross_process_record_notice_publishes_directory_row() {
         .output()
         .unwrap();
     assert!(spawned.status.success(), "{spawned:?}");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     for id in 2.. {
         if client
             .rows(id)
@@ -1837,7 +1841,11 @@ fn a_second_host_refuses_and_a_sigterm_stops_the_first() {
 #[test]
 fn a_broken_tree_row_degrades_the_directory_but_does_not_admit_an_open() {
     let Some(fixture) = fixture() else { return };
-    let host = start(&fixture);
+    let host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_DIRECTORY_REVALIDATE_MS", "120".into())],
+    );
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { node, .. }) =
         client.request(1, new_session(&fixture.workspace()))

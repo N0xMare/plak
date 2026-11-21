@@ -28,6 +28,18 @@ mod files;
 const REVALIDATE: Duration = Duration::from_secs(15);
 const PROBE_HOLDERS: Duration = Duration::from_millis(250);
 
+fn revalidation_interval() -> Duration {
+    #[cfg(feature = "test-support")]
+    if let Some(millis) = std::env::var("PLAK_TEST_DIRECTORY_REVALIDATE_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|millis| (1..=60_000).contains(millis))
+    {
+        return Duration::from_millis(millis);
+    }
+    REVALIDATE
+}
+
 type Rows = BTreeMap<String, Summary>;
 
 #[derive(PartialEq, Eq)]
@@ -310,7 +322,8 @@ struct Source {
 
 impl Source {
     fn run(&mut self, events: &Mailbox, shared: &RwLock<Rows>, notify: &watch::Sender<u64>) {
-        let mut next_tick = Instant::now() + REVALIDATE;
+        let interval = revalidation_interval();
+        let mut next_tick = Instant::now() + interval;
         let mut next_probe = Instant::now() + PROBE_HOLDERS;
         let mut retry_rebuild = false;
         while let Some(mut batch) = events.take_until(if self.holders.is_empty() {
@@ -330,7 +343,7 @@ impl Source {
             }
             let tick = now >= next_tick || batch.revalidate;
             if now >= next_tick {
-                next_tick = now + REVALIDATE;
+                next_tick = now + interval;
             }
             if batch.gap || (retry_rebuild && tick) {
                 retry_rebuild = match self.rebuild() {
@@ -447,7 +460,6 @@ impl Source {
         trees: BTreeMap<String, TreeUpdate>,
         mut affected: BTreeSet<String>,
     ) -> Vec<(String, Option<Summary>)> {
-        let mut activity_trees = BTreeSet::new();
         for (id, update) in trees {
             // Actors can acknowledge a save without advancing its revision
             // or changing any directory facts. Do not query either store
@@ -474,7 +486,12 @@ impl Source {
                 self.tree_probe
                     .note_image(&id, facts.as_ref().map(|facts| facts.revision));
             }
-            activity_trees.insert(id.clone());
+            if !matches!(
+                (self.trees.get(&id), &facts),
+                (Some(Ok(Some(previous))), Ok(Some(current))) if previous.same_projection(current)
+            ) {
+                affected.insert(id.clone());
+            }
             self.trees.insert(id, facts);
         }
         let mut changes = Vec::new();
@@ -506,15 +523,6 @@ impl Source {
                 }
             }
         }
-        for (id, meta) in &self.metadata {
-            if activity_trees.contains(&meta.node.tree_id)
-                && let Some(locator) = meta.locator
-                && !locators.iter().any(|(located, _)| located == id)
-            {
-                locators.push((id.clone(), locator));
-            }
-        }
-        affected.extend(activity_trees);
         self.refresh_revisions(locators);
         changes.extend(self.project(&affected));
         changes

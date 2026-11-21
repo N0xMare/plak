@@ -37,6 +37,7 @@ pub struct WireSession<P: ProtocolExtension> {
     releases: std::sync::atomic::AtomicU64,
     attachments: AttachmentCount,
     reopening: AtomicBool,
+    lifecycle_retired: AtomicBool,
 }
 
 fn directory_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool {
@@ -187,6 +188,7 @@ impl<P: ProtocolExtension> WireSession<P> {
             releases: std::sync::atomic::AtomicU64::new(0),
             attachments: attachments.clone(),
             reopening: AtomicBool::new(false),
+            lifecycle_retired: AtomicBool::new(false),
         }
     }
 
@@ -341,8 +343,13 @@ impl<P: ProtocolExtension> WireSession<P> {
     }
 
     pub(super) fn retire_for_lifecycle(&self) {
+        self.lifecycle_retired.store(true, Ordering::Release);
         self.ended.store(true, Ordering::Release);
         self.reopening.store(false, Ordering::Release);
+    }
+
+    pub(super) fn lifecycle_retired(&self) -> bool {
+        self.lifecycle_retired.load(Ordering::Acquire)
     }
 
     /// Asks the session to quit; it ends once it has.

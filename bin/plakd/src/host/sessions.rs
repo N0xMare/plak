@@ -1269,8 +1269,8 @@ mod tests {
         product.directory.settle();
         assert_eq!(
             runtime_inspections(),
-            previous + 1,
-            "a new tree revision refreshes activity"
+            previous,
+            "a new tree revision is not a product activity refresh"
         );
         // Save through the filesystem, not through a product config notice.
         std::fs::write(
@@ -1281,6 +1281,15 @@ mod tests {
         product.directory.tick();
         let refreshed = product.rows(None, None, false).unwrap().remove(0);
         assert_ne!(refreshed.differences, actual.differences);
+        let before_record = runtime_inspections();
+        record.title = Some("record update".into());
+        services
+            .session_records()
+            .unwrap()
+            .save(&mut record)
+            .unwrap();
+        product.directory.settle();
+        assert_eq!(runtime_inspections(), before_record + 1);
     }
 
     #[test]
