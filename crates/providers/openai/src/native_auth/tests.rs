@@ -7511,7 +7511,7 @@ async fn renew_after_peer_advances_read_fence(after_flight: bool) -> TestResult 
     *second
         .refresh_probe_pause
         .lock()
-        .map_err(|_| "probe lock poisoned")? = Some(super::refresh::RefreshProbePause {
+        .map_err(|_| "probe lock poisoned")? = Some(refresh::RefreshProbePause {
         after_flight,
         reached: Arc::clone(&reached),
         resume: Arc::clone(&resume),

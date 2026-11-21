@@ -228,6 +228,35 @@ impl PrivateCredentialStore {
         task.await.map_err(|_| PrivateStoreError::Io)?
     }
 
+    /// Inspects a refresh candidate on a blocking worker. For a Ready
+    /// record, `judge_ready` decodes the payload under the same shared lock
+    /// as the fence and returns whether refresh is due. The closure must not
+    /// retain secret material, including in its redaction-safe errors.
+    /// Non-Ready records return the fence without a verdict or payload.
+    /// An exchange still requires a claim on the exact fence.
+    ///
+    /// # Errors
+    ///
+    /// Returns store or worker failures outside the provider's verdict error.
+    pub async fn inspect_for_refresh<E: Send + 'static>(
+        &self,
+        judge_ready: impl FnOnce(&CredentialFence, &SecretBytes) -> Result<bool, E> + Send + 'static,
+    ) -> Result<Result<Option<(CredentialFence, Option<bool>)>, E>, PrivateStoreError> {
+        self.on_disk(move |store| {
+            store.with_shared_lock(|store| {
+                let Some(record) = platform::load_record(store)? else {
+                    return Ok(Ok(None));
+                };
+                let fence = record.fence();
+                let due = (fence.status() == CredentialStatus::Ready)
+                    .then(|| judge_ready(&fence, record.payload()))
+                    .transpose();
+                Ok(due.map(|due| Some((fence, due))))
+            })
+        })
+        .await
+    }
+
     pub(crate) async fn try_begin_claim(
         &self,
         expected: &CredentialFence,
