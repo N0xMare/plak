@@ -841,7 +841,9 @@ failed command. A failed test prerequisite prevents its dependent groups from
 running. The summary names failures and returns nonzero.
 
 Worker branches iterate and finish with `just fast <packages>` plus the
-groups their change needs. Fast uses packages inferred from the Git working
+groups their change needs. A change to an install-family test or code it
+exercises, including crash-sweep shapes, requires `just steps tests-install`
+before handoff. Fast uses packages inferred from the Git working
 tree against HEAD, or explicitly named instead. At a JJ root, shared
 root-checked listings use `builtin_immutable_heads()..@`; inside a plakd copy
 they diff `plak_base()` to `@`. `PLAK_FAST_BASE` overrides those defaults.
@@ -875,7 +877,8 @@ The Mac intersects that same scope with the platform-sensitive predicates in
 for serial. Nextest intersects each expression with the lane profile and an
 empty intersection passes. Neither batch runs the install profile.
 The Linux install tier, Mac install checks and full each run the complete
-install profile regardless of the changed paths.
+install profile regardless of the changed paths. Main can carry an
+install-profile failure that the install tier catches before production.
 
 Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
 `test_pinned_callback_ports`, `test_configuration_placement`,
@@ -2820,7 +2823,7 @@ notice through that same loop. A corrupt zero saved round refuses without
 panicking; the command-id validity assertion remains in force.
 
 **Crash-point sweep.** `just dev crash-sweep [--shapes SHAPES] [--jobs N]
-[--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the install
+[--repeat R] [--strict]` runs the ignored `crash_sweep::full_sweep`; the install-profile
 `crash_sweep::durability_subset` covers `final_only`, `direct_tool_then_final`,
 `promoted_background_job`, and `sealed_family_artifacts` with up to sixteen workers.
 `crash_sweep::durability_twin_pilots` runs the twin pilots of every other
@@ -2976,7 +2979,7 @@ image history, crosses a mandatory aggregate-image fence with optional scheduled
 compaction disabled, and cuts every indexed runtime/product commit before and
 after the offline one-CAS publication. Pilots require strategy
 `ResidencyPlaceholdersV1`, exactly one Finalized compaction and no paid compact
-dispatch. The durability lane repeats these three shapes through
+dispatch. The install lane repeats these three shapes through
 `image_residency_crash_cuts_recover_without_redispatch`; direct receipt tests
 independently materialize and validate v3 source/selection/successor evidence.
 The shape `residency_dormant_materialize` serves its session through `plakd host
@@ -6647,9 +6650,9 @@ aborted preparation returns to `running`. A publication-lock observer pins
 `stopping`/`shutdown` and `draining` then `restarting` before transport close. A wire-11 hello receives only
 `version_mismatch`. Bridge discovery tests distinguish typed stdout refusals
 for absence, starting, stopping, incompatible state and unverified authority;
-the schema pin includes typed bridge-unavailable handshake refusals. Existing
-upgrade tests remain in the durability partition; new wall-clock discovery
-budget tests belong to serial and its matching offline exclusion.
+the schema pin includes typed bridge-unavailable handshake refusals.
+The `host_skeleton::upgrade::` tests run in the install profile; new wall-clock
+discovery budget tests belong to serial and its matching offline exclusion.
 Publication SIGKILL cuts run in the durability lane; injected parent-sync
 failures run offline. Connection-drop and forced-deadline contracts verify
 retirement of pending authority and an explicit unknown outcome for admitted

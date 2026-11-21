@@ -87,8 +87,17 @@ for parallel tests; Mac batch intersects that scope with the platform-sensitive
 filters. Linux batch overlaps tree checks and independent compile groups with
 test preparation, and tooling with the parallel lane before timed test lanes.
 Neither batch runs the install profile, even when an install test changes.
-The integration batch targets eight minutes warm, with a 15-minute ceiling
-for a cold run; install evidence is timed separately.
+If you change an install-family test or code it exercises, including crash-sweep
+shapes, run `just steps tests-install` before handoff. Main can carry an
+install-profile failure; the install tier catches it before production.
+
+The integration batch targets eight minutes warm and a 15-minute cold wall
+time with empty build and public contract caches. A warm repeat uses the same
+checkout and populated workspace build, lint, standalone and public contract
+caches without invalidating their Rust inputs. A core-crate edit requires
+recompilation and currently exceeds
+eight minutes (about ten minutes on one Linux host with populated caches).
+Install evidence is timed separately.
 
 Production install uses exact-tree batch evidence plus the install groups,
 full Mac suite and strict crash sweep (spec 06 §8). Full adds standalone

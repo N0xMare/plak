@@ -19,7 +19,7 @@ import sys
 import xml.etree.ElementTree as ElementTree
 
 ROOT = Path(__file__).resolve().parents[2]
-LANES = ("offline", "serial", "durability")
+LANES = ("offline", "serial", "durability", "install")
 
 
 @dataclass(frozen=True)

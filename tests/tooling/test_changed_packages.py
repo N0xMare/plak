@@ -229,6 +229,7 @@ class TouchedPackagesTests(unittest.TestCase):
         self.assertEqual(CHANGED.batch_filter(["--workspace"], packages), "all()")
         self.assertEqual(CHANGED.batch_filter([], packages), "none()")
 
+    def test_rust_only_batches_keep_tree_readers_and_inputs_trigger_full_tooling(self):
         scoped = selected_modules(["bin/plakd/src/lib.rs", "toolshed/unrelated.py"])
         self.assertEqual({module.stem for module in scoped}, TREE_READERS)
         full = selected_modules(None)

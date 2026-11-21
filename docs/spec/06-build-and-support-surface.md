@@ -2231,6 +2231,8 @@ uses local gates and has no CI except the release workflow** (§6.6), which
 builds and attests a pushed tag and creates its GitHub Release. A manual run
 is the pre-tag dry run and releases nothing. The workflow checks nothing else.
 Worker branches use `just fast <packages>` plus the groups their change needs.
+A change to an install-family test or code it exercises, including crash-sweep
+shapes, requires `just steps tests-install` before handoff.
 Main advances one integration batch at a time. Before a batch lands, its tip
 tree passes the integration batch gate, with the Linux and Mac runs concurrent:
 
@@ -2260,10 +2262,11 @@ candidate and before publication; a production install builds from the source
 tree and does not require it. Only a matching cohort verification receipt
 (§6.5) may avoid repeating archive verification.
 
-Commits inside a batch are not gated individually. A production install
-requires the batch gate **and** the install tier on the exact tree: the
-complete macOS suite (`just install-checks`), the full Linux parallel and
-install profiles, full tooling, workspace rustdoc, the release-resolution and
+Commits inside a batch are not gated individually. Main can carry an
+install-profile failure that the install tier catches before production.
+A production install requires the batch gate **and** the install tier on the
+exact tree: the complete macOS suite (`just install-checks`), the full Linux
+parallel and install profiles, full tooling, workspace rustdoc, the release-resolution and
 maintainer builds with the linkage check, and the strict crash sweep. The
 Linux batch supplies core serial and durability; the Linux install profile
 runs unconditionally, including the two exclusive indexed crash-sweep
@@ -2282,8 +2285,13 @@ reuse matching Cargo units between the feature checks and standalone lint;
 each command still resolves its own features. Linux batch also overlaps
 independent static checks with test preparation and tooling with the parallel
 lane, never with the wall-clock or weighted lanes (chapter 05 §1).
-The batch targets an eight-minute warm wall time and a fifteen-minute cold
-ceiling. Install and release evidence are timed separately.
+The batch targets an eight-minute warm wall time and a 15-minute cold wall
+time with empty build and public contract caches. A warm repeat uses the same
+checkout with populated workspace build, lint, standalone and public contract
+caches and no changed Rust inputs requiring recompilation. Core-crate edits
+do require recompilation and
+currently exceed the warm target (about ten minutes on one Linux host with
+populated caches). Install and release evidence are timed separately.
 
 A release candidate or publication runs `just full` on both supported
 platforms, `just musl native` and `just musl container`, the full strict crash
