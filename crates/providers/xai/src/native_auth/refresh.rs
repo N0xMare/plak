@@ -7,7 +7,7 @@ use super::{
     ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks, ClaimedRevokeHooks,
     CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshDetail,
     CredentialRefreshEvent, CredentialRefreshFailureClass, CredentialRefreshFailureReason,
-    CredentialRefreshObserver, CredentialRefreshPhase, CredentialStatus, ExchangeControl, Instant,
+    CredentialRefreshObserver, CredentialRefreshPhase, ExchangeControl, Instant,
     MAX_AUTH_BODY_BYTES, MAX_STRING_BYTES, MAX_TOKEN_BYTES, ManagerCore, PrivateCredentialStore,
     PrivateStoreError, PullBodyError, REQUEST_TIMEOUT, RefreshClaim, Request, RevokeResponse,
     StoredTokens, SubscriptionRequestClass, SubscriptionRequestPermit, TokenResponse,
@@ -89,7 +89,7 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
             .await??
             .ok_or(XaiNativeAuthError::NotLoggedIn)?;
         #[cfg(test)]
-        if fence.status() == CredentialStatus::Ready {
+        if fence.status() == plakous_auth::CredentialStatus::Ready {
             let pause = self
                 .core
                 .refresh_probe_pause

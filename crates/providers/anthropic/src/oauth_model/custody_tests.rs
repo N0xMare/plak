@@ -22,6 +22,7 @@ fn token_reply(access: &str) -> Vec<u8> {
 
 mod conformance {
     use super::*;
+    use plakous_test_support::native_auth::TestResult;
     use plakous_test_support::native_auth::custody as suite;
 
     #[tokio::test]
