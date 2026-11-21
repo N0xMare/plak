@@ -127,6 +127,10 @@ impl FamilyAttemptCore {
 
     /// Reserves and validates the wire family's exact slot set. A different
     /// generation returns false without granting dispatch authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns a ledger refusal if the slots cannot be reserved or validated.
     pub fn authorize_generation(
         &self,
         generation: u32,

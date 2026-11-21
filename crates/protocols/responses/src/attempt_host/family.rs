@@ -1,5 +1,7 @@
 //! Responses' raw terminal and observation hooks for the shared exchange.
 
+use std::future::{Future, ready};
+
 use plakous_exchange::attempt::PhysicalRequestLedger;
 use plakous_exchange::family::{
     FamilyExchangeHooks, Generation, GenerationEnd, Reauthorization, RetryFailure,
@@ -125,22 +127,12 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
         }
     }
 
-    async fn finish(&mut self, terminal: Self::Terminal, deferred: bool) -> Self::Result {
-        let attempt = &self.attempt;
-        match terminal {
-            Ok(response) if deferred => {
-                attempt.core.mark_failed();
-                Ok(ResponsesAttemptResponse {
-                    facts: attempt.facts(),
-                    ..response
-                })
-            }
-            Err(error) => {
-                attempt.core.mark_failed();
-                Err(error.with_summary(attempt.core.observations_ref().attempt_summary()))
-            }
-            response => response,
-        }
+    fn finish(
+        &mut self,
+        terminal: Self::Terminal,
+        deferred: bool,
+    ) -> impl Future<Output = Self::Result> + Send {
+        ready(finish_attempt(&self.attempt, terminal, deferred))
     }
 
     fn reset(&mut self) {
@@ -150,23 +142,42 @@ impl<D: Send + Sync + 'static, G: Send + 'static> FamilyExchangeHooks for Respon
 
     fn cancelled(&mut self) -> Self::Result {
         self.attempt.core.mark_failed();
-        Err(ResponsesAttemptError::Cancelled {
-            physical: self.attempt.physical(),
-            facts: self.attempt.facts(),
-        })
+        Err(self.attempt.cancelled_error())
     }
 
-    async fn deadline(&mut self, terminal: Self::Terminal) -> Self::Result {
-        match terminal {
-            Ok(_) => self.finish(terminal, true).await,
+    fn deadline(&mut self, terminal: Self::Terminal) -> impl Future<Output = Self::Result> + Send {
+        ready(match terminal {
+            Ok(_) => finish_attempt(&self.attempt, terminal, true),
             Err(_) => {
                 self.attempt.core.mark_failed();
-                Err(ResponsesAttemptError::Deadline {
-                    physical: self.attempt.physical(),
-                    facts: self.attempt.facts(),
-                })
+                Err(self.attempt.deadline_error())
             }
+        })
+    }
+}
+
+#[allow(
+    clippy::result_large_err,
+    reason = "keeps typed dispatch and terminal facts"
+)]
+fn finish_attempt(
+    attempt: &ResponsesAttempt,
+    terminal: AttemptResult,
+    deferred: bool,
+) -> AttemptResult {
+    match terminal {
+        Ok(response) if deferred => {
+            attempt.core.mark_failed();
+            Ok(ResponsesAttemptResponse {
+                facts: attempt.facts(),
+                ..response
+            })
         }
+        Err(error) => {
+            attempt.core.mark_failed();
+            Err(error.with_summary(attempt.core.observations_ref().attempt_summary()))
+        }
+        response => response,
     }
 }
 

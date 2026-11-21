@@ -19,35 +19,38 @@ impl FamilyExchangeHooks for DeclineHooks {
         self.attempt.ledger()
     }
 
-    async fn exchange(&mut self, _: Generation) -> GenerationEnd<()> {
-        if let Some(failure) = self.failure.take() {
-            GenerationEnd::Retry {
-                terminal: (),
-                failure,
-            }
-        } else {
+    fn exchange(&mut self, _: Generation) -> impl Future<Output = GenerationEnd<()>> + Send {
+        let Some(failure) = self.failure.take() else {
             panic!("declined retry does not dispatch")
-        }
+        };
+        std::future::ready(GenerationEnd::Retry {
+            terminal: (),
+            failure,
+        })
     }
 
     async fn announce_retry(&mut self, retry: ModelRetry) -> bool {
         self.attempt.events_mut().send_retry(retry).await.is_ok()
     }
 
-    async fn reauthorize(&mut self, _: bool) -> Reauthorization {
-        panic!("declined retry does not reauthorize")
+    fn reauthorize(&mut self, _: bool) -> impl Future<Output = Reauthorization> + Send {
+        assert!(
+            self.failure.is_some(),
+            "declined retry does not reauthorize"
+        );
+        std::future::ready(Reauthorization::End)
     }
 
-    async fn finish(&mut self, (): (), deferred: bool) -> bool {
-        deferred
+    fn finish(&mut self, (): (), deferred: bool) -> impl Future<Output = bool> + Send {
+        std::future::ready(deferred)
     }
 
     fn cancelled(&mut self) -> bool {
         false
     }
 
-    async fn deadline(&mut self, (): ()) -> bool {
-        false
+    fn deadline(&mut self, (): ()) -> impl Future<Output = bool> + Send {
+        std::future::ready(false)
     }
 }
 

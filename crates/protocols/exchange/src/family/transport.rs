@@ -71,32 +71,23 @@ impl GenerationTransport {
         tokio::pin!(exchange);
         let first_poll = poll_fn(|context| Poll::Ready(exchange.as_mut().poll(context))).await;
         match first_poll {
-            Poll::Ready(response) => AuthorizedHead::Resolved(response),
-            Poll::Pending => match join_on_abort(
-                exchange,
-                cancellation,
-                Some(self.deadline),
-                &self.cancellation,
-            )
-            .await
-            {
-                Pull::Ready(response) => AuthorizedHead::Resolved(response),
-                Pull::Cancelled => AuthorizedHead::Cancelled,
-                Pull::Deadline => AuthorizedHead::Deadline,
-            },
+            Poll::Ready(response) => Pull::Ready(response),
+            Poll::Pending => {
+                join_on_abort(
+                    exchange,
+                    cancellation,
+                    Some(self.deadline),
+                    &self.cancellation,
+                )
+                .await
+            }
         }
     }
 }
 
 /// A response-head result after an irrevocable authorization fence.
-pub enum AuthorizedHead {
-    /// Exact result from the completed exchange.
-    Resolved(Result<Response, Failure>),
-    /// Cancellation won after send began; transmission is ambiguous.
-    Cancelled,
-    /// Dispatch expiry won after send began; transmission is ambiguous.
-    Deadline,
-}
+/// Cancellation or expiry leaves transmission ambiguous.
+pub type AuthorizedHead = Pull<Result<Response, Failure>>;
 
 async fn join_on_abort<F: Future>(
     future: F,

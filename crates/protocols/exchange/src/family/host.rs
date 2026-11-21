@@ -10,6 +10,7 @@ use crate::attempt::{PhysicalRequestLedger, TerminalFacts};
 use super::retry::{RetryBudget, RetryFailure, RetryWindow};
 
 /// The fresh bounds and connection selection for a physical generation.
+#[derive(Clone, Copy)]
 pub struct Generation {
     /// Start of its dispatch budget, including any credential renewal.
     pub started: Instant,

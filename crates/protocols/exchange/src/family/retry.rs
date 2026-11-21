@@ -205,6 +205,7 @@ impl RetryFailure {
 }
 
 /// Call policy and the time bounds at the point of a retry decision.
+#[derive(Clone, Copy)]
 pub(super) struct RetryWindow {
     /// Remaining time under the caller's hard deadline.
     pub remaining: Option<Duration>,

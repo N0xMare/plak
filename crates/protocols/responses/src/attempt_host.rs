@@ -685,6 +685,35 @@ impl ResponsesAttempt {
     fn physical(&self) -> Option<Box<ResponsesPhysicalDispatchBinding>> {
         self.physical.clone().map(Box::new)
     }
+
+    fn cancelled_error(&self) -> ResponsesAttemptError {
+        ResponsesAttemptError::Cancelled {
+            physical: self.physical(),
+            facts: self.facts(),
+        }
+    }
+
+    fn deadline_error(&self) -> ResponsesAttemptError {
+        ResponsesAttemptError::Deadline {
+            physical: self.physical(),
+            facts: self.facts(),
+        }
+    }
+
+    fn transport_error(&self, source: HttpFailure) -> ResponsesAttemptError {
+        ResponsesAttemptError::Transport {
+            physical: self.physical(),
+            source,
+            facts: self.facts(),
+        }
+    }
+
+    fn request_binding_error(&self) -> ResponsesAttemptError {
+        ResponsesAttemptError::RequestBinding {
+            physical: self.physical(),
+            facts: self.facts(),
+        }
+    }
 }
 
 impl fmt::Debug for ResponsesAttempt {

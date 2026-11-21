@@ -72,16 +72,10 @@ where
     if let Err(rejection) = (authorization.revalidate)(dialect, revalidation) {
         finish_definite_rejection(attempt);
         if attempt.cancellation.is_cancelled() {
-            return Err(ResponsesAttemptError::Cancelled {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
+            return Err(attempt.cancelled_error());
         }
         if monotonic_now() >= attempt.deadline {
-            return Err(ResponsesAttemptError::Deadline {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
+            return Err(attempt.deadline_error());
         }
         return Err(ResponsesAttemptError::Revalidation {
             physical: attempt.physical(),
@@ -93,20 +87,14 @@ where
         .send_authorized(client, request, &attempt.cancellation)
         .await
     {
-        AuthorizedHead::Resolved(response) => response,
+        AuthorizedHead::Ready(response) => response,
         AuthorizedHead::Cancelled => {
             finish_after_authorization(attempt);
-            return Err(ResponsesAttemptError::Cancelled {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
+            return Err(attempt.cancelled_error());
         }
         AuthorizedHead::Deadline => {
             finish_after_authorization(attempt);
-            return Err(ResponsesAttemptError::Deadline {
-                physical: attempt.physical(),
-                facts: attempt.facts(),
-            });
+            return Err(attempt.deadline_error());
         }
     };
     // The credential/authorization lease is deliberately retained until the
@@ -126,11 +114,7 @@ where
                 PhysicalRequestOutcome::AmbiguousPostSend
             };
             finish_generation(attempt, outcome)?;
-            return Err(ResponsesAttemptError::Transport {
-                physical: attempt.physical(),
-                source,
-                facts: attempt.facts(),
-            });
+            return Err(attempt.transport_error(source));
         }
     };
 
@@ -191,14 +175,8 @@ async fn prepare_dispatch<D: Send + Sync + 'static, G: Send + 'static>(
                     rejection,
                     facts: attempt.facts(),
                 },
-                PreflightFailure::Cancelled => ResponsesAttemptError::Cancelled {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                },
-                PreflightFailure::Deadline => ResponsesAttemptError::Deadline {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                },
+                PreflightFailure::Cancelled => attempt.cancelled_error(),
+                PreflightFailure::Deadline => attempt.deadline_error(),
             }
         })?;
     if prepared.physical != expected
@@ -207,10 +185,7 @@ async fn prepare_dispatch<D: Send + Sync + 'static, G: Send + 'static>(
             != Some(attempt.binding.operation().request_body())
     {
         finish_before_dispatch(attempt);
-        return Err(ResponsesAttemptError::RequestBinding {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.request_binding_error());
     }
     ensure_running(attempt)?;
     let (route_digest, request_digest) = physical_request_digest(
@@ -221,10 +196,7 @@ async fn prepare_dispatch<D: Send + Sync + 'static, G: Send + 'static>(
     )
     .map_err(|_| {
         finish_before_dispatch(attempt);
-        ResponsesAttemptError::RequestBinding {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        }
+        attempt.request_binding_error()
     })?;
     let dispatch_binding = ResponsesPhysicalDispatchBinding {
         physical: expected,
@@ -244,10 +216,7 @@ async fn prepare_dispatch<D: Send + Sync + 'static, G: Send + 'static>(
         .map_err(|source| fail_definite_rejection(attempt, source))?
     {
         finish_definite_rejection(attempt);
-        return Err(ResponsesAttemptError::RequestBinding {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.request_binding_error());
     }
     ensure_running_after_start(attempt)?;
     Ok((prepared, dispatch_binding))
@@ -291,11 +260,7 @@ async fn classify_error_response(
         }),
         Err(source) => {
             finish_generation(attempt, outcome)?;
-            return Err(ResponsesAttemptError::Transport {
-                physical: attempt.physical(),
-                source,
-                facts: attempt.facts(),
-            });
+            return Err(attempt.transport_error(source));
         }
     };
     finish_generation(attempt, outcome)?;
@@ -453,42 +418,26 @@ pub(super) async fn decode_body(
                 return Err(match source.kind() {
                     HttpErrorKind::Cancelled => {
                         let _ = attempt.core.claim_and_close_protocol_failure();
-                        ResponsesAttemptError::Cancelled {
-                            physical: attempt.physical(),
-                            facts: attempt.facts(),
-                        }
+                        attempt.cancelled_error()
                     }
                     HttpErrorKind::DeadlineExceeded => {
                         close_interrupted_stream(attempt);
-                        ResponsesAttemptError::Deadline {
-                            physical: attempt.physical(),
-                            facts: attempt.facts(),
-                        }
+                        attempt.deadline_error()
                     }
                     _ => {
                         close_interrupted_stream(attempt);
-                        ResponsesAttemptError::Transport {
-                            physical: attempt.physical(),
-                            source,
-                            facts: attempt.facts(),
-                        }
+                        attempt.transport_error(source)
                     }
                 });
             }
             BodyPull::Ready(None) => break,
             BodyPull::Cancelled => {
                 let _ = attempt.core.claim_and_close_protocol_failure();
-                return Err(ResponsesAttemptError::Cancelled {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                });
+                return Err(attempt.cancelled_error());
             }
             BodyPull::Deadline => {
                 close_interrupted_stream(attempt);
-                return Err(ResponsesAttemptError::Deadline {
-                    physical: attempt.physical(),
-                    facts: attempt.facts(),
-                });
+                return Err(attempt.deadline_error());
             }
         }
     }
@@ -514,11 +463,7 @@ pub(super) async fn decode_body(
         && let Err(source) = body.close_after_protocol_terminal().await
     {
         let _ = attempt.core.claim_and_close_protocol_failure();
-        return Err(ResponsesAttemptError::Transport {
-            physical: attempt.physical(),
-            source,
-            facts: attempt.facts(),
-        });
+        return Err(attempt.transport_error(source));
     }
     if refused_in_band.is_none() {
         attempt
@@ -986,17 +931,11 @@ pub(super) fn finish_physical(attempt: &mut ResponsesAttempt, outcome: PhysicalR
 pub(super) fn ensure_running(attempt: &mut ResponsesAttempt) -> Result<(), ResponsesAttemptError> {
     if attempt.cancellation.is_cancelled() {
         finish_before_dispatch(attempt);
-        return Err(ResponsesAttemptError::Cancelled {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.cancelled_error());
     }
     if monotonic_now() >= attempt.deadline {
         finish_before_dispatch(attempt);
-        return Err(ResponsesAttemptError::Deadline {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.deadline_error());
     }
     Ok(())
 }
@@ -1010,17 +949,11 @@ pub(super) fn ensure_running_after_start(
 ) -> Result<(), ResponsesAttemptError> {
     if attempt.cancellation.is_cancelled() {
         finish_definite_rejection(attempt);
-        return Err(ResponsesAttemptError::Cancelled {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.cancelled_error());
     }
     if monotonic_now() >= attempt.deadline {
         finish_definite_rejection(attempt);
-        return Err(ResponsesAttemptError::Deadline {
-            physical: attempt.physical(),
-            facts: attempt.facts(),
-        });
+        return Err(attempt.deadline_error());
     }
     Ok(())
 }

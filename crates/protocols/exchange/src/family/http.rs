@@ -318,6 +318,10 @@ struct HttpGeneration<W: FamilyWire, H> {
 
 type HttpResult<W> = Result<FamilyAttemptResponse<W>, FamilyAttemptError<W>>;
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one terminal is moved out without allocating the successful response"
+)]
 enum HttpTerminal<W: FamilyWire> {
     Finished(HttpResult<W>),
     Deferred(FamilyAttemptProtocolError<W>),
