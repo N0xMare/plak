@@ -33,6 +33,7 @@ struct TreeFacts {
     work: PendingTreeWork,
     /// The tree has a node besides the root, so a child could wake the root.
     descendants: bool,
+    running_child: bool,
 }
 
 impl TreeFacts {
@@ -42,6 +43,10 @@ impl TreeFacts {
     ) -> Self {
         Self {
             descendants: tree.nodes().len() > 1,
+            running_child: tree
+                .nodes()
+                .values()
+                .any(|node| node.parent_agent_id.is_some() && node.active_turn),
             work: PendingTreeWork::read(tree, policy),
         }
     }
@@ -94,6 +99,10 @@ impl PendingTrack {
         self.process_exits > 0 || (tree_is_live && self.unread_count() > 0)
     }
 
+    pub(super) fn has_running_child(&self) -> bool {
+        self.tree.is_some_and(|tree| tree.running_child)
+    }
+
     pub(super) fn wake_paused(&self) -> bool {
         self.root_paused
     }
@@ -141,6 +150,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
 
     fn publish_pending(&mut self, idle: bool) {
         self.bind_pending_track();
+        if self
+            .role
+            .live
+            .as_mut()
+            .is_some_and(super::super::projection::live::LiveProjector::take_change)
+        {
+            self.role.pending_track.invalidate_root_controls();
+        }
         let Some((tree, source)) = self.read_tree_facts_with_store(!idle) else {
             return;
         };
@@ -161,16 +178,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         let prepared_wakes = prepared_wake_count(&self.role.config.session);
         let has_work =
             work.results > 0 || work.questions > 0 || process_exits > 0 || prepared_wakes > 0;
-        let projected = self
-            .role
-            .live
-            .as_mut()
-            .is_some_and(super::super::projection::live::LiveProjector::take_change);
-        let reason = self.read_root_attention_reason(
-            has_work,
-            idle,
-            projected || tree_changed || exits_changed,
-        );
+        let reason = self.read_root_attention_reason(has_work, idle, tree_changed || exits_changed);
         let attention = work.attention(reason, process_exits, prepared_wakes);
         let suppressed = self.role.config.session.child_wake_suppressed;
         let suppression_paused = suppressed

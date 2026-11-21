@@ -419,7 +419,10 @@ fn the_idle_wait_wakes_on_an_intent_and_not_before() {
     let started = Instant::now();
     let received = host.block(async |host| host.receive(window).await);
     delayed.join().unwrap();
-    assert!(matches!(received.as_deref(), Ok(UserAction::Interrupt)));
+    assert!(matches!(
+        received.as_ref().ok().and_then(Option::as_deref),
+        Some(UserAction::Interrupt)
+    ));
     assert!(
         started.elapsed() < window / 2,
         "the intent, not the window, woke it"
@@ -442,6 +445,18 @@ fn the_idle_wait_wakes_on_an_intent_and_not_before() {
         "an empty mailbox woke the idle wait {} times",
         polls.get()
     );
+    assert!(
+        host.role
+            .events
+            .notice(crate::sessions::TranscriptRow::info(
+                crate::sessions::NoticeScope::Session,
+                "notice while idle",
+            ))
+    );
+    assert!(matches!(
+        host.block(async |host| host.receive(window).await),
+        Ok(None)
+    ));
     drop(actions);
     block_release(&mut host);
 }

@@ -590,6 +590,10 @@ impl<P: ProtocolExtension> Default for AccountReads<P> {
 }
 
 impl<P: ProtocolExtension> AccountReads<P> {
+    pub(super) fn pending(&self) -> bool {
+        !self.0.is_empty()
+    }
+
     /// Give incoming controls priority over a completed read. `None` means
     /// the incoming delivery is now owned by the background read.
     pub(super) fn poll<E: PartialEq>(

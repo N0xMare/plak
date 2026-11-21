@@ -22,6 +22,17 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
+const QUIET_IDLE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
+async fn changed<T>(observation: &mut Option<tokio::sync::watch::Receiver<T>>) {
+    if let Some(observation) = observation
+        && observation.changed().await.is_ok()
+    {
+        return;
+    }
+    std::future::pending::<()>().await;
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Reopens a fenced session in place as soon as the actor is idle, with
     /// no action needed. A failed reopen is reported and left to the next
@@ -54,18 +65,35 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
         }
     }
 
-    /// The next intent, or the end of one idle observation `window` without
-    /// one: a biased select that takes the mailbox, whose urgent lane
-    /// outranks everything queued, ahead of the window's deadline. An intent
-    /// wakes it on arrival.
+    /// The next intent or idle deadline. A live observation returns `None`
+    /// so the caller checks the changed facts before deciding on release.
     pub(super) async fn receive(
         &self,
         window: std::time::Duration,
-    ) -> Result<crate::surface_protocol::UserActionDelivery<P>, RecvTimeoutError> {
+    ) -> Result<Option<crate::surface_protocol::UserActionDelivery<P>>, RecvTimeoutError> {
         let deadline = tokio::time::Instant::now() + window;
+        let quiet = window > IDLE_OBSERVE_POLL_INTERVAL;
+        let jobs = self
+            .role
+            .config
+            .state_roots
+            .job_registry()
+            .observations_ready();
+        let mut tree = self.role.idle_tree_housekeeping.observe_changes();
+        let mut projected = self
+            .role
+            .live
+            .as_ref()
+            .map(super::super::projection::live::LiveProjector::observe_applied);
+        let residency = self
+            .role
+            .config
+            .idle_release
+            .as_ref()
+            .map(|release| release.attachments.changed());
         loop {
             match self.role.actions.try_recv() {
-                Ok(delivery) => return Ok(delivery),
+                Ok(delivery) => return Ok(Some(delivery)),
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     return Err(RecvTimeoutError::Disconnected);
                 }
@@ -75,9 +103,54 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 biased;
                 () = self.role.actions.ready() => {}
                 () = self.role.events.step_control.changed.notified() => return Err(RecvTimeoutError::Timeout),
+                () = async {
+                    match residency {
+                        Some(change) => change.notified().await,
+                        None => std::future::pending::<()>().await,
+                    }
+                }, if quiet => return Ok(None),
+                () = self.role.events.notice_ready.notified(), if quiet => return Ok(None),
+                () = jobs.notified(), if quiet => return Ok(None),
+                () = changed(&mut tree), if quiet => return Ok(None),
+                () = changed(&mut projected), if quiet => return Ok(None),
                 () = tokio::time::sleep_until(deadline) => return Err(RecvTimeoutError::Timeout),
             }
         }
+    }
+
+    fn idle_receive_window(&self, one_shot: bool) -> std::time::Duration {
+        let role = &self.role;
+        let session = &role.config.session;
+        if one_shot
+            || role.pending_resume.is_some()
+            || role.pending_context_refresh.is_some()
+            || role.root_loss_resume_due
+            || role.config.continuation.is_some()
+            || role.child_wake.pending(&session.id)
+            || role.pending_track.wake_candidates(true)
+            || role.pending_track.has_running_child()
+            || role.account_reads.pending()
+            || role.readiness.pending()
+            || role.recovery.blocked()
+            || role.last_tree_revision.notices_pending
+            || session.queue_commands.has_pending()
+            || session.queue_projection_debt
+            || role.config.state_roots.job_registry().running_count() > 0
+        {
+            return IDLE_OBSERVE_POLL_INTERVAL;
+        }
+        let Some(release) = &role.config.idle_release else {
+            return QUIET_IDLE_WINDOW;
+        };
+        if release.attachments.get() > 0 {
+            return QUIET_IDLE_WINDOW;
+        }
+        if release.attachments.release_now() {
+            return IDLE_OBSERVE_POLL_INTERVAL;
+        }
+        role.idle_since.map_or(IDLE_OBSERVE_POLL_INTERVAL, |since| {
+            QUIET_IDLE_WINDOW.min(release.after.saturating_sub(since.elapsed()))
+        })
     }
 
     fn surface_facts(&self, with_tools: bool) -> surface::SurfaceFacts<'_> {
@@ -164,8 +237,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 );
             }
             // Child status transitions, grandchild spawns, and mail changes have
-            // no root receipt behind them, so the idle loop observes the tree at
-            // its existing wake, no faster than the observe interval. Resolving
+            // no root receipt behind them, so the idle loop observes the tree
+            // after a live notification or an observation deadline. Resolving
             // the durable tree id can touch the store, but `TreeSnapshotPush`
             // resolves at most once per bound session, so the steady-state cost
             // here is two hub-map probes. Gating this on "a tree has already
@@ -200,8 +273,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             // timeout begins only if nothing attached since.
             let residency_seen = self.residency_seen();
             let received = match deferred {
-                Some(delivery) => Ok(delivery),
-                None => self.receive(IDLE_OBSERVE_POLL_INTERVAL).await,
+                Some(delivery) => Ok(Some(delivery)),
+                None => {
+                    self.receive(self.idle_receive_window(one_shot.is_some()))
+                        .await
+                }
+            };
+            let Some(received) = received.transpose() else {
+                if self.residency_seen() != residency_seen {
+                    self.role.idle_since = None;
+                }
+                let now = Instant::now();
+                self.role.last_tree_observed_at =
+                    now.checked_sub(TREE_OBSERVE_INTERVAL).unwrap_or(now);
+                return Ok(HostStep::Continue);
             };
             let read = match received.as_deref() {
                 Ok(UserAction::Extension(intent)) => surface::accounts_read(

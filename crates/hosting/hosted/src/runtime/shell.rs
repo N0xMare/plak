@@ -860,6 +860,7 @@ type ReadinessResult = Result<
 /// only the newest settled read, between actions.
 pub(super) struct ReadinessRefresh {
     generation: u64,
+    applied: u64,
     sender: std::sync::mpsc::Sender<(u64, ReadinessResult)>,
     settled: std::sync::mpsc::Receiver<(u64, ReadinessResult)>,
 }
@@ -869,9 +870,14 @@ impl ReadinessRefresh {
         let (sender, settled) = std::sync::mpsc::channel();
         Self {
             generation: 0,
+            applied: 0,
             sender,
             settled,
         }
+    }
+
+    pub(super) fn pending(&self) -> bool {
+        self.generation != self.applied
     }
 
     /// Starts one re-read without waiting for it.
@@ -905,7 +911,7 @@ impl ReadinessRefresh {
     /// Republishes both projections from the newest settled re-read; an older
     /// read that settles later is discarded.
     pub(super) fn apply_settled<P: plakous_host_protocol::ProtocolExtension>(
-        &self,
+        &mut self,
         host: &mut impl ProductAuthHost<P>,
         events: &Sender<P>,
     ) {
@@ -918,6 +924,7 @@ impl ReadinessRefresh {
         else {
             return;
         };
+        self.applied = self.generation;
         match refreshed {
             Ok((providers, model_sections)) => {
                 host.replace_ready_catalog(plakous_host_protocol::views::ReadyCatalog::new(

@@ -111,6 +111,10 @@ struct HousekeepingObservation {
 }
 
 impl IdleTreeHousekeeping {
+    pub(in crate::runtime) fn observe_changes(&self) -> Option<watch::Receiver<()>> {
+        self.0.as_ref().map(|observed| observed.changes.clone())
+    }
+
     pub(in crate::runtime) fn due(&mut self, tree_id: &str, now: Instant) -> bool {
         let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
             self.0 = None;

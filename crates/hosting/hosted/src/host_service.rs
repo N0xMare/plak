@@ -323,6 +323,7 @@ pub struct AttachmentCount(Arc<CountWord>);
 #[derive(Debug, Default)]
 struct CountWord {
     bits: AtomicU64,
+    changed: tokio::sync::Notify,
     /// How many host requests ask the session to release as soon as
     /// nothing keeps it, without waiting out the idle release
     /// (`release_session`).
@@ -444,6 +445,7 @@ impl AttachmentCount {
     /// keeps it.
     pub fn request_release_now(&self) {
         self.0.release_now.fetch_add(1, Ordering::AcqRel);
+        self.0.changed.notify_one();
     }
 
     /// Withdraws one [`Self::request_release_now`]; another request still
@@ -460,12 +462,17 @@ impl AttachmentCount {
             .is_ok();
         if withdrew {
             self.0.bits.fetch_add(GENERATION, Ordering::AcqRel);
+            self.0.changed.notify_one();
         }
     }
 
     /// Whether a host asked the session to release now.
     pub(crate) fn release_now(&self) -> bool {
         self.0.release_now.load(Ordering::Acquire) > 0
+    }
+
+    pub(crate) fn changed(&self) -> &tokio::sync::Notify {
+        &self.0.changed
     }
 
     /// Holds the session resident until the hold is dropped; `None` once it
@@ -481,22 +488,29 @@ impl AttachmentCount {
 
     /// Counts one more unless the session is releasing.
     fn try_add(&self) -> bool {
-        self.0
+        let added = self
+            .0
             .bits
             .try_update(Ordering::AcqRel, Ordering::Acquire, |word| {
                 (word & RELEASING == 0).then_some(word.wrapping_add(TAKEN))
             })
-            .is_ok()
+            .is_ok();
+        if added {
+            self.0.changed.notify_one();
+        }
+        added
     }
 
     /// Counts one more, releasing or not: an in-process face's attachment,
     /// whose session is never released for being idle.
     fn add(&self) {
         self.0.bits.fetch_add(TAKEN, Ordering::AcqRel);
+        self.0.changed.notify_one();
     }
 
     fn remove(&self) {
         self.0.bits.fetch_sub(1, Ordering::AcqRel);
+        self.0.changed.notify_one();
     }
 }
 

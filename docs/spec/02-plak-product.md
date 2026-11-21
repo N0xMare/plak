@@ -2413,9 +2413,11 @@ settlement deadlines. An explicitly open Usage watch refreshes at its
 own freshness deadline.
 
 Between turns, a caught-up live projector follows acknowledged feed changes,
-not the idle observation clock. The clock still checks release and scheduled
-maintenance. Those checks reuse the bound tree identity, inspect live residency
-and pending work, and do not read a quiescent session's durable rows. A refused
+not the idle observation clock. The idle actor wakes for intents, notices,
+job and tree changes, projection and residency changes, and release and
+maintenance deadlines. It keeps the short observation window for pending work
+and uses a one-second window for quiescent checks. These checks reuse the bound
+tree identity and do not read a quiescent session's durable rows. A refused
 read or projection and queued work still get their normal retry paths.
 
 Terminal publication takes the settled views and counters directly from
