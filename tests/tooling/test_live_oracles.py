@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
 
+import jobs  # noqa: E402
 import live  # noqa: E402
 import long_session  # noqa: E402
 import qualification  # noqa: E402
@@ -2456,3 +2457,330 @@ class FailureLinesTests(unittest.TestCase):
         )
         self.assertEqual(live.failure_lines("plakd: done\n"), "plakd: done")
         self.assertEqual(live.failure_lines(""), "")
+
+
+class NestedSteerAwaitTests(unittest.TestCase):
+    """The Code Mode await steer is judged at the moment it is applied."""
+
+    def replay(self, events, *, finished_after: int | None = None):
+        """Feed timed `plakd agent` events through the scenario; the job ends after event N.
+
+        Each event is `(seconds, event)` on the driver's monotonic clock.
+        """
+        driver = jobs.Jobs(live.ROUTES["codex"], Mock(fixture_seed=1))
+        repo = Path("repo")
+        driver.prepare = Mock(return_value=(repo, Path("home")))
+        sent = []
+        agent = Mock(observed=[], capture_dir=None)
+        agent.send.side_effect = lambda kind, **fields: sent.append(fields) or "s"
+        driver.open_agent = Mock(return_value=agent)
+        seen = {"n": 0, "t": 0.0}
+
+        def finished(_repo, name):
+            return (
+                name == "job-finished" and finished_after is not None and seen["n"] > finished_after
+            )
+
+        def run_turn(_agent, text, _timeout, tick, _accept_eof):
+            self.prompt = text
+            for index, (at, event) in enumerate(events):
+                seen["n"], seen["t"] = index, at
+                agent.observed.append((at, event))
+                tick(None, event)
+            return live.Turn(phase="completed")
+
+        with (
+            patch.object(jobs, "run_turn", run_turn),
+            patch.object(jobs, "marker", side_effect=finished),
+            patch.object(
+                jobs,
+                "matching",
+                side_effect=lambda lines, token: [] if finished(repo, "job-finished") else ["hold"],
+            ),
+            patch.object(jobs, "command_lines", return_value=[]),
+            patch.object(jobs, "require_script"),
+            patch.object(jobs, "close_agent"),
+            patch.object(jobs, "stop_token"),
+            patch.object(jobs, "job_id_for", return_value="p1"),
+            patch.object(jobs.time, "monotonic", side_effect=lambda: seen["t"]),
+        ):
+            try:
+                return driver.steer_await(), sent
+            except live.ScenarioFailure as failure:
+                return failure, sent
+
+    CELL = {"kind": "tool", "name": "exec", "call_id": "cell", "state": "running"}
+    START = {
+        "kind": "tool",
+        "name": "process_session_start",
+        "call_id": "start",
+        "parent_call_id": "cell",
+        "state": "running",
+    }
+    STARTED = {**START, "state": "done"}
+    PROMOTED = {"kind": "job_promoted", "job_id": "p1"}
+    WRITE = {
+        "kind": "tool",
+        "name": "process_session_write",
+        "call_id": "write",
+        "parent_call_id": "cell",
+        "state": "running",
+    }
+    YIELDED = {**WRITE, "state": "done"}
+    APPLIED = {"kind": "steer_ack", "state": "applied"}
+    QUEUED = {"kind": "steer_ack", "state": "queued", "position": 1}
+    CELL_WAIT = {
+        "kind": "tool",
+        "name": "wait",
+        "call_id": "wait",
+        "parent_call_id": "cell",
+        "state": "running",
+    }
+    CELL_WAITED = {**CELL_WAIT, "state": "done"}
+    CELL_DONE = {**CELL, "state": "done"}
+
+    def timed(self, *events, step=0.1):
+        return [(index * step, event) for index, event in enumerate(events)]
+
+    def test_the_prompt_asks_for_one_nested_wait_and_to_follow_a_new_instruction(self):
+        self.replay([])
+        self.assertIn("one write_stdin call", self.prompt)
+        self.assertIn(
+            "If a new instruction arrives, follow it immediately without waiting on the cell.",
+            self.prompt,
+        )
+        self.assertNotIn("must not yield", self.prompt)
+
+    def test_a_steer_applied_while_the_job_runs_passes_even_if_the_job_ends_later(self):
+        result, sent = self.replay(
+            self.timed(
+                self.CELL,
+                self.START,
+                self.STARTED,
+                self.PROMOTED,
+                self.WRITE,
+                self.QUEUED,
+                self.YIELDED,
+                self.APPLIED,
+                self.CELL_DONE,
+            ),
+            finished_after=7,
+        )
+        self.assertEqual(
+            result,
+            "nested wait yielded on the steer; applied at the outer-cell "
+            "boundary in 0.3 s; job still running",
+        )
+        self.assertEqual(sent, [{"text": jobs.STEER_TEXT, "steer": True}])
+
+    def test_the_recorded_shape_waits_on_the_cell_after_the_steer(self):
+        result, _sent = self.replay(
+            self.timed(
+                self.CELL,
+                self.START,
+                self.STARTED,
+                self.PROMOTED,
+                self.WRITE,
+                self.YIELDED,
+                self.APPLIED,
+                self.CELL_WAIT,
+                self.CELL_DONE,
+            ),
+            finished_after=7,
+        )
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (
+                live.MODEL,
+                "model waited on the cell after the steer was applied instead of "
+                "following the steer",
+            ),
+        )
+
+    def test_only_a_cell_wait_first_seen_after_the_applied_steer_counts(self):
+        # A wait started before the steer and finished after it is not the miss.
+        result, _sent = self.replay(
+            self.timed(
+                self.CELL,
+                self.START,
+                self.STARTED,
+                self.PROMOTED,
+                self.CELL_WAIT,
+                self.WRITE,
+                self.YIELDED,
+                self.APPLIED,
+                self.CELL_WAITED,
+                self.CELL_DONE,
+            ),
+            finished_after=8,
+        )
+        self.assertIsInstance(result, str)
+
+    def test_a_start_alone_is_not_a_nested_wait(self):
+        result, sent = self.replay(
+            self.timed(self.CELL, self.START, self.PROMOTED, self.STARTED, self.CELL_DONE)
+        )
+        self.assertEqual(sent, [])
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (live.MODEL, "no nested wait was in flight inside the cell while the job ran"),
+        )
+
+    def test_a_cell_that_already_completed_is_not_an_outer_cell_steer(self):
+        result, sent = self.replay(
+            self.timed(self.CELL, self.START, self.STARTED, self.PROMOTED, self.CELL_DONE)
+        )
+        self.assertEqual(sent, [])
+        self.assertEqual(result.outcome, live.MODEL)
+
+    def test_latency_and_the_job_state_at_the_applied_steer_decide(self):
+        events = [
+            (0.0, self.CELL),
+            (0.1, self.START),
+            (0.2, self.STARTED),
+            (0.3, self.PROMOTED),
+            (0.4, self.WRITE),
+            (0.5, self.YIELDED),
+        ]
+        result, _ = self.replay([*events, (9.5, self.APPLIED)])
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (live.HARNESS, "steer was applied 9.1 s after it was sent, past 8 s"),
+        )
+        # The nested wait yielded while the job ran; the job then ended on its
+        # own before the outer cell applied the steer: a late nested wait.
+        result, _ = self.replay([*events, (2.0, self.APPLIED)], finished_after=5)
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (
+                live.MODEL,
+                "job finished within 1.6 s of the steer, after the nested wait yielded: "
+                "the nested wait began too late",
+            ),
+        )
+        # The nested wait returned only once the job had finished: never yielded.
+        result, _ = self.replay([*events, (2.0, self.APPLIED)], finished_after=4)
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (
+                live.HARNESS,
+                "the nested wait returned only when the job finished: it was not "
+                "yielded on the steer",
+            ),
+        )
+        result, _ = self.replay([*events, (0.6, self.QUEUED)])
+        self.assertEqual(
+            (result.outcome, str(result)),
+            (live.HARNESS, "steer was not applied at the outer-cell boundary"),
+        )
+        # A steer sent with under the 8 s bar of the 25 s hold left is late,
+        # whatever the product did with the nested wait.
+        with patch.object(jobs, "started_wall", side_effect=lambda _repo: jobs.time.time() - 20.0):
+            result, _ = self.replay([*events, (2.0, self.APPLIED)], finished_after=4)
+        self.assertEqual(result.outcome, live.MODEL)
+        self.assertRegex(
+            str(result),
+            r"^the steer went out with [45]\.\d s of the hold left, "
+            r"under the 8 s bar",
+        )
+
+    def test_the_promotion_prompt_names_the_only_code_mode_argument(self):
+        codex = jobs.promotion_prompt(live.ROUTES["codex"], "python3 hold.py 8 t")
+        self.assertIn(
+            "Call exec_command with only the cmd argument: do not pass "
+            "yield_time_ms or any other argument.",
+            codex,
+        )
+        grok = jobs.promotion_prompt(live.ROUTES["grok"], "python3 hold.py 8 t")
+        self.assertIn("Do not pass a timeout, yield, block_until, or background flag.", grok)
+        self.assertNotIn("exec_command", grok)
+
+
+class SteerCommandSnapshotTests(unittest.TestCase):
+    """The Code Mode command steer is judged when the steer is applied."""
+
+    PROMOTED = {"kind": "job_promoted", "job_id": "p1"}
+    APPLIED = {"kind": "steer_ack", "state": "applied"}
+    DONE = {"kind": "turn_lifecycle", "phase": "completed"}
+
+    def replay(self, events, finished_after=None):
+        driver = jobs.Jobs(live.ROUTES["codex"], Mock(fixture_seed=1))
+        driver.prepare = Mock(return_value=(Path("repo"), Path("home")))
+        agent = Mock(observed=[], capture_dir=None)
+        driver.open_agent = Mock(return_value=agent)
+        seen = {"n": 0}
+
+        def finished():
+            return finished_after is not None and seen["n"] > finished_after
+
+        def run_turn(_agent, _text, _timeout, tick, _accept_eof):
+            for index, event in enumerate(events):
+                seen["n"] = index
+                agent.observed.append((0.0, event))
+                tick(None, event)
+            seen["n"] = len(events)
+            return live.Turn(phase="completed")
+
+        with (
+            patch.object(jobs, "run_turn", run_turn),
+            patch.object(
+                jobs,
+                "marker",
+                side_effect=lambda _repo, name: name == "job-finished" and finished(),
+            ),
+            patch.object(jobs, "matching", side_effect=lambda *_: [] if finished() else ["x"]),
+            patch.object(jobs, "command_lines", return_value=[]),
+            patch.object(jobs, "require_script"),
+            patch.object(jobs, "close_agent"),
+            patch.object(jobs, "stop_token"),
+            patch.object(jobs, "job_id_for", return_value="p1"),
+        ):
+            try:
+                return driver.steer_command()
+            except live.ScenarioFailure as failure:
+                return failure
+
+    def test_a_job_that_ends_after_the_applied_steer_still_passes(self):
+        self.assertEqual(
+            self.replay([self.PROMOTED, self.APPLIED, self.DONE], finished_after=1),
+            "hint promoted the nested command; steer applied with the job still running",
+        )
+
+    def test_the_state_at_the_applied_steer_decides(self):
+        failure = self.replay(
+            [self.PROMOTED, {"kind": "status"}, self.APPLIED, self.DONE], finished_after=1
+        )
+        self.assertEqual(
+            (failure.outcome, str(failure)),
+            (live.MODEL, "command finished before the steer was applied"),
+        )
+        failure = self.replay([self.PROMOTED, self.DONE])
+        self.assertEqual(
+            (failure.outcome, str(failure)),
+            (live.HARNESS, "steer was not applied at the outer-cell boundary"),
+        )
+        # A steer only queued, never applied, is the product's: steer_command
+        # now requires `applied`, not any `steer_ack`.
+        failure = self.replay([self.PROMOTED, {"kind": "steer_ack", "state": "queued"}, self.DONE])
+        self.assertEqual(
+            (failure.outcome, str(failure)),
+            (live.HARNESS, "steer was not applied at the outer-cell boundary"),
+        )
+
+
+class JobsTurnTimeoutTests(unittest.TestCase):
+    def test_a_jobs_turn_without_a_terminal_uses_the_budget_accounting(self):
+        agent = live.Agent.__new__(live.Agent)
+        agent.events = __import__("queue").Queue()
+        agent.env, agent.capture_dir, agent.lookup_faults = None, None, None
+        with (
+            patch.object(agent, "send", return_value="1"),
+            patch.object(live, "timeout_failure", wraps=live.timeout_failure) as accounted,
+        ):
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                jobs.run_turn(agent, "hi", 0.05, None, lambda: False)
+        self.assertEqual(
+            (raised.exception.outcome, str(raised.exception)),
+            (live.HARNESS, "no turn terminal within 0s"),
+        )
+        self.assertEqual(accounted.call_args.kwargs["timeout"], 0.05)
