@@ -605,7 +605,7 @@ begin_static() {
     cargo fetch --locked --offline || cargo fetch --locked || fetch_failed=fetch
     structure_jobs=$((jobs / 4))
     if [[ "$batch_scoped" == true && "$test_build_needed" == true && "$jobs" -ge 4 ]] \
-      && selected standalone && ! selected builds && ! selected variants \
+      && selected standalone && ! selected builds \
       && ! selected rustdoc && ! selected rustdoc-alone; then
       # Both check independent resolutions, not a shared feature graph.
       # Sequence them in one target so Cargo can reuse matching dependency
