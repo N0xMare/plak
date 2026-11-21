@@ -1,6 +1,24 @@
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
-use super::{HostService, KeptActivity, tree_nodes};
+use super::{HostService, tree_nodes};
+
+/// What a session's host service kept that its host's directory shows
+/// ([`HostService::kept_activity`]).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct KeptActivity {
+    /// A turn runs, or a child's work is live.
+    pub busy: bool,
+    /// The root's own turn runs, whatever its children do.
+    pub turn_busy: bool,
+    /// An approval, credential wait or context-capacity decision needs the operator.
+    pub awaiting_operator: bool,
+    /// Background processes running or stopping.
+    pub processes: usize,
+    /// Children whose work is live, including parked and sealing children.
+    pub children: usize,
+    /// Children awaiting consent to continue after host loss.
+    pub held_children: usize,
+}
 
 impl<P: ProtocolExtension> HostService<P> {
     /// What this service kept of the session that a directory shows: whether

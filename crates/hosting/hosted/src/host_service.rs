@@ -100,6 +100,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use attachment::{attachment_of, kept_for_attach, origin};
+pub use attention::KeptActivity;
 pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
 pub use tree_nodes::TreeNodes;
@@ -547,24 +548,6 @@ impl AttachmentCount {
     fn seam(&self) -> std::sync::MutexGuard<'_, MarkSeam> {
         self.0.seam.lock().unwrap_or_else(PoisonError::into_inner)
     }
-}
-
-/// What a session's host service kept that its host's directory shows
-/// ([`HostService::kept_activity`]).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct KeptActivity {
-    /// A turn runs, or a child's work is live.
-    pub busy: bool,
-    /// The root's own turn runs, whatever its children do.
-    pub turn_busy: bool,
-    /// An approval, credential wait or context-capacity decision needs the operator.
-    pub awaiting_operator: bool,
-    /// Background processes running or stopping.
-    pub processes: usize,
-    /// Children whose work is live, including parked and sealing children.
-    pub children: usize,
-    /// Children awaiting consent to continue after host loss.
-    pub held_children: usize,
 }
 
 /// A connection's hold on its session's residency
