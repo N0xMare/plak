@@ -1014,14 +1014,6 @@ fn configure_fanout_wait(
     config: &mut crate::runtime::HostConfig<TestExtension>,
     runtime: &Arc<crate::topology_runtime::ProductTopologyRuntime>,
 ) {
-    use plakous_offline_crash_harness::{BoundaryController, scripted_topology_runtime_binding};
-    let mut tools = crate::agent_tree_tools::topology_tool_registrations_on(
-        runtime.driver().clone(),
-        "root",
-        crate::agent_tree_tools::TopologyHostPorts::default(),
-    )
-    .unwrap();
-    tools.retain(|tool| tool.name().as_str() == "wait_agent");
     // A full fan-out (the direct child budget) of settled children whose
     // results are each a few hundred bytes.
     let mut request = SpawnAgentRequest::test_review();
@@ -1060,6 +1052,23 @@ fn configure_fanout_wait(
                 .collect()
         })
         .unwrap();
+    configure_wait(config, runtime, &agent_ids, 1_000);
+}
+
+fn configure_wait(
+    config: &mut crate::runtime::HostConfig<TestExtension>,
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+    agent_ids: &[String],
+    timeout_ms: u64,
+) {
+    use plakous_offline_crash_harness::{BoundaryController, scripted_topology_runtime_binding};
+    let mut tools = crate::agent_tree_tools::topology_tool_registrations_on(
+        runtime.driver().clone(),
+        "root",
+        crate::agent_tree_tools::TopologyHostPorts::default(),
+    )
+    .unwrap();
+    tools.retain(|tool| tool.name().as_str() == "wait_agent");
     let script = Arc::new(
         serde_json::from_value(serde_json::json!({
             "version": 1,
@@ -1067,7 +1076,7 @@ fn configure_fanout_wait(
                 {
                     "output": {"tool": {
                         "name": "wait_agent",
-                        "arguments": {"agent_ids": agent_ids, "timeout_ms": 1_000}
+                        "arguments": {"agent_ids": agent_ids, "timeout_ms": timeout_ms}
                     }},
                     "finish": "tool_calls"
                 },
@@ -1093,6 +1102,143 @@ fn configure_fanout_wait(
         )
         .map_err(|error| error.to_string())
     });
+}
+
+#[test]
+fn a_root_waiting_on_a_child_has_no_periodic_passes_or_store_reads() {
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::runtime::turn_drive::wake_trace::PASSES;
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone)]
+    struct Reads(Arc<AtomicUsize>);
+    impl StoreFaults for Reads {
+        fn before(
+            &self,
+            call: StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            if matches!(
+                call,
+                StoreCall::Load
+                    | StoreCall::LoadIntents
+                    | StoreCall::LoadViews
+                    | StoreCall::LoadQueueHead
+                    | StoreCall::LoadQueueCommands
+            ) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+            Ok(())
+        }
+    }
+
+    let reads = Reads(Arc::default());
+    let child = std::cell::OnceCell::new();
+    with_configured_fixture(
+        0,
+        false,
+        |config, runtime| {
+            let id = runtime
+                .mutate_then_emit(false, |tree| {
+                    tree.spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+                        .map(|child| child.agent_id)
+                        .map_err(|error| error.message)
+                })
+                .block()
+                .unwrap();
+            configure_wait(config, runtime, std::slice::from_ref(&id), 30_000);
+            child.set(id).unwrap();
+            config.store = Arc::new(FaultStore::new(config.store.clone(), reads.clone()));
+        },
+        |host, runtime, actions, observed| {
+            actions
+                .send(UserAction::Prompt("wait for the child".into()))
+                .unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.block(async |host| host.next_prompt(None).await)
+                    .unwrap(),
+            );
+            // Isolate the root port from unrelated requests or reads still
+            // pending on the attachment's independent feed projector.
+            host.block(async |host| {
+                if let Some(live) = host.role.live.as_mut() {
+                    live.drain_ticks().await;
+                }
+            });
+            host.role.live = None;
+            let clock = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            clock.block_on(async {
+                let passes = std::rc::Rc::new(Cell::new(0));
+                let mut drive = Box::pin(PASSES.scope(passes.clone(), async {
+                    host.run_prompt(text, item, echoed, None).await
+                }));
+                let ready_by = Instant::now() + Duration::from_secs(15);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut drive => panic!("the root must still be waiting"),
+                        () = tokio::task::yield_now() => {},
+                    }
+                    if observed.try_iter().any(|event| {
+                        matches!(
+                            event,
+                            HostEvent::ToolLine { name, state, .. }
+                                if name == "wait_agent" && state == "running"
+                        )
+                    }) {
+                        break;
+                    }
+                    assert!(Instant::now() < ready_by, "wait did not start");
+                }
+                let before_passes = passes.get();
+                let before_reads = reads.0.load(Ordering::Relaxed);
+                tokio::time::pause();
+                for _ in 0..20 {
+                    tokio::time::advance(Duration::from_millis(25)).await;
+                    tokio::select! {
+                        biased;
+                        _ = &mut drive => panic!("the wait completed with no child result"),
+                        () = tokio::task::yield_now() => {},
+                    }
+                }
+                assert_eq!(
+                    passes.get() - before_passes,
+                    0,
+                    "timer woke the waiting root"
+                );
+                assert_eq!(reads.0.load(Ordering::Relaxed) - before_reads, 0);
+                tokio::time::resume();
+                let id = child.get().unwrap().clone();
+                runtime
+                    .mutate_then_emit(false, move |tree| {
+                        tree.submit_result(
+                            &id,
+                            &SubmitResultRequest {
+                                turn_token: 1,
+                                output_json: r#"{"ok":true}"#.into(),
+                            },
+                            None,
+                        )
+                        .map_err(|error| error.message)?;
+                        tree.record_turn_completed(&id)
+                            .map_err(|error| error.message)
+                    })
+                    .await
+                    .unwrap();
+                tokio::time::timeout(Duration::from_secs(15), drive)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            });
+            assert!(observed.try_iter().any(|event| matches!(
+                event, HostEvent::AssistantDelta(text) if text == "all settled"
+            )));
+        },
+    );
 }
 
 /// A `wait_agent` over a full fan-out of settled agents (the direct

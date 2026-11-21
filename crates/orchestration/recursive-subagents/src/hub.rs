@@ -194,6 +194,7 @@ pub struct LiveChildTable {
     /// Signalled whenever a child leaves the table or a resident root goes:
     /// the hub then checks whether the whole tree is dormant.
     quiet: Arc<tokio::sync::Notify>,
+    observations: Option<tokio::sync::watch::Sender<()>>,
 }
 
 impl LiveChildTable {
@@ -504,6 +505,7 @@ async fn record_retirement_fault(
                 agent_id.to_owned(),
                 format!("{prefix} for {agent_id}: {error}; recovery required"),
             ));
+            driver.observations().send_replace(());
         }
     }))
     .catch_unwind()

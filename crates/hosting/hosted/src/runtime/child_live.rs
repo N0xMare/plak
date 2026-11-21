@@ -24,7 +24,7 @@ use crate::topology_runtime::ProductTopologyRuntime;
 const MAX_CHILDREN: usize = 8;
 pub(super) const GAP: &str = "Live view starts here · earlier streaming output not shown";
 
-type ObservedChild = (String, TurnId, Agent, Arc<ChildObservation>);
+pub(super) type ObservedChild = (String, TurnId, Agent, Arc<ChildObservation>);
 
 struct Observer {
     turn_id: TurnId,
@@ -103,30 +103,47 @@ pub(super) struct ChildObservers {
     /// The host's job registry, for an agent view's process subjects.
     jobs: Option<Arc<crate::jobs::JobRegistry>>,
     published: BTreeMap<String, ChildProgress>,
+    pub(super) progress_ready: Arc<tokio::sync::Notify>,
 }
 
 fn running_children(runtime: &ProductTopologyRuntime) -> Option<Vec<ObservedChild>> {
     let live = runtime.live.try_lock().ok()?;
-    Some(
-        live.keys()
-            .filter_map(|id| {
-                let child = live.get(id)?;
-                Some((
-                    id.clone(),
-                    child.turn_id(),
-                    child.agent()?,
-                    super::child_projection::of(child)?,
-                ))
-            })
-            .collect(),
-    )
+    Some(observed_children(&live))
+}
+
+fn observed_children(live: &crate::topology_runtime::LiveChildTable) -> Vec<ObservedChild> {
+    live.keys()
+        .filter_map(|id| {
+            let child = live.get(id)?;
+            Some((
+                id.clone(),
+                child.turn_id(),
+                child.agent()?,
+                super::child_projection::of(child)?,
+            ))
+        })
+        .collect()
 }
 
 impl ChildObservers {
-    pub(super) fn sync(&mut self, runtime: &ProductTopologyRuntime) {
+    pub(super) fn sync(&mut self, runtime: &ProductTopologyRuntime) -> bool {
         let Some(children) = running_children(runtime) else {
-            return;
+            return false;
         };
+        self.sync_observations(runtime, children);
+        true
+    }
+
+    pub(super) async fn read_live(runtime: &ProductTopologyRuntime) -> Vec<ObservedChild> {
+        let live = runtime.live.lock().await;
+        observed_children(&live)
+    }
+
+    pub(super) fn sync_observations(
+        &mut self,
+        runtime: &ProductTopologyRuntime,
+        children: Vec<ObservedChild>,
+    ) {
         let _ = runtime.try_read(|tree| {
             for (id, _, _, observation) in &children {
                 if let Ok(node) = tree.node(id) {
@@ -148,6 +165,9 @@ impl ChildObservers {
             (!existing(left, turn), left).cmp(&(!existing(right, right_turn), right))
         });
         children.truncate(MAX_CHILDREN);
+        for (_, _, _, observation) in &children {
+            observation.watch_progress(&self.progress_ready);
+        }
         self.children = children
             .into_iter()
             .map(|(id, turn_id, _, observation)| {
@@ -178,8 +198,11 @@ impl ChildObservers {
     }
 
     pub(super) fn progress_changed(&self) -> bool {
+        self.material_progress_changed() || self.held_now().is_some_and(|held| held != self.held)
+    }
+
+    pub(super) fn material_progress_changed(&self) -> bool {
         self.published != self.material_progress()
-            || self.held_now().is_some_and(|held| held != self.held)
     }
 
     fn held_now(&self) -> Option<std::collections::BTreeSet<String>> {

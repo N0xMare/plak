@@ -10,6 +10,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         Self {
             inner,
             notices: Arc::default(),
+            notice_ready: Arc::default(),
             presentations: Arc::default(),
             request_tools: Arc::default(),
             session_id: None,
@@ -31,6 +32,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         Self {
             inner: self.inner.clone(),
             notices: Arc::clone(&self.notices),
+            notice_ready: Arc::clone(&self.notice_ready),
             presentations: Arc::clone(&self.presentations),
             request_tools: Arc::clone(&self.request_tools),
             session_id: Some(Arc::from(session_id)),

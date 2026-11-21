@@ -21,7 +21,7 @@ use crate::runtime::*;
 
 use crate::runtime::test_support::*;
 use plakous::agent::{AgentError, AgentErrorKind};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::interrupt::CancelSettlement;
 use crate::sessions::{self, QueueDrainState as SessionQueueDrainState, SessionRecord};
@@ -479,7 +479,7 @@ fn observe_pending_cancel_settlement_paints_unsettled_after_deadline() {
     let (mut config, _) = fresh_injected_attached_host(root.path());
     config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
     let (events, rx) = host_event_sink();
-    let mut cancel_settle_deadline = Instant::now()
+    let mut cancel_settle_deadline = tokio::time::Instant::now()
         .checked_sub(Duration::from_millis(1))
         .map(Some)
         .expect("clock can subtract 1ms");

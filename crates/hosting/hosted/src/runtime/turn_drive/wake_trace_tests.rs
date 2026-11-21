@@ -1,9 +1,13 @@
 //! Which select arm ended the pass that took each queued follow-up, so a
-//! test can tell an intent wake from the coalescing tick. Test builds only.
+//! test can tell an intent wake from a coalescing deadline. Test builds only.
 
 use std::sync::Mutex;
 
 static TAKEN: Mutex<Vec<(String, &'static str)>> = Mutex::new(Vec::new());
+
+tokio::task_local! {
+    pub(in crate::runtime) static PASSES: std::rc::Rc<std::cell::Cell<usize>>;
+}
 
 /// The pass after the drive's last wake, on `arm`, admitted the follow-up
 /// `text`. The drive itself carries the arm, whichever thread polls it.

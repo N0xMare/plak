@@ -190,6 +190,7 @@ struct JobQueue {
     pending: VecDeque<(u8, BranchKey, plakous::tools::JobView)>,
     terminals: BTreeSet<[u8; 16]>,
     generation: u64,
+    ready: Arc<tokio::sync::Notify>,
 }
 
 impl JobQueue {
@@ -212,11 +213,22 @@ impl JobQueue {
             self.pending.push_back((2, key, job));
         }
         self.generation = self.generation.wrapping_add(1);
+        self.ready.notify_one();
         true
     }
 }
 
 impl JobRegistry {
+    pub(crate) fn observations_ready(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(
+            &self
+                .events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .ready,
+        )
+    }
+
     /// A registry of one session's jobs under `capacity`, the process's
     /// bound on running process starts.
     pub(crate) fn under(capacity: Arc<JobHostCapacity>) -> Self {
@@ -553,6 +565,7 @@ impl JobRegistry {
         targets: Vec<UserStopTarget>,
         rows: Vec<String>,
     ) -> Result<(), String> {
+        let ready = self.observations_ready();
         let mut stops = self
             .user_stops
             .lock()
@@ -562,6 +575,7 @@ impl JobRegistry {
             *stops.rows.entry(row.clone()).or_default() += 1;
         }
         let shared = Arc::clone(&self.user_stops);
+        let completed = Arc::clone(&ready);
         let worker_rows = rows.clone();
         let spawned = std::thread::Builder::new()
             .name("plak-user-stop".into())
@@ -616,12 +630,14 @@ impl JobRegistry {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 release_stopping_rows(&mut stops.rows, &worker_rows);
                 stops.failures.extend(failure);
+                completed.notify_one();
             });
         let Ok(worker) = spawned else {
             release_stopping_rows(&mut stops.rows, &rows);
             return Err("background process stop could not start".into());
         };
         stops.workers.push(worker);
+        ready.notify_one();
         Ok(())
     }
 

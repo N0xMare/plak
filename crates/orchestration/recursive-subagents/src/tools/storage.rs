@@ -15,15 +15,22 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) struct TreeMutationGuard<'a> {
     live: &'a Mutex<ProductAgentTree>,
+    observations: &'a tokio::sync::watch::Sender<()>,
+    previous_revision: u64,
     locked: Option<MutexGuard<'a, ProductAgentTree>>,
     candidate: Option<ProductAgentTree>,
 }
 
 impl<'a> TreeMutationGuard<'a> {
-    pub(super) fn lock(live: &'a Mutex<ProductAgentTree>) -> Result<Self, ()> {
+    pub(super) fn lock(
+        live: &'a Mutex<ProductAgentTree>,
+        observations: &'a tokio::sync::watch::Sender<()>,
+    ) -> Result<Self, ()> {
         let locked = live.lock().map_err(|_| ())?;
         Ok(Self {
             live,
+            observations,
+            previous_revision: locked.stored_revision,
             locked: Some(locked),
             candidate: None,
         })
@@ -57,6 +64,7 @@ impl DerefMut for TreeMutationGuard<'_> {
 }
 impl Drop for TreeMutationGuard<'_> {
     fn drop(&mut self) {
+        let advanced = self.previous_revision != self.stored_revision;
         if let Some(candidate) = &mut self.candidate {
             let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
             std::mem::swap(&mut *live, candidate);
@@ -64,6 +72,11 @@ impl Drop for TreeMutationGuard<'_> {
             // waiter that woke and read the live tree in between saw the old
             // rows, so wake it again now that they are current.
             live.waiters().notify_waiters();
+        }
+        // Signal after a detached candidate has replaced the live image.
+        drop(self.locked.take());
+        if advanced {
+            self.observations.send_replace(());
         }
     }
 }
@@ -142,6 +155,7 @@ type ParkSender = tokio::sync::mpsc::UnboundedSender<ParkRequest>;
 /// The order writers run in, and how the running one reaches its caller.
 #[derive(Default)]
 pub(super) struct TreeWriter {
+    pub(super) observations: tokio::sync::watch::Sender<()>,
     /// Owed effects also span gaps between writer turns, not child actor lifetimes.
     pub(super) effect_activity: super::step_activity::EffectActivity,
     /// Tokio's mutex is fair: writers take it in the order they asked.

@@ -1684,7 +1684,7 @@ fn busy_watch_does_not_announce_loading() {
 }
 
 /// The turn loop asks for allowances only while the surface says the Usage tab
-/// is open. Several ticks with the watch closed read nothing; opening it reads
+/// is open. A quiet interval with the watch closed reads nothing; opening it reads
 /// once. Replacing the gate with `if true` reads during the closed window.
 #[test]
 fn a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open() {
@@ -1702,6 +1702,7 @@ fn a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open() {
             self.armed.load(Ordering::Acquire)
         }
         fn dispatch(&self, _: ProbeIntent, _: SurfaceFacts<'_>, _: &Sender) -> SurfaceEffect {
+            self.armed.store(true, Ordering::Release);
             SurfaceEffect::default()
         }
         fn publish_template_readiness(
@@ -1723,9 +1724,8 @@ fn a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open() {
     let plan: Arc<plakous_offline_crash_harness::script::ScriptPlan> =
         Arc::new(serde_json::from_value(plan).unwrap());
     let (mut config, _) = scripted_host_with(root.path(), plan);
-    let armed = Arc::new(AtomicBool::new(false));
     config.surface = Some(Box::new(WatchProbe {
-        armed: Arc::clone(&armed),
+        armed: Arc::new(AtomicBool::new(false)),
     }));
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
@@ -1747,7 +1747,7 @@ fn a_busy_turn_rereads_allowances_only_while_the_usage_tab_is_open() {
     let closed = seen.iter().filter(|event| is_allowance_read(event)).count() - before;
     assert_eq!(closed, 0, "a closed Usage tab read allowances: {seen:#?}");
 
-    armed.store(true, Ordering::Release);
+    send_attached_action(&actions, UserAction::Extension(ProbeIntent::InspectUsage));
     let open_deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < open_deadline
         && seen.iter().filter(|event| is_allowance_read(event)).count() - before == 0

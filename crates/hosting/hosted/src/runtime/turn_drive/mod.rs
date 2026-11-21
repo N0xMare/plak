@@ -22,6 +22,7 @@ use super::{
     turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
 };
 use super::{HostBoundary, HostWorkflow, RuntimeFactory, TurnObserver, observe_boundary};
+use crate::node::wait_deadline;
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::CancelUnsettled;
 
@@ -119,11 +120,12 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     assistant: String,
     delta_buf: String,
     last_flush: Instant,
+    housekeeping: wakes::Housekeeping,
     tool_subjects: ToolSubjectStash,
     projection: TurnProjection<P>,
     quit_after_terminal: bool,
     /// After Quit, wait this long for a cancelled terminal, then abandon.
-    quit_join_deadline: Option<Instant>,
+    quit_join_deadline: Option<tokio::time::Instant>,
     #[cfg(test)]
     quit_result_ready: Option<quit_trace::ResultSlot>,
     cancel_unsettled: Option<CancelUnsettled>,
@@ -131,7 +133,7 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The runtime accepted a cancel for this turn, or reported the turn
     /// already ended; a refused request leaves this unset.
     cancel_accepted: bool,
-    cancel_settle_deadline: Option<Instant>,
+    cancel_settle_deadline: Option<tokio::time::Instant>,
     interrupted_status_pending: bool,
     abandoned_by_quit: bool,
     events_done: bool,
@@ -145,7 +147,6 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     live_occupancy: LiveOccupancy,
     last_context_refresh_bytes: u64,
     request_tool_names: Vec<String>,
-    queue_refresh_at: Instant,
     queue_refresh: Option<queue_projection::QueueRefresh>,
     /// A model round started since the last running-turn tree pass.
     root_tree_pass_due: Option<u64>,
@@ -176,6 +177,8 @@ mod finish;
 #[cfg(test)]
 mod prefix_tests;
 mod queue_projection;
+mod wakes;
+use wakes::{changed, wait_children, wait_queue, wait_reply};
 
 pub(in crate::runtime) async fn drive_recovered_turn<
     P: plakous_host_protocol::ProtocolExtension,
@@ -217,10 +220,14 @@ pub(in crate::runtime) mod wake_trace;
 impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
     fn new(
         control: TurnControl,
-        host: TurnHost<'a, P>,
+        mut host: TurnHost<'a, P>,
         turn_observer: Option<Box<dyn TurnObserver>>,
     ) -> Self {
         let live_occupancy = LiveOccupancy::from_projection(&host.context_projection);
+        if let Some(live) = host.live_projector.as_mut() {
+            live.tick(host.live_target.clone());
+        }
+        let housekeeping = wakes::Housekeeping::new(&host);
         Self {
             turn_observer,
             host,
@@ -228,6 +235,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             assistant: String::new(),
             delta_buf: String::new(),
             last_flush: Instant::now(),
+            housekeeping,
             tool_subjects: ToolSubjectStash::new(),
             projection: TurnProjection::default(),
             quit_after_terminal: false,
@@ -248,7 +256,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             live_occupancy,
             last_context_refresh_bytes: 0,
             request_tool_names: Vec::new(),
-            queue_refresh_at: Instant::now(),
             queue_refresh: None,
             root_tree_pass_due: None,
             steering_projection_due: false,
@@ -288,14 +295,22 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
 
 /// What wakes the root's turn besides its result and events.
 enum RootWake {
-    /// The join deadline after Quit passed.
-    QuitDeadline,
     /// An intent arrived.
     Intent,
     /// A deferred intent is ready to take.
     Deferred,
-    /// The 20 ms coalesce window closed with no other wake.
-    Tick,
+    Flush,
+    Tree(bool),
+    ChildTable(Vec<super::child_live::ObservedChild>),
+    ChildProgress,
+    NoticeReply,
+    Notice,
+    Jobs,
+    StepControl,
+    Cancel,
+    Projection(bool),
+    Queue(Option<sessions::QueueCommands>),
+    Usage,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for RootTurn<'_, P> {
@@ -304,7 +319,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
     type Wake = RootWake;
 
     async fn pass(&mut self) -> crate::node::Pass {
-        self.poll_queue_projection().await;
+        #[cfg(test)]
+        let _ = wake_trace::PASSES.try_with(|passes| passes.set(passes.get() + 1));
         if let Some(through) = self.root_tree_pass_due.take() {
             self.project_running_root_tree(through).await;
             #[cfg(test)]
@@ -343,6 +359,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         if self.poll_actions().await {
             return crate::node::Pass::Again;
         }
+        self.observe_housekeeping();
 
         // The drive polls a ready result before the urgent quit deadline.
         // Checking elapsed time here would abandon an already-published
@@ -361,45 +378,65 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
         !self.events_done
     }
 
-    fn urgent_armed(&self) -> bool {
-        self.quit_join_deadline.is_some()
+    fn urgent_deadline(&self) -> Option<tokio::time::Instant> {
+        self.quit_join_deadline
     }
 
-    fn urgent(&self) -> impl Future<Output = RootWake> {
-        let sleep = tokio::time::sleep(self.quit_join_deadline.map_or(Duration::MAX, |deadline| {
-            deadline.saturating_duration_since(Instant::now())
-        }));
-        async move {
-            sleep.await;
-            RootWake::QuitDeadline
-        }
-    }
-
-    fn ready(&self) -> impl Future<Output = RootWake> {
-        self.host
-            .events
-            .step_control
-            .observe_agent(Some(self.host.job_agent));
-        if self.host.events.step_control.requested() {
-            self.host.events.step_control.owner_boundary(
+    fn ready(&mut self) -> impl Future<Output = RootWake> {
+        let step = &self.host.events.step_control;
+        let step_changed = step.changed.notified();
+        // Publish the owner boundary even if a ready runtime event wins
+        // before the lower-priority select below is polled.
+        step.observe_agent(Some(self.host.job_agent));
+        if step.requested() {
+            step.owner_boundary(
                 Some(self.host.job_agent),
                 Some(self.control.turn_id()),
                 crate::topology_runtime::lookup(&self.host.live_target.tree_id),
             );
         }
-        let actions = self.host.actions;
         let takes_actions = self.takes_actions();
         let deferred_ready = takes_actions && self.host.deferred.borrow().has_deferred();
+        let accepts_intents = takes_actions || (step.requested() && !self.quit_after_terminal);
+        let flush = (!self.delta_buf.is_empty())
+            .then(|| (self.last_flush + super::turn::ASSISTANT_DELTA_WINDOW).into());
+        let state = &mut self.housekeeping;
+        let tree_output_at = state.tree_output_deadline;
+        let progress_ready = &self.host.last_tree_revision.child_live.progress_ready;
+        let usage_at = surface::usage_watch_armed(self.host.surface.as_deref()).then(|| {
+            self.host
+                .subscription_usage_refresh
+                .watch_deadline(state.usage_not_before)
+                .into()
+        });
+        let cancel_at = self.cancel_settle_deadline;
+        let reply = self.notice_reply.as_mut();
+        let queue = self.queue_refresh.as_mut();
+        let queue_pending = self.host.session.queue_projection_debt
+            || self.host.session.queue_commands.has_pending();
+        let actions = self.host.actions;
+        let control = &self.control;
+        let cancel_pending = self.cancel_pending && self.cancel_unsettled.is_none();
+        let notice_ready = &self.host.events.notice_ready;
         async move {
             tokio::select! {
                 biased;
-                // An intent wakes the loop at once; the next pass takes it.
-                () = actions.ready(), if takes_actions => RootWake::Intent,
+                () = actions.ready(), if accepts_intents => RootWake::Intent,
                 () = std::future::ready(()), if deferred_ready => RootWake::Deferred,
-                // Recreated every pass, so it fires only after 20 ms with no
-                // other wake. Arming it only while deltas are buffered is the
-                // host actor's job (design E1), not this loop's.
-                () = tokio::time::sleep(Duration::from_millis(20)) => RootWake::Tick,
+                () = step_changed => RootWake::StepControl,
+                () = control.wait_until_settled(), if cancel_pending => RootWake::Cancel,
+                () = wait_deadline(cancel_at) => RootWake::Cancel,
+                () = wait_deadline(flush) => RootWake::Flush,
+                () = notice_ready.notified() => RootWake::Notice,
+                () = state.jobs.notified() => RootWake::Jobs,
+                open = changed(state.tree.as_mut()) => RootWake::Tree(open),
+                children = wait_children(state.resync_children.as_deref()) => RootWake::ChildTable(children),
+                () = progress_ready.notified(), if tree_output_at.is_none() => RootWake::ChildProgress,
+                () = wait_deadline(tree_output_at) => RootWake::ChildProgress,
+                open = changed(state.projection.as_mut()), if queue_pending => RootWake::Projection(open),
+                () = wait_reply(reply) => RootWake::NoticeReply,
+                commands = wait_queue(queue) => RootWake::Queue(commands),
+                () = wait_deadline(usage_at) => RootWake::Usage,
             }
         }
     }
@@ -419,13 +456,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                     observer.observe(HostBoundary::RuntimeReturned);
                 }
             }
-            crate::node::TurnWake::Urgent(_) => {
+            crate::node::TurnWake::Urgent => {
                 self.abandoned_by_quit = true;
                 return crate::node::Flow::Done;
             }
             crate::node::TurnWake::Event(ev) => {
                 match ev {
                     Ok(event) => {
+                        self.runtime_housekeeping(&event);
                         if matches!(event.kind(), AgentEventKind::SteeringApplied) {
                             self.steering_projection_due = true;
                         }
@@ -588,11 +626,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                                 &self.request_tool_names,
                             );
                         }
-                        // No push here: the canvas is fed from the coalesce
-                        // tick below and from tool lifecycle terminals inside
-                        // `apply_event`. Pushing per streamed event made every
-                        // `TextDelta` pay a tree lookup for a revision that a
-                        // text delta cannot advance.
+                        // Tree changes have their own wake. Text deltas do not
+                        // pay for an unrelated tree observation.
                         // A tool row that just terminalised may be the last
                         // one a settled cancel is waiting behind.
                         flush_deferred_interrupted_status(
@@ -633,44 +668,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> crate::node::TurnPort for Root
                     }
                 }
             }
-            crate::node::TurnWake::Ready(RootWake::Intent) => {
-                #[cfg(test)]
-                {
-                    self.last_wake = "intent";
-                }
-            }
-            crate::node::TurnWake::Ready(RootWake::Deferred | RootWake::QuitDeadline) => {}
-            crate::node::TurnWake::Ready(RootWake::Tick) => {
-                #[cfg(test)]
-                {
-                    self.last_wake = "tick";
-                }
-                // Coalesce window: flush buffered text deltas if due, and take
-                // the one tree observation of this window. The emitter drops
-                // every non-advancing revision, so an idle tree costs a lookup
-                // and nothing leaves.
-                if surface::usage_watch_armed(self.host.surface.as_deref()) {
-                    self.host.subscription_usage_refresh.poll_while_watched(
-                        self.host.subscription_service.clone(),
-                        self.host.session.account_ref().ok(),
-                    );
-                }
-                flush_assistant_delta(
-                    &mut self.delta_buf,
-                    &mut self.last_flush,
-                    self.host.events,
-                    false,
-                );
-                emit_tree_snapshot_if_revision_advanced(
-                    self.host.rows,
-                    self.host.store,
-                    self.host.home,
-                    self.host.session,
-                    self.host.last_tree_revision,
-                    self.host.events,
-                    false,
-                );
-            }
+            crate::node::TurnWake::Ready(wake) => self.serve_work(wake),
         }
         crate::node::Flow::Continue
     }

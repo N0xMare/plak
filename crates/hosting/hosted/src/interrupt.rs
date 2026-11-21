@@ -194,7 +194,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> InterruptWatch<'a, P> {
     }
 
     /// [`Self::poll`], answering whether the mailbox can still deliver.
-    fn drain(self) -> bool {
+    pub(crate) fn drain(self) -> bool {
         loop {
             match self.actions.try_recv() {
                 Ok(delivery) => {

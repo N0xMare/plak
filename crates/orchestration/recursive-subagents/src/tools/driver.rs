@@ -110,7 +110,7 @@ impl TreeDriver {
             .order()
             .try_lock_owned()
             .unwrap_or_else(|_| panic!("a synchronous test runs with no other writer"));
-        let mut tree = storage::TreeMutationGuard::lock(&self.tree)
+        let mut tree = storage::TreeMutationGuard::lock(&self.tree, self.observations())
             .unwrap_or_else(|()| panic!("topology tree lock is poisoned"));
         work(&mut tree)
     }
@@ -671,7 +671,9 @@ impl TreeDriver {
             .name("tree-undo".to_owned())
             .spawn(move || {
                 let _permit = driver.writer.order().blocking_lock_owned();
-                if let Ok(mut tree) = storage::TreeMutationGuard::lock(&driver.tree) {
+                if let Ok(mut tree) =
+                    storage::TreeMutationGuard::lock(&driver.tree, driver.observations())
+                {
                     undo(&mut tree);
                 }
             });
@@ -700,7 +702,7 @@ impl TreeDriver {
         let mut running = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let _writer = driver.writer.enter(parks);
-            let mut tree = storage::TreeMutationGuard::lock(&driver.tree)
+            let mut tree = storage::TreeMutationGuard::lock(&driver.tree, driver.observations())
                 .map_err(|()| Self::lock_poisoned())?;
             work(&mut tree);
             Ok::<_, TopologyError>(())
@@ -735,6 +737,10 @@ impl TreeDriver {
         self.publication_owner
             .as_deref()
             .unwrap_or(&self.root_agent_id)
+    }
+
+    pub(crate) fn observations(&self) -> &tokio::sync::watch::Sender<()> {
+        &self.writer.observations
     }
 
     /// Waits for this writer's turn, giving up only once the tree cannot

@@ -76,6 +76,8 @@ struct WebSection {
     credentials_write: Entry,
     config_read: Entry,
     config_write: Entry,
+    files_read: Entry,
+    terminal: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,6 +302,8 @@ fn forward_sections(
         assign("web.credentials_write", &section.credentials_write)?;
         assign("web.config_read", &section.config_read)?;
         assign("web.config_write", &section.config_write)?;
+        assign("web.files_read", &section.files_read)?;
+        assign("web.terminal", &section.terminal)?;
     }
     if let Some(section) = &file.gateway {
         assign("gateway.address", &section.address)?;

@@ -99,7 +99,7 @@ impl LiveTarget {
 /// A pass the task finished: the request generation it covered and its
 /// refusal, if any.
 #[derive(Clone, Default)]
-struct Applied {
+pub(in crate::runtime) struct Applied {
     generation: u64,
     error: Option<String>,
 }
@@ -156,6 +156,10 @@ pub(crate) struct LiveProjector {
 }
 
 impl LiveProjector {
+    pub(in crate::runtime) fn observe_applied(&self) -> watch::Receiver<Applied> {
+        self.applied.clone()
+    }
+
     /// Spawns the task as one of the session's `tasks`. Call it inside the
     /// host's executor.
     pub(crate) fn spawn(tasks: &crate::TaskSet) -> Self {

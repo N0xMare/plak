@@ -30,6 +30,7 @@ impl ProductTopologyRuntime {
         Self {
             live: Arc::new(tokio::sync::Mutex::new(LiveChildTable {
                 quiet: Arc::clone(&quiet),
+                observations: Some(driver.observations().clone()),
                 ..LiveChildTable::default()
             })),
             driver,
@@ -344,6 +345,12 @@ impl ProductTopologyRuntime {
     /// Observes owner-confirmed retirement failures, independently of their initiator.
     pub fn observe_retirement_faults(&self) -> tokio::sync::broadcast::Receiver<(String, String)> {
         self.driver.retirement_faults.subscribe()
+    }
+
+    /// Wakes on a committed revision, a live child change, or a retirement fault.
+    #[must_use]
+    pub fn observe_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.driver.observations().subscribe()
     }
 
     /// Parks the host's rejoin spec on the hub for this tree's lifetime.

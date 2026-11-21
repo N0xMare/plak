@@ -5,6 +5,12 @@ use super::{
 };
 
 impl LiveChildTable {
+    fn observations_changed(&self) {
+        if let Some(observations) = &self.observations {
+            observations.send_replace(());
+        }
+    }
+
     /// A resident child; an opening or releasing one takes no new work.
     pub fn get(&self, agent_id: &str) -> Option<&(dyn LiveChildHandle + 'static)> {
         match self.nodes.get(agent_id)? {
@@ -86,11 +92,14 @@ impl LiveChildTable {
     /// The node is resident with `child`'s turn, whatever it was.
     pub(super) fn reside(&mut self, agent_id: String, child: Box<dyn LiveChildHandle>) {
         self.nodes.insert(agent_id, Residency::Resident(child));
+        self.observations_changed();
     }
 
     /// The node goes dormant.
     pub(super) fn vacate(&mut self, agent_id: &str) {
-        self.nodes.remove(agent_id);
+        if self.nodes.remove(agent_id).is_some() {
+            self.observations_changed();
+        }
     }
 
     #[allow(
@@ -246,6 +255,7 @@ impl LiveChildTable {
         };
         self.nodes
             .insert(agent_id, Residency::Releasing(Box::new(retirement.clone())));
+        self.observations_changed();
         Some(retirement)
     }
 

@@ -40,7 +40,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     /// longer reads the mailbox, so readiness must not wake the loop.
     pub(super) fn takes_actions(&self) -> bool {
         !self.quit_after_terminal
-            && (!self.host.events.step_control.requested()
+            && (self.housekeeping.mailbox_closed
+                || !self.host.events.step_control.requested()
                 || self.host.actions.abandon_and_release_requested()
                 || self.host.deferred.borrow().has_deferred_quit())
     }
@@ -165,8 +166,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     )]
     pub(super) async fn poll_actions(&mut self) -> bool {
         if self.host.events.step_control.requested() {
-            crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
-                .poll();
+            self.housekeeping.mailbox_closed =
+                !crate::interrupt::InterruptWatch::deferring(self.host.actions, self.host.deferred)
+                    .drain();
             if self.host.deferred.borrow().has_deferred_stop_or_interrupt() {
                 self.host.events.step_control.interrupt();
             }
@@ -430,12 +432,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         super::quit_trace::step(&self.host.session.id, "queue paused");
                     }
                     self.quit_after_terminal = true;
-                    self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
+                    self.quit_join_deadline = Some(tokio::time::Instant::now() + QUIT_RESULT_JOIN);
                     #[cfg(test)]
                     if super::quit_trace::take_expired_join(&self.host.session.id) {
                         let _ =
                             super::quit_trace::ready_result(self.quit_result_ready.take()).await;
-                        self.quit_join_deadline = Some(Instant::now());
+                        self.quit_join_deadline = Some(tokio::time::Instant::now());
                     }
                     if let Some(observer) = &self.turn_observer {
                         observer.observe(HostBoundary::ProductPublished);
@@ -603,7 +605,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                                 || self.cancel_settle_deadline.is_none()
                             {
                                 self.cancel_settle_deadline =
-                                    Some(Instant::now() + HOST_CANCEL_SETTLE_TIMEOUT);
+                                    Some(tokio::time::Instant::now() + HOST_CANCEL_SETTLE_TIMEOUT);
                             }
                             let _ = self.host.events.send(ContentEvent::Status {
                                 phase: HostPhase::Interrupting,

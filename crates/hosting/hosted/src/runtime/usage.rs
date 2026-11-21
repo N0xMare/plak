@@ -994,9 +994,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         }
     }
 
-    /// Re-reads allowances on the coalesced in-turn path while the Usage tab
-    /// is open. A request younger than the freshness window is left alone, so
-    /// the busy tick does not start a read every pass.
+    pub(super) fn watch_deadline(&self, not_before: Instant) -> Instant {
+        self.last_request
+            .lock()
+            .ok()
+            .and_then(|last| *last)
+            .map_or(not_before, |at| {
+                not_before.max(at + crate::subscription_usage::USAGE_PROJECTION_FRESHNESS)
+            })
+    }
+
+    /// Re-reads allowances when the open Usage tab's observation expires.
     pub(super) fn poll_while_watched(
         &self,
         subscriptions: Option<NativeSubscriptions>,

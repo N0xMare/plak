@@ -410,7 +410,7 @@ pub(super) async fn observe_pending_cancel_settlement<
     control: &TurnControl,
     cancel_pending: bool,
     cancel_unsettled: &mut Option<CancelUnsettled>,
-    cancel_settle_deadline: &mut Option<Instant>,
+    cancel_settle_deadline: &mut Option<tokio::time::Instant>,
     rows: &dyn TopologyRows,
     store: &dyn SessionRecordStore,
     home: &SessionHome,
@@ -456,9 +456,11 @@ pub(super) async fn observe_pending_cancel_settlement<
     cancel_pending
 }
 
-pub(super) fn cancel_settle_deadline_elapsed(deadline: Option<Instant>) -> Option<CancelUnsettled> {
+pub(super) fn cancel_settle_deadline_elapsed(
+    deadline: Option<tokio::time::Instant>,
+) -> Option<CancelUnsettled> {
     deadline
-        .filter(|deadline| Instant::now() >= *deadline)
+        .filter(|deadline| tokio::time::Instant::now() >= *deadline)
         .map(|_| cancel_settle_timeout_detail())
 }
 
@@ -665,6 +667,8 @@ pub(super) fn reconcile_authoritative_assistant(
     missing.filter(|suffix| !suffix.is_empty())
 }
 
+pub(super) const ASSISTANT_DELTA_WINDOW: Duration = Duration::from_millis(20);
+
 /// Flush coalesced assistant text deltas to the client.
 ///
 /// When `force` is false, only flushes if the buffer is non-empty and at least
@@ -678,7 +682,7 @@ pub(super) fn flush_assistant_delta<P: plakous_host_protocol::ProtocolExtension>
     if delta_buf.is_empty() {
         return;
     }
-    if force || last_flush.elapsed() >= Duration::from_millis(20) {
+    if force || last_flush.elapsed() >= ASSISTANT_DELTA_WINDOW {
         let _ = events.send(ContentEvent::AssistantDelta(std::mem::take(delta_buf)));
         *last_flush = Instant::now();
     }

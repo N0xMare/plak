@@ -707,6 +707,33 @@ fn full_schema_round_trips_through_files() {
 }
 
 #[test]
+fn every_config_key_survives_render_and_parse() {
+    let default = ProductConfig::default_product();
+    for row in CONFIG_KEYS {
+        let example: toml::Table = toml::from_str(&format!("value = {}", row.example)).unwrap();
+        let value = match &example["value"] {
+            toml::Value::Boolean(_) => {
+                toml::Value::Boolean(!default.field_value(row.field).unwrap().as_bool().unwrap())
+            }
+            value => value.clone(),
+        };
+        let mut config = default.clone();
+        config
+            .assign_field(row, keys::FieldValue::Toml(&value))
+            .unwrap_or_else(|error| panic!("{}: {error}", row.path));
+        let rendered = config.render();
+        let read =
+            ProductConfig::parse(&rendered).unwrap_or_else(|error| panic!("{}: {error}", row.path));
+        assert!(
+            read.present.contains(&row.field),
+            "{} was not read",
+            row.path
+        );
+        assert_eq!(read, config, "{}", row.path);
+    }
+}
+
+#[test]
 fn project_template_wins_over_the_user_file_on_collision() {
     let (tmp, paths) = home_with_templates(&[
         ("critic", &template_body("claude", "claude-opus-5", "")),

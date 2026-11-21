@@ -223,6 +223,7 @@ impl ChildTurnProjection {
                 cursor: 0,
                 updates: VecDeque::new(),
                 closed: false,
+                progress_watchers: Vec::new(),
             }),
         });
         Self {
@@ -317,18 +318,14 @@ impl<T> crate::node::TurnPort for ChildPort<T> {
         !self.reduced
     }
 
-    fn urgent_armed(&self) -> bool {
-        false
-    }
-
-    fn urgent(&self) -> impl Future<Output = Self::Wake> {
-        std::future::pending()
+    fn urgent_deadline(&self) -> Option<tokio::time::Instant> {
+        None
     }
 
     /// Once the result came, the events already delivered are reduced and
     /// then the drive ends: events outrank this wake, so it comes only when
     /// none is ready.
-    fn ready(&self) -> impl Future<Output = Self::Wake> {
+    fn ready(&mut self) -> impl Future<Output = Self::Wake> {
         let drained = self.result.is_some();
         async move {
             if !drained {
@@ -364,9 +361,7 @@ impl<T> crate::node::TurnPort for ChildPort<T> {
                     Flow::Continue
                 }
             }
-            crate::node::TurnWake::Urgent(Drained) | crate::node::TurnWake::Ready(Drained) => {
-                Flow::Done
-            }
+            crate::node::TurnWake::Urgent | crate::node::TurnWake::Ready(Drained) => Flow::Done,
         };
         std::future::ready(flow)
     }
@@ -440,8 +435,16 @@ impl<T> ChildPort<T> {
                 );
             }
             let terminal = projection.progress.terminal;
-            state.progress = projection.progress.view.clone();
+            let next = projection.progress.view.clone();
+            let previous = std::mem::replace(&mut state.progress, next);
+            let material = ChildProgress {
+                last_activity_unix_ms: state.progress.last_activity_unix_ms,
+                ..previous
+            } != state.progress;
             state.terminal = terminal;
+            if material || terminal {
+                state.notify_progress();
+            }
             let cursor = state.publish(event.cursor().sequence().get(), ops);
             self.observed.changed.send_replace(cursor);
             terminal
@@ -501,9 +504,21 @@ struct State {
     cursor: u64,
     updates: VecDeque<Update>,
     closed: bool,
+    progress_watchers: Vec<std::sync::Weak<tokio::sync::Notify>>,
 }
 
 impl State {
+    fn notify_progress(&mut self) {
+        self.progress_watchers.retain(|watcher| {
+            if let Some(watcher) = watcher.upgrade() {
+                watcher.notify_one();
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     /// Retains one update for the faces; its cursor.
     fn publish(&mut self, source_sequence: u64, ops: Vec<HostEvent<Core>>) -> u64 {
         self.cursor = self.cursor.saturating_add(1);
@@ -606,6 +621,21 @@ pub(crate) fn tree_needs_operator(tree_id: &str) -> bool {
 }
 
 impl ChildObservation {
+    pub(super) fn watch_progress(&self, watcher: &Arc<tokio::sync::Notify>) {
+        let watcher = Arc::downgrade(watcher);
+        let mut state = self.lock();
+        state
+            .progress_watchers
+            .retain(|watcher| watcher.strong_count() != 0);
+        if !state
+            .progress_watchers
+            .iter()
+            .any(|prior| prior.ptr_eq(&watcher))
+        {
+            state.progress_watchers.push(watcher);
+        }
+    }
+
     fn needs_operator(&self) -> bool {
         let state = self.lock();
         !state.closed
@@ -784,6 +814,7 @@ impl ChildObservation {
     fn close(&self) {
         let mut state = self.lock();
         state.closed = true;
+        state.notify_progress();
         // Faces may retain the closed read model, but never its live reducer.
         drop(state.projection.take());
         self.changed.send_replace(state.cursor);

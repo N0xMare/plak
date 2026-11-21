@@ -140,8 +140,8 @@ fn snapshot_due(
     last_revision: Option<u64>,
     revision: u64,
     changed: bool,
-    next: Option<std::time::Instant>,
-    now: std::time::Instant,
+    next: Option<tokio::time::Instant>,
+    now: tokio::time::Instant,
 ) -> bool {
     last_revision != Some(revision) || (changed && next.is_none_or(|next| now >= next))
 }
@@ -397,6 +397,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     events: &Sender<P>,
     skip_if_first: bool,
 ) {
+    push.notices_pending = false;
     let Some(runtime) = push.runtime(rows, session) else {
         push.last_notice_revision = None;
         return;
@@ -424,6 +425,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
         return;
     };
     if push.last_notice_revision != Some(revision) {
+        push.notices_pending = true;
         let Ok(mut notice_ids) = known_notice_ids(store, session) else {
             return;
         };
@@ -444,6 +446,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
                 .pending_notice_entries()
                 .any(|(id, _)| id.is_some())
         });
+        push.notices_pending = push.last_notice_revision != Some(revision);
     }
     let child_live = &mut push.child_live;
     let last_revision = &mut push.last_revision;
@@ -451,7 +454,7 @@ pub(super) fn emit_tree_snapshot_if_revision_advanced<
     let announced_abandoned = &mut push.announced_abandoned_turns;
     let _ = runtime.read(|tree| {
         let revision = tree.revision;
-        let now = std::time::Instant::now();
+        let now = tokio::time::Instant::now();
         if !snapshot_due(
             *last_revision,
             revision,
@@ -1079,7 +1082,7 @@ mod tests;
 mod progress_rate_tests {
     #[test]
     fn material_progress_snapshots_are_rate_limited_without_sleeping() {
-        let now = std::time::Instant::now();
+        let now = tokio::time::Instant::now();
         let next = now + std::time::Duration::from_secs(1);
         assert!(!super::snapshot_due(Some(1), 1, true, Some(next), now));
         assert!(super::snapshot_due(Some(1), 1, true, Some(next), next));

@@ -192,8 +192,8 @@ pub(crate) enum Pass {
 pub(crate) enum TurnWake<T, E, W> {
     /// The turn's result.
     Result(T),
-    /// A role wake that outranks events.
-    Urgent(W),
+    /// A role deadline that outranks events.
+    Urgent,
     /// The turn's next event.
     Event(E),
     /// A role wake events outrank.
@@ -205,6 +205,13 @@ pub(crate) enum TurnWake<T, E, W> {
 pub(crate) enum Flow {
     Continue,
     Done,
+}
+
+pub(crate) async fn wait_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
 }
 
 /// A role's half of one turn's drive: the work every pass does, which
@@ -223,14 +230,11 @@ pub(crate) trait TurnPort {
     /// Whether the drive still takes the turn's events.
     fn awaits_events(&self) -> bool;
 
-    /// Whether [`Self::urgent`] is armed this pass.
-    fn urgent_armed(&self) -> bool;
-
-    /// The role wake that outranks events.
-    fn urgent(&self) -> impl Future<Output = Self::Wake>;
+    /// The role deadline that outranks events, if any.
+    fn urgent_deadline(&self) -> Option<tokio::time::Instant>;
 
     /// The role wake events outrank; pending when the role has none.
-    fn ready(&self) -> impl Future<Output = Self::Wake>;
+    fn ready(&mut self) -> impl Future<Output = Self::Wake>;
 
     /// Serves one wake.
     fn on_wake(
@@ -260,11 +264,12 @@ impl<R: TurnPort> TurnDrive<R> {
                 Pass::Done => return,
                 Pass::Wait => {}
             }
-            let port = &self.port;
+            let port = &mut self.port;
+            let deadline = port.urgent_deadline();
             let wake = tokio::select! {
                 biased;
                 result = &mut result, if port.awaits_result() => TurnWake::Result(result),
-                wake = port.urgent(), if port.urgent_armed() => TurnWake::Urgent(wake),
+                () = wait_deadline(deadline), if deadline.is_some() => TurnWake::Urgent,
                 event = events.recv(), if port.awaits_events() => TurnWake::Event(event),
                 wake = port.ready() => TurnWake::Ready(wake),
             };

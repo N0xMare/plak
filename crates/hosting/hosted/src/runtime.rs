@@ -306,6 +306,7 @@ const IDLE_OBSERVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub struct Sender<P: plakous_host_protocol::ProtocolExtension = plakous_host_protocol::Core> {
     inner: crate::surface_protocol::HostEventSender<P>,
     notices: Arc<std::sync::Mutex<VecDeque<PendingNoticeIntent>>>,
+    notice_ready: Arc<tokio::sync::Notify>,
     presentations: Arc<std::sync::Mutex<projection::transcript::Presentations>>,
     /// Configured tool names from the last prepared request of this attachment.
     /// Process memory only: a clear, resume, rebind or new process drops them.
@@ -663,6 +664,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
                 session_id: self.session_id.clone(),
                 row: row.clone(),
             });
+            self.notice_ready.notify_one();
         }
         self.send(ContentEvent::Row(row))
     }
@@ -1404,7 +1406,8 @@ struct TreeSnapshotPush {
     tree_id: Option<String>,
     last_revision: Option<u64>,
     last_notice_revision: Option<u64>,
-    next_progress_snapshot: Option<Instant>,
+    notices_pending: bool,
+    next_progress_snapshot: Option<tokio::time::Instant>,
     notified_results: std::collections::BTreeSet<String>,
     /// Nodes whose abandoned-turn notice this face has already said.
     ///

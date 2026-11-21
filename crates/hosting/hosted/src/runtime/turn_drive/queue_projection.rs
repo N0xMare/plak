@@ -1,6 +1,6 @@
 //! Refresh queue authority without waiting for a busy turn to end.
 
-use super::{Duration, Instant, RootTurn, emit_queue_snapshot, sessions};
+use super::{RootTurn, emit_queue_snapshot, sessions};
 use crate::surface_protocol::ContentEvent;
 use plakous_host_protocol::status::{HostPhase, HostStatusDetail};
 
@@ -57,29 +57,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         }
     }
 
-    pub(super) async fn poll_queue_projection(&mut self) {
-        if self
-            .queue_refresh
-            .as_ref()
-            .is_some_and(|refresh| refresh.task.is_finished())
-            && let Some(refresh) = self.queue_refresh.take()
-            && let Ok(Ok(commands)) = refresh.task.await
+    pub(super) fn finish_queue_projection(&mut self, commands: Option<sessions::QueueCommands>) {
+        let refresh = self.queue_refresh.take();
+        if let Some(commands) = commands
             // A read started before a new immutable submission cannot unlock it.
-            && refresh.expected == self.host.session.queue_commands
+            && refresh.is_some_and(|refresh| refresh.expected == self.host.session.queue_commands)
         {
             self.apply_queue_join(commands);
         }
-        if Instant::now() < self.queue_refresh_at {
-            return;
-        }
-        self.queue_refresh_at = Instant::now() + Duration::from_millis(250);
-        self.poll_mail_notice();
-        if let Some(live) = self.host.live_projector.as_mut() {
-            live.tick(self.host.live_target.clone());
-        }
-        if self.queue_refresh.is_none()
-            && (self.host.session.queue_projection_debt
-                || self.host.session.queue_commands.has_pending())
+    }
+
+    pub(super) fn start_queue_projection(&mut self) {
+        if self.host.session.queue_projection_debt || self.host.session.queue_commands.has_pending()
         {
             let store = self.host.projection_store.clone();
             let id = self.host.session.id.clone();
@@ -140,16 +129,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
         self.tree_debt_logged = Some(debt);
     }
 
-    fn poll_mail_notice(&mut self) {
+    pub(super) fn poll_mail_notice(&mut self) {
         if !self.host.host_wakes || self.host.session.child_wake_suppressed {
             self.host.job_agent.set_unread_mail_pending(false);
             return;
         }
-        if let Some(reply) = self.notice_reply.as_mut() {
-            match reply.try_recv() {
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return,
-                _ => self.notice_reply = None,
-            }
+        if self.notice_reply.is_some() {
+            return;
         }
         let checkpoint = self.host.job_agent.checkpoint_id();
         let tree_id =

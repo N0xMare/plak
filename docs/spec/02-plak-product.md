@@ -2398,6 +2398,20 @@ quit stages share the one-second quit deadline. Past the bound the host
 proceeds with projection debt, not a snapshot of stale rows. A task that stops
 while a settle waits fails that request at once rather than leaving it
 unanswered.
+
+An admitted root turn waits on runtime events and the authoritative result,
+operator intents, and changes from the tree and other live publishers. When
+assistant text is buffered, the host flushes it on the 20 ms coalescing
+deadline or sooner at a response boundary. Rate-limited child progress and
+unsettled tree notices can also arm a one-shot publication deadline. Neither
+clock runs without pending output. A root waiting on unchanged children does
+not poll the store; child results, mail and notices wake the owner on publication.
+Tree notices and child milestones are reconciled on a new revision (or
+when retrying a revision whose notices did not settle), not on text deltas
+or progress-only changes. Cancellation and quit retain their own bounded
+settlement deadlines. An explicitly open Usage watch refreshes at its
+own freshness deadline.
+
 Terminal publication takes the settled views and counters directly from
 the live task and emits the canonical settlement update (a patch, or a snapshot
 on a gap); it does not reload the session record or transcript for that update.
