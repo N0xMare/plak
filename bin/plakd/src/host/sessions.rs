@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     fn directory_profile_uses_the_same_workspace_overlay_as_the_attached_session() {
-        use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore as _};
+        use plakous_recursive_subagents::tree::TreeStore as _;
         let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
         let workspace = temporary.path().join("workspace");
         std::fs::create_dir_all(workspace.join(".git")).unwrap();
@@ -1278,7 +1278,7 @@ mod tests {
 
     fn assert_tree_saves_do_not_inspect_runtime(
         product: &ProductSessions,
-        tree: &mut plakous_recursive_subagents::tree::ProductAgentTree,
+        tree: &mut ProductAgentTree,
         inspections: impl Fn() -> usize,
     ) {
         use plakous_recursive_subagents::tree::TreeStore as _;
