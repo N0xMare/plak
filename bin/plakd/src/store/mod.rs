@@ -358,6 +358,18 @@ impl ProductStore {
         paths: &PlakPaths,
         read: impl FnOnce(&Transaction<'_>) -> Result<T, String>,
     ) -> Result<T, ProductStoreOpenError> {
+        let connection = Self::inspection_connection(paths, BUSY_TIMEOUT)?;
+        let snapshot = connection.unchecked_transaction().map_err(|_| {
+            ProductStoreOpenError::unavailable("could not start product store inspection")
+        })?;
+        Self::admit_read_only(&snapshot)?;
+        read(&snapshot).map_err(ProductStoreOpenError::unavailable)
+    }
+
+    pub(super) fn inspection_connection(
+        paths: &PlakPaths,
+        timeout: std::time::Duration,
+    ) -> Result<Connection, ProductStoreOpenError> {
         #[cfg(test)]
         open_counts::record(paths.product_database());
         let database = product_sqlite_path(paths)?;
@@ -368,7 +380,7 @@ impl ProductStore {
         .map_err(|_| {
             ProductStoreOpenError::unavailable("could not open product store for inspection")
         })?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(|_| {
+        connection.busy_timeout(timeout).map_err(|_| {
             ProductStoreOpenError::unavailable("could not configure product store read timeout")
         })?;
         connection
@@ -376,11 +388,7 @@ impl ProductStore {
             .map_err(|_| {
                 ProductStoreOpenError::unavailable("could not configure product store inspection")
             })?;
-        let snapshot = connection.unchecked_transaction().map_err(|_| {
-            ProductStoreOpenError::unavailable("could not start product store inspection")
-        })?;
-        Self::admit_read_only(&snapshot)?;
-        read(&snapshot).map_err(ProductStoreOpenError::unavailable)
+        Ok(connection)
     }
 
     fn admit_read_only(snapshot: &Connection) -> Result<(), ProductStoreOpenError> {

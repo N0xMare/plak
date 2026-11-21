@@ -54,9 +54,7 @@ fn external(paths: &PlakPaths, kind: &str, id: &str) {
         return;
     }
     if let Ok(sender) = UnixDatagram::unbound()
-        && sender
-            .set_write_timeout(Some(std::time::Duration::from_millis(100)))
-            .is_ok()
+        && sender.set_nonblocking(true).is_ok()
     {
         let _ = sender.send_to(format!("{kind} {id}").as_bytes(), path);
     }
@@ -64,9 +62,9 @@ fn external(paths: &PlakPaths, kind: &str, id: &str) {
 
 #[cfg(feature = "web")]
 pub(crate) mod local {
-    use std::collections::BTreeMap;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak, mpsc};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    use std::sync::{Arc, Condvar, LazyLock, Mutex, PoisonError, Weak};
+    use std::time::Instant;
 
     use plakous_hosted::orchestration::OrchestrationSnapshot;
     use plakous_hosted::runtime::{ResumeAfterLoss, operator_attention::PendingTreeWork};
@@ -76,6 +74,7 @@ pub(crate) mod local {
 
     #[derive(PartialEq, Eq)]
     pub(crate) struct TreeFacts {
+        pub(crate) revision: u64,
         pub(crate) roster: OrchestrationSnapshot,
         pub(crate) hold: PendingTreeWork,
         pub(crate) resume: PendingTreeWork,
@@ -84,6 +83,7 @@ pub(crate) mod local {
     impl TreeFacts {
         pub(crate) fn of(tree: &ProductAgentTree) -> Self {
             Self {
+                revision: tree.revision,
                 roster: tree.current_epoch().clone(),
                 hold: PendingTreeWork::read(tree, ResumeAfterLoss::Hold),
                 resume: PendingTreeWork::read(tree, ResumeAfterLoss::Continue),
@@ -98,43 +98,151 @@ pub(crate) mod local {
         Custody(String),
         Configuration,
         Visibility,
+        Revalidate,
+        #[cfg(test)]
         Gap,
-        Barrier(mpsc::SyncSender<()>),
+        #[cfg(test)]
+        Barrier(std::sync::mpsc::SyncSender<()>),
     }
 
-    pub(crate) struct Inbox {
-        send: mpsc::SyncSender<Notice>,
-        pub(crate) gap: Arc<AtomicBool>,
+    pub(crate) enum TreeUpdate {
+        Image(Option<Box<TreeFacts>>),
+        Inspect,
     }
+
+    #[derive(Default)]
+    pub(crate) struct Batch {
+        pub(crate) records: BTreeSet<String>,
+        pub(crate) trees: BTreeMap<String, TreeUpdate>,
+        pub(crate) custody: BTreeSet<String>,
+        pub(crate) revalidate: bool,
+        pub(crate) gap: bool,
+        pub(crate) configuration: bool,
+        pub(crate) visibility: bool,
+        #[cfg(test)]
+        pub(crate) barriers: Vec<std::sync::mpsc::SyncSender<()>>,
+    }
+
+    impl Batch {
+        fn add(&mut self, notice: Notice) {
+            match notice {
+                Notice::Record(id) => {
+                    self.records.insert(id);
+                }
+                Notice::Tree(id, facts) => {
+                    self.trees.insert(id, TreeUpdate::Image(facts));
+                }
+                Notice::InspectTree(id) => {
+                    self.trees.insert(id, TreeUpdate::Inspect);
+                }
+                Notice::Custody(id) => {
+                    self.custody.insert(id);
+                }
+                Notice::Configuration => self.configuration = true,
+                Notice::Visibility => self.visibility = true,
+                Notice::Revalidate => self.revalidate = true,
+                #[cfg(test)]
+                Notice::Gap => self.gap = true,
+                #[cfg(test)]
+                Notice::Barrier(sender) => self.barriers.push(sender),
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct Pending {
+        local: Option<Batch>,
+        external: VecDeque<Notice>,
+        closed: bool,
+    }
+
+    #[derive(Default)]
+    pub(crate) struct Mailbox {
+        pending: Mutex<Pending>,
+        ready: Condvar,
+    }
+
+    impl Mailbox {
+        pub(crate) fn take_until(&self, deadline: Instant) -> Option<Batch> {
+            let pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+            let (mut pending, _) = self
+                .ready
+                .wait_timeout_while(
+                    pending,
+                    deadline.saturating_duration_since(Instant::now()),
+                    |state| !state.closed && state.local.is_none() && state.external.is_empty(),
+                )
+                .unwrap_or_else(PoisonError::into_inner);
+            if pending.closed {
+                return None;
+            }
+            let mut batch = pending.local.take().unwrap_or_default();
+            let external = std::mem::take(&mut pending.external);
+            drop(pending);
+            for notice in external {
+                batch.add(notice);
+            }
+            Some(batch)
+        }
+    }
+
+    pub(crate) struct Inbox(Arc<Mailbox>);
 
     static INBOXES: LazyLock<Mutex<BTreeMap<PathBuf, Weak<Inbox>>>> =
         LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
     impl Inbox {
-        pub(crate) fn register(paths: &PlakPaths) -> (Arc<Self>, mpsc::Receiver<Notice>) {
-            let (send, receive) = mpsc::sync_channel(256);
-            let inbox = Arc::new(Self {
-                send,
-                gap: Arc::default(),
-            });
+        pub(crate) fn register(paths: &PlakPaths) -> (Arc<Self>, Arc<Mailbox>) {
+            let mailbox = Arc::new(Mailbox::default());
+            let inbox = Arc::new(Self(Arc::clone(&mailbox)));
             let mut boxes = INBOXES.lock().unwrap_or_else(PoisonError::into_inner);
             boxes.retain(|_, inbox| inbox.strong_count() > 0);
             boxes.insert(paths.product_database(), Arc::downgrade(&inbox));
-            (inbox, receive)
+            (inbox, mailbox)
         }
 
         pub(crate) fn send(&self, notice: Notice) {
-            if let Err(mpsc::TrySendError::Full(_)) = self.send.try_send(notice) {
-                self.gap.store(true, Ordering::Release);
-                let _ = self.send.try_send(Notice::Gap);
+            let mut pending = self
+                .0
+                .pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            pending.local.get_or_insert_with(Batch::default).add(notice);
+            self.0.ready.notify_one();
+        }
+
+        pub(crate) fn send_external(&self, notice: Notice) {
+            let mut pending = self
+                .0
+                .pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if pending.external.len() < 256 {
+                pending.external.push_back(notice);
+                self.0.ready.notify_one();
             }
         }
 
+        #[cfg(test)]
         pub(crate) fn settle(&self) {
-            let (send, receive) = mpsc::sync_channel(1);
-            if self.send.send(Notice::Barrier(send)).is_ok() {
-                let _ = receive.recv_timeout(std::time::Duration::from_secs(10));
-            }
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            self.send(Notice::Barrier(send));
+            assert!(
+                receive
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .is_ok()
+            );
+        }
+    }
+
+    impl Drop for Inbox {
+        fn drop(&mut self) {
+            self.0
+                .pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .closed = true;
+            self.0.ready.notify_one();
         }
     }
 
@@ -156,7 +264,7 @@ pub(crate) mod local {
                 },
                 Change::Input("config") => Notice::Configuration,
                 Change::Input("visibility") => Notice::Visibility,
-                Change::Input(_) => Notice::Gap,
+                Change::Input(_) => Notice::Revalidate,
             });
             true
         } else {

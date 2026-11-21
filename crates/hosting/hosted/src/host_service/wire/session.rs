@@ -284,6 +284,10 @@ impl<P: ProtocolExtension> WireSession<P> {
         self.attachments.request_release_now();
     }
 
+    pub(super) fn release_unattached(&self) {
+        self.attachments.request_release_now();
+    }
+
     /// Withdraws [`Self::request_release`]'s release (not its detaches).
     pub fn cancel_release(&self) {
         self.attachments.cancel_release_now();

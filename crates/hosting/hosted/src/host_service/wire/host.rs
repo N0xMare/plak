@@ -15,7 +15,7 @@
 //! host attachment is the directory: a snapshot of every row, then each row
 //! that changed, read again when a session or product summary changes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -302,6 +302,7 @@ where
             read_ready: Arc::default(),
             host_reads: BTreeMap::new(),
             attaching: None,
+            attach_queue: VecDeque::new(),
             host: Arc::clone(self),
             host_changes: self.changes.subscribe(),
             directory_changes: self.sessions.directory_changes(),
@@ -514,6 +515,7 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     read_ready: Arc<reads::ReadyReads>,
     host_reads: BTreeMap<plakous_host_protocol::wire::RequestId, reads::PendingRead<P>>,
     attaching: Option<attach::PendingAttach<P>>,
+    attach_queue: VecDeque<attach::AttachRequest>,
     host: Arc<SessionHost<P>>,
     host_changes: watch::Receiver<u64>,
     directory_changes: Option<watch::Receiver<u64>>,
@@ -609,11 +611,7 @@ where
                 Ok(true)
             };
         };
-        if self
-            .attaching
-            .as_ref()
-            .is_some_and(|attach| attach.id() == id)
-        {
+        if self.attach_in_flight(id) {
             write_frame(
                 &mut self.out,
                 &HostFrame::<P>::Response {
@@ -1392,6 +1390,7 @@ where
     /// closes, and its session hold ends.
     pub fn leave(&mut self) {
         self.attaching = None;
+        self.attach_queue.clear();
         self.host_reads.clear();
         self.host.sessions.host_disconnect(
             &self.principal,

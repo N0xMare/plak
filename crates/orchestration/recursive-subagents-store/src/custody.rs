@@ -126,7 +126,7 @@ impl SqliteTreeStore {
         tree_id: &str,
         step: impl FnOnce(Option<&CustodyRecord>) -> Result<(Option<CustodyRecord>, T), CustodyError>,
     ) -> Result<T, CustodyError> {
-        self.with_connection(|connection| {
+        let (answer, changed) = self.with_connection(|connection| {
             let tx = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| {
@@ -134,21 +134,25 @@ impl SqliteTreeStore {
                 })?;
             let current = read(&tx, tree_id)?;
             let (record, answer) = step(current.as_ref())?;
-            if let Some(record) = record {
+            let changed = if let Some(record) = record {
                 write(&tx, tree_id, &record)?;
                 tx.commit().map_err(|error| {
                     sqlite_unavailable("could not durably commit agent tree custody", &error)
                 })?;
-                if !current.is_some_and(|current| {
+                !current.is_some_and(|current| {
                     current.fence == record.fence
                         && current.holding.host == record.holding.host
                         && current.released == record.released
-                }) {
-                    self.notify_commit(tree_id, crate::store::TreeChange::Custody);
-                }
-            }
-            Ok(answer)
-        })
+                })
+            } else {
+                false
+            };
+            Ok::<_, CustodyError>((answer, changed))
+        })?;
+        if changed {
+            self.notify_commit(tree_id, crate::store::TreeChange::Custody);
+        }
+        Ok(answer)
     }
 }
 

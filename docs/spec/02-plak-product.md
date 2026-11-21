@@ -4652,21 +4652,30 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   of a node of another session ends the old attachment only when the new
   attachment succeeds. On buffered transports, attach preparation, including
   a dormant open, runs outside frame handling; the connection can still
-  answer control requests while it waits. An already resident session uses
+  answer control requests while it waits. Attaches on one connection finish
+  in request order. If a connection leaves during an open, the host asks the
+  new actor to release as soon as it has no other reason to stay resident.
+  An already resident session uses
   the live service without opening a store. For a nonresident session, the
   host reads only the archive flag before choosing a live open or loading the
   archived read-only view. Directory requests do not open dormant sessions.
   The startup scan below is separate recovery authority.
   The host seeds one in-memory summary per session from storage at startup.
   Product and tree commit notices update affected summaries; residency,
-  observation and runner changes wake directory watches. A detected notice
-  gap requests a rebuild off the connection. A sibling product process can
-  send a private presentation notice, which names changed facts but conveys
-  no admission or write authority. For an observed external holder, the
-  directory rechecks its process lock off the connection so a crash can clear
-  the holder without a release notice. Both directory watches and
+  observation and runner changes wake directory watches. Mutations do not
+  wait for publication. Local notices coalesce by key. A sibling product
+  process can send a bounded, best-effort private presentation notice, which
+  names changed facts but conveys no admission or write authority. Every
+  15 seconds, off the connection, the directory checks data versions on
+  persistent read-only product and tree connections. Unchanged versions skip
+  database scans. Changed versions are reconciled against narrow fingerprints
+  so only affected rows are refreshed. The same check detects config, trust
+  and project overlay edits and retries failed projections or a failed gap
+  rebuild. Observed external holders have their process locks rechecked
+  every 250 ms independently of notice traffic, so a crash can clear a
+  holder without a release notice. Both directory watches and
   one-shot lists read memory without opening a database, loading an agent
-  tree or taking a store write lock. There is no periodic directory read.
+  tree or taking a store write lock. There is no periodic full directory read.
   A row gone from the directory is said by a fresh snapshot.
   A wire creation profile is an exact listed built-in or user profile id,
   never a trimmed spelling, path or CLI alias. Profile is mutually exclusive

@@ -2376,11 +2376,14 @@ kernel-held private locks; a stopping diagnostic is meaningful only while its
 verified lock is held. Unverifiable ownership, permissions, receipts or socket
 identity returns `verification_failed`, never absence or permission to start.
 
-The directory's separate same-user notice socket accepts only invalidations
+The directory's separate same-user notice datagram socket is
+`host/run/<state-key>.dir`, mode 0600 inside the owned mode-0700 run directory.
+It accepts only invalidations
 of cached presentation facts. It carries no session transcript, credentials,
 or commands. The reader re-reads affected durable facts under its own
 authority; a notice cannot change storage, open a driver, or answer a client
-request by itself.
+request by itself. Senders do not block or retry on a full queue; the
+directory reconciles lost notices from durable facts on its 15-second check.
 
 An explicit `plakd host upgrade --expect-binary <id>` is operator authority,
 not a frontend reload request or a browser capability. Its separate control

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock, atomic::Ordering, mpsc};
+use std::sync::{Arc, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
 use plakous_host_protocol::{
     views::ProfileDifference,
@@ -9,17 +10,22 @@ use plakous_host_protocol::{
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::runtime::{ResumeAfterLoss, SurfaceSession};
 use plakous_recursive_subagents::tree::ProductAgentTree;
-use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
+use plakous_recursive_subagents_store::{SqliteTreeStore, TreeDirectoryProbe, TreeInspection};
 use tokio::sync::watch;
 
 use crate::home::paths::PlakPaths;
 use crate::product_config::ProductConfig;
 use crate::store::ProductStore;
 use crate::store::directory::MAX_DIRECTORY_ROWS;
-use crate::store::directory_notice::local::{Inbox, Notice, TreeFacts};
-use crate::store::directory_projection::DirectoryMetadata;
+use crate::store::directory_notice::local::{Batch, Inbox, Mailbox, Notice, TreeFacts, TreeUpdate};
+use crate::store::directory_projection::{DirectoryMetadata, ProductDirectoryProbe};
 
 use super::{Holder, activity_of, environment_of, runner_views};
+
+mod files;
+
+const REVALIDATE: Duration = Duration::from_secs(15);
+const PROBE_HOLDERS: Duration = Duration::from_millis(250);
 
 type Rows = BTreeMap<String, Summary>;
 
@@ -45,58 +51,26 @@ impl Directory {
             paths: paths.clone(),
             tree,
             store: ProductStore::open(paths).map_err(|error| CliFailure::new(error.to_string()))?,
+            product_probe: ProductDirectoryProbe::open(paths).map_err(CliFailure::new)?,
+            tree_probe: TreeDirectoryProbe::open(&paths.subagents_database())
+                .map_err(|error| CliFailure::new(error.message()))?,
+            files: files::Inputs::new(paths),
             metadata: BTreeMap::new(),
             revisions: BTreeMap::new(),
+            retry_revisions: BTreeSet::new(),
             trees: BTreeMap::new(),
             profiles: BTreeMap::new(),
             withheld: BTreeSet::new(),
             omitted: BTreeSet::new(),
+            retry_rows: BTreeSet::new(),
             holders: BTreeMap::new(),
         };
         let rows = Arc::new(RwLock::new(source.rebuild().map_err(CliFailure::new)?));
         let shared = Arc::clone(&rows);
-        let gap = inbox.gap.clone();
         let notify = changes.clone();
         std::thread::Builder::new()
             .name("plakd-directory".into())
-            .spawn(move || {
-                while let Some(mut batch) = source.next_batch(&events) {
-                    let reset = gap.swap(false, Ordering::AcqRel) || batch.gap;
-                    if reset {
-                        if let Ok(next) = source.rebuild() {
-                            *shared.write().unwrap_or_else(PoisonError::into_inner) = next;
-                            bump(&notify);
-                        } else {
-                            // Retry on the next notice, not on a timer.
-                            gap.store(true, Ordering::Release);
-                        }
-                    } else {
-                        // Live child state is overlaid separately from the
-                        // durable roster/wake projection.
-                        let tree_changed = !batch.trees.is_empty() || !batch.custody.is_empty();
-                        let updates = source.apply(&mut batch);
-                        let mut rows = shared.write().unwrap_or_else(PoisonError::into_inner);
-                        let mut published = false;
-                        for (id, summary) in updates {
-                            if let Some(summary) = summary {
-                                if rows.get(&id) != Some(&summary) {
-                                    rows.insert(id, summary);
-                                    published = true;
-                                }
-                            } else {
-                                published |= rows.remove(&id).is_some();
-                            }
-                        }
-                        drop(rows);
-                        if published || tree_changed {
-                            bump(&notify);
-                        }
-                    }
-                    for barrier in batch.barriers {
-                        let _ = barrier.send(());
-                    }
-                }
-            })
+            .spawn(move || source.run(&events, &shared, &notify))
             .map_err(|error| {
                 CliFailure::new(format!("could not start session directory: {error}"))
             })?;
@@ -124,6 +98,14 @@ impl Directory {
         let socket = tokio::net::UnixDatagram::bind(&path).map_err(|error| {
             CliFailure::new(format!("could not bind session directory notices: {error}"))
         })?;
+        use std::os::unix::fs::PermissionsExt as _;
+        if let Err(error) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        {
+            let _ = External::remove_socket(&path);
+            return Err(CliFailure::new(format!(
+                "could not protect session directory notices: {error}"
+            )));
+        }
         drop(entered);
         let inbox = Arc::downgrade(&self.inbox);
         let notify = self.changes.clone();
@@ -131,14 +113,21 @@ impl Directory {
             let mut bytes = [0; 512];
             loop {
                 let result = socket.recv(&mut bytes).await;
-                let Some(inbox) = inbox.upgrade() else {
+                let Some(recipient) = inbox.upgrade() else {
                     return;
                 };
-                let Ok(count) = result else {
-                    inbox.send(Notice::Gap);
-                    return;
-                };
-                inbox.send(external_notice(&bytes[..count]));
+                match result {
+                    Ok(count) => {
+                        if let Some(notice) = external_notice(&bytes[..count]) {
+                            recipient.send_external(notice);
+                        }
+                    }
+                    Err(_) => {
+                        recipient.send_external(Notice::Revalidate);
+                        drop(recipient);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
             }
         });
         let readiness = runtime.spawn(async move {
@@ -150,8 +139,7 @@ impl Directory {
             path,
             tasks: [input, readiness],
         });
-        self.inbox.send(Notice::Gap);
-        self.inbox.settle();
+        self.inbox.send(Notice::Revalidate);
         Ok(())
     }
 
@@ -206,6 +194,7 @@ impl Directory {
             .collect()
     }
 
+    #[cfg(test)]
     pub(super) fn settle(&self) {
         self.inbox.settle();
     }
@@ -213,6 +202,12 @@ impl Directory {
     #[cfg(test)]
     pub(super) fn gap(&self) {
         self.inbox.send(Notice::Gap);
+        self.settle();
+    }
+
+    #[cfg(test)]
+    pub(super) fn tick(&self) {
+        self.inbox.send(Notice::Revalidate);
         self.settle();
     }
 }
@@ -250,67 +245,25 @@ impl Drop for External {
     }
 }
 
-fn external_notice(bytes: &[u8]) -> Notice {
-    let Some((kind, id)) = std::str::from_utf8(bytes)
+fn external_notice(bytes: &[u8]) -> Option<Notice> {
+    let (kind, id) = std::str::from_utf8(bytes)
         .ok()
-        .and_then(|line| line.split_once(' '))
-    else {
-        return Notice::Gap;
-    };
+        .and_then(|line| line.split_once(' '))?;
     if id.is_empty()
         || id.len() > 128
         || !id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
     {
-        return Notice::Gap;
+        return None;
     }
     match kind {
-        "record" => Notice::Record(id.into()),
-        "tree" => Notice::InspectTree(id.into()),
-        "custody" => Notice::Custody(id.into()),
-        "config" => Notice::Configuration,
-        "visibility" => Notice::Visibility,
-        _ => Notice::Gap,
-    }
-}
-
-#[derive(Default)]
-struct Batch {
-    records: BTreeSet<String>,
-    trees: BTreeMap<String, TreeUpdate>,
-    custody: BTreeSet<String>,
-    gap: bool,
-    configuration: bool,
-    visibility: bool,
-    barriers: Vec<mpsc::SyncSender<()>>,
-}
-
-enum TreeUpdate {
-    Image(Option<Box<TreeFacts>>),
-    Inspect,
-}
-
-impl Batch {
-    fn add(&mut self, notice: Notice) {
-        match notice {
-            Notice::Record(id) => {
-                self.records.insert(id);
-            }
-            Notice::Tree(id, facts) => {
-                self.trees.insert(id, TreeUpdate::Image(facts));
-            }
-            Notice::InspectTree(id) => {
-                self.trees.insert(id, TreeUpdate::Inspect);
-            }
-            Notice::Custody(id) => {
-                self.custody.insert(id);
-            }
-            Notice::Configuration => self.configuration = true,
-            Notice::Visibility => self.visibility = true,
-            Notice::Gap => self.gap = true,
-            Notice::Barrier(sender) => self.barriers.push(sender),
-        }
+        "record" => Some(Notice::Record(id.into())),
+        "tree" => Some(Notice::InspectTree(id.into())),
+        "custody" => Some(Notice::Custody(id.into())),
+        "config" => Some(Notice::Configuration),
+        "visibility" => Some(Notice::Visibility),
+        _ => None,
     }
 }
 
@@ -326,49 +279,106 @@ struct Source {
     paths: PlakPaths,
     tree: Arc<SqliteTreeStore>,
     store: ProductStore,
+    product_probe: ProductDirectoryProbe,
+    tree_probe: TreeDirectoryProbe,
+    files: files::Inputs,
     metadata: BTreeMap<String, DirectoryMetadata>,
     revisions: BTreeMap<String, u64>,
+    retry_revisions: BTreeSet<String>,
     trees: BTreeMap<String, Result<Option<Box<TreeFacts>>, ()>>,
     profiles: BTreeMap<Option<PathBuf>, Option<Profiles>>,
     withheld: BTreeSet<String>,
     omitted: BTreeSet<String>,
+    retry_rows: BTreeSet<String>,
     holders: BTreeMap<String, Holder>,
 }
 
 impl Source {
-    fn next_batch(&self, events: &mpsc::Receiver<Notice>) -> Option<Batch> {
-        loop {
-            let event = if self.holders.is_empty() {
-                events.recv().ok()?
-            } else {
-                match events.recv_timeout(std::time::Duration::from_millis(250)) {
-                    Ok(event) => event,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return None,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        // A dead process cannot send a release notice. Probe only
-                        // already observed holders' locks, not the directory stores.
-                        let records = self
-                            .holders
-                            .iter()
-                            .filter(|(_, holder)| holder.gone(&self.paths, &self.tree))
-                            .map(|(id, _)| id.clone())
-                            .collect::<BTreeSet<_>>();
-                        if records.is_empty() {
-                            continue;
-                        }
-                        return Some(Batch {
-                            records,
-                            ..Batch::default()
-                        });
-                    }
-                }
-            };
-            let mut batch = Batch::default();
-            for event in std::iter::once(event).chain(events.try_iter().take(255)) {
-                batch.add(event);
+    fn run(&mut self, events: &Mailbox, shared: &RwLock<Rows>, notify: &watch::Sender<u64>) {
+        let mut next_tick = Instant::now() + REVALIDATE;
+        let mut next_probe = Instant::now() + PROBE_HOLDERS;
+        let mut retry_rebuild = false;
+        while let Some(mut batch) = events.take_until(if self.holders.is_empty() {
+            next_tick
+        } else {
+            next_tick.min(next_probe)
+        }) {
+            let now = Instant::now();
+            if now >= next_probe {
+                next_probe = now + PROBE_HOLDERS;
+                batch.records.extend(
+                    self.holders
+                        .iter()
+                        .filter(|(_, holder)| holder.gone(&self.paths, &self.tree))
+                        .map(|(id, _)| id.clone()),
+                );
             }
-            return Some(batch);
+            let tick = now >= next_tick || batch.revalidate;
+            if now >= next_tick {
+                next_tick = now + REVALIDATE;
+            }
+            if batch.gap || (retry_rebuild && tick) {
+                retry_rebuild = match self.rebuild() {
+                    Ok(next) => {
+                        *shared.write().unwrap_or_else(PoisonError::into_inner) = next;
+                        bump(notify);
+                        false
+                    }
+                    Err(_) => true,
+                };
+            }
+            if tick {
+                self.revalidate(&mut batch);
+            }
+            // Live child state is overlaid separately.
+            let tree_changed = !batch.trees.is_empty() || !batch.custody.is_empty();
+            let updates = self.apply(&mut batch);
+            if publish(shared, updates) || tree_changed {
+                bump(notify);
+            }
+            #[cfg(test)]
+            for barrier in batch.barriers {
+                let _ = barrier.send(());
+            }
         }
+    }
+
+    fn revalidate(&mut self, batch: &mut Batch) {
+        if let Ok(records) = self.product_probe.changes() {
+            batch.records.extend(records);
+        }
+        if let Ok(trees) = self.tree_probe.changes() {
+            for id in trees.images {
+                batch.trees.entry(id).or_insert(TreeUpdate::Inspect);
+            }
+            batch.custody.extend(trees.custody);
+        }
+        batch
+            .records
+            .extend(self.retry_rows.iter().chain(&self.retry_revisions).cloned());
+        for (id, facts) in &self.trees {
+            if facts.is_err() {
+                batch.trees.entry(id.clone()).or_insert(TreeUpdate::Inspect);
+            }
+        }
+        batch.configuration |= self.files.global_changed(&self.paths);
+        batch.visibility |= self.files.receipts_changed(&self.paths);
+        self.profiles.retain(|workspace, profile| {
+            if profile.is_some()
+                && !self
+                    .files
+                    .workspace_changed(&self.paths, workspace.as_deref())
+            {
+                return true;
+            }
+            batch.custody.extend(
+                self.metadata
+                    .values()
+                    .filter(|meta| profile_workspace(meta) == workspace.as_deref())
+                    .map(|meta| meta.node.tree_id.clone()),
+            );
+            false
+        });
     }
 
     fn apply(&mut self, batch: &mut Batch) -> Vec<(String, Option<Summary>)> {
@@ -400,9 +410,11 @@ impl Source {
             .map_err(|error| error.message().to_owned())?;
         self.metadata.clear();
         self.revisions.clear();
+        self.retry_revisions.clear();
         self.trees.clear();
         self.profiles.clear();
         self.holders.clear();
+        self.retry_rows.clear();
         Ok(self
             .update(ids, BTreeMap::new(), BTreeSet::new())
             .into_iter()
@@ -416,11 +428,19 @@ impl Source {
         trees: BTreeMap<String, TreeUpdate>,
         mut affected: BTreeSet<String>,
     ) -> Vec<(String, Option<Summary>)> {
+        let mut activity_trees = BTreeSet::new();
         for (id, update) in trees {
             let facts = match update {
-                TreeUpdate::Image(facts) => Ok(facts),
-                TreeUpdate::Inspect => inspect_tree(&self.paths, &id),
+                TreeUpdate::Image(facts)
+                    if self.tree_probe.revision(&id).is_ok_and(|current| {
+                        current == facts.as_ref().map(|facts| facts.revision)
+                    }) =>
+                {
+                    Ok(facts)
+                }
+                TreeUpdate::Image(_) | TreeUpdate::Inspect => inspect_tree(&self.paths, &id),
             };
+            activity_trees.insert(id.clone());
             if self.trees.get(&id) != Some(&facts) {
                 affected.insert(id.clone());
                 self.trees.insert(id, facts);
@@ -431,6 +451,8 @@ impl Source {
         for id in ids {
             self.holders.remove(&id);
             self.revisions.remove(&id);
+            self.retry_rows.remove(&id);
+            self.retry_revisions.remove(&id);
             if let Some(previous) = self.metadata.remove(&id) {
                 affected.insert(previous.node.tree_id);
             }
@@ -449,6 +471,15 @@ impl Source {
                 }
             }
         }
+        for (id, meta) in &self.metadata {
+            if activity_trees.contains(&meta.node.tree_id)
+                && let Some(locator) = meta.locator
+                && !locators.iter().any(|(located, _)| located == id)
+            {
+                locators.push((id.clone(), locator));
+            }
+        }
+        affected.extend(activity_trees);
         self.refresh_revisions(locators);
         changes.extend(self.project(&affected));
         changes
@@ -466,12 +497,15 @@ impl Source {
             self.paths.runtime_database(),
             &locators,
         ) {
-            self.revisions.extend(
-                located
-                    .into_iter()
-                    .zip(revisions)
-                    .filter_map(|((id, _), revision)| revision.map(|revision| (id, revision))),
-            );
+            for ((id, _), revision) in located.into_iter().zip(revisions) {
+                if let Some(revision) = revision {
+                    self.retry_revisions.remove(&id);
+                    self.revisions.insert(id, revision);
+                }
+            }
+        } else {
+            self.retry_revisions
+                .extend(located.into_iter().map(|(id, _)| id));
         }
     }
 
@@ -493,15 +527,11 @@ impl Source {
                 .trees
                 .entry(tree_id.clone())
                 .or_insert_with(|| inspect_tree(&self.paths, tree_id));
-            let profile_key = meta
-                .runner
-                .as_ref()
-                .is_none_or(|runner| runner.runner_id == "local")
-                .then(|| meta.workspace.clone());
-            let profiles = self
-                .profiles
-                .entry(profile_key.clone())
-                .or_insert_with(|| load_profiles(&self.paths, profile_key.as_deref()));
+            let profile_key = profile_workspace(meta).map(Path::to_owned);
+            let profiles = self.profiles.entry(profile_key).or_insert_with_key(|key| {
+                self.files.remember_workspace(&self.paths, key.as_deref());
+                load_profiles(&self.paths, key.as_deref())
+            });
             let summary = (!self.withheld.contains(id))
                 .then(|| {
                     summarize(
@@ -521,6 +551,7 @@ impl Source {
                 })
                 .transpose();
             self.holders.remove(id);
+            self.retry_rows.remove(id);
             let summary = match summary {
                 Ok(Some((summary, holder))) => {
                     if let Some(holder) = holder {
@@ -531,6 +562,7 @@ impl Source {
                 Ok(None) => None,
                 Err(reason) => {
                     diagnostic(&mut self.omitted, id, reason);
+                    self.retry_rows.insert(id.clone());
                     None
                 }
             };
@@ -541,7 +573,34 @@ impl Source {
 
     fn omit(&mut self, id: &str, reason: &str) {
         diagnostic(&mut self.omitted, id, reason);
+        self.retry_rows.insert(id.to_owned());
     }
+}
+
+fn profile_workspace(meta: &DirectoryMetadata) -> Option<&Path> {
+    meta.runner
+        .as_ref()
+        .is_none_or(|runner| runner.runner_id == "local")
+        .then_some(meta.workspace.as_path())
+}
+
+fn publish(shared: &RwLock<Rows>, updates: Vec<(String, Option<Summary>)>) -> bool {
+    if updates.is_empty() {
+        return false;
+    }
+    let mut rows = shared.write().unwrap_or_else(PoisonError::into_inner);
+    let mut published = false;
+    for (id, summary) in updates {
+        if let Some(summary) = summary {
+            if rows.get(&id) != Some(&summary) {
+                rows.insert(id, summary);
+                published = true;
+            }
+        } else {
+            published |= rows.remove(&id).is_some();
+        }
+    }
+    published
 }
 
 fn diagnostic(omitted: &mut BTreeSet<String>, id: &str, reason: &str) {

@@ -3622,6 +3622,15 @@ record. A delete removes the custody record with the rows; tree ids are
 session ids and are never reused. There is no other tree write: the store's
 capacity probe writes only its schema row.
 
+`SqliteTreeStore::with_commit_notice` adds an optional presentation
+callback. `TreeChange` reports a committed save image, deletion or custody
+placement change. Renewing custody timestamps alone does not notify. The
+callback runs after commit and outside the writer mutex; concurrent
+callbacks may arrive out of commit order. The notice carries no write or
+custody authority and is not a durable feed. The directory validates
+advisory images against the stored revision and uses a read-only data-version
+and revision/custody fingerprint probe to reconcile missed changes.
+
 A host process takes custody as one `CustodyHost`, fixed at its first take,
 and counts its holders per store and tree, so every holder in the process
 shares one claim and only the last one releases it. The tree driver takes

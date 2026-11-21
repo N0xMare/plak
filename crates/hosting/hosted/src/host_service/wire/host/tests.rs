@@ -1023,7 +1023,7 @@ fn attached(frames: &[HostFrame<Core>], id: RequestId) -> AttachmentId {
 
 #[tokio::test]
 async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list() {
-    let (host, fake) = host(&["s1"]);
+    let (host, fake) = host(&["s1", "s2"]);
     let (release, gate) = std::sync::mpsc::channel();
     *fake.0.gate.lock().unwrap() = Some(gate);
     let out = Out::default();
@@ -1036,6 +1036,7 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
         )
         .buffered_output();
     request(&mut connection, 1, Op::Attach { node: node("s1") });
+    request(&mut connection, 4, Op::Attach { node: node("s2") });
     request(&mut connection, 2, Op::Ping);
     request(
         &mut connection,
@@ -1055,21 +1056,129 @@ async fn slow_dormant_attach_leaves_the_connection_free_to_answer_ping_and_list(
     ));
     release.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
+        let mut replies = Vec::new();
+        while replies.len() != 2 {
             connection.flush().unwrap();
             let frames = out.take();
-            if frames
-                .iter()
-                .any(|frame| matches!(frame, HostFrame::Response { id: 1, .. }))
-            {
-                attached(&frames, 1);
-                break;
+            for frame in &frames {
+                if let HostFrame::Response { id, .. } = frame {
+                    attached(&frames, *id);
+                    replies.push(*id);
+                }
             }
-            connection.changed().await;
+            if replies.len() < 2 {
+                connection.changed().await;
+            }
+        }
+        assert_eq!(replies, [1, 4]);
+    })
+    .await
+    .unwrap();
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn disconnect_cancels_queued_attach_and_releases_a_new_unattached_actor() {
+    let (host, fake) = host(&["s1", "s2"]);
+    let slot = host.slot("s1");
+    let (release, gate) = std::sync::mpsc::channel();
+    *fake.0.gate.lock().unwrap() = Some(gate);
+    let out = Out::default();
+    let mut connection = host
+        .connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        )
+        .buffered_output();
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    request(&mut connection, 2, Op::Attach { node: node("s2") });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !matches!(slot.peek(), SlotView::Opening(_)) {
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
     })
     .await
     .unwrap();
+    connection.leave();
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let released = fake
+                .0
+                .counts
+                .lock()
+                .unwrap()
+                .get("s1")
+                .is_some_and(|count| count.release_now());
+            if released && fake.0.active_workers.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
+    assert!(out.take().is_empty());
+}
+
+#[tokio::test]
+async fn archive_wins_over_an_undelivered_buffered_attach() {
+    let (host, fake) = host(&["s1"]);
+    let slot = host.slot("s1");
+    let out = Out::default();
+    let mut attach = host
+        .connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        )
+        .buffered_output();
+    request(&mut attach, 1, Op::Attach { node: node("s1") });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !matches!(slot.peek(), SlotView::Resident(_)) {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let archive = Out::default();
+    let mut operator = host.connect(
+        archive.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(
+        &mut operator,
+        2,
+        Op::ArchiveSession {
+            session: "s1".into(),
+            archived: true,
+        },
+    );
+    assert!(matches!(
+        outcome(&archive.take(), 2),
+        Outcome::Ok(Answer::ArchiveUpdated { archived: true, .. })
+    ));
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while attach.attach_in_flight(1) {
+            attach.flush().unwrap();
+            if attach.attach_in_flight(1) {
+                attach.changed().await;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        outcome(&out.take(), 1),
+        Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+    ));
+    assert!(attach.node.is_none());
     assert_eq!(fake.0.opens.load(Ordering::SeqCst), 1);
 }
 

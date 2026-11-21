@@ -23,6 +23,7 @@
 pub mod admission;
 mod custody;
 pub mod database;
+mod directory;
 mod image;
 pub mod rows;
 pub mod store;
@@ -41,6 +42,7 @@ pub use database::{
     GENERATION, OpenError, OpenErrorKind, SCHEMA_VERSION, TreeInspection,
     expected_schema_fingerprint,
 };
+pub use directory::{TreeDirectoryChanges, TreeDirectoryProbe};
 pub use store::{SqliteTreeStore, TreeChange};
 
 /// The `SQLite` integer bound: every count, stamp, and revision a row carries

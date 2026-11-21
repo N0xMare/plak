@@ -183,8 +183,9 @@ impl SqliteTreeStore {
         })
     }
 
-    /// Sends best-effort presentation notices after a successful commit.
-    /// The callback must not read this store or perform authority work.
+    /// Sends best-effort presentation notices after a successful commit and
+    /// after releasing the writer mutex. Concurrent callers may deliver in a
+    /// different order from their commits. The callback is advisory only.
     #[must_use]
     pub fn with_commit_notice(
         mut self,
@@ -235,9 +236,10 @@ impl SqliteTreeStore {
             tx.commit().map_err(|error| {
                 sqlite_unavailable("could not durably delete agent tree", &error)
             })?;
-            self.notify_commit(tree_id, TreeChange::Deleted);
             Ok(())
-        })
+        })?;
+        self.notify_commit(tree_id, TreeChange::Deleted);
+        Ok(())
     }
 
     /// The writer connection, for a step the tree save does not own (the
@@ -422,11 +424,7 @@ impl TreeStore for SqliteTreeStore {
         tree: &ProductAgentTree,
         claim: &CustodyClaim,
     ) -> Result<Revision, TreeStoreError> {
-        let result = self.with_writer(|writer| {
-            writer.save(tree, claim)?;
-            self.notify_commit(&tree.tree_id, TreeChange::Saved(tree));
-            Ok(())
-        });
+        let result = self.with_writer(|writer| writer.save(tree, claim));
         if result.is_ok() {
             self.storage_waiting
                 .store(false, std::sync::atomic::Ordering::Release);
@@ -436,6 +434,7 @@ impl TreeStore for SqliteTreeStore {
                 .store(true, std::sync::atomic::Ordering::Release);
         }
         result?;
+        self.notify_commit(&tree.tree_id, TreeChange::Saved(tree));
         Ok(Revision::published(tree.revision))
     }
 

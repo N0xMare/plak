@@ -149,7 +149,7 @@ where
             self.audit_host_refusal(request_id, &refusal);
             Forwarded::Answered(Outcome::Refused(refusal))
         };
-        if self.host_reads.contains_key(&request_id) {
+        if self.host_reads.contains_key(&request_id) || self.attach_in_flight(request_id) {
             return refused(RequestRefusal::Malformed {
                 detail: "host request id is already in flight".to_owned(),
             });

@@ -509,18 +509,13 @@ impl HostSessions<PlakExtension> for ProductSessions {
     }
 
     fn rename(&self, session: &str, title: Option<&str>) -> Result<Option<String>, RequestRefusal> {
-        let title =
-            crate::commands::session::lifecycle::rename_session(&self.services, session, title)
-                .map_err(|error| lifecycle::refusal(session, error))?;
-        self.directory.settle();
-        Ok(title)
+        crate::commands::session::lifecycle::rename_session(&self.services, session, title)
+            .map_err(|error| lifecycle::refusal(session, error))
     }
 
     fn archive(&self, session: &str, archived: bool) -> Result<(), RequestRefusal> {
         crate::commands::session::lifecycle::set_archived(&self.services, session, archived)
-            .map_err(|error| lifecycle::refusal(session, error))?;
-        self.directory.settle();
-        Ok(())
+            .map_err(|error| lifecycle::refusal(session, error))
     }
 
     fn delete(
@@ -535,9 +530,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
             abandon_children,
             abandon_jobs,
         )
-        .map_err(|error| lifecycle::refusal(session, error))?;
-        self.directory.settle();
-        Ok(())
+        .map_err(|error| lifecycle::refusal(session, error))
     }
 
     fn rows(
@@ -556,10 +549,6 @@ impl HostSessions<PlakExtension> for ProductSessions {
 
     fn directory_changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
         Some(self.directory.changes())
-    }
-
-    fn settle_directory(&self) {
-        self.directory.settle();
     }
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
@@ -770,7 +759,6 @@ impl HostSessions<PlakExtension> for ProductSessions {
         };
         // A replay of the same request finds the session it created.
         if let Ok(existing) = store.load(&session) {
-            self.directory.settle();
             return replayed(&existing);
         }
         let validated = self.placement.validate(creation.runner, workspace)?;
@@ -797,7 +785,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 },
             }
         };
-        let result = if let Some(workspace) = local_workspace {
+        if let Some(workspace) = local_workspace {
             self.services
                 .runner_overlap()
                 .with_local_admission(workspace, commit)
@@ -806,11 +794,7 @@ impl HostSessions<PlakExtension> for ProductSessions {
                 })?
         } else {
             commit()
-        };
-        if result.is_ok() {
-            self.directory.settle();
         }
-        result
     }
 }
 
@@ -1117,6 +1101,29 @@ mod tests {
     }
 
     #[test]
+    fn directory_revalidation_repairs_a_product_write_without_a_notice() {
+        let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+        let mut record = crate::store::sessions::SessionRecord::new(paths.home().to_owned());
+        ProductStore::open(&paths)
+            .unwrap()
+            .commit(&mut record)
+            .unwrap();
+        let sessions =
+            ProductSessions::new(&Services::for_home(paths.clone()), None, None).unwrap();
+        let row = || sessions.rows(None, None, false).unwrap().remove(0);
+        let original = row();
+        let raw = rusqlite::Connection::open(paths.product_database()).unwrap();
+        raw.execute(
+            "UPDATE sessions SET title_override='without a notice' WHERE id=?1",
+            [&record.id],
+        )
+        .unwrap();
+        assert_eq!(row(), original);
+        sessions.directory.tick();
+        assert_eq!(row().title.as_deref(), Some("without a notice"));
+    }
+
+    #[test]
     fn unreadable_row_is_omitted_without_hiding_healthy_rows_and_returns_after_repair() {
         for activity_unreadable in [true, false] {
             let (temporary, paths) = crate::home::paths::PlakPaths::isolated_test_home();
@@ -1232,6 +1239,15 @@ mod tests {
         let actual = product.rows(None, None, false).unwrap().remove(0);
         assert_eq!(actual.profile.as_deref(), Some(expected.id.as_str()));
         assert_eq!(actual.differences, expected.differences);
+        // Save through the filesystem, not through a product config notice.
+        std::fs::write(
+            context.project_agents_dir().unwrap().join("codex-default-root.toml"),
+            "account = \"codex\"\nmodel = \"out-of-band-fixture-model\"\ndescription = \"overlay\"\n",
+        ).unwrap();
+        assert_eq!(actual, product.rows(None, None, false).unwrap().remove(0));
+        product.directory.tick();
+        let refreshed = product.rows(None, None, false).unwrap().remove(0);
+        assert_ne!(refreshed.differences, actual.differences);
     }
 
     #[test]

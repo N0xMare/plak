@@ -114,10 +114,6 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
         None
     }
 
-    /// Let a just-opened session's committed directory facts catch up before
-    /// returning its attachment. Not called on the resident fast path.
-    fn settle_directory(&self) {}
-
     /// The head of the tree's root line, or `None`. A successor that kept
     /// its source's node supersedes it independently of directory ordering.
     ///

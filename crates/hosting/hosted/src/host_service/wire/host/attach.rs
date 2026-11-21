@@ -10,21 +10,38 @@ use super::{
 };
 
 enum Target<P: ProtocolExtension> {
-    Resident(HeldSession<P>),
+    Resident(Undelivered<P>),
     Stored(StoredAttachment<P>),
     Refused(RequestRefusal),
+}
+
+struct Undelivered<P: ProtocolExtension> {
+    held: Option<HeldSession<P>>,
+    from_open: bool,
+}
+
+impl<P: ProtocolExtension> Drop for Undelivered<P> {
+    fn drop(&mut self) {
+        if self.from_open
+            && let Some((session, _, _)) = &self.held
+        {
+            // Unlike ReleaseSession this cannot detach a different client
+            // that attached while this request was being cancelled.
+            session.release_unattached();
+        }
+    }
+}
+
+pub(super) struct AttachRequest {
+    id: RequestId,
+    node: NodeAddress,
+    text: String,
 }
 
 pub(super) struct PendingAttach<P: ProtocolExtension> {
     id: RequestId,
     text: String,
     result: oneshot::Receiver<CliResult<Target<P>>>,
-}
-
-impl<P: ProtocolExtension> PendingAttach<P> {
-    pub(super) const fn id(&self) -> RequestId {
-        self.id
-    }
 }
 
 impl<P: ProtocolExtension> SessionHost<P>
@@ -53,7 +70,10 @@ where
         // Archiving releases the live slot before publishing the archive
         // flag. A held resident cannot have an archived transcript.
         if let Some(resident) = slot.try_hold_resident() {
-            return Ok(Target::Resident(resident));
+            return Ok(Target::Resident(Undelivered {
+                held: Some(resident),
+                from_open: false,
+            }));
         }
         let id = match slot.peek() {
             super::SlotView::Resident(session) => session.session_id(),
@@ -69,9 +89,15 @@ where
             return Ok(target);
         }
         match slot.resident_at_handoff() {
-            Ok(resident) => {
-                self.sessions.settle_directory();
-                Ok(Target::Resident(resident))
+            Ok((resident, from_open)) => {
+                let opened = Undelivered {
+                    held: Some(resident),
+                    from_open,
+                };
+                if self.closed() {
+                    return Ok(Target::Refused(stopping()));
+                }
+                Ok(Target::Resident(opened))
             }
             Err(failure) => Ok(self
                 .stored_target(node, &id, Some(&failure))
@@ -128,6 +154,13 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
+    pub(super) fn attach_in_flight(&self, id: RequestId) -> bool {
+        self.attaching
+            .as_ref()
+            .is_some_and(|attach| attach.id == id)
+            || self.attach_queue.iter().any(|attach| attach.id == id)
+    }
+
     pub(super) fn start_attach(
         &mut self,
         id: RequestId,
@@ -142,9 +175,12 @@ where
             )));
         }
         if self.attaching.is_some() {
-            return Ok(Forwarded::Answered(Outcome::Refused(
-                RequestRefusal::OneInFlight,
-            )));
+            self.attach_queue.push_back(AttachRequest {
+                id,
+                node,
+                text: text.to_owned(),
+            });
+            return Ok(Forwarded::Reading(true));
         }
         let Some(runtime) = tokio::runtime::Handle::try_current()
             .ok()
@@ -176,6 +212,9 @@ where
             } else {
                 host.prepare_attach(&node)
             };
+            if send.is_closed() {
+                return;
+            }
             let _ = send.send(result);
             wake.notify.notify_one();
         });
@@ -194,7 +233,20 @@ where
         let Some(PendingAttach { id, text, .. }) = self.attaching.take() else {
             unreachable!("the connection owns its pending attach");
         };
-        if let Forwarded::Answered(outcome) = self.finish_attach(target, &text)? {
+        let finished = self.finish_attach(target, &text)?;
+        self.complete_attach(id, finished)?;
+        while let Some(AttachRequest { id, node, text }) = self.attach_queue.pop_front() {
+            let started = self.start_attach(id, node, &text)?;
+            self.complete_attach(id, started)?;
+            if self.attaching.is_some() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn complete_attach(&mut self, id: RequestId, result: Forwarded<P>) -> CliResult<()> {
+        if let Forwarded::Answered(outcome) = result {
             write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
         }
         Ok(())
@@ -202,7 +254,15 @@ where
 
     fn finish_attach(&mut self, target: Target<P>, text: &str) -> CliResult<Forwarded<P>> {
         match target {
-            Target::Resident(resident) => self.attach_resident(resident, text),
+            Target::Resident(mut resident) => {
+                if self.host.closed() {
+                    return Ok(Forwarded::Answered(Outcome::Refused(stopping())));
+                }
+                let Some(held) = resident.held.take() else {
+                    unreachable!("a prepared attach owns its session hold");
+                };
+                self.attach_resident(held, text)
+            }
             Target::Stored(stored) => self.attach_stored(stored, text),
             Target::Refused(refusal) => Ok(Forwarded::Answered(Outcome::Refused(refusal))),
         }

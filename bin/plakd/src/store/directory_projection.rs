@@ -5,7 +5,8 @@ use plakous_hosted::runtime::{
     operator_attention::{AttentionReason, root_reason},
 };
 use plakous_hosted::sessions::projector::{ProductIntents, RootInterruptCause, SessionViews};
-use rusqlite::OptionalExtension as _;
+use rusqlite::{Connection, OptionalExtension as _};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::views::{
@@ -13,6 +14,97 @@ use super::views::{
     unavailable, view_cursor_and_state,
 };
 use super::{ProductStore, decode_node, from_i64};
+
+type Stamp = (
+    i64,
+    i64,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+);
+
+pub(crate) struct ProductDirectoryProbe {
+    connection: Connection,
+    version: i64,
+    rows: BTreeMap<String, Stamp>,
+}
+
+impl ProductDirectoryProbe {
+    pub(crate) fn open(paths: &crate::home::paths::PlakPaths) -> Result<Self, String> {
+        let connection =
+            ProductStore::inspection_connection(paths, std::time::Duration::from_millis(250))
+                .map_err(|error| error.to_string())?;
+        ProductStore::admit_read_only(&connection).map_err(|error| error.to_string())?;
+        let version = data_version(&connection)?;
+        let rows = fingerprints(&connection)?;
+        Ok(Self {
+            connection,
+            version,
+            rows,
+        })
+    }
+
+    pub(crate) fn changes(&mut self) -> Result<BTreeSet<String>, String> {
+        let version = data_version(&self.connection)?;
+        if version == self.version {
+            return Ok(BTreeSet::new());
+        }
+        let rows = fingerprints(&self.connection)?;
+        let changed = self
+            .rows
+            .keys()
+            .filter(|id| !rows.contains_key(*id))
+            .chain(
+                rows.iter()
+                    .filter(|(id, stamp)| self.rows.get(*id) != Some(*stamp))
+                    .map(|(id, _)| id),
+            )
+            .cloned()
+            .collect();
+        self.rows = rows;
+        self.version = version;
+        Ok(changed)
+    }
+}
+
+fn data_version(connection: &Connection) -> Result<i64, String> {
+    connection
+        .query_row("PRAGMA data_version", [], |row| row.get(0))
+        .map_err(unavailable)
+}
+
+fn fingerprints(connection: &Connection) -> Result<BTreeMap<String, Stamp>, String> {
+    connection
+        .prepare(
+            "SELECT s.id,s.revision,s.updated_at,s.archived,s.title_override,s.runner_display,
+                v.head_locator,p.applied_seq,
+                (SELECT max(i.rowid) FROM host_intents i WHERE i.session_id=s.id)
+         FROM sessions s LEFT JOIN projector_cursors p ON p.session_id=s.id
+         LEFT JOIN session_views v ON v.session_id=s.id",
+        )
+        .map_err(unavailable)?
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                (
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ),
+            ))
+        })
+        .map_err(unavailable)?
+        .collect::<Result<_, _>>()
+        .map_err(unavailable)
+}
 
 pub(crate) struct DirectoryMetadata {
     pub(crate) workspace: PathBuf,

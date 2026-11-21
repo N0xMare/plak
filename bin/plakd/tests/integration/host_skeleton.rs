@@ -855,6 +855,49 @@ fn wait_for_holder(client: &mut Client, id: RequestId, expected: Option<u32>) ->
     }
 }
 
+#[test]
+fn cross_process_record_notice_publishes_directory_row() {
+    const CHILD_HOME: &str = "PLAK_TEST_DIRECTORY_NOTICE_HOME";
+    if let Some(home) = std::env::var_os(CHILD_HOME) {
+        let paths = plakd::home::paths::PlakPaths::explicit(home.into());
+        let mut record = plakd::store::sessions::SessionRecord::new(paths.home().to_owned());
+        record.title = Some("external record".into());
+        plakd::store::ProductStore::open(&paths)
+            .unwrap()
+            .commit(&mut record)
+            .unwrap();
+        return;
+    }
+    let Some(fixture) = fixture() else { return };
+    let host = start(&fixture);
+    let mut client = Client::connect(&host);
+    assert!(client.rows(1).is_empty());
+    let spawned = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "host_skeleton::cross_process_record_notice_publishes_directory_row",
+        ])
+        .env(CHILD_HOME, fixture.home())
+        .output()
+        .unwrap();
+    assert!(spawned.status.success(), "{spawned:?}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    for id in 2.. {
+        if client
+            .rows(id)
+            .iter()
+            .any(|row| row.title.as_deref() == Some("external record"))
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the external commit notice was not published"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 /// An embedded `plakd agent` that holds a session (its runtime lease, a
 /// session with no tree hub and so no custody): the directory names it with
 /// its pid and its environment, the host's attach is refused
