@@ -13,7 +13,7 @@ mod child;
 mod claude;
 #[cfg(feature = "codex")]
 mod codex;
-#[cfg(any(feature = "grok", feature = "claude"))]
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod common_error;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod compatibility;
@@ -34,6 +34,8 @@ mod login_types;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
 mod model_catalog;
 mod models;
+#[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]
+mod online;
 mod paths;
 mod provider;
 #[cfg(any(feature = "codex", feature = "grok", feature = "claude"))]

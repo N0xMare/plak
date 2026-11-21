@@ -1,5 +1,6 @@
 use super::common_error::map_credential_status;
 use super::login::{PendingCompatibilityConsent, complete_pending_with_consent};
+use super::online::{LocalLogin, auth_client, run_refresh};
 use super::vertical::{NativeFuture, NativeVertical, NativeVerticalEntry};
 use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, ModelId,
@@ -9,7 +10,7 @@ use super::{
     PendingNativeLogin, ResolvedModelDescriptor, ResolvedNativeModel, RuntimeModelAuthority,
     SelectedProviderConfiguration, SessionLineage, SubscriptionRequestGate,
     SubscriptionResolutionEvidence, SubscriptionUsageRead, Timestamp, credential_refresh_observer,
-    detached, run_blocking, unix_now,
+    run_blocking, unix_now,
 };
 
 pub(super) fn xai_native_http_config()
@@ -68,10 +69,7 @@ impl NativeSubscriptions {
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     ) -> Result<XaiOnline, NativeSubscriptionError> {
         let provider = NativeProvider::Xai;
-        let notice = Self::notice(provider)?;
-        self.require_gateway_consent(gateway, provider).await?;
-        let timestamp =
-            Timestamp::new(self.state.now()?, 0).map_err(|_| NativeSubscriptionError::Internal)?;
+        let (notice, timestamp) = self.gateway_login_consent(gateway, provider).await?;
         let acceptance = plakous_xai::XaiCompatibilityAcceptance::accept_exact(
             notice.profile_id,
             notice.source_revision,
@@ -83,10 +81,7 @@ impl NativeSubscriptions {
             timestamp,
         )
         .map_err(map_xai_error)?;
-        let client = gateway.transport.client(
-            plakous_http::Client::new_http1(plakous_http::Limits::default())
-                .map_err(|_| NativeSubscriptionError::Internal)?,
-        );
+        let client = gateway.transport.client(auth_client()?);
         let mut manager = plakous_xai::XaiNativeAuthManager::custodied(
             Arc::clone(&gateway.custodian),
             self.custody_slot(provider)?,
@@ -119,8 +114,7 @@ impl NativeSubscriptions {
         allow(clippy::unused_self, reason = "only tests read the fixture transport")
     )]
     fn xai_auth_client(&self) -> Result<plakous_http::Client, NativeSubscriptionError> {
-        let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
-            .map_err(|_| NativeSubscriptionError::Internal)?;
+        let client = auth_client()?;
         #[cfg(test)]
         let client = self.xai_test_transport.clone().unwrap_or(client);
         Ok(client)
@@ -132,43 +126,15 @@ impl NativeSubscriptions {
         enforce_login_recovery: bool,
         gateway_v1_authority: bool,
     ) -> Result<XaiOnline, NativeSubscriptionError> {
-        let paths = self.state.clone();
-        let notice = Self::notice(NativeProvider::Xai)?;
-        let now = self.state.now()?;
-        run_blocking(move || paths.prepare()).await??;
-        // Checked before anything else is read or claimed, so no online path
-        // writes over a newer build's state.
-        if self
-            .written_by_newer_build_unlocked(NativeProvider::Xai)
-            .await?
-        {
-            return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
-        }
-        let loaded_acceptance = {
-            let paths = self.state.clone();
-            run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
-        };
-        let accepted_at = loaded_acceptance.accepted_at;
-        let path = self.state.provider_record(NativeProvider::Xai);
-        let status_path = path.clone();
-        let slot = self.state.slot_id()?;
-        let status_slot = slot.clone();
-        let local_status = run_blocking(move || {
-            plakous_xai::XaiOfflineSelectedSlot::open_explicit(status_path, status_slot)
-                .map_err(map_xai_error)?
-                .status()
-                .map(map_xai_offline_status)
-                .map_err(map_xai_error)
-        })
-        .await??;
-        if enforce_login_recovery {
-            self.require_recovered_login(
-                NativeProvider::Xai,
-                &loaded_acceptance.generation,
-                local_status,
-            )
+        let LocalLogin {
+            notice,
+            acceptance: loaded_acceptance,
+            path,
+            slot,
+        } = self
+            .prepare_local_login(NativeProvider::Xai, enforce_login_recovery)
             .await?;
-        }
+        let accepted_at = loaded_acceptance.accepted_at;
         let catalog_observer = self.exchange_observer.clone();
         let catalog_retries = self.catalog_retries;
         let client = self.xai_auth_client()?;
@@ -578,12 +544,8 @@ impl NativeVertical for Vertical {
         subscriptions: &'a NativeSubscriptions,
     ) -> NativeFuture<'a, Result<u64, NativeSubscriptionError>> {
         Box::pin(async move {
-            subscriptions
-                .xai_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_xai_error)
+            let manager = subscriptions.xai_online().await?.manager;
+            run_blocking(move || manager.access_expires_at().map_err(map_xai_error)).await?
         })
     }
     fn refresh<'a>(
@@ -592,22 +554,17 @@ impl NativeVertical for Vertical {
         force: bool,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            {
-                let online = subscriptions.xai_online().await?;
-                let manager = Arc::clone(&online.manager);
-                if force {
-                    detached(async move { manager.refresh_now().await })
-                        .await?
-                        .map_err(map_xai_error)?;
-                } else {
-                    online
-                        .manager
-                        .refresh_if_needed()
-                        .await
-                        .map_err(map_xai_error)?;
-                }
-                online
-                    .manager
+            let manager = subscriptions.xai_online().await?.manager;
+            let forced = Arc::clone(&manager);
+            run_refresh(
+                force,
+                async move { forced.refresh_now().await },
+                manager.refresh_if_needed(),
+                map_xai_error,
+            )
+            .await?;
+            run_blocking(move || {
+                manager
                     .status()
                     .map(|status| {
                         status.map_or(NativeAuthStatus::SignedOut, |value| {
@@ -615,7 +572,8 @@ impl NativeVertical for Vertical {
                         })
                     })
                     .map_err(map_xai_error)
-            }
+            })
+            .await?
         })
     }
     fn revoke<'a>(

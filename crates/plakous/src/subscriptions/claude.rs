@@ -1,5 +1,6 @@
 use super::common_error::map_credential_status;
 use super::login::{PendingCompatibilityConsent, complete_pending_with_consent};
+use super::online::{LocalLogin, auth_client, run_refresh};
 use super::vertical::{NativeFuture, NativeVertical, NativeVerticalEntry};
 use super::{
     Arc, CompatibilityNotice, CompiledProviderConfiguration, LoadedAcceptance, NativeAuthStatus,
@@ -8,7 +9,7 @@ use super::{
     NativeSubscriptionError, NativeSubscriptions, NativeToolMode, PendingNativeLogin,
     ResolvedNativeModel, RuntimeModelAuthority, SelectedProviderConfiguration, SessionLineage,
     SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionResolutionEvidence,
-    SubscriptionUsageRead, Timestamp, credential_refresh_observer, detached, run_blocking,
+    SubscriptionUsageRead, Timestamp, credential_refresh_observer, run_blocking,
 };
 use plakous_model::ResolvedProviderAuthorityBinding;
 
@@ -52,10 +53,7 @@ impl NativeSubscriptions {
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     ) -> Result<ClaudeOnline, NativeSubscriptionError> {
         let provider = NativeProvider::Claude;
-        let notice = Self::notice(provider)?;
-        self.require_gateway_consent(gateway, provider).await?;
-        let timestamp =
-            Timestamp::new(self.state.now()?, 0).map_err(|_| NativeSubscriptionError::Internal)?;
+        let (notice, timestamp) = self.gateway_login_consent(gateway, provider).await?;
         let acceptance = plakous_anthropic::ClaudeCompatibilityAcceptance::accept_exact(
             notice.profile_id,
             notice.source_revision,
@@ -64,10 +62,7 @@ impl NativeSubscriptions {
             timestamp,
         )
         .map_err(map_claude_error)?;
-        let client = gateway.transport.client(
-            plakous_http::Client::new_http1(plakous_http::Limits::default())
-                .map_err(|_| NativeSubscriptionError::Internal)?,
-        );
+        let client = gateway.transport.client(auth_client()?);
         let mut manager = plakous_anthropic::ClaudeNativeAuthManager::custodied(
             Arc::clone(&gateway.custodian),
             self.custody_slot(provider)?,
@@ -97,8 +92,7 @@ impl NativeSubscriptions {
         allow(clippy::unused_self, reason = "only tests read the fixture transport")
     )]
     fn claude_auth_client(&self) -> Result<plakous_http::Client, NativeSubscriptionError> {
-        let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
-            .map_err(|_| NativeSubscriptionError::Internal)?;
+        let client = auth_client()?;
         #[cfg(test)]
         let client = self.claude_test_transport.clone().unwrap_or(client);
         Ok(client)
@@ -109,46 +103,15 @@ impl NativeSubscriptions {
         request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
         enforce_login_recovery: bool,
     ) -> Result<ClaudeOnline, NativeSubscriptionError> {
-        let paths = self.state.clone();
-        let notice = Self::notice(NativeProvider::Claude)?;
-        let now = self.state.now()?;
-        run_blocking(move || paths.prepare()).await??;
-        // Checked before anything else is read or claimed, so no online path
-        // writes over a newer build's state.
-        if self
-            .written_by_newer_build_unlocked(NativeProvider::Claude)
-            .await?
-        {
-            return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
-        }
-        let loaded_acceptance = {
-            let paths = self.state.clone();
-            run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
-        };
-        let accepted_at = loaded_acceptance.accepted_at;
-        let path = self.state.provider_record(NativeProvider::Claude);
-        let status_path = path.clone();
-        let slot = self.state.slot_id()?;
-        let status_slot = slot.clone();
-        let local_status = run_blocking(move || {
-            let slot = status_slot;
-            let admin =
-                plakous_anthropic::ClaudeOfflineSelectedSlot::open_explicit(status_path, slot)
-                    .map_err(map_claude_error)?;
-            admin
-                .status()
-                .map(map_claude_offline_status)
-                .map_err(map_claude_error)
-        })
-        .await??;
-        if enforce_login_recovery {
-            self.require_recovered_login(
-                NativeProvider::Claude,
-                &loaded_acceptance.generation,
-                local_status,
-            )
+        let LocalLogin {
+            notice,
+            acceptance: loaded_acceptance,
+            path,
+            slot,
+        } = self
+            .prepare_local_login(NativeProvider::Claude, enforce_login_recovery)
             .await?;
-        }
+        let accepted_at = loaded_acceptance.accepted_at;
         let identity_paths = self.state.clone();
         let client = self.claude_auth_client()?;
         run_blocking(move || {
@@ -231,29 +194,7 @@ impl NativeSubscriptions {
     }
 }
 
-#[allow(
-    clippy::match_same_arms,
-    reason = "unknown non-exhaustive lifecycle states fail closed as quarantined"
-)]
-pub(super) fn map_claude_offline_status(
-    status: plakous_auth::OfflineCredentialLifecycle,
-) -> NativeAuthStatus {
-    match status {
-        plakous_auth::OfflineCredentialLifecycle::SignedOut => NativeAuthStatus::SignedOut,
-        plakous_auth::OfflineCredentialLifecycle::Ready => NativeAuthStatus::Ready,
-        plakous_auth::OfflineCredentialLifecycle::RefreshRequired => {
-            NativeAuthStatus::RefreshRequired
-        }
-        plakous_auth::OfflineCredentialLifecycle::Quarantined => NativeAuthStatus::Quarantined,
-        plakous_auth::OfflineCredentialLifecycle::Refreshing => NativeAuthStatus::Refreshing,
-        plakous_auth::OfflineCredentialLifecycle::Revoked => NativeAuthStatus::Revoked,
-        plakous_auth::OfflineCredentialLifecycle::LoginRequired => NativeAuthStatus::LoginRequired,
-        plakous_auth::OfflineCredentialLifecycle::WrittenByNewerBuild => {
-            NativeAuthStatus::WrittenByNewerBuild
-        }
-        _ => NativeAuthStatus::Quarantined,
-    }
-}
+pub(super) use super::common_error::map_offline_lifecycle as map_claude_offline_status;
 #[allow(
     clippy::match_same_arms,
     reason = "unknown non-exhaustive provider failures map to one redacted internal category"
@@ -491,12 +432,8 @@ impl NativeVertical for Vertical {
         subscriptions: &'a NativeSubscriptions,
     ) -> NativeFuture<'a, Result<u64, NativeSubscriptionError>> {
         Box::pin(async move {
-            subscriptions
-                .claude_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_claude_error)
+            let manager = subscriptions.claude_online().await?.manager;
+            run_blocking(move || manager.access_expires_at().map_err(map_claude_error)).await?
         })
     }
     fn refresh<'a>(
@@ -505,22 +442,17 @@ impl NativeVertical for Vertical {
         force: bool,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            {
-                let online = subscriptions.claude_online().await?;
-                let manager = Arc::clone(&online.manager);
-                if force {
-                    detached(async move { manager.refresh_after_rejection().await })
-                        .await?
-                        .map_err(map_claude_error)?;
-                } else {
-                    online
-                        .manager
-                        .refresh_if_needed()
-                        .await
-                        .map_err(map_claude_error)?;
-                }
-                online
-                    .manager
+            let manager = subscriptions.claude_online().await?.manager;
+            let forced = Arc::clone(&manager);
+            run_refresh(
+                force,
+                async move { forced.refresh_after_rejection().await },
+                manager.refresh_if_needed(),
+                map_claude_error,
+            )
+            .await?;
+            run_blocking(move || {
+                manager
                     .status()
                     .map(|status| {
                         status.map_or(NativeAuthStatus::SignedOut, |value| {
@@ -528,7 +460,8 @@ impl NativeVertical for Vertical {
                         })
                     })
                     .map_err(map_claude_error)
-            }
+            })
+            .await?
         })
     }
     fn revoke<'a>(
@@ -536,15 +469,9 @@ impl NativeVertical for Vertical {
         subscriptions: &'a NativeSubscriptions,
     ) -> NativeFuture<'a, Result<NativeAuthStatus, NativeSubscriptionError>> {
         Box::pin(async move {
-            {
-                subscriptions
-                    .claude_online()
-                    .await?
-                    .manager
-                    .revoke()
-                    .map_err(map_claude_error)?;
-                Ok(NativeAuthStatus::Revoked)
-            }
+            let manager = subscriptions.claude_online().await?.manager;
+            run_blocking(move || manager.revoke().map_err(map_claude_error)).await??;
+            Ok(NativeAuthStatus::Revoked)
         })
     }
     fn logout<'a>(
