@@ -1,6 +1,7 @@
 //! A production build does not record connection probe timings.
 
 #[inline]
+#[must_use]
 pub fn phase(_name: &'static str) -> tracing::Span {
     tracing::Span::none()
 }
