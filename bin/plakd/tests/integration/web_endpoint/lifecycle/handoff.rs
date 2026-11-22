@@ -47,15 +47,24 @@ fn prepare(fixture: &Fixture, candidate: &Path, binary: &str) -> BufReader<UnixS
     control
 }
 
-fn ready(control: &mut BufReader<UnixStream>) {
+fn prepare_answer(control: &mut BufReader<UnixStream>) -> Value {
+    let deadline = Instant::now() + WAIT;
     loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .expect("upgrade prepare did not answer");
+        control.get_mut().set_read_timeout(Some(remaining)).unwrap();
         let frame = read_control(control);
-        match frame["status"].as_str().unwrap() {
-            "progress" => {}
-            "ready" => return,
-            _ => panic!("expected Ready: {frame}"),
+        if frame["status"] != "progress" {
+            return frame;
         }
     }
+}
+
+fn ready(control: &mut BufReader<UnixStream>) {
+    let answer = prepare_answer(control);
+    assert_eq!(answer["status"], "ready", "{answer}");
 }
 
 fn wait_line(web: &Web, expected: &str) {
@@ -334,7 +343,7 @@ fn destination_without_handoff_capability_is_refused_before_pause() {
     let candidate = Path::new(env!("CARGO_BIN_EXE_plakd"))
         .canonicalize()
         .unwrap();
-    let answer = read_control(&mut prepare(
+    let answer = prepare_answer(&mut prepare(
         &fixture,
         &candidate,
         &identify(&mut fixture.command()),
