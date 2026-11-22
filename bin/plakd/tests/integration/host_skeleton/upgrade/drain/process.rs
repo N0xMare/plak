@@ -1,6 +1,7 @@
 //! A foreground wait becomes a joined promoted job before the same-triple transfer.
 
 use super::super::super::runner::{alive, job};
+use super::super::retained_jobs::changed::{candidate_environment, candidate_upgrade};
 use super::*;
 
 #[test]
@@ -166,7 +167,6 @@ fn host_step_drain_changed_triple_carries_a_process_started_during_preparation()
     fixture.write_script(&process_script_for(&fixture, ProcessWait::Foreground));
     let release = fixture.root.join("provider-release");
     let drain_release = fixture.root.join("drain-release");
-    use super::super::retained_jobs::changed::{candidate_environment, candidate_upgrade};
     let image = replacement_image(&fixture).canonicalize().unwrap();
     let mut env = candidate_environment(&image).to_vec();
     env.extend([

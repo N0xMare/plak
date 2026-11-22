@@ -150,6 +150,7 @@ fn release_continuation(fixture: &Fixture) {
 struct Root {
     name: String,
     session: String,
+    node: NodeAddress,
     background: (i32, i32),
     foreground: (i32, i32),
 }
@@ -183,6 +184,7 @@ fn start_root(
     Root {
         name: name.into(),
         session,
+        node,
         background: marked(fixture, name, "bg"),
         foreground: marked(fixture, name, "fg"),
     }
@@ -216,7 +218,8 @@ fn marked(fixture: &Fixture, name: &str, job: &str) -> (i32, i32) {
         }
         assert!(
             Instant::now() < deadline,
-            "process never reached {marker:?}"
+            "process never reached {}",
+            marker.display()
         );
         std::thread::sleep(Duration::from_millis(10));
     }

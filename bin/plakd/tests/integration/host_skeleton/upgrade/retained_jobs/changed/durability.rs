@@ -92,8 +92,13 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
         wait_exit(root.foreground.0);
     }
     release_continuation(&fixture);
+    // The pre-Ready crash has no planned release record for the start scan.
+    // Reopening supplies the ordinary loss-recovery entry point.
+    let mut client = Client::connect(&replacement);
+    client.attach(20, &root.node);
     notices(&fixture, &root.session, !lose_original, cut);
     assert_eq!(marked(&fixture, &root.name, "bg"), root.background);
     assert_eq!(marked(&fixture, &root.name, "fg"), root.foreground);
+    drop(client);
     stop(&mut replacement);
 }
