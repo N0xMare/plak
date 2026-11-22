@@ -357,6 +357,9 @@ can include `'wasm-unsafe-eval'` in its script policy only with `web.terminal`
 enabled. Use a compliant build or omit `--ui` for a headless endpoint.
 `SIGUSR1` reloads UI files and CSP, not the home switches.
 
+Upgrade service preflight also validates the home configuration and user
+templates required by host startup.
+
 On Linux, the socket written by `plakd host install` is
 `/run/user/<uid>/plak/gateway.sock`, matching systemd's `%t` regardless of
 the installer's environment.

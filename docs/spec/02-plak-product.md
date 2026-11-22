@@ -5719,10 +5719,11 @@ credential probes must give a usable known input window; an insufficient or
 unknown window refuses rather than warning and surrendering. No credential
 renewal or paid request is used to obtain a native-login verdict.
 The source retains resolved service arguments, not a working-directory-relative
-invocation. Destination service preflight parses those arguments and verifies
-web access settings, UI/CSP assets and any existing cookie key without binding
-a listener or creating a key. A known service-configuration failure refuses
-before draining sessions.
+invocation. Destination service preflight parses those arguments and validates
+the home configuration and user templates that startup requires. For a web
+listener it also verifies web access settings, UI/CSP assets and any existing
+cookie key without binding a listener or creating a key. A known
+service-configuration failure refuses before draining sessions.
 
 The host exposes `resolve_paused_drafts(pause, deadline)` for an upgrade
 coordinator to call before planned surrender. The pause must belong to that

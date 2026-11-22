@@ -2,6 +2,21 @@
 
 use std::collections::BTreeMap;
 
+const WASM_UNSAFE_EVAL: &str = "'wasm-unsafe-eval'";
+
+pub(super) fn script_src_has_wasm_eval(header: &str) -> bool {
+    header
+        .split(';')
+        .find_map(|directive| {
+            let mut words = directive.split_ascii_whitespace();
+            words
+                .next()?
+                .eq_ignore_ascii_case("script-src")
+                .then(|| words.any(|source| source == WASM_UNSAFE_EVAL))
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn console_policy(header: &str, terminal: bool) -> bool {
     let mut directives = BTreeMap::new();
     for directive in header.split(';') {
@@ -58,7 +73,7 @@ fn script_sources(values: &[&str], terminal: bool) -> bool {
     !values.is_empty()
         && values.iter().all(|value| {
             matches!(*value, "'none'" | "'self'")
-                || (terminal && *value == "'wasm-unsafe-eval'")
+                || (terminal && *value == WASM_UNSAFE_EVAL)
                 || ["'sha256-", "'sha384-", "'sha512-"]
                     .iter()
                     .any(|prefix| value.starts_with(prefix) && value.ends_with('\''))

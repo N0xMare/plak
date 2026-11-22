@@ -669,6 +669,39 @@ fn host_upgrade_binding_regression_refuses_before_surrender_and_prints_live_rows
 }
 
 #[test]
+fn web_service_upgrade_probe_refuses_an_invalid_home_template() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    fixture.write_config(
+        "[web]\nallow = [\"a@example.com\"]\norigin = \"https://plak.example.ts.net\"\n",
+    );
+    let service = fixture.root.join("service.json");
+    let listen = format!("unix:{}", fixture.root.join("web.sock").display());
+    write_private(
+        &service,
+        &json!({"arguments":["host","--web",listen],"placements":[]}).to_string(),
+    );
+    let probe = || {
+        fixture
+            .base_command()
+            .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
+            .arg(&service)
+            .output()
+            .unwrap()
+    };
+    let ready = probe();
+    assert!(
+        ready.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ready.stderr)
+    );
+    write_private(&fixture.home().join("agents/broken.toml"), "account = [");
+    let refused = probe();
+    let reason = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success(), "{reason}");
+    assert!(reason.contains("broken.toml"), "{reason}");
+}
+
+#[test]
 fn host_upgrade_preflights_web_assets_and_preserves_resolved_service_arguments() {
     let Some(fixture) = fixture() else { return };
     let _owner = HomeHost(fixture.home());

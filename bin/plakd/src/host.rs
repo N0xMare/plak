@@ -40,10 +40,12 @@ pub(crate) fn preflight_upgrade_service(
     command: &HostCommand,
     probe: &std::path::Path,
 ) -> CliResult<()> {
+    let paths = services.paths()?;
+    crate::product_config::ProductConfig::load_user(paths).map_err(CliFailure::new)?;
     if let Some(web) = &command.web {
         crate::web::preflight(services, web)?;
     }
-    store_revisions::rehearse_for_service(services.paths()?, probe)
+    store_revisions::rehearse_for_service(paths, probe)
 }
 
 use std::sync::Arc;
