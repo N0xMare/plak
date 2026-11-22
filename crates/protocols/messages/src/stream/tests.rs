@@ -512,15 +512,6 @@ fn message_start_admits_the_container_receipt_without_widening_the_message_objec
             .kind(),
         MessagesStreamErrorKind::InvalidResponse
     );
-
-    // A truly unknown top-level message field is still rejected.
-    assert_eq!(
-        projector()
-            .push(message_start_stream(",\"future_field\":1").as_bytes())
-            .expect_err("unknown message_start field")
-            .kind(),
-        MessagesStreamErrorKind::InvalidResponse
-    );
 }
 
 #[test]
@@ -551,13 +542,6 @@ fn claude_oauth_message_start_admits_bounded_context_management_only_for_the_cos
         claude_oauth_projector()
             .push(message_start_stream(",\"context_management\":{\"future_edits\":[]}").as_bytes())
             .expect_err("unknown context management shape")
-            .kind(),
-        MessagesStreamErrorKind::InvalidResponse
-    );
-    assert_eq!(
-        claude_oauth_projector()
-            .push(message_start_stream(",\"future_field\":1").as_bytes())
-            .expect_err("unknown message_start field under the costume")
             .kind(),
         MessagesStreamErrorKind::InvalidResponse
     );
@@ -854,26 +838,31 @@ fn malformed_cache_miss_diagnostics_record_nothing_and_the_turn_proceeds() {
 }
 
 #[test]
-fn unknown_message_start_fields_still_fail_closed() {
-    let cases = [
-        r#","future_field":1"#,
-        r#","diagnostics":{"cache_miss_reason":{"type":"messages_changed","cache_missed_input_tokens":1,"private-sentinel":true}},"future_field":1"#,
-        r#","diagnostics":"private-sentinel","future_field":1"#,
-    ];
-    for extra in cases {
-        for mut stream in [projector(), claude_oauth_projector()] {
-            let error = stream
-                .push(message_start_stream(extra).as_bytes())
-                .expect_err("unknown message_start field must fail closed");
-            assert_eq!(error.kind(), MessagesStreamErrorKind::InvalidResponse);
-            assert!(
-                error.message().contains("invalid"),
-                "missing invalid in {}",
-                error.message()
-            );
-            assert!(!error.message().contains("private-sentinel"));
-            assert!(!error.message().contains("msg_"));
-        }
+fn additive_messages_fields_do_not_change_accounting_or_output() {
+    let extra = r#","future_message_metadata":{"tags":[1,2]}"#;
+    let stream = message_start_stream(extra)
+        .replace(
+            r#""type":"message_stop""#,
+            r#""type":"message_stop","future_envelope_field":true"#,
+        )
+        .replace(
+            r#""type":"text_delta""#,
+            r#""type":"text_delta","future_text_field":0"#,
+        );
+    for projector in [
+        projector(),
+        claude_oauth_projector(),
+        openrouter_projector(),
+    ] {
+        let (response, _, _) = project(projector, &stream).expect("known terminal with metadata");
+        assert_eq!(
+            response.usage(),
+            Some(plakous_model::Usage::new(1, 1, 0, 0, 0))
+        );
+        assert!(matches!(
+            response.output()[0].blocks(),
+            [ContentBlock::Text(_)]
+        ));
     }
 }
 

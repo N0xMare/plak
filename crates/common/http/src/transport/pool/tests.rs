@@ -36,7 +36,7 @@ const H2: &[u8] = b"h2";
 
 #[test]
 fn a_tls_config_key_keeps_its_configuration_allocation_alive() -> TestResult {
-    let client = Client::new(Limits::default())?;
+    let client = Client::with_tls_config(Limits::default(), super::super::default_tls_config()?)?;
     let config = &client.inner.tls_config;
     let owner = Arc::downgrade(config);
     let key = TlsConfigKey(Arc::clone(config));
@@ -51,12 +51,13 @@ fn a_tls_config_key_keeps_its_configuration_allocation_alive() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn a_pool_of_64_keys_evicts_the_key_whose_newest_socket_is_oldest() -> TestResult {
+#[tokio::test]
+async fn a_pool_of_64_keys_evicts_the_key_whose_newest_socket_is_oldest() -> TestResult {
     let pool = Pool::new(Some(64));
     let client = Client::new(Limits::default())?;
     let key = |port| PoolKey {
         scope: None,
+        runtime: tokio::runtime::Handle::current().id(),
         host: "example.test".into(),
         port,
         plain_loopback: false,
@@ -368,7 +369,6 @@ async fn concurrent_exchanges_hold_separate_connections_and_at_most_two_stay_idl
 
 #[tokio::test]
 async fn a_connection_idle_for_the_bound_is_closed_instead_of_reused() -> TestResult {
-    assert_eq!(IDLE_BOUND, Duration::from_secs(5));
     for alpn in [H1, H2] {
         let server = Server::start(alpn).await?;
         let client = server.pooled_client(Limits::default())?;
@@ -389,6 +389,52 @@ async fn a_connection_idle_for_the_bound_is_closed_instead_of_reused() -> TestRe
         assert_eq!(server.connections(), 2);
         assert!(eventually(|| server.closed() == 1).await);
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn separate_inference_clients_share_a_tls_handshake_over_tool_steps() -> TestResult {
+    let server = Server::start(H1).await?;
+    let config = Arc::new(server.client.clone());
+    let new_client = || {
+        // The local CA stands in for the shared built-in trust configuration.
+        Client::with_tls_config_and_policy(
+            Limits::for_streaming_inference(),
+            Arc::clone(&config),
+            crate::TransportPolicy::WebPkiHttp1Only,
+            Some(super::super::default_trust_identity()),
+        )
+        .map(|client| client.pooled())
+    };
+    let first = new_client()?;
+    assert_eq!(
+        exchange(&first, &server.origin, "/ok").await?,
+        ConnectionUse::Fresh
+    );
+    for idle in [Duration::from_secs(8), Duration::from_secs(20)] {
+        for (key, entries) in pool(&first)?
+            .idle
+            .lock()
+            .map_err(|_| "pool poisoned")?
+            .iter_mut()
+        {
+            if key.port == server.origin.port() && Arc::ptr_eq(&key.tls_config.0, &config) {
+                for entry in entries {
+                    entry.since -= idle;
+                }
+            }
+        }
+        let next = new_client()?;
+        assert_eq!(
+            exchange(&next, &server.origin, "/ok").await?,
+            ConnectionUse::Reused
+        );
+    }
+    assert_eq!(
+        server.connections(),
+        1,
+        "three steps used one TLS connection"
+    );
     Ok(())
 }
 
@@ -575,7 +621,9 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         let address = listener.local_addr()?;
         let mut peer = TcpStream::connect(address).await?;
         let (mut stream, _) = listener.accept().await?;
-        let client = Client::new(Limits::default())?.pooled();
+        let client =
+            Client::with_tls_config(Limits::default(), super::super::default_tls_config()?)?
+                .pooled();
         let derived = client.with_limits(Limits::for_streaming_inference())?;
         let driver = tokio::spawn(async move {
             let mut byte = [0];
@@ -589,6 +637,7 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         pool(&client)?.checkin(
             PoolKey {
                 scope: None,
+                runtime: tokio::runtime::Handle::current().id(),
                 host: address.ip().to_string(),
                 port: address.port(),
                 plain_loopback: false,

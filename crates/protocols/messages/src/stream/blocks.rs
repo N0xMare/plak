@@ -762,10 +762,24 @@ impl MessagesStreamProjector {
                 location, b"{}",
             )));
         }
-        let parsed = serde_json::from_str::<serde_json::Value>(&json)
-            .map_err(|_| self.fail("terminal Messages tool input was not complete valid JSON"))?;
-        if !parsed.is_object() {
-            return Err(self.fail("terminal Messages tool input must be a JSON object"));
+        match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(parsed) if parsed.is_object() => {}
+            Ok(_) => return Err(self.fail("terminal Messages tool input must be a JSON object")),
+            Err(error)
+                if (error.is_syntax() || error.is_eof())
+                    && self.stop_reason == Some(super::MessagesStopReason::ToolUse)
+                    && !self.hosted_effects_possible
+                    && matches!(
+                        owner,
+                        ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
+                    ) =>
+            {
+                // The complete tool-use terminal authorizes an inert proposal,
+                // not execution; strict tool input validation returns InvalidArguments.
+            }
+            Err(_) => {
+                return Err(self.fail("terminal Messages tool input was not complete valid JSON"));
+            }
         }
         if correlation.remote_call_id() != Some(remote_id.as_str()) {
             return Err(self.fail("Messages tool correlation changed during assembly"));

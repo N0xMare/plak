@@ -11,9 +11,9 @@ use plakous_model::{
     DataClassification, Digest, EntryId, FinishDetails, FinishReason, IdGenerator, ModelEvent,
     ModelId, ModelProviderRequestId, ModelResponse, ModelResponseMetadata, OutputLocation,
     ProtocolId, Provenance, ReasoningBlock, ReasoningDelta, ReasoningPolicy, ReasoningVisibility,
-    ReplayEnvelope, ReplayKindId, ReplayScope, SafeDiagnostic, SemanticJsonV1, ServedBy, TextBlock,
-    TextDelta, ToolCallBlock, ToolCallState, ToolCallerLineage, ToolCorrelation,
-    ToolExecutionOwner, ToolInputDelta, ToolName, Usage, UsageUpdate,
+    ReplayEnvelope, ReplayKindId, ReplayScope, SafeDiagnostic, SemanticJsonError, SemanticJsonV1,
+    ServedBy, TextBlock, TextDelta, ToolCallBlock, ToolCallState, ToolCallerLineage,
+    ToolCorrelation, ToolExecutionOwner, ToolInputDelta, ToolName, Usage, UsageUpdate,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -518,15 +518,6 @@ impl ChatStreamProjector {
                 format!("Chat data is not exact JSON: {error}"),
             )
         })?;
-        if !chunk.extensions_allowed(self.binding.extensions) {
-            let detail = chunk
-                .first_unreviewed_extension(self.binding.extensions)
-                .map_or_else(
-                    || "Chat chunk contains dialect fields outside the prepared grammar".to_owned(),
-                    |path| format!("Chat chunk contains an unreviewed dialect field at {path}"),
-                );
-            return self.fail(ChatStreamErrorKind::InvalidResponse, detail);
-        }
         if let Some(error) = chunk.error.as_ref() {
             let status = in_band_error_status(error);
             let usage_limit = plakous_exchange::attempt::value_reports_usage_limit(error);
@@ -534,7 +525,7 @@ impl ChatStreamProjector {
                 error,
                 status,
                 usage_limit,
-                chunk.extra.get("provider"),
+                chunk.provider.as_ref(),
             ))
             .to_string();
             self.failed = true;
@@ -611,7 +602,11 @@ impl ChatStreamProjector {
         self.response_id.get_or_insert(id.clone());
         self.model.get_or_insert(model.clone());
         self.created.get_or_insert(created);
-        capture_served_provider(&chunk.extra, self.binding.extensions, &mut self.served_by)?;
+        capture_served_provider(
+            chunk.provider.as_ref(),
+            self.binding.extensions,
+            &mut self.served_by,
+        )?;
         if first {
             output.push(ModelEvent::ResponseStarted(
                 plakous_model::ResponseStarted::new(Some(id), self.binding.plan)
@@ -1092,21 +1087,27 @@ impl ChatStreamProjector {
             // Bounded by the binding's argument cap, not the tool-schema node
             // and string limits: an oversized write is the tool runtime's
             // recoverable input error, as on Messages and Responses.
-            let arguments = SemanticJsonV1::parse_document(
+            match SemanticJsonV1::parse_document(
                 &call.arguments,
                 self.binding.limits.arguments.get(),
-            )
-            .map_err(|_| {
-                err(
-                    ChatStreamErrorKind::InvalidResponse,
-                    "tool arguments are malformed or ambiguous",
-                )
-            })?;
-            if !arguments.is_object() {
-                return self.fail(
-                    ChatStreamErrorKind::InvalidResponse,
-                    "tool arguments must be one JSON object",
-                );
+            ) {
+                Ok(arguments) if arguments.is_object() => {}
+                // Keep a closed local proposal with invalid syntax. The tool
+                // runtime answers it with InvalidArguments without executing it.
+                Err(SemanticJsonError::Invalid)
+                    if crate::request::malformed_tool_json(&call.arguments) => {}
+                Ok(_) => {
+                    return self.fail(
+                        ChatStreamErrorKind::InvalidResponse,
+                        "tool arguments must be one JSON object",
+                    );
+                }
+                Err(_) => {
+                    return self.fail(
+                        ChatStreamErrorKind::InvalidResponse,
+                        "tool arguments are malformed or ambiguous",
+                    );
+                }
             }
             // Only the syntactic name grammar is a wire fault. A name outside the
             // prepared catalog stays a projected call, exactly as on the Messages
@@ -1310,8 +1311,7 @@ struct Chunk {
     choices: Vec<Choice>,
     usage: Option<UsageWire>,
     error: Option<serde_json::Value>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
+    provider: Option<serde_json::Value>,
 }
 #[derive(Deserialize)]
 struct Choice {
@@ -1319,10 +1319,9 @@ struct Choice {
     #[serde(default)]
     delta: Delta,
     finish_reason: Option<String>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Delta {
     role: Option<String>,
     content: Option<String>,
@@ -1331,26 +1330,22 @@ struct Delta {
     reasoning_details: Option<Vec<Box<RawValue>>>,
     #[serde(default)]
     tool_calls: Vec<ToolDelta>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToolDelta {
     index: u32,
     id: Option<String>,
     #[serde(rename = "type")]
     kind: Option<String>,
     function: Option<FunctionDelta>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FunctionDelta {
     name: Option<String>,
     arguments: Option<String>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 #[derive(Deserialize)]
 struct UsageWire {
@@ -1361,8 +1356,7 @@ struct UsageWire {
     prompt_tokens_details: PromptDetails,
     #[serde(default)]
     completion_tokens_details: CompletionDetails,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
+    cost: Option<serde_json::Value>,
 }
 #[derive(Default, Deserialize)]
 struct PromptDetails {
@@ -1370,15 +1364,11 @@ struct PromptDetails {
     cached_tokens: u64,
     #[serde(default)]
     cache_write_tokens: u64,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 #[derive(Default, Deserialize)]
 struct CompletionDetails {
     #[serde(default)]
     reasoning_tokens: u64,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]

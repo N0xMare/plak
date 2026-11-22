@@ -1229,11 +1229,16 @@ pub(super) fn validate_prepared_digest(
 
 fn validate_prepared_wire(digest: Digest, size: u64) -> Result<(), PreparedCallError> {
     validate_prepared_digest(digest, DigestDomain::Blob)?;
-    if size == 0 || size > MAX_PREPARED_WIRE_BYTES {
-        Err(PreparedCallError::InvalidWireSize)
-    } else {
-        Ok(())
+    if size == 0 {
+        return Err(PreparedCallError::InvalidWireSize);
     }
+    if size > MAX_PREPARED_WIRE_BYTES {
+        return Err(PreparedCallError::WireTooLarge {
+            bytes: size,
+            limit: MAX_PREPARED_WIRE_BYTES,
+        });
+    }
+    Ok(())
 }
 
 fn validate_preparation_label(value: &str) -> Result<(), PreparedCallError> {

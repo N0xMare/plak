@@ -1059,7 +1059,6 @@ struct EventEnvelope {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MessageStartEvent {
     #[serde(rename = "type")]
     _kind: String,
@@ -1067,7 +1066,6 @@ struct MessageStartEvent {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MessageStart {
     id: String,
     #[serde(rename = "type")]
@@ -1137,7 +1135,6 @@ impl UsageWire {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ContentBlockStartEvent {
     #[serde(rename = "type")]
     _kind: String,
@@ -1146,7 +1143,6 @@ struct ContentBlockStartEvent {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TextStart {
     #[serde(rename = "type")]
     _kind: String,
@@ -1156,7 +1152,6 @@ struct TextStart {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ThinkingStart {
     #[serde(rename = "type")]
     _kind: String,
@@ -1167,7 +1162,6 @@ struct ThinkingStart {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RedactedStart {
     #[serde(rename = "type")]
     _kind: String,
@@ -1189,7 +1183,6 @@ struct ToolUseStart {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RefusalStart {
     #[serde(rename = "type")]
     _kind: String,
@@ -1197,7 +1190,6 @@ struct RefusalStart {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ContentBlockDeltaEvent {
     #[serde(rename = "type")]
     _kind: String,
@@ -1206,7 +1198,6 @@ struct ContentBlockDeltaEvent {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TextDeltaWire {
     #[serde(rename = "type")]
     _kind: String,
@@ -1214,7 +1205,6 @@ struct TextDeltaWire {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ThinkingDeltaWire {
     #[serde(rename = "type")]
     _kind: String,
@@ -1222,7 +1212,6 @@ struct ThinkingDeltaWire {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SignatureDeltaWire {
     #[serde(rename = "type")]
     _kind: String,
@@ -1238,7 +1227,6 @@ struct InputJsonDeltaWire {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RefusalDeltaWire {
     #[serde(rename = "type")]
     _kind: String,
@@ -1246,7 +1234,6 @@ struct RefusalDeltaWire {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ContentBlockStopEvent {
     #[serde(rename = "type")]
     _kind: String,
@@ -1254,7 +1241,6 @@ struct ContentBlockStopEvent {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MessageDeltaEvent {
     #[serde(rename = "type")]
     _kind: String,
@@ -1311,14 +1297,12 @@ impl MessageDeltaUsage {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct PingEvent {
     #[serde(rename = "type")]
     _kind: String,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct MessageStopEvent {
     #[serde(rename = "type")]
     _kind: String,

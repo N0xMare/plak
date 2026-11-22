@@ -177,6 +177,7 @@ impl Client {
     fn pool_key(&self, origin: &Origin, scope: Option<Arc<PoolScope>>) -> PoolKey {
         PoolKey {
             scope,
+            runtime: tokio::runtime::Handle::current().id(),
             host: origin.host().to_owned(),
             port: origin.port(),
             plain_loopback: origin.is_loopback_http(),

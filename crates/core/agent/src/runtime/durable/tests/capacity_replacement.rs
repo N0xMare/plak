@@ -593,6 +593,15 @@ async fn the_recovery_decoder_reads_committed_placeholders_as_offline_and_resolv
 /// redacted arguments and the rejection's descriptive message.
 #[tokio::test]
 async fn a_schema_rejection_publishes_the_arguments_sent_and_the_reason() -> TestResult {
+    assert_tool_rejection_before_execution(r#"{"cell_id": 2}"#).await
+}
+
+#[tokio::test]
+async fn malformed_tool_json_is_rejected_to_the_model_without_execution() -> TestResult {
+    assert_tool_rejection_before_execution(r#"{"cell_id":"#).await
+}
+
+async fn assert_tool_rejection_before_execution(raw: &str) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let descriptor = durable_test_descriptor("test.route")?;
@@ -606,7 +615,7 @@ async fn a_schema_rejection_publishes_the_arguments_sent_and_the_reason() -> Tes
         )
         // The probe's schema declares no properties and forbids extras, so
         // this is refused before validation, exactly like `wait` was.
-        .with_scripted_tool_calls([(0, "probe", r#"{"cell_id": 2}"#.to_owned())]),
+        .with_scripted_tool_calls([(0, "probe", raw.to_owned())]),
     );
     let authority = model.authority.clone();
     let runtime_model: Arc<dyn LanguageModel> = model.clone();
@@ -673,7 +682,15 @@ async fn a_schema_rejection_publishes_the_arguments_sent_and_the_reason() -> Tes
         arguments.contains("cell_id"),
         "the refused arguments must be recoverable, got {arguments:?}"
     );
-    let _ = turn.result().await;
+    let result = turn.result().await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks).any(|block| {
+        matches!(block, ContentBlock::ToolResult(result) if result.kind() == ToolResultKind::Failure)
+    }));
     agent.shutdown().await?;
     Ok(())
 }

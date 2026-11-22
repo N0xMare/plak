@@ -1,12 +1,10 @@
 //! Chunk, choice, delta and usage wire checks and the cost and finish parsers.
 
-use std::collections::BTreeMap;
-
 use plakous_model::{FinishReason, ServedBy, Usage};
 
 use super::{
-    ChatFinishReason, ChatStreamError, ChatStreamErrorKind, ChatStreamExtensions, Choice, Chunk,
-    Delta, ToolDelta, UsageWire, err,
+    ChatFinishReason, ChatStreamError, ChatStreamErrorKind, ChatStreamExtensions, Delta, UsageWire,
+    err,
 };
 
 impl Delta {
@@ -28,160 +26,6 @@ impl Delta {
     }
 }
 
-impl Chunk {
-    pub(super) fn extensions_allowed(&self, extensions: ChatStreamExtensions) -> bool {
-        match extensions {
-            ChatStreamExtensions::None => {
-                self.extra.is_empty()
-                    && self.choices.iter().all(Choice::has_no_extensions)
-                    && self.usage.as_ref().is_none_or(UsageWire::has_no_extensions)
-            }
-            ChatStreamExtensions::OpenRouterV1 => {
-                keys_allowed(
-                    &self.extra,
-                    &[
-                        "provider",
-                        "service_tier",
-                        "openrouter_metadata",
-                        "system_fingerprint",
-                    ],
-                ) && self
-                    .choices
-                    .iter()
-                    .all(Choice::has_only_openrouter_v1_extensions)
-                    && self
-                        .usage
-                        .as_ref()
-                        .is_none_or(UsageWire::has_only_openrouter_v1_extensions)
-            }
-        }
-    }
-
-    pub(super) fn first_unreviewed_extension(
-        &self,
-        extensions: ChatStreamExtensions,
-    ) -> Option<String> {
-        let allowed_chunk = match extensions {
-            ChatStreamExtensions::None => &[][..],
-            ChatStreamExtensions::OpenRouterV1 => &[
-                "provider",
-                "service_tier",
-                "openrouter_metadata",
-                "system_fingerprint",
-            ][..],
-        };
-        first_unallowed_key(&self.extra, allowed_chunk)
-            .map(|key| format!("chunk.{key}"))
-            .or_else(|| {
-                self.choices.iter().find_map(|choice| {
-                    let allowed_choice = match extensions {
-                        ChatStreamExtensions::None => &[][..],
-                        ChatStreamExtensions::OpenRouterV1 => &["native_finish_reason"][..],
-                    };
-                    first_unallowed_key(&choice.extra, allowed_choice)
-                        .map(|key| format!("choice.{key}"))
-                        .or_else(|| {
-                            first_unallowed_key(&choice.delta.extra, &[])
-                                .map(|key| format!("choice.delta.{key}"))
-                        })
-                        .or_else(|| {
-                            choice.delta.tool_calls.iter().find_map(|tool| {
-                                first_unallowed_key(&tool.extra, &[])
-                                    .map(|key| format!("choice.delta.tool.{key}"))
-                                    .or_else(|| {
-                                        tool.function.as_ref().and_then(|function| {
-                                            first_unallowed_key(&function.extra, &[]).map(|key| {
-                                                format!("choice.delta.tool.function.{key}")
-                                            })
-                                        })
-                                    })
-                            })
-                        })
-                })
-            })
-            .or_else(|| {
-                let usage = self.usage.as_ref()?;
-                let (usage_allowed, prompt_allowed, completion_allowed) = match extensions {
-                    ChatStreamExtensions::None => (&[][..], &[][..], &[][..]),
-                    ChatStreamExtensions::OpenRouterV1 => (
-                        &["cost", "is_byok", "cost_details"][..],
-                        &["cache_write_tokens", "audio_tokens", "video_tokens"][..],
-                        &["image_tokens", "audio_tokens"][..],
-                    ),
-                };
-                first_unallowed_key(&usage.extra, usage_allowed)
-                    .map(|key| format!("usage.{key}"))
-                    .or_else(|| {
-                        first_unallowed_key(&usage.prompt_tokens_details.extra, prompt_allowed)
-                            .map(|key| format!("usage.prompt_tokens_details.{key}"))
-                    })
-                    .or_else(|| {
-                        first_unallowed_key(
-                            &usage.completion_tokens_details.extra,
-                            completion_allowed,
-                        )
-                        .map(|key| format!("usage.completion_tokens_details.{key}"))
-                    })
-            })
-    }
-}
-impl Choice {
-    fn has_no_extensions(&self) -> bool {
-        self.extra.is_empty() && self.delta.has_no_extensions()
-    }
-
-    fn has_only_openrouter_v1_extensions(&self) -> bool {
-        keys_allowed(&self.extra, &["native_finish_reason"]) && self.delta.has_no_extensions()
-    }
-}
-impl Delta {
-    fn has_no_extensions(&self) -> bool {
-        self.extra.is_empty() && self.tool_calls.iter().all(ToolDelta::has_no_extensions)
-    }
-}
-impl ToolDelta {
-    fn has_no_extensions(&self) -> bool {
-        self.extra.is_empty()
-            && self
-                .function
-                .as_ref()
-                .is_none_or(|function| function.extra.is_empty())
-    }
-}
-impl UsageWire {
-    fn has_no_extensions(&self) -> bool {
-        self.extra.is_empty()
-            && self.prompt_tokens_details.extra.is_empty()
-            && self.completion_tokens_details.extra.is_empty()
-    }
-
-    fn has_only_openrouter_v1_extensions(&self) -> bool {
-        keys_allowed(&self.extra, &["cost", "is_byok", "cost_details"])
-            && keys_allowed(
-                &self.prompt_tokens_details.extra,
-                &["cache_write_tokens", "audio_tokens", "video_tokens"],
-            )
-            && keys_allowed(
-                &self.completion_tokens_details.extra,
-                &["image_tokens", "audio_tokens"],
-            )
-    }
-}
-
-fn keys_allowed(extra: &BTreeMap<String, serde_json::Value>, allowed: &[&str]) -> bool {
-    extra.keys().all(|key| allowed.contains(&key.as_str()))
-}
-
-fn first_unallowed_key<'a>(
-    extra: &'a BTreeMap<String, serde_json::Value>,
-    allowed: &[&str],
-) -> Option<&'a str> {
-    extra
-        .keys()
-        .find(|key| !allowed.contains(&key.as_str()))
-        .map(String::as_str)
-}
-
 impl UsageWire {
     pub(super) fn canonical(
         self,
@@ -197,7 +41,7 @@ impl UsageWire {
                 "usage counters are inconsistent",
             ));
         }
-        let cost_micros = parse_cost_micros(&self.extra, extensions)?;
+        let cost_micros = parse_cost_micros(self.cost.as_ref(), extensions)?;
         Ok(Usage::new(
             self.prompt_tokens,
             self.completion_tokens,
@@ -210,14 +54,14 @@ impl UsageWire {
 }
 
 pub(super) fn capture_served_provider(
-    extra: &BTreeMap<String, serde_json::Value>,
+    provider: Option<&serde_json::Value>,
     extensions: ChatStreamExtensions,
     served_by: &mut Option<ServedBy>,
 ) -> Result<(), ChatStreamError> {
     if extensions != ChatStreamExtensions::OpenRouterV1 {
         return Ok(());
     }
-    let Some(value) = extra.get("provider") else {
+    let Some(value) = provider else {
         return Ok(());
     };
     let text = value.as_str().ok_or_else(|| {
@@ -242,13 +86,13 @@ pub(super) fn capture_served_provider(
 }
 
 fn parse_cost_micros(
-    extra: &BTreeMap<String, serde_json::Value>,
+    cost: Option<&serde_json::Value>,
     extensions: ChatStreamExtensions,
 ) -> Result<Option<u64>, ChatStreamError> {
     if extensions != ChatStreamExtensions::OpenRouterV1 {
         return Ok(None);
     }
-    let Some(value) = extra.get("cost") else {
+    let Some(value) = cost else {
         return Ok(None);
     };
     if value.is_null() {

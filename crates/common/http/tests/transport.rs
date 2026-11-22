@@ -508,6 +508,34 @@ async fn returns_redirect_without_following_or_forwarding_authorization() -> Tes
 }
 
 #[test]
+fn streaming_requests_fit_the_inference_bound_but_bulk_rest_requests_do_not() -> TestResult {
+    let origin = Origin::parse("https://example.com")?;
+    let build = |bytes, limits| {
+        Request::new(
+            origin.clone(),
+            Method::POST,
+            "/",
+            HeaderMap::new(),
+            bytes,
+            limits,
+        )
+    };
+    let body = Bytes::from(vec![b'x'; 32 * 1024 * 1024 + 1]);
+    let inference = Limits::for_streaming_inference();
+    let at_bound = body.slice(..body.len() - 1);
+    assert!(build(at_bound.clone(), &inference).is_ok());
+    for oversized in [build(body, &inference), build(at_bound, &Limits::default())] {
+        assert!(matches!(
+            oversized,
+            Err(plakous_http::RequestError::LimitExceeded(
+                LimitKind::RequestBodyBytes
+            ))
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn validates_https_origin_controlled_headers_and_request_limits() -> TestResult {
     assert!(Origin::parse("http://example.com").is_err());
     assert!(Origin::parse("https://user@example.com").is_err());

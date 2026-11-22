@@ -250,9 +250,17 @@ pub enum PreparedCallError {
     /// A behavior-bearing label was empty, oversized, or non-portable.
     #[error("prepared call contains an invalid revision or field label")]
     InvalidLabel,
-    /// The exact credential-free body was absent or exceeded its bound.
+    /// The exact credential-free body was absent.
     #[error("prepared call wire size is invalid")]
     InvalidWireSize,
+    /// The exact credential-free body exceeded the inference wire bound.
+    #[error("prepared call wire body is {bytes} bytes, above the {limit}-byte limit")]
+    WireTooLarge {
+        /// Exact serialized body bytes.
+        bytes: u64,
+        /// Maximum admissible serialized body bytes.
+        limit: u64,
+    },
     /// The serializable recovery record exceeded its strict bound.
     #[error("prepared call record exceeds its retention bound")]
     RecordTooLarge,

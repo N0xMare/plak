@@ -373,8 +373,7 @@ impl LanguageModel for ClaudeOAuthLanguageModel {
         })?;
         let observation = reference_client_wire_observation(self.resolved.descriptor(), wire_size)?;
         let token_projection =
-            PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))
-                .map_err(|error| rejection(ModelPreparationErrorKind::InvalidConfiguration, error))?
+            PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))?
                 .with_wire_analysis(
                     prepared.body(),
                     Some(crate::model::CLAUDE_IMAGE_MAX_TOKENS),

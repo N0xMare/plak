@@ -1186,6 +1186,56 @@ fn preserves_responses_shaped_requested_freeform_as_inert_history() -> TestResul
 }
 
 #[test]
+fn rejected_malformed_arguments_replay_as_an_object_with_the_correlated_error() -> TestResult {
+    let fixture = Fixture::new()?;
+    let (call_id, correlation, call) =
+        call_with_raw_state(40, "alpha", "remote-bound", ToolCallState::Requested, "{")?;
+    let refused = ContentBlock::ToolResult(ToolResultBlock::new(
+        call_id,
+        ToolExecutionOwner::Local,
+        ToolResultKind::Failure,
+        vec![ToolResultPart::Text(TextBlock::new(
+            "invalid tool arguments",
+            None,
+        )?)],
+        correlation.clone(),
+    )?);
+    let plan = fixture.plan(vec![
+        item(40, Actor::Assistant, vec![call.clone()])?,
+        item(41, Actor::Tool, vec![refused])?,
+    ])?;
+    let lowered = lower_request(&plan, &fixture.policy(&plan)?)?;
+    let wire: serde_json::Value = serde_json::from_slice(&lowered.body)?;
+    let messages = wire["messages"].as_array().ok_or("messages")?;
+    let assistant = messages
+        .iter()
+        .find(|message| message["role"] == "assistant")
+        .ok_or("assistant")?;
+    let tool = messages
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .ok_or("tool")?;
+    assert_eq!(assistant["tool_calls"][0]["id"], "remote-bound");
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        r#"{"input":"{"}"#
+    );
+    assert_eq!(tool["tool_call_id"], "remote-bound");
+    assert_eq!(tool["content"], "error: invalid tool arguments");
+
+    let success = fixture.plan(vec![
+        item(40, Actor::Assistant, vec![call])?,
+        item(
+            41,
+            Actor::Tool,
+            vec![result(call_id, correlation, "must not execute")?],
+        )?,
+    ])?;
+    assert!(lower_request(&success, &fixture.policy(&success)?).is_err());
+    Ok(())
+}
+
+#[test]
 fn inert_history_is_bounded_and_never_rewrites_current_exposure() -> TestResult {
     let fixture = Fixture::new()?;
     let (call_id, correlation, call) = call_with_raw_state(

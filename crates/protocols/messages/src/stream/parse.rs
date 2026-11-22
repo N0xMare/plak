@@ -32,13 +32,15 @@ pub(super) fn parse_message_start(
             // null or advisory cache telemetry. Malformed diagnostics record
             // nothing and do not fail the turn. Unknown keys inside
             // `diagnostics` and inside `cache_miss_reason` are ignored.
-            // Every other unknown field still fails closed.
             let mut value = parse_event::<serde_json::Value>(data)?;
             let diagnosis = match value
                 .get_mut("message")
                 .and_then(serde_json::Value::as_object_mut)
             {
-                Some(message) => admit_message_diagnostics(message),
+                Some(message) => {
+                    reject_unadmitted_claude_fields(message)?;
+                    admit_message_diagnostics(message)
+                }
                 None => None,
             };
             let event = serde_json::from_value(value).map_err(|error| {
@@ -72,6 +74,12 @@ pub(super) fn parse_message_start(
                 .get_mut("message")
                 .and_then(serde_json::Value::as_object_mut)
                 .ok_or_else(|| invalid_response("OpenRouter message_start omitted message"))?;
+            reject_unadmitted_claude_fields(message)?;
+            if message.contains_key("diagnostics") {
+                return Err(invalid_response(
+                    "Messages cache diagnostics are not admitted on this route",
+                ));
+            }
             if let Some(provider) = message.remove("provider") {
                 let valid = provider
                     .as_str()
@@ -102,6 +110,17 @@ pub(super) fn parse_message_start(
             Ok((event, None))
         }
     }
+}
+
+fn reject_unadmitted_claude_fields(
+    message: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), MessagesStreamError> {
+    if message.contains_key("context_management") || message.contains_key("input_transformations") {
+        return Err(invalid_response(
+            "Claude OAuth context or input transformations are not admitted on this route",
+        ));
+    }
+    Ok(())
 }
 
 fn admit_message_diagnostics(

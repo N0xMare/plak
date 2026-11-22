@@ -3624,6 +3624,19 @@ Plakous has one neutral runtime and three wire-family kernels:
 - **Chat Completions** — bounded messages and tools, choice lifecycle, finish
   and usage, exact configured reasoning replay, and SSE `[DONE]` semantics.
 
+Chat ignores additive fields on known chunk and choice envelopes and usage
+objects; selected provider and cost fields still obey the configured dialect.
+Chat deltas and function-call objects remain closed because they carry model
+output and tool intent. Messages ignores additive fields on known event and
+message envelopes, usage and known text, thinking, signature and refusal
+objects. Its terminal delta, tool start and input delta, caller, container,
+and recognized route-specific authority shapes stay closed. Neither handles an
+unknown event, delta type, tool owner, or finish reason as a known semantic
+action. Known fields still obey their types, bounds, accounting and ordering.
+This tolerance is only at external provider response DTOs: Plakous-owned
+wire formats, exact replay artifacts and persisted canonical codecs do not
+inherit it.
+
 A dialect owns origins, paths, headers, authentication mode, catalog policy,
 pin tables, capability evidence, and bounded wire deltas. It MUST NOT own a
 second stream state machine, history stack, attempt loop, tool
@@ -3711,9 +3724,17 @@ invalid. Messages still requires physical `content_block_stop` before terminal
 metadata. It retains closed client input under the existing byte/event bounds
 until the terminal reason is known, and parses it only under a terminal that
 neither refuses, overflows the context window, nor stops at an output limit.
-Malformed or truncated JSON
-therefore never becomes an executable call. Other output mismatches remain
-invalid.
+Under a complete tool-use terminal with no possible hosted effects,
+Messages can retain syntactically malformed JSON as an unparsed local or MCP
+proposal; Chat does the same for a closed, identified function call under
+`tool_calls`. The neutral assembler admits only `Requested` client proposals
+with unparsed input under a tool-call terminal. Tool admission rejects them
+as `InvalidArguments` before execution and returns a correlated tool failure
+to the model. Chat only lowers such a requested call into a historical input
+object when paired with its terminal failure, never a success or update.
+Messages uses its historical input-object projection. Invalid framing,
+ambiguous Chat JSON, non-object values, and incomplete programmatic or
+provider-hosted input still fail closed.
 Only local and MCP tool calls still in `Requested` are revocable, including
 completed canonical blocks. `Pending`, `Completed`, and `Failed` calls retain
 possible effects and cannot be discarded. Possible provider-hosted effects or streamed tool results cannot be discarded
@@ -3959,8 +3980,8 @@ item or replay-byte cutoffs; canonical history bounds, their per-item/response
 limits and ordinary context admission still apply.
 Long stateless requests remain bounded by context admission: byte estimators
 count `encrypted_content` as part of the request, not as free replay. The
-transport's 8 MiB request-body limit also refuses oversized requests locally
-before dispatch.
+complete prepared wire body and the standard inference transport (including
+the default credential gateway) have the same 32 MiB ceiling (§13.2).
 Fresh Responses lowering preserves local and MCP calls in their stored
 `Requested` state, with the ordinary protected call/result correlation checks.
 Tool execution appends results without changing that stored state. A projected
@@ -5607,13 +5628,13 @@ changes while signed thinking is retained; the native next request retains the
 original thinking and signature. Plak likewise treats it as a server-side input
 notification, not a command to rewrite canonical history. Empty arrays remain
 admitted. Other transformation types/reasons, shapes, paths and extra fields
-remain rejected, as do other non-null token-estimate shapes and
-unknown fields outside `diagnostics`. These fields do not authorize context
-changes or contribute certified token usage. A refused token-estimate shape is named
-as a static category (number, string, boolean, array, or object), never by its
-raw value. API-key Anthropic admits the same `message.diagnostics` object as
-Claude OAuth; input
-transformations and every other unknown field stay rejected there.
+remain rejected, as do other non-null token-estimate shapes. These fields do not
+authorize context changes or contribute certified token usage. A refused
+token-estimate shape is named as a static category (number, string, boolean,
+array, or object), never by its raw value. API-key Anthropic admits the same
+`message.diagnostics` object as Claude OAuth, but rejects the known OAuth-only
+context and input transformation fields. Additive metadata on known stream
+objects follows the family rule in §6.1.
 `message.diagnostics` is null or a bounded advisory object on both routes.
 It is non-semantic, content-free telemetry and never fails a turn.
 `cache_miss_reason` is absent, null, or an object. A present, well-formed
@@ -13579,10 +13600,13 @@ OAuth, refresh, profile and key-usage exchanges do not inherit it.
 
 **Connection reuse is opt-in and limited to inference.** A plain
 `plakous-http` client opens a fresh connection for every `execute`.
-`Client::pooled()` returns a client with its own pool, which its clones and
-every client derived by `with_limits` or `with_observer` share; the pool ends,
-closing its idle connections, with the last of them. No background task exists:
-dropping an idle connection aborts its driver. The model clients of every route
+`Client::pooled()` opts the client into reuse. Independently constructed
+direct clients with built-in trust and standard dialing use the same
+process-wide pool and TLS configuration for a given ALPN policy. This lets
+sessions and sub-agents share connections to the same authority in the host
+runtime. Caller TLS and custom dialing remain private to a client and its
+derivatives; those pools close with their last owner. There is no separate
+pool task. Dropping an idle connection aborts its driver. The model clients of every route
 (Claude, Codex and Grok subscription inference, the Anthropic, OpenAI Platform
 and xAI API clients, and OpenRouter's configured model clients) are pooled;
 OAuth, token refresh, catalog, discovery and key-usage clients stay one-shot.
@@ -13597,9 +13621,9 @@ evicts the key whose most recently parked socket has been idle longest.
 Neither a pool hit nor stale-checkout replacement changes relay authority,
 the relay protocol, or the caller-side route transport identity.
 A pool key is the origin's host, port and scheme (HTTPS or loopback HTTP), the
-shared Rustls configuration, the transport policy, the address policy, and the
-limits fixed into a connection at negotiation (response header bounds and the
-HTTP/2 receive window). A connection carries one
+shared Rustls configuration, the transport policy, the address policy, the
+Tokio runtime that owns the driver, and the limits fixed into a connection at
+negotiation (response header bounds and the HTTP/2 receive window). A connection carries one
 exchange at a time on HTTP/1.1 and HTTP/2 alike, and request progress is reset
 for each exchange, so transmission facts describe that exchange alone.
 Deadlines, cancellation, streaming bounds and fault injection stay per
@@ -13617,11 +13641,14 @@ arrives before its request body was fully sent, failure, cancellation, an early
 close or drop, a response asking to close, a GOAWAY, a panicked stream task,
 and any fault-injected exchange close the connection instead. At most two idle
 connections are kept per key, the oldest closed beyond that, and an idle
-connection is closed rather than reused once it has been idle 5 seconds. That
-bound assumes the inference front ends keep idle connections open for about 60
-seconds or more, as common proxy defaults do; no provider guarantees it. A
-checkout drops the expired or closed entries of its own key; entries of a key
-no later exchange asks for stay until the pool ends. The client sets
+connection is closed rather than reused once it has been idle 30 seconds.
+This covers ordinary tool steps while staying below the roughly 60-second
+idle timeout common at provider edges; it is not a provider keep-alive
+guarantee. The stale-checkout replacement rule below still applies. A
+checkout drops expired or closed entries of its own key. The direct process
+pool also keeps at most 64 idle keys and uses the same oldest-key eviction
+rule as the gateway. Idle entries can remain parked until checkout, eviction
+or shutdown; they are never offered after expiry. The client sets
 `TCP_NODELAY` on every connection, since HTTP/2 sends a request as separate
 HEADERS and DATA frames.
 
@@ -13672,7 +13699,7 @@ they share the residual race with a server closing a connection after the idle
 check but before the request reached it, which ends them `MayHaveTransmitted`
 without the turn kernel's replay. Pooling is part of the transport behavior
 identity: the identity carries a pooled or one-shot frame, and the transport
-behavior revision is 5. Family-interleaved, staggered connection racing is
+behavior revision is 6. Family-interleaved, staggered connection racing is
 part of that revision-bound transport behavior.
 
 Responses operation deadline diagnostics aggregate the existing bounded, lossy
@@ -13884,6 +13911,18 @@ All queues, frames, events, blocks, JSON depth/nodes/strings, accumulated text
 and arguments, media and blobs, decompression, snapshot graphs,
 tool output, rounds, concurrency, and retries have explicit hard bounds.
 Exceeding one returns a typed limit error without a partial semantic commit.
+For standard inference, the local maximum is 32 MiB of the exact serialized
+request body, including base64 and all other JSON fields, not the decoded
+image size. It matches the prepared-wire bound and is below the documented
+public [Anthropic Messages](https://platform.claude.com/docs/en/api/errors)
+request and [OpenAI image input](https://developers.openai.com/api/docs/guides/images-vision)
+aggregate limits. On routes without an established body-wide ceiling,
+including brokered and subscription routes, this is a local ceiling, not a
+promise of provider acceptance; upstream/model media and context limits
+still apply. An oversized preparation reports `WireTooLarge` mapped to
+`ContextLimit`, not a transport configuration error. REST clients keep the
+8 MiB default and an explicitly lower gateway limit still applies at its own
+boundary.
 Responses-family streaming admits at most 100,000 decoded JSON events per
 operation by default, including the typed terminal event. Its independent
 2 MiB frame and 16 MiB total stream byte limits still apply. This event

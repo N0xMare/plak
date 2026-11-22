@@ -546,6 +546,25 @@ fn prepared_record_with_six_thousand_items_retains_only_item_and_anchor_referenc
 }
 
 #[test]
+fn prepared_wire_at_the_limit_is_admissible_and_excess_is_typed() {
+    let limit = crate::MAX_PREPARED_WIRE_BYTES;
+    let digest = Digest::sha256(DigestDomain::Blob, 1, &[b"test wire"]).expect("digest");
+    assert!(PreparedTokenProjection::new(digest, limit, None).is_ok());
+    let error = PreparedTokenProjection::new(digest, limit + 1, None).unwrap_err();
+    assert_eq!(
+        error,
+        crate::PreparedCallError::WireTooLarge {
+            bytes: limit + 1,
+            limit,
+        }
+    );
+    assert_eq!(
+        ModelError::from(ModelPreparationError::from(error)).kind(),
+        ModelErrorKind::ContextLimit
+    );
+}
+
+#[test]
 fn the_persisted_item_reference_names_the_list_that_becomes_the_anchor() {
     let (descriptor, _, record) = anchored_item_record();
     let tokens = record.projection().token_projection();

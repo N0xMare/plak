@@ -2046,9 +2046,12 @@ client or official native host binary is part of this execution path.
   runtime uses the bounded validator owned by `plakous-model`, and there is no
   network or filesystem resolver.
 - RFC 8785 byte serialization uses the exact-pinned, locally reviewed
-  `serde_json_canonicalizer`. Plakous keeps strict parsing, duplicate-key
-  rejection, resource bounds, the deliberately small portable schema language,
-  and input/output validation authority.
+  `serde_json_canonicalizer`. Plakous keeps strict semantic JSON parsing,
+  duplicate-key rejection, resource bounds, the deliberately small portable
+  schema language, and input/output validation authority. Provider response
+  envelopes may ignore additive metadata on explicitly open DTOs (chapter 01
+  §6.1); the semantic JSON, persisted and internal wire codecs do not inherit
+  that tolerance.
   L0 dependency review: `plakous-agent` also uses this existing pin to encode
   session-owned named values. Its own validators retain key/count/byte bounds
   and require exact canonical bytes on restore; the serializer receives no

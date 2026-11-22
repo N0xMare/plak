@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::{ConnectionTask, Limits, ProgressSlot, TransportPolicy};
@@ -19,11 +19,17 @@ use crate::{AddressPolicy, WireProtocol};
 /// or more, as common proxy defaults do. That is an assumption, not a timeout
 /// any provider guarantees. Under it a connection is rarely offered after its
 /// server already decided to close it.
-pub(super) const IDLE_BOUND: Duration = Duration::from_secs(5);
+pub(super) const IDLE_BOUND: Duration = Duration::from_secs(30);
 
 /// Idle connections kept per key. One agent runs one exchange at a time per
 /// route; a second covers a brief overlap such as a title request.
 pub(super) const MAX_IDLE_PER_KEY: usize = 2;
+
+pub(super) fn shared_pool() -> Arc<Pool> {
+    // A process may see arbitrary custom origins over its lifetime.
+    static POOL: LazyLock<Arc<Pool>> = LazyLock::new(|| Arc::new(Pool::new(Some(64))));
+    Arc::clone(&POOL)
+}
 
 pub(crate) struct PoolUse<'a> {
     pub(crate) pool: &'a Arc<Pool>,
@@ -62,6 +68,8 @@ impl Hash for TlsConfigKey {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(super) struct PoolKey {
     pub(super) scope: Option<Arc<PoolScope>>,
+    /// A parked connection's driver only runs on the runtime that spawned it.
+    pub(super) runtime: tokio::runtime::Id,
     pub(super) host: String,
     pub(super) port: u16,
     /// A plain loopback connection never carries an HTTPS origin's request.

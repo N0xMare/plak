@@ -16,6 +16,22 @@ use crate::gateway::RelayClient;
 
 const KIND: &str = "openai";
 
+#[test]
+fn inference_and_gateway_body_bounds_cover_the_exact_prepared_wire() {
+    let prepared_limit = plakous_model::MAX_PREPARED_WIRE_BYTES;
+    let direct = plakous_http::Limits::for_streaming_inference();
+    let gateway = super::http1_upstream().unwrap();
+    assert_eq!(direct.max_request_body_bytes as u64, prepared_limit);
+    assert_eq!(
+        gateway.limits().max_request_body_bytes as u64,
+        prepared_limit
+    );
+    assert_eq!(
+        plakous_http::relay_server::DEFAULT_MAX_REQUEST_BODY_BYTES as u64,
+        prepared_limit
+    );
+}
+
 struct Keys(Mutex<&'static str>);
 
 impl LocalKeyStore for Keys {

@@ -9,14 +9,6 @@ fn an_in_band_rate_limit_status_with_a_quota_type_is_terminal() {
 }
 
 #[test]
-fn openrouter_usage_chunk_is_structurally_bounded() {
-    let data = r#"{"id":"gen-exact","object":"chat.completion.chunk","created":1787623695,"model":"model-literal","provider":"Nvidia","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"length","native_finish_reason":"length"}],"usage":{"prompt_tokens":18,"completion_tokens":8,"total_tokens":26,"cost":0,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0,"upstream_inference_prompt_cost":0,"upstream_inference_completions_cost":0},"completion_tokens_details":{"reasoning_tokens":8,"image_tokens":0,"audio_tokens":0}}}"#;
-    let chunk: Chunk = serde_json::from_str(data).expect("OpenRouter chunk grammar");
-    assert!(chunk.extensions_allowed(ChatStreamExtensions::OpenRouterV1));
-    assert!(!chunk.extensions_allowed(ChatStreamExtensions::None));
-}
-
-#[test]
 fn openrouter_usage_chunk_projects_cost_micros() {
     let data = r#"{"id":"gen-exact","object":"chat.completion.chunk","created":1787623695,"model":"model-literal","provider":"Nvidia","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"length","native_finish_reason":"length"}],"usage":{"prompt_tokens":18,"completion_tokens":8,"total_tokens":26,"cost":0,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0,"upstream_inference_prompt_cost":0,"upstream_inference_completions_cost":0},"completion_tokens_details":{"reasoning_tokens":8,"image_tokens":0,"audio_tokens":0}}}"#;
     let chunk: Chunk = serde_json::from_str(data).expect("OpenRouter chunk grammar");
@@ -227,46 +219,6 @@ fn openrouter_usage_chunk_projects_cache_write_tokens() {
     assert_eq!(usage.cache_write_tokens(), 5);
 }
 
-#[test]
-fn openrouter_router_metadata_is_observational_and_additive() {
-    let value = json!({
-        "id": "gen-exact",
-        "object": "chat.completion.chunk",
-        "created": 1,
-        "model": "vendor/model",
-        "provider": "Provider",
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        "openrouter_metadata": {
-            "requested": "vendor/model",
-            "strategy": "fallback",
-            "attempt": 2,
-            "pipeline": [{
-                "type": "future_gateway_stage",
-                "data": {"opaque_future_member": [1, true, null]}
-            }],
-            "future_gateway_member": {"opaque": true}
-        }
-    });
-    let chunk: Chunk = serde_json::from_value(value).expect("gateway metadata JSON");
-    assert!(chunk.extensions_allowed(ChatStreamExtensions::OpenRouterV1));
-    assert!(!chunk.extensions_allowed(ChatStreamExtensions::None));
-}
-
-#[test]
-fn openrouter_system_fingerprint_is_observational() {
-    let value = json!({
-        "id": "gen-exact",
-        "object": "chat.completion.chunk",
-        "created": 1,
-        "model": "vendor/model",
-        "provider": "Provider",
-        "system_fingerprint": "fp-observed",
-        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-    });
-    let chunk: Chunk = serde_json::from_value(value).expect("fingerprint JSON");
-    assert!(chunk.extensions_allowed(ChatStreamExtensions::OpenRouterV1));
-    assert!(!chunk.extensions_allowed(ChatStreamExtensions::None));
-}
 use plakous_model::{
     DigestDomain, EffectiveProviderConfigurationId, FixedClock, ModelResponseAssembler,
     SelectedProviderConfigurationId, SequenceIdGenerator, Timestamp,
@@ -852,7 +804,7 @@ fn non_length_finishes_keep_strict_tool_call_agreement() {
 }
 
 #[test]
-fn rejects_choice_identity_object_and_unknown_wire_fields() {
+fn rejects_choice_identity_object_and_model_drift() {
     for (value, kind) in [
         (chunk(json!([])), ChatStreamErrorKind::InvalidResponse),
         (
@@ -868,10 +820,6 @@ fn rejects_choice_identity_object_and_unknown_wire_fields() {
         ),
         (
             json!({"id":"response-1","object":"chat.completion.chunk","created":1700000000,"model":"other-model","choices":[{"index":0,"delta":{},"finish_reason":null}]}),
-            ChatStreamErrorKind::InvalidResponse,
-        ),
-        (
-            json!({"id":"response-1","object":"chat.completion.chunk","created":1700000000,"model":"model-literal","choices":[{"index":0,"delta":{},"finish_reason":null}],"extra":true}),
             ChatStreamErrorKind::InvalidResponse,
         ),
     ] {
@@ -893,7 +841,7 @@ fn rejects_choice_identity_object_and_unknown_wire_fields() {
 }
 
 #[test]
-fn openrouter_rejects_unknown_semantics_outside_reviewed_metadata() {
+fn openrouter_rejects_unknown_delta_semantics() {
     let mut projector = ChatStreamProjector::new(
         binding(ChatStreamLimits::default()).with_extensions(ChatStreamExtensions::OpenRouterV1),
         Some(ModelProviderRequestId::new("request-1").expect("request id")),
@@ -927,17 +875,6 @@ fn openrouter_rejects_unknown_semantics_outside_reviewed_metadata() {
             .kind(),
         ChatStreamErrorKind::InvalidResponse
     );
-
-    let mut sibling = projector_with_binding(
-        binding(ChatStreamLimits::default()).with_extensions(ChatStreamExtensions::OpenRouterV1),
-    );
-    let mut value = role();
-    value["future_gateway_action"] = json!({"id": "effect-2"});
-    let error = sibling
-        .push(&data(&value))
-        .expect_err("unknown top-level semantic");
-    assert_eq!(error.kind(), ChatStreamErrorKind::InvalidResponse);
-    assert!(error.message().contains("chunk.future_gateway_action"));
 }
 
 #[test]
@@ -1082,24 +1019,6 @@ fn rejects_conflicting_and_malformed_tool_calls() {
             .contains("tool-call slot never bound id and name")
     );
 
-    let mut malformed = projector();
-    push_json(&mut malformed, role());
-    push_json(
-        &mut malformed,
-        chunk(
-            json!([{"index":0,"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"lookup","arguments":"{"}}]},"finish_reason":null}]),
-        ),
-    );
-    push_json(&mut malformed, finish("tool_calls"));
-    push_json(&mut malformed, usage());
-    assert_eq!(
-        malformed
-            .push(b"data: [DONE]\n\n")
-            .expect_err("malformed arguments")
-            .kind(),
-        ChatStreamErrorKind::InvalidResponse
-    );
-
     for raw in ["{\"x\":1,\"x\":2}", "[]"] {
         let mut ambiguous = projector();
         push_json(&mut ambiguous, role());
@@ -1119,6 +1038,48 @@ fn rejects_conflicting_and_malformed_tool_calls() {
             ChatStreamErrorKind::InvalidResponse
         );
     }
+}
+
+#[test]
+fn closed_local_tool_call_keeps_malformed_input_for_a_tool_error() {
+    let mut malformed = projector();
+    push_json(&mut malformed, role());
+    push_json(
+        &mut malformed,
+        chunk(
+            json!([{"index":0,"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"lookup","arguments":"{"}}]},"finish_reason":null}]),
+        ),
+    );
+    complete(&mut malformed, "tool_calls");
+    let terminal = malformed
+        .finish()
+        .expect("malformed input does not kill the stream");
+    assert!(matches!(
+        terminal.response().output()[0].blocks(),
+        [ContentBlock::ToolCall(call)] if call.raw_arguments() == "{" && call.arguments().is_none()
+    ));
+}
+
+#[test]
+fn additive_envelope_choice_and_usage_fields_do_not_change_chat_output() {
+    let mut stream = projector();
+    let mut start = role();
+    start["future_metadata"] = json!({"tags": [1, 2]});
+    start["choices"][0]["future_choice_metadata"] = json!(true);
+    push_json(&mut stream, start);
+    push_json(
+        &mut stream,
+        chunk(json!([{"index":0,"delta":{"content":"ok"},"finish_reason":null}])),
+    );
+    push_json(&mut stream, finish("stop"));
+    let mut usage = usage();
+    usage["usage"]["future_total"] = json!(4);
+    usage["usage"]["prompt_tokens_details"]["future_detail"] = json!(1);
+    push_json(&mut stream, usage);
+    stream.push(b"data: [DONE]\n\n").expect("terminal");
+    let terminal = stream.finish().expect("complete response");
+    assert!(matches!(terminal.response().output()[0].blocks(),
+        [ContentBlock::Text(text)] if text.text() == "ok"));
 }
 
 /// The status an in-band error names, wherever the gateway put it.

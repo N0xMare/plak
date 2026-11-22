@@ -1014,6 +1014,20 @@ impl ModelResponse {
                 "model response output is not canonical assistant model output",
             ));
         }
+        if self
+            .output
+            .iter()
+            .flat_map(ConversationItem::blocks)
+            .any(|block| {
+                matches!(block, ContentBlock::ToolCall(call) if call.arguments().is_none()
+                && (self.finish.reason() != FinishReason::ToolCalls
+                    || !call.is_unparsed_client_proposal()))
+            })
+        {
+            return Err(invalid_event(
+                "malformed tool input requires a terminal client tool proposal",
+            ));
+        }
         if let Some(candidate) = &self.family_artifact_candidate {
             candidate
                 .validate_response_binding(self.plan_digest, self.output.len())

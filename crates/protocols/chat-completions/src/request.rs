@@ -1065,6 +1065,7 @@ struct PendingTool {
     correlation: ToolCorrelation,
     remote: Option<String>,
     inert_name: Option<String>,
+    invalid_arguments: bool,
 }
 
 #[allow(
@@ -1191,13 +1192,18 @@ fn lower_history(
                             if !call_ids.insert(call.call_id()) {
                                 return Err(invalid("Chat tool call IDs must be unique"));
                             }
-                            let (remote, inert_name) = if let Some(exposed) = projected_exposure {
+                            let (remote, inert_name, invalid_arguments) = if let Some(exposed) =
+                                projected_exposure
+                            {
                                 if !is_chat_function_name(exposed) {
                                     return Err(invalid(
                                         "historical tool exposure is outside Chat function-name grammar",
                                     ));
                                 }
-                                let arguments = lower_chat_tool_arguments(call.raw_arguments())?;
+                                let (arguments, invalid_arguments) = lower_chat_tool_arguments(
+                                    call.raw_arguments(),
+                                    call.state() == ToolCallState::Requested,
+                                )?;
                                 let remote = call
                                     .correlation()
                                     .remote_call_id()
@@ -1218,7 +1224,7 @@ fn lower_history(
                                         arguments,
                                     },
                                 });
-                                (Some(remote), None)
+                                (Some(remote), None, invalid_arguments)
                             } else {
                                 append_inert_history(
                                     &mut content,
@@ -1226,13 +1232,14 @@ fn lower_history(
                                     call.exposed_name().as_str(),
                                     call.raw_arguments(),
                                 )?;
-                                (None, Some(call.exposed_name().as_str().to_owned()))
+                                (None, Some(call.exposed_name().as_str().to_owned()), false)
                             };
                             pending.push_back(PendingTool {
                                 call_id: call.call_id(),
                                 correlation: call.correlation().clone(),
                                 remote,
                                 inert_name,
+                                invalid_arguments,
                             });
                         }
                         ContentBlock::Opaque(opaque) => match opaque.fallback() {
@@ -1317,6 +1324,7 @@ fn lower_history(
                             })?;
                         if !runtime_owned(update.owner())
                             || update.correlation() != &expected.correlation
+                            || expected.invalid_arguments
                         {
                             return Err(invalid(
                                 "tool-result update correlation differs from the exact assistant call",
@@ -1339,6 +1347,7 @@ fn lower_history(
                     if result.call_id() != expected.call_id
                         || !runtime_owned(result.owner())
                         || result.correlation() != &expected.correlation
+                        || (expected.invalid_arguments && result.kind() != ToolResultKind::Failure)
                     {
                         return Err(invalid(
                             "tool result order or correlation differs from the exact assistant call",
@@ -1425,15 +1434,32 @@ fn replay_alias_matches(
 /// stream accepted.
 const MAX_CHAT_TOOL_ARGUMENT_BYTES: usize = 16 * 1024 * 1024;
 
-fn lower_chat_tool_arguments(raw_arguments: &str) -> Result<String, ChatRequestError> {
-    if SemanticJsonV1::parse_document(raw_arguments, MAX_CHAT_TOOL_ARGUMENT_BYTES)
-        .is_ok_and(|value| value.is_object())
-    {
-        return Ok(raw_arguments.to_owned());
+fn lower_chat_tool_arguments(
+    raw_arguments: &str,
+    requested: bool,
+) -> Result<(String, bool), ChatRequestError> {
+    match SemanticJsonV1::parse_document(raw_arguments, MAX_CHAT_TOOL_ARGUMENT_BYTES) {
+        Ok(value) if value.is_object() => return Ok((raw_arguments.to_owned(), false)),
+        Err(plakous_model::SemanticJsonError::Invalid)
+            if requested && malformed_tool_json(raw_arguments) =>
+        {
+            // A rejected historical call needs an object to carry its exact
+            // text back alongside the correlated tool error.
+            return serde_json::to_string(&serde_json::json!({ "input": raw_arguments }))
+                .map(|arguments| (arguments, true))
+                .map_err(|_| invalid("invalid Chat tool arguments could not be represented"));
+        }
+        _ => {}
     }
     Err(invalid(
         "Chat structured tool arguments must be duplicate-free JSON objects",
     ))
+}
+
+pub(crate) fn malformed_tool_json(raw: &str) -> bool {
+    !raw.is_empty()
+        && serde_json::from_str::<serde_json::Value>(raw)
+            .is_err_and(|error| error.is_syntax() || error.is_eof())
 }
 
 fn append_inert_history(

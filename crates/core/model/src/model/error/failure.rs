@@ -678,9 +678,9 @@ impl From<ModelPreparationError> for ModelError {
                 | ValidationError::Digest(_) => ModelErrorKind::InvalidRequest,
             },
             ModelPreparationError::RuntimeAuthority(_) => ModelErrorKind::InvalidConfiguration,
-            ModelPreparationError::PreparedCall(PreparedCallError::RecordTooLarge) => {
-                ModelErrorKind::ContextLimit
-            }
+            ModelPreparationError::PreparedCall(
+                PreparedCallError::RecordTooLarge | PreparedCallError::WireTooLarge { .. },
+            ) => ModelErrorKind::ContextLimit,
             ModelPreparationError::PreparedCall(_) => ModelErrorKind::InvalidRequest,
             ModelPreparationError::ContextAdmission(error) => match error {
                 ContextAdmissionError::WouldOverflow(_)

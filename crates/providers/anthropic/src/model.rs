@@ -479,8 +479,7 @@ impl LanguageModel for AnthropicLanguageModel {
         })?;
         let observation = wire_observation(self.resolved.descriptor(), wire_size)?;
         let token_projection =
-            PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))
-                .map_err(|error| rejection(ModelPreparationErrorKind::InvalidConfiguration, error))?
+            PreparedTokenProjection::new(wire_digest, wire_size, Some(observation))?
                 .with_wire_analysis(prepared.body(), Some(CLAUDE_IMAGE_MAX_TOKENS), &context)?;
         let output_limit = PreparedOutputLimit::enforced_wire_maximum(
             max_tokens,

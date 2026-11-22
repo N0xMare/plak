@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use rustls::{ClientConfig, RootCertStore};
 use sha2::{Digest as _, Sha256};
@@ -66,6 +66,11 @@ impl fmt::Debug for TransportBehaviorIdentity {
 }
 
 pub(super) fn default_trust_identity() -> TlsConfigIdentity {
+    static IDENTITY: LazyLock<TlsConfigIdentity> = LazyLock::new(compute_trust_identity);
+    *IDENTITY
+}
+
+fn compute_trust_identity() -> TlsConfigIdentity {
     let mut hasher = framed_identity_hasher(b"plakous-http/webpki-ring-safe-defaults-v1");
     for anchor in webpki_roots::TLS_SERVER_ROOTS {
         update_identity_frame(&mut hasher, anchor.subject.as_ref());

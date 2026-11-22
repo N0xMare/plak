@@ -456,6 +456,20 @@ impl ToolCallBlock {
         self.arguments.as_ref()
     }
 
+    pub(crate) fn is_unparsed_client_proposal(&self) -> bool {
+        self.arguments.is_none()
+            && self.state == ToolCallState::Requested
+            && matches!(
+                self.owner,
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
+            )
+            && self
+                .correlation
+                .caller_lineage()
+                .provider_programmatic_kind()
+                .is_none()
+    }
+
     /// Records the canonical name and owner the runtime resolved.
     pub(super) fn resolve_runtime(&mut self, canonical_name: ToolName, owner: ToolExecutionOwner) {
         self.canonical_name = canonical_name;

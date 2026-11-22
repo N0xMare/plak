@@ -1503,7 +1503,7 @@ fn complete_blocks_and_event_counts_obey_explicit_limits() -> Result<(), Box<dyn
 }
 
 #[test]
-fn malformed_tool_json_fails_terminally() -> Result<(), Box<dyn std::error::Error>> {
+fn malformed_hosted_tool_json_fails_terminally() -> Result<(), Box<dyn std::error::Error>> {
     let location = OutputLocation::new(0, 0);
     let digest = plan_digest()?;
     let mut assembler = ModelResponseAssembler::new(digest)?;
@@ -1516,7 +1516,9 @@ fn malformed_tool_json_fails_terminally() -> Result<(), Box<dyn std::error::Erro
         BlockStart::ToolCall {
             call_id: call(2)?,
             tool: ToolName::new("lookup")?,
-            owner: ToolExecutionOwner::Local,
+            owner: ToolExecutionOwner::ProviderHosted {
+                provider_kind: crate::NamespaceId::new("remote")?,
+            },
             state: ToolCallState::Requested,
             correlation: ToolCorrelation::default(),
         },

@@ -236,10 +236,6 @@ fn other_terminals_keep_strict_client_tool_validation() {
             }
         }
     }
-    let error = projector()
-        .push(tool_stream(TRUNCATED_INPUT, "tool_use", None).as_bytes())
-        .expect_err("cut input under tool_use");
-    assert!(error.to_string().contains("not complete valid JSON"));
     let (response, _, _) = project(projector(), &tool_stream(COMPLETE_INPUT, "tool_use", None))
         .expect("complete tool_use terminal");
     assert_eq!(response.finish().reason(), FinishReason::ToolCalls);
@@ -275,6 +271,18 @@ fn other_terminals_keep_strict_client_tool_validation() {
             .kind(),
         MessagesStreamErrorKind::InvalidResponse
     );
+}
+
+#[test]
+fn closed_client_tool_use_keeps_malformed_input_as_a_refusable_proposal() {
+    let (response, _, _) = project(projector(), &tool_stream(TRUNCATED_INPUT, "tool_use", None))
+        .expect("malformed client input still completes the response");
+    assert_eq!(response.finish().reason(), FinishReason::ToolCalls);
+    assert!(matches!(
+        response.output()[0].blocks(),
+        [ContentBlock::Text(_), ContentBlock::ToolCall(call)]
+            if call.raw_arguments() == TRUNCATED_INPUT && call.arguments().is_none()
+    ));
 }
 
 #[test]

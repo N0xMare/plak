@@ -625,7 +625,7 @@ fn materialize(partial: PartialBlock) -> Result<ContentBlock, ModelError> {
             let arguments = decode_utf8(bytes, "tool input ended with invalid UTF-8")?;
             let block = ToolCallBlock::new(call_id, tool, owner, state, correlation, arguments)
                 .map_err(|error| invalid_event(error.to_string()))?;
-            if block.arguments().is_none() {
+            if block.arguments().is_none() && !block.is_unparsed_client_proposal() {
                 return Err(invalid_event("tool input ended with malformed JSON"));
             }
             Ok(ContentBlock::ToolCall(block))

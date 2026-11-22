@@ -133,6 +133,12 @@ impl ToolPresentation {
         &self,
         call: &'a ToolCallBlock,
     ) -> Result<&'a str, ToolRuntimeError> {
+        let parsed = call.arguments().ok_or_else(|| {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::InvalidArguments,
+                "tool input was not valid JSON",
+            )
+        })?;
         let custom = match self {
             Self::V1(exposure) => exposure.definitions().iter().any(|definition| {
                 definition.name() == call.exposed_name()
@@ -152,7 +158,7 @@ impl ToolPresentation {
         if !custom {
             return Ok(call.raw_arguments());
         }
-        if let Some(serde_json::Value::String(text)) = call.arguments() {
+        if let serde_json::Value::String(text) = parsed {
             Ok(text)
         } else {
             Err(ToolRuntimeError::new(

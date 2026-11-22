@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{LazyLock, Mutex, OnceLock, PoisonError, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
@@ -57,10 +57,16 @@ pub(crate) mod test_hop;
 pub(crate) mod test_tls;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
-const TRANSPORT_BEHAVIOR_REVISION: u32 = 5;
+const TRANSPORT_BEHAVIOR_REVISION: u32 = 6;
 /// How long a cleanly finished exchange waits for its HTTP/1.1 connection to
 /// accept another request before giving up on keeping it.
 const RELEASE_READY_BOUND: Duration = Duration::from_secs(1);
+
+fn webpki_config(alpn: &[&[u8]]) -> Result<Arc<ClientConfig>, ConfigError> {
+    let mut config = default_tls_config()?;
+    config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
+    Ok(Arc::new(config))
+}
 
 /// Strict memory and phase-time bounds for physical exchanges.
 #[derive(Clone, Debug)]
@@ -147,6 +153,9 @@ impl Limits {
     #[must_use]
     pub fn for_streaming_inference() -> Self {
         Self {
+            // Match the prepared wire bound, including e.g. base64 images and
+            // the rest of their serialized inference request.
+            max_request_body_bytes: 32 * 1024 * 1024,
             response_head_timeout: STREAMING_IDLE_TIMEOUT,
             response_body_timeout: STREAMING_IDLE_TIMEOUT,
             ..Self::default()
@@ -286,14 +295,13 @@ impl Client {
     ///
     /// Returns [`ConfigError`] when a limit is invalid.
     pub fn new(limits: Limits) -> Result<Self, ConfigError> {
-        let mut tls_config = default_tls_config()?;
-        tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        let trust = default_trust_identity();
+        static TLS: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
+            LazyLock::new(|| webpki_config(&[b"h2", b"http/1.1"]));
         Self::with_tls_config_and_policy(
             limits,
-            tls_config,
+            (*TLS).clone()?,
             TransportPolicy::WebPkiHttp2Preferred,
-            Some(trust),
+            Some(default_trust_identity()),
         )
     }
 
@@ -307,14 +315,13 @@ impl Client {
     ///
     /// Returns [`ConfigError`] when a limit is invalid.
     pub fn new_http1(limits: Limits) -> Result<Self, ConfigError> {
-        let mut tls_config = default_tls_config()?;
-        tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
-        let trust = default_trust_identity();
+        static TLS: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
+            LazyLock::new(|| webpki_config(&[b"http/1.1"]));
         Self::with_tls_config_and_policy(
             limits,
-            tls_config,
+            (*TLS).clone()?,
             TransportPolicy::WebPkiHttp1Only,
-            Some(trust),
+            Some(default_trust_identity()),
         )
     }
 
@@ -334,7 +341,7 @@ impl Client {
         tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Self::with_tls_config_and_policy(
             limits,
-            tls_config,
+            Arc::new(tls_config),
             TransportPolicy::CallerTlsHttp2Preferred,
             None,
         )
@@ -357,7 +364,7 @@ impl Client {
         tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Self::with_tls_config_and_policy(
             limits,
-            tls_config,
+            Arc::new(tls_config),
             TransportPolicy::CallerTlsHttp2Preferred,
             Some(identity),
         )
@@ -365,7 +372,7 @@ impl Client {
 
     fn with_tls_config_and_policy(
         limits: Limits,
-        tls_config: ClientConfig,
+        tls_config: Arc<ClientConfig>,
         policy: TransportPolicy,
         trust_identity: Option<TlsConfigIdentity>,
     ) -> Result<Self, ConfigError> {
@@ -381,7 +388,7 @@ impl Client {
                 policy,
                 trust_identity,
                 behavior_identity,
-                tls_config: Arc::new(tls_config),
+                tls_config,
                 pool: None,
                 address_policy: None,
                 resolver: Resolver::System,
@@ -505,13 +512,11 @@ impl Client {
     /// Returns a client with the same TLS, policy, limits, observer and fault
     /// plan that keeps cleanly finished connections for reuse.
     ///
-    /// The new client owns a new, empty pool. Its clones and every client
-    /// derived from it by [`Self::with_limits`] or [`Self::with_observer`]
-    /// share that pool, which ends, closing its idle connections, with the
-    /// last of them. A connection carries one exchange at a time, returns to
-    /// the pool only after a clean, fully read response, and is closed after
-    /// 5 seconds idle. Inference routes use it: their turn requests may be
-    /// replayed after the rare race with a server closing an idle connection.
+    /// Built-in trust clients with ordinary dialing share a process-wide pool,
+    /// keyed also by the runtime that owns the driver. Caller TLS and custom
+    /// dialing use a private pool shared only by derived clients. A connection
+    /// carries one exchange at a time and is reusable for at most 30 seconds
+    /// after a clean, fully read response. Inference routes use pooling.
     /// One-shot endpoints such as OAuth, catalogs and discovery stay unpooled.
     #[must_use]
     pub fn pooled(&self) -> Self {
@@ -534,7 +539,17 @@ impl Client {
                     )
                 }),
                 tls_config: Arc::clone(&inner.tls_config),
-                pool: Some(Arc::new(Pool::new(None))),
+                pool: Some(
+                    if inner.policy != TransportPolicy::CallerTlsHttp2Preferred
+                        && inner.dial.is_none()
+                        && inner.relay.is_none()
+                        && matches!(inner.resolver, Resolver::System)
+                    {
+                        pool::shared_pool()
+                    } else {
+                        Arc::new(Pool::new(None))
+                    },
+                ),
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
@@ -559,7 +574,12 @@ impl Client {
     /// This client dialing `dialer` for every fresh connection.
     #[allow(dead_code, reason = "the credential gateway relay client installs it")]
     pub(crate) fn with_dialer(&self, dialer: Arc<dyn Dialer>) -> Self {
-        self.with_inner(|inner| inner.dial = Some(dialer))
+        self.with_inner(|inner| {
+            inner.dial = Some(dialer);
+            if inner.pool.is_some() {
+                inner.pool = Some(Arc::new(Pool::new(None)));
+            }
+        })
     }
 
     #[allow(
