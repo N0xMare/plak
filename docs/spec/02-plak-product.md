@@ -6041,9 +6041,11 @@ settles asynchronously after endpoint binding, before local admission.
   planned 45 s session handoff. The WebSocket sender obeys the same stop
   rule. The reader can admit an intent while a baseline is in flight; its
   answer can pass queued pages but still waits for the current frame.
-  The WebSocket driver checks for ready client messages before settling
-  replies and again before draining the attachment. It limits each read
-  burst so a busy client cannot starve either stage of output.
+  The WebSocket and Unix control socket drivers check for ready client
+  messages before settling replies and again before draining the
+  attachment, in bursts of at most eight frames. When the previous
+  ordered batch had drained before reply settlement, that turn's replies
+  and attachment output can enter the same batch in order.
   An intent whose answer is lost or timed out has unknown outcome, not
   permission to mint another submission id. Other connections remain
   independent. The host sizes the asynchronous worker pool from available

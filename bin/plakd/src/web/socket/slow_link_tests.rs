@@ -1,5 +1,7 @@
 use super::*;
-use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, decode_line};
+use plakous_host_protocol::wire::{
+    Answer, HostFrame, Outcome, decode_line, encode_line, page_snapshot,
+};
 use std::io::Write as _;
 
 fn context() -> (tempfile::TempDir, Served) {
@@ -24,10 +26,19 @@ fn context() -> (tempfile::TempDir, Served) {
 
 #[tokio::test(start_paused = true)]
 async fn web_reads_ready_pings_before_draining_an_attach_baseline() {
-    let (_home, mut context) = context();
-    context.host = principal_tests::archived_host();
-    let outbox = Outbox::default();
-    let mut connection = context
+    check_ready_pings(2, false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn web_ready_pings_cannot_starve_an_attach_baseline() {
+    // Eight reads may precede each of the two flush phases. The bye is
+    // also ready; if read early it discards the still-pending baseline.
+    check_ready_pings(16, true).await;
+}
+
+fn archived_connection(served: &Served, outbox: &Outbox) -> Connection {
+    let snapshots = outbox.clone();
+    served
         .host
         .connect(
             outbox.clone(),
@@ -35,28 +46,44 @@ async fn web_reads_ready_pings_before_draining_an_attach_baseline() {
             plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
             || false,
         )
-        .with_snapshot_output(|_, _| panic!("baseline drained before the ready client frames"));
-    // Settle the attach and let its reply go out, leaving its real baseline
-    // in the service queue rather than the transport outbox.
-    assert!(connection
-        .frame(Ok(r#"{"frame":"request","id":1,"op":{"op":"attach","node":{"tree_id":"archived","agent_id":"archived"}}}"#.into()))
-        .unwrap());
+        .with_snapshot_output(move |attachment, snapshot| {
+            for page in page_snapshot(snapshot, attachment).unwrap() {
+                let line = encode_line(&HostFrame::<PlakExtension>::Snapshot(page)).unwrap();
+                snapshots.clone().write_all(line.as_bytes()).unwrap();
+            }
+            Ok(())
+        })
+}
+
+const ATTACH: &str = r#"{"frame":"request","id":1,"op":{"op":"attach","node":{"tree_id":"archived","agent_id":"archived"}}}"#;
+
+type Server = WebSocketStream<ProgressIo<tokio::io::DuplexStream>>;
+type Client = WebSocketStream<tokio::io::DuplexStream>;
+
+async fn pair() -> (Server, Client) {
     let (server, client) = tokio::io::duplex(4096);
-    let mut server =
-        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
-    let mut client = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+    (
+        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await,
+        WebSocketStream::from_raw_socket(client, Role::Client, None).await,
+    )
+}
+
+async fn send_pending(outbox: &Outbox, server: &mut Server) {
     let progress = server.get_ref().progress.clone();
     outbox
         .send_batch(
             &progress,
             || false,
             &mut WebWriter {
-                sink: &mut server,
+                sink: server,
                 heartbeat: Heartbeat::default(),
             },
         )
         .await
         .unwrap();
+}
+
+async fn attached_answer(client: &mut Client) {
     assert!(matches!(
         decode_line::<HostFrame<PlakExtension>>(
             client.next().await.unwrap().unwrap().to_text().unwrap()
@@ -66,7 +93,19 @@ async fn web_reads_ready_pings_before_draining_an_attach_baseline() {
             outcome: Outcome::Ok(Answer::Attached { .. })
         })
     ));
-    for id in [2, 3] {
+}
+
+async fn check_ready_pings(count: u64, expect_baseline: bool) {
+    let (_home, mut context) = context();
+    context.host = principal_tests::archived_host();
+    let outbox = Outbox::default();
+    let mut connection = archived_connection(&context, &outbox);
+    // Send Attached, but leave its baseline in the service queue.
+    assert!(connection.frame(Ok(ATTACH.into())).unwrap());
+    let (mut server, mut client) = pair().await;
+    send_pending(&outbox, &mut server).await;
+    attached_answer(&mut client).await;
+    for id in 2..2 + count {
         client
             .send(Message::text(format!(
                 r#"{{"frame":"request","id":{id},"op":{{"op":"ping"}}}}"#
@@ -79,21 +118,59 @@ async fn web_reads_ready_pings_before_draining_an_attach_baseline() {
         .await
         .unwrap();
     let reading = async {
-        for id in [2, 3] {
-            assert!(matches!(
-                decode_line::<HostFrame<PlakExtension>>(
-                    client.next().await.unwrap().unwrap().to_text().unwrap()
-                ),
-                Ok(HostFrame::Response { id: got, outcome: Outcome::Ok(Answer::Pong) }) if got == id
-            ));
+        let mut pongs = Vec::new();
+        let mut snapshots = 0;
+        loop {
+            let message = client.next().await.unwrap().unwrap();
+            if matches!(message, Message::Close(_)) {
+                break;
+            }
+            match decode_line::<HostFrame<PlakExtension>>(message.to_text().unwrap()).unwrap() {
+                HostFrame::Response {
+                    id,
+                    outcome: Outcome::Ok(Answer::Pong),
+                } => pongs.push(id),
+                HostFrame::Snapshot(_) => snapshots += 1,
+                _ => panic!("unexpected frame"),
+            }
         }
-        assert!(matches!(client.next().await, Some(Ok(Message::Close(_)))));
+        assert_eq!(pongs, (2..2 + count).collect::<Vec<_>>());
+        assert_eq!(snapshots, usize::from(expect_baseline));
     };
     let (ended, ()) = tokio::join!(
         attached(server, &context, &mut connection, &outbox),
         reading
     );
     assert!(matches!(ended, Ended::Bye));
+}
+
+#[tokio::test]
+async fn web_attach_reply_and_baseline_enter_the_same_ordered_batch() {
+    let (_home, mut context) = context();
+    context.host = principal_tests::archived_host();
+    let outbox = Outbox::default();
+    let mut connection = archived_connection(&context, &outbox).buffered_output();
+    assert!(connection.frame(Ok(ATTACH.into())).unwrap());
+    tokio::time::timeout(Duration::from_secs(5), connection.changed())
+        .await
+        .unwrap();
+
+    let mut flush = ConnectionFlush::default();
+    flush.step(&mut connection, &outbox).unwrap();
+    flush.step(&mut connection, &outbox).unwrap();
+    // No writer has run between the two steps.
+    let (mut server, mut client) = pair().await;
+    send_pending(&outbox, &mut server).await;
+    attached_answer(&mut client).await;
+    let page = tokio::time::timeout(Duration::from_secs(1), client.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        decode_line::<HostFrame<PlakExtension>>(page.to_text().unwrap()),
+        Ok(HostFrame::Snapshot(_))
+    ));
 }
 
 #[tokio::test(start_paused = true)]

@@ -17,8 +17,81 @@ mod snapshot;
 
 const MAX_PENDING_FRAMES: usize = 8192;
 const MAX_SNAPSHOT_JOBS: usize = 2;
+const READS_PER_FLUSH_PHASE: u8 = 8;
 
 pub(crate) type Connection = HostConnection<PlakExtension, Outbox>;
+
+/// The single driver interleaves bounded read bursts with reply settlement
+/// and ordered output. Both transports use the same flush boundaries.
+pub(crate) struct ConnectionFlush {
+    phase: FlushPhase,
+    reads: u8,
+}
+
+#[derive(Clone, Copy)]
+enum FlushPhase {
+    Replies,
+    Output { bulk: bool, again: bool },
+    Idle,
+}
+
+impl Default for ConnectionFlush {
+    fn default() -> Self {
+        Self {
+            phase: FlushPhase::Replies,
+            reads: 0,
+        }
+    }
+}
+
+impl ConnectionFlush {
+    pub(crate) const fn can_read(&self) -> bool {
+        self.reads < READS_PER_FLUSH_PHASE
+    }
+
+    pub(crate) const fn pending(&self) -> bool {
+        !matches!(self.phase, FlushPhase::Idle)
+    }
+
+    pub(crate) fn read(&mut self) {
+        self.reads += 1;
+        self.request();
+    }
+
+    pub(crate) fn request(&mut self) {
+        match &mut self.phase {
+            FlushPhase::Idle => self.phase = FlushPhase::Replies,
+            FlushPhase::Output { again, .. } => *again = true,
+            FlushPhase::Replies => {}
+        }
+    }
+
+    pub(crate) fn step(&mut self, connection: &mut Connection, outbox: &Outbox) -> CliResult<()> {
+        self.reads = 0;
+        connection_work(|| match self.phase {
+            FlushPhase::Replies => {
+                let bulk = outbox.ordered_drained();
+                if bulk {
+                    // Confirmation applies only to ordered frames already sent.
+                    connection.output_sent();
+                }
+                // Replies in this batch, such as Attached, stay ahead of its
+                // bulk output without requiring an intervening writer drain.
+                self.phase = FlushPhase::Output { bulk, again: false };
+                connection.flush_replies()
+            }
+            FlushPhase::Output { bulk, again } => {
+                self.phase = if again {
+                    FlushPhase::Replies
+                } else {
+                    FlushPhase::Idle
+                };
+                connection.flush_output(bulk)
+            }
+            FlushPhase::Idle => Ok(()),
+        })
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct Outbox(Arc<Shared>);
@@ -192,7 +265,7 @@ impl Outbox {
         self.0.drained.notified().await;
     }
 
-    pub(crate) fn ordered_drained(&self) -> bool {
+    fn ordered_drained(&self) -> bool {
         self.lock().ordered_frames == 0
     }
 

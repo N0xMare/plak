@@ -27,7 +27,9 @@ use tokio::io::{AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::JoinSet;
 
-use super::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
+use super::connection::{
+    Connection, ConnectionFlush, Frame, FrameWriter, Outbox, SendError, connection_work,
+};
 use super::lock::HostLock;
 use super::send::{ProgressIo, STOP_JOIN, TOTAL};
 use crate::surface_protocol::PlakExtension;
@@ -442,6 +444,7 @@ async fn attached(
         result
     });
 
+    let mut flush = ConnectionFlush::default();
     let join = loop {
         if stopped() {
             connection_work(|| {
@@ -450,15 +453,13 @@ async fn attached(
             });
             break STOP_JOIN;
         }
-        if connection_work(|| outbox.flush_connection(connection)).is_err() {
-            break STOP_JOIN;
-        }
         tokio::select! {
+            biased;
             _ = writer.join_next() => break STOP_JOIN,
-            line = reader.next() => {
+            line = reader.next(), if flush.can_read() => {
                 let Some(line) = line else { break STOP_JOIN };
                 match connection_work(|| connection.frame(line)) {
-                    Ok(true) => {}
+                    Ok(true) => flush.read(),
                     Ok(false) => {
                         let _ = connection_work(|| outbox.flush_connection(connection));
                         break if stopped() { STOP_JOIN } else { TOTAL };
@@ -466,9 +467,14 @@ async fn attached(
                     Err(_) => break STOP_JOIN,
                 }
             }
-            () = connection.changed() => {}
-            () = outbox.drained() => {}
-            () = tokio::time::sleep(STOP_POLL) => {}
+            () = std::future::ready(()), if flush.pending() => {
+                if flush.step(connection, outbox).is_err() {
+                    break STOP_JOIN;
+                }
+            }
+            () = connection.changed() => flush.request(),
+            () = outbox.drained() => flush.request(),
+            () = tokio::time::sleep(STOP_POLL) => flush.request(),
         }
     };
     outbox.close();

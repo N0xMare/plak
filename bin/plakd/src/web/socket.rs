@@ -29,7 +29,9 @@ use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 
 use super::Served;
 use super::auth::ConnectionSlot;
-use crate::host::connection::{Connection, Frame, FrameWriter, Outbox, SendError, connection_work};
+use crate::host::connection::{
+    Connection, ConnectionFlush, Frame, FrameWriter, Outbox, SendError, connection_work,
+};
 use crate::host::send::{ProgressIo, STOP_JOIN, TOTAL};
 use crate::surface_protocol::PlakExtension;
 
@@ -43,9 +45,6 @@ const PONG_DEADLINE: Duration = Duration::from_secs(30);
 /// Client messages per second a connection may send, with this burst.
 const MESSAGES_PER_SECOND: f64 = 20.0;
 const MESSAGE_BURST: f64 = 60.0;
-/// Give ready client frames a turn without letting a continuously readable
-/// client starve either stage of output work.
-const READS_BEFORE_FLUSH: u8 = 8;
 
 /// The `Sec-WebSocket-Accept` for a valid upgrade request, or `None` when
 /// the request is not one.
@@ -362,41 +361,6 @@ async fn admit(
         .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot)))
 }
 
-#[derive(Clone, Copy)]
-enum Flush {
-    Replies,
-    Output { again: bool },
-    Idle,
-}
-
-impl Flush {
-    fn step(&mut self, connection: &mut Connection, outbox: &Outbox) -> bool {
-        connection_work(|| match *self {
-            Self::Replies => {
-                if outbox.ordered_drained() {
-                    connection.output_sent();
-                }
-                *self = Self::Output { again: false };
-                connection.flush_replies()
-            }
-            Self::Output { again } => {
-                *self = if again { Self::Replies } else { Self::Idle };
-                connection.flush_output(outbox.ordered_drained())
-            }
-            Self::Idle => Ok(()),
-        })
-        .is_ok()
-    }
-
-    fn request(&mut self) {
-        match self {
-            Self::Idle => *self = Self::Replies,
-            Self::Output { again } => *again = true,
-            Self::Replies => {}
-        }
-    }
-}
-
 fn handle_frame(
     connection: &mut Connection,
     outbox: &Outbox,
@@ -447,8 +411,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
     pinger.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut rate = Rate::new();
     let mut finished = None;
-    let mut flush = Flush::Replies;
-    let mut reads = 0;
+    let mut flush = ConnectionFlush::default();
     let mut ended = loop {
         if served.stop.stopped() {
             connection_work(|| {
@@ -466,23 +429,21 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                 finished = Some((sink, result));
                 break result.map_or_else(Ended::from, |()| Ended::Left);
             }
-            message = next_text(&mut reader, &heartbeat), if reads < READS_BEFORE_FLUSH => {
+            message = next_text(&mut reader, &heartbeat), if flush.can_read() => {
                 if let Err(ended) = handle_frame(connection, outbox, &mut rate, message) {
                     break ended;
                 }
-                flush.request();
-                reads += 1;
-            }
-            () = std::future::ready(()), if !matches!(flush, Flush::Idle) => {
-                if !flush.step(connection, outbox) {
-                    break Ended::Lost("client fell behind");
-                }
-                reads = 0;
+                flush.read();
             }
             () = heartbeat.expired() => break Ended::Lost("no pong"),
             _ = pinger.tick() => {
                 if let Err(ended) = heartbeat.tick(outbox) {
                     break ended;
+                }
+            }
+            () = std::future::ready(()), if flush.pending() => {
+                if flush.step(connection, outbox).is_err() {
+                    break Ended::Lost("client fell behind");
                 }
             }
             () = connection.changed() => flush.request(),
