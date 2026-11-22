@@ -1458,7 +1458,7 @@ fn lower_chat_tool_arguments(
 
 pub(crate) fn malformed_tool_json(raw: &str) -> bool {
     !raw.is_empty()
-        && serde_json::from_str::<serde_json::Value>(raw)
+        && serde_json::from_str::<Value>(raw)
             .is_err_and(|error| error.is_syntax() || error.is_eof())
 }
 

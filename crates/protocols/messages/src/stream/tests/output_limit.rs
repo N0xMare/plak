@@ -66,7 +66,7 @@ fn tool_stream(input: &str, reason: &str, details: Option<serde_json::Value>) ->
     stream
 }
 
-fn project(
+pub(super) fn project(
     mut projector: MessagesStreamProjector,
     stream: &str,
 ) -> Result<(ModelResponse, Vec<ModelEvent>, MessagesStopReason), crate::MessagesStreamError> {

@@ -1205,7 +1205,7 @@ fn rejected_malformed_arguments_replay_as_an_object_with_the_correlated_error() 
         item(41, Actor::Tool, vec![refused])?,
     ])?;
     let lowered = lower_request(&plan, &fixture.policy(&plan)?)?;
-    let wire: serde_json::Value = serde_json::from_slice(&lowered.body)?;
+    let wire: Value = serde_json::from_slice(&lowered.body)?;
     let messages = wire["messages"].as_array().ok_or("messages")?;
     let assistant = messages
         .iter()

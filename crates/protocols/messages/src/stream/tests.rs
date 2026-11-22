@@ -867,7 +867,8 @@ fn additive_messages_fields_do_not_change_accounting_or_output() {
         claude_oauth_projector(),
         openrouter_projector(),
     ] {
-        let (response, _, _) = project(projector, &stream).expect("known terminal with metadata");
+        let (response, _, _) =
+            output_limit::project(projector, &stream).expect("known terminal with metadata");
         assert_eq!(
             response.usage(),
             Some(plakous_model::Usage::new(1, 1, 0, 0, 0))

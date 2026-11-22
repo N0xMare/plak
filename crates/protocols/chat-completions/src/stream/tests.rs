@@ -109,15 +109,13 @@ fn openrouter_main_stream_refuses_url_citation_annotations() {
 fn openrouter_usage_cost_matrix() {
     let extensions = ChatStreamExtensions::OpenRouterV1;
     let canonical = |cost: Value| {
-        let mut extra = BTreeMap::new();
-        extra.insert("cost".into(), cost);
         UsageWire {
             prompt_tokens: 1,
             completion_tokens: 1,
             total_tokens: 2,
             prompt_tokens_details: PromptDetails::default(),
             completion_tokens_details: CompletionDetails::default(),
-            extra,
+            cost: Some(cost),
         }
         .canonical(extensions)
     };
