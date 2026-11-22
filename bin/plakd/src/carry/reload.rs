@@ -116,7 +116,6 @@ pub(crate) fn reopen_probe(
         let head = views.as_ref().map_or(recorded, |views| {
             plakous_hosted::runtime::projected_head(recorded, views)
         });
-        #[cfg(feature = "test-support")]
         if host_upgrade {
             crate::test_hooks::gate_upgrade_reopen(&record.id)?;
         }

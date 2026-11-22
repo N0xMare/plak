@@ -55,6 +55,13 @@ pub(crate) const fn upgrade_runner_revision() -> Option<String> {
 pub(crate) const fn force_host_upgrade() -> bool {
     false
 }
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same seam when test hooks are disabled"
+)]
+pub(crate) const fn gate_upgrade_reopen(_id: &str) -> Result<(), String> {
+    Ok(())
+}
 #[allow(dead_code, reason = "only the optional host coordinates upgrades")]
 pub(crate) fn upgrade_crash_cut(_name: &str) {}
 #[allow(dead_code, reason = "only the optional host prepares upgrades")]
