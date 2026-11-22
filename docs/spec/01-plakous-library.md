@@ -1894,8 +1894,13 @@ Session count has no reserve. Changing these settings changes neither the
 persisted accounting nor per-session or per-checkpoint bounds. Writable open still validates the stored counts.
 Increasing aggregate retention requires no format change and permits exact
 recovery to publish within the enlarged budget, without replaying model calls
-or tools. Reducing a cap does not remove history; existing usage can be above
-a new threshold, at which point that admission class refuses further growth.
+or tools. Reducing a cap does not remove history. At the ordinary threshold
+new ordinary growth stops; at the settlement threshold, settlement
+publication that needs growth stops too, even while recovery has headroom.
+If usage already meets or exceeds a new hard cap, ordinary, settlement and
+recovery growth all stop at once. Settlement and recovery publication that
+requires growth stays blocked until the cap is raised or enough state is
+reclaimed.
 
 The admission reserve is logical only: it reserves configured retention
 headroom, not physical disk blocks. `SQLITE_FULL` and directly observed filesystem `ENOSPC` and `EDQUOT` are

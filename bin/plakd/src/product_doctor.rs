@@ -619,6 +619,7 @@ fn runtime_store_check(
         ),
         None => detail,
     };
+    let detail = runtime_cap_detail(detail, &usage);
     let pressure = bounds
         .iter()
         .map(|bound| StorePressure::of(bound.used(), bound.ordinary_threshold()))
@@ -646,6 +647,14 @@ fn runtime_store_check(
             DoctorCheck::new(kind, "storage", Severity::Ok, "available", detail, None)
         }
     }
+}
+
+fn runtime_cap_detail(mut detail: String, usage: &plakous::sessions::SessionStoreUsage) -> String {
+    use std::fmt::Write as _;
+    for issue in crate::runtime_headroom::cap_issues(usage) {
+        let _ = write!(detail, "; {issue}");
+    }
+    detail
 }
 
 /// How close one aggregate bound is to the point where new work stops.

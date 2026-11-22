@@ -312,6 +312,15 @@ it opens the home; restart it after editing them. Standalone commands,
 including `status` and `doctor`, read the home file for the current invocation
 and therefore show the new policy even before that restart. These limits
 count retained objects, not physical space, and changing them does not prune.
+When the store can be read, `config set` refuses a cap whose settlement
+threshold is at or below retained usage and names the minimum cap that keeps
+settlement headroom. It accepts with a warning if only the ordinary threshold
+is at or below usage. The session count has no reserve; its cap blocks new
+sessions, not publication to existing ones. A hand edit can bypass this
+check: doctor and host startup report the condition, but do not rewrite the
+file. At or above a hard aggregate cap all three classes stop growing at once;
+settlement and recovery publication that require growth stop until the cap is
+raised or enough data is reclaimed (spec 01 §5).
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |

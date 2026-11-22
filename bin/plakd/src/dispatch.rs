@@ -34,6 +34,7 @@ pub(super) fn execute_config_show(
 pub(super) fn execute_config_set(
     services: &Services,
     stdout: &mut dyn io::Write,
+    stderr: &mut dyn io::Write,
     key: String,
     value: String,
     scope: product_config::ConfigWriteScope,
@@ -70,8 +71,11 @@ pub(super) fn execute_config_set(
         cfg.set_origin(field, product_config::ConfigValueOrigin::Project);
     }
     if scope == product_config::ConfigWriteScope::User {
+        let mut warning = None;
         product_config::ProductConfig::update_user(paths, |current| {
             current.set_key(&key, &value)?;
+            warning =
+                crate::runtime_headroom::check_cap_edit(paths, &key, current.runtime_store_bounds)?;
             if crate::config_key_changes_orchestration(&key)
                 && let Some(reason) = topology_product::roster_apply_refusal(paths, None)
             {
@@ -80,6 +84,10 @@ pub(super) fn execute_config_set(
             Ok(())
         })
         .map_err(|error| CliFailure::new(error.into_message()))?;
+        if let Some(warning) = warning {
+            writeln!(stderr, "plakd: warning: {warning}")
+                .map_err(|_| CliFailure::new("stderr failed"))?;
+        }
         let note = if crate::config_key_changes_orchestration(&key) {
             " · saved; applies to new sessions and explicit profile switches"
         } else {

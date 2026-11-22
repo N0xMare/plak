@@ -1017,7 +1017,7 @@ fn execute_command<Backend: AccountOps>(
             Ok(ProcessOutcome::Success)
         }
         Command::ConfigSet { key, value, scope } => {
-            dispatch::execute_config_set(services, stdout, key, value, scope)
+            dispatch::execute_config_set(services, stdout, stderr, key, value, scope)
         }
         Command::ConfigTrust => {
             let paths = services.paths()?;

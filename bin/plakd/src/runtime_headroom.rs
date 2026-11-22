@@ -4,11 +4,120 @@ use std::io::Write;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
-use plakous::sessions::{SessionBackend, SessionStoreUsage};
+use plakous::sessions::{SessionBackend, SessionStoreBound, SessionStoreUsage};
 use serde::Serialize;
 
 use crate::home::paths::PlakPaths;
 use crate::{CliFailure, CliResult, ProcessOutcome};
+
+pub(crate) fn cap_issues(usage: &SessionStoreUsage) -> impl Iterator<Item = CapIssue> {
+    let (used, limit) = usage.session_capacity();
+    let sessions = CapIssue::new("runtime_store.max_sessions", used, limit, limit, limit);
+    usage
+        .bounds()
+        .iter()
+        .filter_map(|bound| {
+            let key = match bound.bound() {
+                SessionStoreBound::Checkpoints => "runtime_store.max_checkpoints",
+                SessionStoreBound::Objects => "runtime_store.max_objects",
+                SessionStoreBound::ObjectBytes => "runtime_store.max_object_bytes",
+                _ => return None,
+            };
+            CapIssue::new(
+                key,
+                bound.used(),
+                bound.limit(),
+                bound.ordinary_threshold(),
+                bound.settlement_threshold(),
+            )
+        })
+        .chain(sessions)
+}
+
+pub(crate) struct CapIssue {
+    key: &'static str,
+    used: u64,
+    limit: u64,
+    settlement: u64,
+}
+
+impl CapIssue {
+    const fn new(
+        key: &'static str,
+        used: u64,
+        limit: u64,
+        ordinary: u64,
+        settlement: u64,
+    ) -> Option<Self> {
+        if used < ordinary {
+            return None;
+        }
+        Some(Self {
+            key,
+            used,
+            limit,
+            settlement,
+        })
+    }
+
+    pub(crate) const fn blocks_settlement(&self) -> bool {
+        self.used >= self.settlement
+    }
+
+    fn minimum(&self) -> u128 {
+        let required = u128::from(self.used) + 1;
+        if self.key == "runtime_store.max_sessions" {
+            return required;
+        }
+        // The settlement reserve is floor((limit + 7) / 16). Invert
+        // limit - reserve >= required to find the first admissible cap.
+        (required + required.saturating_sub(8).div_ceil(15)).max(16)
+    }
+}
+
+impl std::fmt::Display for CapIssue {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reason = if self.key == "runtime_store.max_sessions" {
+            "new sessions cannot be created"
+        } else if self.used >= self.limit {
+            "ordinary, settlement and recovery growth are blocked until the cap is raised"
+        } else if self.blocks_settlement() {
+            "ordinary and settlement growth are blocked; only recovery headroom remains"
+        } else {
+            "ordinary growth is blocked; settlement and recovery still have headroom"
+        };
+        write!(
+            out,
+            "{}: used {}, cap {}: {reason} (minimum accepted cap {})",
+            self.key,
+            self.used,
+            self.limit,
+            self.minimum()
+        )
+    }
+}
+
+pub(crate) fn check_cap_edit(
+    paths: &PlakPaths,
+    key: &str,
+    limits: [NonZeroUsize; 4],
+) -> Result<Option<CapIssue>, String> {
+    if !key.starts_with("runtime_store.") {
+        return Ok(None);
+    }
+    let Ok(Some(usage)) =
+        SessionBackend::inspect_sqlite_usage_with_bounds(paths.runtime_database(), limits)
+    else {
+        return Ok(None);
+    };
+    let issue = cap_issues(&usage).find(|issue| issue.key == key);
+    if let Some(issue) = &issue
+        && issue.blocks_settlement()
+    {
+        return Err(issue.to_string());
+    }
+    Ok(issue)
+}
 
 #[derive(Serialize)]
 struct Bound {
@@ -143,6 +252,7 @@ impl Alerts {
 #[allow(dead_code, reason = "only the hosting product runs periodic checks")]
 pub(crate) async fn watch(paths: PlakPaths, limits: [NonZeroUsize; 4]) {
     let mut alerts = Alerts::default();
+    let mut first_sample = true;
     let mut ticks = tokio::time::interval(Duration::from_secs(60));
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let database = paths.runtime_database();
@@ -156,6 +266,15 @@ pub(crate) async fn watch(paths: PlakPaths, limits: [NonZeroUsize; 4]) {
         else {
             continue;
         };
+        if std::mem::take(&mut first_sample) {
+            let issues = cap_issues(&usage)
+                .map(|issue| issue.to_string())
+                .collect::<Vec<_>>();
+            if !issues.is_empty() {
+                eprintln!("plakd host: WARN {}", issues.join("; "));
+                continue;
+            }
+        }
         let report = Report::new(Some(usage), limits);
         let Some((name, bound, fill)) = report
             .bounds()
@@ -184,6 +303,79 @@ pub(crate) async fn watch(paths: PlakPaths, limits: [NonZeroUsize; 4]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn config_set_guards_settlement_and_warns_at_ordinary_threshold() {
+        use crate::product_config::{ConfigWriteScope, ProductConfig};
+        use plakous::sessions::{
+            AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionOperationId,
+        };
+        use plakous_offline_crash_harness::{
+            BoundaryController, protocol::CrashBoundary, text_runtime_binding,
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::from_home(root.path().join("home"));
+        paths.ensure_layout().unwrap();
+        let backend = SessionBackend::sqlite(paths.runtime_database()).unwrap();
+        let sessions = AgentSessions::new(backend).unwrap();
+        let binding = text_runtime_binding(
+            root.path(),
+            BoundaryController::quiet_from_evidence_path(
+                CrashBoundary::None,
+                root.path().join("evidence"),
+            )
+            .unwrap(),
+            "synthetic",
+            "synthetic",
+        )
+        .unwrap();
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new("headroom-test").unwrap(),
+                binding,
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("new headroom fixture")
+        };
+        session.release().await.unwrap();
+        let usage = SessionBackend::inspect_sqlite_usage(paths.runtime_database())
+            .unwrap()
+            .unwrap();
+        let used = usage.bounds()[2].used();
+        let key = "runtime_store.max_object_bytes";
+        let cap = CapIssue::new(key, used, used, used, used).unwrap();
+        let min = cap.minimum();
+        let set = |limit: u128| {
+            let services = crate::shell::services::Services::for_home(paths.clone());
+            let mut stderr = Vec::new();
+            let result = crate::dispatch::execute_config_set(
+                &services,
+                &mut Vec::new(),
+                &mut stderr,
+                key.into(),
+                limit.to_string(),
+                ConfigWriteScope::User,
+            );
+            (result, String::from_utf8(stderr).unwrap())
+        };
+        let refusal = set(min - 1).0.unwrap_err().to_string();
+        assert!(refusal.contains(&format!("{key}: used {used}, cap {}", min - 1)));
+        assert!(refusal.contains(&format!("minimum accepted cap {min}")));
+        assert!(!paths.config_file().exists());
+
+        let (result, warning) = set(min);
+        result.unwrap();
+        assert!(warning.contains("ordinary growth is blocked"));
+        let config = ProductConfig::load_home_file(&paths).unwrap();
+        assert_eq!(config.runtime_store_bounds[2].get() as u128, min);
+
+        let (result, warning) = set(u128::from(used) * 2);
+        result.unwrap();
+        assert!(warning.is_empty());
+    }
 
     #[test]
     fn status_json_reads_home_caps_and_existing_store_without_creating_a_missing_store() {
