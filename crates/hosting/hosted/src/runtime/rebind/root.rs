@@ -256,9 +256,8 @@ async fn rebind_root<P: plakous_host_protocol::ProtocolExtension>(
         refuse_unready_rebind(config, mode.continues_line())?;
         let account = account.to_owned();
         // A Code Mode (native-ptc) prefix is replayable onto every presentation:
-        // each kernel re-projects `exec`/`wait` cells truthfully at dispatch
-        // (Responses/Chat carry the original string input, Messages wraps it as
-        // `{"input": ...}`), so the rebind branches at the canonical checkpoint
+        // each kernel re-projects `exec`/`wait` cells at dispatch for its
+        // target wire form, so the rebind branches at the canonical checkpoint
         // like any other and nothing is refused up front.
         let (target_selection, api_root, effort_label, composition) = selection?;
         // refuse before the first resolution round-trip,

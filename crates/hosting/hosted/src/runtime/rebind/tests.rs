@@ -2092,9 +2092,8 @@ fn handle_fork_refuses_while_the_source_tree_has_live_descendants() {
 }
 
 /// A Codex Code Mode (native-ptc) prefix is replayable onto every
-/// presentation: the kernels re-project `exec`/`wait` cells at dispatch
-/// (Responses/Chat carry the original string input, Messages wraps it as
-/// `{"input": ...}` — see the kernel tests), so the host admits the rebind
+/// presentation: the kernels re-project `exec`/`wait` cells for their target
+/// wire form at dispatch, so the host admits the rebind
 /// like any other. A refusal here ("cannot replay a Codex Code Mode
 /// (native-ptc) prefix onto another presentation") would make a profile
 /// fork after a Code Mode turn a dead end. The memory stub cannot complete

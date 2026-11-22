@@ -322,7 +322,7 @@ fn requested_calls_with_results_prepare_fresh_on_shared_responses_routes() -> Te
     ] {
         for (raw, expected) in [
             (r#"{"q":"portable"}"#, r#"{"q":"portable"}"#),
-            (r#""cell source""#, "cell source"),
+            (r#""cell source""#, r#"{"input":"cell source"}"#),
         ] {
             let state = ToolCallState::Requested;
             let call = ToolCallBlock::new(

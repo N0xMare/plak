@@ -228,17 +228,13 @@ impl XaiPlatformModel {
             return Err(XaiPlatformBuildError::Authentication);
         }
         let execution_authority = platform_binding::execution_authority(&grant)?;
-        let client = client.with_credential_scope(
-            "xai.platform.responses",
-            execution_authority.account_binding().bytes(),
-            execution_authority.credential_authority_binding().bytes(),
-        );
         let descriptor = platform_binding::descriptor(
             &execution_authority,
             selected.route().requested_model().as_str(),
             maximum_input,
         )?;
         let runtime = runtime_authority(&descriptor, &grant, clock.now())?;
+        let client = scoped_platform_client(&client, &runtime);
         let configuration =
             compile_configuration(&selected, &descriptor, &runtime, &grant, admitted_facts)?;
         configuration
@@ -582,6 +578,13 @@ fn runtime_authority(
             .and_then(|c| c.capacity().freshness().expires_at()),
     )
     .map_err(|_| XaiPlatformBuildError::Configuration)
+}
+fn scoped_platform_client(client: &Client, authority: &RuntimeModelAuthority) -> Client {
+    client.with_credential_scope(
+        "xai.platform.responses",
+        authority.account_binding().bytes(),
+        authority.credential_authority_binding().bytes(),
+    )
 }
 fn check_grant(execution: &PlatformExecution) -> Result<(), XaiPlatformBuildError> {
     if platform_binding::xai_api_key_generation(execution.source.as_ref())? != execution.grant {
