@@ -9,7 +9,8 @@ import re
 
 
 INVENTORY = (
-    Path(__file__).resolve().parents[2] / "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
+    Path(__file__).resolve().parents[2]
+    / "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
 )
 INDEXED = json.loads(INVENTORY.read_text())
 WIRE = {
