@@ -1048,8 +1048,8 @@ fn local_submission_rollback_invalidates_the_warm_body() {
     let expected = seed_submission(&mut store, &id, "root");
     let reads = submission_body_reads(&mut store.connection);
     assert_eq!(
-        store.load_intents(&id).unwrap().submissions,
-        [expected.clone()]
+        store.load_intents(&id).unwrap().submissions.as_slice(),
+        std::slice::from_ref(&expected)
     );
     let versions = sqlite_versions(&store.connection);
     reads.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -1075,8 +1075,8 @@ fn a_submission_read_in_a_write_transaction_cannot_seed_the_index() {
     let (mut store, id) = store_with_session(root.path());
     let expected = seed_submission(&mut store, &id, "root");
     assert_eq!(
-        store.load_intents(&id).unwrap().submissions,
-        [expected.clone()]
+        store.load_intents(&id).unwrap().submissions.as_slice(),
+        std::slice::from_ref(&expected)
     );
     let reads = submission_body_reads(&mut store.connection);
     let provisional = Submission {
@@ -1116,8 +1116,8 @@ fn local_ddl_invalidates_the_index_without_submission_updates() {
     let (mut store, id) = store_with_session(root.path());
     let expected = seed_submission(&mut store, &id, "root");
     assert_eq!(
-        store.load_intents(&id).unwrap().submissions,
-        [expected.clone()]
+        store.load_intents(&id).unwrap().submissions.as_slice(),
+        std::slice::from_ref(&expected)
     );
     let reads = submission_body_reads(&mut store.connection);
     let (data, schema) = sqlite_versions(&store.connection);

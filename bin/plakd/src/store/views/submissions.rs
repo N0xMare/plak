@@ -51,7 +51,6 @@ impl VerifiedSubmissions {
         &mut self,
         connection: &mut Connection,
     ) -> rusqlite::Result<()> {
-        debug_assert!(self.index.is_none());
         let index = SubmissionIndex::default();
         let changed = Arc::clone(&index.changed);
         connection.update_hook(Some(move |_, database: &str, table: &str, rowid| {
