@@ -2276,6 +2276,14 @@ campaigns (chapter 05 §2.3). Run the Linux install groups with `just install` o
 separate command. An explicit `release` or `maintainer` argument to
 `just install` installs a snapshot instead of running the gate.
 
+An urgent hotfix may enter production before its strict crash sweep finishes
+when it changes no persisted or wire format, store write path, recovery or
+host upgrade code. Every other part of the batch gate and the install tier
+must already have passed on the exact tree. The sweep then runs on that tree.
+If it fails, production returns to the previous snapshot through a same-key
+upgrade, and the fix does not re-enter production until a corrected tree
+passes the complete gate.
+
 A prior tree's install evidence is not evidence for a changed tree. A
 dedicated detached Mac gate checkout with its own stable target directory
 keeps installation checkout switches from invalidating artifacts; it refuses
