@@ -15,6 +15,9 @@ fn changed_native_protocol_refuses_without_stopping_the_job() {
     runner::wait_local_runner_ready(&host);
     let mut client = Client::connect(&host);
     let root = start_root(&fixture, &mut client, "local", None, 1);
+    // Qualification can outlast the host's write deadline for an attached
+    // client that has stopped reading observations.
+    drop(client);
     let result = candidate_upgrade(&fixture, &image, &environment)
         .output()
         .unwrap();
@@ -23,7 +26,8 @@ fn changed_native_protocol_refuses_without_stopping_the_job() {
         String::from_utf8_lossy(&result.stderr).contains("host_upgrade_runner_protocol"),
         "{result:?}"
     );
-    assert_current_jobs(&fixture, &mut client, &root);
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+    assert_current_jobs(&fixture, &host, &root);
     finish_source(&fixture, &mut host, &root);
 }
 
@@ -108,7 +112,8 @@ fn third_build_stops_the_job_on_its_original_daemon() {
     terminal_rows(&fixture, 1);
 }
 
-fn assert_current_jobs(fixture: &Fixture, client: &mut Client, root: &Root) {
+fn assert_current_jobs(fixture: &Fixture, host: &Host, root: &Root) {
+    let mut client = Client::connect(host);
     assert_eq!(client.request(9, Op::Ping), Outcome::Ok(Answer::Pong));
     assert_eq!(marked(fixture, &root.name, "fg"), root.foreground);
     assert_eq!(marked(fixture, &root.name, "bg"), root.background);
