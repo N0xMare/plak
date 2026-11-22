@@ -30,6 +30,7 @@ use crate::limits::{COALESCED_DELTA_BYTES, INTENT_QUEUE_CAPACITY, OBSERVATION_QU
 use crate::observation::SessionObservation;
 use crate::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope, TranscriptStreamDelta};
 
+mod replay;
 mod stops;
 
 const AGENT_OBSERVATION_SHARE: usize = OBSERVATION_QUEUE_CAPACITY / 4;
@@ -191,7 +192,6 @@ struct NonrepeatableAdmission {
 }
 
 const URGENT_INTERRUPT: u8 = 1;
-const ROOT_ATTACHMENT_REPAIR: &str = "root-attachment-repair";
 const PENDING_QUIT: u8 = 1 << 1;
 const NONREPEATABLE_NEW: u8 = 1;
 const NONREPEATABLE_COMPACT: u8 = 1 << 1;
@@ -376,12 +376,6 @@ impl<P: ProtocolExtension> IntentDelivery<P> {
         self.correlation.is_some()
     }
 
-    /// This repair was requested by the attachment service, not the wire peer.
-    #[must_use]
-    pub fn is_root_attachment_repair(&self) -> bool {
-        self.origin.as_deref() == Some(ROOT_ATTACHMENT_REPAIR)
-    }
-
     /// Split the action from its acknowledgement guard. Keep the guard alive
     /// for the complete host handling scope.
     #[must_use]
@@ -556,19 +550,6 @@ impl<P: ProtocolExtension> IntentSender<P> {
         self.send_correlated(action, None)
     }
 
-    /// Requests the current root baseline for attachments that need it.
-    ///
-    /// # Errors
-    /// As for `send`, unless the same repair is already queued.
-    #[allow(clippy::result_large_err, reason = "the refusal preserves the action")]
-    pub fn request_root_attachment_repair(&self) -> Result<(), IntentSendError<P>> {
-        self.clone()
-            .tagged(ROOT_ATTACHMENT_REPAIR)
-            .send(SessionIntent::ResyncTranscript {
-                scope: TranscriptScope::Root,
-            })
-    }
-
     /// This sender, its intents tagged with the origin `tag`: the
     /// `IntentStarted` of an intent sent with correlation `c` carries
     /// `<tag>:c`, and of one sent with none `<tag>`. It stays the same
@@ -653,15 +634,7 @@ impl<P: ProtocolExtension> IntentSender<P> {
             }
             return Err(IntentSendError::Disconnected(action));
         }
-        if correlation.is_none()
-            && let SessionIntent::ResyncTranscript { scope } = &action
-            && queue.iter().any(|queued| {
-                queued.correlation.is_none()
-                    && matches!(&queued.action, SessionIntent::ResyncTranscript { scope: pending } if pending == scope)
-                    && (self.1.as_deref() == Some(ROOT_ATTACHMENT_REPAIR))
-                        == (queued.origin.as_deref() == Some(ROOT_ATTACHMENT_REPAIR))
-            })
-        {
+        if replay::coalesces_resync(self.1.as_deref(), &action, correlation.as_deref(), &queue) {
             return Ok(());
         }
         if queue.len() >= INTENT_QUEUE_CAPACITY {
@@ -1371,38 +1344,6 @@ impl<P: ProtocolExtension> ObservationSender<P> {
             .insert(scope);
     }
 
-    fn supersede_baseline(
-        &self,
-        snapshot: &crate::views::PresentationSnapshot,
-        queue: &mut VecDeque<SessionObservation<P>>,
-    ) {
-        // A new baseline covers every older queued patch in this scope.
-        queue.retain(|queued| match queued {
-            SessionObservation::PresentationSnapshot(old) => old.scope != snapshot.scope,
-            SessionObservation::TranscriptPatch(patch) => patch.scope != snapshot.scope,
-            SessionObservation::TranscriptStream { scope, .. } => *scope != snapshot.scope,
-            _ => true,
-        });
-        if matches!(snapshot.scope, TranscriptScope::Agent(_)) {
-            // A face has one open agent view. Replacing it retires queued
-            // content and gap bookkeeping for the old agent.
-            queue.retain(|queued| {
-                let scope = match queued {
-                    SessionObservation::PresentationSnapshot(old) => &old.scope,
-                    SessionObservation::TranscriptPatch(old) => &old.scope,
-                    SessionObservation::TranscriptStream { scope, .. } => scope,
-                    _ => return true,
-                };
-                *scope == TranscriptScope::Root || *scope == snapshot.scope
-            });
-            self.0
-                .transcript_gaps
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .retain(|scope| *scope == TranscriptScope::Root || *scope == snapshot.scope);
-        }
-    }
-
     /// Bounded delivery that never waits for renderer capacity. Mutex ownership
     /// is short; at saturation required final/state events evict only a
     /// replaceable transcript/delta/progress observation. A credential-wait
@@ -1533,34 +1474,6 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         }
         self.0.ready.notify_one();
         Ok(())
-    }
-}
-
-impl<P: ProtocolExtension> ObservationSender<P> {
-    /// Queues a same-revision root repair behind the observations that
-    /// produced that revision, without discarding them or clearing gaps.
-    #[must_use]
-    pub fn replay_root_snapshot(&self, snapshot: crate::views::PresentationSnapshot) -> bool {
-        let Ok(mut queue) = self.0.queue.lock() else {
-            return false;
-        };
-        if queue.iter().any(|event| {
-            matches!(event, SessionObservation::PresentationSnapshot(old)
-            if old.scope == snapshot.scope && old.revision == snapshot.revision)
-        }) {
-            return true;
-        }
-        if queue.len() >= OBSERVATION_QUEUE_CAPACITY {
-            return false;
-        }
-        queue.push_back(SessionObservation::PresentationSnapshot(snapshot));
-        self.0.ready.notify_one();
-        let edge = self.0.claim_edge();
-        drop(queue);
-        if edge {
-            self.0.fire();
-        }
-        true
     }
 }
 

@@ -38,8 +38,7 @@ impl Out {
 }
 
 /// What the fake session does with a prompt: `approve` asks for an
-/// approval, `process` runs a background process, `flood` sends more
-/// required events than an attachment holds, and anything else is busy.
+/// approval, `process` runs a background process, and anything else is busy.
 fn prompted(
     script: &Script,
     busy: &plakous_host_protocol::ObservationSender<Core>,
@@ -67,19 +66,6 @@ fn prompted(
                 views: Vec::new(),
                 running: 1,
             });
-        }
-        // More required events than an attachment holds.
-        "flood" => {
-            for index in 0..5_000 {
-                let _ = busy.send(SessionObservation::ApprovalResolved {
-                    approval_id: format!("f{index}"),
-                    resolution: "denied".into(),
-                });
-                if index % 200 == 0 {
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-            }
-            script.flooded.store(true, Ordering::SeqCst);
         }
         _ => {
             let _ = busy.send(SessionObservation::SetBusy(true));
@@ -151,8 +137,6 @@ struct Script {
     linger: AtomicU64,
     /// The image byte counts of every prompt a session took.
     images: Mutex<Vec<usize>>,
-    /// A flood of required events was sent whole.
-    flooded: std::sync::atomic::AtomicBool,
     /// The sessions take stops and settle none until this is cleared.
     hold_stops: std::sync::atomic::AtomicBool,
     /// Each opened session's attachment count.
@@ -2485,7 +2469,7 @@ fn a_refused_cross_tree_attach_keeps_the_attachment() {
 /// no hold keeps the session resident.
 #[test]
 fn an_attachment_its_service_ended_lets_the_session_go() {
-    let (host, fake) = host(&["s1"]);
+    let (host, _fake) = host(&["s1"]);
     let out = Out::default();
     let mut connection = host.connect(
         out.clone(),
@@ -2496,23 +2480,19 @@ fn an_attachment_its_service_ended_lets_the_session_go() {
     request(&mut connection, 1, Op::Attach { node: node("s1") });
     let attachment = attached(&out.take(), 1);
     let session = Arc::clone(&connection.node.as_ref().unwrap().session);
-    prompt(&mut connection, 2, attachment, "flood");
-    // Nothing takes the attachment's queue while the flood fills it.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !fake.0.flooded.load(Ordering::SeqCst) {
-        assert!(Instant::now() < deadline, "the flood was never sent");
-        std::thread::sleep(Duration::from_millis(20));
+    // Fill the attachment's queue, not the smaller producer mailbox.
+    let publisher = session.publisher();
+    for index in 0..=super::super::ATTACHMENT_CAPACITY {
+        publisher.publish(SessionObservation::ApprovalResolved {
+            approval_id: format!("f{index}"),
+            resolution: "denied".into(),
+        });
     }
-    std::thread::sleep(Duration::from_millis(200));
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while connection.node.is_some() {
-        assert!(
-            Instant::now() < deadline,
-            "the flooded attachment was never ended"
-        );
-        connection.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    connection.flush().unwrap();
+    assert!(
+        connection.node.is_none(),
+        "the flooded attachment was never ended"
+    );
     assert!(
         out.take()
             .contains(&HostFrame::ResyncRequired { attachment })
