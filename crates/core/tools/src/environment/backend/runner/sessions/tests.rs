@@ -3,6 +3,8 @@ use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::task::Poll;
 
+use tokio::sync::watch;
+
 use super::*;
 
 fn snapshot(status: JoinedProcessStatus) -> JoinedProcessCursorPollResult {
@@ -24,7 +26,8 @@ async fn pending<T>(mut future: std::pin::Pin<&mut impl Future<Output = T>>) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_silent_poll_reads_once_then_waits_for_its_deadline() {
+async fn a_silent_poll_reads_once_then_waits_for_its_deadline() -> Result<(), ExecutionBackendError>
+{
     let (_changes, rx) = watch::channel(0);
     let control = OperationContext::new(CancellationToken::new());
     let reads = Cell::new(0);
@@ -39,13 +42,15 @@ async fn a_silent_poll_reads_once_then_waits_for_its_deadline() {
         pending(result.as_mut()).await;
         assert_eq!(reads.get(), 1);
     }
-    assert_eq!(result.await.unwrap().status(), JoinedProcessStatus::Running);
+    assert_eq!(result.await?.status(), JoinedProcessStatus::Running);
     assert_eq!(Instant::now(), deadline);
     assert_eq!(reads.get(), 2);
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]
-async fn terminal_notification_during_the_first_read_is_not_lost() {
+async fn terminal_notification_during_the_first_read_is_not_lost()
+-> Result<(), ExecutionBackendError> {
     let (changes, rx) = watch::channel(0);
     let control = OperationContext::new(CancellationToken::new());
     let now = Instant::now();
@@ -58,14 +63,15 @@ async fn terminal_notification_during_the_first_read_is_not_lost() {
             Ok(snapshot(JoinedProcessStatus::Exited(Some(0))))
         }
     })
-    .await
-    .unwrap();
+    .await?;
     assert_eq!(result.status(), JoinedProcessStatus::Exited(Some(0)));
     assert_eq!(Instant::now(), now);
+    Ok(())
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_waiting_poll_answers_notice_and_cancellation_without_a_timer() {
+async fn a_waiting_poll_answers_notice_and_cancellation_without_a_timer()
+-> Result<(), ExecutionBackendError> {
     for notice in [true, false] {
         let (_changes, rx) = watch::channel(0);
         let (preempt, signal) = watch::channel(ToolPreempt::None);
@@ -83,7 +89,8 @@ async fn a_waiting_poll_answers_notice_and_cancellation_without_a_timer() {
         } else {
             control.cancellation().cancel();
         }
-        assert_eq!(result.await.unwrap().status(), JoinedProcessStatus::Running);
+        assert_eq!(result.await?.status(), JoinedProcessStatus::Running);
         assert_eq!(Instant::now(), now);
     }
+    Ok(())
 }

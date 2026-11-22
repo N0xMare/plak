@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use plakous_model::CancellationToken;
 use serde_json::{Value, json};
-use tokio::sync::watch;
 use tokio::time::Instant;
 
 use super::super::{
@@ -756,7 +755,7 @@ async fn poll(
 }
 
 async fn poll_on_change(
-    mut changes: watch::Receiver<u64>,
+    mut changes: tokio::sync::watch::Receiver<u64>,
     deadline: Instant,
     control: &OperationContext,
     mut read: impl FnMut() -> Result<JoinedProcessCursorPollResult, ExecutionBackendError>,
@@ -778,9 +777,9 @@ async fn poll_on_change(
             return Ok(result);
         }
         tokio::select! {
-            changed = changes.changed(), if changes_open => changes_open = changed.is_ok(),
-            changed = preempt.wait_for(|signal| *signal != ToolPreempt::None), if preempt_open => {
-                preempt_open = changed.is_ok();
+            update = changes.changed(), if changes_open => changes_open = update.is_ok(),
+            update = preempt.wait_for(|signal| *signal != ToolPreempt::None), if preempt_open => {
+                preempt_open = update.is_ok();
             }
             () = control.cancellation().cancelled() => {}
             () = tokio::time::sleep_until(deadline) => {}
