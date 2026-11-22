@@ -157,7 +157,7 @@ pub struct MessagesStreamDialectHooks {
 /// Closed additive stream grammar selected by a Messages dialect.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum MessagesStreamExtensions {
-    /// Strict Messages grammar and lifecycle.
+    /// Base Messages semantics without dialect-specific extensions.
     #[default]
     Strict,
     /// Reviewed Claude OAuth additions from the pinned Claude Code envelope.

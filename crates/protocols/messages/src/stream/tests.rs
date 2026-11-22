@@ -271,7 +271,20 @@ fn closed_client_input_is_validated_only_after_a_non_revoking_terminal() {
                 }
             }
             if reason == "tool_use" {
-                assert!(rejected, "invalid tool input must not dispatch");
+                if input == "[1]" {
+                    assert!(
+                        rejected,
+                        "non-object input remains outside Messages grammar"
+                    );
+                } else {
+                    assert!(!rejected, "closed malformed client input is a proposal");
+                    projector.finish_eof().expect("tool-use EOF");
+                    assert!(matches!(
+                        terminal.expect("tool-use terminal").output()[0].blocks(),
+                        [ContentBlock::Text(_), ContentBlock::ToolCall(call)]
+                            if call.raw_arguments() == input && call.arguments().is_none()
+                    ));
+                }
                 continue;
             }
             assert!(!rejected, "revoked input needs no JSON interpretation");

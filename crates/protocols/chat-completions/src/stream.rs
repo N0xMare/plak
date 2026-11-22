@@ -47,7 +47,7 @@ pub enum ReasoningAliasPolicy {
 /// Closed set of admitted dialect additions to the neutral Chat stream.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ChatStreamExtensions {
-    /// Exact provider-neutral Chat V1 grammar only.
+    /// Base Chat V1 semantics without dialect-specific extensions.
     #[default]
     None,
     /// OpenRouter gateway metadata and repeated assistant-role spelling.
