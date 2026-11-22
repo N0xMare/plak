@@ -78,8 +78,9 @@ fn crossing_the_byte_cap_requests_a_fresh_baseline_only_for_later_attaches() {
     ));
     assert!(intents.try_recv().is_err());
     service.observe(root_patch(3));
-    assert!(
-        service.take(new).is_empty(),
+    assert_eq!(
+        service.take(new),
+        [] as [Outbound<Core>; 0],
         "no root patch without a baseline"
     );
 
@@ -117,7 +118,7 @@ fn the_patch_count_limit_still_applies_to_small_patches() {
     assert!(intents.try_recv().is_err());
     service.observe(root_patch(65));
     let new = service.attach(&root(), Face::Remote).unwrap();
-    assert!(service.take(new).is_empty());
+    assert_eq!(service.take(new), [] as [Outbound<Core>; 0]);
     assert!(matches!(
         &*intents.try_recv().unwrap(),
         SessionIntent::ResyncTranscript {

@@ -31,6 +31,7 @@ fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
         panic!("fixture attach was refused");
     };
     while intents.try_recv().is_ok() {}
+    connection.flush_pending(true).unwrap();
     let scope = TranscriptScope::Root;
     connection
         .service

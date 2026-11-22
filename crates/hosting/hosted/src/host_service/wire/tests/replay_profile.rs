@@ -157,8 +157,10 @@ fn three_resident_attachments_replay_profile() {
             ));
             resnapshots += 1;
         }
-        if resnapshots != 0 {
-            service.observe(snapshot(PATCHES + 1, PATCHES * PATCH_ROWS + 1));
+        // Treat each request as a separate publication, as when the host
+        // drains the observation mailbox between successive resyncs.
+        for offset in 0..resnapshots {
+            service.observe(snapshot(PATCHES + 1 + offset, PATCHES * PATCH_ROWS + 1));
         }
         eprintln!(
             "replay_profile fresh_requests={resnapshots} draining rss_kib={:?}",
