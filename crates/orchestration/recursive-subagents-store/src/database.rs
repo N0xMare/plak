@@ -276,7 +276,7 @@ impl SubagentsDatabase {
         })
     }
 
-    fn inspect_rows<T>(
+    pub(crate) fn inspect_rows<T>(
         database: &Path,
         absent: T,
         read: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, OpenError>,

@@ -3,10 +3,66 @@ use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 
-use crate::{OpenError, database::schema};
+use crate::{
+    OpenError, SqliteTreeStore,
+    database::{SubagentsDatabase, schema},
+};
 
 type Images = BTreeMap<String, u64>;
 type Custody = BTreeMap<String, (i64, String, String, Option<String>, String, bool)>;
+
+/// The persisted tree image and custody incarnation inspected by qualification.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TreeQualificationStamp {
+    revision: u64,
+    fence: u64,
+    holder: plakous_recursive_subagents::tree::HostInstance,
+    claimed_at_ms: u64,
+    released: bool,
+}
+
+impl SqliteTreeStore {
+    /// Reads exact tree revisions and custody from one read-only snapshot, in
+    /// caller order. An absent tree has no stamp; an existing tree must have
+    /// a readable custody floor. This does not load or reopen any tree image.
+    #[doc(hidden)]
+    pub fn inspect_qualification_stamps(
+        database: &Path,
+        tree_ids: &[&str],
+    ) -> Result<Vec<Option<TreeQualificationStamp>>, OpenError> {
+        SubagentsDatabase::inspect_rows(database, vec![None; tree_ids.len()], |tx| {
+            let mut revisions = tx
+                .prepare("SELECT revision FROM agent_trees WHERE tree_id=?1")
+                .map_err(unavailable)?;
+            tree_ids
+                .iter()
+                .map(|id| {
+                    let Some(revision) = revisions
+                        .query_row([id], |row| crate::from_i64(row.get(0)?))
+                        .optional()
+                        .map_err(unavailable)?
+                    else {
+                        return Ok(None);
+                    };
+                    let custody = crate::custody::read(tx, id)
+                        .map_err(|error| OpenError::unavailable(error.detail))?
+                        .ok_or_else(|| {
+                            OpenError::unavailable("qualification tree has no custody floor")
+                        })?;
+                    // Renewing the same claim does not change the image or owner.
+                    Ok(Some(TreeQualificationStamp {
+                        revision,
+                        fence: custody.fence,
+                        holder: custody.holding.host.instance,
+                        claimed_at_ms: custody.holding.claimed_at_ms,
+                        released: custody.released,
+                    }))
+                })
+                .collect()
+        })
+    }
+}
 
 /// Changed tree revisions and custody placement facts since the previous inspection.
 #[derive(Default)]

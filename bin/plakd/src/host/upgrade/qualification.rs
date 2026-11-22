@@ -35,11 +35,17 @@ pub(super) fn qualify_destination(
         process::verify_image(&request.destination, &request.expected_binary)
     })?;
     let scratch = Workspace::new(paths, request)?;
-    let probe = progress::timed(report, progress::Phase::Capability, || {
-        service_probe(paths, request, arguments, &scratch)
+    let (probe, before_rehearsal) = progress::timed(report, progress::Phase::Capability, || {
+        // Rehearsal copies product and tree stores during the capability call.
+        // A reusable verdict for those copies must not be stamped by newer live rows.
+        let before_rehearsal = (request.source_key == request.destination_key)
+            .then(|| reopen::snapshot(paths))
+            .transpose()?;
+        let probe = service_probe(paths, request, arguments, &scratch)?;
+        Ok((probe, before_rehearsal))
     })?;
-    let reopen = (request.source_key == request.destination_key)
-        .then(|| {
+    let reopen = before_rehearsal
+        .map(|roots| {
             let stores = scratch.stores();
             let stores = stores.is_dir().then_some(stores.as_path());
             bindings::preflight(
@@ -50,7 +56,7 @@ pub(super) fn qualify_destination(
                 report,
             )?;
             progress::timed(report, progress::Phase::ExactReopen, || {
-                reopen::preflight(paths, request, stores)
+                reopen::preflight(paths, request, stores, roots)
             })
         })
         .transpose()?;

@@ -5710,16 +5710,25 @@ applies the live steps only after source drain and release and before
 announcing readiness; a failure after either commit is fixed forward under
 §2.5, not by restarting the source.
 The destination verifies exact reopen for each eligible root before admissions
-pause. Local probes can run concurrently within a fixed bound; paired-runner
-probes remain serial. A probe refuses known binding/configuration/credential
-changes; an unfinished-turn verdict retains the existing planned-handoff recovery law.
-An observed advance of the same runtime branch is not an incompatibility.
-The coordinator remembers each root's recorded locator and durable revision
-before probing. After admission closes and the step drain joins, it rechecks
-new, changed, or unproven roots while the reversible holds are in force. A
-refusal there rolls back preparation; no source surrenders on a stale verdict.
-Revision qualification takes fresh scratch copies if a held-root recheck
-needs them.
+pause. A probe refuses known binding/configuration/credential changes. Neither
+an unfinished turn nor an observed advance of the same runtime branch is a
+reusable pre-pause verdict. The coordinator records each root's product
+revision, locator, durable branch revision, and persisted agent-tree revision
+and custody (including an absent tree). Descendant changes can advance this
+tree without moving the root branch. The reuse stamp predates the probes or,
+for revision rehearsal, the scratch copies. After admission closes and the
+step drain joins, it rechecks new, changed, or unproven roots under the
+reversible holds. A refusal there rolls back preparation; no source
+surrenders on a stale verdict. A still-unfinished turn at that boundary keeps
+the existing planned-handoff recovery law. Revision qualification takes fresh
+scratch copies if a held-root recheck needs them.
+The host reads durable branch revisions from its own runtime store, including
+those of paired placements. A missing or unreadable branch has no reusable
+verdict. Local probes can run concurrently within a fixed bound; paired
+probes remain serial. A paired root with a reusable, unchanged verdict adds
+no SSH work to the admission pause. Each paired root that needs a held
+recheck adds one serial destination probe, including its SSH qualification,
+bounded by 30 seconds per probe.
 Verification restores process metadata only into detached, start-refusing
 bookkeeping from the durable job mirror. It never refreshes or watches runner
 jobs, adopts a line or takes process custody. Paired placements retain the

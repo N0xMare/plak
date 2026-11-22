@@ -8,6 +8,7 @@ use crate::home::paths::PlakPaths;
 use crate::store::ProductStore;
 use crate::{CliFailure, CliResult};
 use plakous::sessions::{AgentSessions, SessionLocator};
+use plakous_recursive_subagents_store::{SqliteTreeStore, TreeQualificationStamp};
 
 // Bound the number of cold checkpoint loads as well as processes. Paired
 // runners are probed serially so this doesn't fan out SSH connections.
@@ -18,6 +19,7 @@ struct Head {
     locator: SessionLocator,
     revision: u64,
     product_revision: u64,
+    tree: Option<TreeQualificationStamp>,
 }
 
 pub(super) struct Root {
@@ -26,12 +28,15 @@ pub(super) struct Root {
     head: Option<Head>,
 }
 
-fn snapshot(paths: &PlakPaths) -> CliResult<Vec<Root>> {
+pub(super) fn snapshot(paths: &PlakPaths) -> CliResult<Vec<Root>> {
     let records = ProductStore::inspect_upgrade_roots(paths)
         .map_err(CliFailure::new)?
         .into_iter()
         .filter_map(|record| record.plakous_locator.map(|locator| (record, locator)))
         .collect::<Vec<_>>();
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
     let locators = records
         .iter()
         .map(|(_, locator)| *locator)
@@ -39,10 +44,18 @@ fn snapshot(paths: &PlakPaths) -> CliResult<Vec<Root>> {
     let revisions =
         AgentSessions::inspect_branch_revisions_sqlite(paths.runtime_database(), &locators)
             .map_err(CliFailure::from)?;
+    let tree_ids = records
+        .iter()
+        .map(|(record, _)| record.node.tree_id.as_str())
+        .collect::<Vec<_>>();
+    let trees =
+        SqliteTreeStore::inspect_qualification_stamps(&paths.subagents_database(), &tree_ids)
+            .map_err(|error| CliFailure::new(error.message()))?;
     Ok(records
         .into_iter()
         .zip(revisions)
-        .map(|((record, locator), revision)| Root {
+        .zip(trees)
+        .map(|(((record, locator), revision), tree)| Root {
             id: record.id,
             local: record
                 .runner
@@ -52,6 +65,7 @@ fn snapshot(paths: &PlakPaths) -> CliResult<Vec<Root>> {
                 locator,
                 revision,
                 product_revision: record.store_revision,
+                tree,
             }),
         })
         .collect())
@@ -75,10 +89,15 @@ pub(super) fn preflight(
     paths: &PlakPaths,
     request: &Request,
     scratch: Option<&Path>,
+    before_rehearsal: Vec<Root>,
 ) -> CliResult<Preflight> {
     // Capture before starting probes: even if a probe follows the latest head,
     // an advance during its execution can't make the held check optional.
-    let roots = snapshot(paths)?;
+    let roots = if scratch.is_some() {
+        before_rehearsal
+    } else {
+        snapshot(paths)?
+    };
     let verdicts = probe_roots(paths, request, scratch, &roots, true)?;
     let passed = roots
         .into_iter()
@@ -173,7 +192,9 @@ fn exact_reopen(
         ReopenProbe::Unknown { reason }
             if reason == plakous_hosted::runtime::REOPEN_UNSETTLED_WORK =>
         {
-            Ok(true)
+            // Recheck under the holds; if still unfinished, the planned
+            // handoff recovery law owns it rather than a qualification probe.
+            Ok(false)
         }
         ReopenProbe::Unknown { reason } if allow_advance && reason == REOPEN_HEAD_ADVANCED => {
             Ok(false)

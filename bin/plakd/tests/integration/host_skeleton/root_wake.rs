@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 mod notice;
 mod suppression;
 
-fn child_fixture(process: bool) -> Option<(Fixture, serde_json::Value)> {
+pub(super) fn child_fixture(process: bool) -> Option<(Fixture, serde_json::Value)> {
     let fixture = fixture()?;
     crash::client_control::script(&fixture, true);
     // The product-child fixture includes its caller's topology tools
@@ -82,7 +82,7 @@ fn idle_stays(fixture: &Fixture, session: &str, expected: u64) {
     }
 }
 
-fn idle_turns(fixture: &Fixture, session: &str, expected: u64) {
+pub(super) fn idle_turns(fixture: &Fixture, session: &str, expected: u64) {
     let records = plakd::store::session_records::SqliteSessionStore::new(
         plakd::home::paths::PlakPaths::explicit(fixture.home()),
     );
@@ -103,7 +103,7 @@ fn idle_turns(fixture: &Fixture, session: &str, expected: u64) {
     }
 }
 
-fn submitted_result(fixture: &Fixture, node: &NodeAddress) {
+pub(super) fn submitted_result(fixture: &Fixture, node: &NodeAddress) {
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let trees = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let deadline = Instant::now() + WAIT;

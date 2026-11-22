@@ -42,7 +42,7 @@ pub use database::{
     GENERATION, OpenError, OpenErrorKind, SCHEMA_VERSION, TreeInspection,
     expected_schema_fingerprint,
 };
-pub use directory::{TreeDirectoryChanges, TreeDirectoryProbe};
+pub use directory::{TreeDirectoryChanges, TreeDirectoryProbe, TreeQualificationStamp};
 pub use store::{SqliteTreeStore, TreeChange};
 
 /// The `SQLite` integer bound: every count, stamp, and revision a row carries
