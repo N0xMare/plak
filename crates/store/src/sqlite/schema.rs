@@ -649,8 +649,7 @@ pub(super) fn checkpoint_wal(c: &Connection, truncate: bool) -> Result<(), Sessi
 }
 
 pub(super) fn checkpoint_wal_shutdown(c: &Connection) -> Result<(), SessionStoreError> {
-    c.busy_timeout(std::time::Duration::ZERO)
-        .map_err(map_sqlite)?;
+    c.busy_timeout(Duration::ZERO).map_err(map_sqlite)?;
     let checkpoint = match checkpoint_wal(c, true) {
         Err(SessionStoreError::BackendBusy) => {
             tracing::warn!("runtime store WAL truncation deferred; committed data remains durable");

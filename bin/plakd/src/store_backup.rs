@@ -644,13 +644,7 @@ mod tests {
             root.path().to_path_buf(),
         );
         crate::store::tree::save_tree(&paths, &mut tree).unwrap();
-        for (_, path) in sources(&paths) {
-            for suffix in ["-wal", "-shm"] {
-                let mut sidecar = path.as_os_str().to_owned();
-                sidecar.push(suffix);
-                assert!(!Path::new(&sidecar).exists(), "source must be cold");
-            }
-        }
+        assert_cold_sources(&paths);
         let target = root.path().join("backup");
         run(&paths, &target, &mut Vec::new()).unwrap();
         let restored = PlakPaths::from_home(root.path().join("restored"));
@@ -689,6 +683,16 @@ mod tests {
                 .iter()
                 .any(|item| item.display_text() == Some("backup fixture"))
         );
+    }
+
+    fn assert_cold_sources(paths: &PlakPaths) {
+        for (_, path) in sources(paths) {
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = path.as_os_str().to_owned();
+                sidecar.push(suffix);
+                assert!(!Path::new(&sidecar).exists(), "source must be cold");
+            }
+        }
     }
 
     #[test]

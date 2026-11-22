@@ -511,7 +511,7 @@ async fn shutdown_preserves_commits_when_a_reader_pins_the_wal() -> TestResult {
     let reader = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     reader.execute_batch("BEGIN")?;
     let count =
-        |c: &Connection| c.query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, u64>(0));
+        |c: &Connection| c.query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, i64>(0));
     assert_eq!(count(&reader)?, 0);
     store.create(seed()?).await?;
     // Resident host handoff uses the PASSIVE flush before closing the store.
@@ -525,7 +525,7 @@ async fn shutdown_preserves_commits_when_a_reader_pins_the_wal() -> TestResult {
             Ok(())
         })
         .await?;
-    tokio::time::timeout(std::time::Duration::from_secs(3), store.shutdown()).await??;
+    tokio::time::timeout(Duration::from_secs(3), store.shutdown()).await??;
     assert_eq!(
         store
             .dispatch_read("check shutdown checkpoints", |_| Ok(
