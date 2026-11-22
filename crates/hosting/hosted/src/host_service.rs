@@ -150,6 +150,19 @@ pub enum Outbound<P: ProtocolExtension> {
     },
 }
 
+impl<P: ProtocolExtension> Outbound<P> {
+    fn paced_alone(&self) -> bool {
+        matches!(
+            self,
+            Self::Event {
+                observation: SessionObservation::PresentationSnapshot(_)
+                    | SessionObservation::TranscriptPatch(_),
+                ..
+            }
+        )
+    }
+}
+
 /// One attachment's state.
 struct Attachment<P: ProtocolExtension> {
     /// Its connection's face: a remote one takes no local-only observation.
@@ -1085,16 +1098,21 @@ impl<P: ProtocolExtension> HostService<P> {
         // that repays its gaps. Never spin waiting for a mailbox snapshot.
         for _ in 0..2 {
             self.repair_gaps();
-            taken.extend(self.take_queued(attachment, usize::MAX, false));
+            taken.extend(self.take_queued(attachment, usize::MAX, |_| true));
         }
         taken
     }
 
-    fn take_for_wire(&self, attachment: AttachmentId, bulk: bool) -> Vec<Outbound<P>> {
-        if bulk {
-            self.repair_gaps();
-        }
-        self.take_queued(attachment, 1, !bulk)
+    fn take_for_wire(
+        &self,
+        attachment: AttachmentId,
+        bulk: bool,
+        small_only: bool,
+    ) -> Vec<Outbound<P>> {
+        self.take_queued(attachment, 1, |head| match head {
+            Some(item @ Outbound::Event { .. }) => bulk && !(small_only && item.paced_alone()),
+            _ => true,
+        })
     }
 
     // Fence incoming intents when residency ends, but let the transport
@@ -1123,7 +1141,7 @@ impl<P: ProtocolExtension> HostService<P> {
         &self,
         attachment: AttachmentId,
         limit: usize,
-        boundary_only: bool,
+        allow: impl FnOnce(Option<&Outbound<P>>) -> bool,
     ) -> Vec<Outbound<P>> {
         // As in `detach`, the senders this ends drop after the lock.
         let mailbox = self.mailbox();
@@ -1131,7 +1149,7 @@ impl<P: ProtocolExtension> HostService<P> {
         let Some(held) = state.attachments.get_mut(&attachment) else {
             return Vec::new();
         };
-        if boundary_only && matches!(held.queue.front(), Some(Outbound::Event { .. })) {
+        if !allow(held.queue.front()) {
             return Vec::new();
         }
         let count = limit.min(held.queue.len());

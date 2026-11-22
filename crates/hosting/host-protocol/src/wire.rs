@@ -1288,16 +1288,31 @@ pub fn page_snapshot(
         revision,
         items,
     } = snapshot;
-    let mut pages: Vec<Vec<TranscriptItem>> = vec![Vec::new()];
-    let mut used = 0;
-    for item in items {
-        let size = serde_json::to_vec(&item)
+    let mut sizes = Vec::with_capacity(items.len());
+    let mut total = 0_usize;
+    for item in &items {
+        let size = serde_json::to_vec(item)
             .map_err(|error| WireError::Malformed(error.to_string()))?
             .len();
         if size > MAX_SNAPSHOT_ROW_BYTES {
             return Err(WireError::TooLarge);
         }
-        if used != 0 && used + size > PAGE_BUDGET_BYTES {
+        total = total.saturating_add(size);
+        sizes.push(size);
+    }
+    // In next-fit packing, any adjacent pair totals more than the
+    // budget. Reserve room for that worst case, not just the mean fill.
+    let budget = PAGE_BUDGET_BYTES
+        .max(
+            total
+                .saturating_mul(2)
+                .div_ceil((MAX_SNAPSHOT_PAGES - 1) as usize),
+        )
+        .min(MAX_SNAPSHOT_ROW_BYTES);
+    let mut pages: Vec<Vec<TranscriptItem>> = vec![Vec::new()];
+    let mut used = 0;
+    for (item, size) in items.into_iter().zip(sizes) {
+        if used != 0 && used + size > budget {
             pages.push(Vec::new());
             used = 0;
         }
@@ -1307,6 +1322,9 @@ pub fn page_snapshot(
         }
     }
     let count = pages.len();
+    if count > MAX_SNAPSHOT_PAGES as usize {
+        return Err(WireError::TooLarge);
+    }
     Ok(pages
         .into_iter()
         .enumerate()

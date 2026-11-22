@@ -2067,6 +2067,79 @@ fn release_session_detaches_every_attachment_and_releases() {
     handed_off(&host);
 }
 
+#[test]
+fn paced_release_refuses_stale_intents_then_delivers_queued_items_before_detached() {
+    let (host, _) = host(&["s1"]);
+    let out = Out::default();
+    let mut connection = host
+        .connect(
+            out.clone(),
+            Face::Remote,
+            HostPrincipal::Socket(501),
+            || false,
+        )
+        .with_snapshot_output(|_, _| Ok(()));
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let id = attached(&out.take(), 1);
+    let link = connection.node.as_ref().unwrap();
+    for approval_id in ["first", "second", "third"] {
+        link.connection
+            .service
+            .observe(SessionObservation::ApprovalRequired {
+                approval_id: approval_id.into(),
+                call_id: None,
+                tool_name: "fixture".into(),
+                subject: None,
+                prompt: None,
+                expires_at_ms: 1,
+            });
+    }
+    link.session.request_release();
+    connection.flush_output(false).unwrap();
+    assert_eq!(out.take(), [] as [HostFrame<Core>; 0]);
+    request(
+        &mut connection,
+        2,
+        Op::Intent {
+            attachment: id,
+            intent: SessionIntent::Prompt(plakous_host_protocol::intent::Draft::from("stale")),
+            client_id: None,
+            blobs: Vec::new(),
+        },
+    );
+    let frames = out.take();
+    assert_eq!(
+        outcome(&frames, 2),
+        Outcome::Refused(RequestRefusal::NotAttached)
+    );
+    assert!(
+        !frames
+            .iter()
+            .any(|frame| matches!(frame, HostFrame::Detached { .. }))
+    );
+    let mut frames = Vec::new();
+    for _ in 0..8 {
+        connection.flush_output(true).unwrap();
+        frames.extend(out.take());
+        if connection.node.is_none() {
+            break;
+        }
+    }
+    let approvals: Vec<_> = frames
+        .iter()
+        .filter_map(|frame| match frame {
+            HostFrame::Event {
+                observation: SessionObservation::ApprovalRequired { approval_id, .. },
+                ..
+            } => Some(approval_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(approvals, ["first", "second", "third"]);
+    assert_eq!(frames.last(), Some(&HostFrame::Detached { attachment: id }));
+    handed_off(&host);
+}
+
 /// A session that something else keeps resident is answered `resident`
 /// with its reason once the wait is over, and the request is withdrawn: it
 /// does not release later by itself.

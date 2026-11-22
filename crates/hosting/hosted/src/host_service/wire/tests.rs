@@ -12,6 +12,44 @@ fn root() -> NodeAddress {
 }
 
 #[test]
+fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
+    use plakous_host_protocol::Core;
+    use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptPatch};
+    let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
+    let mut connection = WireConnection::new(root(), Vec::new(), actions)
+        .with_snapshot_output(Some(std::sync::Arc::new(|_, _| Ok(()))));
+    let Some(Outcome::Ok(Answer::Attached { attachment })) =
+        connection.request(1, Op::Attach { node: root() })
+    else {
+        panic!("fixture attach was refused");
+    };
+    while intents.try_recv().is_ok() {}
+    let scope = TranscriptScope::Root;
+    connection
+        .service
+        .observe(SessionObservation::TranscriptPatch(TranscriptPatch {
+            scope: scope.clone(),
+            from_revision: 1,
+            to_revision: 2,
+            upserts: vec![TranscriptItem {
+                key: RowKey::new(1, Lane::Runtime, 0),
+                row: TranscriptRow::assistant(
+                    "x".repeat(plakous_host_protocol::wire::MAX_LINE_BYTES),
+                ),
+            }],
+            deletes: Vec::new(),
+        }));
+    connection.flush_pending(true).unwrap();
+    assert_eq!(connection.stdout.inner, [] as [u8; 0]);
+    assert!(connection.service.attached(attachment));
+    assert!(matches!(
+        &*intents.try_recv().unwrap(),
+        SessionIntent::ResyncTranscript { scope: requested } if *requested == scope
+    ));
+    assert!(intents.try_recv().is_err());
+}
+
+#[test]
 fn runner_aliases_decorate_each_wire_node_without_changing_another_attachments_facts() {
     use plakous_host_protocol::Core;
     use plakous_host_protocol::wire::RunnerLabel;
@@ -52,7 +90,7 @@ fn runner_aliases_decorate_each_wire_node_without_changing_another_attachments_f
             }));
     connection.attachment = Some(attachment);
     connection.flush().unwrap();
-    let shown = host_frames(&connection.stdout)
+    let shown = host_frames(&connection.stdout.inner)
         .into_iter()
         .find_map(|frame| match frame {
             HostFrame::Event {

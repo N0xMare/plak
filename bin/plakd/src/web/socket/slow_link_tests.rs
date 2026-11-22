@@ -6,6 +6,65 @@ use std::io::Write as _;
 
 mod baseline_pressure;
 
+#[tokio::test(start_paused = true)]
+async fn web_paced_pages_deliver_ping_before_replay_without_closing() {
+    use crate::host::connection::test_fixtures as paced;
+    use plakous_host_protocol::SessionObservation;
+    let (_home, mut context) = context();
+    context.host = principal_tests::archived_history(paced::history);
+    let outbox = Outbox::default();
+    let mut connection = paced::connection(
+        &context.host,
+        &outbox,
+        plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
+    );
+    assert!(connection.frame(Ok(ATTACH.into())).unwrap());
+    let (server, mut client) = pair().await;
+    let reading = async {
+        attached_answer(&mut client).await;
+        paced::wait_for_snapshot(&outbox, 1).await;
+        client
+            .send(Message::text(
+                r#"{"frame":"request","id":42,"op":{"op":"ping"}}"#,
+            ))
+            .await
+            .unwrap();
+        paced::wait_for_snapshot(&outbox, 2).await;
+        let mut kinds = Vec::new();
+        while kinds.len() < 6 {
+            let frame = client.next().await.unwrap().unwrap();
+            kinds.push(
+                match decode_line::<HostFrame<PlakExtension>>(frame.to_text().unwrap()).unwrap() {
+                    HostFrame::Snapshot(page) if page.last => "last page",
+                    HostFrame::Snapshot(_) => "page",
+                    HostFrame::Response {
+                        id: 42,
+                        outcome: Outcome::Ok(Answer::Pong),
+                    } => "pong",
+                    HostFrame::Event {
+                        observation: SessionObservation::TranscriptPatch(_),
+                        ..
+                    } => "patch",
+                    _ => panic!("unexpected paced frame"),
+                },
+            );
+        }
+        assert_eq!(
+            kinds,
+            ["page", "pong", "page", "last page", "patch", "patch"]
+        );
+        client
+            .send(Message::text(r#"{"frame":"bye"}"#))
+            .await
+            .unwrap();
+    };
+    let (ended, ()) = tokio::join!(
+        attached(server, &context, &mut connection, &outbox),
+        reading
+    );
+    assert!(matches!(ended, Ended::Bye));
+}
+
 fn context() -> (tempfile::TempDir, Served) {
     let home = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.path().to_path_buf());

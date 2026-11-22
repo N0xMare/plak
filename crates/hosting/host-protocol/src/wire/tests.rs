@@ -564,6 +564,22 @@ fn a_large_snapshot_travels_as_pages() {
     assert!(encode_line(&Host::Snapshot(indivisible.into_iter().next().unwrap())).is_ok());
 }
 
+#[test]
+fn underfilled_pages_still_fit_the_wire_page_count() {
+    let whole = snapshot(66, 520 * 1024);
+    let sizes = whole.items.len();
+    let pages = page_snapshot(whole, 7).unwrap();
+    assert!(pages.len() <= MAX_SNAPSHOT_PAGES as usize);
+    assert_eq!(
+        pages.iter().map(|page| page.items.len()).sum::<usize>(),
+        sizes
+    );
+    assert!(pages.last().unwrap().last);
+    for page in pages {
+        assert!(encode_line(&Host::Snapshot(page)).is_ok());
+    }
+}
+
 fn chunk(id: &str, len: usize) -> BlobChunk {
     use base64::Engine as _;
     BlobChunk {

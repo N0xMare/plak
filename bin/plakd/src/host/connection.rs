@@ -15,6 +15,8 @@ use super::send::{MAX_PENDING_BYTES, Progress};
 use crate::surface_protocol::PlakExtension;
 
 mod snapshot;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 
 const MAX_PENDING_FRAMES: usize = 8192;
 const MAX_SNAPSHOT_JOBS: usize = 2;
@@ -840,6 +842,33 @@ mod tests {
             let frame: HostFrame<PlakExtension> = serde_json::from_slice(&line).unwrap();
             assert!(
                 matches!(frame, HostFrame::Snapshot(frame) if frame.page == page && frame.last == (page == 2))
+            );
+        }
+        assert!(outbox.ordered_drained());
+    }
+
+    #[tokio::test]
+    async fn the_snapshot_slot_limit_refuses_one_more_without_poisoning_output() {
+        static ENCODER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let held = ENCODER.try_acquire().unwrap();
+        let outbox = Outbox::default();
+        for _ in 0..MAX_PENDING_SNAPSHOTS {
+            outbox
+                .snapshot_with(8, PresentationSnapshot::empty(1), &ENCODER)
+                .unwrap();
+        }
+        assert!(
+            outbox
+                .snapshot_with(8, PresentationSnapshot::empty(1), &ENCODER)
+                .is_err()
+        );
+        assert!(!outbox.overflowed());
+        drop(held);
+        for _ in 0..MAX_PENDING_SNAPSHOTS {
+            assert!(
+                next_ordered(&outbox)
+                    .await
+                    .starts_with(br#"{"frame":"snapshot","#)
             );
         }
         assert!(outbox.ordered_drained());

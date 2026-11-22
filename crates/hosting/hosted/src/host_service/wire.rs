@@ -39,6 +39,7 @@ use super::{HostService, Outbound, TreeNodes};
 use crate::error::{CliFailure, CliResult};
 use lines::Next;
 mod drafts;
+mod paced;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_timing;
@@ -279,7 +280,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     drafts: Option<super::drafts::DraftRegistry>,
     buffered_drafts: Option<Vec<super::drafts::DraftDelivery>>,
     snapshot_output: Option<SnapshotOutput>,
-    stdout: W,
+    stdout: paced::Counted<W>,
     actions: IntentSender<P>,
     service: HostService<P>,
     attachment: Option<AttachmentId>,
@@ -498,7 +499,7 @@ where
             drafts: None,
             buffered_drafts: None,
             snapshot_output: None,
-            stdout,
+            stdout: paced::Counted::new(stdout),
             service,
             actions,
             attachment: None,
@@ -1372,12 +1373,7 @@ where
 
     fn flush_pending(&mut self, bulk: bool) -> CliResult<()> {
         if self.snapshot_output.is_some() {
-            self.flush_answers()?;
-            if let Some(attachment) = self.attachment {
-                let items = self.service.take_for_wire(attachment, bulk);
-                self.write_observations(attachment, items)?;
-            }
-            return Ok(());
+            return self.flush_paced(bulk);
         }
         if bulk
             || self

@@ -268,6 +268,103 @@ fn archived_node() -> NodeAddress {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn socket_paced_pages_deliver_ping_before_replay_without_closing() {
+    use crate::host::connection::test_fixtures as paced;
+    use plakous_host_protocol::SessionObservation;
+    use plakous_host_protocol::wire::{decode_line, encode_line};
+    use tokio::io::AsyncBufReadExt as _;
+
+    let host = SessionHost::new(
+        NoSessions {
+            archived: true,
+            replay: true,
+            ..NoSessions::default()
+        },
+        "fixture",
+        0,
+    );
+    let outbox = Outbox::default();
+    let mut connection = paced::connection(&host, &outbox, HostPrincipal::Socket(0));
+    let attach = ClientFrame::<PlakExtension>::Request {
+        id: 1,
+        op: Op::Attach {
+            node: archived_node(),
+        },
+    };
+    assert!(connection.frame(encode_line(&attach)).unwrap());
+    let (server, client) = tokio::io::duplex(4096);
+    let (read, write) = tokio::io::split(server);
+    let reader = Reader {
+        read,
+        lines: LineReader::default(),
+        queued: VecDeque::new(),
+        buffer: zeroize::Zeroizing::new(vec![0; 4096]),
+    };
+    let reading = async {
+        let mut client = tokio::io::BufReader::new(client);
+        let mut line = String::new();
+        client.read_line(&mut line).await.unwrap();
+        assert!(matches!(
+            decode_line::<HostFrame<PlakExtension>>(&line),
+            Ok(HostFrame::Response {
+                id: 1,
+                outcome: Outcome::Ok(Answer::Attached { .. })
+            })
+        ));
+        paced::wait_for_snapshot(&outbox, 1).await;
+        let ping = encode_line(&ClientFrame::<PlakExtension>::Request {
+            id: 42,
+            op: Op::Ping,
+        })
+        .unwrap();
+        client.get_mut().write_all(ping.as_bytes()).await.unwrap();
+        paced::wait_for_snapshot(&outbox, 2).await;
+        let mut kinds = Vec::new();
+        while kinds.len() < 6 {
+            line.clear();
+            client.read_line(&mut line).await.unwrap();
+            kinds.push(
+                match decode_line::<HostFrame<PlakExtension>>(&line).unwrap() {
+                    HostFrame::Snapshot(page) if page.last => "last page",
+                    HostFrame::Snapshot(_) => "page",
+                    HostFrame::Response {
+                        id: 42,
+                        outcome: Outcome::Ok(Answer::Pong),
+                    } => "pong",
+                    HostFrame::Event {
+                        observation: SessionObservation::TranscriptPatch(_),
+                        ..
+                    } => "patch",
+                    _ => panic!("unexpected paced frame"),
+                },
+            );
+        }
+        assert_eq!(
+            kinds,
+            ["page", "pong", "page", "last page", "patch", "patch"]
+        );
+        client
+            .get_mut()
+            .write_all(br#"{"frame":"bye"}"#)
+            .await
+            .unwrap();
+        client.get_mut().write_all(b"\n").await.unwrap();
+    };
+    let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| false);
+    tokio::join!(
+        attached(
+            reader,
+            ProgressIo::new(write),
+            &mut connection,
+            &outbox,
+            &host,
+            &stop
+        ),
+        reading
+    );
+}
+
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -282,6 +379,7 @@ pub(in crate::host) struct NoSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
     durable: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
     archived: bool,
+    replay: bool,
 }
 
 impl NoSessions {
@@ -356,9 +454,13 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
                 archived: true,
                 session: session.into(),
                 root: archived_node(),
-                observations: vec![SessionObservation::PresentationSnapshot(
-                    PresentationSnapshot::empty(1),
-                )],
+                observations: if self.replay {
+                    crate::host::connection::test_fixtures::history()
+                } else {
+                    vec![SessionObservation::PresentationSnapshot(
+                        PresentationSnapshot::empty(1),
+                    )]
+                },
             }),
         )
     }

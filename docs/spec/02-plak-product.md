@@ -4572,18 +4572,23 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   reply. When ordered output is backed up, the driver leaves further
   observations in the bounded attachment queues but continues handling
   requests and polling console replies, lifecycle advisories, stops and
-  attachment ends. The host settles an attachment end before forwarding
-  another intent to it, even while its final frames wait their turn. Terminal
+  attachment ends. The host fences an ended attachment before forwarding
+  another intent to it. A stale intent can receive `not_attached` before
+  `moved` or `detached` while earlier observations still await delivery. Terminal
   replies, refusals and unknown outcomes stay FIFO because a refusal or
   unknown outcome can belong to a terminal operation.
   Snapshot pages target 1 MiB of encoded row payload. An indivisible row
-  can occupy a page alone up to the existing 8 MiB row limit, subject to
-  the line and whole-snapshot bounds. Snapshot pagination and encoding use
-  bounded blocking work. Each snapshot holds one ordered position; the
+  can occupy a page alone up to the existing 8 MiB row limit, and the
+  target grows when needed to stay within the 64-page bound. The line
+  and whole-snapshot bounds still apply. Snapshot pagination and encoding
+  use two background slots and at most one inline fallback per connection.
+  Each snapshot holds one ordered position; the
   writer takes only its next page after the preceding frame finishes.
   Pending pages have their own snapshot bounds and never charge the live
-  output byte cap all at once. The driver takes at most one attachment
-  observation per drained ordered batch, including during initial replay.
+  output byte cap all at once. The driver coalesces at most 32 small
+  observations or 256 KiB per drained ordered batch, checking the byte
+  budget after each observation. Snapshots and transcript patches take
+  separate turns, including during initial replay.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`
