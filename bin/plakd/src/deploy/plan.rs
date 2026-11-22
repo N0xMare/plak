@@ -105,8 +105,8 @@ impl Plan {
                 transition.runners = configuration
                     .runners
                     .iter()
-                    .map(|runner| {
-                        let own = &targets.runners[&runner.id].runner_triple;
+                    .filter_map(|runner| {
+                        let own = &targets.runners.get(&runner.id)?.runner_triple;
                         let image = &artifacts.image(runner.node.platform).manifest.build_info;
                         let destination = RunnerTriple {
                             protocol: image.runner.protocol,
@@ -120,7 +120,7 @@ impl Plan {
                         } else {
                             RunnerTransition::ChangedTriple
                         };
-                        (runner.node.platform, class)
+                        Some((runner.node.platform, class))
                     })
                     .collect();
                 transition.runners.sort_unstable();

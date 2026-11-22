@@ -206,6 +206,17 @@ fn stderr_class(bytes: &[u8]) -> &'static str {
     .unwrap_or("remote_command_or_transport")
 }
 
+pub(super) fn unreachable(error: &crate::CliFailure) -> bool {
+    matches!(
+        error.message(),
+        "SSH exchange was unavailable or exceeded its bound"
+            | "SSH returned no bounded verdict (name_resolution)"
+            | "SSH returned no bounded verdict (connection_refused)"
+            | "SSH returned no bounded verdict (timeout)"
+            | "SSH returned no bounded verdict (transport_lost)"
+    )
+}
+
 pub(super) fn machine_id(platform: Platform) -> CliResult<String> {
     if platform == Platform::Mac {
         let mut command = operator_process::command("/usr/sbin/ioreg".as_ref());

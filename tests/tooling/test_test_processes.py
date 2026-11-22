@@ -247,7 +247,7 @@ class TestProcessGuardTests(unittest.TestCase):
         machine_socket = f'{runner_root}/{builds}/{triple}/{run_directory}/{socket_file}'
         suffixes = [
             f'{home}/{machine_socket}',
-            f'{home}/host/runner/v{protocol}/run/runner.sock',
+            f'{home}/host/runner/{triple}/run/r.sock',
             f'{home}/host/run/r00.e00.p00.t00.sock',
             f'{fixture}/web/plak.sock',
             f'rh-{fixture}/{machine_socket}',

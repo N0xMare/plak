@@ -265,13 +265,15 @@ they reach the loop as data and ports, never as a loop of their own.
 Planned runner replacement can preserve promoted jobs through the versioned
 job-retention endpoint (chapter 01 §8.4), without weakening exact native runner
 matching. Home-local retention endpoints use `<home>/builds/<triple>/` to keep
-Unix socket paths short; the protocol-local `host/runner/v<N>/run/runner.sock`
-attach path is unchanged. The new daemon is the sole native peer; original daemons retain their
+Unix socket paths short; the home-local native attachment is
+`host/runner/<triple>/run/r.sock`. The new daemon is the sole native peer;
+original daemons retain their
 own processes and expose only fixed job controls. Connection-bound services and operator terminals
 retain their existing rebuild/closure laws. A downgraded or reinstalled drainer
 never re-promotes its retention-only host/line; the remedy is to finish, consume
 or disown its jobs through a compatible retained build. Source foreground work
-must be settled before surrender, not converted to a retained job.
+must join before surrender; a joined Notice promotion is already a normal
+background allocation by then.
 
 ### 2.1 The plakd home
 
@@ -331,10 +333,11 @@ another session's jobs.
   binary-ids                  development-build identity cache, 0600 (§1), disposable
   host-id                     this home's host identity (runners, tree custody), 0600, made at first use
   host/run/<state key>.sock   `plakd host`'s control socket, 0600 in 0700 directories (section 4.6, chapter 04 section 4.7); not state
-  host/runner/v<N>/           this home's home-local runner for runner protocol N (chapter 01 §8.4), 0700:
-                              runner-id, owners.json (its owner floors, as below), empty/ (where a
+  host/runner/                this home's stable local runner-id, 0600
+  host/runner/<triple>/       one exact home-local runner build (chapter 01 §8.4), 0700:
+                              version.json (the exact triple), owners.json (its owner floors, as below), empty/ (where a
                               request naming no workspace is answered), run/ (0700: the 0600
-                              runner.sock and the 0600 lock file its daemon holds for its life); not
+                              r.sock and the 0600 lock file its daemon holds for its life); not
                               state, and never reached by `runner connect --stdio`;
                               calls/<state key>/ (the serving host's journal) and serve.log (0600)
   runners/<name>/runner.json  paired identity, machine id, effective roots and version, 0600
@@ -5776,10 +5779,9 @@ Verification restores process metadata only into detached, start-refusing
 bookkeeping from the durable job mirror. It never refreshes or watches runner
 jobs, adopts a line or takes process custody. Paired placements retain the
 binding-free qualification connection for workspace/configuration reads only,
-for both changed and unchanged triples. Terminal job history does not block
-reopen; process liveness and unknown-state refusals remain the source's native
-process gate below, with its typed `host_upgrade_process_retention_unavailable`
-old-build settle/drain remedy.
+for both changed and unchanged triples. Terminal history and running
+promoted jobs do not block exact reopen. The source separately qualifies
+process custody as described below.
 The source closes ingress and resolves earlier draft verdicts before requesting
 runtime holds. `--drain` defaults to 60 seconds; integer `ms`, `s`, `m`, `h`
 suffixes and bare seconds accept 0 through one hour. It is exclusive with
@@ -5843,36 +5845,45 @@ A replacement acknowledgement requires a fresh source-instance identity even
 when a test forces the same image to restart. An already running exact target
 remains an ordinary no-op.
 
-A changed local-runner protocol refuses before handoff. Runner retention v1
-exists, but host upgrade does not carry jobs across changed runner triples.
-Step draining adds no such job-retention channel. One read-only gate
-checks the source's existing bound runner clients before drain. Same-key upgrade
-checks again before surrender; cross-key settled carry checks once, before the
-admission pause. A changed-triple request with live foreground/background processes or
-unknown process state refuses with the remedy to settle/drain using the old
-build. A cached picker Ready row is not a process-state proof: a source with no
-native backend user may have retired its idle paired connection. Before changing
-a paired runner's dedicated link, reconnect a settled source root on that runner read-only
-and retain that attachment through the upgrade. This opens no new turn. If the
-link was already advanced, restore the source-compatible link first, establish
-the old connection, then advance it again. The source names this remedy when
-inspection is unavailable; it never treats missing inspection as an empty job
-inventory or substitutes a destination bind. Unavailable local inspection instead
-names the old host's home-local runner connection. A five-second inspection timeout
-names runner reachability/load and retry, not a mandatory link change or attachment.
-A source restart is not required.
+A changed local-runner protocol still refuses before handoff. A changed
+revision or flavor on the same-key path carries running and terminal promoted
+jobs through retention v1 (chapter 01 §8.4). The source owns admission and
+native process control before surrender; qualification transfers nothing.
+Notice promotes foreground waits, and the held check refuses unpromoted
+work or incomplete inventory on a referenced placement. An aborted
+preparation restores source admission without stopping promoted jobs.
+A process that starts between the initial inspection and the hold participates
+in the same drain and carry; a mere Notice acknowledgement does not suffice.
+
+The old daemon keeps each process and its output and exit state without
+moving, pausing or restarting it. After surrender the target uses its own
+native daemon for new commands. Its recovery sweep discovers the old line's
+original daemon instance and allocation identities through retention, takes
+the line's head lease, and transfers only control of the recorded allocations.
+The native job port uses the original endpoint for output, wait, stop, write
+and acknowledgement. The line terminal table and driver ledger govern
+consumption; a restart or repeated watch/snapshot does not duplicate a result
+or resend a process start or an ambiguous write. Confirmed original-daemon
+loss yields typed `outcome_unknown` for allocations without exact terminal
+evidence; a transient link failure does not assert that an original exited.
+The old daemon exits on its own when its retention obligations and idle grace
+end. No job authority is added to the host upgrade receipt or state key.
+
+The paired runner's dedicated link advances to the destination before its
+binding-free qualification; its existing source connection continues to the
+incumbent daemon. If the source connection is missing for a referenced root or
+child placement, restore the source-compatible link if needed, reconnect a
+source root on that runner read-only and keep it attached, then advance the
+link again. A picker Ready row alone does not retain that source connection.
+An unreachable enrolled paired runner without a durable placement reference
+can be skipped with a typed `unreferenced_runner_unavailable` warning; that
+runner's dedicated link is left alone if the deploy client cannot reach it.
+Repair the skipped link to match the serving host before using that placement.
+Missing local inspection instead names the source local connection, while a
+timed-out inspection directs the operator to reachability/load and retry.
 Concurrent resident release retries definite busy lease releases and durability
-flushes, each under its original cleanup bound; it does not retry ambiguous failures or require
-an operator restart to avoid checkpoint contention. A persistent cleanup refusal
-still aborts before surrender.
-Promoted-job continuation is qualified only for an unchanged exact triple.
-On the same-key path, if a process begins after the first check, Notice may
-already have promoted its wait by the final check. Refusal leaves that process running under the source;
-it does not stop the process or surrender its custody. The gate checks child
-runner placements too, not just each root's runner. This temporary gate does not
-weaken the home-local protocol-only admission rule
-or any remote exact-triple rule. Cross-key live trees/jobs remain outside this
-settled carrier.
+flushes under their original cleanup bounds; unresolved release still aborts
+before surrender. Cross-key live trees and jobs remain outside settled carry.
 
 Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
 `--wait`, blockers are returned before stopping admissions, as a list with
@@ -6263,8 +6274,8 @@ to cached home-local daemon refreshes; direct local placement without a daemon
 keeps its separate readiness path.
 
 - **Local process daemon.** After binding its control socket, its independently owned local probe
-  dials the home-local runner of this
-  protocol, binds journaled to `host/runner/v<N>/calls/<state key>`, and
+  dials the home-local runner of this exact triple, binds journaled to
+  `host/runner/<triple>/calls/<state key>`, and
   selects `LocalDaemonBackend` through its services for every root and child.
   It retries connect, start and connect under one 10 s bound, including an EOF
   before Hello and a starter losing to an idle daemon's final socket/lock
@@ -6326,12 +6337,12 @@ keeps its separate readiness path.
   remain direct and stop their jobs on exit.
   This lifetime includes paired native runner placements, not only the
   home-local daemon: a quiescent root's promoted jobs survive graceful host
-  restart and same-key handoff with an unchanged exact runner triple. Neither
-  host-registry cleanup nor agent cleanup may turn that handoff into a
-  `SessionExit` job stop. Explicit session stops remain terminal, and the
-  changed-triple live/unknown-process refusal in §4.6 is unchanged.
-  An embedded open checks the live holder first, preserving
-  `tree_hosted_elsewhere`, then inspects the current-protocol home-local daemon
+  restart and same-key handoff, including replacement by a compatible changed
+  runner triple (§2.5). Neither host-registry cleanup nor agent cleanup may
+  turn that handoff into a `SessionExit` job stop. Explicit session stops remain
+  terminal. An embedded open checks the live holder first, preserving
+  `tree_hosted_elsewhere`, then inspects the live current-protocol home-local
+  daemons (including a pre-transfer original)
   before opening the canonical session. It resolves the root and every node's
   recorded session locator to its current head line, without opening any of
   them. Live work on any of those lines, including a held child's line after
@@ -6579,24 +6590,27 @@ re-plan with an S2 incumbent. Stage with the candidate's installer before
 using its link command, which cannot relink pre-port snapshots.
 Ordinary `run --max-turns 1` is not a substitute.
 
-When replacing a host with paired placements, plan asks its exact source
-coordinator to inspect incumbent runner connections and refuses live or
-unknown job state. An `outcome_unknown` job blocks deploy and names the
-runner, line and job number and the `jobs.ack` or `jobs.disown` remedy.
-Ordinary manual host upgrade retains its existing process checks.
+When replacing a host with paired placements, plan asks the exact source
+coordinator to inspect the incumbent runner connections. Running and unknown
+promoted-job outcomes are not blockers for same-key retention. A missing
+source connection to a referenced placement blocks with the reconnect
+remedy in §2.5. An unreachable target may be omitted only when the source
+proves it unreferenced; the report carries a typed warning and no link or
+rollback operation is issued for that target. A runner already recorded in
+a deployment cohort is not omitted during recovery.
+
 The same-user preflight has no admission or connection lifetime effects.
-Apply checks before runner links move. The requester proves inspection
-support on the exact source instance before sending the enrolled runner
-IDs; the source checks those placements again before drain and just before
-surrender, whether the runner triple changes or not. Requests without
-enrolled runner IDs keep the ordinary host-upgrade encoding. A read-only
-attachment on a settled root using the source-compatible link can restore
-missing inspection; a picker Ready row is not enough. If the attachment
-disappears and inspection becomes unavailable, the source refuses rather
-than relying on the earlier proof.
-A source without this inspection request must be upgraded by the manual
-procedure first. Runner links must be dedicated links to owned, immutable
-snapshots. Install does not move them.
+Apply renews the proof before runner links move. The requester proves
+inspection support on the exact source instance before sending the enrolled
+placement aliases; the source resolves them to pinned runner identities and
+rechecks under the handoff hold. Requests without enrolled aliases keep the
+ordinary host-upgrade encoding. A read-only attachment on a settled root
+using the source-compatible link can restore missing inspection; a picker
+Ready row is not enough. If a referenced attachment disappears and
+inspection becomes unavailable, the source refuses rather than relying on
+the earlier proof. A source without this inspection request must be upgraded
+by the manual procedure first. Runner links must be dedicated links to owned,
+immutable snapshots. Install does not move them.
 
 Plan refuses any in-use account missing from inventory, and reports signed-out
 accounts as `not_enrolled`. Named logins of the same kind remain distinct.

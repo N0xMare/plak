@@ -357,8 +357,9 @@ not (
   | test(gateway::durability::)
   | test(=deploy_gateway_requester_loss_reconciles_each_cohort_boundary)
   | test(=deploy_requester_loss_does_not_repeat_surrender)
-  | test(subscriptions::custody::tests::durability::))
-| ((test(host_skeleton::upgrade::))
+  | test(subscriptions::custody::tests::durability::)
+  | test(host_skeleton::upgrade::retained_jobs::changed::durability::))
+| ((test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::))
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)
@@ -676,6 +677,7 @@ default-filter = '''
   | test(=deploy_gateway_requester_loss_reconciles_each_cohort_boundary)
   | test(=deploy_requester_loss_does_not_repeat_surrender)
   | test(subscriptions::custody::tests::durability::)
+  | test(host_skeleton::upgrade::retained_jobs::changed::durability::)
 '''
 
 [[profile.durability.overrides]]
@@ -691,7 +693,7 @@ test-threads = 16
 slow-timeout = { period = "240s", terminate-after = 2 }
 # BEGIN generated install (tools/gate/nextest_layout.py)
 default-filter = '''
-(test(host_skeleton::upgrade::))
+(test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::))
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)

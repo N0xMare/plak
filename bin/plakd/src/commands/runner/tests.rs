@@ -132,7 +132,7 @@ fn a_runner_bind_names_the_process_custody_instance() {
 }
 
 /// `connect --stdio`, which a host's ssh runs, bridges only to the machine
-/// runner; the home-local runner lives apart, keyed by protocol version.
+/// runner; the home-local runner has a separate exact-build namespace.
 #[test]
 fn connect_never_reaches_the_home_local_runner() {
     let home = tempfile::tempdir().unwrap();
@@ -145,8 +145,8 @@ fn connect_never_reaches_the_home_local_runner() {
         local.socket_path(),
         home.path()
             .join("host/runner")
-            .join(format!("v{}", version().protocol))
-            .join("run/runner.sock")
+            .join(daemon::triple_key(&version()))
+            .join("run/r.sock")
     );
 }
 

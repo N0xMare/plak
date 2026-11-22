@@ -85,7 +85,7 @@ pub(crate) async fn dial(paths: &PlakPaths) -> CliResult<RunnerClient> {
     let home = LocalRunnerHome::of(paths);
     plakous::runner::daemon::check_socket_path(&home.socket_path())
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    super::home::private_below(paths.home(), home.root())?;
+    home.prepare_build(paths)?;
     let journal = Arc::new(
         FileCallJournal::open(
             home.root()

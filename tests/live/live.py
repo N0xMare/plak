@@ -62,7 +62,7 @@ def socket_paths(home: Path) -> list[Path]:
     triple = f"v{protocol}-" + "0" * 12
     return [
         home / "host/run" / f"{state}.sock",
-        home / f"host/runner/v{protocol}/run/runner.sock",
+        home / "host/runner" / triple / "run/r.sock",
         home / "builds" / triple / f"retention-v{retention}.sock",
         home / "runner/builds" / triple / "run" / f"{triple}.sock",
         home / "runner/builds" / triple / f"retention-v{retention}.sock",

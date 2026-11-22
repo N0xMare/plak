@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CliFailure, CliResult, DeployRunnerInspection, DeployRunnerVerdict, Identity, PROBE_BOUND,
-    PlakPaths, UnixStream, io_failure, process_safety, read, socket, write,
+    PlakPaths, UnixStream, io_failure, read, runner_carry, socket, write,
 };
 
 #[derive(Deserialize, Serialize)]
@@ -45,15 +45,20 @@ pub(super) fn prove_deploy_source(
         .map_err(io_failure)?;
     let identity: Identity = read(&stream)?;
     if identity.instance != inspection.source_instance || identity.deploy_idle != Some(true) {
-        return Err(process_safety::deploy_refusal(
+        return Err(runner_carry::deploy_refusal(
             "source coordinator changed or is not idle; replan",
         ));
     }
     write(&mut stream, inspection)?;
-    match read(&stream).map_err(|_| {
-        process_safety::deploy_refusal("source cannot prove deploy runner inspection")
-    })? {
-        DeployRunnerVerdict::Settled => Ok(()),
+    match read(&stream)
+        .map_err(|_| runner_carry::deploy_refusal("source cannot prove deploy runner inspection"))?
+    {
+        DeployRunnerVerdict::Settled { warnings } => {
+            for warning in warnings {
+                eprintln!("host upgrade: {warning}");
+            }
+            Ok(())
+        }
         DeployRunnerVerdict::Blocked { detail } => Err(CliFailure::new(detail)),
     }
 }
@@ -125,10 +130,9 @@ impl Drop for Caller {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::services::Services;
 
     #[test]
-    fn deploy_inspection_keeps_legacy_request_bytes_and_uses_the_gate_for_both_triples() {
+    fn ordinary_upgrade_omits_runner_inspection_fields() {
         let exact = r#"{"source_instance":"source","source_key":"key","destination":"/example/plakd","destination_key":"key","expected_binary":"0123456789ab","wait_seconds":0,"drain":{"mode":"idle"},"abandon":null}"#;
         let mut request: Request = serde_json::from_str(exact).unwrap();
         assert_eq!(serde_json::to_string(&request).unwrap(), exact);
@@ -141,24 +145,5 @@ mod tests {
                 exact.trim_end_matches('}')
             )
         );
-        let (_temp, paths) = PlakPaths::isolated_test_home();
-        let services = Services::for_home(paths);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let same = crate::commands::runner::version();
-        let mut changed = same.clone();
-        changed.source_revision = "different".into();
-        for triple in [&same, &changed] {
-            let error = request
-                .check_processes(&services, triple, runtime.handle())
-                .unwrap_err();
-            assert!(
-                error
-                    .message()
-                    .contains("native process inspection is unavailable for runner desk")
-            );
-        }
     }
 }

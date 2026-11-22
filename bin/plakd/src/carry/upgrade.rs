@@ -194,10 +194,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
     } else {
         export_versions
     };
-    let mut runner_version = crate::commands::runner::version();
-    if let Some(revision) = crate::test_hooks::upgrade_runner_revision() {
-        runner_version.source_revision = revision;
-    }
+    let runner_version = crate::commands::runner::version();
     Ok(DestinationProbe {
         protocol: PROTOCOL,
         receipt_version: receipt::VERSION,

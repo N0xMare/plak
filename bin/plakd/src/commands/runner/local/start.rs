@@ -93,7 +93,8 @@ async fn managed_start(paths: &PlakPaths) {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let unit = format!("plak-runner-{hash}-v{}", super::super::version().protocol);
+    let build = plakous::runner::daemon::triple_key(&super::super::version());
+    let unit = format!("plak-runner-{hash}-{build}");
     let Ok(executable) = std::env::current_exe() else {
         return;
     };
@@ -110,6 +111,11 @@ async fn managed_start(paths: &PlakPaths) {
         .arg("--setenv=PATH=/usr/bin:/bin");
     if let Some(home) = crate::environment::inherited_home() {
         manager.arg(format!("--setenv=HOME={home}"));
+    }
+    for (name, value) in crate::test_hooks::upgrade_runner_environment() {
+        let mut argument = std::ffi::OsString::from(format!("--setenv={name}="));
+        argument.push(value);
+        manager.arg(argument);
     }
     manager
         .arg("--")
@@ -140,6 +146,7 @@ fn detached_start(
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("PLAK_HOME", paths.home())
+        .envs(crate::test_hooks::upgrade_runner_environment())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(log);

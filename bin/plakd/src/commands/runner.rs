@@ -291,15 +291,15 @@ fn admitted_environment(
 }
 
 /// `plakd runner serve --local`: this home's home-local runner (spec 01
-/// §8.4), in the foreground, until it is idle. It binds only this home's
-/// host, from any build of its protocol version, carries only process
+/// §8.4), in the foreground, until it is idle. It serves this home's
+/// exact build socket and only this home's host, carries only process
 /// sessions, and starts each process in the context its host sends; it
 /// serves any workspace outside the product home, as the local runner does.
 async fn serve_local(paths: &PlakPaths) -> CliResult<()> {
     let home = LocalRunnerHome::of(paths);
     let socket = home.socket_path();
     daemon::check_socket_path(&socket).map_err(|error| CliFailure::new(error.to_string()))?;
-    home::private_below(paths.home(), home.root())?;
+    home.prepare_build(paths)?;
     let empty = home.empty_directory();
     home::private_below(paths.home(), &empty)?;
     let scope = || -> CliResult<ExecutionEnvironmentScope> {
@@ -501,6 +501,7 @@ fn start_daemon(
         .env("PATH", path)
         .env("HOME", user_home)
         .env("PLAK_HOME", paths.home())
+        .envs(crate::test_hooks::upgrade_runner_environment())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(log);

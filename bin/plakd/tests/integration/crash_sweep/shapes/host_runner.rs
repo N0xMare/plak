@@ -73,16 +73,14 @@ fn alive(pid: i32) -> bool {
 }
 
 fn runner_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
-    use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
+    use plakous::runner::protocol::{Bind, VersionTriple};
     use plakous::runner::{ClientWindows, RunnerClient};
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     runtime.block_on(async {
-        let socket = fixture
-            .home()
-            .join(format!("host/runner/v{PROTOCOL_VERSION}/run/runner.sock"));
+        let socket = crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock");
         let Ok(stream) = tokio::net::UnixStream::connect(socket).await else {
             return Vec::new();
         };

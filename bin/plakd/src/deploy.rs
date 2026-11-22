@@ -23,7 +23,9 @@ mod runner;
 mod ssh;
 mod target;
 mod timing;
-pub(crate) use protocol::{DeployRunnerInspection, DeployRunnerVerdict, RUNNER_INSPECTION_REFUSAL};
+pub(crate) use protocol::{
+    DeployRunnerInspection, DeployRunnerVerdict, DeployRunnerWarning, RUNNER_INSPECTION_REFUSAL,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Action {

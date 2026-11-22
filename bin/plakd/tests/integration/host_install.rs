@@ -256,10 +256,7 @@ fn host_lifecycle(managed: bool) -> TestResult {
     assert!(!std::fs::read_to_string(&fixture.log)?.contains("UNRELATED_SECRET"));
     // Finish the deferred start before testing stop, so teardown cannot race
     // a daemon that has not published its pid and socket yet.
-    let daemon = fixture.product.join(format!(
-        "host/runner/v{}/run/runner.sock",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    ));
+    let daemon = crate::offline_support::local_runner_root(&fixture.product).join("run/r.sock");
     let until = std::time::Instant::now() + super::offline_support::WAIT;
     while std::os::unix::net::UnixStream::connect(&daemon).is_err() {
         assert!(

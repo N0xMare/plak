@@ -156,8 +156,7 @@ pub(super) fn execute_host(
                 expected == observed.instance && placements == observed.paired,
                 "source runner placements changed; replan",
             )?;
-            target.runner_preflight(&observed)?;
-            data(&())
+            data(&target.runner_preflight(&observed)?)
         }
         HostOp::Health { expected, routes } => data(&health(target, &expected, &routes)?),
         HostOp::CanaryPreflight { expected, route } => {

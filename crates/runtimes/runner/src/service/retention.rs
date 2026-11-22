@@ -526,15 +526,17 @@ impl RunnerService {
     }
 
     pub(crate) fn retention_keeps_alive(&self, now: Instant) -> bool {
+        if self.retention_context().is_none() {
+            return false;
+        }
         let held: Vec<_> = lock(&self.inner.lines)
             .iter()
             .map(|(key, (sessions, _))| (key.clone(), sessions.clone()))
             .collect();
         let mut needed = false;
         for ((host, line), sessions) in held {
-            if !lock(&self.inner.tables).retention_only(&host, &line) {
-                continue;
-            }
+            // Results can become terminal after the source disconnects but
+            // before any successor gets far enough to CAS the line.
             let jobs = sessions.jobs();
             let terminal_times = plakous_tools::internal::job_terminal_times(&sessions);
             let mut times = lock(&self.inner.retention.terminals);

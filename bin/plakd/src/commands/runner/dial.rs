@@ -59,7 +59,8 @@ pub(crate) const STRICT_SSH_OPTIONS: [&str; 37] = [
 /// built from (`unknown` when the build did not say) and its flavor.
 pub(crate) fn version() -> VersionTriple {
     VersionTriple::current(
-        crate::build_identity::SOURCE_REVISION,
+        crate::test_hooks::upgrade_runner_revision()
+            .unwrap_or_else(|| crate::build_identity::SOURCE_REVISION.to_owned()),
         crate::build_identity::FLAVOR,
     )
 }

@@ -143,6 +143,12 @@ async fn retention_review_connect_errors_need_instance_inode_or_unlocked_absence
     .unwrap();
     assert!(!confirmed_loss(&error));
     assert!(
+        loss::positive(directory.parent().unwrap(), &origin, Some(unchanged)),
+        "a crashed daemon's stale socket does not make its unlocked guard live"
+    );
+    std::fs::remove_file(native).unwrap();
+    std::fs::remove_file(directory.join("retention-native.lock")).unwrap();
+    assert!(
         !loss::positive(directory.parent().unwrap(), &origin, Some(unchanged)),
         "a refused connect with an unchanged inode is not loss"
     );

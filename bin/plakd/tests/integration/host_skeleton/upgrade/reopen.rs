@@ -279,20 +279,11 @@ fn a_later_root_refusal_keeps_same_key_admissions_open() {
 }
 
 #[test]
-fn paired_terminal_history_reopens_across_a_changed_triple() {
-    terminal_history(true);
-}
-
-#[test]
 fn paired_terminal_history_reopens_with_an_unchanged_triple() {
-    terminal_history(false);
-}
-
-fn terminal_history(changed: bool) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let (_daemon, path, id) = runner::remote_fixture(&fixture);
-    let (mut host, _client, session, node) = placed_job(&fixture, &path, &id, changed, true);
+    let (mut host, _client, session, node) = placed_job(&fixture, &path, &id, true);
     let state = fixture
         .home()
         .join("state")
@@ -384,44 +375,11 @@ fn wait_for_terminal_history(path: &Path, source: plakous::sessions::SessionLoca
 }
 
 #[test]
-fn paired_live_job_changed_triple_refuses_with_old_build_remedy() {
-    let Some(fixture) = fixture() else { return };
-    let _cleanup = HomeHost(fixture.home());
-    let (_daemon, path, id) = runner::remote_fixture(&fixture);
-    let (mut host, mut client, session, _) = placed_job(&fixture, &path, &id, true, false);
-    let result = same_key_upgrade(&fixture, &path);
-    assert!(!result.status.success());
-    let message = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        message.contains("host_upgrade_process_retention_unavailable"),
-        "{message}"
-    );
-    assert!(
-        message.contains("settle and drain them using the old build, then retry"),
-        "{message}"
-    );
-    assert!(!message.contains("Internal"), "{message}");
-    assert!(
-        runner::alive(runner::job(&fixture).0),
-        "refusal must leave source custody intact"
-    );
-    assert_eq!(client.request(10, Op::Ping), Outcome::Ok(Answer::Pong));
-    assert_eq!(
-        client.request(11, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped {
-            runner_pending: false
-        })
-    );
-    assert!(!fixture.home().join("host/upgrades").exists());
-    stop(&mut host);
-}
-
-#[test]
 fn paired_live_job_unchanged_triple_probe_keeps_source_custody() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let (_daemon, path, id) = runner::remote_fixture(&fixture);
-    let (mut host, mut client, session, _) = placed_job(&fixture, &path, &id, false, false);
+    let (mut host, mut client, session, _) = placed_job(&fixture, &path, &id, false);
     let pid = runner::job(&fixture).0;
     assert!(runner::alive(pid));
     let result = output_env(
@@ -460,7 +418,6 @@ pub(super) fn placed_job(
     fixture: &Fixture,
     path: &str,
     id: &str,
-    changed: bool,
     terminal: bool,
 ) -> (Host, Client, String, NodeAddress) {
     if terminal {
@@ -473,16 +430,7 @@ pub(super) fn placed_job(
         }));
         fixture.write_script(&script);
     }
-    // The destination-probe hook changes the triple comparison, not the real
-    // paired connection or its qualification request restrictions.
-    let mut environment = vec![("PATH", path.to_owned())];
-    if changed {
-        environment.push((
-            "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
-            "destination-revision".into(),
-        ));
-    }
-    let host = start_env(fixture, &[], &environment);
+    let host = start_env(fixture, &[], &[("PATH", path.to_owned())]);
     let mut client = Client::connect(&host);
     runner::remote_ready(&mut client, id);
     let mut request = new_session(&fixture.workspace());

@@ -10,10 +10,7 @@ fn a_broken_daemon_blocks_local_placement_without_terminating_the_host() {
     let Some(fixture) = fixture() else { return };
     let mut host = start(&fixture);
     wait_local_runner_ready(&host);
-    let version = plakous::runner::protocol::PROTOCOL_VERSION;
-    let floors = fixture
-        .home()
-        .join(format!("host/runner/v{version}/owners.json"));
+    let floors = crate::offline_support::local_runner_root(&fixture.home()).join("owners.json");
     // An empty daemon has no owner floors until its first transfer. Corrupt
     // the recorded location deliberately rather than waiting for a transfer.
     std::fs::write(floors, "not owner floors").unwrap();
@@ -21,11 +18,7 @@ fn a_broken_daemon_blocks_local_placement_without_terminating_the_host() {
     // Keep failed-redial teardown from racing another detached child start.
     let lock = std::fs::OpenOptions::new()
         .write(true)
-        .open(
-            fixture
-                .home()
-                .join(format!("host/runner/v{version}/run/runner.lock")),
-        )
+        .open(crate::offline_support::local_runner_root(&fixture.home()).join("run/r.lock"))
         .unwrap();
     let lock_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -66,10 +59,7 @@ fn a_transient_daemon_failure_keeps_the_redial_bound() {
             ],
         );
         wait_local_runner_ready(&host);
-        let version = plakous::runner::protocol::PROTOCOL_VERSION;
-        let socket = fixture
-            .home()
-            .join(format!("host/runner/v{version}/run/runner.sock"));
+        let socket = crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock");
         std::fs::remove_file(&socket).unwrap();
         // A listener that never sends Hello is transient, not a start refusal.
         let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
@@ -276,10 +266,7 @@ fn manager_start_case(outcome: &str) {
     );
     wait_local_runner_ready(&host);
     assert_eq!(std::fs::read_to_string(counter).unwrap().trim(), "1");
-    let lock = fixture.home().join(format!(
-        "host/runner/v{}/run/runner.lock",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    ));
+    let lock = crate::offline_support::local_runner_root(&fixture.home()).join("run/r.lock");
     let pid: i32 = std::fs::read_to_string(lock).unwrap().parse().unwrap();
     let output = std::process::Command::new("ps")
         .args(["-o", "ppid=", "-p", &pid.to_string()])

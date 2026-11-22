@@ -1,9 +1,48 @@
-use plakous_runner_protocol::LineStatus;
+use plakous_runner_protocol::{LineStatus, Refusal};
 use serde_json::{Value, json};
 
 use super::{RunnerService, lock};
 
 impl RunnerService {
+    pub(in crate::service) async fn discover_retained_lines(
+        &self,
+        host: &str,
+        instance: &str,
+        lines: &mut Vec<LineStatus>,
+    ) -> Result<(), Refusal> {
+        let Some(context) = self.retention_context() else {
+            return Ok(());
+        };
+        let unavailable = || Refusal::Unsupported {
+            what: "retained job inventory is unavailable; restore the original runner endpoint"
+                .into(),
+        };
+        let scope = super::scope(host, instance).map_err(|_| unavailable())?;
+        let retained = context
+            .registry
+            .discover(&scope, &context.origin)
+            .await
+            .map_err(|_| unavailable())?;
+        // This is only a startup/recovery candidate, not native adoption or
+        // proof of a terminal. The sweep must still acquire the head lease and
+        // transfer before using its jobs.
+        for row in retained.into_iter().filter(|row| !row.jobs.is_empty()) {
+            let line = row.owner.line.as_str();
+            if !lines.iter().any(|status| status.line == line) {
+                lines.push(LineStatus {
+                    host_id: host.into(),
+                    line: line.into(),
+                    owner: None,
+                    adopted: false,
+                    jobs: json!({"instance":self.hello().instance,"jobs":[]}),
+                    foreground: false,
+                });
+            }
+        }
+        lines.sort_by(|left, right| left.line.cmp(&right.line));
+        Ok(())
+    }
+
     pub(in crate::service) fn delegated_line_inventory(
         &self,
         host: Option<&str>,

@@ -179,10 +179,10 @@ async fn inspection_lost_after_hello_before_lines_answer_is_retryable() {
 }
 
 fn inspection_socket(home: &std::path::Path) -> std::path::PathBuf {
-    home.join(format!(
-        "host/runner/v{}/run/runner.sock",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    ))
+    let build = plakous::runner::protocol::VersionTriple::current("inspection-worker", "test");
+    home.join("host/runner")
+        .join(plakous::runner::daemon::triple_key(&build))
+        .join("run/r.sock")
 }
 
 fn inspection_daemon(home: &std::path::Path) -> tokio::task::JoinHandle<()> {

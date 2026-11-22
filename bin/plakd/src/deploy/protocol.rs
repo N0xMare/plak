@@ -20,8 +20,32 @@ pub(crate) struct DeployRunnerInspection {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum DeployRunnerVerdict {
-    Settled,
-    Blocked { detail: String },
+    Settled {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<DeployRunnerWarning>,
+    },
+    Blocked {
+        detail: String,
+    },
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum DeployRunnerWarning {
+    UnreferencedRunnerUnavailable { runner: String },
+}
+
+impl std::fmt::Display for DeployRunnerWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnreferencedRunnerUnavailable { runner } => {
+                write!(
+                    f,
+                    "unreferenced_runner_unavailable: skipped source runner {runner}"
+                )
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]

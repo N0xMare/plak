@@ -22,7 +22,7 @@ use super::protocol::{
 };
 use super::ssh;
 use super::timing;
-use super::{DeployRunnerInspection, DeployRunnerVerdict};
+use super::{DeployRunnerInspection, DeployRunnerVerdict, DeployRunnerWarning};
 
 const UNIT: &str = "plakd-host.service";
 const HOST_AGENT: &str = "com.plakd.host";
@@ -443,7 +443,10 @@ impl<'a> Target<'a> {
         frame(socket)
     }
 
-    pub(super) fn runner_preflight(&self, observed: &Observed) -> CliResult<()> {
+    pub(super) fn runner_preflight(
+        &self,
+        observed: &Observed,
+    ) -> CliResult<Vec<DeployRunnerWarning>> {
         let mut socket = connect(&self.host.product_home.join("host/upgrade.sock"))?;
         let mut reader = BufReader::new(socket.try_clone().map_err(io)?);
         let identity: Identity = read_frame(&mut reader)?;
@@ -467,7 +470,7 @@ impl<'a> Target<'a> {
         let answer: DeployRunnerVerdict = read_frame(&mut reader)
             .map_err(|_| fail("source cannot prove paired-runner inspection; use a source with deploy runner inspection or the manual paired upgrade"))?;
         match answer {
-            DeployRunnerVerdict::Settled => Ok(()),
+            DeployRunnerVerdict::Settled { warnings } => Ok(warnings),
             DeployRunnerVerdict::Blocked { detail } => Err(fail(&detail)),
         }
     }

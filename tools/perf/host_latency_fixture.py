@@ -35,7 +35,7 @@ class Fixture:
         self.processes = []
 
     def init(self):
-        if len(os.fsencode(self.root / "home/host/runner/vXX/run/runner.sock")) > 100:
+        if len(os.fsencode(self.root / "home/host/runner/vXX-000000000000/run/r.sock")) > 100:
             raise ValueError("scratch path is too long for a Unix socket")
         self.root.mkdir(mode=0o700)
         for directory in ("home", "home/agents", "workspace", "os", "tmp", "ui"):
@@ -125,7 +125,7 @@ class Fixture:
         # Own the local runner as a child rather than letting the host launch a
         # detached daemon that would survive the measurement.
         runner = await self.spawn("runner", "serve", "--local")
-        await self.ready(runner, lambda: any(self.home.glob("host/runner/*/run/runner.sock")))
+        await self.ready(runner, lambda: any(self.home.glob("host/runner/*/run/r.sock")))
         host = await self.spawn(
             "host",
             "--web",

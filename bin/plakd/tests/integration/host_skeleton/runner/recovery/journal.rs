@@ -19,10 +19,9 @@ fn received(stream: &mut UnixStream) -> RunnerFrame {
 }
 
 fn bind(fixture: &Fixture) -> (UnixStream, String) {
-    let mut stream = UnixStream::connect(fixture.home().join(format!(
-        "host/runner/v{}/run/runner.sock",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    )))
+    let mut stream = UnixStream::connect(
+        crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock"),
+    )
     .unwrap();
     stream.set_read_timeout(Some(WAIT)).unwrap();
     let RunnerFrame::Hello(hello) = received(&mut stream) else {
@@ -132,11 +131,9 @@ fn startup_acknowledges_answered_keys_and_empties_its_journal() {
             payload: json!({"root": fixture.workspace(), "cwd": fixture.workspace(), "request": {"session":"00000000000000000000000000000000", "bytes":"", "close":true}}),
         },
     };
-    let directory = fixture.home().join(format!(
-        "host/runner/v{}/calls/{}",
-        plakous::runner::protocol::PROTOCOL_VERSION,
-        plakd::home::state::state_key()
-    ));
+    let directory = crate::offline_support::local_runner_root(&fixture.home())
+        .join("calls")
+        .join(plakd::home::state::state_key());
     let journal = FileCallJournal::open(directory).unwrap();
     let mut requests = [request.clone(), request];
     requests[1].request_id = "journal-answer-two".into();

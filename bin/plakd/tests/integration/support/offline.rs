@@ -433,6 +433,21 @@ impl Drop for Fixture {
     }
 }
 
+pub(super) fn local_runner_root(home: &Path) -> PathBuf {
+    let flavor = match (cfg!(feature = "maintainer"), cfg!(debug_assertions)) {
+        (true, true) => "maintainer debug",
+        (true, false) => "maintainer release",
+        (false, true) => "debug",
+        (false, false) => "release",
+    };
+    let version = plakous::runner::protocol::VersionTriple::current(
+        option_env!("PLAK_SOURCE_REVISION").unwrap_or("unknown"),
+        flavor,
+    );
+    home.join("host/runner")
+        .join(plakous::runner::daemon::triple_key(&version))
+}
+
 pub(super) fn kill_local_daemon_only(home: &Path) {
     for version in std::fs::read_dir(home.join("host/runner"))
         .into_iter()

@@ -7403,9 +7403,10 @@ the normal recovery-required path before Ready. The driver's placement parking
   runner refuses unless the directory at that path is still that one, and
   the repository discovery ceiling; no other variable and no delegated
   value) and refuses a start without one; every other runner starts processes in its
-  own environment and refuses a start that carries one. Its home and socket
-  are keyed by the protocol version, so its floors never meet a build of
-  another protocol. Because a home-local bind no longer proves that both ends
+  own environment and refuses a start that carries one. Product hosts select
+  their exact triple's native socket; a new product build does not reuse the
+  incumbent's floors, call journal or service unit. Because the library's
+  home-local bind does not itself prove that both ends
   are one build, every change to the runner's semantics (a holder, fence or
   key rule, a refusal's meaning, a journal or floors rule, a frame's meaning)
   bumps `PROTOCOL_VERSION`.
@@ -7603,11 +7604,17 @@ jobs count once against the receiver's job_bound, including during temporary
 I/O failure. Read-only maintenance refreshes inventory without a native rebind
 or ownership transfer. There is no drainer-count cap or live-drainer eviction.
 Bare connection refusal or NotFound never proves original-worker loss. A
-different hello instance, changed observed socket inode, or socket absence with
-the original native lock free supplies positive evidence. A private hard link
-to that lock permits a liveness check without reading native stores.
+different hello instance, changed observed socket inode, or a free original
+native lock after a failed connect to a missing or previously observed socket
+supplies positive evidence. A private hard link to that lock permits a
+liveness check without reading native stores.
 A known original-instance loss records unknown terminal facts, never adopts
 PIDs or silently starts replacements. Known terminal outcomes do not regress.
+A bound native Lines query lists lines with retained allocations in the same
+host namespace as candidates for readoption. Such a candidate is not a native
+owner or a terminal fact. The host must hold the line's durable head lease,
+transfer its exact owner and then record any terminal under that fence.
+Unbound inspection and qualification do not sweep.
 
 Job controls retain their original key, digest, replay age and original-worker
 receipt; ambiguous input is not resent. Proven answers survive a failed later
@@ -7619,8 +7626,11 @@ loss of the native controller's authority or closure of its consumer. Native
 reply acks are forwarded only for control IDs actually relayed to that original,
 skipping lost and empty origins. Lines remains scoped observation.
 
-A drainer stays alive until every job is terminal/disowned and consumed, or
+A retention-enabled daemon keeps original terminals until consumption or
 until 24 hours after its last original terminal when no unsettled job remains.
+This applies before the first retention transfer too: a command can finish
+after the source host disconnects but before the successor discovers it.
+Once nothing is retained, the daemon exits under its ordinary idle grace.
 The retention clock never kills running jobs or restarts their existing caps.
 Old immutable executable snapshots and matching sidecars remain available until
 explicit operator cleanup, not merely until host Ready or acknowledgement.

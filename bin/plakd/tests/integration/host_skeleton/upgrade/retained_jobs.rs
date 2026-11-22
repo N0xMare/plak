@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(super) mod changed;
+
 #[test]
 fn paired_quiescent_job_survives_sigterm_and_restart() {
     paired_handoff(Handoff::Restart);
@@ -28,7 +30,7 @@ fn paired_handoff(handoff: Handoff) {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let (_daemon, path, id) = runner::remote_fixture(&fixture);
-    let (mut host, _client, session, node) = reopen::placed_job(&fixture, &path, &id, false, false);
+    let (mut host, _client, session, node) = reopen::placed_job(&fixture, &path, &id, false);
     let pid = runner::job(&fixture).0;
     let before = identity(&fixture, &plakd::home::state::state_key(), &session);
     let job = running_job(&fixture, &session);

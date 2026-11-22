@@ -3,11 +3,11 @@
 mod abandon;
 mod bindings;
 mod preparation;
-mod process_safety;
 mod progress;
 mod qualification;
 mod reopen;
 mod requester;
+mod runner_carry;
 mod startup;
 mod step_drain;
 pub(super) use abandon::request as abandon;
@@ -765,11 +765,18 @@ fn next_upgrade(
     match read(stream)? {
         Incoming::Upgrade(request) => Ok(Some(request)),
         Incoming::DeployInspection(request) => {
-            let verdict = process_safety::deploy_verdict(
+            let verdict = runner_carry::deploy_verdict(
                 &request,
                 &identity.instance.to_string(),
                 deploy_idle(services, pending)? == Some(true),
-                |runners| process_safety::inspect_deploy(services, runners, runtime),
+                |runners| {
+                    runner_carry::inspect(
+                        services,
+                        runners,
+                        runner_carry::Check::BeforeDrain,
+                        runtime,
+                    )
+                },
             );
             write(stream, &verdict)?;
             Ok(None)
@@ -954,13 +961,21 @@ fn prepare(
         qualification::qualify_destination(services, &request, arguments, report)?;
     let cross_key = request.source_key != request.destination_key;
     if cross_key && !request.inspect_runners.is_empty() {
-        return Err(process_safety::deploy_refusal(
+        return Err(runner_carry::deploy_refusal(
             "deploy runner inspection requires a same-key upgrade",
         ));
     }
-    progress::timed(report, progress::Phase::RunnerProcess, || {
-        request.check_processes(services, &destination.runner_version, runtime)
-    })?;
+    let changed_runner = destination.runner_version != crate::commands::runner::version();
+    if changed_runner || !request.inspect_runners.is_empty() {
+        progress::timed(report, progress::Phase::RunnerProcess, || {
+            let check = if cross_key {
+                runner_carry::Check::CrossKey
+            } else {
+                runner_carry::Check::BeforeDrain
+            };
+            runner_carry::inspect(services, &request.inspect_runners, check, runtime).map(drop)
+        })?;
+    }
     if cross_key {
         match settled_roots(services) {
             Ok(roots) => progress::timed(report, progress::Phase::CarryCapacity, || {
@@ -1016,7 +1031,16 @@ fn prepare(
         ready.pause.commit()?;
         host.join_paused_stops(&ready.pause, Instant::now() + Duration::from_secs(10))?;
         qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
-        request.check_processes(services, &destination.runner_version, runtime)?;
+        if changed_runner {
+            for warning in runner_carry::inspect(
+                services,
+                &request.inspect_runners,
+                runner_carry::Check::Held,
+                runtime,
+            )? {
+                tracing::warn!(target: "plak.runner", %warning);
+            }
+        }
         ready.image.recheck(&ready.executable)?;
         check_cancel(cancelled)?;
         return Ok((ready, None));

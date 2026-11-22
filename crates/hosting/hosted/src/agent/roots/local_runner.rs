@@ -1,6 +1,7 @@
 //! An embedded attachment refuses live daemon work anywhere in its tree.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use super::ProductStateRoots;
 use crate::error::{CliFailure, CliResult};
@@ -22,67 +23,17 @@ impl ProductStateRoots {
         if self.local_daemon.is_some() {
             return Ok(());
         }
-        let socket = self
-            .product
-            .join(format!("host/runner/v{PROTOCOL_VERSION}/run/runner.sock"));
-        let stream = match tokio::net::UnixStream::connect(socket).await {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                return Ok(());
-            }
-            Err(error) => return Err(CliFailure::new(error.to_string())),
+        let Some(lines) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            inspect_home(&self.product),
+        )
+        .await
+        .map_err(|_| {
+            CliFailure::retryable_open("the local runner did not answer the embedded inspection")
+        })??
+        else {
+            return Ok(());
         };
-        let inspection = async {
-            let bind = Bind {
-                host_id: std::fs::read_to_string(self.product.join("host-id"))
-                    .map_err(|error| CliFailure::new(error.to_string()))?
-                    .trim()
-                    .to_owned(),
-                host_instance: "embedded-inspection".into(),
-                version: VersionTriple::current("inspection", "inspection"),
-                inspect: true,
-            };
-            let (client, _) = match RunnerClient::connect_home_local(
-                stream,
-                bind,
-                ClientWindows::default(),
-                None,
-            )
-            .await
-            {
-                Ok(connected) => connected,
-                Err(ConnectError::Closed) => {
-                    return Err(CliFailure::retryable_open(
-                        "the local runner closed the embedded inspection",
-                    ));
-                }
-                Err(error) => return Err(CliFailure::new(error.to_string())),
-            };
-            let lines = client.lines().await;
-            client.disconnect();
-            let lines = lines.map_err(|error| {
-                let message = format!("the local runner inspection failed: {error:?}");
-                match error {
-                    RunnerFailure::NotSent(_) | RunnerFailure::ReadInterrupted(_) => {
-                        CliFailure::retryable_open(message)
-                    }
-                    _ => CliFailure::new(message),
-                }
-            })?;
-            Ok(lines)
-        };
-        let lines = tokio::time::timeout(std::time::Duration::from_secs(5), inspection)
-            .await
-            .map_err(|_| {
-                CliFailure::retryable_open(
-                    "the local runner did not answer the embedded inspection",
-                )
-            })??;
         // The transport budget does not include storage work. Line identity
         // reads use branch metadata, not the materialized conversation graph.
         let sessions = self.runtime_sessions()?;
@@ -119,6 +70,96 @@ impl ProductStateRoots {
         }
         Ok(())
     }
+}
+
+async fn inspect_home(
+    product: &Path,
+) -> CliResult<Option<Vec<plakous::runner::protocol::LineStatus>>> {
+    let builds = match std::fs::read_dir(product.join("host/runner")) {
+        Ok(builds) => builds,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(CliFailure::new(error.to_string())),
+    };
+    let protocol = format!("v{PROTOCOL_VERSION}");
+    let mut lines = None::<Vec<_>>;
+    for build in builds {
+        let build = build.map_err(|error| CliFailure::new(error.to_string()))?;
+        let name = build.file_name();
+        if !name.to_str().is_some_and(|name| {
+            name == protocol
+                || name
+                    .strip_prefix(&protocol)
+                    .and_then(|suffix| suffix.strip_prefix('-'))
+                    .is_some_and(|hash| {
+                        hash.len() == 12 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+        }) || !build
+            .file_type()
+            .map_err(|error| CliFailure::new(error.to_string()))?
+            .is_dir()
+        {
+            continue;
+        }
+        let socket = build.path().join(if name == protocol.as_str() {
+            "run/runner.sock"
+        } else {
+            "run/r.sock"
+        });
+        let stream = match tokio::net::UnixStream::connect(socket).await {
+            Ok(stream) => stream,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => return Err(CliFailure::new(error.to_string())),
+        };
+        let read = async {
+            let bind = Bind {
+                host_id: std::fs::read_to_string(product.join("host-id"))
+                    .map_err(|error| CliFailure::new(error.to_string()))?
+                    .trim()
+                    .to_owned(),
+                host_instance: "embedded-inspection".into(),
+                version: VersionTriple::current("inspection", "inspection"),
+                inspect: true,
+            };
+            let (client, _) = match RunnerClient::connect_home_local(
+                stream,
+                bind,
+                ClientWindows::default(),
+                None,
+            )
+            .await
+            {
+                Ok(connected) => connected,
+                Err(ConnectError::Closed) => {
+                    return Err(CliFailure::retryable_open(
+                        "the local runner closed the embedded inspection",
+                    ));
+                }
+                Err(error) => return Err(CliFailure::new(error.to_string())),
+            };
+            let lines = client.lines().await;
+            client.disconnect();
+            let lines = lines.map_err(|error| {
+                let message = format!("the local runner inspection failed: {error:?}");
+                match error {
+                    RunnerFailure::NotSent(_) | RunnerFailure::ReadInterrupted(_) => {
+                        CliFailure::retryable_open(message)
+                    }
+                    _ => CliFailure::new(message),
+                }
+            })?;
+            Ok(lines)
+        }
+        .await?;
+        lines.get_or_insert_with(Vec::new).extend(read);
+    }
+    Ok(lines)
 }
 
 fn has_processes(line: &plakous::runner::protocol::LineStatus) -> bool {

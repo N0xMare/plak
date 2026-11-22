@@ -157,9 +157,18 @@ fn a_reload_signal_during_runner_startup_is_retained() {
 fn an_eof_before_the_local_runner_hello_is_retried() {
     for protocol in [1, plakous::runner::protocol::PROTOCOL_VERSION] {
         let Some(fixture) = fixture() else { return };
-        let directory = fixture.home().join(format!("host/runner/v{protocol}/run"));
+        let directory = if protocol == 1 {
+            fixture.home().join("host/runner/v1")
+        } else {
+            crate::offline_support::local_runner_root(&fixture.home())
+        }
+        .join("run");
         std::fs::create_dir_all(&directory).unwrap();
-        let socket = directory.join("runner.sock");
+        let socket = directory.join(if protocol == 1 {
+            "runner.sock"
+        } else {
+            "r.sock"
+        });
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let dropped = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
@@ -237,12 +246,8 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     inspect.join().unwrap();
     assert!(socket.exists());
     assert!(
-        fixture
-            .home()
-            .join(format!(
-                "host/runner/v{}/run/runner.sock",
-                plakous::runner::protocol::PROTOCOL_VERSION
-            ))
+        crate::offline_support::local_runner_root(&fixture.home())
+            .join("run/r.sock")
             .exists()
     );
     let mut client = Client::connect(&host);
@@ -291,7 +296,7 @@ fn obsolete_hello(fixture: &Fixture) -> plakous::runner::protocol::Hello {
 }
 
 pub(super) fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::protocol::LineStatus> {
-    use plakous::runner::protocol::{Bind, PROTOCOL_VERSION, VersionTriple};
+    use plakous::runner::protocol::{Bind, VersionTriple};
     use plakous::runner::{ClientWindows, RunnerClient};
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -299,9 +304,7 @@ pub(super) fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::prot
         .unwrap()
         .block_on(async {
             let stream = tokio::net::UnixStream::connect(
-                fixture
-                    .home()
-                    .join(format!("host/runner/v{PROTOCOL_VERSION}/run/runner.sock")),
+                crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock"),
             )
             .await
             .unwrap();
@@ -336,12 +339,9 @@ fn runner_frame(stream: &mut UnixStream) -> plakous::runner::protocol::HostFrame
 #[test]
 fn a_starter_losing_to_the_exiting_daemons_lock_is_retried() {
     let Some(fixture) = fixture() else { return };
-    let home = fixture.home().join(format!(
-        "host/runner/v{}",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    ));
+    let home = crate::offline_support::local_runner_root(&fixture.home());
     std::fs::create_dir_all(home.join("run")).unwrap();
-    let lock = std::fs::File::create(home.join("run/runner.lock")).unwrap();
+    let lock = std::fs::File::create(home.join("run/r.lock")).unwrap();
     lock.try_lock().unwrap();
     let release = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));

@@ -11,8 +11,8 @@ use super::fleet::{self, Fleet};
 use super::inventory::{Runner, Selected, Stage};
 use super::plan::{self, Plan, Step, Targets};
 use super::protocol::{
-    Canary, ClientOp, Connection, Health, HostImages, HostOp, Observed, RunnerLink, RunnerOp,
-    StageIdentity,
+    Canary, ClientOp, Connection, DeployRunnerWarning, Health, HostImages, HostOp, Observed,
+    RunnerLink, RunnerOp, StageIdentity,
 };
 use super::{Halt, Report, Result};
 
@@ -89,7 +89,19 @@ impl<F: Fleet> Deploy<'_, F> {
             report.put("legacy_facts", &observed.facts)?;
         }
         let routes = plan::qualify(&observed, self.config, self.artifacts, self.stage)?;
-        let (targets, clients) = self.observe_targets(&observed.stage_identity, report)?;
+        let warnings = if observed.sha256 != self.artifacts.candidate().sha256
+            && !self.config.runners.is_empty()
+        {
+            self.runner_preflight(&observed)?
+        } else {
+            Vec::new()
+        };
+        let (targets, clients) = self.observe_targets(
+            &observed.stage_identity,
+            &warnings,
+            prior.as_ref().map(|(_, pending)| pending),
+            report,
+        )?;
         let resume =
             self.resolve_pending(&observed, &targets, prior.map(|(_, pending)| pending))?;
         let plan = Plan::new(
@@ -105,8 +117,8 @@ impl<F: Fleet> Deploy<'_, F> {
             plan.has(Step::HostUpgrade) || plan.runner_changes.is_empty(),
             "runner link differs after host handoff; inspect and fix forward",
         )?;
-        if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
-            self.runner_preflight(&plan.observed)?;
+        if !warnings.is_empty() {
+            report.put("runner_warnings", &warnings)?;
         }
         report.put("plan", &plan.steps)?;
         report.put("source_transition", &plan.source_transition)?;
@@ -117,6 +129,8 @@ impl<F: Fleet> Deploy<'_, F> {
     fn observe_targets(
         &self,
         host: &StageIdentity,
+        warnings: &[DeployRunnerWarning],
+        prior: Option<&Pending>,
         report: &mut Report,
     ) -> Result<(Targets, BTreeSet<String>)> {
         let mut targets = Targets {
@@ -134,7 +148,20 @@ impl<F: Fleet> Deploy<'_, F> {
             }
         }
         for runner in self.config.runners {
-            let found = self.observe_runner(runner)?;
+            if prior.is_some_and(|prior| !prior.runners.contains_key(&runner.id)) {
+                continue;
+            }
+            let found = match self.observe_runner(runner) {
+                Ok(found) => found,
+                Err(error)
+                    if prior.is_none()
+                        && super::ssh::unreachable(&error)
+                        && unreferenced(warnings, &runner.id) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
             self.stage_allowed(found.production_history)?;
             targets.accounts.insert(found.account.clone());
             if found.link != self.runner_destination(runner) {
@@ -210,8 +237,8 @@ impl<F: Fleet> Deploy<'_, F> {
                 if !Self::same_active_accounts(observed, &prior)
                     || targets.accounts != prior.accounts
                     || self.config.runners.iter().any(|runner| {
-                        let found = &targets.runners[&runner.id];
-                        prior.runners.get(&runner.id).is_none_or(|old| {
+                        targets.runners.get(&runner.id).is_some_and(|found| {
+                            let old = &prior.runners[&runner.id];
                             old.account != found.account
                                 || (old.link != found.link
                                     && found.link != self.runner_destination(runner))
@@ -441,7 +468,8 @@ impl<F: Fleet> Deploy<'_, F> {
                 "serving facts changed after BASELINE; replan",
             )?;
             if plan.has(Step::HostUpgrade) && !self.config.runners.is_empty() {
-                self.runner_preflight(&plan.observed)?;
+                let warnings = self.runner_preflight(&plan.observed)?;
+                self.verify_skips(plan, &warnings)?;
             }
             if plan.has(Step::RunnerLinks) {
                 if pending.cohort != Cohort::GatewayReady {
@@ -494,12 +522,21 @@ impl<F: Fleet> Deploy<'_, F> {
         )
     }
 
-    fn runner_preflight(&self, observed: &Observed) -> CliResult<()> {
-        self.fleet.host(HostOp::RunnerPreflight {
+    fn runner_preflight(&self, observed: &Observed) -> CliResult<Vec<DeployRunnerWarning>> {
+        let answer = self.fleet.host(HostOp::RunnerPreflight {
             expected: observed.instance.clone(),
             placements: observed.paired.clone(),
         })?;
-        Ok(())
+        fleet::evidence_decode(answer)
+    }
+
+    fn verify_skips(&self, plan: &Plan, warnings: &[DeployRunnerWarning]) -> CliResult<()> {
+        check(
+            self.config.runners.iter().all(|runner| {
+                plan.runners.contains_key(&runner.id) || unreferenced(warnings, &runner.id)
+            }),
+            "skipped runner is no longer proven unreferenced and unavailable; replan before handoff",
+        )
     }
 
     fn advance_runners(&self, plan: &Plan, pending: &Pending, report: &mut Report) -> Result<()> {
@@ -524,11 +561,12 @@ impl<F: Fleet> Deploy<'_, F> {
 
     fn verify_runners(&self, plan: &Plan) -> Result<()> {
         for runner in self.config.runners {
+            let Some(source) = plan.runners.get(&runner.id) else {
+                continue;
+            };
             let found = self.observe_runner(runner).map_err(link_lost)?;
             self.stage_allowed(found.production_history)?;
-            if found.link != self.runner_destination(runner)
-                || found.account != plan.runners[&runner.id].account
-            {
+            if found.link != self.runner_destination(runner) || found.account != source.account {
                 return Err(Halt::reconcile(
                     "runner account or dedicated link did not converge",
                 ));
@@ -678,7 +716,9 @@ impl<F: Fleet> Deploy<'_, F> {
     fn restore_runners(&self, pending: &Pending, report: &mut Report) -> Result<()> {
         let mut refusal = None;
         for runner in self.config.runners {
-            let old = &pending.runners[&runner.id].link;
+            let Some(old) = pending.runners.get(&runner.id).map(|source| &source.link) else {
+                continue;
+            };
             if *old != self.runner_destination(runner)
                 && let Err(error) = self.restore_runner(runner, old, pending.ticket, report)
             {
@@ -918,6 +958,12 @@ impl<F: Fleet> Deploy<'_, F> {
         report.put("observed", &observed)?;
         Ok(observed)
     }
+}
+
+fn unreferenced(warnings: &[DeployRunnerWarning], id: &str) -> bool {
+    warnings.iter().any(|warning| match warning {
+        DeployRunnerWarning::UnreferencedRunnerUnavailable { runner } => runner == id,
+    })
 }
 
 fn link_lost(_: crate::CliFailure) -> Halt {

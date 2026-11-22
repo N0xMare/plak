@@ -48,6 +48,10 @@ pub(crate) const fn upgrade_import_refused() -> bool {
 pub(crate) const fn upgrade_runner_revision() -> Option<String> {
     None
 }
+
+pub(crate) const fn upgrade_runner_environment() -> Vec<(&'static str, std::ffi::OsString)> {
+    Vec::new()
+}
 #[allow(
     dead_code,
     reason = "only the optional host can exercise same-image handoff"

@@ -241,10 +241,9 @@ fn startup_retries_interrupted_inspection_and_continues_once_without_a_client() 
         root_record(&fixture, &session).0,
         [RootInterruptCause::Handoff]
     );
-    let pid = std::fs::read_to_string(fixture.home().join(format!(
-        "host/runner/v{}/run/runner.lock",
-        plakous::runner::protocol::PROTOCOL_VERSION
-    )))
+    let pid = std::fs::read_to_string(
+        crate::offline_support::local_runner_root(&fixture.home()).join("run/r.lock"),
+    )
     .unwrap()
     .trim()
     .parse()

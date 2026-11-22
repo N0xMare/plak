@@ -95,15 +95,18 @@ pub(super) fn replace(
     ];
     let web = listeners.web.as_deref().map(crate::web::Listener::as_fd);
     let failure = match destination {
-        Ok(command) => exec(
-            command,
-            home,
-            arguments,
-            &target,
-            environment,
-            descriptors,
-            web,
-        ),
+        Ok(command) => {
+            crate::carry::upgrade::crash_cut("after-source-release");
+            exec(
+                command,
+                home,
+                arguments,
+                &target,
+                environment,
+                descriptors,
+                web,
+            )
+        }
         Err(failure) => failure,
     };
     eprintln!("{failure}; restoring the old host");

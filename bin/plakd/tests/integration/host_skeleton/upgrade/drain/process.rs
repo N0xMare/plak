@@ -102,7 +102,6 @@ fn process_handoff(mode: &str, waiting: ProcessWait) {
     }
     stop(&mut host);
 }
-
 fn foreground(
     fixture: &Fixture,
     env: &[(&str, String)],
@@ -161,27 +160,23 @@ fn process_script_for(fixture: &Fixture, waiting: ProcessWait) -> serde_json::Va
 }
 
 #[test]
-fn host_step_drain_changed_triple_rechecks_a_process_started_during_preparation() {
+fn host_step_drain_changed_triple_carries_a_process_started_during_preparation() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     fixture.write_script(&process_script_for(&fixture, ProcessWait::Foreground));
     let release = fixture.root.join("provider-release");
     let drain_release = fixture.root.join("drain-release");
-    let mut host = start_env(
-        &fixture,
-        &[],
-        &[
-            (
-                "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
-                "synthetic-destination".into(),
-            ),
-            ("PLAK_TEST_PROVIDER_RELEASE", release.display().to_string()),
-            (
-                "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE",
-                drain_release.display().to_string(),
-            ),
-        ],
-    );
+    use super::super::retained_jobs::changed::{candidate_environment, candidate_upgrade};
+    let image = replacement_image(&fixture).canonicalize().unwrap();
+    let mut env = candidate_environment(&image).to_vec();
+    env.extend([
+        ("PLAK_TEST_PROVIDER_RELEASE", release.display().to_string()),
+        (
+            "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE",
+            drain_release.display().to_string(),
+        ),
+    ]);
+    let mut host = start_env(&fixture, &[], &env);
     let mut client = Client::connect(&host);
     let Outcome::Ok(Answer::Created { session, node, .. }) =
         client.request(1, fresh_session(&fixture))
@@ -196,17 +191,7 @@ fn host_step_drain_changed_triple_rechecks_a_process_started_during_preparation(
     );
     wait_for_provider_dispatch(&fixture);
     let mut requester = Requester(Some(
-        fixture
-            .command()
-            .args([
-                "host",
-                "upgrade",
-                "--expect-binary",
-                &binary(&fixture),
-                "--drain",
-                "5",
-            ])
-            .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1")
+        candidate_upgrade(&fixture, &image, &env)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -229,28 +214,23 @@ fn host_step_drain_changed_triple_rechecks_a_process_started_during_preparation(
         0,
         "process must start under the source, before its hold"
     );
+    fixture.write_script(
+        &json!({"version":1,"process_tools":true,"steps":[{"output":{"text":ANSWER}}]}),
+    );
     std::fs::write(drain_release, "continue").unwrap();
     while requester.0.as_mut().unwrap().try_wait().unwrap().is_none() {
         assert!(
             Instant::now() < deadline,
-            "late process did not refuse surrender"
+            "upgrade did not carry the late process"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
     let result = requester.0.take().unwrap().wait_with_output().unwrap();
-    assert!(!result.status.success());
-    assert!(
-        String::from_utf8_lossy(&result.stderr)
-            .contains("host_upgrade_process_retention_unavailable"),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert!(alive(pid), "refusal must retain the process on the source");
-    assert_eq!(root_record(&fixture, &session).1, 0);
-    assert!(matches!(
-        client.request(11, fresh_session(&fixture)),
-        Outcome::Ok(Answer::Created { .. })
-    ));
+    assert!(result.status.success(), "{result:?}");
+    assert!(alive(pid), "the late process was lost during handoff");
+    runner::wait_local_runner_ready(&host);
+    let mut client = Client::connect(&host);
+    client.attach(11, &node);
     assert!(!fixture.home().join("host/upgrades").exists());
     assert_eq!(
         client.request(12, Op::StopSession { session }),
@@ -258,71 +238,5 @@ fn host_step_drain_changed_triple_rechecks_a_process_started_during_preparation(
             runner_pending: false
         })
     );
-    stop(&mut host);
-}
-
-#[test]
-fn host_step_drain_changed_triple_with_a_foreground_process_refuses_before_pause() {
-    changed_triple_refusal(ProcessWait::Foreground);
-}
-
-#[test]
-fn host_step_drain_changed_triple_with_a_background_job_refuses_before_pause() {
-    changed_triple_refusal(ProcessWait::Output);
-}
-
-fn changed_triple_refusal(waiting: ProcessWait) {
-    let Some(fixture) = fixture() else { return };
-    let (mut host, mut client, session, node, pid) = foreground(
-        &fixture,
-        &[(
-            "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
-            "synthetic-destination".to_owned(),
-        )],
-        waiting,
-    );
-    let _cleanup = HomeHost(fixture.home());
-    let result = output_env(
-        &fixture,
-        &[
-            "host",
-            "upgrade",
-            "--expect-binary",
-            &binary(&fixture),
-            "--drain",
-            "0",
-        ],
-        false,
-        &[("PLAK_TEST_FORCE_HOST_UPGRADE", "1")],
-    );
-    assert!(!result.status.success());
-    let message = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        message.contains("host_upgrade_process_retention_unavailable"),
-        "{message}"
-    );
-    assert!(
-        !message.contains("waiting "),
-        "refusal must precede the admission pause"
-    );
-    assert!(alive(pid));
-    assert_eq!(
-        dispatches(&fixture),
-        if matches!(waiting, ProcessWait::Output) {
-            2
-        } else {
-            1
-        }
-    );
-    assert_eq!(root_record(&fixture, &session).1, 0);
-    client.attach(10, &node);
-    assert_eq!(
-        client.request(11, Op::StopSession { session }),
-        Outcome::Ok(Answer::Stopped {
-            runner_pending: false
-        })
-    );
-    assert_eq!(client.request(12, Op::Ping), Outcome::Ok(Answer::Pong));
-    assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut host);
 }

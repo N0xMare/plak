@@ -85,45 +85,50 @@ impl RunnerHome {
     /// Pins the full triple before opening any mutable state. A shortened
     /// filesystem-key collision fails closed rather than sharing owner floors.
     pub(crate) fn prepare_build(&self) -> CliResult<()> {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let directory = self.build_directory();
-        private_directory(&directory)?;
-        let path = directory.join("version.json");
-        let version = super::version();
-        let identity_lock = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(directory.join("version.lock"))
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        identity_lock
-            .lock()
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        match std::fs::read(&path) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let bytes = serde_json::to_vec(&version)
-                    .map_err(|error| CliFailure::new(error.to_string()))?;
-                write_private(&path, &bytes)?;
-            }
-            Ok(bytes) => {
-                let recorded =
-                    serde_json::from_slice::<plakous::runner::protocol::VersionTriple>(&bytes).ok();
-                if recorded.as_ref() != Some(&version) {
-                    return Err(CliFailure::new(
-                        "runner build directory belongs to another triple or has incomplete identity; inspect and drain that build before repairing its state",
-                    ));
-                }
-            }
-            Err(error) => {
-                return Err(CliFailure::new(format!(
-                    "runner build identity could not be recorded: {error}"
-                )));
+        prepare_build(&self.build_directory())
+    }
+}
+
+fn prepare_build(directory: &Path) -> CliResult<()> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    private_directory(directory)?;
+    let path = directory.join("version.json");
+    let version = super::version();
+    let identity_lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(directory.join("version.lock"))
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    identity_lock
+        .lock()
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    match std::fs::read(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let bytes =
+                serde_json::to_vec(&version).map_err(|error| CliFailure::new(error.to_string()))?;
+            write_private(&path, &bytes)?;
+        }
+        Ok(bytes) => {
+            let recorded =
+                serde_json::from_slice::<plakous::runner::protocol::VersionTriple>(&bytes).ok();
+            if recorded.as_ref() != Some(&version) {
+                return Err(CliFailure::new(
+                    "runner build directory belongs to another triple or has incomplete identity; inspect and drain that build before repairing its state",
+                ));
             }
         }
-        Ok(())
+        Err(error) => {
+            return Err(CliFailure::new(format!(
+                "runner build identity could not be recorded: {error}"
+            )));
+        }
     }
+    Ok(())
+}
 
+impl RunnerHome {
     /// `runner.toml`, or the empty configuration when there is none.
     pub(crate) fn config(&self) -> CliResult<RunnerToml> {
         let path = self.config_path();
@@ -202,29 +207,29 @@ impl RunnerHome {
 }
 
 /// This home's home-local runner (spec 02 §2.1), apart from the machine's
-/// runner for paired hosts: `$PLAK_HOME/host/runner/v<N>/`, one per runner
-/// protocol version, so its owner floors never meet a build of another
-/// protocol. It holds the runner id, the owner floors, the private socket
-/// directory and an empty default workspace.
+/// runner for paired hosts. Native sockets, floors and call journals are
+/// isolated by exact triple; only retention can reach a previous build.
 #[derive(Clone, Debug)]
 pub(crate) struct LocalRunnerHome {
+    identity: PathBuf,
     root: PathBuf,
     retention: PathBuf,
 }
 
 impl LocalRunnerHome {
     pub(crate) fn of(paths: &PlakPaths) -> Self {
+        let key = plakous::runner::daemon::triple_key(&super::version());
+        let identity = paths.home().join("host/runner");
         Self {
-            root: paths
-                .home()
-                .join("host")
-                .join("runner")
-                .join(format!("v{}", super::version().protocol)),
-            retention: paths
-                .home()
-                .join("builds")
-                .join(plakous::runner::daemon::triple_key(&super::version())),
+            root: identity.join(&key),
+            identity,
+            retention: paths.home().join("builds").join(key),
         }
+    }
+
+    pub(crate) fn prepare_build(&self, paths: &PlakPaths) -> CliResult<()> {
+        private_below(paths.home(), &self.root)?;
+        prepare_build(&self.root)
     }
 
     pub(crate) fn root(&self) -> &Path {
@@ -236,10 +241,9 @@ impl LocalRunnerHome {
         &self.retention
     }
 
-    /// The socket, named by the directory's protocol version alone: every
-    /// build of that protocol reaches the same daemon.
+    /// The native socket for this exact build.
     pub(crate) fn socket_path(&self) -> PathBuf {
-        self.root.join("run").join("runner.sock")
+        self.root.join("run").join("r.sock")
     }
 
     pub(crate) fn floors_path(&self) -> PathBuf {
@@ -254,7 +258,7 @@ impl LocalRunnerHome {
 
     /// The home-local runner's stable identity, created on first use.
     pub(crate) fn runner_id(&self) -> CliResult<String> {
-        read_or_create_id(&self.root, "runner-id", "r-")
+        read_or_create_id(&self.identity, "runner-id", "r-")
     }
 }
 

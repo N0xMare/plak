@@ -2,7 +2,7 @@
 # derived filter blocks in nextest.toml from these families.
 
 [upgrade]
-filter = "test(host_skeleton::upgrade::)"
+filter = "test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::)"
 
 [ledger-retirement]
 filter = '''

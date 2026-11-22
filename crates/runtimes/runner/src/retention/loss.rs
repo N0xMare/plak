@@ -48,28 +48,27 @@ pub(super) fn positive(builds: &Path, origin: &Origin, previous: Option<SocketId
     match SocketIdentity::observe(builds, origin) {
         Ok(current) => {
             previous.is_some_and(|old| old.device != current.device || old.inode != current.inode)
+                || previous.is_some() && native_lock_free(builds, origin)
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let path = builds.join(origin.build.as_str()).join(NATIVE_LOCK);
-            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-                return false;
-            };
-            if !private_file(&metadata) {
-                return false;
-            }
-            let Ok(lock) = File::options().read(true).write(true).open(path) else {
-                return false;
-            };
-            if !lock
-                .metadata()
-                .is_ok_and(|now| now.dev() == metadata.dev() && now.ino() == metadata.ino())
-            {
-                return false;
-            }
-            lock.try_lock().is_ok()
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => native_lock_free(builds, origin),
         Err(_) => false,
     }
+}
+
+fn native_lock_free(builds: &Path, origin: &Origin) -> bool {
+    let path = builds.join(origin.build.as_str()).join(NATIVE_LOCK);
+    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        return false;
+    };
+    if !private_file(&metadata) {
+        return false;
+    }
+    let Ok(lock) = File::options().read(true).write(true).open(path) else {
+        return false;
+    };
+    lock.metadata()
+        .is_ok_and(|now| now.dev() == metadata.dev() && now.ino() == metadata.ino())
+        && lock.try_lock().is_ok()
 }
 
 fn private_file(metadata: &std::fs::Metadata) -> bool {
