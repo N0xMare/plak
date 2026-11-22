@@ -574,11 +574,17 @@ fn web_capabilities_use_home_config_even_from_a_broken_trusted_project() {
     let console = &welcome["extension"]["console"];
     assert_eq!(console["files_read"]["enabled"], true, "{welcome}");
     assert_eq!(console["terminal"]["enabled"], true, "{welcome}");
-    for (id, request) in [
-        (1, json!({"request":"terminal_list"})),
+    for (id, request, expected) in [
+        (
+            1,
+            json!({"request":"terminal_list"}),
+            json!({"response":"terminal_list","terminals":[]}),
+        ),
+        // Files admission reaches saved-workspace lookup, not capability_disabled.
         (
             2,
             json!({"request":"files_list","target":{"session":REQUEST},"path":""}),
+            json!({"response":"refused","reason":{"reason":"workspace_unavailable"}}),
         ),
     ] {
         socket
@@ -586,16 +592,9 @@ fn web_capabilities_use_home_config_even_from_a_broken_trusted_project() {
                 json!({"frame":"request","id":id,"op":{"op":"host","request":request}}).to_string(),
             ))
             .unwrap();
+        let answer = response(&mut socket, id);
+        assert_eq!(answer["ok"]["response"], expected, "{answer}");
     }
-    assert_eq!(
-        response(&mut socket, 1)["ok"]["response"],
-        json!({"response":"terminal_list","terminals":[]})
-    );
-    // Files admission reaches saved-workspace lookup, not capability_disabled.
-    assert_eq!(
-        response(&mut socket, 2)["ok"]["response"],
-        json!({"response":"refused","reason":{"reason":"workspace_unavailable"}})
-    );
     drop(socket);
     interrupt_and_wait(&mut web);
 }
