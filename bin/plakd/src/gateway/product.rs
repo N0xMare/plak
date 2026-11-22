@@ -450,6 +450,10 @@ async fn claim<T: Send + 'static>(
     .map_err(|_| GatewayRefusal::Internal {})?
 }
 
+#[allow(
+    clippy::redundant_closure_for_method_calls,
+    reason = "the gateway facade lets audit code read these facts without exposing their HTTP types"
+)]
 fn relay_event(state: &GatewayState, caller: &str, record: &RelayRecord) -> AuditEvent {
     let (origin, path) = record
         .upstream
