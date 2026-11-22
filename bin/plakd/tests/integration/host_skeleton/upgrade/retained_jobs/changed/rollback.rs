@@ -146,7 +146,7 @@ impl Images {
     }
 }
 
-fn wait_line(host: &Host, expected: &str) {
+pub(super) fn wait_line(host: &Host, expected: &str) {
     let deadline = Instant::now() + WAIT;
     while let Ok(line) = host
         .lines

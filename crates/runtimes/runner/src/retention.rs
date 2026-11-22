@@ -198,6 +198,10 @@ pub(crate) struct Client {
 }
 
 impl Client {
+    fn peer_pid(&self) -> Option<u32> {
+        u32::try_from(self.stream.peer_cred().ok()?.pid()?).ok()
+    }
+
     pub(crate) async fn inspect(
         builds: &Path,
         build: &wire::Id,

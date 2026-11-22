@@ -5,7 +5,7 @@ use super::{Origin, Path, io};
 
 const NATIVE_LOCK: &str = "retention-native.lock";
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) struct SocketIdentity {
     device: u64,
     inode: u64,
@@ -16,6 +16,10 @@ impl SocketIdentity {
         let path = builds
             .join(origin.build.as_str())
             .join(format!("retention-v{}.sock", origin.version));
+        Self::at(&path)
+    }
+
+    pub(super) fn at(path: &Path) -> io::Result<Self> {
         let metadata = std::fs::symlink_metadata(path)?;
         super::check_socket(&metadata)?;
         Ok(Self {
@@ -58,19 +62,41 @@ pub(super) fn positive(builds: &Path, origin: &Origin, previous: Option<SocketId
 }
 
 pub(super) fn native_lock_free(builds: &Path, build: &str) -> bool {
-    let path = builds.join(build).join(NATIVE_LOCK);
-    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-        return false;
-    };
-    if !private_file(&metadata) {
-        return false;
+    native_lock(builds, build).is_some_and(|(file, _)| file.try_lock().is_ok())
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct NativeHolder {
+    device: u64,
+    inode: u64,
+    pub(super) pid: u32,
+}
+
+pub(super) fn native_holder(builds: &Path, build: &str) -> Option<NativeHolder> {
+    use std::io::Read as _;
+    let (file, metadata) = native_lock(builds, build)?;
+    if !matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
+        return None;
     }
-    let Ok(lock) = File::options().read(true).write(true).open(path) else {
-        return false;
-    };
+    let mut text = String::new();
+    file.take(16).read_to_string(&mut text).ok()?;
+    Some(NativeHolder {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        pid: text.parse().ok()?,
+    })
+}
+
+fn native_lock(builds: &Path, build: &str) -> Option<(File, std::fs::Metadata)> {
+    let path = builds.join(build).join(NATIVE_LOCK);
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    if !private_file(&metadata) {
+        return None;
+    }
+    let lock = File::options().read(true).write(true).open(path).ok()?;
     lock.metadata()
         .is_ok_and(|now| now.dev() == metadata.dev() && now.ino() == metadata.ino())
-        && lock.try_lock().is_ok()
+        .then_some((lock, metadata))
 }
 
 fn private_file(metadata: &std::fs::Metadata) -> bool {

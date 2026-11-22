@@ -88,14 +88,19 @@ async fn bind_local(
         environment.backend(client.clone(), runtime.clone()),
         client.clone(),
     );
-    services.runners().progress("local", ProbePhase::Reconcile);
+    services
+        .runners()
+        .progress("local", ProbePhase::ReconcileStore);
     let sessions = services
         .state_roots()
         .and_then(|roots| roots.runtime_sessions())
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileStore))?;
+    services
+        .runners()
+        .progress("local", ProbePhase::ReconcileObsoleteLines);
     let obsolete = crate::commands::runner::local::older(paths)
         .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileObsoleteLines))?;
     plakous_hosted::runner_adoption::report_obsolete_lines(&sessions, obsolete).await;
     finish_local_bind(services, catalog, client).await
 }

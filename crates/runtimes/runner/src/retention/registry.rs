@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use plakous_runner_protocol::retention::{Bind, Line, Origin, Owner};
 use serde::{Deserialize, Serialize};
 
+mod discovery;
 mod observations;
 use observations::Observations;
 
@@ -128,74 +129,7 @@ impl Registry {
         own: &Origin,
         current: u32,
     ) -> io::Result<Vec<Line>> {
-        let mut originals = BTreeMap::new();
-        // Saved provenance remains authoritative occupancy during an outage.
-        for line in self.inventory(scope.host_id.as_str()) {
-            append(&mut originals, line, false);
-        }
-        let mut directories = std::fs::read_dir(&self.builds)?.collect::<Result<Vec<_>, _>>()?;
-        directories.sort_by_key(std::fs::DirEntry::file_name);
-        for directory in directories {
-            let name = directory.file_name();
-            let Some(name) = name.to_str().filter(|name| super::build_key(name)) else {
-                continue;
-            };
-            if name == own.build.as_str() {
-                continue;
-            }
-            let build = plakous_runner_protocol::retention::Id::try_from(name.to_owned())
-                .map_err(super::invalid)?;
-            super::private_parent(&directory.path())?;
-            for socket in std::fs::read_dir(directory.path())? {
-                let socket = socket?;
-                let name = socket.file_name();
-                let Some(version) = name
-                    .to_str()
-                    .and_then(|name| name.strip_prefix("retention-v"))
-                    .and_then(|name| name.strip_suffix(".sock"))
-                    .and_then(|version| version.parse::<u32>().ok())
-                else {
-                    continue;
-                };
-                if super::Codec::select(version, current).is_err() {
-                    let probe = async {
-                        super::check_socket(&std::fs::symlink_metadata(socket.path())?)?;
-                        tokio::time::timeout(
-                            std::time::Duration::from_millis(250),
-                            tokio::net::UnixStream::connect(socket.path()),
-                        )
-                        .await
-                        .map_err(super::timed_out)?
-                    }
-                    .await;
-                    if probe.as_ref().is_err_and(|error| {
-                        discovery_endpoint_gone(&self.builds, build.as_str(), error)
-                    }) {
-                        continue;
-                    }
-                    return Err(super::invalid(
-                        "finish/consume/disown jobs through a retained compatible build, then retry",
-                    ));
-                }
-                let mut client =
-                    match super::Client::inspect(&self.builds, &build, scope, version, current)
-                        .await
-                    {
-                        Ok(client) => client,
-                        Err(error)
-                            if discovery_endpoint_gone(&self.builds, build.as_str(), &error) =>
-                        {
-                            continue;
-                        }
-                        Err(error) => return Err(error),
-                    };
-                for line in inspect_lines(&mut client).await? {
-                    let direct = line.origin == client.origin;
-                    append(&mut originals, line, direct);
-                }
-            }
-        }
-        Ok(originals.into_values().map(|(line, _)| line).collect())
+        discovery::current(self, scope, own, current).await
     }
 
     pub(crate) fn entries(&self, host: &str, line: Option<&str>) -> Vec<Delegation> {
@@ -765,14 +699,6 @@ impl Registry {
             .map(|(origin, jobs)| (origin, jobs.len()))
             .collect()
     }
-}
-
-fn discovery_endpoint_gone(builds: &Path, build: &str, error: &io::Error) -> bool {
-    // A full listen queue can refuse connections to a live endpoint.
-    matches!(
-        error.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused | io::ErrorKind::TimedOut
-    ) && super::loss::native_lock_free(builds, build)
 }
 
 fn original_key(host: &str, origin: &Origin) -> String {

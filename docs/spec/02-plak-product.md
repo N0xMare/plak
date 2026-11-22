@@ -4788,9 +4788,11 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   parked children on available placements does not set it. A live child turn uses
   the existing `tools waiting · <runner>` label only while its placement is
   held, never for a permanent refusal, without a new wire field.
-  Activity stays
-  `busy`, the runner status keeps its `link_lost` or `reconcile` phase, and
-  `activity_seq` does not advance for this. No field, client protocol or
+  Activity stays `busy` and `activity_seq` does not advance for this. The runner
+  status names `link_lost`, the pending `reconcile` barrier, or the unsuccessful
+  reconciliation operation: `reconcile_store`, `reconcile_obsolete_lines`,
+  `reconcile_terminals`, `reconcile_jobs`, `reconcile_stops` or
+  `reconcile_foreground`. No field, client protocol or
   duration is added; these are the fields a client reads. A refused
   placement (`not_paired`, identity, version, configuration) is not a live
   root hold: its calls end with the refusal. An unavailable child's deferred

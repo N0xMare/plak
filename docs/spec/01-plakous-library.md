@@ -7624,7 +7624,17 @@ A known original-instance loss records unknown terminal facts, never adopts
 PIDs or silently starts replacements. Known terminal outcomes do not regress.
 Before transfer, a refused or timed-out discovery connection (or an
 endpoint that disappears during discovery) is incomplete unless the
-original build's native lock is free. The exact-triple CarryLines read
+original build's native lock is free, or an unchanged socket is proven
+to be a stale alias of a shared legacy lock. The old protocol-keyed
+home-local layout can hard-link one native lock into several build
+directories; the busy inode alone does not identify its holder. For a
+shared-lock alias, a distinct build must answer a fresh retention inventory
+request with the same instance, and the authenticated Unix peer PID must
+match the recorded holder of the same busy lock inode before and after that
+request. The refused socket inode must not have changed, and its link must
+still name that same held lock. An unverified sibling, including a responder
+on a different lock or the same build, never proves the original is gone.
+The exact-triple CarryLines read
 lists lines with retained allocations in the same host namespace as
 candidates for readoption. Such a candidate is not a native owner or a
 terminal fact. The host must hold the line's durable head lease, transfer

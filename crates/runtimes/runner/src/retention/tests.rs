@@ -7,6 +7,7 @@ use plakous_tools::{
 use std::os::unix::fs::DirBuilderExt as _;
 use std::sync::Arc;
 mod review;
+mod shared_lock;
 
 fn fixture() -> (
     tempfile::TempDir,

@@ -13,6 +13,12 @@ pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
         ProbePhase::Options => wire::RunnerPhase::Options,
         ProbePhase::Discovery => wire::RunnerPhase::Discovery,
         ProbePhase::Reconcile => wire::RunnerPhase::Reconcile,
+        ProbePhase::ReconcileStore => wire::RunnerPhase::ReconcileStore,
+        ProbePhase::ReconcileObsoleteLines => wire::RunnerPhase::ReconcileObsoleteLines,
+        ProbePhase::ReconcileTerminals => wire::RunnerPhase::ReconcileTerminals,
+        ProbePhase::ReconcileJobs => wire::RunnerPhase::ReconcileJobs,
+        ProbePhase::ReconcileStops => wire::RunnerPhase::ReconcileStops,
+        ProbePhase::ReconcileForeground => wire::RunnerPhase::ReconcileForeground,
         ProbePhase::LinkLost => wire::RunnerPhase::LinkLost,
     })
 }

@@ -31,6 +31,18 @@ pub enum ProbePhase {
     Discovery,
     /// First-bind sweep, recovery and recorded controls.
     Reconcile,
+    /// Local store and runtime session view.
+    ReconcileStore,
+    /// Legacy native line inspection.
+    ReconcileObsoleteLines,
+    /// Operator terminal inventory.
+    ReconcileTerminals,
+    /// Native and retained job inventory, owner transfer, and terminal fold.
+    ReconcileJobs,
+    /// Durable Stop intent reconciliation.
+    ReconcileStops,
+    /// Settled foreground effect cleanup.
+    ReconcileForeground,
     /// Previously live connection ended.
     LinkLost,
 }

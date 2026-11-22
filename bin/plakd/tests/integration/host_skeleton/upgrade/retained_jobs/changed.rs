@@ -7,6 +7,7 @@ use std::path::Path;
 use plakous_offline_crash_harness::ledger_signature::inspect_process_notices;
 
 mod durability;
+mod legacy_layout;
 mod qualifiers;
 mod rollback;
 

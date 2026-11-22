@@ -565,38 +565,42 @@ async fn reconcile_remote(
 ) -> Result<Vec<LineId>, plakous::runner::PlacementFailure> {
     use plakous::runner::{PlacementFailure, ProbePhase};
     let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
-    services
-        .runners()
-        .begin_reconcile(id, services.now_unix_seconds());
+    let registry = services.runners();
+    registry.begin_reconcile(id, services.now_unix_seconds());
     if let Some(terminals) = services.terminal_registry() {
+        registry.progress(id, ProbePhase::ReconcileTerminals);
         terminals
             .reconcile(id, client)
             .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+            .map_err(|_| unavailable(ProbePhase::ReconcileTerminals, false))?;
     }
+    registry.progress(id, ProbePhase::ReconcileStore);
     let roots = services
         .state_roots()
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?
-        .with_runner_readiness(services.runners().clone(), id);
+        .map_err(|_| unavailable(ProbePhase::ReconcileStore, false))?
+        .with_runner_readiness(registry.clone(), id);
     let sessions = roots
         .runtime_sessions()
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileStore, false))?;
+    registry.progress(id, ProbePhase::ReconcileJobs);
     let (readopted, failures) =
         plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
             .await
-            .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+            .map_err(|_| unavailable(ProbePhase::ReconcileJobs, false))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
-        return Err(unavailable(ProbePhase::Reconcile, false));
+        return Err(unavailable(ProbePhase::ReconcileJobs, false));
     }
     let _ = client.recover().await;
+    registry.progress(id, ProbePhase::ReconcileStops);
     let pending = finish_stops(services, client, &sessions, &readopted)
         .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileStops, false))?;
+    registry.progress(id, ProbePhase::ReconcileForeground);
     client
         .reconcile_settled_foreground()
         .await
-        .map_err(|_| unavailable(ProbePhase::Reconcile, false))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileForeground, false))?;
     #[cfg(test)]
     tests::production_fence::after_cleanup(client).await;
     Ok(pending)
