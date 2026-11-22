@@ -6,14 +6,15 @@ use super::{
 use std::path::Path;
 
 impl SqliteSessionStore {
-    /// Loads retained branch checkpoints and liveness through one read-only snapshot.
+    /// Projects retained branch checkpoints and liveness through one read-only snapshot.
     /// No boot, lease, runtime actor, recovery or write is opened.
     ///
     /// # Errors
     /// Returns schema, shape or read failures. An absent store is empty.
-    pub fn inspect_binding_checkpoints(
+    pub fn inspect_binding_checkpoints<T>(
         path: impl AsRef<Path>,
-    ) -> Result<Vec<BindingCheckpointInspection>, SessionStoreError> {
+        mut project: impl FnMut(BindingCheckpointInspection) -> T,
+    ) -> Result<Vec<T>, SessionStoreError> {
         let Some(connection) = Self::open_inspection(path.as_ref())? else {
             return Ok(Vec::new());
         };
@@ -43,13 +44,13 @@ impl SqliteSessionStore {
                     branch.parse().map_err(|_| SessionStoreError::corrupt())?,
                 );
                 let stored = Some(load_checkpoint(&snapshot, id));
-                Ok(BindingCheckpointInspection {
+                Ok(project(BindingCheckpointInspection {
                     session,
                     checkpoint: id,
                     archived,
                     line_head: head,
                     stored,
-                })
+                }))
             })
             .collect()
     }

@@ -33,28 +33,24 @@ pub struct BindingHeadInspection {
 pub fn inspect_binding_presentations_sqlite(
     path: impl AsRef<Path>,
 ) -> Result<Vec<BindingHeadInspection>, AgentSessionsError> {
-    let path = path.as_ref();
-    Ok(SqliteSessionStore::inspect_binding_checkpoints(path)
-        .map_err(store_error)?
-        .into_iter()
-        .map(|head| {
-            let locator = SessionLocator::new(
-                head.session.session_id(),
-                head.session.branch_id(),
-                head.checkpoint,
-            );
-            BindingHeadInspection {
-                locator,
-                archived: head.archived,
-                line_head: head.line_head,
-                presentation: head.stored.map(|stored| {
-                    stored.map_err(store_error).and_then(|stored| {
-                        super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
-                    })
-                }),
-            }
-        })
-        .collect::<Vec<_>>())
+    SqliteSessionStore::inspect_binding_checkpoints(path, |head| {
+        let locator = SessionLocator::new(
+            head.session.session_id(),
+            head.session.branch_id(),
+            head.checkpoint,
+        );
+        BindingHeadInspection {
+            locator,
+            archived: head.archived,
+            line_head: head.line_head,
+            presentation: head.stored.map(|stored| {
+                stored.map_err(store_error).and_then(|stored| {
+                    super::FrozenSessionPresentation::from_checkpoint(stored.checkpoint())
+                })
+            }),
+        }
+    })
+    .map_err(store_error)
 }
 
 /// What the pure resume predicates permit, before credentialed reconstruction.

@@ -72,17 +72,27 @@ fn a_head_advanced_during_qualification_is_checked_at_handoff() {
             Some(phase)
         })
         .collect();
-    assert_eq!(
-        phases,
-        [
-            "image",
-            "capability",
-            "binding_source",
-            "binding_destination",
-            "exact_reopen",
-            "runner_process",
-            "standalone_admission",
-        ],
+    assert!(
+        matches!(
+            phases.as_slice(),
+            [
+                "image",
+                "capability",
+                "binding_source",
+                "binding_destination",
+                "exact_reopen",
+                "runner_process",
+                "standalone_admission",
+            ] | [
+                "image",
+                "capability",
+                "binding_destination",
+                "binding_source",
+                "exact_reopen",
+                "runner_process",
+                "standalone_admission",
+            ]
+        ),
         "{stderr}"
     );
     stop(&mut host);

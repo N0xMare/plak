@@ -61,8 +61,24 @@ pub(super) fn preflight(
     timing: &super::progress::Report<'_>,
 ) -> CliResult<()> {
     let source = std::env::current_exe().map_err(|error| CliFailure::new(error.to_string()))?;
-    let baseline = super::progress::timed(timing, super::progress::Phase::BindingSource, || {
-        probe(&source, paths, key, None)
+    let (baseline, output) = std::thread::scope(|scope| {
+        let baseline = std::thread::Builder::new()
+            .spawn_scoped(scope, || {
+                super::progress::timed(timing, super::progress::Phase::BindingSource, || {
+                    probe(&source, paths, key, None)
+                })
+            })
+            .map_err(|error| {
+                CliFailure::new(format!("could not start binding baseline: {error}"))
+            })?;
+        let output =
+            super::progress::timed(timing, super::progress::Phase::BindingDestination, || {
+                probe(destination, paths, key, scratch)
+            });
+        let baseline = baseline
+            .join()
+            .map_err(|_| CliFailure::new("binding baseline worker panicked"))??;
+        Ok::<_, CliFailure>((baseline, output))
     })?;
     let baseline = serde_json::from_slice::<Report>(&baseline.stdout).ok();
     if baseline.is_none() {
@@ -70,10 +86,7 @@ pub(super) fn preflight(
             "plakd host: binding baseline unavailable; source did not answer check-binding; no source verdict inferred"
         );
     }
-    let output =
-        super::progress::timed(timing, super::progress::Phase::BindingDestination, || {
-            probe(destination, paths, key, scratch)
-        })?;
+    let output = output?;
     let destination: Report = serde_json::from_slice(&output.stdout).map_err(|_| {
         CliFailure::new(format!(
             "host_upgrade_binding_preflight_invalid: {}\n{}",

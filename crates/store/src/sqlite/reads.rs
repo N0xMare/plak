@@ -60,8 +60,7 @@ pub(super) fn load_checkpoint_contents(
         VALUES(?1,?2,?3) UNION SELECT e.child_kind,e.child_codec,e.child_digest
         FROM runtime_object_edges e JOIN reach p ON e.parent_kind=p.kind
         AND e.parent_codec=p.codec AND e.parent_digest=p.digest)
-        SELECT o.kind,o.codec,o.digest,p.bytes FROM reach JOIN runtime_objects o USING(kind,codec,digest) JOIN runtime_object_bytes p USING(id)
-        ORDER BY o.kind,o.codec,o.digest").map_err(map_sqlite)?;
+        SELECT o.kind,o.codec,o.digest,p.bytes FROM reach JOIN runtime_objects o USING(kind,codec,digest) JOIN runtime_object_bytes p USING(id)").map_err(map_sqlite)?;
     let mut rows = s
         .query(params![
             kind_tag(root.kind()),
@@ -88,6 +87,9 @@ pub(super) fn load_checkpoint_contents(
     if !children.is_empty() {
         return Err(SessionStoreError::corrupt());
     }
+    // Sort the verified handles, not the payloads: a SQLite sort of the result
+    // copies checkpoint bytes through its temporary sorter.
+    objects.sort_unstable_by_key(RuntimeObject::address);
     let bundle = CheckpointObjectBundle::from_store(idv, row.reference.integrity(), root, objects)
         .map_err(bundle_error)?;
     let checkpoint = bundle.validated_checkpoint().map_err(bundle_error)?;

@@ -1119,6 +1119,11 @@ host removes abandoned copy staging and abandoned qualification copies; it
 skips scratch still held by a probe and never removes published copies.
 `plakd doctor` reports retained copies in the current state directory.
 
+Before surrender in a same-key upgrade, source and destination run independent
+read-only binding inspections concurrently (§4.5). Neither inspection borrows
+the other build's verdict or substitutes for the destination's exact-reopen
+checks (§4.6).
+
 Commands that cannot carry a foreign session automatically, including
 `run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely
 matching prefix) recorded only under another state key. It does not present
@@ -5637,7 +5642,7 @@ registrations, shipped as metadata even when an optional runtime is omitted;
 inspection does not maintain a separate prefix inventory. IDs with fewer than
 two dots use their exact pinned ID rather than a namespace prefix.
 
-Same-key host upgrade runs both source and destination inspections before
+Same-key host upgrade waits for both inspections before exact reopen and
 surrender. It refuses only a live row that the source found compatible and the
 destination no longer does, printing the offending rows while the source keeps
 running. A source without the command is explicitly reported as baseline

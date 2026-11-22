@@ -113,7 +113,7 @@ pub const BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS: [&str; 4] = [
 const BACKGROUND_VACUUM_PAGES: u32 = 1024;
 const CHECKPOINT_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
-/// Read-only binding metadata, with inactive payloads deliberately unopened.
+/// Read-only binding inspection input for one retained branch head.
 #[doc(hidden)]
 pub struct BindingCheckpointInspection {
     /// Exact branch selector.

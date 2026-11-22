@@ -658,6 +658,35 @@ async fn sqlite_best_effort_uses_the_stronger_full_commit_boundary() -> Result<(
 }
 
 #[tokio::test]
+async fn binding_inspection_checks_payloads_when_projecting_retained_heads()
+-> Result<(), Box<dyn Error>> {
+    let db = Database::new();
+    seed_shared_corpus(&db, RuntimeDurability::Required).await?;
+    let verdicts = || {
+        SqliteSessionStore::inspect_binding_checkpoints(&db.path, |head| {
+            head.stored.map(|stored| stored.is_ok())
+        })
+    };
+    let healthy = verdicts()?;
+    assert!(!healthy.is_empty());
+    assert!(healthy.iter().all(|verdict| *verdict == Some(true)));
+
+    let connection = Connection::open(&db.path)?;
+    assert!(
+        connection.execute(
+            "UPDATE runtime_object_bytes SET bytes=zeroblob(length(bytes))
+             WHERE id IN (SELECT id FROM runtime_objects WHERE kind=8)",
+            [],
+        )? > 0
+    );
+    drop(connection);
+    // The index, edges, payload count and lengths still agree. Projection
+    // must still validate each graph's bytes before returning a verdict.
+    assert_eq!(verdicts()?, vec![Some(false); healthy.len()]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn cached_fork_semantics_corruption_fails_closed_on_reopen() -> Result<(), Box<dyn Error>> {
     let db = Database::new();
     seed_shared_corpus(&db, RuntimeDurability::Required).await?;
