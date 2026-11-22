@@ -1229,7 +1229,22 @@ where
     /// cannot be read.
     pub fn flush(&mut self) -> CliResult<()> {
         self.flush_replies()?;
-        self.flush_attachments(true)?;
+        self.flush_output(true)
+    }
+
+    /// Flushes attachment output after the driver has given ready client
+    /// frames a chance to run. A backed-up writer may defer live observations
+    /// and the directory, but not attachment endings.
+    ///
+    /// # Errors
+    ///
+    /// A lost output, a snapshot that cannot be paged, or a directory that
+    /// cannot be read.
+    pub fn flush_output(&mut self, bulk: bool) -> CliResult<()> {
+        self.flush_attachments(bulk)?;
+        if !bulk {
+            return Ok(());
+        }
         self.flush_directory()?;
         let context = self.host_context();
         for _ in 0..4 {
@@ -1249,10 +1264,16 @@ where
     /// The transport outbox cannot accept output.
     pub fn flush_control(&mut self) -> CliResult<()> {
         self.flush_replies()?;
-        self.flush_attachments(false)
+        self.flush_output(false)
     }
 
-    fn flush_replies(&mut self) -> CliResult<()> {
+    /// Settles lifecycle notices, host reads, attaches and stops, in that
+    /// order, without draining the new attachment's baseline.
+    ///
+    /// # Errors
+    ///
+    /// The transport outbox cannot accept output.
+    pub fn flush_replies(&mut self) -> CliResult<()> {
         self.flush_lifecycle()?;
         self.flush_host_reads()?;
         self.flush_attach()?;

@@ -192,8 +192,12 @@ impl Outbox {
         self.0.drained.notified().await;
     }
 
+    pub(crate) fn ordered_drained(&self) -> bool {
+        self.lock().ordered_frames == 0
+    }
+
     pub(crate) fn flush_connection(&self, connection: &mut Connection) -> CliResult<()> {
-        if self.lock().ordered_frames == 0 {
+        if self.ordered_drained() {
             // Draft verdicts and lifecycle notices are in the ordered lane.
             // Only the actual end of their transport sends can settle delivery.
             connection.output_sent();

@@ -4,6 +4,7 @@ use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, WIRE_VERSION};
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::{
     HostPrincipal, HostReadLimits, HostReadTask, HostRequestContext, HostSessions, SessionHost,
+    StoredSessionView,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
@@ -29,22 +30,29 @@ async fn websocket_client(
     Ok(WebSocketStream::from_raw_socket(reader.into_inner(), Role::Client, None).await)
 }
 
-struct NoSessions {
+#[derive(Default)]
+struct FixtureSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
     opens: Arc<AtomicUsize>,
+    archived: bool,
 }
 
 pub(super) fn empty_host() -> Arc<SessionHost<PlakExtension>> {
+    SessionHost::new(FixtureSessions::default(), "fixture", 1)
+}
+
+pub(super) fn archived_host() -> Arc<SessionHost<PlakExtension>> {
     SessionHost::new(
-        NoSessions {
-            principals: Arc::default(),
-            opens: Arc::default(),
+        FixtureSessions {
+            archived: true,
+            ..FixtureSessions::default()
         },
         "fixture",
         1,
     )
 }
-impl HostSessions<PlakExtension> for NoSessions {
+
+impl HostSessions<PlakExtension> for FixtureSessions {
     fn host_read_limits(&self) -> HostReadLimits {
         HostReadLimits {
             request_bytes: 64 * 1024,
@@ -84,8 +92,8 @@ impl HostSessions<PlakExtension> for NoSessions {
             })
         })
     }
-    fn contains(&self, _: &str) -> Result<bool, String> {
-        Ok(false)
+    fn contains(&self, session: &str) -> Result<bool, String> {
+        Ok(self.archived && session == "archived")
     }
     fn rows(
         &self,
@@ -97,9 +105,32 @@ impl HostSessions<PlakExtension> for NoSessions {
     }
     fn session_of(
         &self,
-        _: &plakous_host_protocol::wire::NodeAddress,
+        node: &plakous_host_protocol::wire::NodeAddress,
     ) -> Result<Option<String>, String> {
-        Ok(None)
+        Ok(self.archived.then(|| node.tree_id.clone()))
+    }
+    fn stored_view(
+        &self,
+        session: &str,
+        _: bool,
+    ) -> Result<Option<StoredSessionView<PlakExtension>>, plakous_host_protocol::wire::RequestRefusal>
+    {
+        use plakous_host_protocol::{
+            SessionObservation, views::presentation::PresentationSnapshot,
+        };
+        Ok(
+            (self.archived && session == "archived").then(|| StoredSessionView {
+                archived: true,
+                session: session.into(),
+                root: plakous_host_protocol::wire::NodeAddress {
+                    tree_id: session.into(),
+                    agent_id: session.into(),
+                },
+                observations: vec![SessionObservation::PresentationSnapshot(
+                    PresentationSnapshot::empty(1),
+                )],
+            }),
+        )
     }
     fn open(
         &self,
@@ -132,9 +163,10 @@ async fn web_drive_binds_the_verified_login_before_welcome_and_host_dispatch()
     let principals = Arc::new(Mutex::new(Vec::new()));
     let opens = Arc::new(AtomicUsize::new(0));
     let host = SessionHost::new(
-        NoSessions {
+        FixtureSessions {
             principals: Arc::clone(&principals),
             opens: Arc::clone(&opens),
+            archived: false,
         },
         "fixture",
         1,

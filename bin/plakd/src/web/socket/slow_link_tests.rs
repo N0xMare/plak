@@ -1,4 +1,5 @@
 use super::*;
+use plakous_host_protocol::wire::{Answer, HostFrame, Outcome, decode_line};
 use std::io::Write as _;
 
 fn context() -> (tempfile::TempDir, Served) {
@@ -19,6 +20,80 @@ fn context() -> (tempfile::TempDir, Served) {
         ),
     };
     (home, context)
+}
+
+#[tokio::test(start_paused = true)]
+async fn web_reads_ready_pings_before_draining_an_attach_baseline() {
+    let (_home, mut context) = context();
+    context.host = principal_tests::archived_host();
+    let outbox = Outbox::default();
+    let mut connection = context
+        .host
+        .connect(
+            outbox.clone(),
+            Face::Remote,
+            plakous_hosted::host_service::wire::HostPrincipal::Web("fixture".into()),
+            || false,
+        )
+        .with_snapshot_output(|_, _| panic!("baseline drained before the ready client frames"));
+    // Settle the attach and let its reply go out, leaving its real baseline
+    // in the service queue rather than the transport outbox.
+    assert!(connection
+        .frame(Ok(r#"{"frame":"request","id":1,"op":{"op":"attach","node":{"tree_id":"archived","agent_id":"archived"}}}"#.into()))
+        .unwrap());
+    let (server, client) = tokio::io::duplex(4096);
+    let mut server =
+        WebSocketStream::from_raw_socket(ProgressIo::new(server), Role::Server, None).await;
+    let mut client = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+    let progress = server.get_ref().progress.clone();
+    outbox
+        .send_batch(
+            &progress,
+            || false,
+            &mut WebWriter {
+                sink: &mut server,
+                heartbeat: Heartbeat::default(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        decode_line::<HostFrame<PlakExtension>>(
+            client.next().await.unwrap().unwrap().to_text().unwrap()
+        ),
+        Ok(HostFrame::Response {
+            id: 1,
+            outcome: Outcome::Ok(Answer::Attached { .. })
+        })
+    ));
+    for id in [2, 3] {
+        client
+            .send(Message::text(format!(
+                r#"{{"frame":"request","id":{id},"op":{{"op":"ping"}}}}"#
+            )))
+            .await
+            .unwrap();
+    }
+    client
+        .send(Message::text(r#"{"frame":"bye"}"#))
+        .await
+        .unwrap();
+    let reading = async {
+        for id in [2, 3] {
+            assert!(matches!(
+                decode_line::<HostFrame<PlakExtension>>(
+                    client.next().await.unwrap().unwrap().to_text().unwrap()
+                ),
+                Ok(HostFrame::Response { id: got, outcome: Outcome::Ok(Answer::Pong) }) if got == id
+            ));
+        }
+        assert!(matches!(client.next().await, Some(Ok(Message::Close(_)))));
+    };
+    let (ended, ()) = tokio::join!(
+        attached(server, &context, &mut connection, &outbox),
+        reading
+    );
+    assert!(matches!(ended, Ended::Bye));
 }
 
 #[tokio::test(start_paused = true)]

@@ -43,6 +43,9 @@ const PONG_DEADLINE: Duration = Duration::from_secs(30);
 /// Client messages per second a connection may send, with this burst.
 const MESSAGES_PER_SECOND: f64 = 20.0;
 const MESSAGE_BURST: f64 = 60.0;
+/// Give ready client frames a turn without letting a continuously readable
+/// client starve either stage of output work.
+const READS_BEFORE_FLUSH: u8 = 8;
 
 /// The `Sec-WebSocket-Accept` for a valid upgrade request, or `None` when
 /// the request is not one.
@@ -359,6 +362,63 @@ async fn admit(
         .with_snapshot_output(move |attachment, snapshot| snapshots.snapshot(attachment, snapshot)))
 }
 
+#[derive(Clone, Copy)]
+enum Flush {
+    Replies,
+    Output { again: bool },
+    Idle,
+}
+
+impl Flush {
+    fn step(&mut self, connection: &mut Connection, outbox: &Outbox) -> bool {
+        connection_work(|| match *self {
+            Self::Replies => {
+                if outbox.ordered_drained() {
+                    connection.output_sent();
+                }
+                *self = Self::Output { again: false };
+                connection.flush_replies()
+            }
+            Self::Output { again } => {
+                *self = if again { Self::Replies } else { Self::Idle };
+                connection.flush_output(outbox.ordered_drained())
+            }
+            Self::Idle => Ok(()),
+        })
+        .is_ok()
+    }
+
+    fn request(&mut self) {
+        match self {
+            Self::Idle => *self = Self::Replies,
+            Self::Output { again } => *again = true,
+            Self::Replies => {}
+        }
+    }
+}
+
+fn handle_frame(
+    connection: &mut Connection,
+    outbox: &Outbox,
+    rate: &mut Rate,
+    message: Result<String, Ended>,
+) -> Result<(), Ended> {
+    let _timing = test_timing::phase("read ready").entered();
+    let line = message?;
+    if !Connection::is_host_request(&line) && !rate.admit() {
+        let _line = zeroize::Zeroizing::new(line);
+        return Err(Ended::Policy("message rate"));
+    }
+    match connection_work(|| connection.frame(Ok(line))) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            let _ = connection_work(|| outbox.flush_connection(connection));
+            Err(Ended::Bye)
+        }
+        Err(_) => Err(Ended::Lost("request failed")),
+    }
+}
+
 /// Serves an admitted connection until it ends.
 async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(
     socket: WebSocketStream<ProgressIo<S>>,
@@ -387,6 +447,8 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
     pinger.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut rate = Rate::new();
     let mut finished = None;
+    let mut flush = Flush::Replies;
+    let mut reads = 0;
     let mut ended = loop {
         if served.stop.stopped() {
             connection_work(|| {
@@ -394,9 +456,6 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                 let _ = connection.flush_lifecycle();
             });
             break Ended::Stopping;
-        }
-        if connection_work(|| outbox.flush_connection(connection)).is_err() {
-            break Ended::Lost("client fell behind");
         }
         tokio::select! {
             biased;
@@ -407,24 +466,18 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                 finished = Some((sink, result));
                 break result.map_or_else(Ended::from, |()| Ended::Left);
             }
-            message = next_text(&mut reader, &heartbeat) => {
-                let _timing = test_timing::phase("read ready").entered();
-                let line = match message {
-                    Ok(line) => line,
-                    Err(ended) => break ended,
-                };
-                if !Connection::is_host_request(&line) && !rate.admit() {
-                    let _line = zeroize::Zeroizing::new(line);
-                    break Ended::Policy("message rate");
+            message = next_text(&mut reader, &heartbeat), if reads < READS_BEFORE_FLUSH => {
+                if let Err(ended) = handle_frame(connection, outbox, &mut rate, message) {
+                    break ended;
                 }
-                match connection_work(|| connection.frame(Ok(line))) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        let _ = connection_work(|| outbox.flush_connection(connection));
-                        break Ended::Bye;
-                    }
-                    Err(_) => break Ended::Lost("request failed"),
+                flush.request();
+                reads += 1;
+            }
+            () = std::future::ready(()), if !matches!(flush, Flush::Idle) => {
+                if !flush.step(connection, outbox) {
+                    break Ended::Lost("client fell behind");
                 }
+                reads = 0;
             }
             () = heartbeat.expired() => break Ended::Lost("no pong"),
             _ = pinger.tick() => {
@@ -432,9 +485,9 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                     break ended;
                 }
             }
-            () = connection.changed() => {}
-            () = outbox.drained() => {}
-            () = tokio::time::sleep(STOP_POLL) => {}
+            () = connection.changed() => flush.request(),
+            () = outbox.drained() => flush.request(),
+            () = tokio::time::sleep(STOP_POLL) => flush.request(),
         }
     };
     outbox.close();
