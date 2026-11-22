@@ -183,7 +183,7 @@ impl HostSessions<PlakExtension> for FixtureSessions {
             actions,
             events,
             worker,
-            attachments: Default::default(),
+            attachments: plakous_hosted::host_service::AttachmentCount::default(),
             roots: Box::new(|_| None),
         })
     }
