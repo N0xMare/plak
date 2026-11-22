@@ -3,7 +3,7 @@
 use plakous_host_protocol::observation::Delivery;
 
 use super::{
-    Attachment, AttachmentId, Face, LOCAL_ATTACHMENT, ObservationClass, Outbound,
+    Attachment, AttachmentId, Face, LOCAL_ATTACHMENT, ObservationClass, Payload, Pending,
     ProtocolExtension, REMOTE_ATTACHMENT, SessionObservation, TranscriptScope, same_kind,
 };
 
@@ -67,8 +67,8 @@ impl<P: ProtocolExtension> Attachment<P> {
         let mut index = 0;
         let mut kept_snapshot = 0;
         self.queue.retain(|item| {
-            let keep = !matches!(item, Outbound::Event {
-                observation: SessionObservation::TranscriptPatch(patch), ..
+            let keep = !matches!(item, Pending::Event {
+                observation: Payload::Patch(patch), ..
             } if patch.scope == *scope);
             kept_snapshot += usize::from(keep && index < self.snapshot_held);
             index += 1;
@@ -108,15 +108,15 @@ impl<P: ProtocolExtension> Attachment<P> {
     /// attachment when what it may not lose finds none.
     pub(super) fn offer(
         &mut self,
-        observation: SessionObservation<P>,
+        observation: Payload<P>,
         class: ObservationClass,
         capacity: usize,
     ) {
-        if self.dropped || self.waiting || !self.face.receives(&observation) {
+        if self.dropped || self.waiting || !observation.received_by(self.face) {
             return;
         }
         let patch_scope = match &observation {
-            SessionObservation::TranscriptPatch(patch) => Some(&patch.scope),
+            Payload::Patch(patch) => Some(&patch.scope),
             _ => None,
         };
         if patch_scope.is_some_and(|scope| self.fresh.contains(scope)) {
@@ -125,9 +125,10 @@ impl<P: ProtocolExtension> Attachment<P> {
         }
         let droppable = class == ObservationClass::Event(Delivery::Droppable);
         if class == ObservationClass::State
+            && let Payload::Other(new) = &observation
             && let Some(index) = self.queue.iter().position(|item| {
-                matches!(item, Outbound::Event { class: ObservationClass::State, observation: held, .. }
-                    if same_kind(held, &observation))
+                matches!(item, Pending::Event { class: ObservationClass::State, observation: Payload::Other(held), .. }
+                    if same_kind(held, new))
             })
         {
             // A queued state of its kind is superseded: the old one goes,
@@ -140,7 +141,7 @@ impl<P: ProtocolExtension> Attachment<P> {
             let oldest_droppable = self.queue.iter().position(|item| {
                 matches!(
                     item,
-                    Outbound::Event {
+                    Pending::Event {
                         class: ObservationClass::Event(Delivery::Droppable),
                         ..
                     }
@@ -148,8 +149,8 @@ impl<P: ProtocolExtension> Attachment<P> {
             });
             match (oldest_droppable, droppable) {
                 (Some(index), _) => {
-                    if let Some(Outbound::Event {
-                        observation: lost, ..
+                    if let Some(Pending::Event {
+                        observation: Payload::Other(lost), ..
                     }) = self.queue.remove(index)
                     {
                         self.note_loss(&lost);
@@ -157,7 +158,9 @@ impl<P: ProtocolExtension> Attachment<P> {
                 }
                 (None, true) => {
                     // Dropped: the gap in the sequence tells the client.
-                    self.note_loss(&observation);
+                    if let Payload::Other(lost) = &observation {
+                        self.note_loss(lost);
+                    }
                     self.seq += 1;
                     return;
                 }
@@ -171,19 +174,19 @@ impl<P: ProtocolExtension> Attachment<P> {
                     }
                     self.dropped = true;
                     self.queue.clear();
-                    self.queue.push_back(Outbound::ResyncRequired);
+                    self.queue.push_back(Pending::ResyncRequired);
                     return;
                 }
             }
         }
         self.seq += 1;
-        if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
+        if let Payload::Snapshot(snapshot) = &observation {
             // The baseline includes any transcript evicted to make room for it.
             self.gapped.remove(&snapshot.scope);
             self.fresh.remove(&snapshot.scope);
             self.repairing.remove(&snapshot.scope);
         }
-        self.queue.push_back(Outbound::Event {
+        self.queue.push_back(Pending::Event {
             client_id: None,
             seq: self.seq,
             class,

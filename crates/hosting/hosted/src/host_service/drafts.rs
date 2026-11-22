@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Instant;
 
-use super::{ANSWER, Outbound, attachment_of};
+use super::{ANSWER, Pending, attachment_of};
 use plakous_host_protocol::wire::{AttachmentId, ClientDraftId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
@@ -347,7 +347,7 @@ impl<P: ProtocolExtension> super::State<P> {
 impl<P: ProtocolExtension> super::Attachment<P> {
     pub(super) fn correlate_draft(&mut self, origin: Option<ClientDraftId>) {
         if let Some(id) = origin
-            && let Some(Outbound::Event { client_id, .. }) = self.queue.back_mut()
+            && let Some(Pending::Event { client_id, .. }) = self.queue.back_mut()
         {
             *client_id = Some(id);
         }

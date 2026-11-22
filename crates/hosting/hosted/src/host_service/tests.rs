@@ -6,6 +6,7 @@ use super::*;
 
 mod child;
 mod gap_repair;
+mod retained;
 
 type Observation = SessionObservation<Core>;
 

@@ -51,6 +51,7 @@ pub(crate) mod drafts;
 mod face;
 mod gap_repair;
 mod handle;
+mod retained;
 #[cfg(feature = "test-support")]
 pub mod test_draft_gate;
 #[cfg(feature = "test-support")]
@@ -103,6 +104,7 @@ use attachment::{attachment_of, kept_for_attach, origin};
 pub use attention::KeptActivity;
 pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
+use retained::{Payload, RetainedBaseline};
 pub use tree_nodes::TreeNodes;
 
 /// The prefix marking an `IntentStarted` whose window holds only that
@@ -112,17 +114,13 @@ pub(crate) const ANSWER: &str = "answer:";
 pub(crate) const REMOTE_ATTACHMENT: &str = "remote-attachment:";
 pub(crate) const LOCAL_ATTACHMENT: &str = "local-attachment:";
 
-/// The most root patches the service keeps after the root snapshot for an
-/// attach; past it, a new attachment asks the session for a fresh one.
-const MAX_BASELINE_PATCHES: usize = 64;
-
 /// What an attachment takes from its queue.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "an event carries one observation by value"
-)]
+pub type Outbound<P> = QueueItem<SessionObservation<P>>;
+type Pending<P> = QueueItem<Payload<P>>;
+
+/// One sequenced queue entry or an attachment boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Outbound<P: ProtocolExtension> {
+pub enum QueueItem<T> {
     /// One observation, with the attachment's sequence number (from one;
     /// a gap means a droppable event was dropped) and its class.
     Event {
@@ -133,7 +131,7 @@ pub enum Outbound<P: ProtocolExtension> {
         /// The observation's class.
         class: ObservationClass,
         /// The observation.
-        observation: SessionObservation<P>,
+        observation: T,
     },
     /// The attachment fell behind on what it may not lose and is dropped;
     /// it takes nothing more and must attach again.
@@ -150,16 +148,33 @@ pub enum Outbound<P: ProtocolExtension> {
     },
 }
 
-impl<P: ProtocolExtension> Outbound<P> {
+impl<P: ProtocolExtension> Pending<P> {
     fn paced_alone(&self) -> bool {
         matches!(
             self,
             Self::Event {
-                observation: SessionObservation::PresentationSnapshot(_)
-                    | SessionObservation::TranscriptPatch(_),
+                observation: Payload::Snapshot(_) | Payload::Patch(_),
                 ..
             }
         )
+    }
+
+    fn into_outbound(self) -> Outbound<P> {
+        match self {
+            Self::Event {
+                client_id,
+                seq,
+                class,
+                observation,
+            } => Outbound::Event {
+                client_id,
+                seq,
+                class,
+                observation: observation.into_observation(),
+            },
+            Self::Moved { node, request } => Outbound::Moved { node, request },
+            Self::ResyncRequired => Outbound::ResyncRequired,
+        }
     }
 }
 
@@ -174,7 +189,7 @@ struct Attachment<P: ProtocolExtension> {
     sender: Option<IntentSender<P>>,
     /// The child node this attachment targets, or `None` for the root.
     node: Option<String>,
-    queue: VecDeque<Outbound<P>>,
+    queue: VecDeque<Pending<P>>,
     seq: u64,
     /// The transcripts this attachment holds; a face of a service with no
     /// session mailbox holds every one, since its intents pass through no
@@ -233,7 +248,7 @@ struct Snapshot<P: ProtocolExtension> {
     states: Vec<SessionObservation<P>>,
     /// The latest root snapshot and the root patches after it, or `None`
     /// when a new attachment must ask for a fresh one.
-    baseline: Option<(SessionObservation<P>, Vec<SessionObservation<P>>)>,
+    baseline: Option<RetainedBaseline>,
     /// Approvals asked and not yet resolved, in the order asked.
     approvals: Vec<(String, SessionObservation<P>)>,
     /// The credential wait that holds, if any.
@@ -716,7 +731,7 @@ impl<P: ProtocolExtension> HostService<P> {
         for (id, held) in &mut state.attachments {
             if !held.dropped {
                 held.dropped = true;
-                held.queue.push_back(Outbound::Moved {
+                held.queue.push_back(Pending::Moved {
                     node: node.clone(),
                     request: request.map(|(requester, id)| (requester, id.to_owned())),
                 });
@@ -764,7 +779,7 @@ impl<P: ProtocolExtension> HostService<P> {
             };
             if gapped && !held.dropped {
                 held.dropped = true;
-                held.queue.push_back(Outbound::ResyncRequired);
+                held.queue.push_back(Pending::ResyncRequired);
             }
         }
     }
@@ -778,7 +793,7 @@ impl<P: ProtocolExtension> HostService<P> {
         for held in state.attachments.values_mut() {
             if !held.dropped {
                 held.dropped = true;
-                held.queue.push_back(Outbound::ResyncRequired);
+                held.queue.push_back(Pending::ResyncRequired);
             }
         }
     }
@@ -831,7 +846,7 @@ impl<P: ProtocolExtension> HostService<P> {
                     }
                 };
                 if shown {
-                    held.offer(observation, class, capacity);
+                    held.offer(observation.into(), class, capacity);
                 }
             }
         }
@@ -931,24 +946,38 @@ impl<P: ProtocolExtension> HostService<P> {
         state.next_attachment += 1;
         let waiting = state.holding;
         let snapshot = &state.snapshot;
-        let mut items: Vec<SessionObservation<P>> = snapshot.states.clone();
+        let mut items: Vec<Payload<P>> = snapshot
+            .states
+            .iter()
+            .cloned()
+            .map(Payload::Other)
+            .collect();
         let needs_baseline = snapshot.baseline.is_none() && !waiting;
-        if let Some((baseline, patches)) = &snapshot.baseline {
-            items.push(baseline.clone());
-            items.extend(patches.iter().cloned());
+        if let Some(baseline) = &snapshot.baseline {
+            items.extend(baseline.observations());
         }
-        items.extend(snapshot.approvals.iter().map(|(_, asked)| asked.clone()));
-        items.extend(snapshot.credential_wait.iter().cloned());
+        items.extend(
+            snapshot
+                .approvals
+                .iter()
+                .map(|(_, asked)| Payload::Other(asked.clone())),
+        );
+        items.extend(snapshot.credential_wait.iter().cloned().map(Payload::Other));
         if let Some(attention) = state.count.attention() {
-            items.push(SessionObservation::Row(attention.notice()));
+            items.push(Payload::Other(SessionObservation::Row(attention.notice())));
         }
-        items.retain(|item| face.receives(item) && !waiting);
+        items.retain(|item| item.received_by(face) && !waiting);
         let sender = mailbox.map(|actions| actions.tagged(origin(id, face)));
         let scopes = match self.actions {
             Some(_) => Scopes::Held(BTreeSet::from([TranscriptScope::Root])),
             None => Scopes::All,
         };
         let ask = sender.clone().filter(|_| needs_baseline);
+        let fresh = if ask.is_some() {
+            BTreeSet::from([TranscriptScope::Root])
+        } else {
+            BTreeSet::new()
+        };
         let mut attachment = Attachment {
             face,
             reply_origin: id,
@@ -958,7 +987,7 @@ impl<P: ProtocolExtension> HostService<P> {
             seq: 0,
             scopes,
             gapped: BTreeSet::new(),
-            fresh: BTreeSet::new(),
+            fresh,
             repairing: BTreeMap::new(),
             snapshot_held: items.len(),
             dropped: false,
@@ -966,7 +995,7 @@ impl<P: ProtocolExtension> HostService<P> {
         };
         for observation in items {
             attachment.seq += 1;
-            attachment.queue.push_back(Outbound::Event {
+            attachment.queue.push_back(Pending::Event {
                 client_id: None,
                 seq: attachment.seq,
                 class: observation.class(),
@@ -1093,6 +1122,13 @@ impl<P: ProtocolExtension> HostService<P> {
         reason = "draining is the effect even when a caller discards the queued observations"
     )]
     pub fn take(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
+        self.take_shared(attachment)
+            .into_iter()
+            .map(Pending::into_outbound)
+            .collect()
+    }
+
+    fn take_shared(&self, attachment: AttachmentId) -> Vec<Pending<P>> {
         let mut taken = Vec::new();
         // The first drain makes room; the second includes any kept baseline
         // that repays its gaps. Never spin waiting for a mailbox snapshot.
@@ -1108,9 +1144,9 @@ impl<P: ProtocolExtension> HostService<P> {
         attachment: AttachmentId,
         bulk: bool,
         small_only: bool,
-    ) -> Vec<Outbound<P>> {
+    ) -> Vec<Pending<P>> {
         self.take_queued(attachment, 1, |head| match head {
-            Some(item @ Outbound::Event { .. }) => bulk && !(small_only && item.paced_alone()),
+            Some(item @ Pending::Event { .. }) => bulk && !(small_only && item.paced_alone()),
             _ => true,
         })
     }
@@ -1141,8 +1177,8 @@ impl<P: ProtocolExtension> HostService<P> {
         &self,
         attachment: AttachmentId,
         limit: usize,
-        allow: impl FnOnce(Option<&Outbound<P>>) -> bool,
-    ) -> Vec<Outbound<P>> {
+        allow: impl FnOnce(Option<&Pending<P>>) -> bool,
+    ) -> Vec<Pending<P>> {
         // As in `detach`, the senders this ends drop after the lock.
         let mailbox = self.mailbox();
         let mut state = self.lock();
@@ -1224,10 +1260,6 @@ impl<P: ProtocolExtension> HostService<P> {
                         .get(owner)
                         .is_some_and(|held| held.node.is_some())
             });
-            // A face's service takes no later attachment to keep anything for.
-            if self.actions.is_some() && child_answer.is_none() {
-                state.remember(&observation, class);
-            }
             let mut observation = observation;
             let targets: Vec<AttachmentId> = match (class, baseline_scope(&observation)) {
                 (_, Some(scope)) => state
@@ -1283,21 +1315,18 @@ impl<P: ProtocolExtension> HostService<P> {
                 }
                 _ => state.root_attachments(),
             };
-            if let Some((last, others)) = targets.split_last() {
-                for id in others {
-                    if let Some(held) = state.attachments.get_mut(id) {
-                        let capacity = held.capacity(self.capacity);
-                        held.offer(observation.clone(), class, capacity);
-                        held.correlate_draft(client_id);
-                    }
-                    state.track_draft_delivery(*id, &mut draft_delivery);
-                }
-                if let Some(held) = state.attachments.get_mut(last) {
+            let observation = Payload::from(observation);
+            // A face's service takes no later attachment to keep anything for.
+            if self.actions.is_some() && child_answer.is_none() {
+                state.snapshot.remember(&observation, class);
+            }
+            for id in targets {
+                if let Some(held) = state.attachments.get_mut(&id) {
                     let capacity = held.capacity(self.capacity);
-                    held.offer(observation, class, capacity);
+                    held.offer(observation.clone(), class, capacity);
                     held.correlate_draft(client_id);
                 }
-                state.track_draft_delivery(*last, &mut draft_delivery);
+                state.track_draft_delivery(id, &mut draft_delivery);
             }
         }
         self.repair_gaps();
@@ -1511,62 +1540,6 @@ impl<P: ProtocolExtension> State<P> {
             if *count == 0 {
                 self.agent_holders.remove(agent);
             }
-        }
-    }
-
-    /// Keeps what a later attach re-emits.
-    fn remember(&mut self, observation: &SessionObservation<P>, class: ObservationClass) {
-        let snapshot = &mut self.snapshot;
-        if matches!(
-            observation,
-            SessionObservation::SessionOpening | SessionObservation::SessionOpened { .. }
-        ) {
-            // A session (re)opening starts what an attach re-emits afresh:
-            // nothing the earlier session asked or held is still pending.
-            snapshot.states.clear();
-            snapshot.baseline = None;
-            snapshot.approvals.clear();
-            snapshot.credential_wait = None;
-        }
-        match observation {
-            SessionObservation::ApprovalRequired { approval_id, .. } => {
-                snapshot.approvals.retain(|(id, _)| id != approval_id);
-                snapshot
-                    .approvals
-                    .push((approval_id.clone(), observation.clone()));
-            }
-            SessionObservation::ApprovalResolved { approval_id, .. } => {
-                snapshot.approvals.retain(|(id, _)| id != approval_id);
-            }
-            SessionObservation::CredentialWait { account } => {
-                snapshot.credential_wait = account.is_some().then(|| observation.clone());
-            }
-            SessionObservation::PresentationSnapshot(baseline)
-                if baseline.scope == TranscriptScope::Root =>
-            {
-                snapshot.baseline = Some((observation.clone(), Vec::new()));
-            }
-            SessionObservation::TranscriptPatch(patch) if patch.scope == TranscriptScope::Root => {
-                if let Some((_, patches)) = &mut snapshot.baseline {
-                    if patches.len() < MAX_BASELINE_PATCHES {
-                        patches.push(observation.clone());
-                    } else {
-                        snapshot.baseline = None;
-                    }
-                }
-            }
-            SessionObservation::ClearView => snapshot.baseline = None,
-            _ if class == ObservationClass::State => {
-                match snapshot
-                    .states
-                    .iter_mut()
-                    .find(|held| same_kind(held, observation))
-                {
-                    Some(held) => *held = observation.clone(),
-                    None => snapshot.states.push(observation.clone()),
-                }
-            }
-            _ => {}
         }
     }
 }

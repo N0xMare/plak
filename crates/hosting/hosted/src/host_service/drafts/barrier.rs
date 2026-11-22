@@ -51,7 +51,7 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
         else {
             return;
         };
-        if let Some(super::super::Outbound::Event {
+        if let Some(super::super::Pending::Event {
             seq,
             client_id: Some(_),
             ..
@@ -86,7 +86,7 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
             SessionObservation::DraftRejected(intent),
         ] {
             let class = observation.class();
-            held.offer(observation, class, capacity);
+            held.offer(observation.into(), class, capacity);
             held.correlate_draft(Some(id));
         }
         self.track_draft_delivery(attachment, &mut delivery);

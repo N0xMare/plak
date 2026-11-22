@@ -2394,6 +2394,7 @@ portable builds and contracts run per batch; package verification runs at RC.
 Public host tests do not build or require any external client repository.
 The product's outbox tests cover ordered snapshot jobs, one page exposed
 at a time, and output for a retired agent view queued before its successor
-(chapter 02 §4.4). An opt-in shaped-link probe exercises a large retained
-patch replay with repeated attaches.
+(chapter 02 §4.4). An opt-in Linux probe exercises three simultaneous
+attaches to a resident transcript, with one throttled output, and measures
+first-page latency, replay time, process RSS and CPU.
 Human client review is independent evidence, not a public gate dependency.

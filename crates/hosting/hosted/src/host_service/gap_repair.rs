@@ -32,15 +32,16 @@ impl<P: ProtocolExtension> HostService<P> {
                         continue;
                     }
                     match (&scope, &snapshot.baseline) {
-                        (TranscriptScope::Root, Some((baseline, patches)))
+                        (TranscriptScope::Root, Some(baseline))
                             if !held.fresh.contains(&scope)
-                                && patches.len()
+                                && baseline.patch_count()
                                     < held.capacity(self.capacity).saturating_sub(
                                         held.queue.len().saturating_sub(held.snapshot_held),
                                     ) =>
                         {
-                            for item in std::iter::once(baseline).chain(patches) {
-                                held.offer(item.clone(), item.class(), self.capacity);
+                            for item in baseline.observations() {
+                                let class = item.class();
+                                held.offer(item, class, self.capacity);
                             }
                         }
                         _ => {

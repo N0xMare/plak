@@ -35,7 +35,7 @@ use plakous_host_protocol::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::{HostService, Outbound, TreeNodes};
+use super::{HostService, Outbound, Pending, TreeNodes};
 use crate::error::{CliFailure, CliResult};
 use lines::Next;
 mod drafts;
@@ -1298,15 +1298,15 @@ where
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
-        self.write_observations(attachment, self.service.take(attachment))
+        self.write_observations(attachment, self.service.take_shared(attachment))
     }
 
     fn write_observations(
         &mut self,
         attachment: AttachmentId,
-        items: Vec<Outbound<P>>,
+        items: Vec<Pending<P>>,
     ) -> CliResult<()> {
-        for item in items {
+        for item in items.into_iter().map(Pending::into_outbound) {
             if let Outbound::Event {
                 observation,
                 client_id,

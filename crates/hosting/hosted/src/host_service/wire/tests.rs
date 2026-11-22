@@ -2,6 +2,7 @@ use plakous_host_protocol::intent::Draft;
 
 use super::*;
 
+#[cfg(target_os = "linux")]
 mod replay_profile;
 mod verdicts;
 
@@ -19,6 +20,11 @@ fn a_too_large_paced_patch_requests_a_fresh_scope_without_closing() {
     let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
     let mut connection = WireConnection::new(root(), Vec::new(), actions)
         .with_snapshot_output(Some(std::sync::Arc::new(|_, _| Ok(()))));
+    connection
+        .service
+        .observe(SessionObservation::PresentationSnapshot(
+            PresentationSnapshot::empty(1),
+        ));
     let Some(Outcome::Ok(Answer::Attached { attachment })) =
         connection.request(1, Op::Attach { node: root() })
     else {

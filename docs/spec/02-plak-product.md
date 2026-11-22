@@ -5151,10 +5151,15 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   session took the intent. The service keeps, for the session that last
   opened (`SessionOpening` or `SessionOpened` forgets everything kept
   before), the latest state of each kind, the root snapshot with up to 64
-  patches after it (dropped by a clear or past that bound, when a new
-  attachment asks the session for a fresh one, and the attach fails if it
-  cannot), the approvals asked and not resolved, and the credential wait
-  that holds; an attachment's queue starts with exactly those. Beyond that
+  patches and at most 8 MiB of encoded patch data after it, the approvals
+  asked and not resolved, and the credential wait that holds. Only the root
+  scope has a replay cache; agent scopes open or resnapshot from the session.
+  The root snapshot and patch payloads are shared across attachment queues,
+  with sequence numbers and delivery state kept per attachment. A clear or
+  either replay limit drops the kept baseline as a whole. Without a kept
+  baseline a new attachment asks for a fresh one (the attach fails if it
+  cannot ask), and it receives no root patches until a snapshot arrives.
+  An attachment's queue starts with the kept observations. Beyond that
   attach snapshot, which does not count against it, a queue holds at most
   its capacity: a droppable event evicts the oldest droppable one (its
   sequence gap shows the loss) or is itself dropped; a state replaces a
@@ -5168,8 +5173,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   observations keep their order and the transport stays connected.
   Transcript content an attachment
   lost to a full queue is a gap in that scope, repaid at its next take or
-  observation: the root's from the kept baseline, any other by asking the
-  session for a fresh snapshot of that scope. Content of a transcript the
+  observation: the root's from the kept baseline when usable, otherwise by
+  asking the session for a fresh snapshot of that scope. Content of a transcript the
   session's own observation mailbox dropped before the host service took
   it is lost to every holder: each attachment holding that scope is ended
   with `resync_required` once per loss, the kept root baseline goes with

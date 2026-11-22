@@ -278,7 +278,7 @@ impl<P: ProtocolExtension> HostService<P> {
         {
             let observation = SessionObservation::SessionInfo(info);
             let class = observation.class();
-            held.offer(observation, class, self.capacity);
+            held.offer(observation.into(), class, self.capacity);
         }
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
         Ok(id)
@@ -326,7 +326,7 @@ impl<P: ProtocolExtension> HostService<P> {
                                 )),
                             ] {
                                 let class = answer.class();
-                                held.offer(answer, class, capacity);
+                                held.offer(answer.into(), class, capacity);
                             }
                         }
                     }),
