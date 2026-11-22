@@ -4198,7 +4198,8 @@ would open a dormant or still-loading session, start new work, or change
 product state is refused with `backpressure` before delivery, except for the
 exact Stop and Interrupt controls described in §4.6. Clients hold unsent
 drafts themselves; a pause drops blob frames without acknowledgement and
-never queues them for the next generation.
+never queues them for the next generation. Wire 12 has no response keyed
+by blob ID. An explicit, retryable blob refusal is a protocol 13 item.
 
 The public stdio bridge reads exactly one bounded newline-terminated Hello,
 within the same ten-second handshake deadline and maximum line bound, before
