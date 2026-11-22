@@ -2,6 +2,7 @@
 
 use super::*;
 use plakous::runner::{FileOwnerFloors, Floor, OwnerFloors as _};
+use plakous_host_protocol::wire::{RequestRefusal, RunnerStatus};
 use std::os::unix::fs::MetadataExt as _;
 
 #[test]
@@ -176,10 +177,30 @@ fn socket_id(path: &Path) -> (u64, u64) {
 }
 
 fn connected(host: &Host, paired: &Paired) -> Client {
-    runner::wait_local_runner_ready(host);
     let mut client = Client::connect(host);
-    runner::remote_ready(&mut client, &paired.id);
-    client
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let reply = client.request(8, Op::SessionOptions { workspace: None });
+        match &reply {
+            Outcome::Ok(Answer::Options { options }) => {
+                if ["local", paired.id.as_str()].into_iter().all(|id| {
+                    options
+                        .runners
+                        .iter()
+                        .any(|row| row.runner.runner_id == id && row.status == RunnerStatus::Ready)
+                }) {
+                    return client;
+                }
+            }
+            Outcome::Refused(RequestRefusal::Backpressure) => {}
+            _ => panic!("runner options refused: {reply:?}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "runners did not reconcile: {reply:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 struct ServingIdentity {
