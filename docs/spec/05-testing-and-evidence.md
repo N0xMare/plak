@@ -2103,6 +2103,24 @@ first; while the sweep runs they are refreshed at most every 30 seconds, and the
 final pair is written once every task is done. `timings.jsonl` beside them
 records each setup-and-pilot and each cut with its start and duration.
 
+To distribute a strict sweep, run `just dev crash-sweep --strict
+--shard I/N --output RECEIPT` on the same clean revision and target, once for
+each index from 1 through N. A shard runs the complete indexed cuts of its
+assigned shapes, assigned runner authority cases, and all sixteen groups of
+each assigned wire restart family. Both pilots and cuts of a shape stay
+together. The deterministic assignment uses largest estimated shape cost
+first and places each shape on the lightest shard; estimates affect placement,
+not coverage. Shards use the all-shapes selection with one repeat.
+
+Run `just dev crash-sweep --merge RECEIPT... --output DIRECTORY` to verify
+the union. It rejects different revisions, trees, targets, pruning settings
+or inventories; missing or duplicate shard indices, cuts, runner cases or
+restart groups; and missing, failed or refused invariant rows. The checked
+inventory identifies every expected per-store ordinal, independently of what
+the executed shards report. Changes to the registry or cut inventory update
+that inventory against an unsharded strict run. A successful merge writes
+`sweep.jsonl`, `wire.jsonl` and `coverage.json` in the output directory.
+
 **Pilot and cut laws.** A clean post-setup seed supplies each fresh home.
 Twins must agree on each store's indexed `(store, label, tables)` sequence
 and on live effect/dispatch evidence. The terminal-input barrier follows

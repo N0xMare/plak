@@ -2291,8 +2291,11 @@ maintainer builds with the linkage check, and the strict crash sweep. The
 Linux batch supplies core serial and durability; the Linux install profile
 runs unconditionally, including the two exclusive indexed crash-sweep
 campaigns (chapter 05 §2.3). Run the Linux install groups with `just install` or
-`just musl native --install` for the shipped target; strict crash sweep is a
-separate command. An explicit `release` or `maintainer` argument to
+`just musl native --install` for the shipped target. The strict crash sweep
+can run concurrently on separate admitted lanes. Either one full strict run
+or a verified merge of all strict shards on the exact tree and shipped
+target is required (chapter 05 §2.3). Individual shard passes are not gate
+evidence without the merge. An explicit `release` or `maintainer` argument to
 `just install` installs a snapshot instead of running the gate.
 
 An urgent hotfix may enter production before its strict crash sweep finishes

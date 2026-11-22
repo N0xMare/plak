@@ -163,6 +163,26 @@ fn full_sweep() {
     run(&names, jobs, repeat, strict, "full");
 }
 
+#[test]
+fn strict_shard_inventory_covers_the_shape_registry() {
+    use std::collections::BTreeSet;
+    let inventory: Value = serde_json::from_str(include_str!(
+        "../../../../../tools/dev/crash_sweep_inventory.json"
+    ))
+    .unwrap();
+    let pinned = inventory
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        pinned,
+        shapes::names(false).into_iter().collect::<BTreeSet<_>>(),
+        "update the strict shard inventory from an unsharded run"
+    );
+}
+
 /// How often a running sweep refreshes its progress tables.
 const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
