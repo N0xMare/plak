@@ -12868,6 +12868,9 @@ on facts, not phases. The caller opens a fresh HTTP/1.1 connection for each
 gateway request, including version negotiation, JSON calls and relay
 envelopes. A negotiated version is cached, not a connection. A new request
 never uses a caller socket left idle by a previous call or gateway instance.
+TCP gateway dials set `TCP_NODELAY`. When the gateway closes its listeners
+at drain start, a fresh dial refused locally fails at `Connect` with
+`NotStarted`, before any relay request can be sent.
 A gateway hop that failed before the gateway could
 hold the whole relay request (`NotStarted` or `RequestIncomplete`) is an
 upstream `NotStarted`: the gateway dials only after a full read. A gateway

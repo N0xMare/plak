@@ -108,11 +108,13 @@ impl crate::transport::hooks::Dialer for Dial {
                         .map_err(failed)?,
                 )
                     as Box<dyn crate::transport::hooks::DialedIo>,
-                GatewayEndpoint::Tcp(address) => Box::new(
-                    tokio::net::TcpStream::connect(address)
+                GatewayEndpoint::Tcp(address) => {
+                    let stream = tokio::net::TcpStream::connect(address)
                         .await
-                        .map_err(failed)?,
-                ),
+                        .map_err(failed)?;
+                    stream.set_nodelay(true).map_err(failed)?;
+                    Box::new(stream)
+                }
                 GatewayEndpoint::InMemory(gateway) => Box::new(gateway.open()),
             })
         })

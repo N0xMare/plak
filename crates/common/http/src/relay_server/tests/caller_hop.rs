@@ -1,14 +1,15 @@
-//! A caller connection that closes after the gateway admits a request, but
-//! before it sends the first relay frame.
+//! Caller connection lifecycle through the real relay client and server.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use plakous_gateway_protocol::Endpoint;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, DuplexStream};
 
 use super::{
     Client, Duration, ErrorKind, GatewayEndpoint, InMemoryGateway, LOGICAL, Method, Origin, Peer,
-    Phase, RelayServer, Script, Service, TransmissionFact, body_chunks, control, headers, ok_reply,
-    placeholder, relayed, request, upstream,
+    Phase, RelayClient, RelayServer, Script, Service, TransmissionFact, body_chunks, control,
+    headers, ok_reply, placeholder, relayed, request, upstream,
 };
 use crate::Request;
 use crate::relay_server::RelayOutcome;
@@ -45,9 +46,7 @@ async fn cut_before_first_frame(caller: DuplexStream, gateway: DuplexStream) {
 
 /// Only the selected connection is closing; other connections reach a
 /// healthy server. Negotiation still goes through the real relay server.
-async fn closing_gateway(
-    cut_connection: usize,
-) -> (Client, super::Upstream, std::sync::Arc<Service>) {
+async fn closing_gateway(cut_connection: usize) -> (Client, super::Upstream, Arc<Service>) {
     let idle_upstream = upstream(Script::HangAfter(Vec::new())).await;
     let healthy = upstream(Script::Reply(ok_reply("application/json", b"{}"))).await;
     let service = Service::new();
@@ -78,6 +77,47 @@ async fn closing_gateway(
         }
     })));
     (client, healthy, service)
+}
+
+#[tokio::test]
+async fn each_gateway_call_and_relay_opens_one_connection() {
+    let fixture = upstream(Script::Reply(ok_reply("text/plain", b"ok"))).await;
+    let server = RelayServer::new(
+        Service::new(),
+        Client::new_http1(crate::Limits::default()).unwrap(),
+        super::super::new_instance().unwrap(),
+    )
+    .with_dial_override(LOGICAL, fixture.origin.clone());
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let endpoint = GatewayEndpoint::InMemory(InMemoryGateway::new({
+        let accepted = Arc::clone(&accepted);
+        move |io| {
+            accepted.fetch_add(1, Ordering::Relaxed);
+            let server = server.clone();
+            tokio::spawn(async move {
+                let _ = server.serve(io, Peer::InProcess).await;
+            });
+        }
+    }));
+    let relay = Arc::new(RelayClient::new(endpoint, None).unwrap());
+    let client = Client::new_http1(crate::Limits::default())
+        .unwrap()
+        .with_relay(Arc::clone(&relay));
+    for _ in 0..2 {
+        let reply = relay
+            .call(Endpoint::Facts, b"{}".to_vec(), &control())
+            .await
+            .unwrap();
+        assert_eq!(reply, b"{}");
+        let request = request(Origin::parse(LOGICAL).unwrap(), "/v1/x", placeholder(7));
+        let response = client.execute(request, control()).await.unwrap();
+        assert_eq!(body_chunks(response).await.unwrap().concat(), b"ok");
+    }
+    assert_eq!(
+        accepted.load(Ordering::Relaxed),
+        5,
+        "versions, two facts calls, two relays"
+    );
 }
 
 #[tokio::test]

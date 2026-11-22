@@ -1,11 +1,11 @@
-//! The gateway process: exclusive holder, listeners, one exchange per connection.
+//! The gateway process: exclusive holder, listeners, and bounded drain.
 
 use std::future::Future;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use plakous::gateway::server::{Peer, RelayServer};
@@ -187,7 +187,8 @@ async fn run(
             Err(poisoned) => poisoned.into_inner(),
         };
         listeners.push(format!("unix:{}", state.config.socket.display()));
-        if let Some(addr) = state.config.listen_tcp {
+        if let Some(listener) = &tcp {
+            let addr = listener.local_addr().map_err(|error| error.to_string())?;
             listeners.push(format!("tcp:{addr}"));
         }
     }
@@ -223,7 +224,16 @@ async fn run(
             }
         }
     }
+    // Stop new dials at connect, not after the caller has written into an
+    // unserviced backlog. Already accepted connections still flush replies.
+    drop(unix);
+    drop(tcp);
     server.drain();
+    state
+        .listeners
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
     let _ = tokio::time::timeout(DRAIN_DEADLINE, finish_connections(connections, &state)).await;
     Ok(())
 }
@@ -318,15 +328,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn product_gateway_flushes_an_accepted_call_across_drain() {
+    async fn product_gateway_closes_listeners_and_flushes_an_accepted_call_during_drain() {
         use std::io::Read as _;
 
         use plakous::gateway::protocol::{Endpoint, PROTOCOL_VERSION, call};
-        use plakous::gateway::{GatewayEndpoint, RelayClient};
+        use plakous::gateway::{GatewayEndpoint, RelayCallError, RelayClient};
         use tokio::io::AsyncWriteExt as _;
 
         let (_temp, home) = PlakPaths::isolated_test_home();
-        let state = super::super::tests::state_for(&home);
+        let mut state = super::super::tests::state_for(&home);
+        Arc::get_mut(&mut state).unwrap().config.listen_tcp = Some("127.0.0.1:0".parse().unwrap());
         let (started, entered) = tokio::sync::oneshot::channel();
         let (started_sync, entered_sync) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -343,11 +354,8 @@ mod tests {
             plakous::gateway::server::http1_upstream().unwrap(),
             state.instance.clone(),
         );
-        let lock = HolderLock::try_acquire(
-            &holder::lock_path(&state.config.state_root),
-            HolderMode::Exclusive,
-        )
-        .unwrap();
+        let lock_path = holder::lock_path(&state.config.state_root);
+        let lock = HolderLock::try_acquire(&lock_path, HolderMode::Exclusive).unwrap();
         let socket = state.config.socket.clone();
         let running = Arc::clone(&state);
         let service = tokio::spawn(async move {
@@ -357,8 +365,15 @@ mod tests {
             })
             .await
         });
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while state.listeners.lock().unwrap().is_empty() {
+        let tcp = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(addr) = state.listeners.lock().unwrap().iter().find_map(|endpoint| {
+                    endpoint
+                        .strip_prefix("tcp:")
+                        .map(|addr| addr.parse().unwrap())
+                }) {
+                    break addr;
+                }
                 tokio::task::yield_now().await;
             }
         })
@@ -392,6 +407,34 @@ mod tests {
             call::decode::<AdminResponse>(&acknowledgement).unwrap(),
             AdminResponse::Draining {}
         );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !state.listeners.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            // The Unix client has already negotiated; its next admin call
+            // must fail at dial, not after sending a request into the backlog.
+            let unix_error = relay
+                .call(Endpoint::Admin, list, &control)
+                .await
+                .unwrap_err();
+            let tcp = RelayClient::new(GatewayEndpoint::Tcp(tcp), None).unwrap();
+            let tcp_error = tcp.version(&control).await.unwrap_err();
+            for error in [unix_error, tcp_error] {
+                let RelayCallError::Transport(failure) = error else {
+                    panic!("expected a connect failure, got {error:?}");
+                };
+                assert_eq!(
+                    failure.to_string(),
+                    "HTTP transport failed in Connect (NotStarted, Io)"
+                );
+            }
+        })
+        .await
+        .expect("fresh dials must fail while the accepted call is held");
+        let Err(error) = HolderLock::try_acquire(&lock_path, HolderMode::Shared) else {
+            panic!("the drain released credential custody early");
+        };
+        assert!(holder::is_busy(&error), "{error}");
         assert!(!service.is_finished());
         release.send(()).unwrap();
         service.await.unwrap().unwrap();
