@@ -82,6 +82,10 @@ pub(crate) enum ReopenProbe {
     Unknown { reason: String },
 }
 
+/// Only the host coordinator can defer this verdict, and it must then check
+/// the held head before surrender.
+pub(crate) const REOPEN_HEAD_ADVANCED: &str = "head_advanced";
+
 /// How far ahead of now a native access token must stay valid for the probe
 /// to resolve its route: past every route's renewal lead and the source's
 /// deadline, so resolution never renews.
@@ -112,6 +116,10 @@ pub(crate) fn reopen_probe(
         let head = views.as_ref().map_or(recorded, |views| {
             plakous_hosted::runtime::projected_head(recorded, views)
         });
+        #[cfg(feature = "test-support")]
+        if host_upgrade {
+            crate::test_hooks::gate_upgrade_reopen(&record.id)?;
+        }
         let verify = if host_upgrade {
             crate::commands::session::verify_host_upgrade_reopen
         } else {
@@ -132,7 +140,10 @@ impl From<plakous_hosted::runtime::ReopenVerdict> for ReopenProbe {
             } => Self::BindingChanged {
                 change: binding_change_words(&change, current_revision.as_deref()),
             },
-            plakous_hosted::runtime::ReopenVerdict::Refused(reason) => Self::Refused { reason },
+            plakous_hosted::runtime::ReopenVerdict::Refused(reason)
+            | plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(reason) => {
+                Self::Refused { reason }
+            }
             plakous_hosted::runtime::ReopenVerdict::Unknown(reason) => Self::Unknown { reason },
         }
     }

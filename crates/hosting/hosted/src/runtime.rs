@@ -895,6 +895,8 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
 pub enum ReopenVerdict {
     /// The head opens exactly.
     Opens,
+    /// The same branch advanced even after following its head once.
+    HeadAdvanced(String),
     /// The open refuses because this build derives a different frozen binding
     /// input; only a carry into a new session continues the conversation.
     BindingChanged {
@@ -941,6 +943,7 @@ pub fn verify_exact_reopen<P: plakous_host_protocol::ProtocolExtension>(
         .map_err(|error| crate::CliFailure::new(error.to_string()))?;
     let factory = Arc::clone(&config.runtime_factory);
     let mut stderr = Vec::new();
+    let mut checked = head;
     let mut verified = executor
         .block_on(factory.verify_head(&mut config, head, &mut stderr))
         .map_err(|error| crate::CliFailure::new(error.to_string()))?;
@@ -948,14 +951,22 @@ pub fn verify_exact_reopen<P: plakous_host_protocol::ProtocolExtension>(
     // the current head once, and so does its verification.
     if let Err(failure) = &verified
         && let Some(current) = failure.current_locator
-        && current != head
+        && same_branch_advanced(checked, current)
     {
+        checked = current;
         verified = executor
             .block_on(factory.verify_head(&mut config, current, &mut stderr))
             .map_err(|error| crate::CliFailure::new(error.to_string()))?;
     }
     Ok(match verified {
         Ok(()) => ReopenVerdict::Opens,
+        Err(failure)
+            if failure
+                .current_locator
+                .is_some_and(|current| same_branch_advanced(checked, current)) =>
+        {
+            ReopenVerdict::HeadAdvanced(failure.failure.message().to_owned())
+        }
         Err(failure) if failure.unsettled_work => {
             ReopenVerdict::Unknown(REOPEN_UNSETTLED_WORK.to_owned())
         }
@@ -973,6 +984,15 @@ pub fn verify_exact_reopen<P: plakous_host_protocol::ProtocolExtension>(
             None => ReopenVerdict::Refused(failure.failure.message().to_owned()),
         },
     })
+}
+
+fn same_branch_advanced(
+    checked: plakous::sessions::SessionLocator,
+    current: plakous::sessions::SessionLocator,
+) -> bool {
+    current != checked
+        && current.session_id() == checked.session_id()
+        && current.branch_id() == checked.branch_id()
 }
 
 /// Resolves a destination runtime's advisory input window without creating a

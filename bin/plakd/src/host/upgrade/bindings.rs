@@ -58,16 +58,22 @@ pub(super) fn preflight(
     destination: &Path,
     key: &str,
     scratch: Option<&Path>,
+    timing: &super::progress::Report<'_>,
 ) -> CliResult<()> {
     let source = std::env::current_exe().map_err(|error| CliFailure::new(error.to_string()))?;
-    let baseline = probe(&source, paths, key, None)?;
+    let baseline = super::progress::timed(timing, super::progress::Phase::BindingSource, || {
+        probe(&source, paths, key, None)
+    })?;
     let baseline = serde_json::from_slice::<Report>(&baseline.stdout).ok();
     if baseline.is_none() {
         eprintln!(
             "plakd host: binding baseline unavailable; source did not answer check-binding; no source verdict inferred"
         );
     }
-    let output = probe(destination, paths, key, scratch)?;
+    let output =
+        super::progress::timed(timing, super::progress::Phase::BindingDestination, || {
+            probe(destination, paths, key, scratch)
+        })?;
     let destination: Report = serde_json::from_slice(&output.stdout).map_err(|_| {
         CliFailure::new(format!(
             "host_upgrade_binding_preflight_invalid: {}\n{}",

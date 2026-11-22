@@ -4,6 +4,9 @@ mod abandon;
 mod bindings;
 mod preparation;
 mod process_safety;
+mod progress;
+mod qualification;
+mod reopen;
 mod requester;
 mod startup;
 mod step_drain;
@@ -20,7 +23,7 @@ use plakous_hosted::host_service::wire::{AdmissionPause, SessionHost};
 use serde::{Deserialize, Serialize};
 
 use crate::carry::upgrade::{
-    DestinationProbe, process,
+    process,
     receipt::{self, Phase, Receipt},
 };
 use crate::deploy::{DeployRunnerInspection, DeployRunnerVerdict};
@@ -53,10 +56,20 @@ enum Incoming {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum Answer {
-    Progress { detail: String },
-    Ready { receipt: Option<uuid::Uuid> },
-    Abandoned { mappings: Vec<abandon::Abandoned> },
-    Refused { detail: String },
+    Progress {
+        detail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        qualification: Option<progress::Timing>,
+    },
+    Ready {
+        receipt: Option<uuid::Uuid>,
+    },
+    Abandoned {
+        mappings: Vec<abandon::Abandoned>,
+    },
+    Refused {
+        detail: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -432,7 +445,13 @@ fn finish_request(
     let mut replies = std::io::BufReader::new(stream);
     loop {
         match read_frame::<Answer>(&mut replies)? {
-            Answer::Progress { detail } => eprintln!("host upgrade: {detail}"),
+            Answer::Progress {
+                detail,
+                qualification,
+            } => {
+                let detail = qualification.map_or(detail, |timing| timing.detail());
+                eprintln!("host upgrade: {detail}");
+            }
             Answer::Abandoned { .. } => {
                 return Err(CliFailure::new("unexpected abandon reply to upgrade"));
             }
@@ -771,26 +790,35 @@ fn handle(
     let output = Mutex::new(stream.try_clone().map_err(io_failure)?);
     let progress_start = Instant::now();
     let last_progress = Mutex::new(None::<Instant>);
-    let progress = |detail: &str| {
-        let mut last = last_progress
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !detail.starts_with("preflight connected ")
-            && last.is_some_and(|sent| sent.elapsed() < Duration::from_secs(1))
-        {
-            return Ok(());
-        }
+    let progress = |event: progress::Event<'_>| {
+        let (detail, qualification) = match event {
+            progress::Event::Qualification(timing) => (timing.detail(), Some(timing)),
+            progress::Event::Waiting(detail) => {
+                let mut last = last_progress
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !detail.starts_with("preflight connected ")
+                    && last.is_some_and(|sent| sent.elapsed() < Duration::from_secs(1))
+                {
+                    return Ok(());
+                }
+                *last = Some(Instant::now());
+                (
+                    format!("waiting {}s: {detail}", progress_start.elapsed().as_secs()),
+                    None,
+                )
+            }
+        };
         let mut output = output
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         write(
             &mut output,
             &Answer::Progress {
-                detail: format!("waiting {}s: {detail}", progress_start.elapsed().as_secs()),
+                detail,
+                qualification,
             },
-        )?;
-        *last = Some(Instant::now());
-        Ok(())
+        )
     };
     let result = prepare(
         host,
@@ -891,8 +919,9 @@ fn prepare(
     cancelled: &Arc<std::sync::atomic::AtomicBool>,
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
-    progress: &(dyn Fn(&str) -> CliResult<()> + Sync),
+    report: &progress::Report<'_>,
 ) -> CliResult<(Ready, Option<uuid::Uuid>)> {
+    let progress = |detail: &str| report(progress::Event::Waiting(detail));
     let paths = services.paths()?;
     check_cancel(cancelled)?;
     if receipt::all(paths)?
@@ -903,22 +932,29 @@ fn prepare(
             "host_upgrade_pending_ack: finish the recorded destination's pending successors before another upgrade",
         ));
     }
-    let destination_version = qualify_destination(services, &request, arguments)?;
+    let (destination, reopen) =
+        qualification::qualify_destination(services, &request, arguments, report)?;
     let cross_key = request.source_key != request.destination_key;
     if cross_key && !request.inspect_runners.is_empty() {
         return Err(process_safety::deploy_refusal(
             "deploy runner inspection requires a same-key upgrade",
         ));
     }
-    request.check_processes(services, &destination_version, runtime)?;
+    progress::timed(report, progress::Phase::RunnerProcess, || {
+        request.check_processes(services, &destination.runner_version, runtime)
+    })?;
     if cross_key {
         match settled_roots(services) {
-            Ok(roots) => preflight_capacities(services, &request, &roots)?,
+            Ok(roots) => progress::timed(report, progress::Phase::CarryCapacity, || {
+                preflight_capacities(services, &request, &roots)
+            })?,
             Err(error) if request.wait_seconds == 0 => return Err(error),
             Err(_) => {}
         }
     }
-    let standalone = crate::carry::upgrade::admission(paths, true)?;
+    let standalone = progress::timed(report, progress::Phase::StandaloneAdmission, || {
+        crate::carry::upgrade::admission(paths, true)
+    })?;
     let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
     super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
     let budget = step_drain::Budget::new(request.drain)?;
@@ -947,7 +983,7 @@ fn prepare(
         leases: Leases::new()?,
         _standalone: standalone,
     };
-    if !cross_key {
+    if let Some(reopen) = reopen {
         let mut ready = ready;
         ready.step_drain = Some(step_drain::prepare(
             host,
@@ -956,9 +992,10 @@ fn prepare(
             budget,
             cancelled,
             runtime,
-            progress,
+            &progress,
         )?);
-        request.check_processes(services, &destination_version, runtime)?;
+        qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
+        request.check_processes(services, &destination.runner_version, runtime)?;
         ready.pause.commit()?;
         return Ok((ready, None));
     }
@@ -975,90 +1012,6 @@ fn prepare(
     // mailbox after the first check. The joined release persists it first.
     let documents = settled_roots(services)?;
     carry_settled(services, request, ready, documents, cancelled, arguments)
-}
-
-fn qualify_destination(
-    services: &Services,
-    request: &Request,
-    arguments: &[String],
-) -> CliResult<plakous::runner::protocol::VersionTriple> {
-    let paths = services.paths()?;
-    let identity = plakous_recursive_subagents::tree::custody_host();
-    if request.source_instance != identity.instance.to_string()
-        || request.source_key != crate::home::state::state_key()
-        || !request.destination.is_absolute()
-        || !crate::carry::upgrade::state_key_valid(&request.destination_key)
-        || request.wait_seconds > 3600
-        || !request.drain.valid()
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_stale_source: source instance or state key changed",
-        ));
-    }
-    process::verify_image(
-        &std::env::current_exe().map_err(io_failure)?,
-        crate::build_identity::binary_id(),
-    )?;
-    process::verify_image(&request.destination, &request.expected_binary)?;
-    let probe_directory = tempfile::tempdir_in(paths.home()).map_err(io_failure)?;
-    let service_file = probe_directory.path().join("service.json");
-    let probe_arguments = arguments
-        .iter()
-        .enumerate()
-        .filter_map(|(index, argument)| {
-            (!(index == 1 && argument == "__serve-auto")).then_some(argument)
-        })
-        .collect::<Vec<_>>();
-    std::fs::write(
-        &service_file,
-        serde_json::to_vec(&crate::carry::upgrade::ServiceProbe {
-            arguments: probe_arguments.into_iter().cloned().collect(),
-            placements: probe_placements(paths)?,
-        })
-        .map_err(|error| CliFailure::new(error.to_string()))?,
-    )
-    .map_err(io_failure)?;
-    let mut probe_command =
-        process::command(&request.destination, paths.home(), &request.destination_key);
-    probe_command
-        .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
-        .arg(service_file);
-    let _scratch_request = (request.source_key == request.destination_key)
-        .then(|| super::store_revisions::request_rehearsal(probe_directory.path()))
-        .transpose()?;
-    let probe: DestinationProbe = serde_json::from_slice(
-        &process::run(probe_command, PROBE_BOUND)?.stdout,
-    )
-    .map_err(|_| CliFailure::new("host upgrade destination did not answer its capability probe"))?;
-    if probe.protocol != crate::carry::upgrade::PROTOCOL
-        || probe.runner_protocol != probe.runner_version.protocol
-        || probe.receipt_version != receipt::VERSION
-        || !probe.host_available
-        || probe.binary_id != request.expected_binary
-        || probe.state_key != request.destination_key
-        || probe.config_error.is_some()
-        || probe.state_key != request.source_key
-            && !probe.export_versions.contains(&crate::carry::VERSION)
-    {
-        return Err(CliFailure::new(format!(
-            "host_upgrade_destination_unsupported: {}",
-            probe
-                .config_error
-                .as_deref()
-                .unwrap_or("identity, import version or host capability does not match")
-        )));
-    }
-    if request.source_key == request.destination_key {
-        if probe.runner_protocol != crate::commands::runner::version().protocol {
-            return Err(CliFailure::new(
-                "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
-            ));
-        }
-        let scratch = probe_directory.path().join("stores");
-        let scratch = scratch.is_dir().then_some(scratch.as_path());
-        preflight_same_key(services, request, scratch)?;
-    }
-    Ok(probe.runner_version)
 }
 
 fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> CliResult<Receipt> {
@@ -1143,38 +1096,6 @@ fn check_cancel(cancelled: &std::sync::atomic::AtomicBool) -> CliResult<()> {
     }
 }
 
-fn probe_placements(paths: &PlakPaths) -> CliResult<Vec<crate::carry::upgrade::PlacementProbe>> {
-    let withheld = receipt::withheld_targets(paths)?;
-    let mut seen = std::collections::BTreeSet::new();
-    let records =
-        crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
-    for record in records
-        .iter()
-        .filter(|record| !record.archived && !withheld.contains(&record.id))
-    {
-        if let Some(runner) = &record.runner {
-            seen.insert((runner.runner_id.clone(), record.workspace_root.clone()));
-        }
-        if let Some((tree, _)) =
-            plakous_recursive_subagents_store::SqliteTreeStore::inspect_tree_with_custody(
-                &paths.subagents_database(),
-                &record.node.tree_id,
-            )
-            .map_err(|error| CliFailure::new(error.message()))?
-        {
-            for node in tree.rows().nodes().values().filter(|node| node.active_turn) {
-                if let Some(runner) = &node.placement.runner_id {
-                    seen.insert((runner.clone(), node.path.clone()));
-                }
-            }
-        }
-    }
-    Ok(seen
-        .into_iter()
-        .map(|(id, workspace)| crate::carry::upgrade::PlacementProbe { id, workspace })
-        .collect())
-}
-
 fn preflight_capacities(
     services: &Services,
     request: &Request,
@@ -1193,53 +1114,6 @@ fn preflight_capacities(
             .args(["version", "--host-upgrade-capacity"])
             .arg(file);
         process::run(command, PROBE_BOUND)?;
-    }
-    Ok(())
-}
-
-fn preflight_same_key(
-    services: &Services,
-    request: &Request,
-    scratch: Option<&std::path::Path>,
-) -> CliResult<()> {
-    let paths = services.paths()?;
-    bindings::preflight(
-        paths,
-        &request.destination,
-        &request.destination_key,
-        scratch,
-    )?;
-    for record in
-        crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?
-    {
-        if record.plakous_locator.is_none() {
-            continue;
-        }
-        let mut command =
-            process::command(&request.destination, paths.home(), &request.destination_key);
-        command
-            .args(["version", "--host-upgrade-reopen", "--reopen-probe"])
-            .arg(&record.id);
-        if let Some(scratch) = scratch {
-            command.arg("--store-probe").arg(scratch);
-        }
-        let verdict: crate::carry::ReopenProbe =
-            serde_json::from_slice(&process::run(command, PROBE_BOUND)?.stdout).map_err(|_| {
-                CliFailure::new(
-                    "same-key upgrade destination did not answer its exact-reopen probe",
-                )
-            })?;
-        match verdict {
-            crate::carry::ReopenProbe::Opens => {}
-            crate::carry::ReopenProbe::Unknown { reason }
-                if reason == plakous_hosted::runtime::REOPEN_UNSETTLED_WORK => {}
-            verdict => {
-                return Err(CliFailure::new(format!(
-                    "host_upgrade_reopen_refused: {}: {verdict:?}; same-key upgrade uses planned handoff, not carry",
-                    record.id
-                )));
-            }
-        }
     }
     Ok(())
 }

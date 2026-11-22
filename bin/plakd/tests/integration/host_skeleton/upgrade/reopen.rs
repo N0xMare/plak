@@ -3,6 +3,132 @@
 use super::*;
 
 #[test]
+fn a_head_advanced_during_qualification_is_checked_at_handoff() {
+    let Some(fixture) = fixture() else { return };
+    fixture.write_script(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": "first"}}, {"output": {"text": "second"}}]
+    }));
+    let gate = fixture.root.join("reopen-gate");
+    std::fs::create_dir(&gate).unwrap();
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_HOST_REOPEN_GATE", gate.display().to_string())],
+    );
+    runner::wait_local_runner_ready(&host);
+    let mut client = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { session, node, .. }) =
+        client.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("root creation refused");
+    };
+    let attachment = client.attach(2, &node);
+    client.prompt(3, attachment, "first turn", "first");
+    profiles::wait_idle(&mut client, &session);
+    let key = plakd::home::state::state_key();
+    let locator = identity(&fixture, &key, &session).0;
+    let database = plakd::home::paths::PlakPaths::explicit(fixture.home()).runtime_database();
+    let revision = || {
+        plakous::sessions::AgentSessions::inspect_branch_revision_sqlite(&database, locator)
+            .unwrap()
+    };
+    let before = revision();
+    let request = std::thread::scope(|scope| {
+        let request = scope.spawn(|| same_key_upgrade(&fixture, &std::env::var("PATH").unwrap()));
+        let deadline = Instant::now() + WAIT;
+        while !gate.join(&session).is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "reopen probe did not read the head"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        client.prompt(4, attachment, "advance during qualification", "second");
+        profiles::wait_idle(&mut client, &session);
+        let deadline = Instant::now() + WAIT;
+        while revision() <= before {
+            assert!(Instant::now() < deadline, "runtime head did not advance");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::write(gate.join("release"), "").unwrap();
+        request.join().unwrap()
+    });
+    let stderr = String::from_utf8_lossy(&request.stderr);
+    assert!(request.status.success(), "{stderr}");
+    assert!(
+        gate.join(format!("{session}.rechecked")).is_file(),
+        "{stderr}"
+    );
+    let (qualification, _) = stderr
+        .split_once("resolving earlier admission verdicts")
+        .unwrap();
+    let phases: Vec<_> = qualification
+        .lines()
+        .filter_map(|line| {
+            let timing = line.strip_prefix("host upgrade: qualification phase=")?;
+            let (phase, elapsed_ms) = timing.split_once(" elapsed_ms=").unwrap();
+            assert!(elapsed_ms.parse::<u64>().is_ok(), "{line}");
+            Some(phase)
+        })
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            "image",
+            "capability",
+            "binding_source",
+            "binding_destination",
+            "exact_reopen",
+            "runner_process",
+            "standalone_admission",
+        ],
+        "{stderr}"
+    );
+    stop(&mut host);
+}
+
+#[test]
+fn a_later_root_refusal_keeps_same_key_admissions_open() {
+    let Some(fixture) = fixture() else { return };
+    let first = seed(&fixture, 1);
+    let second = seed(&fixture, 2);
+    let refused_root = first.max(second);
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
+    let product = rusqlite::Connection::open(paths.product_database()).unwrap();
+    assert_eq!(
+        product
+            .execute(
+                "UPDATE sessions SET account='fixture-removed-account' WHERE id=?1",
+                [&refused_root],
+            )
+            .unwrap(),
+        1
+    );
+    drop(product);
+
+    let mut host = start(&fixture);
+    let mut client = Client::connect(&host);
+    let result = same_key_upgrade(&fixture, &std::env::var("PATH").unwrap());
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("host_upgrade_reopen_refused") && stderr.contains(&refused_root),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("resolving earlier admission verdicts"),
+        "{stderr}"
+    );
+    runner::wait_local_runner_ready(&host);
+    assert!(matches!(
+        client.request(1, new_session(&fixture.workspace())),
+        Outcome::Ok(Answer::Created { .. })
+    ));
+    stop(&mut host);
+}
+
+#[test]
 fn paired_terminal_history_reopens_across_a_changed_triple() {
     terminal_history(true);
 }

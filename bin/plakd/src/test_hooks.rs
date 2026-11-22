@@ -160,6 +160,28 @@ pub(crate) fn force_host_upgrade() -> bool {
     std::env::var("PLAK_TEST_FORCE_HOST_UPGRADE").as_deref() == Ok("1")
 }
 
+pub(crate) fn gate_upgrade_reopen(id: &str) -> Result<(), String> {
+    let Some(directory) = std::env::var_os("PLAK_TEST_HOST_REOPEN_GATE").map(PathBuf::from) else {
+        return Ok(());
+    };
+    match std::fs::File::create_new(directory.join(id)) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return std::fs::write(directory.join(format!("{id}.rechecked")), "")
+                .map_err(|error| error.to_string());
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !directory.join("release").is_file() {
+        if std::time::Instant::now() >= deadline {
+            return Err("host upgrade reopen test rendezvous timed out".to_owned());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    Ok(())
+}
+
 pub(crate) fn upgrade_crash_cut(name: &str) {
     if std::env::var("PLAK_TEST_HOST_UPGRADE_CUT").is_ok_and(|cut| cut == name) {
         std::process::exit(86);

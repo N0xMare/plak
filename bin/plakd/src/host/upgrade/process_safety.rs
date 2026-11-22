@@ -374,8 +374,10 @@ mod tests {
         let bytes = b"{\"status\":\"progress\",\"detail\":\"waiting 1s: model=1\"}\n{\"status\":\"progress\",\"detail\":\"waiting 2s: paid_compaction=1\"}\n{\"status\":\"ready\",\"receipt\":null}\n";
         let mut reader = std::io::BufReader::new(bytes.as_slice());
         for expected in ["model=1", "paid_compaction=1"] {
-            let super::super::Answer::Progress { detail } =
-                super::super::read_frame(&mut reader).unwrap()
+            let super::super::Answer::Progress {
+                detail,
+                qualification: None,
+            } = super::super::read_frame(&mut reader).unwrap()
             else {
                 panic!("missing progress");
             };

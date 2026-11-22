@@ -26,7 +26,7 @@ pub(crate) use document::{
 pub(crate) use export::ExportRefusal;
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use reload::{
-    CarryCapacityProbe, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,
+    CarryCapacityProbe, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,
     reopen_credential_gate, reopen_probe,
 };
 /// A running turn refuses a reload or rebind whose successor is another

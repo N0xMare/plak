@@ -231,6 +231,12 @@ impl AgentSessions {
             }
             Ok(_) => Ok(OpenVerification::UnsettledWork),
             Err(error) => {
+                // The runtime also checks the exact address. Distinguish a
+                // concurrent advance between the two reads from a refusal of
+                // the same head, just as the owning open does.
+                if error.kind() == AgentErrorKind::Session && agent_store_origin(&error).is_none() {
+                    self.load_exact(locator, "verify_reopen").await?;
+                }
                 let line = exact.checkpoint.manifest().topology().line;
                 Err(self
                     .line_refusal(line, runtime_error(&error))

@@ -174,7 +174,7 @@ pub(crate) fn verify_host_upgrade_reopen(
         &record.workspace_root,
     )?;
     let services = &placement.services;
-    verify_exact_reopen(services, record, head)
+    verify_reopen(services, record, head, true)
 }
 
 pub(crate) fn verify_exact_reopen(
@@ -182,12 +182,28 @@ pub(crate) fn verify_exact_reopen(
     record: product_sessions::SessionRecord,
     head: plakous::sessions::SessionLocator,
 ) -> CliResult<crate::carry::ReopenProbe> {
+    verify_reopen(services, record, head, false)
+}
+
+fn verify_reopen(
+    services: &crate::shell::services::Services,
+    record: product_sessions::SessionRecord,
+    head: plakous::sessions::SessionLocator,
+    host_upgrade: bool,
+) -> CliResult<crate::carry::ReopenProbe> {
     let config = match build_attached_host_config(services, record, AttachedPurpose::Verify) {
         Ok(config) => config,
         Err(AttachedConfigError::Answered(probe)) => return Ok(*probe),
         Err(error) => return Err(error.into()),
     };
-    product_host::verify_exact_reopen(config, head).map(Into::into)
+    match product_host::verify_exact_reopen(config, head)? {
+        plakous_hosted::runtime::ReopenVerdict::HeadAdvanced(_) if host_upgrade => {
+            Ok(crate::carry::ReopenProbe::Unknown {
+                reason: crate::carry::REOPEN_HEAD_ADVANCED.to_owned(),
+            })
+        }
+        verdict => Ok(verdict.into()),
+    }
 }
 
 /// What an attached host configuration is built for.
