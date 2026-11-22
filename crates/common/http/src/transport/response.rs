@@ -178,10 +178,11 @@ impl ResponseBody {
                     },
                 },
                 Some(Err(SourceError::Wire(error))) => {
-                    return Some(Err(self
+                    let failure = self
                         .fail(ErrorKind::Protocol)
                         .await
-                        .with_protocol_cause(&error)));
+                        .with_protocol_cause(&error);
+                    return Some(Err(self.diagnose_failure(failure)));
                 }
                 Some(Err(SourceError::Hooked(kind))) => {
                     return Some(Err(self.fail(kind).await));
@@ -425,14 +426,22 @@ impl ResponseBody {
             self.incoming = BodySource::Closed;
         }
         let _ = self.connection.abort_and_join().await;
-        Failure::new(
-            Phase::ResponseBody,
-            TransmissionFact::MayHaveTransmitted,
-            kind,
+        self.diagnose_failure(
+            Failure::new(
+                Phase::ResponseBody,
+                TransmissionFact::MayHaveTransmitted,
+                kind,
+            )
+            .with_wire_protocol(self.protocol)
+            .with_connection_use(self.connection_use)
+            .with_idle_age(self.idle_age),
         )
-        .with_wire_protocol(self.protocol)
-        .with_connection_use(self.connection_use)
-        .with_idle_age(self.idle_age)
+    }
+
+    fn diagnose_failure(&self, failure: Failure) -> Failure {
+        self.request_progress
+            .as_ref()
+            .map_or(failure, |progress| progress.diagnose_failure(failure))
     }
 }
 
@@ -646,6 +655,7 @@ impl ResponseBody {
             protocol,
             connection_use,
             idle_age: None,
+            request_progress: None,
             reuse,
             reusable: false,
             limits: limits.clone(),

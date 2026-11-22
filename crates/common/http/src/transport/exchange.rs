@@ -320,7 +320,8 @@ impl Client {
         } = live;
         let failed = |failure: Failure| {
             Exchanged::Failed(
-                failure
+                progress
+                    .diagnose_failure(failure)
                     .with_wire_protocol(protocol)
                     .with_connection_use(connection_use),
             )
@@ -391,7 +392,7 @@ impl Client {
             key: key.clone(),
             slot,
         });
-        response_from_wire(
+        let mut response = response_from_wire(
             wire_response,
             connection,
             control.clone(),
@@ -401,7 +402,9 @@ impl Client {
             limits,
         )
         .await
-        .map_err(failed)
+        .map_err(failed)?;
+        response.body.request_progress = Some(progress);
+        Ok(response)
     }
 }
 

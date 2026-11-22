@@ -9,7 +9,54 @@ use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-use super::{RequestBody, RequestIo, WireStream};
+use crate::Failure;
+use crate::error::IoDetail;
+
+use super::{RequestBody, RequestIo, RequestProgress, WireStream};
+
+impl RequestProgress {
+    /// For the fixed-length HTTP/1.1 request, the accepted bytes after the
+    /// head are body bytes. Scan only until the delimiter, retaining its
+    /// match length across short writes, never a copy of the head.
+    fn record_wire_write<'a>(&self, buffers: impl IntoIterator<Item = &'a [u8]>, accepted: usize) {
+        if !self.http2 && self.head_end.get().is_none() {
+            let mut matched = self.head_match.load(Ordering::Relaxed);
+            for (index, byte) in buffers
+                .into_iter()
+                .flatten()
+                .copied()
+                .take(accepted)
+                .enumerate()
+            {
+                if byte == b"\r\n\r\n"[usize::from(matched)] {
+                    matched += 1;
+                    if matched == 4 {
+                        let end = self
+                            .accepted()
+                            .saturating_add(u64::try_from(index + 1).unwrap_or(u64::MAX));
+                        let _ = self.head_end.set(end);
+                        break;
+                    }
+                } else {
+                    matched = u8::from(byte == b'\r');
+                }
+            }
+            self.head_match.store(matched, Ordering::Relaxed);
+        }
+        self.record_accepted(accepted);
+    }
+
+    pub(super) fn diagnose_failure(&self, failure: Failure) -> Failure {
+        let body_bytes = (!self.http2).then(|| {
+            self.head_end.get().map_or(0, |head| {
+                self.accepted().saturating_sub(*head).min(self.body_len)
+            })
+        });
+        failure
+            .with_request_body_bytes_written(body_bytes)
+            .with_io_fallback(self.wire_io.get())
+    }
+}
 
 impl AsyncRead for WireStream {
     fn poll_read(
@@ -94,10 +141,13 @@ impl AsyncRead for RequestIo {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let before = buf.filled().len();
+        let available = buf.remaining();
         let result = Pin::new(&mut self.stream).poll_read(cx, buf);
         let progress = self.slot.current();
         if buf.filled().len() > before {
             progress.response_started.store(true, Ordering::Release);
+        } else if available != 0 && matches!(result, Poll::Ready(Ok(()))) {
+            let _ = progress.wire_io.set(IoDetail::EOF);
         }
         if let Poll::Ready(Err(error)) = &result {
             self.record_io_error(error);
@@ -119,7 +169,7 @@ impl AsyncWrite for RequestIo {
         if let Poll::Ready(Ok(n)) = result
             && n > 0
         {
-            self.slot.current().record_accepted(n);
+            self.slot.current().record_wire_write([buf], n);
         }
         result
     }
@@ -140,7 +190,9 @@ impl AsyncWrite for RequestIo {
         if let Poll::Ready(Ok(n)) = result
             && n > 0
         {
-            self.slot.current().record_accepted(n);
+            self.slot
+                .current()
+                .record_wire_write(bufs.iter().map(std::ops::Deref::deref), n);
         }
         result
     }

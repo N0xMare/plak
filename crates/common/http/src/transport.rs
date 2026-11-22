@@ -3,7 +3,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
@@ -19,6 +19,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_rustls::client::TlsStream;
 
+use crate::error::IoDetail;
 use crate::observation::Observation;
 use crate::{
     AddressPolicy, CancellationToken, ConfigError, ConnectionUse, ErrorKind, ExchangeControl,
@@ -814,6 +815,7 @@ pub struct ResponseBody {
     protocol: WireProtocol,
     connection_use: Option<ConnectionUse>,
     idle_age: Option<Duration>,
+    request_progress: Option<Arc<RequestProgress>>,
     /// Where a clean end returns the connection; `None` once that cannot happen.
     reuse: Option<Reuse>,
     /// The connection came back from its supervisor ready for another request
@@ -852,6 +854,9 @@ struct RequestProgress {
     /// head, framing and body together, so it never undercounts what the peer
     /// can hold.
     accepted: AtomicU64,
+    head_match: AtomicU8,
+    head_end: OnceLock<u64>,
+    wire_io: OnceLock<IoDetail>,
     response_started: AtomicBool,
     peer_rejected_record: AtomicBool,
     complete: OnceLock<Instant>,
@@ -864,6 +869,9 @@ impl RequestProgress {
         Self {
             body_len,
             accepted: AtomicU64::new(0),
+            head_match: AtomicU8::new(0),
+            head_end: OnceLock::new(),
+            wire_io: OnceLock::new(),
             response_started: AtomicBool::new(false),
             peer_rejected_record: AtomicBool::new(false),
             http2,
@@ -970,6 +978,7 @@ impl RequestProgress {
     }
 
     fn record_io_error(&self, error: &std::io::Error, tls13: bool) {
+        let _ = self.wire_io.set(IoDetail::from_error(error));
         // H1 never pipelines. Rustls 0.23 defers TLS 1.3 KeyUpdate replies
         // until the next outgoing message, ahead of its request records.
         // Post-request key-exhaustion KeyUpdate or close_notify requires about

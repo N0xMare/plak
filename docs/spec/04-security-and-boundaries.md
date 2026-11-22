@@ -1362,8 +1362,10 @@ window, but retries never accept another socket or fall back to local custody.
 The caller key file must be owner-only; a
 unix gateway gets a key only when `gateway.key_file` names one. The service
 replaces a stale socket only when it is this user's socket. The audit log
-records metadata only; a failed append is counted and shown by `plakd gateway
-status`.
+records metadata only; upstream transport diagnostics are closed labels,
+counts and codes, never raw errors, header values or payloads. They confer
+no replay authority and are not sent to callers. A failed append is counted
+and shown by `plakd gateway status`.
 
 Drain closes the Unix and TCP listeners before it waits for already accepted
 work. Closing the listeners does not hand off the credential store while

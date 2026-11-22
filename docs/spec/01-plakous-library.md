@@ -12910,7 +12910,9 @@ before the head, and a frame decode error before it are `MayHaveTransmitted`
 in the response head; losing a fresh hop after admission does not make
 the request safe to resend. `End{upstream_failed}` before the head carries the
 gateway's measured upstream phase, transmission and kind verbatim. The
-`Head` frame is the `Response`; any break after it (a lost hop,
+gateway retains redacted transport diagnostics for its local audit; neither
+those diagnostics nor request-write counts enter a relay frame. The `Head`
+frame is the `Response`; any break after it (a lost hop,
 `End{upstream_failed}`, `cancelled` or `gateway_failed`, a decode, sequence
 or offset error, an oversized body) is the ordinary mid-stream
 `ResponseBody`/`MayHaveTransmitted` failure. `End{complete}`, after any

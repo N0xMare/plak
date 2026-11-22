@@ -384,6 +384,53 @@ fn audit_records_metadata_and_not_the_secret() {
     assert!(!joined.contains(secret));
     assert!(joined.contains("\"verb\":\"key_set\""));
     assert!(joined.contains("\"caller\":\"local-admin\""));
+    assert!(!joined.contains("\"upstream_failure\""));
+}
+
+#[tokio::test]
+async fn upstream_failure_audit_appends_only_closed_transport_fields() {
+    use plakous::gateway::server::{GatewayService, RelayOutcome, RelayRecord};
+    use plakous::gateway::{GatewayEndpoint, RelayCallError, RelayClient};
+
+    let (_dir, paths) = home();
+    let state = state_for(&paths);
+    let gateway = super::product::ProductGateway::new(&paths, Arc::clone(&state));
+    let client =
+        RelayClient::new(GatewayEndpoint::Unix(state.config.socket.clone()), None).unwrap();
+    let RelayCallError::Transport(failure) = client
+        .version(&RelayClient::call_control())
+        .await
+        .unwrap_err()
+    else {
+        panic!("expected an unsent connect failure");
+    };
+    gateway.audit(RelayRecord {
+        account: None,
+        operation: None,
+        upstream: None,
+        method: None,
+        upstream_status: None,
+        bytes_down: 0,
+        duration: std::time::Duration::ZERO,
+        outcome: RelayOutcome::UpstreamFailed(failure.transmission()),
+        upstream_failure: Some(failure),
+    });
+    let lines =
+        super::audit::read_lines(&super::server_config::audit_dir(&paths), None, None).unwrap();
+    let entry: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+    assert_eq!(entry["gateway_error"], "upstream_failed");
+    assert_eq!(
+        entry["upstream_failure"],
+        serde_json::json!({
+            "connection_use": "fresh",
+            "idle_age_ms": null,
+            "http_version": null,
+            "request_body_bytes_written": 0,
+            "error_class": "io_other",
+            "tls_alert": null,
+            "http2_reason": null,
+        })
+    );
 }
 
 #[test]

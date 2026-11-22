@@ -5,8 +5,8 @@ use super::{
 use crate::relay::custodied_placeholder;
 use crate::transport::test_tls::{Endpoint, endpoint_with_versions};
 use crate::{
-    Client, ErrorKind, Failure, FaultPlan, HeaderValue, Limits, Origin, Phase, Response,
-    TransmissionFact, sensitive_header_value,
+    Client, ConnectionUse, ErrorKind, Failure, FaultPlan, HeaderValue, Limits, Origin, Phase,
+    Response, TransmissionFact, sensitive_header_value,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -244,6 +244,35 @@ async fn a_gateway_socket_is_not_reused_at_the_five_second_idle_bound() {
     server.inner.upstream_pool.age(Duration::from_secs(5));
     drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
     assert_eq!(peer.counts(), (2, 2));
+}
+
+#[tokio::test]
+async fn a_gateway_audits_upstream_eof_without_sending_diagnostics_to_the_caller() {
+    let peer = TlsPeer::start().await;
+    let service = Service::new();
+    let server = peer.relay(service.clone(), peer.upstream());
+    let client = via(&server);
+    drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
+    let idle = Duration::from_secs(1);
+    server.inner.upstream_pool.age(idle);
+
+    let failure = send(&client, LOGICAL, "/v1/drop", placeholder(7))
+        .await
+        .unwrap_err();
+    assert_eq!(failure.cause(), Some("gateway_upstream"));
+    assert_eq!(failure.connection_use(), None);
+    assert_eq!(failure.request_body_bytes_written(), None);
+
+    tokio::time::timeout(Duration::from_secs(2), service.failure_audited.notified())
+        .await
+        .unwrap();
+    let audit = service.upstream_failure.lock().unwrap().unwrap();
+    assert_eq!(audit.connection_use(), Some(ConnectionUse::Reused));
+    assert!(audit.idle_age().is_some_and(|age| age >= idle));
+    assert_eq!(audit.wire_protocol(), Some(crate::WireProtocol::Http1));
+    assert_eq!(audit.request_body_bytes_written(), Some(13));
+    assert_eq!(audit.transport_error_class(), "eof");
+    assert_eq!(peer.counts(), (1, 2));
 }
 
 #[tokio::test]

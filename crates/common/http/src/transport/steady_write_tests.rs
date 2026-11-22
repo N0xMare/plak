@@ -59,6 +59,33 @@ async fn start_upload(limits: Limits) -> (DuplexStream, Arc<RequestProgress>, Ex
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_blocked_upload_reports_accepted_body_bytes_without_the_http1_head() {
+    let limits = Limits {
+        request_write_idle_timeout: Duration::from_millis(300),
+        ..Limits::default()
+    };
+    let (mut peer, progress, exchange) = start_upload(limits).await;
+    let failure = progress.diagnose_failure(exchange.await.unwrap().err().unwrap());
+    assert_eq!(failure.phase(), Phase::RequestWrite);
+    assert_eq!(failure.transport_error_class(), "timeout");
+    let mut received = Vec::new();
+    // The pipe was never read while the writer ran. After joined cleanup,
+    // its buffer holds exactly what those positive writes handed to it.
+    peer.read_to_end(&mut received).await.unwrap();
+    let head = received
+        .windows(4)
+        .position(|bytes| bytes == b"\r\n\r\n")
+        .unwrap()
+        + 4;
+    let accepted = &received[head..];
+    assert!(!accepted.is_empty() && accepted.iter().all(|byte| *byte == b'x'));
+    assert_eq!(
+        failure.request_body_bytes_written(),
+        Some(accepted.len().try_into().unwrap())
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn steady_request_write_outlives_idle_bound() {
     let limits = Limits {
         request_write_idle_timeout: Duration::from_millis(300),

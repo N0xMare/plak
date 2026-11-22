@@ -146,6 +146,8 @@ struct Service {
     moves_per_inject: AtomicU64,
     held: Arc<AtomicUsize>,
     audited: Mutex<Vec<super::RelayOutcome>>,
+    upstream_failure: Mutex<Option<crate::Failure>>,
+    failure_audited: Notify,
     cut: Mutex<Option<crate::CancellationToken>>,
     facts_gate: Option<Arc<FactsGate>>,
     permit: AtomicBool,
@@ -174,6 +176,8 @@ impl Service {
             moves_per_inject: AtomicU64::new(0),
             held: Arc::new(AtomicUsize::new(0)),
             audited: Mutex::new(Vec::new()),
+            upstream_failure: Mutex::new(None),
+            failure_audited: Notify::new(),
             cut: Mutex::new(None),
             facts_gate: None,
             permit: AtomicBool::new(true),
@@ -287,6 +291,10 @@ impl GatewayService for Service {
 
     fn audit(&self, record: super::RelayRecord) {
         self.audited.lock().unwrap().push(record.outcome);
+        if let Some(failure) = record.upstream_failure {
+            *self.upstream_failure.lock().unwrap() = Some(failure);
+            self.failure_audited.notify_one();
+        }
     }
 }
 

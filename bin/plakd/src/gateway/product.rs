@@ -473,6 +473,21 @@ fn relay_event(state: &GatewayState, caller: &str, record: &RelayRecord) -> Audi
         bytes_down: record.bytes_down,
         duration_ms: u64::try_from(record.duration.as_millis()).unwrap_or(u64::MAX),
         gateway_error: relay_error(&record.outcome),
+        upstream_failure: record
+            .upstream_failure
+            .map(|failure| super::audit::UpstreamFailure {
+                connection_use: failure.connection_use().map(|use_| use_.label()),
+                idle_age_ms: failure
+                    .idle_age()
+                    .map(|age| u64::try_from(age.as_millis()).unwrap_or(u64::MAX)),
+                http_version: failure
+                    .wire_protocol()
+                    .map(|protocol| protocol.http_version()),
+                request_body_bytes_written: failure.request_body_bytes_written(),
+                error_class: failure.transport_error_class(),
+                tls_alert: failure.tls_cause().and_then(|cause| cause.alert()),
+                http2_reason: failure.http2_reason(),
+            }),
         ..AuditEvent::default()
     }
 }

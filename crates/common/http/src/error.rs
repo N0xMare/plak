@@ -174,6 +174,15 @@ pub enum WireProtocol {
 }
 
 impl WireProtocol {
+    /// The HTTP version of the connection.
+    #[must_use]
+    pub const fn http_version(self) -> &'static str {
+        match self {
+            Self::Http1 => "http/1.1",
+            Self::Http2 => "http/2",
+        }
+    }
+
     /// The ALPN protocol id.
     #[must_use]
     pub const fn alpn(self) -> &'static str {
@@ -198,6 +207,18 @@ pub enum ConnectionUse {
     ReplacedStale,
 }
 
+impl ConnectionUse {
+    /// A closed label for diagnostics.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Reused => "reused",
+            Self::ReplacedStale => "replaced_stale",
+        }
+    }
+}
+
 /// A redacted physical-exchange failure.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Failure {
@@ -213,6 +234,33 @@ pub struct Failure {
     connection: Option<ConnectionUse>,
     idle_age: Option<std::time::Duration>,
     connect_attempts: Option<ConnectAttempts>,
+    request_body_bytes_written: Option<u64>,
+}
+
+/// Only the closed facts read from an I/O error, not the error itself.
+pub(crate) struct IoDetail {
+    cause: &'static str,
+    os_error: Option<i32>,
+    tls: Option<TlsCause>,
+}
+
+impl IoDetail {
+    pub(crate) fn from_error(io: &std::io::Error) -> Self {
+        Self {
+            cause: io_cause(io.kind()),
+            os_error: io.raw_os_error(),
+            tls: io
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+                .map(TlsCause::from_rustls),
+        }
+    }
+
+    pub(crate) const EOF: Self = Self {
+        cause: "eof",
+        os_error: None,
+        tls: None,
+    };
 }
 
 /// Content-free accounting of all TCP addresses attempted before failure.
@@ -249,6 +297,7 @@ impl Failure {
             connection: None,
             idle_age: None,
             connect_attempts: None,
+            request_body_bytes_written: None,
         }
     }
 
@@ -299,13 +348,32 @@ impl Failure {
     }
 
     /// Records the I/O kind, OS error number and any Rustls error behind `io`.
-    pub(crate) fn with_io_cause(mut self, io: &std::io::Error) -> Self {
-        self.cause = Some(io_cause(io.kind()));
-        self.os_error = io.raw_os_error();
-        self.tls = io
-            .get_ref()
-            .and_then(|inner| inner.downcast_ref::<rustls::Error>())
-            .map(TlsCause::from_rustls);
+    pub(crate) fn with_io_cause(self, io: &std::io::Error) -> Self {
+        self.with_io_detail(&IoDetail::from_error(io))
+    }
+
+    const fn with_io_detail(mut self, io: &IoDetail) -> Self {
+        self.cause = Some(io.cause);
+        self.os_error = io.os_error;
+        self.tls = io.tls;
+        self
+    }
+
+    /// Hyper can report only that its response channel closed. Preserve the
+    /// stream's own observation in that case, without replacing a specific
+    /// HTTP/2 reason, parse error, or the TLS record-rejection proof.
+    pub(crate) fn with_io_fallback(self, observed: Option<&IoDetail>) -> Self {
+        if self.kind == ErrorKind::Protocol
+            && matches!(
+                self.cause,
+                Some(
+                    "incomplete_message" | "channel_closed" | "request_canceled" | "http_protocol"
+                )
+            )
+            && let Some(io) = observed
+        {
+            return self.with_io_detail(io);
+        }
         self
     }
 
@@ -339,9 +407,54 @@ impl Failure {
 
     /// Age of the pooled connection at checkout, including a stale replacement.
     #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn idle_age(self) -> Option<std::time::Duration> {
+    pub const fn idle_age(self) -> Option<std::time::Duration> {
         self.idle_age
+    }
+
+    pub(crate) const fn with_request_body_bytes_written(mut self, bytes: Option<u64>) -> Self {
+        self.request_body_bytes_written = bytes;
+        self
+    }
+
+    /// HTTP/1.1 request body bytes confirmed accepted by the transport, not
+    /// including the head. This does not measure bytes received by the peer.
+    /// Reports zero when the request did not start. Otherwise `None` means
+    /// there was no measurement (including on HTTP/2).
+    #[must_use]
+    pub const fn request_body_bytes_written(self) -> Option<u64> {
+        match (self.request_body_bytes_written, self.transmission) {
+            (None, TransmissionFact::NotStarted) => Some(0),
+            (written, _) => written,
+        }
+    }
+
+    /// Closed diagnostic class, preferring a TLS cause to its I/O wrapper.
+    #[must_use]
+    pub fn transport_error_class(self) -> &'static str {
+        if self.kind == ErrorKind::DeadlineExceeded
+            || matches!(self.cause, Some("io_timeout" | "library_timeout"))
+        {
+            return "timeout";
+        }
+        if let Some(tls) = self.tls {
+            return tls.label();
+        }
+        match self.cause {
+            Some("unexpected_eof" | "incomplete_message") => "eof",
+            Some(cause) => cause,
+            None => match self.kind {
+                ErrorKind::Cancelled => "cancelled",
+                ErrorKind::DeadlineExceeded => "timeout",
+                ErrorKind::LimitExceeded(_) => "limit_exceeded",
+                ErrorKind::Resolution => "resolution",
+                ErrorKind::AddressRefused => "address_refused",
+                ErrorKind::Io => "io",
+                ErrorKind::Tls => "tls",
+                ErrorKind::Protocol => "protocol",
+                ErrorKind::InvalidResponse => "invalid_response",
+                ErrorKind::Internal => "internal",
+            },
+        }
     }
 
     /// A closed, non-sensitive transport-library cause category, when known.

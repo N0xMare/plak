@@ -152,6 +152,8 @@ pub struct RelayRecord {
     pub upstream_status: Option<u16>,
     /// Upstream body bytes relayed.
     pub bytes_down: u64,
+    /// Redacted transport failure, for the local audit only.
+    pub upstream_failure: Option<Failure>,
     /// Time from the whole request read to the end.
     pub duration: Duration,
     /// How the relay ended.
@@ -421,6 +423,7 @@ impl<S: GatewayService> ServerInner<S> {
             method: Some(envelope.method.clone()),
             upstream_status: None,
             bytes_down: 0,
+            upstream_failure: None,
             duration: Duration::ZERO,
             outcome: RelayOutcome::Complete,
         };
@@ -587,6 +590,7 @@ impl<S: GatewayService> ServerInner<S> {
             None => RelayOutcome::Abandoned,
             Some(None) => RelayOutcome::Cut,
             Some(Some(Err(failure))) => {
+                record.upstream_failure = Some(failure);
                 let _ = send(&sender, &upstream_failed(failure)).await;
                 RelayOutcome::UpstreamFailed(failure.transmission())
             }
@@ -714,6 +718,7 @@ async fn stream(
                 return RelayOutcome::Complete;
             }
             Some(Err(failure)) => {
+                record.upstream_failure = Some(failure);
                 let _ = send(sender, &upstream_failed(failure)).await;
                 return RelayOutcome::UpstreamFailed(failure.transmission());
             }

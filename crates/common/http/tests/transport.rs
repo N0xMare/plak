@@ -1797,6 +1797,8 @@ async fn http2_remote_reset_retains_reason_without_retry() -> TestResult {
         .ok_or("reset unexpectedly succeeded")?;
     assert_eq!(failure.kind(), ErrorKind::Protocol);
     assert_eq!(failure.cause(), Some("http2_remote_reset"));
+    assert_eq!(failure.transport_error_class(), "http2_remote_reset");
+    assert_eq!(failure.request_body_bytes_written(), None);
     assert_eq!(
         failure.http2_reason(),
         Some(u32::from(h2::Reason::REFUSED_STREAM))

@@ -1021,6 +1021,7 @@ async fn bad_record_mac_before_response_is_incomplete_even_after_full_upload() -
         assert!(failure.transmission().peer_cannot_have_acted());
         assert_eq!(failure.cause(), Some("peer_rejected_record"));
         assert_eq!(failure.tls_cause(), Some(TlsCause::AlertReceived(20)));
+        assert_eq!(failure.transport_error_class(), "tls_alert_received");
         assert_eq!(failure.wire_protocol(), Some(WireProtocol::Http1));
         peer.await??;
     }

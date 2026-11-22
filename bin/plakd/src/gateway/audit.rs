@@ -26,6 +26,19 @@ pub(crate) struct AuditEvent {
     pub duration_ms: u64,
     pub certainty: Option<String>,
     pub gateway_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_failure: Option<UpstreamFailure>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct UpstreamFailure {
+    pub connection_use: Option<&'static str>,
+    pub idle_age_ms: Option<u64>,
+    pub http_version: Option<&'static str>,
+    pub request_body_bytes_written: Option<u64>,
+    pub error_class: &'static str,
+    pub tls_alert: Option<u8>,
+    pub http2_reason: Option<u32>,
 }
 
 pub(crate) struct Audit {
