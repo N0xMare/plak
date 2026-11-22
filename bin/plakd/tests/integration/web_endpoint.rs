@@ -89,7 +89,7 @@ fn launch_on_with_env(
 ) -> (Web, bool) {
     let config = fixture.home().join("config.toml");
     let mut text = std::fs::read_to_string(&config).unwrap();
-    if !text.contains("\n[web]\n") {
+    if !text.lines().any(|line| line == "[web]") {
         let _ = write!(
             text,
             "\n[web]\nallow = [\"{LOGIN}\"]\norigin = \"{ORIGIN}\"\n"
