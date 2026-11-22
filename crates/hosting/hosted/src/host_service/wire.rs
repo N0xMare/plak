@@ -35,7 +35,7 @@ use plakous_host_protocol::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use super::{HostService, Outbound, Pending, TreeNodes};
+use super::{HostService, Outbound, Pending, TreeNodes, fanout::Publication};
 use crate::error::{CliFailure, CliResult};
 use lines::Next;
 mod drafts;
@@ -720,8 +720,9 @@ where
             self.service.observe(event);
             return Ok(true);
         };
+        let publication = Publication::prepare(event);
         let mut guard = served::lock(&served);
-        let found = guard.observe(event);
+        let found = guard.observe(publication);
         let switched = guard.generation() != self.generation;
         drop(guard);
         if switched {
