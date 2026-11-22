@@ -54,6 +54,7 @@ fn forward_hop_with_a_busy_legacy_shared_lock_reconciles_admission_and_wake() {
     let mut client = ready_picker(&host);
     client.attach(40, &old_node);
     let (fresh, node) = prompt(&fixture, &mut client);
+    assert_ne!(fresh, before);
     root_wake::idle_turns(&fixture, &fresh, 1);
     std::fs::write(fixture.root.join("release-child"), "continue").unwrap();
     root_wake::submitted_result(&fixture, &node);
@@ -64,7 +65,11 @@ fn forward_hop_with_a_busy_legacy_shared_lock_reconciles_admission_and_wake() {
 }
 
 fn prompt(fixture: &Fixture, client: &mut Client) -> (String, NodeAddress) {
-    let outcome = client.request(41, new_session(&fixture.workspace()));
+    let request = uuid::Uuid::new_v4().to_string();
+    let outcome = client.request(
+        41,
+        new_session_request(&fixture.workspace(), None, &request),
+    );
     let Outcome::Ok(Answer::Created { session, node, .. }) = outcome else {
         panic!("workspace admission failed: {outcome:?}");
     };
