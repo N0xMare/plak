@@ -19,7 +19,9 @@ fn forward_hop_with_a_busy_legacy_shared_lock_reconciles_admission_and_wake() {
     if daemon::check_socket_path(&legacy.stale_socket()).is_err() {
         return;
     }
-    fixture.write_script(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
+    let mut source_script = wake_script.clone();
+    source_script["steps"] = json!([{"output": {"text": ANSWER}}]);
+    fixture.write_script(&source_script);
     let _cleanup = HomeHost(fixture.home());
     let image = replacement_image(&fixture).canonicalize().unwrap();
     let gate = fixture.root.join("exec-gate");
