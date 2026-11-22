@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::commands::runner::environment::HostEnvironment;
 use crate::{CliFailure, CliResult};
 
-const MAX_FDS: usize = 6;
+const MAX_FDS: usize = 7;
 const MAX_ENVELOPE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
@@ -48,8 +48,10 @@ pub(crate) fn receive() -> CliResult<(String, Inherited)> {
         fds.next()
             .ok_or_else(|| failed("missing inherited descriptor"))
     };
-    // Restore stdin before startup can launch any child process.
+    // Restore stdio only after recvmsg has installed the rights. Closing
+    // the sender with rights still queued can break the listeners on Darwin.
     rustix::stdio::dup2_stdin(next()?).map_err(failed)?;
+    rustix::stdio::dup2_stdout(next()?).map_err(failed)?;
     let file = std::fs::File::from(next()?);
     let metadata = file.metadata().map_err(failed)?;
     if !metadata.is_file() || metadata.len() > MAX_ENVELOPE_BYTES {
@@ -139,6 +141,10 @@ fn exec(
             .as_fd()
             .try_clone_to_owned()
             .map_err(failed)?;
+        let saved_stdout = std::io::stdout()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(failed)?;
         let (send, receive) = UnixDatagram::pair().map_err(failed)?;
         // Pass metadata by descriptor as well: no private marker or PATH/HOME
         // can leak through the successor's process environment to its tools.
@@ -159,6 +165,7 @@ fn exec(
         file.rewind().map_err(failed)?;
         let mut fds = vec![
             saved_stdin.as_fd(),
+            saved_stdout.as_fd(),
             file.as_fd(),
             home_lock,
             state_lock,
@@ -166,15 +173,18 @@ fn exec(
         ];
         fds.extend(web);
         send_fds(&send, &fds)?;
-        // Command owns the only exception to close-on-exec: this one endpoint
-        // temporarily occupies stdin. The listening sockets are never made
-        // inheritable in the source's descriptor table.
+        // Keep both ends alive until receipt. On Darwin, closing the sender
+        // before recvmsg can make accepted streams report a false EOF.
+        // Command's stdio setup leaves the listeners themselves CLOEXEC.
         let error = command
             .arg(crate::HOST_REEXEC_ARG)
             .args(arguments)
             .stdin(Stdio::from(OwnedFd::from(receive)))
+            .stdout(Stdio::from(OwnedFd::from(send)))
             .exec();
-        rustix::stdio::dup2_stdin(saved_stdin).map_err(failed)?;
+        let input = rustix::stdio::dup2_stdin(saved_stdin);
+        let output = rustix::stdio::dup2_stdout(saved_stdout);
+        input.and(output).map_err(failed)?;
         Ok(failed(error))
     })();
     match result {

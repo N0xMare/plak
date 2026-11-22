@@ -227,7 +227,7 @@ use crate::presentation::{
 };
 use crate::shell::services::Services;
 
-const HOST_REEXEC_ARG: &str = "__host-reexec-v2";
+const HOST_REEXEC_ARG: &str = "__host-reexec-v3";
 
 /// Run the Plak CLI using process arguments from the environment.
 pub fn main_from_env() -> ExitCode {
