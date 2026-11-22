@@ -1,4 +1,4 @@
-//! Re-exec failures at the real ownership and listening-socket boundaries.
+//! Re-exec at the real ownership and listening-socket boundaries.
 
 use super::*;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -108,6 +108,156 @@ fn locks(fixture: &Fixture) -> [File; 2] {
 
 fn inode(path: &Path) -> u64 {
     std::fs::symlink_metadata(path).unwrap().ino()
+}
+
+fn config_get(socket: &mut WebSocket<UnixStream>) -> Value {
+    socket
+        .send(Message::text(
+            json!({
+                "frame": "request", "id": 1,
+                "op": {"op": "host", "request": {"request": "config_get"}}
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    response(socket, 1)
+}
+
+fn assert_web_console(welcome: &Value, enabled: bool) {
+    let console = &welcome["extension"]["console"];
+    assert_eq!(console["config_read"]["enabled"], enabled, "{welcome}");
+    assert_eq!(console["terminal"]["enabled"], enabled, "{welcome}");
+    assert_eq!(console["accounts_read"]["enabled"], true, "{welcome}");
+}
+
+fn assert_waiting_for_scan(fixture: &Fixture, socket: &mut WebSocket<UnixStream>) {
+    send(
+        socket,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::NewSession {
+                runner: plakous_host_protocol::wire::RunnerLabel::local(),
+                profile: None,
+                model: None,
+                workspace: fixture.workspace().display().to_string(),
+                template: None,
+                request_id: REQUEST.into(),
+                accounts: Vec::new(),
+            },
+        },
+    );
+    assert_eq!(
+        response(socket, 2),
+        json!({"refused":{"refusal":"backpressure"}})
+    );
+}
+
+fn assert_login_revoked(web: &Web, login: &str, cookie: &str) {
+    let mut headers = upgrade_headers(Some(ORIGIN), Some(cookie));
+    headers
+        .iter_mut()
+        .find(|(name, _)| *name == "Tailscale-User-Login")
+        .unwrap()
+        .1 = login.into();
+    assert_eq!(
+        exchange(&mut connect(web), "GET", "/wire", &headers).status,
+        403
+    );
+}
+
+#[test]
+fn successor_serves_the_new_home_web_policy_on_the_inherited_listener() {
+    const REMOVED_LOGIN: &str = "revoked@example.com";
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let write_policy = |allow: &str, enabled: bool| {
+        fixture.write_config(&format!(
+            "[web]\nallow = [{allow}]\norigin = \"{ORIGIN}\"\naccounts_read = true\nconfig_read = {enabled}\nterminal = {enabled}\n"
+        ));
+    };
+    write_policy(&format!("\"{LOGIN}\", \"{REMOVED_LOGIN}\""), true);
+    let source_csp =
+        latency::CONSOLE_CSP.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
+    let exec_gate = fixture.root.join("exec-gate");
+    let scan_gate = fixture.root.join("scan-gate");
+    std::fs::write(&exec_gate, []).unwrap();
+    let (mut web, started) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[
+            (
+                "PLAK_TEST_HOST_BEFORE_PAIRED_EXEC",
+                exec_gate.to_str().unwrap(),
+            ),
+            (
+                "PLAK_TEST_HOST_CONTINUATION_SCAN_GATE",
+                scan_gate.to_str().unwrap(),
+            ),
+        ],
+        &source_csp,
+    );
+    assert!(started, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
+    let listener_inode = inode(&web.socket);
+    let old_page = page(&web, Some(REMOVED_LOGIN), HOST);
+    assert_eq!(old_page.status, 200);
+    assert_eq!(
+        old_page.header("content-security-policy"),
+        Some(source_csp.as_str())
+    );
+    let revoked_cookie = old_page
+        .header("set-cookie")
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let retained_cookie = cookie(&web);
+    let mut source = upgrade(&web, &retained_cookie);
+    let old = directory(&mut source);
+    assert_web_console(&old, true);
+    assert_eq!(
+        config_get(&mut source)["ok"]["response"]["response"],
+        "config_get"
+    );
+
+    let candidate = replacement_image(&fixture).canonicalize().unwrap();
+    let binary = identify(&mut image_command(&fixture, &candidate));
+    assert_ne!(old["binary_id"], binary);
+    let mut control = prepare(&fixture, &candidate, &binary);
+    ready(&mut control);
+    wait_line(&web, "waiting at paired exec gate");
+    write_policy(&format!("\"{LOGIN}\""), false);
+    std::fs::write(
+        fixture.root.join("ui/csp.json"),
+        json!({"header":latency::CONSOLE_CSP}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(&scan_gate, []).unwrap();
+    std::fs::remove_file(exec_gate).unwrap();
+
+    let mut successor = upgrade(&web, &retained_cookie);
+    let welcome = directory(&mut successor);
+    assert_ne!(welcome["host_generation"], old["host_generation"]);
+    assert_eq!(welcome["binary_id"], binary);
+    assert_eq!(inode(&web.socket), listener_inode);
+    assert_waiting_for_scan(&fixture, &mut successor);
+    assert_web_console(&welcome, false);
+    let outcome = config_get(&mut successor);
+    assert_eq!(
+        outcome["refused"],
+        json!({"refusal": "capability_disabled", "capability": "config_read"}),
+        "{outcome}"
+    );
+    let new_page = page(&web, Some(LOGIN), HOST);
+    assert_eq!(new_page.status, 200);
+    assert_eq!(
+        new_page.header("content-security-policy"),
+        Some(latency::CONSOLE_CSP)
+    );
+    assert_login_revoked(&web, REMOVED_LOGIN, revoked_cookie);
+
+    std::fs::remove_file(scan_gate).unwrap();
+    drop(successor);
+    interrupt_and_wait(&mut web);
 }
 
 #[test]
