@@ -13077,16 +13077,44 @@ misbehavior or incompatibility, a rejected certificate, an oversized record, or
 `tls_other`. A failure after ALPN names the negotiated protocol (`h2` or
 `http/1.1`), and an HTTP/2 failure says whether its I/O cause came through the
 connection's own I/O rather than a stream or frame error, and a failure on a
-connection names its `ConnectionUse` (below). All of these appear in
-the `Failure` debug form that capture logs and `.info` terminals print. Unknown
-causes stay generic; raw library errors, Rustls message text, OS error text and
-peer-controlled GOAWAY debug bytes are never formatted. These facts do not change transmission
-classification, retry eligibility, canonical history, or provider failure
-semantics. Transmission is decided by request progress alone: a protocol failure
-is `RequestIncomplete` only when the TLS stream accepted fewer bytes, head and
-framing included, than the body alone, so part of the body provably never left
-the client; otherwise it is `MayHaveTransmitted`. An unobserved flush is not
-that proof: bytes the stream accepted may all have arrived.
+connection names its `ConnectionUse` (below).
+
+On every physical HTTP route, including direct provider routes and the
+gateway's provider leg, Hyper may report only `incomplete_message`,
+`channel_closed`, `request_canceled`, or `http_protocol`. On such a protocol
+failure, the stream's first observed I/O error or EOF supplies the cause, OS
+error number, and TLS cause, where present. A successful read of zero bytes
+into a buffer with room yields the synthetic `eof` cause. Without a stream
+observation, the generic cause stands. The fallback does not replace specific
+causes such as an HTTP/2 frame error, a parse error, or `peer_rejected_record`.
+These transport facts, including `eof`, appear in the `Failure` debug form that
+capture logs and `.info` terminals print. Raw library errors, Rustls message
+text, OS error text, and peer-controlled GOAWAY debug bytes are never formatted.
+
+`Failure::transport_error_class()` returns a closed diagnostic label. It
+normalizes deadlines and I/O or library timeouts to `timeout`, otherwise
+prefers the closed TLS label when known, maps `unexpected_eof` and
+`incomplete_message` to `eof`, and passes through other closed cause labels.
+When there is no cause it uses the failure kind's label: `cancelled`,
+`limit_exceeded`, `resolution`, `address_refused`, `io`, `tls`, `protocol`,
+`invalid_response`, or `internal`.
+`Failure::idle_age()` reports the pool idle age at checkout, including for a
+stale connection that was replaced. `ConnectionUse::label()` yields
+`fresh`, `reused`, or `replaced_stale`. `WireProtocol::http_version()`
+yields `http/1.1` or `http/2` rather than the ALPN label.
+`Failure::request_body_bytes_written()` reports HTTP/1.1 body bytes confirmed
+accepted by the stream, excluding the head, or zero for an unsent request.
+It can omit partial progress on an errored write and is absent when upload
+progress is unmeasured (including HTTP/2). The count is not printed in
+`Failure` debug output and does not measure delivery.
+
+These diagnostics do not change transmission classification, retry eligibility,
+canonical history, or provider failure semantics. Transmission is decided by
+request progress alone: a protocol failure is `RequestIncomplete` only when
+the TLS stream accepted fewer bytes, head and framing included, than the body
+alone, so part of the body provably never left the client; otherwise it is
+`MayHaveTransmitted`. An unobserved flush is not that proof: bytes the stream
+accepted may all have arrived.
 
 **A refusal the provider named is a definite outcome when it produced nothing.**
 Acceptance decides what may have happened, not what did. A provider that opens a

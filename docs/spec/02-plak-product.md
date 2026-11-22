@@ -6785,11 +6785,13 @@ hash, scopes and source networks. The gateway is the only writer of
 query strings, keys, tokens or pastes. A failed upstream transport adds an
 optional `upstream_failure` object: connection use (fresh, reused or stale
 replacement), pool idle age at checkout in milliseconds, HTTP version,
-request body bytes written, a closed error class and any numeric TLS alert
-or HTTP/2 reason. Unknown facts are null. The byte count excludes the HTTP
-head and counts HTTP/1.1 body plaintext confirmed accepted by the stream;
-it is not delivery evidence and may omit partial progress during an errored
-write. An unsent request records zero; HTTP/2 upload progress is unmeasured.
+request body bytes written, an `error_class` from the closed
+`Failure::transport_error_class()` vocabulary (chapter 01 §13.1), and any
+numeric TLS alert or HTTP/2 reason. Unknown facts are null. The byte count
+excludes the HTTP head and counts HTTP/1.1 body plaintext confirmed accepted
+by the stream; it is not delivery evidence and may omit partial progress
+during an errored write. An unsent request records zero; HTTP/2 upload
+progress is unmeasured.
 These fields are local diagnostics and do not change gateway protocol,
 retry, or custody. Older lines and other outcomes omit the object.
 
