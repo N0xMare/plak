@@ -186,9 +186,9 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
             "PLAK_TEST_HOST_CONTINUATION_SCAN_GATE",
             gate.to_str().unwrap(),
         )],
-        CSP,
+        super::latency::CONSOLE_CSP,
     );
-    assert!(ready);
+    assert!(ready, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
     let login = cookie(&web);
     let mut source = upgrade(&web, &login);
     let old = directory(&mut source);

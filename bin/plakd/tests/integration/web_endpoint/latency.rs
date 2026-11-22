@@ -6,7 +6,7 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-const CONSOLE_CSP: &str = concat!(
+pub(super) const CONSOLE_CSP: &str = concat!(
     "default-src 'self'; script-src 'self'; connect-src 'self'; ",
     "require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
 );
