@@ -1308,10 +1308,23 @@ where
             // link asked for, is no longer this connection's.
             let detach = !link.session.reopening()
                 && (link.session.ended() || link.session.releases() > link.releases);
-            link.connection.flush_pending(bulk || detach)?;
+            let paced = link.connection.snapshot_output.is_some();
+            if detach
+                && paced
+                && let Some(attachment) = link.connection.attachment()
+            {
+                link.connection.service.finish_attachment(attachment);
+            }
+            link.connection.flush_pending(bulk || (detach && !paced))?;
             if !link.connection.holding() {
                 self.unlink();
-            } else if detach {
+            } else if detach
+                && (!paced
+                    || link
+                        .connection
+                        .attachment()
+                        .is_none_or(|attachment| !link.connection.service.has_queued(attachment)))
+            {
                 self.detach_link()?;
                 self.host.changed();
             }

@@ -4576,13 +4576,14 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   another intent to it, even while its final frames wait their turn. Terminal
   replies, refusals and unknown outcomes stay FIFO because a refusal or
   unknown outcome can belong to a terminal operation.
-  Snapshot pagination and encoding normally run on bounded blocking jobs.
-  Two pending jobs per connection can hold ordered positions; a pending job
-  counts as one frame until encoding completes. If both job slots are in use,
-  the driver encodes the next snapshot in its blocking section rather than
-  refusing it. Its pages follow previously queued output even if an agent
-  view has since retired. The actual page bytes and count are charged against
-  the outbox caps, including output in flight.
+  Snapshot pages target 1 MiB of encoded row payload. An indivisible row
+  can occupy a page alone up to the existing 8 MiB row limit, subject to
+  the line and whole-snapshot bounds. Snapshot pagination and encoding use
+  bounded blocking work. Each snapshot holds one ordered position; the
+  writer takes only its next page after the preceding frame finishes.
+  Pending pages have their own snapshot bounds and never charge the live
+  output byte cap all at once. The driver takes at most one attachment
+  observation per drained ordered batch, including during initial replay.
 - **Handshake.** The client's first frame is `hello` (protocol version,
   binary id and capabilities). The host answers `welcome` (version, binary id, host
   generation, capabilities, the required principal-specific `extension`
@@ -5138,7 +5139,12 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   queued state of its kind, taking a fresh sequence number after what came
   before it; a state, required event or addressed answer that still finds
   no room drops the attachment, whose queue becomes one `resync_required`
-  and which takes and sends nothing more. Transcript content an attachment
+  and which takes and sends nothing more. An overflowing transcript patch
+  instead discards that scope's queued patch chain, suppresses further
+  patches in that scope and asks for a fresh snapshot once there is room.
+  An individually oversized wire patch takes the same repair path. Other
+  observations keep their order and the transport stays connected.
+  Transcript content an attachment
   lost to a full queue is a gap in that scope, repaid at its next take or
   observation: the root's from the kept baseline, any other by asking the
   session for a fresh snapshot of that scope. Content of a transcript the
@@ -6071,9 +6077,10 @@ settles asynchronously after endpoint binding, before local admission.
   unanswered, and a failed accept is retried after 100 ms. A client that
   leaves, or one whose write makes no byte progress for 10 s, detaches;
   its sessions run on. A connection is detached if its outbox exceeds 8192
-  frames or 64 MiB of encoded output, including the frame being sent; up to
-  two unexpanded snapshot jobs may occupy placeholders, after which the
-  driver encodes additional snapshots inline (§4.4). A pending batch retains
+  frames or 64 MiB of non-snapshot output, including ordinary output being
+  sent. Snapshots are paced separately (§4.4). Output failures log the
+  queued bytes and lines, connection age and in-flight frame kind without
+  frame contents. A pending batch retains
   a hard 30-minute total send bound. A large baseline that continues making byte
   progress is not detached merely because the batch takes more than 10 s;
   neither a slow nor a stalled client holds up another client's sends.

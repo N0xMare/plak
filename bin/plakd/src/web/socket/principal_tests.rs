@@ -35,6 +35,7 @@ struct FixtureSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
     opens: Arc<AtomicUsize>,
     archived: bool,
+    history: Option<fn() -> Vec<plakous_host_protocol::SessionObservation<PlakExtension>>>,
 }
 
 pub(super) fn empty_host() -> Arc<SessionHost<PlakExtension>> {
@@ -45,6 +46,20 @@ pub(super) fn archived_host() -> Arc<SessionHost<PlakExtension>> {
     SessionHost::new(
         FixtureSessions {
             archived: true,
+            ..FixtureSessions::default()
+        },
+        "fixture",
+        1,
+    )
+}
+
+pub(super) fn archived_history(
+    history: fn() -> Vec<plakous_host_protocol::SessionObservation<PlakExtension>>,
+) -> Arc<SessionHost<PlakExtension>> {
+    SessionHost::new(
+        FixtureSessions {
+            archived: true,
+            history: Some(history),
             ..FixtureSessions::default()
         },
         "fixture",
@@ -126,9 +141,14 @@ impl HostSessions<PlakExtension> for FixtureSessions {
                     tree_id: session.into(),
                     agent_id: session.into(),
                 },
-                observations: vec![SessionObservation::PresentationSnapshot(
-                    PresentationSnapshot::empty(1),
-                )],
+                observations: self.history.map_or_else(
+                    || {
+                        vec![SessionObservation::PresentationSnapshot(
+                            PresentationSnapshot::empty(1),
+                        )]
+                    },
+                    |history| history(),
+                ),
             }),
         )
     }
@@ -167,6 +187,7 @@ async fn web_drive_binds_the_verified_login_before_welcome_and_host_dispatch()
             principals: Arc::clone(&principals),
             opens: Arc::clone(&opens),
             archived: false,
+            history: None,
         },
         "fixture",
         1,

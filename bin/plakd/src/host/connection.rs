@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use plakous_host_protocol::views::presentation::PresentationSnapshot;
 use plakous_host_protocol::wire::AttachmentId;
@@ -17,6 +18,7 @@ mod snapshot;
 
 const MAX_PENDING_FRAMES: usize = 8192;
 const MAX_SNAPSHOT_JOBS: usize = 2;
+const MAX_PENDING_SNAPSHOTS: usize = MAX_SNAPSHOT_JOBS + 1;
 const READS_PER_FLUSH_PHASE: u8 = 8;
 
 pub(crate) type Connection = HostConnection<PlakExtension, Outbox>;
@@ -93,8 +95,14 @@ impl ConnectionFlush {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct Outbox(Arc<Shared>);
+#[derive(Clone)]
+pub(crate) struct Outbox(Arc<Shared>, Instant);
+
+impl Default for Outbox {
+    fn default() -> Self {
+        Self(Arc::default(), Instant::now())
+    }
+}
 
 #[derive(Default)]
 struct Shared {
@@ -112,6 +120,7 @@ struct Pending {
     // The transport still owns a frame until its send completes.
     ordered_frames: usize,
     snapshots: usize,
+    sending: Option<Sending>,
     overflowed: bool,
     closed: bool,
 }
@@ -119,33 +128,29 @@ struct Pending {
 enum Ordered {
     Line(Vec<u8>),
     Snapshot(snapshot::Job),
+    Pages(snapshot::Pages),
+}
+
+struct Sending {
+    snapshot_last: Option<bool>,
+    kind: &'static str,
+    bytes: usize,
+}
+
+pub(crate) struct CloseStats {
+    pub(crate) queued_bytes: usize,
+    pub(crate) queued_lines: usize,
+    pub(crate) age_ms: u64,
+    pub(crate) in_flight: &'static str,
+    pub(crate) pending_snapshots: usize,
 }
 
 impl Ordered {
     fn ready(&self) -> bool {
         match self {
-            Self::Line(_) => true,
+            Self::Line(_) | Self::Pages(_) => true,
             Self::Snapshot(job) => job.ready(),
         }
-    }
-}
-
-impl Shared {
-    fn charge_snapshot(&self, pages: &snapshot::Pages) -> Result<(), SendError> {
-        let mut queue = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
-        // Replace the placeholder before publishing the completed job. The
-        // writer may have drained preceding lines while encoding was running.
-        let frames = queue.frames - 1 + pages.lines.len();
-        let bytes = queue.bytes + pages.bytes;
-        if queue.overflowed || frames > MAX_PENDING_FRAMES || bytes > MAX_PENDING_BYTES {
-            queue.overflowed = true;
-            return Err(SendError::Full);
-        }
-        queue.frames = frames;
-        queue.bytes = bytes;
-        queue.ordered_frames = queue.ordered_frames - 1 + pages.lines.len();
-        queue.snapshots -= 1;
-        Ok(())
     }
 }
 
@@ -157,6 +162,18 @@ pub(crate) enum SendError {
     Full,
     Stalled,
     Disconnected,
+    Snapshot,
+}
+
+impl SendError {
+    pub(crate) const fn reason(self) -> &'static str {
+        match self {
+            Self::Full => "client fell behind",
+            Self::Stalled => "client too slow",
+            Self::Disconnected => "send failed",
+            Self::Snapshot => "snapshot encoding failed",
+        }
+    }
 }
 
 pub(crate) trait FrameWriter: Send {
@@ -164,6 +181,33 @@ pub(crate) trait FrameWriter: Send {
 }
 
 impl Outbox {
+    pub(crate) fn overflowed(&self) -> bool {
+        self.lock().overflowed
+    }
+
+    pub(crate) fn close_stats(&self) -> CloseStats {
+        let queue = self.lock();
+        let page = queue
+            .sending
+            .as_ref()
+            .filter(|frame| frame.snapshot_last.is_some());
+        CloseStats {
+            queued_bytes: queue.bytes + page.map_or(0, |frame| frame.bytes),
+            queued_lines: queue.frames - queue.snapshots + usize::from(page.is_some()),
+            age_ms: u64::try_from(self.1.elapsed().as_millis()).unwrap_or(u64::MAX),
+            in_flight: queue.sending.as_ref().map_or("none", |frame| frame.kind),
+            pending_snapshots: queue.snapshots,
+        }
+    }
+
+    pub(crate) fn output_error(&self) -> &'static str {
+        if self.overflowed() {
+            SendError::Full.reason()
+        } else {
+            "output failed"
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, Pending> {
         self.0
             .pending
@@ -208,6 +252,9 @@ impl Outbox {
         encoders: &'static tokio::sync::Semaphore,
     ) -> CliResult<()> {
         let mut queue = self.lock();
+        if queue.snapshots >= MAX_PENDING_SNAPSHOTS {
+            return Err(CliFailure::new("snapshot queue is full"));
+        }
         if queue.snapshots == MAX_SNAPSHOT_JOBS {
             // The driver is the sole producer of ordered output. Let the
             // writer drain earlier frames while the driver encodes this one.
@@ -218,7 +265,6 @@ impl Outbox {
             .map_err(|error| CliFailure::new(error.to_string()))?;
         queue.ordered_frames += 1;
         queue.snapshots += 1;
-        let output = Arc::downgrade(&self.0);
         queue
             .ordered
             .push_back(Ordered::Snapshot(snapshot::Job::start(
@@ -226,12 +272,6 @@ impl Outbox {
                 snapshot,
                 encoders,
                 Arc::clone(&self.0.ready),
-                move |pages| {
-                    output
-                        .upgrade()
-                        .ok_or(SendError::Disconnected)?
-                        .charge_snapshot(pages)
-                },
             )));
         // Preparation wakes the writer once this entry can be taken.
         Ok(())
@@ -246,12 +286,11 @@ impl Outbox {
             CliFailure::new("the snapshot exceeded its wire bounds or could not be encoded")
         })?;
         let mut queue = self.lock();
-        self.reserve(&mut queue, pages.bytes, pages.lines.len())
+        self.reserve(&mut queue, 0, 1)
             .map_err(|error| CliFailure::new(error.to_string()))?;
-        queue.ordered_frames += pages.lines.len();
-        queue
-            .ordered
-            .extend(pages.lines.into_iter().map(Ordered::Line));
+        queue.ordered_frames += 1;
+        queue.snapshots += 1;
+        queue.ordered.push_back(Ordered::Pages(pages));
         self.0.ready.notify_one();
         Ok(())
     }
@@ -341,27 +380,44 @@ impl Outbox {
         if queue.overflowed {
             return Err(SendError::Full);
         }
+        if queue.sending.is_some() {
+            return Ok(None);
+        }
         if let Some(frame) = queue.control.pop_front() {
+            queue.sending = Some(sending(&frame, None));
             return Ok(Some((frame, false)));
         }
-        loop {
-            if queue.ordered.front().is_some_and(|entry| !entry.ready()) {
-                return Ok(None);
-            }
-            let pages = match queue.ordered.pop_front() {
-                Some(Ordered::Snapshot(job)) => job.take()?,
-                Some(Ordered::Line(line)) => return Ok(Some((Some(line), true))),
-                None => return Ok(None),
-            };
-            for line in pages.lines.into_iter().rev() {
-                queue.ordered.push_front(Ordered::Line(line));
-            }
+        if queue.ordered.front().is_some_and(|entry| !entry.ready()) {
+            return Ok(None);
         }
+        let mut pages = match queue.ordered.pop_front() {
+            Some(Ordered::Snapshot(job)) => job.take()?,
+            Some(Ordered::Pages(pages)) => pages,
+            Some(Ordered::Line(line)) => {
+                let frame = Some(line);
+                queue.sending = Some(sending(&frame, None));
+                return Ok(Some((frame, true)));
+            }
+            None => return Ok(None),
+        };
+        // The cursor is one ordered slot. Expose just its next page after
+        // the preceding frame completed; remaining pages aren't queued lines.
+        let frame = Some(pages.lines.pop_front().ok_or(SendError::Snapshot)?);
+        let last = pages.lines.is_empty();
+        if !last {
+            queue.ordered.push_front(Ordered::Pages(pages));
+        }
+        queue.sending = Some(sending(&frame, Some(last)));
+        Ok(Some((frame, true)))
     }
 
     fn sent(&self, len: usize, ordered: bool) -> bool {
         let mut queue = self.lock();
-        queue.bytes -= len;
+        match queue.sending.take().and_then(|frame| frame.snapshot_last) {
+            Some(false) => return false,
+            Some(true) => queue.snapshots -= 1,
+            None => queue.bytes -= len,
+        }
         queue.frames -= 1;
         if ordered {
             queue.ordered_frames -= 1;
@@ -371,6 +427,23 @@ impl Outbox {
             }
         }
         false
+    }
+}
+
+fn sending(frame: &Frame, snapshot_last: Option<bool>) -> Sending {
+    let kind = match frame.as_deref() {
+        None => "heartbeat",
+        Some(line) if line.starts_with(br#"{"frame":"snapshot","#) => "snapshot",
+        Some(line) if line.starts_with(br#"{"frame":"event","#) => "event",
+        Some(line) if line.starts_with(br#"{"frame":"response","#) => "response",
+        Some(line) if line.starts_with(br#"{"frame":"directory","#) => "directory",
+        Some(line) if line.starts_with(br#"{"frame":"blob","#) => "blob",
+        Some(_) => "other",
+    };
+    Sending {
+        snapshot_last,
+        kind,
+        bytes: frame.as_ref().map_or(0, Vec::len),
     }
 }
 
@@ -710,7 +783,7 @@ mod tests {
                 {
                     let queue = outbox.lock();
                     if queue.ordered.back().is_some_and(Ordered::ready) {
-                        assert!(queue.bytes > bulk.len() * 3);
+                        assert_eq!(queue.bytes, bulk.len() * 3);
                         break;
                     }
                 }
@@ -727,5 +800,48 @@ mod tests {
                 .await
                 .starts_with(br#"{"frame":"snapshot","#)
         );
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_cursor_exposes_only_one_page_until_it_is_sent() {
+        use plakous_host_protocol::views::transcript::{
+            Lane, RowKey, TranscriptItem, TranscriptRow,
+        };
+        let outbox = Outbox::default();
+        let mut snapshot = PresentationSnapshot::empty(1);
+        snapshot.items = (1..=3)
+            .map(|key| TranscriptItem {
+                key: RowKey::new(key, Lane::Runtime, 0),
+                row: TranscriptRow::assistant("x".repeat(600 * 1024)),
+            })
+            .collect();
+        outbox.snapshot(8, snapshot).unwrap();
+        let (first, ordered) = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(frame) = outbox.pop().unwrap() {
+                    break frame;
+                }
+                outbox.0.ready.notified().await;
+            }
+        })
+        .await
+        .unwrap();
+        let first = first.unwrap();
+        assert!(ordered);
+        assert!(outbox.pop().unwrap().is_none());
+        let stats = outbox.close_stats();
+        assert_eq!(
+            (stats.queued_bytes, stats.queued_lines, stats.in_flight),
+            (first.len(), 1, "snapshot")
+        );
+        assert!(!outbox.sent(first.len(), ordered));
+        for page in 1..=2 {
+            let line = next_ordered(&outbox).await;
+            let frame: HostFrame<PlakExtension> = serde_json::from_slice(&line).unwrap();
+            assert!(
+                matches!(frame, HostFrame::Snapshot(frame) if frame.page == page && frame.last == (page == 2))
+            );
+        }
+        assert!(outbox.ordered_drained());
     }
 }

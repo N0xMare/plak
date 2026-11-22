@@ -455,7 +455,12 @@ async fn attached(
         }
         tokio::select! {
             biased;
-            _ = writer.join_next() => break STOP_JOIN,
+            result = writer.join_next() => {
+                if let Some(Ok(Err(error))) = result {
+                    log_output_loss(outbox, error.reason());
+                }
+                break STOP_JOIN;
+            }
             line = reader.next(), if flush.can_read() => {
                 let Some(line) = line else { break STOP_JOIN };
                 match connection_work(|| connection.frame(line)) {
@@ -464,11 +469,15 @@ async fn attached(
                         let _ = connection_work(|| outbox.flush_connection(connection));
                         break if stopped() { STOP_JOIN } else { TOTAL };
                     }
-                    Err(_) => break STOP_JOIN,
+                    Err(_) => {
+                        log_output_loss(outbox, outbox.output_error());
+                        break STOP_JOIN;
+                    }
                 }
             }
             () = std::future::ready(()), if flush.pending() => {
                 if flush.step(connection, outbox).is_err() {
+                    log_output_loss(outbox, outbox.output_error());
                     break STOP_JOIN;
                 }
             }
@@ -478,14 +487,29 @@ async fn attached(
         }
     };
     outbox.close();
-    if matches!(
-        tokio::time::timeout(join, writer.join_next()).await,
-        Ok(Some(Ok(Ok(()))))
-    ) {
-        connection.output_sent();
+    match tokio::time::timeout(join, writer.join_next()).await {
+        Ok(Some(Ok(Ok(())))) => connection.output_sent(),
+        Ok(Some(Ok(Err(error)))) => log_output_loss(outbox, error.reason()),
+        Err(_) => log_output_loss(outbox, "final send timed out"),
+        _ => {}
     }
     // Every way out detaches, so no session holds a dead attachment.
     connection_work(|| connection.leave());
+}
+
+fn log_output_loss(outbox: &Outbox, ended: &'static str) {
+    let stats = outbox.close_stats();
+    let _log = tracing::info_span!(
+        target: "plak::host",
+        "control connection output ended",
+        ended,
+        queued_bytes = stats.queued_bytes,
+        queued_lines = stats.queued_lines,
+        age_ms = stats.age_ms,
+        in_flight = stats.in_flight,
+        pending_snapshots = stats.pending_snapshots,
+    )
+    .entered();
 }
 
 #[cfg(test)]

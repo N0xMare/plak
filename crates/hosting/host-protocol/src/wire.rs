@@ -102,9 +102,10 @@ pub const MAX_SNAPSHOT_PAGES: u32 = 64;
 /// bound, for the encoding.
 pub const MAX_SNAPSHOT_BYTES: usize = 2 * crate::views::presentation::MAX_PRESENTATION_BYTES;
 
-/// The encoded bytes one snapshot page aims to stay under, leaving room
-/// for its frame within [`MAX_LINE_BYTES`].
-const PAGE_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+/// Target page payload: smaller frames allow control traffic at the next
+/// frame boundary. An indivisible row can use the old single-row limit.
+const PAGE_BUDGET_BYTES: usize = 1024 * 1024;
+const MAX_SNAPSHOT_ROW_BYTES: usize = 8 * 1024 * 1024;
 
 /// A request's id, chosen by the client and unique on its connection.
 pub type RequestId = u64;
@@ -1276,7 +1277,7 @@ impl BlobAssembler {
 ///
 /// # Errors
 ///
-/// [`WireError::TooLarge`] when one row alone is over the page budget.
+/// [`WireError::TooLarge`] when one row alone exceeds its wire bound.
 pub fn page_snapshot(
     snapshot: PresentationSnapshot,
     attachment: AttachmentId,
@@ -1293,10 +1294,10 @@ pub fn page_snapshot(
         let size = serde_json::to_vec(&item)
             .map_err(|error| WireError::Malformed(error.to_string()))?
             .len();
-        if size > PAGE_BUDGET_BYTES {
+        if size > MAX_SNAPSHOT_ROW_BYTES {
             return Err(WireError::TooLarge);
         }
-        if used + size > PAGE_BUDGET_BYTES {
+        if used != 0 && used + size > PAGE_BUDGET_BYTES {
             pages.push(Vec::new());
             used = 0;
         }

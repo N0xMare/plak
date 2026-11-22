@@ -131,3 +131,34 @@ fn a_snapshot_clears_losses_recorded_while_its_repair_was_outstanding() {
         assert_eq!(resyncs(&intents, &scope), 0);
     }
 }
+
+#[test]
+fn patch_pressure_asks_for_a_fresh_revision_without_ending_the_attachment() {
+    use plakous_host_protocol::views::transcript::TranscriptPatch;
+    let (service, intents) = service(2);
+    service.observe(Observation::PresentationSnapshot(
+        PresentationSnapshot::empty(1),
+    ));
+    let id = service.attach(&root(), Face::Remote).unwrap();
+    service.take(id);
+    let patch = |from_revision| {
+        Observation::TranscriptPatch(TranscriptPatch {
+            scope: TranscriptScope::Root,
+            from_revision,
+            to_revision: from_revision + 1,
+            upserts: Vec::new(),
+            deletes: Vec::new(),
+        })
+    };
+    for revision in 1..=4 {
+        service.observe(patch(revision));
+    }
+    assert!(service.attached(id));
+    assert!(service.take(id).is_empty());
+    assert_eq!(resyncs(&intents, &TranscriptScope::Root), 1);
+    let snapshot = Observation::PresentationSnapshot(PresentationSnapshot::empty(5));
+    service.observe(snapshot.clone());
+    service.observe(patch(5));
+    assert_eq!(observations(service.take(id)), vec![snapshot, patch(5)]);
+    assert!(service.attached(id));
+}

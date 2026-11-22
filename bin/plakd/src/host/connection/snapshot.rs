@@ -36,7 +36,6 @@ impl Job {
         snapshot: PresentationSnapshot,
         encoders: &'static Semaphore,
         ready: Arc<Notify>,
-        charge: impl FnOnce(&Pages) -> Result<(), SendError> + Send + 'static,
     ) -> Self {
         let result = Arc::new(Mutex::new(None));
         let output = Arc::clone(&result);
@@ -49,11 +48,7 @@ impl Job {
                 .await
                 .unwrap_or(Err(SendError::Disconnected)),
                 Err(_) => Err(SendError::Disconnected),
-            }
-            .and_then(|pages| {
-                charge(&pages)?;
-                Ok(pages)
-            });
+            };
             *output.lock().unwrap_or_else(PoisonError::into_inner) = Some(pages);
             ready.notify_one();
         });
@@ -90,17 +85,17 @@ pub(super) fn encode(
     snapshot: PresentationSnapshot,
 ) -> Result<Pages, SendError> {
     let mut output = Pages::default();
-    let pages = page_snapshot(snapshot, attachment).map_err(|_| SendError::Disconnected)?;
+    let pages = page_snapshot(snapshot, attachment).map_err(|_| SendError::Snapshot)?;
     if pages.len() > FRAMES {
-        return Err(SendError::Full);
+        return Err(SendError::Snapshot);
     }
     for page in pages {
         let line = encode_line(&HostFrame::<PlakExtension>::Snapshot(page))
-            .map_err(|_| SendError::Disconnected)?
+            .map_err(|_| SendError::Snapshot)?
             .into_bytes();
         output.bytes += line.len();
         if output.bytes > BYTES {
-            return Err(SendError::Full);
+            return Err(SendError::Snapshot);
         }
         output.lines.push_back(line);
     }

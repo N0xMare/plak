@@ -170,6 +170,7 @@ struct Attachment<P: ProtocolExtension> {
     /// Scopes whose transcript content this attachment lost to a full
     /// queue; repaid with a fresh baseline.
     gapped: BTreeSet<TranscriptScope>,
+    fresh: BTreeSet<TranscriptScope>,
     repairing: BTreeMap<TranscriptScope, std::time::Instant>,
     /// Attach-snapshot items still at the head of the queue; they do not
     /// count against the capacity.
@@ -944,6 +945,7 @@ impl<P: ProtocolExtension> HostService<P> {
             seq: 0,
             scopes,
             gapped: BTreeSet::new(),
+            fresh: BTreeSet::new(),
             repairing: BTreeMap::new(),
             snapshot_held: items.len(),
             dropped: false,
@@ -1083,21 +1085,59 @@ impl<P: ProtocolExtension> HostService<P> {
         // that repays its gaps. Never spin waiting for a mailbox snapshot.
         for _ in 0..2 {
             self.repair_gaps();
-            taken.extend(self.take_queued(attachment));
+            taken.extend(self.take_queued(attachment, usize::MAX, false));
         }
         taken
     }
 
-    fn take_queued(&self, attachment: AttachmentId) -> Vec<Outbound<P>> {
+    fn take_for_wire(&self, attachment: AttachmentId, bulk: bool) -> Vec<Outbound<P>> {
+        if bulk {
+            self.repair_gaps();
+        }
+        self.take_queued(attachment, 1, !bulk)
+    }
+
+    // Fence incoming intents when residency ends, but let the transport
+    // deliver everything already owed before it emits Detached.
+    fn finish_attachment(&self, attachment: AttachmentId) {
+        if let Some(held) = self.lock().attachments.get_mut(&attachment) {
+            held.dropped = true;
+        }
+    }
+
+    fn has_queued(&self, attachment: AttachmentId) -> bool {
+        self.lock()
+            .attachments
+            .get(&attachment)
+            .is_some_and(|held| !held.queue.is_empty())
+    }
+
+    fn lose_wire_patch(&self, attachment: AttachmentId, scope: &TranscriptScope) {
+        if let Some(held) = self.lock().attachments.get_mut(&attachment) {
+            held.miss_patch(scope);
+        }
+        self.repair_gaps();
+    }
+
+    fn take_queued(
+        &self,
+        attachment: AttachmentId,
+        limit: usize,
+        boundary_only: bool,
+    ) -> Vec<Outbound<P>> {
         // As in `detach`, the senders this ends drop after the lock.
         let mailbox = self.mailbox();
         let mut state = self.lock();
         let Some(held) = state.attachments.get_mut(&attachment) else {
             return Vec::new();
         };
-        let taken: Vec<_> = held.queue.drain(..).collect();
-        held.snapshot_held = 0;
-        let removed = if held.dropped {
+        if boundary_only && matches!(held.queue.front(), Some(Outbound::Event { .. })) {
+            return Vec::new();
+        }
+        let count = limit.min(held.queue.len());
+        let taken: Vec<_> = held.queue.drain(..count).collect();
+        held.snapshot_held = held.snapshot_held.saturating_sub(count);
+        let removed = if held.dropped && held.queue.is_empty() {
             state.remove(attachment, mailbox.as_ref())
         } else {
             None
@@ -1446,6 +1486,7 @@ impl<P: ProtocolExtension> State<P> {
         {
             held.gapped
                 .remove(&TranscriptScope::Agent(agent.to_owned()));
+            held.fresh.remove(&TranscriptScope::Agent(agent.to_owned()));
             held.repairing
                 .remove(&TranscriptScope::Agent(agent.to_owned()));
             *count = count.saturating_sub(1);
@@ -1513,6 +1554,26 @@ impl<P: ProtocolExtension> State<P> {
 }
 
 impl<P: ProtocolExtension> Attachment<P> {
+    fn miss_patch(&mut self, scope: &TranscriptScope) {
+        self.gapped.insert(scope.clone());
+        if !self.fresh.insert(scope.clone()) {
+            return;
+        }
+        // A patch chain with a missing revision cannot be repaired by
+        // replaying later deltas. Keep all other observations in order.
+        let mut index = 0;
+        let mut kept_snapshot = 0;
+        self.queue.retain(|item| {
+            let keep = !matches!(item, Outbound::Event {
+                observation: SessionObservation::TranscriptPatch(patch), ..
+            } if patch.scope == *scope);
+            kept_snapshot += usize::from(keep && index < self.snapshot_held);
+            index += 1;
+            keep
+        });
+        self.snapshot_held = kept_snapshot;
+    }
+
     /// How many items this attachment's queue holds: a face's is unbounded,
     /// since the face reads it on its own thread and the session's mailbox
     /// is the bound it meets.
@@ -1549,6 +1610,14 @@ impl<P: ProtocolExtension> Attachment<P> {
         capacity: usize,
     ) {
         if self.dropped || self.waiting || !self.face.receives(&observation) {
+            return;
+        }
+        let patch_scope = match &observation {
+            SessionObservation::TranscriptPatch(patch) => Some(&patch.scope),
+            _ => None,
+        };
+        if patch_scope.is_some_and(|scope| self.fresh.contains(scope)) {
+            self.seq += 1;
             return;
         }
         let droppable = class == ObservationClass::Event(Delivery::Droppable);
@@ -1590,6 +1659,13 @@ impl<P: ProtocolExtension> Attachment<P> {
                     return;
                 }
                 (None, false) => {
+                    if let Some(scope) = patch_scope
+                        && self.sender.is_some()
+                    {
+                        self.miss_patch(scope);
+                        self.seq += 1;
+                        return;
+                    }
                     self.dropped = true;
                     self.queue.clear();
                     self.queue.push_back(Outbound::ResyncRequired);
@@ -1601,6 +1677,7 @@ impl<P: ProtocolExtension> Attachment<P> {
         if let SessionObservation::PresentationSnapshot(snapshot) = &observation {
             // The baseline includes any transcript evicted to make room for it.
             self.gapped.remove(&snapshot.scope);
+            self.fresh.remove(&snapshot.scope);
             self.repairing.remove(&snapshot.scope);
         }
         self.queue.push_back(Outbound::Event {

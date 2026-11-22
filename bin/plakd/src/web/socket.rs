@@ -128,8 +128,7 @@ pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: Connect
         Some(config),
     )
     .await;
-    let reason = drive(socket, &served, slot.login()).await;
-    tracing::info!(target: "plak::web", ended = reason.as_str(), "web connection closed");
+    drive(socket, &served, slot.login()).await;
     drop(slot);
 }
 
@@ -157,11 +156,7 @@ impl Ended {
 
 impl From<SendError> for Ended {
     fn from(error: SendError) -> Self {
-        match error {
-            SendError::Full => Self::Lost("client fell behind"),
-            SendError::Stalled => Self::Lost("client too slow"),
-            SendError::Disconnected => Self::Lost("send failed"),
-        }
+        Self::Lost(error.reason())
     }
 }
 
@@ -303,13 +298,25 @@ impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
 
 async fn drive(mut socket: Socket, served: &Served, login: &str) -> Ended {
     let outbox = Outbox::default();
-    match admit(&mut socket, served, login, &outbox).await {
+    let reason = match admit(&mut socket, served, login, &outbox).await {
         Ok(mut connection) => attached(socket, served, &mut connection, &outbox).await,
         Err(reason) => {
             close(&mut socket, reason).await;
             reason
         }
-    }
+    };
+    let stats = outbox.close_stats();
+    tracing::info!(
+        target: "plak::web",
+        ended = reason.as_str(),
+        queued_bytes = stats.queued_bytes,
+        queued_lines = stats.queued_lines,
+        age_ms = stats.age_ms,
+        in_flight = stats.in_flight,
+        pending_snapshots = stats.pending_snapshots,
+        "web connection closed"
+    );
+    reason
 }
 
 async fn admit(
@@ -443,7 +450,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
             }
             () = std::future::ready(()), if flush.pending() => {
                 if flush.step(connection, outbox).is_err() {
-                    break Ended::Lost("client fell behind");
+                    break Ended::Lost(outbox.output_error());
                 }
             }
             () = connection.changed() => flush.request(),

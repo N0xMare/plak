@@ -4,6 +4,8 @@ use plakous_host_protocol::wire::{
 };
 use std::io::Write as _;
 
+mod baseline_pressure;
+
 fn context() -> (tempfile::TempDir, Served) {
     let home = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.path().to_path_buf());

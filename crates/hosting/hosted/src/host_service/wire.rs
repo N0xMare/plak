@@ -1264,7 +1264,15 @@ where
         let Some(attachment) = self.attachment else {
             return Ok(());
         };
-        for item in self.service.take(attachment) {
+        self.write_observations(attachment, self.service.take(attachment))
+    }
+
+    fn write_observations(
+        &mut self,
+        attachment: AttachmentId,
+        items: Vec<Outbound<P>>,
+    ) -> CliResult<()> {
+        for item in items {
             if let Outbound::Event {
                 observation,
                 client_id,
@@ -1363,6 +1371,14 @@ where
     }
 
     fn flush_pending(&mut self, bulk: bool) -> CliResult<()> {
+        if self.snapshot_output.is_some() {
+            self.flush_answers()?;
+            if let Some(attachment) = self.attachment {
+                let items = self.service.take_for_wire(attachment, bulk);
+                self.write_observations(attachment, items)?;
+            }
+            return Ok(());
+        }
         if bulk
             || self
                 .attachment
@@ -1410,7 +1426,27 @@ where
         seq: u64,
         frame: HostFrame<P>,
     ) -> CliResult<()> {
-        let written = write_frame(&mut self.stdout, &frame);
+        let written = if self.snapshot_output.is_some()
+            && let HostFrame::Event {
+                observation: SessionObservation::TranscriptPatch(patch),
+                ..
+            } = &frame
+        {
+            match encode_line(&frame) {
+                Ok(line) => self
+                    .stdout
+                    .write_all(line.as_bytes())
+                    .and_then(|()| self.stdout.flush())
+                    .map_err(|_| CliFailure::new("stdout failed")),
+                Err(WireError::TooLarge) => {
+                    self.service.lose_wire_patch(attachment, &patch.scope);
+                    Ok(())
+                }
+                Err(error) => Err(CliFailure::new(error.to_string())),
+            }
+        } else {
+            write_frame(&mut self.stdout, &frame)
+        };
         let delivery = self.service.take_draft_delivery(attachment, seq);
         if let Some(pending) = &mut self.buffered_drafts
             && let Some(delivery) = delivery
