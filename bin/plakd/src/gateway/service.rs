@@ -298,6 +298,8 @@ mod tests {
     use plakous::gateway::protocol::admin::{AdminRequest, AdminResponse};
     use plakous::gateway::protocol::facts::{AccountFacts, RefreshRequest};
     use plakous::gateway::protocol::refusal::GatewayRefusal;
+    use plakous::gateway::protocol::{Endpoint, PROTOCOL_VERSION, call};
+    use plakous::gateway::{GatewayEndpoint, RelayCallError, RelayClient};
 
     use super::*;
 
@@ -331,8 +333,6 @@ mod tests {
     async fn product_gateway_closes_listeners_and_flushes_an_accepted_call_during_drain() {
         use std::io::Read as _;
 
-        use plakous::gateway::protocol::{Endpoint, PROTOCOL_VERSION, call};
-        use plakous::gateway::{GatewayEndpoint, RelayCallError, RelayClient};
         use tokio::io::AsyncWriteExt as _;
 
         let (_temp, home) = PlakPaths::isolated_test_home();
@@ -407,30 +407,7 @@ mod tests {
             call::decode::<AdminResponse>(&acknowledgement).unwrap(),
             AdminResponse::Draining {}
         );
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while !state.listeners.lock().unwrap().is_empty() {
-                tokio::task::yield_now().await;
-            }
-            // The Unix client has already negotiated; its next admin call
-            // must fail at dial, not after sending a request into the backlog.
-            let unix_error = relay
-                .call(Endpoint::Admin, list, &control)
-                .await
-                .unwrap_err();
-            let tcp = RelayClient::new(GatewayEndpoint::Tcp(tcp), None).unwrap();
-            let tcp_error = tcp.version(&control).await.unwrap_err();
-            for error in [unix_error, tcp_error] {
-                let RelayCallError::Transport(failure) = error else {
-                    panic!("expected a connect failure, got {error:?}");
-                };
-                assert_eq!(
-                    failure.to_string(),
-                    "HTTP transport failed in Connect (NotStarted, Io)"
-                );
-            }
-        })
-        .await
-        .expect("fresh dials must fail while the accepted call is held");
+        assert_fresh_dials_are_unsent(&state, &relay, tcp, list).await;
         let Err(error) = HolderLock::try_acquire(&lock_path, HolderMode::Shared) else {
             panic!("the drain released credential custody early");
         };
@@ -449,6 +426,39 @@ mod tests {
             reply.contains(std::str::from_utf8(&expected).unwrap()),
             "{reply}"
         );
+    }
+
+    async fn assert_fresh_dials_are_unsent(
+        state: &GatewayState,
+        unix: &RelayClient,
+        tcp: SocketAddr,
+        list: Vec<u8>,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !state.listeners.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            // The Unix client has already negotiated; its next admin call
+            // must fail at dial, not after sending a request into the backlog.
+            let control = RelayClient::call_control();
+            let unix_error = unix
+                .call(Endpoint::Admin, list, &control)
+                .await
+                .unwrap_err();
+            let tcp = RelayClient::new(GatewayEndpoint::Tcp(tcp), None).unwrap();
+            let tcp_error = tcp.version(&control).await.unwrap_err();
+            for error in [unix_error, tcp_error] {
+                let RelayCallError::Transport(failure) = error else {
+                    panic!("expected a connect failure, got {error:?}");
+                };
+                assert_eq!(
+                    failure.to_string(),
+                    "HTTP transport failed in Connect (NotStarted, Io)"
+                );
+            }
+        })
+        .await
+        .expect("fresh dials must fail while the accepted call is held");
     }
 
     #[test]
