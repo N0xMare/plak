@@ -106,6 +106,7 @@ changing a host or its paired runners.
 | 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
 | 7 | `tree_hosted_elsewhere`: another running `plakd` holds the session's agent tree (see `plakd tree release`) |
+| 8 | Backup busy or its copy budget expired; retry. The backup directory was not published. |
 | 130 | Quit escalated because the turn's terminal did not join and the host abandoned by lease only; clean idle or terminal-joined quit remains 0 |
 
 Every subscription failure ends with what to do about it, for example:

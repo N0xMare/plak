@@ -150,12 +150,12 @@ fn release_flush_and_shutdown_perform_a_bounded_number_of_fsyncs() {
     );
     let calls = source.matches("checkpoint_wal(&b.connection, ").count();
     assert_eq!(
-        calls, 2,
-        "two foreground checkpoint call sites: flush (passive), shutdown (truncate)"
+        calls, 1,
+        "flush is the only direct foreground checkpoint; shutdown owns a bounded fallback"
     );
     assert!(source.contains("let _ = checkpoint_wal(&self.connection, false);"));
     assert!(source.contains("checkpoint_wal(&b.connection, false)?;"));
-    assert!(source.contains("checkpoint_wal(&b.connection, true)?;"));
+    assert!(source.contains("checkpoint_wal_shutdown(&b.connection)?;"));
     assert!(
         source.contains("PRAGMA synchronous=FULL;"),
         "the durability pragma stays in force"

@@ -37,6 +37,8 @@ pub enum CliFailureKind {
     LocalRunnerInspection,
     /// A standalone import cannot bind runners while a host owns the home.
     ImportThroughRunningHost,
+    /// A local operation refused without publishing and may succeed on retry.
+    Retryable,
 }
 
 impl CliFailureKind {
@@ -49,6 +51,7 @@ impl CliFailureKind {
             Self::Auth => 3,
             Self::Agent | Self::RecoveryRequired => 5,
             Self::HostedElsewhere | Self::LocalRunnerProcesses | Self::LocalRunnerInspection => 7,
+            Self::Retryable => 8,
         }
     }
 }

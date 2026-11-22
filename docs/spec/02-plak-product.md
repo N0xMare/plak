@@ -1077,11 +1077,15 @@ pins the three WAL snapshots at a common instant; the SQLite backup API
 copies them without blocking ordinary writers or holding a write lock on
 the source. Readers can temporarily delay WAL reclamation. The copy has one
 shared time budget, and releases the source snapshots before validation,
-hashing or publication. A common instant can include durable intermediate
+hashing or publication. A backup reader may prevent WAL truncation during
+shutdown. The runtime tries TRUNCATE without waiting and falls back to a
+PASSIVE checkpoint when busy; unreclaimed WAL is durable and is not a
+shutdown failure. A common instant can include durable intermediate
 states; it does not bypass normal recovery. Logs, job files, runner-local
 state, telemetry, and credentials are not part of this backup.
 
-The command stages private files outside the home, verifies current schemas,
+The command stages private files outside the home, verifies current schemas
+and requires exactly `ok` from SQLite `quick_check` on each copy,
 syncs the self-contained files and the directory, then publishes the new
 directory with a no-replace rename. An existing directory or a destination
 inside the home or source store directories, including symlink aliases, is
@@ -2826,7 +2830,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports the gateway or its refusal |
-| `store backup <dir>` | online read-only snapshot of the three current stores and a SHA-256 manifest (§2.5) |
+| `store backup <dir>` | online read-only snapshot of the three current stores and a SHA-256 manifest (§2.5); retry `store_backup_busy` (exit 8), investigate `store_backup_destination` or `store_backup_source` (exit 1) |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
 | `gateway install [--dry-run]`, `gateway uninstall` | user service definition; install also seeds an absent dedicated command link; does not start or stop the service |
@@ -3050,6 +3054,7 @@ not have or a command that would only print help.
 | 5 | agent or product failure, model refusal, a `plakd run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plakd run` reached its admitted-turn or wall-clock bound |
 | 7 | `tree_hosted_elsewhere`: the session's agent tree is in another live `plakd` process's custody (chapter 03 section 14), or its open was refused for a runtime lease another live `plakd` process holds (section 4.6); nothing was attached or written |
+| 8 | `store_backup_busy`: no backup published; retry when the stores are quieter or the copy can finish within its budget |
 | 130 | quit exhausted its terminal join and selected lease-only abandonment, including when `SIGTERM`/`SIGHUP` requested the stop; an idle quit or a quit whose terminal joined still exits 0 |
 | 1 | anything else, including an invalid `config.toml` |
 

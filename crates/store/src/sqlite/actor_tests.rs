@@ -504,6 +504,49 @@ async fn shutdown_with_pending_vacuum_runs_only_one_checkpoint() -> TestResult {
 }
 
 #[tokio::test]
+async fn shutdown_preserves_commits_when_a_reader_pins_the_wal() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("runtime.sqlite3");
+    let store = SqliteSessionStore::open(&path)?;
+    let reader = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    reader.execute_batch("BEGIN")?;
+    let count =
+        |c: &Connection| c.query_row("SELECT count(*) FROM sessions", [], |r| r.get::<_, u64>(0));
+    assert_eq!(count(&reader)?, 0);
+    store.create(seed()?).await?;
+    // Resident host handoff uses the PASSIVE flush before closing the store.
+    store.flush().await?;
+    store
+        .dispatch("trace shutdown checkpoints", |b| {
+            b.connection
+                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement))
+                .map_err(map_sqlite)?;
+            WAL_CHECKPOINTS.with(|counter| counter.set(0));
+            Ok(())
+        })
+        .await?;
+    tokio::time::timeout(std::time::Duration::from_secs(3), store.shutdown()).await??;
+    assert_eq!(
+        store
+            .dispatch_read("check shutdown checkpoints", |_| Ok(
+                WAL_CHECKPOINTS.with(std::cell::Cell::get)
+            ))
+            .await?,
+        2
+    );
+    assert_eq!(
+        count(&reader)?,
+        0,
+        "the backup reader still sees its old cut"
+    );
+    drop(reader);
+    drop(store);
+    let reopened = SqliteSessionStore::open(&path)?;
+    assert_eq!(reopened.stats().await?.sessions(), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;

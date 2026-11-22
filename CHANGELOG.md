@@ -9,6 +9,12 @@ also keep compatibility with their immediately preceding version.
 
 ## Unreleased
 
+- Report runtime-store headroom in status and doctor, warn at host startup
+  about hard pressure, and reject configured caps that would block settlement.
+  Back up the three current SQLite stores online with verified copies and a
+  SHA-256 manifest. Busy backups are retryable; pinned backup readers no longer
+  block runtime-store shutdown while WAL truncation is deferred.
+
 ### Persisted formats
 
 - Permit forward-only additive revisions of product and tree stores during a

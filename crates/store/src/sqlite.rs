@@ -1508,7 +1508,7 @@ impl SessionStore for SqliteSessionStore {
                 return Ok(r);
             }
             b.require_open()?;
-            checkpoint_wal(&b.connection, true)?;
+            checkpoint_wal_shutdown(&b.connection)?;
             let r = report();
             b.state = BackendState::Shutdown(r);
             Ok(r)

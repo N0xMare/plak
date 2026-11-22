@@ -247,15 +247,25 @@ Use a coordinated backup if later work changed more than the restored stores.
 object bytes against their limits, plus the feed row and byte totals.
 `plakd doctor` also reports headroom. Neither the object byte limit nor the
 feed totals are a disk space budget. Set `[runtime_store]` in the home config
-only if you need different caps, then restart the serving host.
+only if you need different caps, then restart the serving host. Changing
+a cap can block new work before the cap is full because settlement and
+recovery have reserved headroom. If a hand edit exhausts that reserve,
+doctor and host startup tell you which cap to raise.
 
 `plakd store backup <dir>` saves the runtime, product and agent-tree SQLite
 stores at a shared point in time. It does not stop the host, but can fail if
-writes prevent a stable snapshot; retry later. Choose a new directory under
-a private parent outside `PLAK_HOME`, preferably on separate storage, with
+writes prevent a stable snapshot or the copy exceeds its budget. Exit 8
+(`store_backup_busy`) can be retried; exit 1 for
+`store_backup_destination` or `store_backup_source` needs investigation.
+Choose a new directory under a private parent outside `PLAK_HOME`,
+preferably on separate storage, with
 room for the full databases. The command prints the same SHA-256 manifest it
 saves with the files. Keep backups private: they contain session data. This
 does not copy logs, job output, runner-local state, telemetry or credentials.
+Each staged database must pass SQLite `quick_check` before publication.
+A backup reader can hold WAL pages through shutdown: the runtime skips a
+busy truncate without waiting, checkpoints what it can, and leaves the
+remaining committed WAL durable. Do not remove those WAL files.
 
 For a nightly Linux user timer, prepare a private parent, for example
 `install -d -m 700 "$HOME/plak-store-backups"`. Adapt the absolute executable
@@ -266,7 +276,7 @@ and any `PLAK_HOME` setting to match the serving host. Use a
 [Service]
 Type=oneshot
 UMask=0077
-ExecStart=/bin/sh -c 'exec "%h/.local/bin/plakd" store backup "%h/plak-store-backups/$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
+ExecStart=/bin/sh -c 'exec "%h/.local/bin/plakd" store backup "%h/plak-store-backups/$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
 ```
 
 Pair it with `plakd-store-backup.timer`:
