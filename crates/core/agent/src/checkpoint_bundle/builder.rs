@@ -274,12 +274,14 @@ impl BundleBuilder {
             prior.binding,
             |builder| builder.binding(manifest.binding()),
         )?;
-        let tools = self.reuse_or_build(
-            RuntimeObjectKind::ToolRuntime,
-            &encode_bundle_tools(manifest.tools())?,
-            prior.tools,
-            |builder| builder.tools(manifest.tools()),
-        )?;
+        let tools = if manifest.tools() == prior_manifest.tools() {
+            // Ledger-only checkpoints keep the exact tool manifest. Its
+            // verified address is already in the prior bundle.
+            self.visited = self.visited.saturating_add(1);
+            prior.tools
+        } else {
+            self.tools(manifest.tools())?
+        };
         let ledger = self.advance_ledger(
             manifest.ledger(),
             prior_manifest.ledger(),
