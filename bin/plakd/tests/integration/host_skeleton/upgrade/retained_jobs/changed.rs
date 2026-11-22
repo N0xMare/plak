@@ -115,10 +115,10 @@ fn source_script(fixture: &Fixture) {
     let root = shell_words::quote(fixture.root.to_str().unwrap());
     let start = |kind, budget, code| {
         let command = format!(
-            "base={root}/${{PWD##*/}}-{kind}; printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; until [ -f \"$base-finish\" ]; do sleep .02; done; printf '{kind}-retained-output\\n'; exit {code}"
+            "base={root}/${{PWD##*/}}-{kind}; printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; until [ -f \"$base-finish\" ]; do sleep 0.02; done; printf '{kind}-retained-output\\n'; exit {code}"
         );
         json!({"output":{"tool":{"name":"process_session_start","arguments":{
-            "command":command, "workdir":".", "login":false, "tty":false,
+            "command":command, "workdir":".", "login":false, "tty":false, "keep_stdin_open":false,
             "yield_time_ms":budget, "max_output_bytes":8192
         }}},"finish":"tool_calls"})
     };
@@ -134,7 +134,7 @@ fn destination_script(fixture: &Fixture) {
     fixture.write_script(&json!({"version":1, "process_tools":true, "steps":[
         {"gate":{"file":fixture.root.join("resume-release")},
          "output":{"tool":{"name":"process_session_start","arguments":{
-            "command": command, "workdir":".", "login":false, "tty":false,
+            "command": command, "workdir":".", "login":false, "tty":false, "keep_stdin_open":false,
             "yield_time_ms":30_000, "max_output_bytes":4096
         }}},"finish":"tool_calls"},
         {"output":{"text":ANSWER}},

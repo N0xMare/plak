@@ -17,7 +17,8 @@ fn resume_after_each_handoff_boundary_preserves_original_jobs() {
 }
 
 #[test]
-fn original_daemon_loss_after_transfer_is_unknown_and_never_replays() {
+fn original_daemon_loss_on_both_sides_of_transfer_is_unknown_and_never_replays() {
+    crash("PLAK_TEST_HOST_UPGRADE_CUT", "after-source-release", true);
     crash("PLAK_TEST_HOST_READOPT_CUT", HostCut::Transfer.name(), true);
 }
 
