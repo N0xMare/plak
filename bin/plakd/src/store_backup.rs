@@ -578,9 +578,14 @@ mod tests {
     #[test]
     fn quick_check_refuses_an_invalid_staged_database() {
         let staged = Connection::open_in_memory().unwrap();
-        staged.execute_batch(
-            "CREATE TABLE fixture(n INTEGER CHECK(n > 0));+             PRAGMA ignore_check_constraints=ON; INSERT INTO fixture VALUES(0);+             PRAGMA ignore_check_constraints=OFF;",
-        ).unwrap();
+        staged
+            .execute_batch(
+                "CREATE TABLE fixture(n INTEGER CHECK(n > 0));
+             PRAGMA ignore_check_constraints=ON;
+             INSERT INTO fixture VALUES(0);
+             PRAGMA ignore_check_constraints=OFF;",
+            )
+            .unwrap();
         assert!(matches!(
             quick_check("fixture", &staged),
             Err(Refusal::Source(_))
