@@ -472,8 +472,8 @@ test-seam-ceiling = 29
 reason = "The existing library test seams and optional JJ integration retain their placement debt."
 
 [workspace.metadata.plakous.cfg.plakous-http]
-feature-ceiling = 17
-test-seam-ceiling = 18
+feature-ceiling = 16
+test-seam-ceiling = 17
 env-ceiling = 1
 reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
 
