@@ -668,7 +668,7 @@ async fn binding_inspection_checks_payloads_when_projecting_retained_heads()
         })
     };
     let healthy = verdicts()?;
-    assert!(!healthy.is_empty());
+    assert_eq!(healthy.first(), Some(&Some(true)));
     assert!(healthy.iter().all(|verdict| *verdict == Some(true)));
 
     let connection = Connection::open(&db.path)?;
