@@ -23,7 +23,7 @@ pub(crate) struct Prepared {
 }
 
 fn configured_runners(paths: &crate::home::paths::PlakPaths) -> CliResult<Vec<ConfiguredRunner>> {
-    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let config = crate::product_config::ProductConfig::load_user(paths).map_err(CliFailure::new)?;
     let mut aliases = BTreeMap::<String, Vec<String>>::new();
     aliases.insert("local".into(), vec!["local".into()]);
     for name in config.runners.keys() {
@@ -173,7 +173,7 @@ fn admission_snapshot(
             }
         }
     }
-    let config = crate::product_config::ProductConfig::load(paths).map_err(CliFailure::new)?;
+    let config = crate::product_config::ProductConfig::load_user(paths).map_err(CliFailure::new)?;
     let mut pins = BTreeMap::<String, RunnerPin>::new();
     for name in config.runners.keys() {
         let path = paths.home().join("runners").join(name).join("runner.json");

@@ -269,10 +269,11 @@ impl ProductSessions {
     ///
     /// The stores cannot be read.
     pub(super) fn owed(&self) -> CliResult<Vec<String>> {
-        let continue_losses = crate::product_config::ProductConfig::load(self.services.paths()?)
-            .map_err(CliFailure::new)?
-            .resume_after_loss
-            == Some(crate::product_config::ResumeAfterLoss::Continue);
+        let continue_losses =
+            crate::product_config::ProductConfig::load_user(self.services.paths()?)
+                .map_err(CliFailure::new)?
+                .resume_after_loss
+                == Some(crate::product_config::ResumeAfterLoss::Continue);
         let store = self.services.session_records()?;
         let mut entries = self
             .with_product(|product| product.continuation_candidates())

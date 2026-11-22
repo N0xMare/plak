@@ -5570,8 +5570,10 @@ does not inherit another connection's pending answers.
   when the host stops. Startup reads listener and capability policy from
   the same home `config.toml` snapshot, without resolving workspace
   configuration or templates. That policy governs the UI CSP, welcome and
-  capability enforcement. An invalid home web policy refuses startup;
-  an invalid project file can still refuse operations that use that project.
+  capability enforcement. Host startup also reads runner registration and
+  recovery policy from the home configuration, not the launch project. An
+  invalid home web policy refuses startup; an invalid project file can still
+  refuse operations that use that project.
   A connection is a client of the host's session
   directory (§4.4), as one on the control socket is: its `welcome` names no
   session, it finds its sessions with `list_sessions` or `watch_sessions`,
