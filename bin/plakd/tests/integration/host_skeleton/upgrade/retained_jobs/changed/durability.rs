@@ -67,7 +67,7 @@ fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
     if let Some(paired) = &paired {
         environment.push(("PATH", paired.path.clone()));
     }
-    let mut source_environment = environment.to_vec();
+    let mut source_environment = environment.clone();
     source_environment.push((flag, cut.into()));
     source_script(&fixture);
     let mut host = start_env(&fixture, &[], &source_environment);

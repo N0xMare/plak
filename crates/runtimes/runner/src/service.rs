@@ -301,7 +301,6 @@ impl RunnerService {
             capabilities: vec![
                 capabilities::WORKSPACE_VERBS.to_owned(),
                 capabilities::STREAMS.to_owned(),
-                capabilities::CARRY_LINES.to_owned(),
             ],
             path: options.path,
             home: options.home,
@@ -357,7 +356,8 @@ impl RunnerService {
         })
     }
 
-    /// What this instance says first on every connection.
+    /// This instance's native identity and base capabilities. An attached
+    /// retention endpoint additionally advertises carry inventory on links.
     #[must_use]
     pub fn hello(&self) -> &Hello {
         &self.inner.hello
@@ -391,7 +391,11 @@ impl RunnerService {
             closer.clone(),
         ));
         let mut reader = FrameStream::new(reader);
-        let _ = sender.send(RunnerFrame::Hello(self.inner.hello.clone()));
+        let mut hello = self.hello().clone();
+        if self.retention_context().is_some() {
+            hello.capabilities.push(capabilities::CARRY_LINES.into());
+        }
+        let _ = sender.send(RunnerFrame::Hello(hello));
         let bind = tokio::time::timeout(self.inner.dead, reader.next::<HostFrame>()).await;
         let bind = match bind {
             Ok(Some(Ok(HostFrame::Bind(bind)))) => bind,
@@ -494,8 +498,8 @@ impl RunnerService {
             };
             read_deadline = tokio::time::Instant::now() + self.inner.dead;
             match frame {
-                HostFrame::CarryLines { request_id } if bind.version == self.hello().version => {
-                    self.receive_carry_lines(host, instance, request_id, &sender);
+                HostFrame::CarryLines { request_id } => {
+                    self.receive_carry_lines(bind, request_id, &sender);
                 }
                 _ => self.receive(host, instance, connection, frame, &sender, &terminal_sender),
             }
@@ -807,14 +811,6 @@ impl RunnerService {
                     let _ = sender.send(RunnerFrame::Lines { request_id, lines });
                 });
             }
-            HostFrame::CarryLines { request_id } => {
-                let _ = sender.send(refused(
-                    Some(request_id),
-                    Refusal::Unsupported {
-                        what: "carry inventory requires an exact-triple bind".into(),
-                    },
-                ));
-            }
             HostFrame::OwnerFloors { request_id, lines } => {
                 self.receive_owner_floors(host, instance, connection, request_id, lines, sender);
             }
@@ -833,7 +829,7 @@ impl RunnerService {
             HostFrame::Ping { nonce } => {
                 let _ = sender.send(RunnerFrame::Pong { nonce });
             }
-            HostFrame::Bind(_) | HostFrame::Qualify { .. } => {
+            HostFrame::Bind(_) | HostFrame::Qualify { .. } | HostFrame::CarryLines { .. } => {
                 let _ = sender.send(refused(
                     None,
                     Refusal::Malformed {

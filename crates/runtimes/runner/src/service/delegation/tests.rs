@@ -228,7 +228,7 @@ async fn incomplete_carry_inventory_refuses_only_the_exact_triple_extension() {
         )
         .await
         .unwrap();
-        assert!(client.lines().await.unwrap().is_empty());
+        assert_eq!(client.lines().await.unwrap(), Vec::new());
         assert_eq!(client.recovery_lines().await.is_err(), sees_carry);
         client.disconnect();
         serving.await.unwrap();
@@ -402,11 +402,9 @@ async fn retention_controls_write_disown_and_consume_the_original_allocation() {
     let first = Worker::new(root.path(), "first").await;
     let (_old_link, old) = first.port(root.path(), "old-host", 1).await;
     let command = JoinedProcessStartRequest::new(
-        JoinedProcessCommand::literal(
-            "/bin/sh",
-            ["-c", "IFS= read -r msg; /bin/sleep 60 </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$msg\" \"$!\""]
-                .map(str::to_owned)
-                .to_vec(),
+        JoinedProcessCommand::shell(
+            plakous_tools::JoinedProcessShellProfile::new("/bin/sh", ["-c".to_owned()]).unwrap(),
+            "IFS= read -r msg; /bin/sleep 60 </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$msg\" \"$!\"",
         )
         .unwrap(),
         ".",
@@ -449,7 +447,7 @@ async fn retention_controls_write_disown_and_consume_the_original_allocation() {
     assert_eq!(new.jobs().await.unwrap()[0].status, JobStatus::Released);
     rustix::process::test_kill_process(leftover.0).unwrap();
     new.acknowledge_jobs(vec![number]).await.unwrap();
-    assert!(new.jobs().await.unwrap().is_empty());
+    assert_eq!(new.jobs().await.unwrap(), Vec::new());
     assert!(!first.service.retention_keeps_alive(Instant::now()));
 }
 

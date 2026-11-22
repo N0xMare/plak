@@ -436,7 +436,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_READY_ORDER"),)),
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
-        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL"),)),
         ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
         ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),

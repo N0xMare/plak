@@ -548,7 +548,7 @@ impl RunnerClient {
     ///
     /// # Errors
     ///
-    /// As for [Self::lines]. An incomplete retained inventory is a refusal.
+    /// As for [`Self::lines`]. An incomplete retained inventory is a refusal.
     pub async fn recovery_lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
         self.inspect_lines(true).await
     }
@@ -572,10 +572,10 @@ impl RunnerClient {
                     request_id: request_id.clone(),
                 }
             };
-            if !state
+            if state
                 .sender
                 .as_ref()
-                .is_some_and(|sender| sender.send(frame).is_ok())
+                .is_none_or(|sender| sender.send(frame).is_err())
             {
                 if let Some(refusal) = &state.refusal {
                     return Err(RunnerFailure::Unavailable(format!(

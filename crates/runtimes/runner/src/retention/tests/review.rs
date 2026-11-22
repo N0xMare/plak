@@ -40,12 +40,9 @@ async fn retention_discovery_refused_connect_is_incomplete_until_the_native_lock
     let error = registry.discover(&scope, &current).await.unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
     drop(lock);
-    assert!(
-        registry
-            .discover(&scope, &current)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        registry.discover(&scope, &current).await.unwrap(),
+        Vec::new()
     );
 }
 

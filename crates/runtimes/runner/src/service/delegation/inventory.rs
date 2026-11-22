@@ -1,4 +1,4 @@
-use plakous_runner_protocol::{LineStatus, Refusal, RunnerFrame};
+use plakous_runner_protocol::{Bind, LineStatus, Refusal, RunnerFrame};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -7,17 +7,23 @@ use super::{RunnerService, lock};
 impl RunnerService {
     pub(in crate::service) fn receive_carry_lines(
         &self,
-        host: &str,
-        instance: &str,
+        bind: &Bind,
         request_id: String,
         sender: &mpsc::UnboundedSender<RunnerFrame>,
     ) {
-        let (service, host, instance, sender) = (
-            self.clone(),
-            host.to_owned(),
-            instance.to_owned(),
-            sender.clone(),
-        );
+        if bind.version != self.hello().version || self.retention_context().is_none() {
+            let _ = sender.send(super::super::refused(
+                Some(request_id),
+                Refusal::Unsupported {
+                    what: "carry inventory requires an exact-triple bind to a retention-enabled daemon".into(),
+                },
+            ));
+            return;
+        }
+        let service = self.clone();
+        let host = bind.host_id.clone();
+        let instance = bind.host_instance.clone();
+        let sender = sender.clone();
         tokio::spawn(async move {
             let mut lines = service.lines(Some(&host)).await;
             let answer = match service
