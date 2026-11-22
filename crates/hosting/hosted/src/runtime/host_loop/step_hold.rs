@@ -11,6 +11,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             if !control.requested() {
                 break;
             }
+            // Stopping a busy turn leaves its receipt to the idle owner.
+            // Settle it here before reporting the boundary as parked.
+            self.finish_turn_stops().await;
             let tree_id = super::super::rebind::durable_tree_id(
                 &self.role.config.topology_rows(),
                 &self.role.config.session,

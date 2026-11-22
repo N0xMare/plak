@@ -229,10 +229,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             .apply_settled(&mut self.role.config, &self.role.events);
         // A stop a running turn took ends that turn's work at its idle
         // boundary, before anything else can start.
-        let stops = self.role.interrupt_state.borrow_mut().take_stops();
-        for (ticket, unrecorded) in stops {
-            self.stop_session(ticket, unrecorded).await;
-        }
+        self.finish_turn_stops().await;
         // An action the operator already sent outranks the queue. Starting
         // a queued turn first would open a turn the very next iteration has to
         // cancel, so a deferred delivery is drained before `pending_start`.

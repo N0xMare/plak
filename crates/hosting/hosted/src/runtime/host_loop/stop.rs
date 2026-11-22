@@ -27,6 +27,14 @@ pub(super) const SESSION_STOPPED_NOTE: &str =
     "stopped: the session's work ended, and nothing continues it until it is prompted again";
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
+    /// Finish stops taken by a running turn at its idle boundary.
+    pub(super) async fn finish_turn_stops(&mut self) {
+        let stops = self.role.interrupt_state.borrow_mut().take_stops();
+        for (ticket, unrecorded) in stops {
+            self.stop_session(ticket, unrecorded).await;
+        }
+    }
+
     /// Stops the session's work and settles `ticket`: `Ok` once every stop
     /// record is durable, or why one is not. `unrecorded` is why a running
     /// turn's root stop was not recorded, when it was not.
