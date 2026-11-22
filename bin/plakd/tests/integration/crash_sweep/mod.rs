@@ -166,10 +166,7 @@ fn full_sweep() {
 #[test]
 fn strict_shard_inventory_covers_the_shape_registry() {
     use std::collections::BTreeSet;
-    let inventory: Value = serde_json::from_str(include_str!(
-        "../../../../../tools/dev/crash_sweep_inventory.json"
-    ))
-    .unwrap();
+    let inventory: Value = serde_json::from_str(include_str!("shard_inventory.json")).unwrap();
     let pinned = inventory
         .as_object()
         .unwrap()

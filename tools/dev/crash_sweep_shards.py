@@ -8,7 +8,9 @@ from pathlib import Path
 import re
 
 
-INVENTORY = Path(__file__).with_name("crash_sweep_inventory.json")
+INVENTORY = (
+    Path(__file__).resolve().parents[2] / "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
+)
 INDEXED = json.loads(INVENTORY.read_text())
 WIRE = {
     "wire_host_restart": (
