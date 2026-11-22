@@ -40,15 +40,16 @@ async fn drain_paused_baseline(
                     outcome: Outcome::Ok(Answer::Pong)
                 }
             ));
-            assert!(matches!(
-                read_frame(client).await,
-                HostFrame::Response {
-                    id: 3,
-                    outcome: Outcome::Refused(RequestRefusal::Backpressure)
-                }
-            ));
         }
     }
+    // The refusal is ordered; unlike Pong it cannot overtake the cursor.
+    assert!(matches!(
+        read_frame(client).await,
+        HostFrame::Response {
+            id: 3,
+            outcome: Outcome::Refused(RequestRefusal::Backpressure)
+        }
+    ));
 }
 
 #[tokio::test(start_paused = true)]
