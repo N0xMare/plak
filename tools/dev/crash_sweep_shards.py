@@ -12,17 +12,9 @@ INVENTORY = (
     Path(__file__).resolve().parents[2]
     / "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
 )
-INDEXED = json.loads(INVENTORY.read_text())
-WIRE = {
-    "wire_host_restart": (
-        {"product": 12, "runtime": 10, "tree": 1},
-        {"product": 14, "runtime": 33, "tree": 16},
-    ),
-    "wire_host_restart_switch": (
-        {"product": 15, "runtime": 13, "tree": 1},
-        {"product": 17, "runtime": 36, "tree": 19},
-    ),
-}
+COVERAGE = json.loads(INVENTORY.read_text())
+INDEXED = COVERAGE["indexed"]
+WIRE = COVERAGE["wire"]
 TERMINAL_SHAPES = {
     "runner_hold_poll": "host_skeleton::runner::hold::runner_hold_poll",
     "runner_hold_live_key": "host_skeleton::runner::hold::runner_hold_live_key",
@@ -69,7 +61,7 @@ def plan(n):
     # A wire family keeps its sixteen groups and twin pilots together. These
     # costs only balance work; the coverage sets are independent of them.
     units.update({name: 1 for name in RUNNERS})
-    units.update({name: 8 for name in WIRE})
+    units.update({name: row["weight"] for name, row in WIRE.items()})
     loads, shards = [0] * n, [set() for _ in range(n)]
     for name in sorted(units, key=lambda key: (-units[key], key)):
         i = min(range(n), key=loads.__getitem__)
@@ -95,7 +87,7 @@ def expected_rows(names):
     groups = {
         (family, child, group): set(cuts(stores)[group::8])
         for family in names & WIRE.keys()
-        for child, stores in enumerate(WIRE[family])
+        for child, stores in enumerate(WIRE[family]["stores"])
         for group in range(8)
     }
     return indexed, groups
@@ -146,10 +138,9 @@ def fingerprint():
     return hashlib.sha256(json.dumps(recorded, sort_keys=True).encode()).hexdigest()
 
 
-def merge(paths, output):
+def merge(paths, output, *, commit, tree, target):
     indexed, runners, wire = [], [], []
     indices = []
-    identity = None
     n = len(paths)
     assignments = plan(n)
     for path in paths:
@@ -158,11 +149,11 @@ def merge(paths, output):
         i, total = shard_id(receipt["shard"])
         if total != n:
             raise ValueError(f"{path}: need all {total} receipts, got {n}")
-        current = receipt["commit"], receipt["tree"], receipt["target"], receipt["pruning"]
-        if identity is None:
-            identity = current
-        if current != identity or receipt["inventory"] != fingerprint():
-            raise ValueError(f"{path}: sweep identity or inventory mismatch")
+        current = receipt["commit"], receipt["tree"], receipt["target"]
+        if current != (commit, tree, target):
+            raise ValueError(f"{path}: sweep identity does not match expected commit/tree/target")
+        if receipt["inventory"] != fingerprint():
+            raise ValueError(f"{path}: sweep inventory fingerprint mismatch")
         validate(receipt, assignments[i - 1])
         indices.append(i)
         indexed.extend(receipt["indexed"])
@@ -187,7 +178,9 @@ def merge(paths, output):
         ),
     )
     report = dict(
-        zip(("commit", "tree", "target", "pruning"), identity, strict=True),
+        commit=commit,
+        tree=tree,
+        target=target,
         inventory=fingerprint(),
         shards=n,
         runners=sorted(runners),

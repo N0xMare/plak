@@ -2110,15 +2110,21 @@ assigned shapes, assigned runner authority cases, and all sixteen groups of
 each assigned wire restart family. Both pilots and cuts of a shape stay
 together. The deterministic assignment uses largest estimated shape cost
 first and places each shape on the lightest shard; estimates affect placement,
-not coverage. Shards use the all-shapes selection with one repeat.
+not coverage. Shards use the all-shapes selection with one repeat and default
+pruning. The driver and inventory must belong to the tracked revision; the
+shard checks that the checkout is clean and unchanged, including untracked
+files, before and after running the tests. Receipts record the Rust build
+target, defaulting to the compiler's host triple when none was selected.
 
-Run `just dev crash-sweep --merge RECEIPT... --output DIRECTORY` to verify
-the union. It rejects different revisions, trees, targets, pruning settings
-or inventories; missing or duplicate shard indices, cuts, runner cases or
+Run `just dev crash-sweep --merge RECEIPT... --output DIRECTORY
+--expect-commit REV --expect-target TRIPLE` to verify the union against the
+revision, its tree and the required target. The merge rejects mismatched
+inventories; missing or duplicate shard indices, cuts, runner cases or
 restart groups; and missing, failed or refused invariant rows. The checked
-inventory identifies every expected per-store ordinal, independently of what
-the executed shards report. Changes to the registry or cut inventory update
-that inventory against an unsharded strict run. A successful merge writes
+inventory identifies every expected per-store ordinal; default strict
+pilots also verify the counts before cutting. Changes to the registry or
+cut inventory update that inventory against an unsharded run of the affected
+shapes, inspecting the pilot counts when they differ. A successful merge writes
 `sweep.jsonl`, `wire.jsonl` and `coverage.json` in the output directory.
 
 **Pilot and cut laws.** A clean post-setup seed supplies each fresh home.

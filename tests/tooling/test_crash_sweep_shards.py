@@ -11,16 +11,19 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/dev"))
 import crash_sweep_shards as sweep  # noqa: E402
 
+COMMIT = "a" * 40
+TREE = "b" * 40
+TARGET = "x86_64-unknown-linux-musl"
+
 
 def receipt(i, n):
     names = sweep.plan(n)[i - 1]
     indexed, groups = sweep.expected_rows(names)
     return {
         "shard": f"{i}/{n}",
-        "commit": "a" * 40,
-        "tree": "b" * 40,
-        "target": "x86_64-unknown-linux-musl",
-        "pruning": [None, None],
+        "commit": COMMIT,
+        "tree": TREE,
+        "target": TARGET,
         "inventory": sweep.fingerprint(),
         "indexed": [
             dict(
@@ -56,12 +59,12 @@ def merge(rows, directory):
         with gzip.open(path, "wt", encoding="utf-8") as stream:
             json.dump(row, stream)
         paths.append(path)
-    return sweep.merge(paths, directory / "merged")
+    return sweep.merge(paths, directory / "merged", commit=COMMIT, tree=TREE, target=TARGET)
 
 
 class StrictSweepShardTests(unittest.TestCase):
     def test_each_shape_and_terminal_campaign_is_owned_once(self):
-        for n in (1, 2, 4, 7, len(sweep.INDEXED)):
+        for n in (1, 2, 5, 7, len(sweep.INDEXED)):
             with self.subTest(shards=n):
                 plan = sweep.plan(n)
                 self.assertEqual(plan, sweep.plan(n))
@@ -75,7 +78,7 @@ class StrictSweepShardTests(unittest.TestCase):
     def test_merge_is_order_independent_and_preserves_invariant_rows(self):
         with tempfile.TemporaryDirectory() as scratch:
             directory = Path(scratch)
-            counts = merge([receipt(i, 4) for i in (4, 3, 1, 2)], directory)
+            counts = merge([receipt(i, 5) for i in (4, 3, 1, 5, 2)], directory)
             self.assertEqual(counts["indexed_cuts"], 2111)
             self.assertEqual(counts["indexed_shapes"], 50)
             self.assertEqual(counts["runner_cases"], 12)
@@ -89,7 +92,14 @@ class StrictSweepShardTests(unittest.TestCase):
         for rows, message in (
             ([first], "need all 2 receipts"),
             ([first, first], "shard receipts"),
+            ([first, receipt(2, 3)], "need all 3 receipts"),
             ([first, dict(second, tree="c" * 40)], "sweep identity"),
+            ([dict(row, commit="c" * 40) for row in (first, second)], "sweep identity"),
+            (
+                [dict(row, target="aarch64-apple-darwin") for row in (first, second)],
+                "sweep identity",
+            ),
+            ([first, dict(second, inventory="stale")], "fingerprint mismatch"),
         ):
             with self.subTest(error=message), tempfile.TemporaryDirectory() as scratch:
                 with self.assertRaisesRegex(ValueError, message):
@@ -105,6 +115,7 @@ class StrictSweepShardTests(unittest.TestCase):
             ("runner cases", lambda row: row["runners"].pop()),
             ("wire groups", lambda row: row["wire"].pop()),
             ("missing=", lambda row: row["wire"][0]["rows"].pop()),
+            ("unexpected=", lambda row: row["wire"][0]["rows"][0].update(cut=100)),
             (
                 "wire invariant failed",
                 lambda row: row["wire"][0]["rows"][0].update(invariants=False),

@@ -167,7 +167,7 @@ fn full_sweep() {
 fn strict_shard_inventory_covers_the_shape_registry() {
     use std::collections::BTreeSet;
     let inventory: Value = serde_json::from_str(include_str!("shard_inventory.json")).unwrap();
-    let pinned = inventory
+    let pinned = inventory["indexed"]
         .as_object()
         .unwrap()
         .keys()
@@ -225,6 +225,10 @@ struct Work<'a> {
 fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
     assert!(jobs > 0 && repeat > 0);
     let table = table::Table::new(run);
+    let check_inventory = strict
+        && run == "full"
+        && std::env::var_os("PLAK_TEST_WORKING_PRUNE_MINIMUM").is_none()
+        && std::env::var_os("PLAK_TEST_WORKING_PRUNE_MARGIN").is_none();
     let rows = Mutex::new(Vec::<Value>::new());
     // The progress copy of the tables is rewritten at most once an interval,
     // by whichever worker finds it due, outside the rows lock: rewriting the
@@ -278,6 +282,7 @@ fn run(names: &[&str], jobs: usize, repeat: usize, strict: bool, run: &str) {
                     &record,
                     &timed,
                     run == "retirement-bounded",
+                    check_inventory,
                 );
             });
         }
@@ -316,6 +321,7 @@ fn work_on<'a>(
     record: &(dyn Fn(Value) + Sync),
     timed: &(dyn Fn(&str, &str, usize, Value, std::time::Instant) + Sync),
     bounded: bool,
+    check_inventory: bool,
 ) {
     loop {
         let task = {
@@ -337,7 +343,7 @@ fn work_on<'a>(
         let begun = std::time::Instant::now();
         let completed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match task {
             Task::Prepare { shape, iteration } => {
-                let prepared = prepare(shape, iteration, record, bounded);
+                let prepared = prepare(shape, iteration, record, bounded, check_inventory);
                 timed("prepare", shape, iteration, Value::Null, begun);
                 match prepared {
                     Ok(cuts) => (cuts, None),
@@ -388,6 +394,7 @@ fn a_panicking_task_releases_the_pool_and_preserves_the_failure() {
             &|_| {},
             &|_, _, _, _, _| panic!("timing fault"),
             false,
+            false,
         );
     }));
     assert!(
@@ -407,6 +414,7 @@ fn prepare<'a>(
     iteration: usize,
     record: &(dyn Fn(Value) + Sync),
     bounded: bool,
+    check_inventory: bool,
 ) -> Result<Vec<Task<'a>>, Box<dyn std::any::Any + Send>> {
     let (seed, session) = std::panic::catch_unwind(|| driver::setup(shape))?;
     let baseline = summary::read_converged(&seed);
@@ -419,6 +427,9 @@ fn prepare<'a>(
             return Ok(Vec::new());
         }
     };
+    if check_inventory {
+        assert_pilot_inventory(shape, &pilot);
+    }
     let indices = if bounded {
         let indices = trace::representative_cuts(&pilot);
         // These two shapes must relaunch at the first product publication,
@@ -457,6 +468,19 @@ fn prepare<'a>(
             index,
         })
         .collect())
+}
+
+fn assert_pilot_inventory(shape: &str, pilot: &[trace::Commit]) {
+    let inventory: Value = serde_json::from_str(include_str!("shard_inventory.json")).unwrap();
+    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    for commit in pilot {
+        *counts.entry(&commit.store).or_default() += 1;
+    }
+    assert_eq!(
+        json!(counts),
+        inventory["indexed"][shape]["stores"],
+        "{shape}: strict pilot inventory drifted before cutting"
+    );
 }
 
 /// One cut of a prepared shape, as its table row.

@@ -1,10 +1,13 @@
 """The standalone sweep prepares the same workers as the offline test gate."""
 
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -251,6 +254,89 @@ class CrashSweepTests(unittest.TestCase):
             with self.subTest(binary=binary), tempfile.TemporaryDirectory() as directory:
                 with self.assertRaisesRegex(SystemExit, f'built {binary} executable'):
                     self.run_sweep(Path(directory), [0], missing_binary=binary)
+
+    def test_invalid_shard_and_merge_args_are_refused_before_running_tools(self):
+        cases = (
+            (["--shard", "1/2", "--output", "path"], {}, "requires --strict"),
+            (["--strict", "--shard", "0/2", "--output", "path"], {}, "1-based"),
+            (["--strict", "--shard", "1/2"], {}, "require --output"),
+            (["--strict", "--shard", "1/2", "--repeat", "2", "--output", "path"], {}, "one repeat"),
+            (["--merge", "receipt", "--output", "path"], {}, "requires --expect-commit"),
+            (
+                ["--strict", "--shard", "1/2", "--output", "path"],
+                {"PLAK_TEST_WORKING_PRUNE_MARGIN": "1"},
+                "default pruning",
+            ),
+        )
+        for argv, env, reason in cases:
+            errors = StringIO()
+            with (
+                self.subTest(argv=argv),
+                patch("sys.argv", ["crash-sweep.py", *argv]),
+                patch.dict("os.environ", env, clear=True),
+                patch.object(SWEEP.subprocess, "check_output") as subprocess_call,
+                redirect_stderr(errors),
+                self.assertRaises(SystemExit) as error,
+            ):
+                SWEEP.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertIn(reason, errors.getvalue())
+            subprocess_call.assert_not_called()
+
+    def test_refuses_to_replace_existing_receipt(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            output = Path(scratch) / "receipt.json.gz"
+            output.write_text("prior evidence")
+            with (
+                patch.object(SWEEP, "clean_checkout") as checkout,
+                self.assertRaisesRegex(ValueError, "already exists"),
+            ):
+                SWEEP.run_shard({}, SimpleNamespace(output=output), (1, 2))
+            checkout.assert_not_called()
+            self.assertEqual(output.read_text(), "prior evidence")
+
+    def test_uses_rustc_host_triple_if_target_is_not_set(self):
+        with patch.object(
+            SWEEP.subprocess, "check_output", return_value="host: aarch64-apple-darwin\n"
+        ) as rustc:
+            self.assertEqual(SWEEP.build_target({}), "aarch64-apple-darwin")
+            rustc.assert_called_once()
+        self.assertEqual(
+            SWEEP.build_target({"CARGO_BUILD_TARGET": "x86_64-unknown-linux-musl"}),
+            "x86_64-unknown-linux-musl",
+        )
+
+    def test_streamed_output_is_kept_and_checks_result_lines(self):
+        lines = [
+            "test result: ok. 0 passed; 0 failed; 0 ignored\n",
+            "test result: ok. 16 passed; 0 failed; 0 ignored\n",
+        ]
+        command = [*SWEEP.COMMAND, "test_name", "--"]
+        with (
+            patch.object(SWEEP.subprocess, "Popen") as process,
+            redirect_stdout(StringIO()) as output,
+        ):
+            child = process.return_value.__enter__.return_value
+            child.stdout = lines
+            child.wait.return_value = 0
+            self.assertEqual(SWEEP.cargo_evidence(command, {}, 16), "".join(lines))
+            self.assertEqual(output.getvalue(), "".join(lines))
+        for log, status in (("".join(lines), 101), (lines[0], 0)):
+            with self.assertRaisesRegex(ValueError, "expected 16 successful tests"):
+                SWEEP.require_pass_count(log, status, 16, "test_name")
+
+    def test_wire_completion_line_can_follow_concurrent_test_output(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "fixture row.jsonl"
+            row = {"invariants": True, "store": "tree", "cut": 1}
+            path.write_text(json.dumps(row) + "\n")
+            prefix = "test cuts::root_0 ... wire_host_restart: child=false group=0:"
+            groups = SWEEP.wire_rows("wire_host_restart", f"{prefix} 1 cuts; {path}\n")
+            self.assertEqual(
+                groups, [dict(family="wire_host_restart", child=0, group=0, rows=[row])]
+            )
+            with self.assertRaisesRegex(ValueError, "row count disagrees"):
+                SWEEP.wire_rows("wire_host_restart", f"{prefix} 2 cuts; {path}\n")
 
 
 if __name__ == "__main__":

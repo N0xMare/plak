@@ -10,8 +10,10 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path.cwd() / "tools/gate"))
+DRIVER = Path(__file__).resolve()
+ROOT = DRIVER.parents[2]
+sys.path.insert(0, str(DRIVER.parent))
+sys.path.insert(0, str(ROOT / "tools/gate"))
 import crash_sweep_shards as shards  # noqa: E402
 from test_artifacts import fixture_paths  # noqa: E402
 
@@ -19,17 +21,35 @@ from test_artifacts import fixture_paths  # noqa: E402
 TERMINAL_SHAPES = shards.TERMINAL_SHAPES
 INDEXED_TEST = "crash_sweep::full_sweep"
 COMMAND = ["cargo", "test", "--locked", "--workspace", "--all-features", "--test", "integration"]
+PRUNE_KNOBS = ("PLAK_TEST_WORKING_PRUNE_MINIMUM", "PLAK_TEST_WORKING_PRUNE_MARGIN")
 
 
 def cargo_evidence(command, env, count):
-    process = subprocess.run(
-        command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    )
-    sys.stdout.write(process.stdout)
-    passed = sum(map(int, re.findall(r"^test result: ok\. (\d+) passed;", process.stdout, re.M)))
-    if process.returncode or passed != count:
-        raise ValueError(f"{command[7]}: expected {count} successful tests, got {passed}")
-    return process.stdout
+    lines = []
+    with subprocess.Popen(
+        command,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    ) as process:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            lines.append(line)
+        code = process.wait()
+    log = "".join(lines)
+    require_pass_count(log, code, count, command[7])
+    return log
+
+
+def require_pass_count(log, code, count, selector):
+    passed = sum(map(int, re.findall(r"^test result: ok\. (\d+) passed;", log, re.M)))
+    if code or passed != count:
+        raise ValueError(
+            f"{selector}: expected {count} successful tests, got {passed} (exit {code})"
+        )
 
 
 def read_rows(path):
@@ -49,15 +69,41 @@ def wire_rows(name, log):
     return groups
 
 
+def clean_checkout():
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=ROOT)
+
+    if Path(os.fsdecode(git("rev-parse", "--show-toplevel").strip())).resolve() != ROOT:
+        raise ValueError("shard driver must run from its tracked checkout")
+    if git("status", "--porcelain", "--untracked-files=all"):
+        raise ValueError("strict shard requires a clean checkout, including untracked files")
+    commit, tree = git("rev-parse", "HEAD", "HEAD^{tree}").decode().splitlines()
+    for path in (DRIVER, Path(shards.__file__).resolve(), shards.INVENTORY):
+        recorded = git("show", f"{commit}:{path.relative_to(ROOT).as_posix()}")
+        if path.read_bytes() != recorded:
+            raise ValueError(
+                f"shard driver or inventory is not from the tracked checkout: {path.name}"
+            )
+    return commit, tree
+
+
+def build_target(env):
+    if target := env.get("CARGO_BUILD_TARGET"):
+        return target
+    version = subprocess.check_output(["rustc", "-vV"], cwd=ROOT, env=env, text=True)
+    (triple,) = re.findall(r"^host: (\S+)$", version, re.M)
+    return triple
+
+
 def run_shard(env, args, shard):
     i, n = shard
     names = shards.plan(n)[i - 1]
     if args.output.exists():
         raise ValueError("shard receipt already exists")
-    subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], check=True)
-    commit, tree = subprocess.check_output(
-        ["git", "rev-parse", "HEAD", "HEAD^{tree}"], text=True
-    ).splitlines()
+    commit, tree = clean_checkout()
+    target = build_target(env)
+    # Pin the target on Cargo calls too, including native host builds.
+    env["CARGO_BUILD_TARGET"] = target
     env["PLAK_CRASH_SWEEP_SHAPES"] = ",".join(sorted(names & shards.INDEXED.keys()))
     print(f"strict shard {i}/{n}: shapes {env['PLAK_CRASH_SWEEP_SHAPES']}", flush=True)
     rc = build(env)
@@ -73,11 +119,7 @@ def run_shard(env, args, shard):
     receipt = dict(
         commit=commit,
         tree=tree,
-        target=env.get("CARGO_BUILD_TARGET") or sys.platform,
-        pruning=[
-            env.get("PLAK_TEST_WORKING_PRUNE_MINIMUM"),
-            env.get("PLAK_TEST_WORKING_PRUNE_MARGIN"),
-        ],
+        target=target,
         shard=args.shard,
         inventory=shards.fingerprint(),
         indexed=indexed,
@@ -99,6 +141,8 @@ def run_shard(env, args, shard):
             cargo_evidence([*COMMAND, selector, "--", "--exact", "--nocapture"], env, 1)
             receipt["runners"].append(name)
     shards.validate(receipt, names)
+    if clean_checkout() != (commit, tree):
+        raise ValueError("checkout revision changed while the strict shard was running")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(args.output, "xt", encoding="utf-8") as stream:
         json.dump(receipt, stream, separators=(",", ":"))
@@ -108,7 +152,7 @@ def run_shard(env, args, shard):
 
 def list_family(name, selector, env):
     listed = subprocess.run(
-        [*COMMAND, selector, "--", "--list"], env=env, capture_output=True, text=True
+        [*COMMAND, selector, "--", "--list"], cwd=ROOT, env=env, capture_output=True, text=True
     )
     expected = {f"{selector}{kind}_{group}" for kind in ["root", "child"] for group in range(8)}
     found = {
@@ -134,20 +178,51 @@ def main() -> int:
         "--merge", nargs="+", type=Path, metavar="RECEIPT", help="verify strict shards"
     )
     parser.add_argument("--output", type=Path, help="shard receipt file or merged output directory")
+    parser.add_argument("--expect-commit", help="revision qualified by --merge")
+    parser.add_argument("--expect-target", help="Rust target triple required by --merge")
     args = parser.parse_args()
     if args.jobs < 1 or args.repeat < 1:
         parser.error("--jobs and --repeat must be positive")
-    if bool(args.output) != bool(args.shard or args.merge):
+    if bool(args.output) != (args.shard is not None or args.merge is not None):
         parser.error("--shard and --merge require --output")
     if args.merge:
+        if not args.expect_commit or not args.expect_target:
+            parser.error("--merge requires --expect-commit and --expect-target")
         try:
-            print(json.dumps(shards.merge(args.merge, args.output), indent=2))
-        except (OSError, ValueError, KeyError, TypeError, EOFError) as error:
+            pin = f"{args.expect_commit}^{{commit}}"
+            commit = subprocess.check_output(
+                ["git", "rev-parse", "--verify", "--end-of-options", pin], text=True
+            ).strip()
+            tree = subprocess.check_output(
+                ["git", "rev-parse", f"{commit}^{{tree}}"], text=True
+            ).strip()
+            result = shards.merge(
+                args.merge, args.output, commit=commit, tree=tree, target=args.expect_target
+            )
+            print(json.dumps(result, indent=2))
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            EOFError,
+            subprocess.SubprocessError,
+        ) as error:
             parser.error(str(error))
         return 0
-    if args.shard and (not args.strict or args.shapes is not None or args.repeat != 1):
-        parser.error("--shard requires --strict and the complete selection with one repeat")
-    script = Path.cwd() / "tools/gate/test-env.sh"
+    if args.expect_commit or args.expect_target:
+        parser.error("--expect-commit and --expect-target apply only to --merge")
+    shard = None
+    if args.shard is not None:
+        if not args.strict or args.shapes is not None or args.repeat != 1:
+            parser.error("--shard requires --strict and the complete selection with one repeat")
+        if any(name in os.environ for name in PRUNE_KNOBS):
+            parser.error("--shard requires default pruning settings")
+        try:
+            shard = shards.shard_id(args.shard)
+        except ValueError as error:
+            parser.error(str(error))
+    script = ROOT / "tools/gate/test-env.sh"
     env = os.environ.copy()
     env.update(json.loads(subprocess.check_output([str(script), "--json"], text=True)))
     # --json keeps the overrides and provider keys the offline tests must not see.
@@ -158,9 +233,9 @@ def main() -> int:
         PLAK_CRASH_SWEEP_REPEAT=str(args.repeat),
         PLAK_CRASH_SWEEP_STRICT=str(int(args.strict)),
     )
-    if args.shard:
+    if shard:
         try:
-            return run_shard(env, args, shards.shard_id(args.shard))
+            return run_shard(env, args, shard)
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             parser.error(str(error))
     terminal_shapes = []
@@ -180,7 +255,7 @@ def main() -> int:
         return rc
     if generic_shapes != []:
         result = subprocess.call(
-            [*COMMAND, INDEXED_TEST, "--", "--ignored", "--exact", "--nocapture"], env=env
+            [*COMMAND, INDEXED_TEST, "--", "--ignored", "--exact", "--nocapture"], cwd=ROOT, env=env
         )
         if result:
             return result
@@ -198,6 +273,7 @@ def main() -> int:
                     *(["--test-threads", str(args.jobs)] if family else ["--exact"]),
                     "--nocapture",
                 ],
+                cwd=ROOT,
                 env=env,
             )
             if result:
@@ -218,6 +294,7 @@ def build(env):
             "--all-features",
             "--message-format=json",
         ],
+        cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
         text=True,
