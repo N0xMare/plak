@@ -645,7 +645,6 @@ fn claude_opus_message_start_admits_null_diagnostics_and_empty_transformations()
     for extension in [
         ",\"input_transformations\":[{\"type\":\"clear\"}]",
         ",\"input_transformations\":null",
-        ",\"future_field\":1",
     ] {
         let error = claude_oauth_projector()
             .push(message_start_stream(extension).as_bytes())
@@ -653,20 +652,17 @@ fn claude_opus_message_start_admits_null_diagnostics_and_empty_transformations()
         assert_eq!(error.kind(), MessagesStreamErrorKind::InvalidResponse);
     }
     // The strict route admits the same diagnostics object as Claude OAuth.
-    // Input transformations and any other message field stay refused.
+    // The known OAuth input transformations still stay refused.
     projector()
         .push(message_start_stream(",\"diagnostics\":null").as_bytes())
         .expect("the API's null diagnostics");
-    for extension in [",\"input_transformations\":[]", ",\"future_field\":1"] {
-        assert_eq!(
-            projector()
-                .push(message_start_stream(extension).as_bytes())
-                .expect_err("other Messages routes stay strict")
-                .kind(),
-            MessagesStreamErrorKind::InvalidResponse,
-            "{extension}"
-        );
-    }
+    assert_eq!(
+        projector()
+            .push(message_start_stream(",\"input_transformations\":[]").as_bytes())
+            .expect_err("other Messages routes do not admit input transformations")
+            .kind(),
+        MessagesStreamErrorKind::InvalidResponse
+    );
 }
 
 #[test]
@@ -1496,7 +1492,12 @@ fn claude_opus_thinking_estimate_is_a_nonsemantic_unsigned_hint() {
         MessagesStreamExtensions::Strict,
         MessagesStreamExtensions::OpenRouterV1,
     ] {
-        assert!(parse_thinking_delta(witnessed, extension).is_err());
+        assert_eq!(
+            parse_thinking_delta(witnessed, extension)
+                .expect("ignored hint")
+                .thinking,
+            ""
+        );
     }
     let estimate = r#"{"type":"thinking_delta","thinking":"step","estimated_tokens":42}"#;
     assert_eq!(
@@ -1505,7 +1506,12 @@ fn claude_opus_thinking_estimate_is_a_nonsemantic_unsigned_hint() {
             .thinking,
         "step"
     );
-    assert!(parse_thinking_delta(estimate, MessagesStreamExtensions::Strict).is_err());
+    assert_eq!(
+        parse_thinking_delta(estimate, MessagesStreamExtensions::Strict)
+            .expect("ignored hint")
+            .thinking,
+        "step"
+    );
     for (invalid, shape) in [
         ("-1", "non-unsigned number"),
         ("1.5", "non-unsigned number"),

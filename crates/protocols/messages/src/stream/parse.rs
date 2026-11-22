@@ -1,5 +1,5 @@
 use plakous_model::{ContentBlock, FinishDetails, FinishReason, ToolExecutionOwner};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
 use super::{
@@ -14,6 +14,11 @@ pub(super) fn parse_event<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, MessagesStreamError> {
     serde_json::from_str(data)
         .map_err(|error| invalid_response(format!("invalid Messages event payload: {error}")))
+}
+
+pub(super) fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(true)
 }
 
 pub(super) fn parse_message_start(
@@ -249,7 +254,15 @@ pub(super) fn parse_message_delta(
     extensions: MessagesStreamExtensions,
 ) -> Result<MessageDeltaEvent, MessagesStreamError> {
     match extensions {
-        MessagesStreamExtensions::Strict => parse_event(data),
+        MessagesStreamExtensions::Strict => {
+            let event = parse_event::<MessageDeltaEvent>(data)?;
+            if event.context_management {
+                return Err(invalid_response(
+                    "Claude OAuth context management is not admitted on this route",
+                ));
+            }
+            Ok(event)
+        }
         MessagesStreamExtensions::ClaudeOauthV1 => {
             let mut value = parse_event::<serde_json::Value>(data)?;
             let event = value

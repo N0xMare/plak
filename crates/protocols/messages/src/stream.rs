@@ -1244,6 +1244,8 @@ struct ContentBlockStopEvent {
 struct MessageDeltaEvent {
     #[serde(rename = "type")]
     _kind: String,
+    #[serde(default, deserialize_with = "parse::present")]
+    context_management: bool,
     delta: MessageDelta,
     usage: MessageDeltaUsage,
 }

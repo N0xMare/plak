@@ -550,7 +550,8 @@ fn prepared_wire_at_the_limit_is_admissible_and_excess_is_typed() {
     let limit = crate::MAX_PREPARED_WIRE_BYTES;
     let digest = Digest::sha256(DigestDomain::Blob, 1, &[b"test wire"]).expect("digest");
     assert!(PreparedTokenProjection::new(digest, limit, None).is_ok());
-    let error = PreparedTokenProjection::new(digest, limit + 1, None).unwrap_err();
+    let error =
+        PreparedTokenProjection::new(digest, limit + 1, None).expect_err("oversized prepared wire");
     assert_eq!(
         error,
         crate::PreparedCallError::WireTooLarge {

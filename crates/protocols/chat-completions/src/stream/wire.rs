@@ -1,6 +1,7 @@
 //! Chunk, choice, delta and usage wire checks and the cost and finish parsers.
 
 use plakous_model::{FinishReason, ServedBy, Usage};
+use serde::{Deserialize, Deserializer};
 
 use super::{
     ChatFinishReason, ChatStreamError, ChatStreamErrorKind, ChatStreamExtensions, Delta, UsageWire,
@@ -24,6 +25,12 @@ impl Delta {
                 .is_some_and(|details| !details.is_empty())
             || !self.tool_calls.is_empty()
     }
+}
+
+pub(super) fn present_value<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 impl UsageWire {

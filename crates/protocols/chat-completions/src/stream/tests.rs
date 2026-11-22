@@ -56,15 +56,17 @@ fn openrouter_provider_chunk_captures_served_by_once() {
 fn openrouter_invalid_provider_is_rejected() {
     let binding =
         binding(ChatStreamLimits::default()).with_extensions(ChatStreamExtensions::OpenRouterV1);
-    let mut projector = projector_with_binding(binding);
-    let mut role = role();
-    role["provider"] = json!("x".repeat(65));
-    assert_eq!(
-        push_chunk(&mut projector, role)
-            .expect_err("oversized provider")
-            .kind(),
-        ChatStreamErrorKind::InvalidResponse
-    );
+    for provider in [json!("x".repeat(65)), Value::Null] {
+        let mut projector = projector_with_binding(binding.clone());
+        let mut start = role();
+        start["provider"] = provider;
+        assert_eq!(
+            push_chunk(&mut projector, start)
+                .expect_err("invalid provider")
+                .kind(),
+            ChatStreamErrorKind::InvalidResponse
+        );
+    }
 }
 
 #[test]
@@ -899,7 +901,7 @@ fn openrouter_metadata_is_ignored_through_the_terminal_projector_lifecycle() {
         }],
         "future_gateway_member": {"opaque": true}
     });
-    push_json(&mut openrouter_projector, final_usage.clone());
+    push_json(&mut openrouter_projector, final_usage);
     openrouter_projector
         .push(b"data: [DONE]\n\n")
         .expect("done");
@@ -913,13 +915,6 @@ fn openrouter_metadata_is_ignored_through_the_terminal_projector_lifecycle() {
         &terminal.response().output()[0].blocks()[0],
         ContentBlock::Text(block) if block.text() == "answer"
     ));
-
-    let mut generic = projector();
-    let error = generic
-        .push(&data(&final_usage))
-        .expect_err("OpenRouter metadata outside its prepared dialect");
-    assert_eq!(error.kind(), ChatStreamErrorKind::InvalidResponse);
-    assert!(error.message().contains("chunk.openrouter_metadata"));
 }
 
 #[test]

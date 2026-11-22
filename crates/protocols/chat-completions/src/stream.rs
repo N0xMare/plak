@@ -1311,6 +1311,7 @@ struct Chunk {
     choices: Vec<Choice>,
     usage: Option<UsageWire>,
     error: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "wire::present_value")]
     provider: Option<serde_json::Value>,
 }
 #[derive(Deserialize)]

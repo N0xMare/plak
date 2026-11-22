@@ -236,14 +236,17 @@ async fn upstream_origin_and_tls_configuration_each_partition_the_pool() {
 }
 
 #[tokio::test]
-async fn a_gateway_socket_is_not_reused_at_the_five_second_idle_bound() {
+async fn the_gateway_reuses_after_a_tool_step_but_not_at_the_thirty_second_idle_bound() {
     let peer = TlsPeer::start().await;
     let server = peer.relay(Service::new(), peer.upstream());
     let client = via(&server);
     drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
-    server.inner.upstream_pool.age(Duration::from_secs(5));
+    server.inner.upstream_pool.age(Duration::from_secs(8));
     drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
-    assert_eq!(peer.counts(), (2, 2));
+    assert_eq!(peer.counts(), (1, 2));
+    server.inner.upstream_pool.age(Duration::from_secs(30));
+    drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
+    assert_eq!(peer.counts(), (2, 3));
 }
 
 #[tokio::test]
