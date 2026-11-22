@@ -8,7 +8,7 @@ use tokio::net::UnixListener;
 struct SharedLock {
     _home: tempfile::TempDir,
     builds: PathBuf,
-    lock: File,
+    _lock: File,
     sibling: Origin,
     listener: UnixListener,
 }
@@ -16,7 +16,7 @@ struct SharedLock {
 impl SharedLock {
     fn new(recorded_pid: u32) -> Self {
         let home = tempfile::tempdir().unwrap();
-        let builds = home.path().join("b");
+        let builds = home.path().join("r/b");
         let sibling = Origin {
             version: 1,
             build: id("v9-sibling"),
@@ -24,19 +24,12 @@ impl SharedLock {
         };
         let dir = builds.join(sibling.build.as_str());
         private_dir(&dir);
-        let mut lock = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(dir.join("retention-native.lock"))
-            .unwrap();
-        lock.try_lock().unwrap();
-        write!(lock, "{recorded_pid}").unwrap();
+        let lock = held_lock(&dir.join("retention-native.lock"), recorded_pid);
         let listener = listen(&dir.join("retention-v1.sock"));
         Self {
             _home: home,
             builds,
-            lock,
+            _lock: lock,
             sibling,
             listener,
         }
@@ -98,12 +91,27 @@ fn listen(path: &Path) -> UnixListener {
     listener
 }
 
+fn held_lock(path: &Path, recorded_pid: u32) -> File {
+    let mut lock = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .unwrap();
+    lock.try_lock().unwrap();
+    write!(lock, "{recorded_pid}").unwrap();
+    lock
+}
+
 async fn answer_inventory(
     listener: UnixListener,
     origin: Origin,
     before_reply: impl FnOnce(),
 ) -> bool {
-    let (mut stream, _) = listener.accept().await.unwrap();
+    let (mut stream, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+        .await
+        .unwrap_or_else(|_| panic!("proof did not connect to the witness"))
+        .unwrap();
     retention::send(&mut stream, &Hello { origin })
         .await
         .unwrap();
@@ -192,16 +200,24 @@ async fn peer_pid_must_match_the_native_holder() {
 }
 
 #[tokio::test]
-async fn disappearing_holder_during_inventory_cannot_prove_an_alias() {
+async fn changed_holder_during_inventory_cannot_prove_an_alias() {
     let fixture = SharedLock::new(std::process::id());
     let holder = fixture.holder();
+    let witness = fixture
+        .builds
+        .join(fixture.sibling.build.as_str())
+        .join("retention-native.lock");
+    let mut replacement = None;
     let bind = scope();
     let (proven, answered) = tokio::join!(
         proves_sibling(&fixture.builds, &bind, 1, &fixture.sibling, holder),
-        answer_inventory(fixture.listener, fixture.sibling.clone(), || drop(
-            fixture.lock
-        )),
+        answer_inventory(fixture.listener, fixture.sibling.clone(), || {
+            std::fs::rename(&witness, witness.with_extension("original")).unwrap();
+            replacement = Some(held_lock(&witness, std::process::id()));
+        }),
     );
     assert!(answered);
+    assert!(replacement.is_some());
+    assert!(native_holder(&fixture.builds, fixture.sibling.build.as_str()).is_some());
     assert!(!proven);
 }
