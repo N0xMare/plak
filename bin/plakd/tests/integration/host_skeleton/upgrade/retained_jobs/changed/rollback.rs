@@ -279,10 +279,17 @@ fn assert_jobs(fixture: &Fixture, roots: [&Root; 2]) {
 }
 
 fn finish_and_check_admission(fixture: &Fixture, client: &mut Client, roots: [&Root; 2]) {
-    assert!(matches!(
-        client.request(50, new_session(&fixture.workspace())),
-        Outcome::Ok(Answer::Created { .. })
-    ));
+    let request = new_session(&fixture.workspace());
+    let deadline = Instant::now() + WAIT;
+    loop {
+        match client.request(50, request.clone()) {
+            Outcome::Ok(Answer::Created { .. }) => break,
+            Outcome::Refused(RequestRefusal::Backpressure) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            reply => panic!("admission after rollback: {reply:?}"),
+        }
+    }
     for (id, root) in roots.into_iter().enumerate() {
         for (job, pid) in [("bg", root.background.0), ("fg", root.foreground.0)] {
             std::fs::write(fixture.root.join(format!("{}-{job}-finish", root.name)), []).unwrap();
