@@ -1,5 +1,7 @@
 //! Detached exact-reopen verification.
 
+use std::sync::Arc;
+
 use super::{CliResult, HostConfig, startup};
 
 /// What an exact reopen of a session's head would do on this build.
