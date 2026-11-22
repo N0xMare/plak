@@ -304,8 +304,9 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses": "1af24d35407bb8c920bd1241de5694e20e0ec4d7e2189f698bf6633d79ab2cfc",
     # SQLite's captured terminal envelope uses the existing JSON dependency.
     "plakous-store": "7e9c37178c2bc5a89ec6bfcb9e0b03451cafb1e9ba5effb562898aaff5f03e6d",
+    # Runner waits use the existing Tokio select macro on all targets.
     # Linux group scans use the existing Nix wrapper to handle kernel PGID zero.
-    "plakous-tools": "2bd611a8a119ad2686c4c40fa4f3dbf87c5f35bbf833822b0e8789867cf96b85",
+    "plakous-tools": "cc8e5911b5bc23f2aaef5350b40cd081600055997d385f6b9a6d76a1d477d1f0",
     "plakous-xai": "79c5017fc78cbb3df7a27f4d37335a0fd6df59ed653eb5770f4ceadef1b4bea3",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
     "plakous-gateway-protocol": "cfed7c1c57d094c562580177e4a0728ec596318e81609ca85c99e2892cba01c5",
