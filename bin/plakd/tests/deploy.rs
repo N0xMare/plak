@@ -768,27 +768,16 @@ fn deploy_canaries_are_keyed_by_exact_account() {
 }
 
 #[test]
-fn deploy_paired_macos_runner_blocks_live_jobs_and_missing_attachment_before_baseline() {
+fn deploy_paired_macos_runner_refuses_a_missing_referenced_placement_before_baseline() {
     let f = Fleet::new();
     f.paired();
-    for (flag, remedy) in [
-        (
-            "live_runner_jobs",
-            "settle and drain them using the old build",
-        ),
-        (
-            "missing_runner_attachment",
-            "read-only and keep it attached",
-        ),
-    ] {
-        f.change(|data| data[flag] = json!(true));
-        let report = f.staging("plan", "blocked", remedy);
-        assert_eq!(report["runner_links"]["desk"]["account"]["platform"], MAC);
-        assert!(!f.path("staging.jsonl").exists());
-        assert_eq!(f.events(), NO_EVENTS);
-        f.change(|data| data[flag] = json!(false));
-    }
+    f.change(|data| data["missing_runner_attachment"] = json!(true));
+    f.staging("plan", "blocked", "read-only and keep it attached");
+    assert!(!f.path("staging.jsonl").exists());
+    assert_eq!(f.events(), NO_EVENTS);
+    f.change(|data| data["missing_runner_attachment"] = json!(false));
     let plan = f.staging("plan", "ready", "");
+    assert_eq!(plan["runner_links"]["desk"]["account"]["platform"], MAC);
     assert_eq!(
         plan["source_transition"]["runners"],
         json!([[MAC, "changed_triple"]])
@@ -806,6 +795,26 @@ fn deploy_paired_macos_runner_blocks_live_jobs_and_missing_attachment_before_bas
             "client_links",
             "verify"
         ])
+    );
+}
+
+#[test]
+fn deploy_leaves_an_unreachable_unreferenced_runners_link_alone() {
+    let f = Fleet::new();
+    f.paired();
+    f.change(|data| data["unreachable_runner"] = json!(true));
+    let report = f.staging("apply", "green", "");
+    assert_eq!(
+        report["runner_warnings"],
+        json!([{"kind":"unreferenced_runner_unavailable", "runner":"desk"}])
+    );
+    assert_eq!(report["runner_links"], json!({}));
+    assert!(
+        f.events()
+            .iter()
+            .all(|name| !name.starts_with("runner_stage")
+                && !name.starts_with("runner_advance")
+                && !name.starts_with("runner_restore"))
     );
 }
 
@@ -1006,7 +1015,7 @@ fn deploy_paired_runner_restores_exact_link_on_pre_surrender_refusal() {
     let report = f.staging(
         "apply",
         "blocked",
-        "deploy_runner_inspection: runner desk job 17",
+        "deploy_runner_inspection: referenced runner desk",
     );
     assert_eq!(report["withdrawn"], true);
     let events = f.events();
@@ -1762,12 +1771,12 @@ fn paired_placements(stage: &str) -> Value {
 }
 
 fn runner_preflight(data: &Value) -> Value {
-    if data["live_runner_jobs"] == true {
-        json!({"error":"foreground/background processes are live; settle and drain them using the old build"})
-    } else if data["missing_runner_attachment"] == true {
+    if data["missing_runner_attachment"] == true {
         json!({"error":"reconnect a settled source root on that runner read-only and keep it attached until upgrade completes"})
+    } else if data["unreachable_runner"] == true {
+        json!({"ok":[{"kind":"unreferenced_runner_unavailable","runner":"desk"}]})
     } else {
-        json!({"ok":null})
+        json!({"ok":[]})
     }
 }
 
@@ -1784,6 +1793,10 @@ fn runner_ssh(
     let source = json!({"path":format!("{home}/.local/lib/plak/maintainer/retained/plakd"),"sha256":"1".repeat(64)});
     let desired = json!({"path":deployed(root,node),"sha256":hash(artifact_bytes("plakd", MAC))});
     if name == "runner_observe" {
+        if data["unreachable_runner"] == true {
+            eprintln!("ssh: connection refused");
+            return (Vec::new(), 255);
+        }
         if data["refuse_runner_observe"] == true && data["runner"] == "current" {
             return (encoded(&json!({"error":"runner observation refused"})), 0);
         }
@@ -2011,11 +2024,11 @@ fn simulate_upgrade(data: &mut Value, op: &Value, want: &Value) -> Value {
     }
     assert_eq!(op["previous"]["instance"], data["host"]["instance"]);
     assert_eq!(op["previous"]["gateway"], data["host"]["gateway"]);
-    if data["paired_fleet"] == true {
+    if data["paired_fleet"] == true && data["unreachable_runner"] != true {
         assert_eq!(data["runner"], "current");
     }
     if data["refuse_upgrade"] == true {
-        return json!({"error":"deploy_runner_inspection: runner desk job 17 is outcome_unknown; use jobs.ack or jobs.disown; no source surrendered"});
+        return json!({"error":"deploy_runner_inspection: referenced runner desk lost its source connection; reconnect it read-only and keep it attached; no source surrendered"});
     }
     if data["lose_reply"] == "old" {
         data["host"]["upgrade_idle"] = json!(false);
