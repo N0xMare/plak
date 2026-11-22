@@ -47,6 +47,22 @@ pub enum ProbePhase {
     LinkLost,
 }
 
+impl ProbePhase {
+    /// Stable operator label for a known inner reconciliation operation.
+    #[must_use]
+    pub const fn reconcile_operation(self) -> Option<&'static str> {
+        Some(match self {
+            Self::ReconcileStore => "runtime_store",
+            Self::ReconcileObsoleteLines => "obsolete_lines",
+            Self::ReconcileTerminals => "terminal_inventory",
+            Self::ReconcileJobs => "job_inventory_and_readoption",
+            Self::ReconcileStops => "recorded_stops",
+            Self::ReconcileForeground => "foreground_cleanup",
+            _ => return None,
+        })
+    }
+}
+
 /// Neutral placement failures; product/wire map these without parsing prose.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -325,6 +341,16 @@ impl RunnerRegistry {
 
     /// Publishes a phase without changing completed-probe timestamps.
     pub fn progress(&self, id: &str, phase: ProbePhase) {
+        self.record_probe_phase(id, phase);
+        let _ = self.progress.send(RunnerProgress {
+            runner_id: id.into(),
+            phase,
+            row: None,
+        });
+    }
+
+    /// Records the operation for timeout diagnostics without publishing a new progress frame.
+    pub fn record_probe_phase(&self, id: &str, phase: ProbePhase) {
         if let Some(entry) = self
             .entries
             .write()
@@ -333,11 +359,6 @@ impl RunnerRegistry {
         {
             entry.refresh.phase = phase;
         }
-        let _ = self.progress.send(RunnerProgress {
-            runner_id: id.into(),
-            phase,
-            row: None,
-        });
     }
     /// Process-local readiness changes, including delayed first bind. A
     /// continuation scanner waits here rather than blocking other runners.

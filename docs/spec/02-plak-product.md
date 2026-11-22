@@ -4788,12 +4788,11 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   parked children on available placements does not set it. A live child turn uses
   the existing `tools waiting · <runner>` label only while its placement is
   held, never for a permanent refusal, without a new wire field.
-  Activity stays `busy` and `activity_seq` does not advance for this. The runner
-  status names `link_lost`, the pending `reconcile` barrier, or the unsuccessful
-  reconciliation operation: `reconcile_store`, `reconcile_obsolete_lines`,
-  `reconcile_terminals`, `reconcile_jobs`, `reconcile_stops` or
-  `reconcile_foreground`. No field, client protocol or
-  duration is added; these are the fields a client reads. A refused
+  Activity stays `busy`, the runner status keeps its `link_lost` or `reconcile`
+  phase, and `activity_seq` does not advance for this. The host log names a
+  failed inner reconciliation operation when known. An admission refused at
+  that operation names it in the existing `session_unavailable` detail.
+  No field, client protocol or duration is added. A refused
   placement (`not_paired`, identity, version, configuration) is not a live
   root hold: its calls end with the refusal. An unavailable child's deferred
   seal or recovery debt still needs attention. Node-to-node
@@ -4874,8 +4873,11 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   `options_progress {request_id,runner,phase,row}` frames report phase changes
   and one completion per runner before exactly one final answer. Null phase
   means queued for a probe slot; phases are ssh, daemon, bind, options,
-  discovery, reconcile and link_lost. Cache/probe deadlines do not cancel
-  admitted reconciliation effects; create/open always validates afresh.
+  discovery, reconcile and link_lost. Inner reconciliation operations do not
+  add progress phases; a workspace request refused at a known inner operation
+  names it in the existing `session_unavailable` detail. Cache/probe
+  deadlines do not cancel admitted reconciliation effects; create/open
+  always validates afresh.
 - **Draft identity.** Wire `intent` accepts optional sibling `client_id`, a
   canonical lowercase hyphenated UUID4. The multi-session host requires it
   for prompt, follow_up, steer and mail_topology_node; the single-session

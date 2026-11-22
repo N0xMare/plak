@@ -563,47 +563,60 @@ async fn reconcile_remote(
     id: &str,
     client: &RunnerClient,
 ) -> Result<Vec<LineId>, plakous::runner::PlacementFailure> {
-    use plakous::runner::{PlacementFailure, ProbePhase};
-    let unavailable = |phase, timed_out| PlacementFailure::RunnerUnreachable { phase, timed_out };
+    use plakous::runner::ProbePhase;
+    let unavailable = |phase| reconcile_unavailable(id, phase);
     let registry = services.runners();
     registry.begin_reconcile(id, services.now_unix_seconds());
     if let Some(terminals) = services.terminal_registry() {
-        registry.progress(id, ProbePhase::ReconcileTerminals);
+        registry.record_probe_phase(id, ProbePhase::ReconcileTerminals);
         terminals
             .reconcile(id, client)
             .await
-            .map_err(|_| unavailable(ProbePhase::ReconcileTerminals, false))?;
+            .map_err(|_| unavailable(ProbePhase::ReconcileTerminals))?;
     }
-    registry.progress(id, ProbePhase::ReconcileStore);
+    registry.record_probe_phase(id, ProbePhase::ReconcileStore);
     let roots = services
         .state_roots()
-        .map_err(|_| unavailable(ProbePhase::ReconcileStore, false))?
+        .map_err(|_| unavailable(ProbePhase::ReconcileStore))?
         .with_runner_readiness(registry.clone(), id);
     let sessions = roots
         .runtime_sessions()
-        .map_err(|_| unavailable(ProbePhase::ReconcileStore, false))?;
-    registry.progress(id, ProbePhase::ReconcileJobs);
+        .map_err(|_| unavailable(ProbePhase::ReconcileStore))?;
+    registry.record_probe_phase(id, ProbePhase::ReconcileJobs);
     let (readopted, failures) =
         plakous_hosted::runner_adoption::readopt_lines(client, &roots, "plak:host:readopt")
             .await
-            .map_err(|_| unavailable(ProbePhase::ReconcileJobs, false))?;
+            .map_err(|_| unavailable(ProbePhase::ReconcileJobs))?;
     if let Some(failure) = failures.iter().find(|failure| !failure.held_elsewhere) {
         tracing::warn!(target: "plak.runner", phase = "sweep", line = %failure.line, error = %failure.reason, "runner_recovery_failed");
-        return Err(unavailable(ProbePhase::ReconcileJobs, false));
+        return Err(unavailable(ProbePhase::ReconcileJobs));
     }
     let _ = client.recover().await;
-    registry.progress(id, ProbePhase::ReconcileStops);
+    registry.record_probe_phase(id, ProbePhase::ReconcileStops);
     let pending = finish_stops(services, client, &sessions, &readopted)
         .await
-        .map_err(|_| unavailable(ProbePhase::ReconcileStops, false))?;
-    registry.progress(id, ProbePhase::ReconcileForeground);
+        .map_err(|_| unavailable(ProbePhase::ReconcileStops))?;
+    registry.record_probe_phase(id, ProbePhase::ReconcileForeground);
     client
         .reconcile_settled_foreground()
         .await
-        .map_err(|_| unavailable(ProbePhase::ReconcileForeground, false))?;
+        .map_err(|_| unavailable(ProbePhase::ReconcileForeground))?;
     #[cfg(test)]
     tests::production_fence::after_cleanup(client).await;
     Ok(pending)
+}
+
+fn reconcile_unavailable(
+    id: &str,
+    phase: plakous::runner::ProbePhase,
+) -> plakous::runner::PlacementFailure {
+    if let Some(operation) = phase.reconcile_operation() {
+        tracing::warn!(target: "plak.runner", runner_id = id, phase = "reconcile", operation, "runner_recovery_failed");
+    }
+    plakous::runner::PlacementFailure::RunnerUnreachable {
+        phase,
+        timed_out: false,
+    }
 }
 
 async fn check_ssh(destination: &str) -> Result<(), plakous::runner::PlacementFailure> {

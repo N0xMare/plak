@@ -16,7 +16,8 @@ fn forward_hop_with_a_busy_legacy_shared_lock_reconciles_admission_and_wake() {
         return;
     };
     let legacy = LegacyLayout::new(&fixture);
-    if daemon::check_socket_path(&legacy.stale_socket()).is_err() {
+    if let Err(error) = daemon::check_socket_path(&legacy.stale_socket()) {
+        eprintln!("skipping legacy runner layout fixture: {error}");
         return;
     }
     let mut source_script = wake_script.clone();

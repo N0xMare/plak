@@ -12,13 +12,13 @@ pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
         ProbePhase::Bind => wire::RunnerPhase::Bind,
         ProbePhase::Options => wire::RunnerPhase::Options,
         ProbePhase::Discovery => wire::RunnerPhase::Discovery,
-        ProbePhase::Reconcile => wire::RunnerPhase::Reconcile,
-        ProbePhase::ReconcileStore => wire::RunnerPhase::ReconcileStore,
-        ProbePhase::ReconcileObsoleteLines => wire::RunnerPhase::ReconcileObsoleteLines,
-        ProbePhase::ReconcileTerminals => wire::RunnerPhase::ReconcileTerminals,
-        ProbePhase::ReconcileJobs => wire::RunnerPhase::ReconcileJobs,
-        ProbePhase::ReconcileStops => wire::RunnerPhase::ReconcileStops,
-        ProbePhase::ReconcileForeground => wire::RunnerPhase::ReconcileForeground,
+        ProbePhase::Reconcile
+        | ProbePhase::ReconcileStore
+        | ProbePhase::ReconcileObsoleteLines
+        | ProbePhase::ReconcileTerminals
+        | ProbePhase::ReconcileJobs
+        | ProbePhase::ReconcileStops
+        | ProbePhase::ReconcileForeground => wire::RunnerPhase::Reconcile,
         ProbePhase::LinkLost => wire::RunnerPhase::LinkLost,
     })
 }
@@ -39,6 +39,17 @@ pub(in super::super) fn refusal(
     failure: PlacementFailure,
     rows: &[RunnerRow],
 ) -> wire::RequestRefusal {
+    if let PlacementFailure::RunnerUnreachable { phase, timed_out } = &failure
+        && let Some(operation) = phase.reconcile_operation()
+    {
+        let outcome = if *timed_out { "timed out" } else { "failed" };
+        return wire::RequestRefusal::SessionUnavailable {
+            detail: format!(
+                "runner {}: reconciliation {outcome} at {operation}",
+                runner.name
+            ),
+        };
+    }
     match reason(failure, Some(runner), rows) {
         Ok(reason) => wire::RequestRefusal::PlacementRefused {
             runner: runner.clone(),
@@ -193,4 +204,33 @@ pub(super) fn options(
             .collect(),
         discovery_truncated: row.discovery.truncated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconciliation_step_uses_existing_wire_phase_and_refusal_detail() {
+        let failed = ProbePhase::ReconcileJobs;
+        let failure = PlacementFailure::RunnerUnreachable {
+            phase: failed,
+            timed_out: false,
+        };
+        assert_eq!(phase(failed), Some(wire::RunnerPhase::Reconcile));
+        assert_eq!(
+            reason(failure.clone(), None, &[]),
+            Ok(wire::PlacementReason::RunnerUnreachable {
+                phase: wire::RunnerPhase::Reconcile,
+                timed_out: false,
+            })
+        );
+        assert_eq!(
+            refusal(&wire::RunnerLabel::local(), failure, &[]),
+            wire::RequestRefusal::SessionUnavailable {
+                detail: "runner local: reconciliation failed at job_inventory_and_readoption"
+                    .into(),
+            }
+        );
+    }
 }

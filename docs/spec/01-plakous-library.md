@@ -7634,6 +7634,10 @@ match the recorded holder of the same busy lock inode before and after that
 request. The refused socket inode must not have changed, and its link must
 still name that same held lock. An unverified sibling, including a responder
 on a different lock or the same build, never proves the original is gone.
+This alias check applies only to discovery before transfer. For an already
+transferred allocation, a refused connection and a still-held shared legacy
+lock leave loss unproven in the absence of independent original-instance or
+socket-identity evidence. The receiver keeps its reference and occupancy.
 The exact-triple CarryLines read
 lists lines with retained allocations in the same host namespace as
 candidates for readoption. Such a candidate is not a native owner or a

@@ -9,6 +9,10 @@ use super::super::{self as retention, Client, Codec, loss};
 use super::{Registry, append, inspect_lines};
 use loss::{NativeHolder, SocketIdentity, native_holder, native_lock_free};
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "private endpoint fixtures")]
+mod tests;
+
 struct Endpoint {
     build: Id,
     version: u32,
