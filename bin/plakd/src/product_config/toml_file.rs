@@ -37,7 +37,7 @@ use std::ops::Range;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
 
-/// `config.toml`: sixteen sections, each optional, nothing else. `[tools]`,
+/// `config.toml`: optional sections. `[tools]`,
 /// `[mcp_servers]` and `[runners]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -51,6 +51,7 @@ struct ConfigFile {
     compaction: Option<CompactionSection>,
     skills: Option<SkillsSection>,
     telemetry: Option<TelemetrySection>,
+    runtime_store: Option<RuntimeStoreSection>,
     mcp: Option<McpSection>,
     tools: Option<ToolsSection>,
     mcp_servers: Option<BTreeMap<String, McpServerSection>>,
@@ -164,6 +165,19 @@ struct TelemetrySection {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RuntimeStoreSection {
+    #[serde(rename = "max_sessions")]
+    sessions: Entry,
+    #[serde(rename = "max_checkpoints")]
+    checkpoints: Entry,
+    #[serde(rename = "max_objects")]
+    objects: Entry,
+    #[serde(rename = "max_object_bytes")]
+    object_bytes: Entry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct McpSection {
     client_id_metadata_url: Entry,
 }
@@ -271,6 +285,12 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign("telemetry.max_bytes", &section.max_bytes)?;
         assign("telemetry.max_age_days", &section.max_age_days)?;
     }
+    if let Some(section) = &file.runtime_store {
+        assign("runtime_store.max_sessions", &section.sessions)?;
+        assign("runtime_store.max_checkpoints", &section.checkpoints)?;
+        assign("runtime_store.max_objects", &section.objects)?;
+        assign("runtime_store.max_object_bytes", &section.object_bytes)?;
+    }
     if let Some(section) = &file.mcp {
         assign(
             "mcp.client_id_metadata_url",
@@ -315,6 +335,7 @@ fn forward_sections(
         ("runners", file.runners.is_some()),
         ("web", file.web.is_some()),
         ("gateway", file.gateway.is_some()),
+        ("runtime_store", file.runtime_store.is_some()),
     ]))
 }
 

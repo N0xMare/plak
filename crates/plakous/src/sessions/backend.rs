@@ -137,30 +137,52 @@ impl SessionBackend {
         objects: std::num::NonZeroUsize,
         object_bytes: std::num::NonZeroUsize,
     ) -> Result<Self, AgentSessionsError> {
-        let path = path.as_ref();
-        let defaults = plakous_store::SqliteStoreOptions::default();
-        let limits = defaults.limits();
-        let options = plakous_store::SqliteStoreOptions::new(
-            MemoryStoreLimits::new(
-                limits.max_sessions(),
-                limits.max_branches_per_session(),
+        Self::sqlite_with_bounds_and_storage_probe(
+            path,
+            [
                 checkpoints,
                 objects,
                 object_bytes,
-                limits.max_page_size(),
-            ),
+                Self::default_sqlite_retention_bounds()[3],
+            ],
+            Arc::new(|_| false),
+        )
+    }
+
+    /// Default SQLite caps in checkpoint, object, accounted-byte, session order.
+    #[must_use]
+    pub fn default_sqlite_retention_bounds() -> [std::num::NonZeroUsize; 4] {
+        let limits = plakous_store::SqliteStoreOptions::default().limits();
+        [
+            limits.max_checkpoints(),
+            limits.max_objects(),
+            limits.max_object_bytes(),
+            limits.max_sessions(),
+        ]
+    }
+
+    /// Opens with explicit aggregate bounds and the colocated-store pause probe.
+    ///
+    /// # Errors
+    /// Returns the same admission failures as [`Self::sqlite`].
+    pub fn sqlite_with_bounds_and_storage_probe(
+        path: impl AsRef<Path>,
+        bounds: [std::num::NonZeroUsize; 4],
+        probe: Arc<dyn Fn(bool) -> bool + Send + Sync>,
+    ) -> Result<Self, AgentSessionsError> {
+        let defaults = plakous_store::SqliteStoreOptions::default();
+        let options = plakous_store::SqliteStoreOptions::new(
+            sqlite_limits(bounds),
             defaults.queue_capacity(),
         );
+        let path = path.as_ref();
         let store = SqliteSessionStore::open_with_options(path, options)
             .map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
-            Arc::new(store),
+            Arc::new(store.with_storage_probe(probe)),
             RuntimeDurability::Required,
         ))
     }
-}
-
-impl SessionBackend {
     /// Classifies bounded SQLite persistence shape without authorizing use.
     ///
     /// `Current` is only startup-routing evidence. Call [`Self::sqlite`] before
@@ -169,7 +191,6 @@ impl SessionBackend {
     /// # Errors
     ///
     /// Returns a redaction-safe refusal for unsafe, unknown, or damaged shape.
-    #[cfg(feature = "sessions-sqlite")]
     pub fn classify_sqlite(
         path: impl AsRef<Path>,
     ) -> Result<SessionPersistenceShape, AgentSessionsError> {
@@ -192,21 +213,54 @@ impl SessionBackend {
     /// # Errors
     ///
     /// Returns a redaction-safe refusal for unsafe, unknown, or damaged shape.
-    #[cfg(feature = "sessions-sqlite")]
     pub fn inspect_sqlite_usage(
         path: impl AsRef<Path>,
     ) -> Result<Option<SessionStoreUsage>, AgentSessionsError> {
+        Self::inspect_sqlite_usage_with_bounds(path, Self::default_sqlite_retention_bounds())
+    }
+
+    /// Reads aggregate SQLite usage against explicitly configured bounds.
+    ///
+    /// # Errors
+    /// Returns the same read-only refusals as [`Self::inspect_sqlite_usage`].
+    pub fn inspect_sqlite_usage_with_bounds(
+        path: impl AsRef<Path>,
+        bounds: [std::num::NonZeroUsize; 4],
+    ) -> Result<Option<SessionStoreUsage>, AgentSessionsError> {
         let path = path.as_ref();
-        let Some(usage) = SqliteSessionStore::inspect_usage(path)
+        let Some(usage) = SqliteSessionStore::inspect_retention_usage(path, sqlite_limits(bounds))
             .map_err(|error| store_path_error(path, error))?
         else {
             return Ok(None);
         };
-        let file = SqliteSessionStore::inspect_file_usage(path).map_err(store_error)?;
-        let feed = SqliteSessionStore::inspect_feed_usage(path).map_err(store_error)?;
-        Ok(Some(SessionStoreUsage::from_store(usage, file, feed)))
+        Ok(Some(SessionStoreUsage::from_store(
+            usage.aggregate,
+            (usage.sessions, bound64(bounds[3])),
+            usage.file,
+            usage.feed,
+        )))
     }
 
+    /// Zero usage with the same admission thresholds as an opened SQLite store.
+    #[must_use]
+    pub fn empty_sqlite_usage(bounds: [std::num::NonZeroUsize; 4]) -> SessionStoreUsage {
+        let [checkpoints, objects, bytes, sessions] = bounds.map(|limit| (0, bound64(limit)));
+        SessionStoreUsage::from_store(
+            StoreUsage::new(checkpoints, objects, bytes),
+            sessions,
+            SqliteFileUsage {
+                file_bytes: 0,
+                free_bytes: 0,
+            },
+            SqliteFeedUsage {
+                records: 0,
+                bytes: 0,
+            },
+        )
+    }
+}
+
+impl SessionBackend {
     pub(super) fn from_store(store: Arc<dyn SessionStore>, durability: RuntimeDurability) -> Self {
         Self {
             store,
@@ -214,6 +268,26 @@ impl SessionBackend {
             drivers: Arc::new(DriverRegistry::default()),
         }
     }
+}
+
+#[cfg(feature = "sessions-sqlite")]
+fn bound64(limit: std::num::NonZeroUsize) -> u64 {
+    u64::try_from(limit.get()).unwrap_or(u64::MAX)
+}
+
+#[cfg(feature = "sessions-sqlite")]
+fn sqlite_limits(
+    [checkpoints, objects, bytes, sessions]: [std::num::NonZeroUsize; 4],
+) -> MemoryStoreLimits {
+    let defaults = plakous_store::SqliteStoreOptions::default().limits();
+    MemoryStoreLimits::new(
+        sessions,
+        defaults.max_branches_per_session(),
+        checkpoints,
+        objects,
+        bytes,
+        defaults.max_page_size(),
+    )
 }
 
 /// Non-authoritative bounded SQLite persistence-shape classification.
@@ -383,6 +457,7 @@ impl SessionRetention {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SessionStoreUsage {
     bounds: [SessionStoreBoundUsage; 3],
+    sessions: (u64, u64),
     file_bytes: u64,
     free_bytes: u64,
     feed_records: u64,
@@ -393,24 +468,24 @@ pub struct SessionStoreUsage {
 impl SessionStoreUsage {
     fn from_store(
         usage: StoreUsage,
-        file: Option<SqliteFileUsage>,
-        feed: Option<SqliteFeedUsage>,
+        sessions: (u64, u64),
+        file: SqliteFileUsage,
+        feed: SqliteFeedUsage,
     ) -> Self {
-        let file = file.unwrap_or(SqliteFileUsage {
-            file_bytes: 0,
-            free_bytes: 0,
-        });
-        let feed = feed.unwrap_or(SqliteFeedUsage {
-            records: 0,
-            bytes: 0,
-        });
         Self {
             bounds: SessionStoreBoundUsage::readings(usage),
+            sessions,
             file_bytes: file.file_bytes,
             free_bytes: file.free_bytes,
             feed_records: feed.records,
             feed_bytes: feed.bytes,
         }
+    }
+
+    /// Returns retained sessions and their hard limit. There is no reserve for this bound.
+    #[must_use]
+    pub const fn session_capacity(&self) -> (u64, u64) {
+        self.sessions
     }
 
     /// Returns the change feed's retained records across every session.

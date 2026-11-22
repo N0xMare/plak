@@ -111,9 +111,17 @@ impl TopCommand {
                 provider: parse_oauth_account(&account)?,
                 local_only: local,
             }),
-            Self::Status { account: None } => Ok(Command::StatusAll),
+            Self::Status {
+                account: None,
+                json: true,
+            } => Ok(Command::StatusJson),
+            Self::Status {
+                account: None,
+                json: false,
+            } => Ok(Command::StatusAll),
             Self::Status {
                 account: Some(account),
+                ..
             } => {
                 if crate::product_secrets::is_api_key_account(&account) {
                     Ok(Command::KeyStatus {
@@ -335,6 +343,12 @@ impl TopCommand {
                 action: Some(action),
             } => Ok(action.into_command()),
             Self::Doctor => Ok(Command::Doctor),
+            Self::Store { action: None } => Ok(Command::CommandHelp {
+                command: "store".to_owned(),
+            }),
+            Self::Store {
+                action: Some(super::StoreAction::Backup { directory }),
+            } => Ok(Command::StoreBackup { directory }),
             Self::State { action: None } => Ok(Command::CommandHelp {
                 command: "state".to_owned(),
             }),

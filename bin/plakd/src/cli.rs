@@ -99,7 +99,7 @@ fn command_account(command: Option<&TopCommand>) -> Option<&str> {
         Some(
             TopCommand::Login { account, .. }
             | TopCommand::Logout { account, .. }
-            | TopCommand::Status { account }
+            | TopCommand::Status { account, .. }
             | TopCommand::Refresh { account }
             | TopCommand::Usage { account, .. },
         ) => account.as_deref(),
@@ -218,6 +218,7 @@ fn is_known_command(name: &str) -> bool {
             | "wire"
             | "session"
             | "state"
+            | "store"
             | "tree"
             | "usage"
             | "doctor"
@@ -314,9 +315,12 @@ enum TopCommand {
         #[arg(long, action = ArgAction::SetTrue)]
         local: bool,
     },
-    /// Credential readiness.
+    /// Runtime store headroom and credential readiness.
     Status {
         account: Option<String>,
+        /// Print local runtime store headroom as JSON without contacting the gateway.
+        #[arg(long, conflicts_with = "account")]
+        json: bool,
     },
     /// Refresh OAuth credential.
     Refresh {
@@ -457,6 +461,11 @@ enum TopCommand {
         action: Option<GatewayAction>,
     },
     Doctor,
+    /// Back up the current runtime, product and agent-tree stores.
+    Store {
+        #[command(subcommand)]
+        action: Option<StoreAction>,
+    },
     State {
         #[command(subcommand)]
         action: Option<StateAction>,
@@ -953,6 +962,12 @@ impl TelemetryAction {
             }
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum StoreAction {
+    /// Copy one consistent SQLite snapshot into a new private directory.
+    Backup { directory: std::path::PathBuf },
 }
 
 #[derive(Debug, Subcommand)]

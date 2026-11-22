@@ -29,6 +29,30 @@ use toml_edit::Value;
 
 mod effective;
 
+fn runtime_store_bound(
+    key: &ConfigKey,
+    value: FieldValue<'_>,
+) -> Result<(usize, std::num::NonZeroUsize), String> {
+    let (index, minimum) = match key.field {
+        ConfigField::RuntimeStoreMaxCheckpoints => (0, 16),
+        ConfigField::RuntimeStoreMaxObjects => (1, 16),
+        ConfigField::RuntimeStoreMaxObjectBytes => (2, 16),
+        ConfigField::RuntimeStoreMaxSessions => (3, 1),
+        _ => return Err("not a runtime store bound".to_owned()),
+    };
+    usize::try_from(parse_positive(key.path, value)?)
+        .ok()
+        .filter(|value| *value >= minimum)
+        .and_then(std::num::NonZeroUsize::new)
+        .map(|bound| (index, bound))
+        .ok_or_else(|| {
+            format!(
+                "{} must be at least {minimum} and fit the platform integer range",
+                key.path
+            )
+        })
+}
+
 #[derive(Debug)]
 pub(super) enum ConfigLoadError {
     Io(String),
@@ -245,6 +269,7 @@ pub struct ProductConfig {
     /// `[skills] enabled`: Agent Skills discovery for new sessions.
     pub skills_enabled: bool,
     pub telemetry_max_bytes: u64,
+    pub(crate) runtime_store_bounds: [std::num::NonZeroUsize; 4],
     pub telemetry_max_age_days: u64,
     /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
     /// MCP login may register with; home-scoped.
@@ -383,6 +408,18 @@ impl ProductConfig {
                 self.compaction_enabled = source.compaction_enabled;
             }
             ConfigField::SkillsEnabled => self.skills_enabled = source.skills_enabled,
+            ConfigField::RuntimeStoreMaxCheckpoints => {
+                self.runtime_store_bounds[0] = source.runtime_store_bounds[0];
+            }
+            ConfigField::RuntimeStoreMaxObjects => {
+                self.runtime_store_bounds[1] = source.runtime_store_bounds[1];
+            }
+            ConfigField::RuntimeStoreMaxObjectBytes => {
+                self.runtime_store_bounds[2] = source.runtime_store_bounds[2];
+            }
+            ConfigField::RuntimeStoreMaxSessions => {
+                self.runtime_store_bounds[3] = source.runtime_store_bounds[3];
+            }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = source.telemetry_max_bytes;
             }
@@ -513,6 +550,8 @@ impl ProductConfig {
             compaction_enabled: true,
             skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
+            runtime_store_bounds:
+                plakous::sessions::SessionBackend::default_sqlite_retention_bounds(),
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
             mcp_client_id_metadata_url: None,
             tool_sections: ToolSections::default(),
@@ -823,6 +862,18 @@ impl ProductConfig {
             ConfigField::ReloadRequests => Value::from(self.reload_requests),
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
             ConfigField::SkillsEnabled => Value::from(self.skills_enabled),
+            ConfigField::RuntimeStoreMaxCheckpoints => {
+                Value::from(i64::try_from(self.runtime_store_bounds[0].get()).ok()?)
+            }
+            ConfigField::RuntimeStoreMaxObjects => {
+                Value::from(i64::try_from(self.runtime_store_bounds[1].get()).ok()?)
+            }
+            ConfigField::RuntimeStoreMaxObjectBytes => {
+                Value::from(i64::try_from(self.runtime_store_bounds[2].get()).ok()?)
+            }
+            ConfigField::RuntimeStoreMaxSessions => {
+                Value::from(i64::try_from(self.runtime_store_bounds[3].get()).ok()?)
+            }
             // A TOML integer is an `i64`; the two retention bounds are held as
             // `u64` for the store and can only have come from one.
             ConfigField::TelemetryMaxBytes => {
@@ -1314,6 +1365,13 @@ impl ProductConfig {
             ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
             ConfigField::SkillsEnabled => self.skills_enabled = value.boolean()?,
+            ConfigField::RuntimeStoreMaxCheckpoints
+            | ConfigField::RuntimeStoreMaxObjects
+            | ConfigField::RuntimeStoreMaxObjectBytes
+            | ConfigField::RuntimeStoreMaxSessions => {
+                let (index, bound) = runtime_store_bound(key, value)?;
+                self.runtime_store_bounds[index] = bound;
+            }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = parse_positive(key.path, value)?;
             }

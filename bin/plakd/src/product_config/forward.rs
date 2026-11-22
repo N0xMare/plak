@@ -103,6 +103,9 @@ impl ProductConfig {
         if keys.len() == before && self.forward.sections.contains("gateway") {
             keys.push("[gateway]".to_owned());
         }
+        if self.forward.sections.contains("runtime_store") {
+            keys.push("[runtime_store]".to_owned());
+        }
         keys
     }
 }

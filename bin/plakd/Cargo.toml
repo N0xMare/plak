@@ -44,7 +44,7 @@ plakous = { workspace = true, features = [
     "web-fetch", "xai",
 ] }
 nix = { workspace = true, features = ["signal"] }
-rusqlite = { workspace = true, features = ["hooks"] }
+rusqlite = { workspace = true, features = ["backup", "hooks"] }
 rustix = { workspace = true, features = ["event", "fs", "net", "process", "stdio", "system", "termios", "time"] }
 base64 = { workspace = true }
 url.workspace = true

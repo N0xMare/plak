@@ -28,6 +28,7 @@ impl PartialEq for ProductConfig {
             && self.reload_requests == other.reload_requests
             && self.compaction_enabled == other.compaction_enabled
             && self.skills_enabled == other.skills_enabled
+            && self.runtime_store_bounds == other.runtime_store_bounds
             && self.telemetry_max_bytes == other.telemetry_max_bytes
             && self.telemetry_max_age_days == other.telemetry_max_age_days
             && self.mcp_client_id_metadata_url == other.mcp_client_id_metadata_url

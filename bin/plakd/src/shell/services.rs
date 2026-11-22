@@ -36,6 +36,7 @@ pub(crate) struct Services {
     /// Credential custody, latched by the first resolution and shared by
     /// every clone: a host resolves it at startup and never re-reads it.
     custody: Arc<OnceLock<crate::gateway::HostCustody>>,
+    runtime_store_bounds: Arc<OnceLock<[std::num::NonZeroUsize; 4]>>,
 }
 
 #[derive(Clone)]
@@ -132,6 +133,7 @@ impl Services {
             session_records: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
+            runtime_store_bounds: Arc::default(),
         }
     }
 
@@ -169,6 +171,7 @@ impl Services {
             session_records: OnceLock::new(),
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
+            runtime_store_bounds: Arc::default(),
         }
     }
 
@@ -198,6 +201,7 @@ impl Clone for Services {
             session_records,
             jobs: self.jobs.clone(),
             custody: Arc::clone(&self.custody),
+            runtime_store_bounds: Arc::clone(&self.runtime_store_bounds),
         }
     }
 }
@@ -347,7 +351,8 @@ impl Services {
             self.session_records()?,
             &self.jobs,
             &self.custody()?,
-        )?;
+        )?
+        .with_runtime_store_bounds(self.runtime_store_bounds()?);
         let roots = match &*self
             .local_daemon
             .read()
@@ -380,8 +385,23 @@ impl Services {
         if let Some(custody) = self.custody.get() {
             return Ok(custody.clone());
         }
-        let resolved = crate::gateway::HostCustody::resolve(self.paths()?)?;
+        let home = self.paths()?;
+        let config = crate::product_config::ProductConfig::load_home_file(home)
+            .map_err(crate::CliFailure::new)?;
+        let resolved = crate::gateway::HostCustody::from_config(home, &config)?;
+        self.runtime_store_bounds
+            .get_or_init(|| config.runtime_store_bounds);
         Ok(self.custody.get_or_init(|| resolved).clone())
+    }
+
+    pub(crate) fn runtime_store_bounds(&self) -> CliResult<[std::num::NonZeroUsize; 4]> {
+        if let Some(bounds) = self.runtime_store_bounds.get() {
+            return Ok(*bounds);
+        }
+        let bounds = crate::product_config::ProductConfig::load_home_file(self.paths()?)
+            .map_err(crate::CliFailure::new)?
+            .runtime_store_bounds;
+        Ok(*self.runtime_store_bounds.get_or_init(|| bounds))
     }
 
     /// The process's one job bound.

@@ -391,7 +391,7 @@ impl ProductStore {
         Ok(connection)
     }
 
-    fn admit_read_only(snapshot: &Connection) -> Result<(), ProductStoreOpenError> {
+    pub(crate) fn admit_read_only(snapshot: &Connection) -> Result<(), ProductStoreOpenError> {
         schema::schema()
             .require_current(snapshot)
             .map_err(Into::into)

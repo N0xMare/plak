@@ -2066,6 +2066,8 @@ client or official native host binary is part of this execution path.
   epoch, canonical codecs and session export version are unchanged.
   The store's SQLite feature declares the exact sys pin too, so fresh consumer
   resolutions retain the engine admitted by its exact runtime source-ID check.
+  The product alone declares `rusqlite/backup` for the online three-store
+  snapshot command (spec 02 §2.5); this enables no new dependency package.
   Rusqlite's PRAGMA helpers validate names through `pragma_list` before
   execution; admission's statement budget includes that fixed overhead and
   remains independent of retained-history size.

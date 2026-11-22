@@ -18,8 +18,8 @@ mod sqlite;
 pub use sqlite::{
     BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS, BUNDLED_SQLITE_SOURCE_ID, BUNDLED_SQLITE_VERSION,
     BranchHolder, SQLITE_SCHEMA_VERSION, SqliteFeedUsage, SqliteFileUsage, SqlitePersistenceShape,
-    SqliteSessionRetention, SqliteSessionStore, SqliteStoreOptions, SqliteStoreStats,
-    branch_holder,
+    SqliteRetentionUsage, SqliteSessionRetention, SqliteSessionStore, SqliteStoreOptions,
+    SqliteStoreStats, branch_holder,
 };
 #[cfg(feature = "test-support")]
 #[doc(hidden)]

@@ -126,9 +126,9 @@ plakd: unknown command; run `plakd help` for the command list
 
 Table-shaped commands (`status`, `doctor`, `session list`, `key status`) render
 column-aligned to a terminal and tab-delimited to a pipe, so
-`plakd status | cut -f4` is stable. There is no `--json` on those commands;
-`plakd session log --json` and `plakd telemetry sql --json` are the two with an
-explicit JSON mode.
+`plakd status | cut -f4` is stable. Bare `plakd status` prints headroom
+for an existing runtime store on stderr. Use `plakd status --json` to read counters and
+thresholds on stdout without contacting the credential gateway.
 
 `plakd agent` writes machine-only JSONL on stdout; its diagnostics go to stderr.
 Send `{"v":1,"kind":"background","id":"b1"}` to background foreground commands

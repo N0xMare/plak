@@ -161,8 +161,13 @@ impl HostCustody {
     /// Reads `[gateway]` from `home`'s `config.toml`. A config that does not
     /// load, an address that does not parse and a key file that is unsafe
     /// are errors.
+    #[cfg(test)]
     pub(crate) fn resolve(home: &PlakPaths) -> crate::CliResult<Self> {
-        let admin = configured_link(home, &ProductConfig::load_home_file(home)?)?;
+        Self::from_config(home, &ProductConfig::load_home_file(home)?)
+    }
+
+    pub(crate) fn from_config(home: &PlakPaths, config: &ProductConfig) -> crate::CliResult<Self> {
+        let admin = configured_link(home, config)?;
         Self::from_admin(admin)
     }
 

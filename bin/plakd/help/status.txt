@@ -1,7 +1,11 @@
-plakd status — credential readiness
+plakd status — credential readiness and runtime store headroom
 
 USAGE:
   plakd status [codex|grok|claude|openai|xai-api|anthropic|openrouter]
+  plakd status --json
+
+  Bare status reports an existing runtime store's headroom and feed totals on stderr.
+  --json prints just the local store report and does not contact the gateway.
 
   The SuperGrok subscription account answers to `grok` and `supergrok`.
   Bare `xai` is ambiguous and refused; use grok or xai-api.

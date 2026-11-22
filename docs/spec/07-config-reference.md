@@ -278,10 +278,10 @@ remain unchanged. Only explicit configuration actions (including Settings and
 profile application) publish configuration changes; an incomplete bind cannot
 silently clear `[root] agent`.
 
-Thirteen key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [compaction] [skills] [telemetry] [mcp] [host] [web]`, plus
+Fourteen key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [compaction] [runtime_store] [skills] [telemetry] [mcp] [host] [web] [gateway]`, plus
 three families of named tables, `[tools.<name>]` (§3.4), `[mcp_servers.<id>]`
-(§3.5) and `[runners.<name>]` (§3.6), sixteen in all. Any other section is an error.
+(§3.5) and `[runners.<name>]` (§3.6), seventeen in all. Any other section is an error.
 The families are not `plakd config set` keys: they are authored in the file, a
 save leaves them exactly as written, and `plakd config show` prints the
 canonical rendering of the tool and server tables after the keys.
@@ -305,6 +305,13 @@ home file or a trusted project file carries, and a `[host]`, `[runners]` or
 resume_after_loss`, `[runners.<name>]` and `[web]` are home-scoped: a project
 file that sets them is loaded with a warning and its values are ignored, so a
 repository can never grant web access.
+
+`[runtime_store]` is home-scoped and applies to the current runtime database.
+A trusted project may not change it. The serving host captures the caps when
+it opens the home; restart it after editing them. Standalone commands,
+including `status` and `doctor`, read the home file for the current invocation
+and therefore show the new policy even before that restart. These limits
+count retained objects, not physical space, and changing them does not prune.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
@@ -331,6 +338,10 @@ repository can never grant web access.
 | `host.reload_requests` | bool | `false` | true or false; home-scoped | Permit this user's own processes to request a hosted-session reload (plakd session reload <session> --expect-binary <id>). The serving host records the outcome and names the explicit host upgrade workflow; replacing a client does not upgrade its sessions. |
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `skills.enabled` | bool | `true` | true or false | Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off. |
+| `runtime_store.max_sessions` | integer | `1024` | greater than 0, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store session cap; includes children and archived sessions. Serving hosts read these limits at startup. |
+| `runtime_store.max_checkpoints` | integer | `524288` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; checkpoints, not disk usage. Serving hosts read these limits at startup. |
+| `runtime_store.max_objects` | integer | `4194304` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup. |
+| `runtime_store.max_object_bytes` | integer | `4294967296` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plakd mcp login`. |
@@ -577,6 +588,10 @@ them on each command. Compaction is captured in `HostConfig` by
 | `jobs.max_runtime_hours` | `new_session` | Stored construction/rebind budgets. |
 | `api.full_window` | `new_session` | Stored construction/rebind window. |
 | `compaction.enabled` | `next_attach` | Attachment's captured HostConfig. |
+| `runtime_store.max_sessions` | `host_restart` | Hard session count cap, without a reserve; CLI applies it on its next invocation. |
+| `runtime_store.max_checkpoints` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
+| `runtime_store.max_objects` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
+| `runtime_store.max_object_bytes` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `skills.enabled` | `new_session` | Stored construction/rebind tools. |
 | `telemetry.max_bytes` | `host_restart` | Per-home writer start; CLI per command. |
 | `telemetry.max_age_days` | `host_restart` | Per-home writer start; CLI per command. |

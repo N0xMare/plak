@@ -68,9 +68,11 @@ mod notice_text;
 mod operator_process;
 mod refusal_text;
 mod review_expiry;
+mod runtime_headroom;
 mod session_attention;
 mod shipping_artifact;
 mod snapshot_install;
+mod store_backup;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
@@ -706,6 +708,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             &mut stdout,
         ),
         Command::Doctor => run_doctor(&services, &mut stdout),
+        Command::StatusJson => runtime_headroom::write_status(services.paths()?, &mut stdout, true),
+        Command::StoreBackup { directory } => {
+            store_backup::run(services.paths()?, &directory, &mut stdout)
+        }
         Command::TreeRelease { tree_id, force } => {
             if !force {
                 return Err(CliFailure::classified(
@@ -1246,6 +1252,8 @@ fn execute_command<Backend: AccountOps>(
         | Command::CarryProbe { .. }
         | Command::ExportVersion
         | Command::Doctor
+        | Command::StatusJson
+        | Command::StoreBackup { .. }
         | Command::Gateway(_)
         | Command::TelemetryStatus { .. }
         | Command::TelemetrySql { .. }

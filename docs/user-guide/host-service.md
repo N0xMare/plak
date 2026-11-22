@@ -210,6 +210,51 @@ its pre-upgrade copy under the original name, and run the older build. This
 loses writes made since the copies; it does not undo writes to other stores.
 Use a coordinated backup if later work changed more than the restored stores.
 
+### Back up the live stores
+
+`plakd status --json` reports retained sessions, checkpoints, objects and accounted
+object bytes against their limits, plus the feed row and byte totals.
+`plakd doctor` also reports headroom. Neither the object byte limit nor the
+feed totals are a disk space budget. Set `[runtime_store]` in the home config
+only if you need different caps, then restart the serving host.
+
+`plakd store backup <dir>` saves the runtime, product and agent-tree SQLite
+stores at a shared point in time. It does not stop the host, but can fail if
+writes prevent a stable snapshot; retry later. Choose a new directory under
+a private parent outside `PLAK_HOME`, preferably on separate storage, with
+room for the full databases. The command prints the same SHA-256 manifest it
+saves with the files. Keep backups private: they contain session data. This
+does not copy logs, job output, runner-local state, telemetry or credentials.
+
+For a nightly Linux user timer, prepare a private parent, for example
+`install -d -m 700 "$HOME/plak-store-backups"`. Adapt the absolute executable
+and any `PLAK_HOME` setting to match the serving host. Use a
+`plakd-store-backup.service` with:
+
+```ini
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/sh -c 'exec "%h/.local/bin/plakd" store backup "%h/plak-store-backups/$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
+```
+
+Pair it with `plakd-store-backup.timer`:
+
+```ini
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Review failures in the user journal and set a retention policy for the
+backup directories. For a restore, first verify all checksums, stop the host
+and other store users, save the current files and their WAL/SHM files aside,
+and restore all three files together under the matching state key and build.
+Do not restore over a live store.
+
 Its exact-reopen check accepts terminal job history on paired runners without
 reading or watching jobs over the qualification connection or taking custody.
 Live jobs across a changed runner triple still refuse with

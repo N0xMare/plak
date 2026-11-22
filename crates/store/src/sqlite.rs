@@ -232,6 +232,19 @@ pub struct SqliteFeedUsage {
     pub bytes: u64,
 }
 
+/// Read-only capacity, physical-space, and feed observations at one cut.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SqliteRetentionUsage {
+    /// Aggregate bounds with reserved admission capacity.
+    pub aggregate: StoreUsage,
+    /// Retained sessions; admission has no reserved slots for session count.
+    pub sessions: u64,
+    /// Main file and freelist size.
+    pub file: SqliteFileUsage,
+    /// Retained feed totals, not subject to a whole-store bound.
+    pub feed: SqliteFeedUsage,
+}
+
 /// One successful commit observed by an explicitly instrumented store.
 ///
 /// This is benchmark/test evidence, not semantic or recovery authority.
@@ -506,6 +519,31 @@ impl SqliteSessionStore {
         // One store_meta row read: no count validation or object scan, so the
         // doctor stays O(1) in retained history.
         usage(&connection, SqliteStoreOptions::default().limits).map(Some)
+    }
+
+    /// Reads recorded capacity, file and feed counters in one read-only snapshot.
+    ///
+    /// # Errors
+    /// Returns the same read-only refusals as [`Self::inspect_usage`].
+    pub fn inspect_retention_usage(
+        path: impl AsRef<Path>,
+        limits: MemoryStoreLimits,
+    ) -> Result<Option<SqliteRetentionUsage>, SessionStoreError> {
+        let Some(connection) = Self::open_inspection(path.as_ref())? else {
+            return Ok(None);
+        };
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        if classify_connection(&snapshot)? != SqlitePersistenceShape::Current {
+            return Ok(None);
+        }
+        let stats = read_stats(&snapshot)?;
+        let (records, bytes) = feed::totals(&snapshot)?;
+        Ok(Some(SqliteRetentionUsage {
+            aggregate: usage_from_stats(&stats, limits),
+            sessions: stats.sessions(),
+            file: file_usage(&snapshot)?,
+            feed: SqliteFeedUsage { records, bytes },
+        }))
     }
 
     /// Reads the database file's size and free pages without opening a

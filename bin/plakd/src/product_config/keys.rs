@@ -161,6 +161,10 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
     ),
     ("compaction", "Automatic transcript compaction."),
     (
+        "runtime_store",
+        "Home-wide runtime retention bounds; read at host startup.",
+    ),
+    (
         "skills",
         "Agent Skills under .agents/skills and ~/.agents/skills.",
     ),
@@ -189,7 +193,7 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
 /// Sections an earlier build refuses as unknown. A render writes one live
 /// only when one of its keys is set, so a file `plakd` writes stays loadable
 /// by those builds until the operator opts in.
-pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host", "web", "gateway"];
+pub(crate) const FORWARD_ONLY_SECTIONS: &[&str] = &["host", "web", "gateway", "runtime_store"];
 
 /// One documented `config.toml` key.
 ///
@@ -282,6 +286,14 @@ pub enum ConfigField {
     SkillsEnabled,
     /// `[telemetry] max_bytes`.
     TelemetryMaxBytes,
+    /// `[runtime_store] max_checkpoints`.
+    RuntimeStoreMaxCheckpoints,
+    /// `[runtime_store] max_objects`.
+    RuntimeStoreMaxObjects,
+    /// `[runtime_store] max_object_bytes`.
+    RuntimeStoreMaxObjectBytes,
+    /// `[runtime_store] max_sessions`.
+    RuntimeStoreMaxSessions,
     /// `[telemetry] max_age_days`.
     TelemetryMaxAgeDays,
     /// `[mcp] client_id_metadata_url`.
@@ -335,6 +347,10 @@ impl ConfigField {
                 | Self::GatewayAddress
                 | Self::GatewayKeyFile
                 | Self::GatewayAllowNonTailnet
+                | Self::RuntimeStoreMaxCheckpoints
+                | Self::RuntimeStoreMaxObjects
+                | Self::RuntimeStoreMaxObjectBytes
+                | Self::RuntimeStoreMaxSessions
         )
     }
 
@@ -357,6 +373,10 @@ impl ConfigField {
                     | Self::GatewayAddress
                     | Self::GatewayKeyFile
                     | Self::GatewayAllowNonTailnet
+                    | Self::RuntimeStoreMaxCheckpoints
+                    | Self::RuntimeStoreMaxObjects
+                    | Self::RuntimeStoreMaxObjectBytes
+                    | Self::RuntimeStoreMaxSessions
             )
     }
 }
@@ -615,6 +635,42 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "true or false",
         doc: "Discover Agent Skills (<workspace>/.agents/skills, then ~/.agents/skills; both on the selected runner for a remote session, using that runner process's home, never the host's) when a session is constructed, list them in its instructions, let its read tool read files under that user skill root on the same machine, and give Claude-vocabulary sessions the Skill tool. Bound when a new session or spawn is constructed; exact reopen keeps the listing and tools it froze, and a fork, rebind or switch keeps the source session's on or off.",
         example: "true",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.max_sessions",
+        field: ConfigField::RuntimeStoreMaxSessions,
+        kind: "integer",
+        constraint: "greater than 0, representable by the SQLite and platform integer ranges; home-scoped",
+        doc: "Whole runtime-store session cap; includes children and archived sessions. Serving hosts read these limits at startup.",
+        example: "1024",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.max_checkpoints",
+        field: ConfigField::RuntimeStoreMaxCheckpoints,
+        kind: "integer",
+        constraint: "at least 16, representable by the SQLite and platform integer ranges; home-scoped",
+        doc: "Whole runtime-store cap; checkpoints, not disk usage. Serving hosts read these limits at startup.",
+        example: "524288",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.max_objects",
+        field: ConfigField::RuntimeStoreMaxObjects,
+        kind: "integer",
+        constraint: "at least 16, representable by the SQLite and platform integer ranges; home-scoped",
+        doc: "Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup.",
+        example: "4194304",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.max_object_bytes",
+        field: ConfigField::RuntimeStoreMaxObjectBytes,
+        kind: "integer",
+        constraint: "at least 16, representable by the SQLite and platform integer ranges; home-scoped",
+        doc: "Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup.",
+        example: "4294967296",
         scope: ConfigScope::Immediate,
     },
     ConfigKey {

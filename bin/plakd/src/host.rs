@@ -190,6 +190,10 @@ fn serve_host(
         StartupInventory::Known(opened.product.owed()?)
     };
     announce_host(&listeners.control, &environment, paths, &custody);
+    let _store_monitor = runtime.spawn(crate::runtime_headroom::watch(
+        paths.clone(),
+        services.runtime_store_bounds()?,
+    ));
     let owner = RunningHost {
         listeners,
         ownership,

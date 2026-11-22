@@ -536,7 +536,14 @@ pub fn inspect_runtime_database(path: &Path) -> DatabaseStatus {
 pub fn inspect_runtime_store(path: &Path) -> RuntimeStoreStatus {
     use plakous::sessions::SessionBackend;
 
-    match SessionBackend::inspect_sqlite_usage(path) {
+    inspect_runtime_store_with_bounds(path, SessionBackend::default_sqlite_retention_bounds())
+}
+
+pub(crate) fn inspect_runtime_store_with_bounds(
+    path: &Path,
+    bounds: [std::num::NonZeroUsize; 4],
+) -> RuntimeStoreStatus {
+    match plakous::sessions::SessionBackend::inspect_sqlite_usage_with_bounds(path, bounds) {
         Ok(Some(usage)) => RuntimeStoreStatus::Usage(usage),
         Ok(None) => RuntimeStoreStatus::Missing,
         Err(error) => RuntimeStoreStatus::Unavailable(error.to_string()),
@@ -575,27 +582,30 @@ fn runtime_store_check(
         RuntimeStoreStatus::Usage(usage) => usage,
     };
     let bounds = usage.bounds();
+    let (sessions, session_limit) = usage.session_capacity();
     let percent = StorePressure::fill_percent(
         bounds
             .iter()
-            .map(|bound| (bound.used(), bound.ordinary_threshold())),
+            .map(|bound| (bound.used(), bound.ordinary_threshold()))
+            .chain([(sessions, session_limit)]),
     );
     let detail = bounds
         .iter()
         .map(|bound| {
             format!(
-                "{} {}/{} (new work stops at {}, child agents' at {})",
+                "{} {}/{} (new work stops at {}, child agents' at {}, settlement at {})",
                 bound.bound(),
                 bound.used(),
                 bound.limit(),
                 bound.ordinary_threshold(),
-                bound.subordinate_threshold()
+                bound.subordinate_threshold(),
+                bound.settlement_threshold()
             )
         })
         .collect::<Vec<_>>()
         .join(", ");
     let detail = format!(
-        "{}: {percent}% of where new work stops; {detail}; file {} bytes, {} free; feed {} rows, {} bytes",
+        "{}: {percent}% of where new work stops; sessions {sessions}/{session_limit} (no reserve); {detail}; file {} bytes, {} free; feed {} rows, {} bytes",
         path.display(),
         usage.file_bytes(),
         usage.free_bytes(),
@@ -612,6 +622,7 @@ fn runtime_store_check(
     let pressure = bounds
         .iter()
         .map(|bound| StorePressure::of(bound.used(), bound.ordinary_threshold()))
+        .chain([StorePressure::of(sessions, session_limit)])
         .max()
         .unwrap_or(StorePressure::Available);
     match pressure {

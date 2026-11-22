@@ -44,7 +44,12 @@ pub(crate) fn run_doctor(
         plakous_recursive_subagents_store::SCHEMA_VERSION,
     );
     let runtime_database = product_doctor::inspect_runtime_database(&paths.runtime_database());
-    let runtime_store = product_doctor::inspect_runtime_store(&paths.runtime_database());
+    let runtime_store = match services.runtime_store_bounds() {
+        Ok(bounds) => {
+            product_doctor::inspect_runtime_store_with_bounds(&paths.runtime_database(), bounds)
+        }
+        Err(error) => product_doctor::RuntimeStoreStatus::Unavailable(error.to_string()),
+    };
     let selected_composition = platform_catalog::root_composition(&selected);
     let telemetry = telemetry_sink::inspect_product_telemetry(paths);
     let local_composition_required = selected_composition.requires_python_worker()

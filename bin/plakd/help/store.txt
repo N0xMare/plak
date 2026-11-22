@@ -1,0 +1,9 @@
+plakd store — backup of the current SQLite stores
+
+USAGE:
+  plakd store backup <directory>
+
+Copy the runtime, product and agent-tree databases at a shared point in time.
+Use a new directory outside PLAK_HOME under a parent you own. The private
+backup directory contains the SQLite files and a SHA-256 manifest.
+The live host can keep serving during the copy.

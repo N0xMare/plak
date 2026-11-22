@@ -176,6 +176,7 @@ pub struct ProductStateRoots {
     /// explicit root, never derived from `product`: the hosting boundary
     /// names where the semantic store lives.
     runtime_database: PathBuf,
+    runtime_store_bounds: [std::num::NonZeroUsize; 4],
     /// The XDG state root the product bound, kept beside the layout root the
     /// paths below name: `SubscriptionPaths` derives the whole Plak layout
     /// from this one directory, so a hosted caller that needs the native
@@ -304,6 +305,7 @@ impl ProductStateRoots {
             session_records,
             product: std::fs::canonicalize(&product).unwrap_or(product),
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
+            runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
@@ -873,6 +875,13 @@ impl ProductStateRoots {
         self.exchange_observer.clone()
     }
 
+    /// Selects home-wide runtime retention bounds before opening the runtime.
+    #[must_use]
+    pub fn with_runtime_store_bounds(mut self, bounds: [std::num::NonZeroUsize; 4]) -> Self {
+        self.runtime_store_bounds = bounds;
+        self
+    }
+
     /// The runtime database every session of this home shares.
     pub(crate) fn runtime_database(&self) -> &std::path::Path {
         &self.runtime_database
@@ -1019,14 +1028,18 @@ impl ProductStateRoots {
                     .as_ref()
                     .is_some_and(|store| store.storage_unavailable())
         });
-        let backend = SessionBackend::sqlite_with_storage_probe(&self.runtime_database, probe)
-            .map_err(|error| {
-                let raw = format!("plak runtime database could not be opened: {error}");
-                CliFailure::new(
-                    crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
-                )
-                .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
-            })?;
+        let backend = SessionBackend::sqlite_with_bounds_and_storage_probe(
+            &self.runtime_database,
+            self.runtime_store_bounds,
+            probe,
+        )
+        .map_err(|error| {
+            let raw = format!("plak runtime database could not be opened: {error}");
+            CliFailure::new(
+                crate::storage_pressure::sessions_storage_pressure(&error, &raw).unwrap_or(raw),
+            )
+            .with_optional_remedy(crate::storage_pressure::sessions_remedy(&error).as_ref())
+        })?;
         let sessions = Arc::new(AgentSessions::new(backend).map_err(|_| {
             CliFailure::new("plak durable session runtime could not be initialized")
         })?);
@@ -1181,6 +1194,7 @@ impl ProductStateRoots {
             session_records: Arc::new(crate::session_store::MemoryStore::new()),
             subscriptions: state_home.join("plak/subscriptions"),
             runtime_database: product.join("runtime.sqlite3"),
+            runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
             product,
             state_home,
             local_daemon: None,

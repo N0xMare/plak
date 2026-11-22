@@ -910,6 +910,15 @@ fn product_command_argv_matrix() {
         (&["--version"], |c| matches!(c, Command::Version)),
         (&["-h"], |c| matches!(c, Command::Help)),
         (&["doctor"], |c| matches!(c, Command::Doctor)),
+        (&["status", "--json"], |c| matches!(c, Command::StatusJson)),
+        (&["store", "backup", "./backup"], |c| {
+            matches!(c, Command::StoreBackup { directory }
+            if directory == std::path::Path::new("./backup"))
+        }),
+        (&["store", "backup", "--help"], |c| {
+            matches!(c, Command::CommandHelp { command }
+            if command == "store")
+        }),
         (&["state", "prune-legacy"], |c| {
             matches!(
                 c,

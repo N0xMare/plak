@@ -40,6 +40,11 @@ pub(crate) fn try_remote_account(
         return Ok(None);
     }
     if matches!(command, Command::StatusAll) {
+        if let Err(error) = crate::runtime_headroom::write_status(services.paths()?, stderr, false)
+        {
+            writeln!(stderr, "Runtime store headroom unavailable: {error}")
+                .map_err(|_| CliFailure::new("stderr failed"))?;
+        }
         crate::session_attention::write_status(services.paths()?, stdout)
             .map_err(|_| CliFailure::new("stdout failed"))?;
     }

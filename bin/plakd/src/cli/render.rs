@@ -50,6 +50,7 @@ const COMMAND_PAGES: &[(&str, &str)] = &[
     ("telemetry", include_str!("../../help/telemetry.txt")),
     ("session", include_str!("../../help/session.txt")),
     ("state", include_str!("../../help/state.txt")),
+    ("store", include_str!("../../help/store.txt")),
     ("tree", include_str!("../../help/tree.txt")),
     #[cfg(feature = "maintainer")]
     (

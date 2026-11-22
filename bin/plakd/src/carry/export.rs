@@ -102,9 +102,16 @@ fn export_after_projection(
         std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
             paths.clone(),
         ));
-    let sessions = plakous::sessions::SessionBackend::sqlite(paths.runtime_database())
-        .and_then(AgentSessions::new)
-        .map_err(|error| runtime(error.to_string()))?;
+    let bounds = crate::product_config::ProductConfig::load_home_file(paths)
+        .map_err(runtime)?
+        .runtime_store_bounds;
+    let sessions = plakous::sessions::SessionBackend::sqlite_with_bounds_and_storage_probe(
+        paths.runtime_database(),
+        bounds,
+        std::sync::Arc::new(|_| false),
+    )
+    .and_then(AgentSessions::new)
+    .map_err(|error| runtime(error.to_string()))?;
     let executor = plakous::application::ApplicationExecutor::new()
         .map_err(|_| runtime("application executor unavailable".to_owned()))?;
     let projected = executor

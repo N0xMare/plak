@@ -1879,9 +1879,14 @@ they are not the database/WAL file size. Memory-backend defaults remain 1 GiB,
 1,048,576 objects, and 131,072 checkpoints. Both retain the same session,
 branch, page, and other bounds. The separate per-checkpoint graph bounds are
 unchanged. Explicit `SqliteStoreOptions` override aggregate defaults.
+The product sets these same three caps for a home with `[runtime_store]`
+(spec 07), as well as the separate **1,024-session** default hard limit.
+Session count has no reserve. Changing these settings changes neither the
+persisted accounting nor per-session or per-checkpoint bounds. Writable open still validates the stored counts.
 Increasing aggregate retention requires no format change and permits exact
 recovery to publish within the enlarged budget, without replaying model calls
-or tools.
+or tools. Reducing a cap does not remove history; existing usage can be above
+a new threshold, at which point that admission class refuses further growth.
 
 The admission reserve is logical only: it reserves configured retention
 headroom, not physical disk blocks. `SQLITE_FULL` and directly observed filesystem `ENOSPC` and `EDQUOT` are

@@ -932,7 +932,8 @@ pub(crate) fn gc_sessions(
     tally.reclaimed.bytes = tally.reclaimed.bytes.saturating_add(report.object_bytes());
     write_gc_tally(stdout, &tally).map_err(|_| CliFailure::new("stdout failed"))?;
     let names = product.session_locators().map_err(CliFailure::new)?;
-    write_store_report(stdout, paths, &names).map_err(|_| CliFailure::new("stdout failed"))
+    write_store_report(stdout, paths, &names, services.runtime_store_bounds()?)
+        .map_err(|_| CliFailure::new("stdout failed"))
 }
 
 /// The bound nearest where new work stops, relative to that stop: the one
@@ -962,9 +963,10 @@ fn write_store_report(
     stdout: &mut dyn io::Write,
     paths: &crate::home::paths::PlakPaths,
     names: &[(String, Option<SessionLocator>)],
+    bounds: [std::num::NonZeroUsize; 4],
 ) -> io::Result<()> {
     let store = paths.runtime_database();
-    match plakous::sessions::SessionBackend::inspect_sqlite_usage(&store) {
+    match plakous::sessions::SessionBackend::inspect_sqlite_usage_with_bounds(&store, bounds) {
         Ok(Some(usage)) => {
             let binding = binding_bound(usage.bounds());
             writeln!(

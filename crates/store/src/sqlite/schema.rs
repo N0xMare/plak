@@ -687,11 +687,15 @@ pub(super) fn usage(
     limits: MemoryStoreLimits,
 ) -> Result<StoreUsage, SessionStoreError> {
     let stats = read_stats(c)?;
-    Ok(StoreUsage::new(
+    Ok(usage_from_stats(&stats, limits))
+}
+
+pub(super) fn usage_from_stats(stats: &SqliteStoreStats, limits: MemoryStoreLimits) -> StoreUsage {
+    StoreUsage::new(
         (stats.checkpoints, u64n(limits.max_checkpoints().get())),
         (stats.objects, u64n(limits.max_objects().get())),
         (stats.object_bytes, u64n(limits.max_object_bytes().get())),
-    ))
+    )
 }
 
 /// Allocated database bytes and reusable free-list bytes.

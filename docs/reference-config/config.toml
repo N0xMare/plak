@@ -110,6 +110,25 @@ full_window = false
 # type: bool · default: true
 enabled = true
 
+# Home-wide runtime retention bounds; read at host startup.
+[runtime_store]
+
+# Whole runtime-store session cap; includes children and archived sessions. Serving hosts read these limits at startup.
+# type: integer · default: 1024 · greater than 0, representable by the SQLite and platform integer ranges; home-scoped
+max_sessions = 1024
+
+# Whole runtime-store cap; checkpoints, not disk usage. Serving hosts read these limits at startup.
+# type: integer · default: 524288 · at least 16, representable by the SQLite and platform integer ranges; home-scoped
+max_checkpoints = 524288
+
+# Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup.
+# type: integer · default: 4194304 · at least 16, representable by the SQLite and platform integer ranges; home-scoped
+max_objects = 4194304
+
+# Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup.
+# type: integer · default: 4294967296 · at least 16, representable by the SQLite and platform integer ranges; home-scoped
+max_object_bytes = 4294967296
+
 # Agent Skills under .agents/skills and ~/.agents/skills.
 [skills]
 

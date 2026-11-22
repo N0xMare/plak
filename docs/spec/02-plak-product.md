@@ -1059,6 +1059,36 @@ recovery authority.
 
 ### 2.5 Versioned state
 
+The aggregate bounds in spec 01 are operator-visible. Bare `status` reports
+headroom for an existing store on stderr without changing the credential table; `status
+--json` prints just the local store report and does not contact the gateway.
+`doctor` reports the same bounds for an existing store. Read-only probes use
+the runtime's recorded usage and feed totals without validating counts by
+scanning retained rows. The serving host samples once a minute and logs WARN
+when the fullest bound is at least 50% or 75% of the cap, no more than once
+per threshold per hour per host process. These percentages are of the cap,
+not of the ordinary admission threshold.
+
+`plakd store backup <dir>` makes a coordinated online backup of the current
+runtime, product and agent-tree SQLite stores. It opens each source read-only,
+has independent observers bracket snapshot acquisition, and retries or
+refuses if any source changed during acquisition. A successful acquisition
+pins the three WAL snapshots at a common instant; the SQLite backup API
+copies them without blocking ordinary writers or holding a write lock on
+the source. Readers can temporarily delay WAL reclamation. The copy has one
+shared time budget, and releases the source snapshots before validation,
+hashing or publication. A common instant can include durable intermediate
+states; it does not bypass normal recovery. Logs, job files, runner-local
+state, telemetry, and credentials are not part of this backup.
+
+The command stages private files outside the home, verifies current schemas,
+syncs the self-contained files and the directory, then publishes the new
+directory with a no-replace rename. An existing directory or a destination
+inside the home or source store directories, including symlink aliases, is
+refused. The printed JSON manifest is also saved as `manifest.json` and names
+the state key, file sizes and SHA-256 checksums. Restore only offline using a
+matching build and all three files as a set, without their old WAL/SHM files.
+
 Each build keeps its state in `~/.plak/state/<key>/`, where the key is
 `r<runtime schema>.e<runtime format epoch>.p<product generation>.t<tree
 generation>`, for example `r28.e39.p39.t11`. The key is derived from those
@@ -2787,7 +2817,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `accounts list`, `accounts rm <vertical>/<name> [--yes]` | Inspect or remove local named account selections without implicit remote logout. |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
 | `logout [<account>] [--local]` | revokes a usable credential, retires an unusable one locally; `--local` never contacts the provider |
-| `status [<account>]` | credential readiness; bare form reports every vertical; compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6) |
+| `status [<account>]`, `status --json` | credential readiness; bare form reports every vertical and store headroom; JSON prints only local store headroom (§2.5) |
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
@@ -2796,6 +2826,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `agent [--account\|--provider <id>] [--account <kind>=<ref>]... [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>]` | the long-lived JSONL host client |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
 | `doctor` | local health diagnosis and compiled review warnings within 14 days of a subscription expiry or an API review-due date (§8.6); no arguments and no flags; reports the gateway or its refusal |
+| `store backup <dir>` | online read-only snapshot of the three current stores and a SHA-256 manifest (§2.5) |
 | `gateway init [--tcp <ip:port>]` | writes `<home>/gateway.toml` and creates `<home>/gateway/`; does not open the credential store. The file names no key directory |
 | `gateway serve` | foreground service; exclusive holder lock, then listeners |
 | `gateway install [--dry-run]`, `gateway uninstall` | user service definition; install also seeds an absent dedicated command link; does not start or stop the service |

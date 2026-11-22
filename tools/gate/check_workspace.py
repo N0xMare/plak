@@ -532,7 +532,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plakd/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plakd", "src/cli/render.rs"): ("include_str",) * 29,
+    ("plakd", "src/cli/render.rs"): ("include_str",) * 30,
     # The source revision the build recipe states, half of the version
     # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
     ("plakd", "src/build_identity.rs"): ("option_env",),
