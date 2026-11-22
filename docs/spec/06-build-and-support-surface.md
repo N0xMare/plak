@@ -1845,6 +1845,20 @@ intent relies on its passed baseline and does not re-check receipt expiry.
 A rehearsal of different bytes, including a fresh rebuild with different
 digests, is not promotion evidence.
 
+A successful reverse same-key handoff does not prove that the prior snapshot
+can reopen existing roots. A changed runner triple can leave a durable
+retention-only fence in the original native runner namespace; a downgrade to
+an image using that namespace cannot run the affected roots, even after their
+jobs finish. This includes the return from exact-triple home-local runner
+directories to the earlier protocol-keyed layout (chapter 02 §4.6). To
+qualify a transition as reversible, reopen and run a pre-existing root that
+ran on the new build, on each affected placement; a preserved PID, intact
+history and fresh-root canaries are not sufficient. Keep the compatible
+exact-triple snapshot and sidecars. If a return strands a fenced root,
+re-upgrade on the same intact home with the matching runner links. This
+does not discard committed state; do not restore older runner files to
+make the reverse appear to work.
+
 Publication retries only Cargo HTTP 429 failures: at most five attempts per
 crate, honoring a numeric or HTTP-date Retry-After, or Cargo's crates.io body
 deadline (`Please try again after <HTTP-date>`), when reported. Honored delays
@@ -2280,9 +2294,10 @@ An urgent hotfix may enter production before its strict crash sweep finishes
 when it changes no persisted or wire format, store write path, recovery or
 host upgrade code. Every other part of the batch gate and the install tier
 must already have passed on the exact tree. The sweep then runs on that tree.
-If it fails, production returns to the previous snapshot through a same-key
-upgrade, and the fix does not re-enter production until a corrected tree
-passes the complete gate.
+This exception requires a supported return to the previous snapshot,
+including native authority for the existing roots. If the sweep fails,
+production returns to that snapshot through a same-key upgrade, and the fix
+does not re-enter production until a corrected tree passes the complete gate.
 
 A prior tree's install evidence is not evidence for a changed tree. A
 dedicated detached Mac gate checkout with its own stable target directory

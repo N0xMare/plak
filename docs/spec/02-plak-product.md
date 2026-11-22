@@ -5917,6 +5917,22 @@ previous retention versions are not supported with live jobs: settle them
 using a compatible build or upgrade through compatible intermediate builds
 and settle them before leaving the supported retention versions.
 
+A reverse same-key handoff can preserve the PID, stores, and session history
+without restoring process authority. A root whose original native runner
+line was transferred through retention cannot reopen or wake on a build
+that uses that original namespace. This includes returning from exact-triple
+home-local runner directories to the earlier protocol-keyed layout. The
+original line's retention-only fence survives daemon restart and an empty
+job inventory; settling or consuming its jobs does not restore native
+authority. The older host can still list the root and run other roots, so a
+successful handoff and fresh prompts do not qualify this return path.
+Re-upgrade to the retained compatible exact-triple build with its matching
+sidecars and runner links on the same home, then reconnect to the affected
+root. This does not discard session history, committed results or runner
+records, and requires no export, import, or store restore. Keep the
+original and successor runner stores intact; do not clear the fence or
+substitute an older copy of either store.
+
 The paired runner's dedicated link advances to the destination before its
 binding-free qualification; its existing source connection continues to the
 incumbent daemon. If the source connection is missing for a referenced root or
