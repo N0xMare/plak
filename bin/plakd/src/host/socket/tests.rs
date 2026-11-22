@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::wire::{
-    Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, RequestRefusal, WIRE_VERSION,
-    decode_line, encode_line,
+    Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, WIRE_VERSION,
 };
 use plakous_hosted::host_service::wire::{HostPrincipal, StoredSessionView};
 
@@ -186,6 +185,7 @@ async fn socket_ready_pings_cannot_starve_an_attach_baseline() {
 }
 
 async fn check_ready_pings(count: u64, expect_baseline: bool) {
+    use plakous_host_protocol::wire::{decode_line, encode_line};
     use tokio::io::AsyncBufReadExt as _;
 
     let sessions = NoSessions {
@@ -218,8 +218,8 @@ async fn check_ready_pings(count: u64, expect_baseline: bool) {
         queued: VecDeque::new(),
         buffer: zeroize::Zeroizing::new(vec![0; 8192]),
     };
-    let pings = (2..2 + count).map(|id| ClientFrame::Request { id, op: Op::Ping });
-    for frame in pings.chain([ClientFrame::<PlakExtension>::Bye]) {
+    let requests = (2..2 + count).map(|id| ClientFrame::Request { id, op: Op::Ping });
+    for frame in requests.chain([ClientFrame::<PlakExtension>::Bye]) {
         client
             .write_all(encode_line(&frame).unwrap().as_bytes())
             .await
@@ -345,7 +345,8 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
         &self,
         session: &str,
         _: bool,
-    ) -> Result<Option<StoredSessionView<PlakExtension>>, RequestRefusal> {
+    ) -> Result<Option<StoredSessionView<PlakExtension>>, plakous_host_protocol::wire::RequestRefusal>
+    {
         use plakous_host_protocol::{
             SessionObservation, views::presentation::PresentationSnapshot,
         };
