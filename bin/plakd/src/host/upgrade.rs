@@ -114,6 +114,7 @@ pub(super) struct Ready {
     pub(super) key: String,
     pub(super) binary: String,
     image: process::VerifiedImage,
+    inherit_transport: bool,
     leases: Leases,
     pause: AdmissionPause,
     _standalone: std::fs::File,
@@ -236,6 +237,10 @@ pub(super) fn replace(
 impl Ready {
     pub(super) fn same_key(&self) -> bool {
         self.key == crate::home::state::state_key()
+    }
+
+    pub(super) fn inherits_transport(&self) -> bool {
+        self.inherit_transport
     }
 
     pub(super) fn paired_command(
@@ -1004,6 +1009,7 @@ fn prepare(
         key: request.destination_key.clone(),
         binary: request.expected_binary.clone(),
         image,
+        inherit_transport: !cross_key && destination.accepts_reexec,
         pause,
         leases: Leases::new()?,
         _standalone: standalone,

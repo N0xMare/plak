@@ -370,7 +370,11 @@ impl RunningHost {
         // The socket goes first, so no client reaches a host that is handing
         // its sessions off, and before the lock: a host that takes the lock
         // next finds no socket of this one.
-        if !paired {
+        if !paired
+            || !ready
+                .as_ref()
+                .is_some_and(upgrade::Ready::inherits_transport)
+        {
             listeners.remove();
         }
         runtime.block_on(terminals.stop());
@@ -388,6 +392,7 @@ impl RunningHost {
         if paired {
             let ready = ready.ok_or_else(|| CliFailure::new("missing paired host upgrade"))?;
             if stop.stopped() {
+                listeners.remove();
                 return Ok(ProcessOutcome::Success);
             }
             return reexec::replace(
@@ -396,7 +401,7 @@ impl RunningHost {
                 &host_arguments,
                 &environment,
                 &ownership,
-                &listeners,
+                listeners,
             );
         }
         drop(listeners);

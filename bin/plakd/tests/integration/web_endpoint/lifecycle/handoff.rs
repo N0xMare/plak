@@ -91,13 +91,17 @@ fn wait_exit(child: &mut Child) -> std::process::ExitStatus {
     }
 }
 
-fn start_gated(fixture: &Fixture, gate: &Path) -> Web {
+fn start_gated(fixture: &Fixture, gate: &Path, legacy: bool) -> Web {
     std::fs::write(gate, []).unwrap();
+    let mut env = vec![("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", gate.to_str().unwrap())];
+    if legacy {
+        env.push(("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1"));
+    }
     let (web, started) = launch_on_with_env(
         fixture,
         &socket_dir(fixture).join("plak.sock"),
         &[],
-        &[("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", gate.to_str().unwrap())],
+        &env,
         CSP,
     );
     assert!(started, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
@@ -271,13 +275,22 @@ fn successor_serves_the_new_home_web_policy_on_the_inherited_listener() {
 
 #[test]
 fn changed_image_rolls_back_with_the_same_pid_and_listeners() {
+    assert_changed_image_rollback(false);
+}
+
+#[test]
+fn changed_legacy_image_rolls_back_by_rebinding_in_the_same_pid() {
+    assert_changed_image_rollback(true);
+}
+
+fn assert_changed_image_rollback(legacy: bool) {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
     let binary = identify(&mut fixture.command());
     let candidate = replacement_image(&fixture).canonicalize().unwrap();
     let destination = identify(&mut image_command(&fixture, &candidate));
     assert_ne!(binary, destination);
     let gate = fixture.root.join("exec-gate");
-    let mut web = start_gated(&fixture, &gate);
+    let mut web = start_gated(&fixture, &gate, legacy);
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let control_path = paths.host_socket();
     let sockets = [inode(&control_path), inode(&web.socket)];
@@ -288,6 +301,10 @@ fn changed_image_rolls_back_with_the_same_pid_and_listeners() {
     let mut control = prepare(&fixture, &candidate, &destination);
     ready(&mut control);
     wait_line(&web, "waiting at paired exec gate");
+    if legacy {
+        assert!(!control_path.exists());
+        assert!(!web.socket.exists());
+    }
     OpenOptions::new()
         .append(true)
         .open(candidate)
@@ -311,11 +328,16 @@ fn changed_image_rolls_back_with_the_same_pid_and_listeners() {
 
     std::fs::remove_file(gate).unwrap();
     wait_line(&web, "qualified image changed");
+    if legacy {
+        wait_line(&web, "plakd host: web on ");
+    }
     let mut successor = upgrade(&web, &login);
     let restored = directory(&mut successor);
     assert_ne!(restored["host_generation"], old["host_generation"]);
     assert_eq!(restored["binary_id"], binary);
-    assert_eq!([inode(&control_path), inode(&web.socket)], sockets);
+    if !legacy {
+        assert_eq!([inode(&control_path), inode(&web.socket)], sockets);
+    }
     assert!(web.child.as_mut().unwrap().try_wait().unwrap().is_none());
     assert_eq!(
         std::fs::read_to_string(paths.host_lock()).unwrap().trim(),
@@ -327,49 +349,40 @@ fn changed_image_rolls_back_with_the_same_pid_and_listeners() {
 }
 
 #[test]
-fn destination_without_handoff_capability_is_refused_before_pause() {
+fn destination_without_handoff_capability_rebinds_and_keeps_the_session() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
-    let (mut web, started) = launch_on_with_env(
-        &fixture,
-        &socket_dir(&fixture).join("plak.sock"),
-        &[],
-        &[("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1")],
-        CSP,
-    );
-    assert!(started);
+    let gate = fixture.root.join("exec-gate");
+    let mut web = start_gated(&fixture, &gate, true);
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let login = cookie(&web);
-    let mut client = upgrade(&web, &login);
-    let old = directory(&mut client);
-    let candidate = Path::new(env!("CARGO_BIN_EXE_plakd"))
-        .canonicalize()
-        .unwrap();
-    let answer = prepare_answer(&mut prepare(
-        &fixture,
-        &candidate,
-        &identify(&mut fixture.command()),
-    ));
-    assert_eq!(answer["status"], "refused", "{answer}");
-    assert!(
-        answer["detail"]
-            .as_str()
-            .unwrap()
-            .starts_with("host_upgrade_destination_unsupported"),
-        "{answer}"
-    );
-    send(
-        &mut client,
-        &ClientFrame::Request {
-            id: 1,
-            op: Op::Ping,
-        },
-    );
-    let pong = next_frame(&mut client);
-    assert_eq!(pong["outcome"]["ok"]["answer"], "pong", "{pong}");
-    assert_eq!(
-        directory(&mut upgrade(&web, &login))["host_generation"],
-        old["host_generation"]
-    );
-    let _new_session = create(&mut client);
+    let mut source = upgrade(&web, &login);
+    let old = directory(&mut source);
+    let root = create(&mut source);
+    attach(&mut source, &root, 1);
+    let candidate = replacement_image(&fixture).canonicalize().unwrap();
+    let binary = identify(&mut image_command(&fixture, &candidate));
+    assert_ne!(old["binary_id"], binary);
+    let mut control = prepare(&fixture, &candidate, &binary);
+    ready(&mut control);
+    wait_line(&web, "waiting at paired exec gate");
+    for path in [&web.socket, &paths.host_socket()] {
+        assert!(matches!(
+            UnixStream::connect(path).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        ));
+    }
+    for lock in locks(&fixture) {
+        assert!(matches!(lock.try_lock(), Err(TryLockError::WouldBlock)));
+    }
+
+    std::fs::remove_file(gate).unwrap();
+    wait_line(&web, "plakd host: web on ");
+    let mut successor = upgrade(&web, &login);
+    let welcome = directory(&mut successor);
+    assert_ne!(welcome["host_generation"], old["host_generation"]);
+    assert_eq!(welcome["binary_id"], binary);
+    assert_eq!(read_control(&mut coordinator(&fixture))["binary"], binary);
+    attach(&mut successor, &root, 2);
     interrupt_and_wait(&mut web);
 }
 
@@ -377,7 +390,7 @@ fn destination_without_handoff_capability_is_refused_before_pause() {
 fn successor_with_a_bad_socket_releases_both_locks_for_cold_start() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
     let gate = fixture.root.join("exec-gate");
-    let mut web = start_gated(&fixture, &gate);
+    let mut web = start_gated(&fixture, &gate, false);
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let candidate = Path::new(env!("CARGO_BIN_EXE_plakd"))
         .canonicalize()

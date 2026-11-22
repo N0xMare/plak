@@ -81,31 +81,40 @@ pub(super) fn replace(
     arguments: &[String],
     environment: &HostEnvironment,
     ownership: &super::HostOwnership,
-    listeners: &super::HostListeners,
+    listeners: super::HostListeners,
 ) -> CliResult<crate::ProcessOutcome> {
+    let listeners = ready.inherits_transport().then_some(listeners);
     crate::test_hooks::host_lifecycle::before_paired_exec();
     let destination = ready.paired_command(home);
     let target = ready.binary.clone();
     // Release store and session holds before the successor starts.
     drop(ready);
-    let descriptors = [
-        ownership.home.as_fd(),
-        ownership.state.as_fd(),
-        listeners.control.as_fd(),
-    ];
-    let web = listeners.web.as_deref().map(crate::web::Listener::as_fd);
+    let replace = |mut command: Command, binary: &str| {
+        let Some(listeners) = &listeners else {
+            // The listeners are closed. The source still holds both locks;
+            // exec closes them so a legacy successor can take them normally.
+            return failed(command.args(arguments).exec());
+        };
+        let descriptors = [
+            ownership.home.as_fd(),
+            ownership.state.as_fd(),
+            listeners.control.as_fd(),
+        ];
+        let web = listeners.web.as_deref().map(crate::web::Listener::as_fd);
+        exec(
+            command,
+            home,
+            arguments,
+            binary,
+            environment,
+            descriptors,
+            web,
+        )
+    };
     let failure = match destination {
         Ok(command) => {
             crate::carry::upgrade::crash_cut("after-source-release");
-            exec(
-                command,
-                home,
-                arguments,
-                &target,
-                environment,
-                descriptors,
-                web,
-            )
+            replace(command, &target)
         }
         Err(failure) => failure,
     };
@@ -113,15 +122,7 @@ pub(super) fn replace(
     let source = std::env::current_exe().map_err(failed)?;
     let command =
         crate::carry::upgrade::process::command(&source, home, &crate::home::state::state_key());
-    Err(exec(
-        command,
-        home,
-        arguments,
-        crate::build_identity::binary_id(),
-        environment,
-        descriptors,
-        web,
-    ))
+    Err(replace(command, crate::build_identity::binary_id()))
 }
 
 fn exec(

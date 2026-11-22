@@ -302,6 +302,57 @@ fn host_lifecycle_same_key_paired_upgrade_names_the_new_binary_before_eof() {
 }
 
 #[test]
+fn host_lifecycle_same_key_legacy_upgrade_preserves_the_saved_session_and_queue() {
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let session = seed(&fixture, 83);
+    let mut host = start_env(
+        &fixture,
+        &[],
+        &[("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1".into())],
+    );
+    let mut source = Client::connect(&host);
+    let root = source
+        .rows(1)
+        .into_iter()
+        .find(|row| row.session == session)
+        .unwrap()
+        .node;
+    drop(source);
+    let (reader, generation) = observe(&host);
+    let image = replacement_image(&fixture);
+    let probe = image_command(&fixture, &image)
+        .args(["version", "--host-upgrade-probe"])
+        .output()
+        .unwrap();
+    assert!(probe.status.success());
+    let version: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let id = version["binary_id"].as_str().unwrap();
+    assert_ne!(id, binary(&fixture));
+    let result = image_command(&fixture, &image)
+        .args(["host", "upgrade", "--expect-binary", id, "--drain", "0"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let notices = notices_to_eof(reader, generation);
+    let restarting = notices.last().unwrap();
+    assert_eq!(restarting.phase, HostLifecyclePhase::Restarting);
+    assert_eq!(restarting.reason, HostLifecycleReason::PairedUpgrade);
+    assert_eq!(restarting.target.as_ref().unwrap().binary_id, id);
+    let (_, next_generation) = observe(&host);
+    assert_ne!(next_generation, generation);
+    let document = export(&fixture, &session, false, "legacy-export.json");
+    assert_eq!(document["queue"], json!(["paused input 83"]));
+    assert_eq!(document["named_state"], json!({"answer":83}));
+    Client::connect(&host).attach(2, &root);
+    stop(&mut host);
+}
+
+#[test]
 fn host_lifecycle_cross_key_source_notice_precedes_destination_welcome_and_moved() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());

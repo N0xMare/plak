@@ -5756,8 +5756,9 @@ This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
-It re-execs the source PID, retaining the host's control and web listeners and
-the home-wide and per-key locks. On Linux and macOS, rustix passes their
+It re-execs the source PID. When the destination advertises support in the
+capability probe, the source retains the control and web listeners and the
+home-wide and per-key locks. On Linux and macOS, rustix passes their
 descriptors in one private Unix socketpair message using `SCM_RIGHTS`. The
 exec temporarily carries the receiver on stdin; the new image restores the
 original stdin and sets close-on-exec on the adopted descriptors before it
@@ -5766,19 +5767,22 @@ file in the same message, not through the environment inherited by child
 processes. Neither listener is unlinked or rebound. New connections can
 wait in the existing kernel backlogs; old client streams end rather than
 moving into the new generation. The private upgrade coordinator is rebound.
-The destination must advertise support for this handoff when the source asks
-during qualification. Installing the first image with this support does not
-change how a source without it closes its own listeners.
+If either image does not support descriptor handoff, the upgrade uses the
+legacy path: the source closes and unlinks its listeners and holds its locks
+until exec closes them. The successor takes the locks and binds normally.
+Reconnects can be refused in that gap; the same sessions and admission
+verdicts still carry over.
 The source rechecks the qualified image's filesystem identity before exec
-instead of hashing the image again, and passes the verified binary identity and
-the captured tool PATH and HOME to the destination. If that last check or
-the exec fails, it re-execs the source with the same listeners and locks.
+instead of hashing the image again. The inherited path also passes the verified
+binary identity and captured tool PATH and HOME. If the last check or the exec
+fails, the source re-execs its own image: with the retained listeners and
+locks on the inherited path, or by ordinary startup on the legacy path.
 A successor that refuses inherited transport exits without keeping ownership;
 an ordinary start can then acquire the locks and replace stale socket paths.
-The destination still
-checks gateway availability and stores before serving. It answers Welcome and
-the in-memory directory while it finds and loads owed sessions; startup
-admission remains paused until the continuation inventory is captured.
+The destination still checks gateway availability and stores before serving.
+On the inherited path it answers Welcome and the in-memory directory while
+it finds and loads owed sessions; startup admission remains paused until the
+continuation inventory is captured.
 When its destination needs a higher store revision, pre-drain qualification
 takes consistent read-only copies of the existing product and tree stores in
 a private scratch directory, applies the registered steps there, and probes

@@ -174,17 +174,12 @@ fn service_probe(
                 .unwrap_or("identity, import version or host capability does not match")
         )));
     }
-    if request.source_key == request.destination_key {
-        if !probe.accepts_reexec {
-            return Err(CliFailure::new(
-                "host_upgrade_destination_unsupported: destination cannot inherit the same-key host transport",
-            ));
-        }
-        if probe.runner_protocol != crate::commands::runner::version().protocol {
-            return Err(CliFailure::new(
-                "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
-            ));
-        }
+    if request.source_key == request.destination_key
+        && probe.runner_protocol != crate::commands::runner::version().protocol
+    {
+        return Err(CliFailure::new(
+            "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
+        ));
     }
     Ok(probe)
 }
