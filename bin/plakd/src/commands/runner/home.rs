@@ -217,8 +217,12 @@ pub(crate) struct LocalRunnerHome {
 }
 
 impl LocalRunnerHome {
+    pub(super) fn build_key() -> String {
+        plakous::runner::daemon::triple_key(&super::version())
+    }
+
     pub(crate) fn of(paths: &PlakPaths) -> Self {
-        let key = plakous::runner::daemon::triple_key(&super::version());
+        let key = Self::build_key();
         let identity = paths.home().join("host/runner");
         Self {
             root: identity.join(&key),

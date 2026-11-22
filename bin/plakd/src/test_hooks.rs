@@ -161,7 +161,7 @@ pub(crate) fn upgrade_input_limit() -> Option<String> {
 }
 
 pub(crate) fn upgrade_runner_revision() -> Option<String> {
-    let image = std::env::var_os("PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE")?;
+    let image = hook_environment("PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE")?;
     (std::env::current_exe().ok()?.as_os_str() == image)
         .then(|| std::env::var("PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION").ok())
         .flatten()
@@ -173,7 +173,7 @@ pub(crate) fn upgrade_runner_environment() -> Vec<(&'static str, std::ffi::OsStr
         "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
     ]
     .into_iter()
-    .filter_map(|name| std::env::var_os(name).map(|value| (name, value)))
+    .filter_map(|name| hook_environment(name).map(|value| (name, value)))
     .collect()
 }
 

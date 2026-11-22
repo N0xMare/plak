@@ -1763,7 +1763,7 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakd", "src/host/upgrade/startup.rs"): {"runner": {"WorkspaceCatalog", "RunnerStatus"}},
     ("plakd", "src/carry/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
     ("plakd", "src/host/upgrade.rs"): {"runner": {"protocol", "VersionTriple"}},
-    ("plakd", "src/host/upgrade/process_safety.rs"): {
+    ("plakd", "src/host/upgrade/runner_carry.rs"): {
         "runner": {"protocol", "LineStatus", "VersionTriple"}
     },
     ("plakd", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},

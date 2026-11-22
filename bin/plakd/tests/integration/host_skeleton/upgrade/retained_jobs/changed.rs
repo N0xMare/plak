@@ -115,7 +115,7 @@ fn source_script(fixture: &Fixture) {
     let root = shell_words::quote(fixture.root.to_str().unwrap());
     let start = |kind, budget, code| {
         let command = format!(
-            "base={root}/${{PWD##*/}}-{kind}; printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; until [ -f \"$base-finish\" ]; do sleep 0.02; done; printf '{kind}-retained-output\\n'; exit {code}"
+            "base={root}/${{PWD##*/}}-{kind}; printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; n=0; until [ -f \"$base-finish\" ]; do [ \"$n\" -lt 10000 ] || exit 42; n=$((n + 1)); sleep 0.02; done; printf '{kind}-retained-output\\n'; exit {code}"
         );
         json!({"output":{"tool":{"name":"process_session_start","arguments":{
             "command":command, "workdir":".", "login":false, "tty":false, "keep_stdin_open":false,

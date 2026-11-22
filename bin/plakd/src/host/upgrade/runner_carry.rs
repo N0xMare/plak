@@ -50,7 +50,7 @@ pub(super) fn held(
     runtime: &tokio::runtime::Handle,
 ) -> CliResult<()> {
     for warning in inspect(services, &request.inspect_runners, Check::Held, runtime)? {
-        tracing::warn!(target: "plak.runner", %warning);
+        eprintln!("host upgrade: {warning}");
     }
     Ok(())
 }

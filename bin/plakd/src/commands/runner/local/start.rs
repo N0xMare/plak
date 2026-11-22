@@ -93,7 +93,7 @@ async fn managed_start(paths: &PlakPaths) {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let build = plakous::runner::daemon::triple_key(&super::super::version());
+    let build = LocalRunnerHome::build_key();
     let unit = format!("plak-runner-{hash}-{build}");
     let Ok(executable) = std::env::current_exe() else {
         return;
