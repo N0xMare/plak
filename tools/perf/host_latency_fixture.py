@@ -33,6 +33,7 @@ class Fixture:
         self.script = root / "script.json"
         self.diagnostics = self.home / "logs/plak.log"
         self.processes = []
+        self.runner_pid = None
 
     def init(self):
         if len(os.fsencode(self.root / "home/host/runner/vXX-000000000000/run/r.sock")) > 100:
@@ -125,6 +126,7 @@ class Fixture:
         # Own the local runner as a child rather than letting the host launch a
         # detached daemon that would survive the measurement.
         runner = await self.spawn("runner", "serve", "--local")
+        self.runner_pid = runner.pid
         await self.ready(runner, lambda: any(self.home.glob("host/runner/*/run/r.sock")))
         host = await self.spawn(
             "host",

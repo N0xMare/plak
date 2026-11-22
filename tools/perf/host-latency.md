@@ -57,3 +57,12 @@ without contacting the host, with no WebSocket dependency. `reads_per_s`
 is the rate of read syscalls; `kb_per_s` includes cached data, and
 `disk_kb_per_s` counts only actual storage reads. CPU uses the system clock
 tick rate and can exceed 100% for a multi-threaded process.
+
+`just perf host-latency process-wait <plakd> <new-scratch-path>` measures
+foreground process tools rather than roots awaiting children. It attaches
+eight terminal clients, then samples with zero, one, four and eight open
+turns waiting on real commands. It runs the series once with silent
+commands and once with a line of output every two seconds per command.
+Rows report host and runner separately. Voluntary context switches, summed
+over each process's threads, are a proxy for blocking wakeups; subtract
+the zero-wait row to estimate the cost attributable to the waits.

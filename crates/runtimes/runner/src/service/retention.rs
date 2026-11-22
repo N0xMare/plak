@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use plakous_runner_protocol::retention::{self as wire, Answer, Refusal};
 use plakous_runner_protocol::{LineOwner, Operation, Request, RequestClass, RunnerFrame};
+use plakous_tools::internal::process_session_changes;
 use plakous_tools::internal::runner::{RunnerVerb, hex, serve_sessions, unhex};
 use plakous_tools::{
     JobStatus, JobStopReason, JoinedProcessOutputCursor, JoinedProcessSessionId,
@@ -683,8 +684,16 @@ async fn read(
     if !sessions.is_promoted(id) {
         return Err(Refusal::UnknownJob);
     }
-    let until = Instant::now() + Duration::from_millis(wait);
-    loop {
+    let until = tokio::time::Instant::now() + Duration::from_millis(wait);
+    let mut changes = if wait == 0 {
+        None
+    } else {
+        Some(process_session_changes(sessions, id).map_err(|_| Refusal::OutcomeUnknown)?)
+    };
+    let output = loop {
+        if let Some(changes) = &mut changes {
+            changes.borrow_and_update();
+        }
         let output = sessions
             .poll_from(
                 id,
@@ -693,33 +702,42 @@ async fn read(
                 wire::PAGE_SIZE,
             )
             .map_err(|_| Refusal::OutcomeUnknown)?;
-        if !output.records().is_empty() || output.status().is_terminal() || Instant::now() >= until
+        if !output.records().is_empty()
+            || output.status().is_terminal()
+            || tokio::time::Instant::now() >= until
         {
-            let records = output
-                .records()
-                .iter()
-                .map(|record| wire::Record {
-                    sequence: record.sequence(),
-                    cursor: record.cursor().get(),
-                    stream: match record.stream() {
-                        plakous_tools::JoinedProcessOutputStream::Stdout => "stdout",
-                        plakous_tools::JoinedProcessOutputStream::Stderr => "stderr",
-                        plakous_tools::JoinedProcessOutputStream::Terminal => "terminal",
-                    }
-                    .into(),
-                    bytes: hex(record.bytes()),
-                })
-                .collect();
-            return Ok(Answer::Output {
-                records,
-                next_cursor: output.next_cursor().get(),
-                more_output: output.more_output(),
-                skipped_bytes: output.skipped_bytes(),
-                status: process_status(output.status()),
-            });
+            break output;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+        if let Some(rx) = &mut changes {
+            if let Ok(Err(_)) = tokio::time::timeout_at(until, rx.changed()).await {
+                changes = None;
+            }
+        } else {
+            tokio::time::sleep_until(until).await;
+        }
+    };
+    let records = output
+        .records()
+        .iter()
+        .map(|record| wire::Record {
+            sequence: record.sequence(),
+            cursor: record.cursor().get(),
+            stream: match record.stream() {
+                plakous_tools::JoinedProcessOutputStream::Stdout => "stdout",
+                plakous_tools::JoinedProcessOutputStream::Stderr => "stderr",
+                plakous_tools::JoinedProcessOutputStream::Terminal => "terminal",
+            }
+            .into(),
+            bytes: hex(record.bytes()),
+        })
+        .collect();
+    Ok(Answer::Output {
+        records,
+        next_cursor: output.next_cursor().get(),
+        more_output: output.more_output(),
+        skipped_bytes: output.skipped_bytes(),
+        status: process_status(output.status()),
+    })
 }
 
 fn mutation(request: &wire::Request) -> Result<(RunnerVerb, serde_json::Value, bool), Refusal> {

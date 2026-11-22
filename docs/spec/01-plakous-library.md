@@ -7192,8 +7192,10 @@ the normal recovery-required path before Ready. The driver's placement parking
   opens a stream names it in its `stream` field. Control frames are `Cancel`,
   `Preempt`, `Ack`, `TransferOwner`, `Lines`, `OwnerFloors`, `JobTerminals` and `Ping`. `Preempt { request_id, value }`
   sets the running request's yield signal on the runner, as the host's own
-  signal changes; a waiting `process.poll` returns as soon as a yield is
-  set.
+  signal changes. A waiting `process.poll` reads from its cursor and then
+  waits on output or terminal notifications, the requested deadline,
+  cancellation, or a yield. It does not periodically reread a silent
+  process.
 - **Jobs.** The runner keeps one process-session service per host and line.
   It outlives connections and owner changes: after a transfer the line's
   newest owner finds the line's sessions and jobs where the old owner left

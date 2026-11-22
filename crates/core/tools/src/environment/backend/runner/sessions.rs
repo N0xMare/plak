@@ -4,10 +4,12 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use plakous_model::CancellationToken;
 use serde_json::{Value, json};
+use tokio::sync::watch;
+use tokio::time::Instant;
 
 use super::super::{
     ExecutionBackendError, ExecutionWorkspace, HostProcessContext, JoinedProcessCursorPollResult,
@@ -27,8 +29,6 @@ use super::{
 };
 use crate::{ExecutionEnvironment, JobStatus, JobStopReason, JobView, ToolPreempt};
 
-/// How often a waiting poll looks for output.
-const POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// How often a job event stream looks for a change no terminal announces.
 const WATCH_TICK: Duration = Duration::from_millis(100);
 
@@ -738,23 +738,55 @@ async fn poll(
 ) -> Result<Value, ExecutionBackendError> {
     let poll: PollWire = from_value(payload)?;
     let id = decode_session(&poll.session)?;
-    let deadline = Instant::now() + Duration::from_millis(poll.wait_ms);
-    let preempt = control.preempt().clone();
-    loop {
-        let result = sessions.poll_from(
+    let read = || {
+        sessions.poll_from(
             id,
             JoinedProcessOutputCursor::new(poll.cursor),
             poll.max_bytes,
             poll.max_records,
-        )?;
-        let settled = !result.records().is_empty()
+        )
+    };
+    let result = if poll.wait_ms == 0 {
+        read()?
+    } else {
+        let deadline = Instant::now() + Duration::from_millis(poll.wait_ms);
+        poll_on_change(sessions.session_changes(id)?, deadline, control, read).await?
+    };
+    encode_polled(&result)
+}
+
+async fn poll_on_change(
+    mut changes: watch::Receiver<u64>,
+    deadline: Instant,
+    control: &OperationContext,
+    mut read: impl FnMut() -> Result<JoinedProcessCursorPollResult, ExecutionBackendError>,
+) -> Result<JoinedProcessCursorPollResult, ExecutionBackendError> {
+    let mut preempt = control.preempt().clone();
+    let mut changes_open = true;
+    let mut preempt_open = preempt.has_changed().is_ok();
+    loop {
+        // Read after marking the notification seen; a concurrent append is
+        // either included in this read or leaves the watch ready.
+        changes.borrow_and_update();
+        let result = read()?;
+        if !result.records().is_empty()
             || result.status().is_terminal()
             || Instant::now() >= deadline
             || *preempt.borrow() != ToolPreempt::None
-            || control.cancellation().is_cancelled();
-        if settled {
-            return encode_polled(&result);
+            || control.cancellation().is_cancelled()
+        {
+            return Ok(result);
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        tokio::select! {
+            changed = changes.changed(), if changes_open => changes_open = changed.is_ok(),
+            changed = preempt.wait_for(|signal| *signal != ToolPreempt::None), if preempt_open => {
+                preempt_open = changed.is_ok();
+            }
+            () = control.cancellation().cancelled() => {}
+            () = tokio::time::sleep_until(deadline) => {}
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;

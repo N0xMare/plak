@@ -272,13 +272,7 @@ async def switch(fixture, args, browser, observer, live, terminal, waiting, heav
         raise RuntimeError("large fixture did not deliver a multi-page baseline")
 
 
-async def run(args):
-    if not sys.platform.startswith("linux"):
-        raise SystemExit("the workload requires Linux /proc")
-    if importlib.util.find_spec("websockets") is None:
-        raise SystemExit("install websockets==15.0.1 in the probe's Python environment")
-    fixture = Fixture(args.scratch.resolve(), args.binary.resolve(strict=True))
-    fixture.init()
+async def report_build(fixture):
     info = await fixture.spawn("version", "--build-info", pipes=True)
     raw, _ = await info.communicate()
     await fixture.stop(info)
@@ -286,6 +280,12 @@ async def run(args):
     if info.returncode or not build["test_hooks"] or build["wire"]["number"] != 12:
         raise RuntimeError("expected a wire-12 plakd built with test-support")
     emit("build", revision=build["revision"], flavor=build["flavor"], wire=build["wire"])
+
+
+async def run(args):
+    fixture = Fixture(args.scratch.resolve(), args.binary.resolve(strict=True))
+    fixture.init()
+    await report_build(fixture)
     try:
         pid, batches = await start_fixture(fixture, args)
         # The normal model operation deadline is shorter than a full soak.
@@ -344,6 +344,11 @@ def parser():
     work.add_argument("--switch-seconds", type=float, default=600)
     work.add_argument("--switch-interval", type=float, default=2)
     work.add_argument("--io-seconds", type=float, default=60)
+    process = sub.add_parser("process-wait", help="measure roots parked on foreground tools")
+    process.add_argument("binary", type=Path)
+    process.add_argument("scratch", type=Path)
+    process.add_argument("--io-seconds", type=float, default=30)
+    process.add_argument("--output-interval", type=int, default=2)
     io = sub.add_parser("io", help="measure Linux /proc without connecting to the process")
     io.add_argument("pid", type=int)
     io.add_argument("--seconds", type=float, default=30)
@@ -357,7 +362,20 @@ def main():
         if args.pid <= 0 or not 0 < args.seconds <= 3600:
             cli.error("positive PID and window up to an hour required")
         asyncio.run(rates(args.pid, args.seconds, "process_io"))
+        return
+    if not sys.platform.startswith("linux"):
+        raise SystemExit("the workload requires Linux /proc")
+    if args.command == "process-wait":
+        from host_latency_process_wait import process_wait
+
+        if not (0 < args.io_seconds <= 120 and 1 <= args.output_interval <= 30):
+            cli.error(
+                "process samples require a window up to 120 seconds and output every 1–30 seconds"
+            )
+        asyncio.run(process_wait(args, emit, proc_sample, report_build))
     else:
+        if importlib.util.find_spec("websockets") is None:
+            raise SystemExit("install websockets==15.0.1 in the probe's Python environment")
         if not (
             2 <= args.roots
             and 1 <= args.children <= 64
