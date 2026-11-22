@@ -745,6 +745,50 @@ async fn a_live_job_parks_the_child_and_its_terminal_wakes_it_to_submit() {
             );
         })
         .unwrap();
+    let driver = fixture.runtime.driver();
+    let turn = fixture
+        .runtime
+        .live
+        .lock()
+        .await
+        .get(&fixture.child)
+        .unwrap()
+        .turn_id();
+    let attempt = driver
+        .read(|tree| tree.attempt(&fixture.child).unwrap().attempt_id.clone())
+        .unwrap();
+    let identity = ChildTurnIdentity { attempt, turn };
+    let facts = read_facts(driver, &fixture.runtime.live, &fixture.child)
+        .await
+        .unwrap();
+    let (held, holding) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let writer = driver.clone();
+    let writer = tokio::spawn(async move {
+        writer
+            .mutate(|_| {
+                held.send(()).unwrap();
+                released.blocking_recv().unwrap();
+            })
+            .await
+    });
+    holding.await.unwrap();
+    let mut refresh = std::pin::pin!(refresh_parked_rows(
+        driver,
+        &fixture.child,
+        &identity,
+        facts
+    ));
+    let poll = refresh
+        .as_mut()
+        .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+    release.send(()).unwrap();
+    let ((), effects) = writer.await.unwrap().unwrap();
+    assert!(effects.is_empty());
+    assert!(
+        poll.is_ready(),
+        "an unchanged parked row queued behind the writer"
+    );
     std::fs::write(fixture.root.path().join("release-job"), b"release").unwrap();
     fixture.until("the wake turn", turns(2)).await;
     let wakes = fixture.wake_prompts();

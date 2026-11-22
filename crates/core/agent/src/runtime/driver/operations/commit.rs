@@ -1,9 +1,8 @@
 use super::{
-    AgentError, AgentErrorKind, Arc, ArtifactTransition, BTreeSet, CanonicalHistory, CommitPlan,
-    ConversationView, Driver, DurableOperationKind, DurableOperationState,
-    DurableOperationTransition, OperationId, PreparedCallRecord, RuntimeCheckpoint,
-    SessionStoreError, TurnId, operation_turn_id, runtime_manifest_error, settled_turn_operations,
-    working_lifecycle,
+    AgentError, AgentErrorKind, Arc, ArtifactTransition, BTreeSet, CommitPlan, ConversationView,
+    Driver, DurableOperationKind, DurableOperationState, DurableOperationTransition, OperationId,
+    PreparedCallRecord, RuntimeCheckpoint, SessionStoreError, TurnId, operation_turn_id,
+    runtime_manifest_error, settled_turn_operations, working_lifecycle,
 };
 
 impl Driver {
@@ -57,9 +56,7 @@ impl Driver {
                 )
             };
             let mut history = if withhold_prompt {
-                let mut retained = manifest.canonical().history().segments().to_vec();
-                retained.pop();
-                CanonicalHistory::new(retained).map_err(|_| rejected())?
+                manifest.canonical().history().without_last_segment()
             } else {
                 manifest.canonical().history().clone()
             };

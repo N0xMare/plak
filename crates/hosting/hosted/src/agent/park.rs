@@ -274,14 +274,7 @@ pub(super) async fn park_until_wake(
             }
             WakeDecision::Idle => {}
         }
-        mutate_child(driver, agent_id, {
-            let agent_id = agent_id.to_owned();
-            move |tree| {
-                let agent_id = agent_id.as_str();
-                tree.refresh_parked(agent_id, facts.running);
-            }
-        })
-        .await;
+        refresh_parked_rows(driver, agent_id, identity, facts).await;
         let mut process_exit = Box::pin(async move {
             if let Some(changes) = job_changes.as_mut()
                 && changes.changed().await.is_ok()
@@ -301,6 +294,35 @@ pub(super) async fn park_until_wake(
         });
         let _ = tokio::time::timeout(SAFETY_TICK, changed).await;
     }
+}
+
+async fn refresh_parked_rows(
+    driver: &TreeDriver,
+    agent_id: &str,
+    identity: &ChildTurnIdentity,
+    facts: WakeSources,
+) {
+    // An unchanged row must not take a writer turn and wake this same wait.
+    let changed = driver.read(|tree| {
+        tree.waiting_on(agent_id).is_some_and(|waiting| {
+            waiting.network
+                || waiting.processes != facts.running
+                || waiting.agents != facts.children
+        })
+    });
+    if !matches!(changed, Ok(true)) {
+        return;
+    }
+    mutate_child(driver, agent_id, {
+        let agent_id = agent_id.to_owned();
+        let identity = identity.clone();
+        move |tree| {
+            if identity.still_owns(tree, &agent_id) && tree.waiting_on(&agent_id).is_some() {
+                tree.refresh_parked(&agent_id, facts.running);
+            }
+        }
+    })
+    .await;
 }
 
 async fn still_parked(

@@ -17,6 +17,7 @@ use crate::manifest::{
 use super::object::{canonical_history_segment, object_address};
 use super::wire::{
     BundleWriter, parse_canonical, parse_checkpoint_root, parse_ledger, parse_manifest_root,
+    parse_sequence_node,
 };
 use super::{
     BuiltCheckpoint, BundleBuilder, BundleReuse, CheckpointBundleError, CheckpointObjectBundle,
@@ -416,7 +417,7 @@ impl BundleBuilder {
         &mut self,
         canonical: &RuntimeCanonicalState,
         prior_canonical: &RuntimeCanonicalState,
-        _prior_bundle: &CheckpointObjectBundle,
+        prior_bundle: &CheckpointObjectBundle,
         prior: &BundleReuse,
     ) -> Result<BuiltCanonical, CheckpointBundleError> {
         let prefix = self.reuse_semantic(
@@ -441,7 +442,24 @@ impl BundleBuilder {
                 canonical.history().segments().len(),
                 Vec::new(),
             ),
-            None => (None, 0, canonical.history().segments().to_vec()),
+            None => {
+                // Withholding an admitted prompt replaces only the last group.
+                // The new history proves it shares the old group's predecessor.
+                let prefix = prior_canonical.history().without_last_segment();
+                match (
+                    prior.history_head,
+                    canonical.history().append_delta_since(&prefix),
+                ) {
+                    (Some(head), Some(delta)) => {
+                        let object = prior_bundle
+                            .lookup(head)
+                            .ok_or(CheckpointBundleError::MissingObject)?;
+                        let previous = parse_sequence_node(&object.canonical_bytes)?.previous;
+                        (previous, prefix.segments().len(), delta)
+                    }
+                    _ => (None, 0, canonical.history().segments().to_vec()),
+                }
+            }
         };
         for (offset, segment) in segments.iter().enumerate() {
             let segment_address = self.segment(segment)?;

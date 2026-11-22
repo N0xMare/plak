@@ -325,7 +325,7 @@ fn render(
         .collect::<Vec<_>>()
         .join(" ");
     Ok(format!(
-        "{MARKER}[Unit]\nDescription=Plak host\nWants={SYSTEMD_UNIT}\nAfter={SYSTEMD_UNIT}\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
+        "{MARKER}[Unit]\nDescription=Plak host\nWants={SYSTEMD_UNIT}\nAfter={SYSTEMD_UNIT}\n\n[Service]\nExecStart=/usr/bin/env -i {environment} \"MALLOC_ARENA_MAX=2\" \"SHELL=${{SHELL}}\" \"USER=${{USER}}\" \"LOGNAME=${{LOGNAME}}\" \"XDG_RUNTIME_DIR=%t\" \"DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus\" \"INVOCATION_ID=${{INVOCATION_ID}}\" {command}\nExecReload=/bin/kill -USR1 $MAINPID\nKillMode=mixed\nKillSignal=SIGTERM\nTimeoutStopSec=90\nRestart=on-failure\nUMask=0077\n# WorkingDirectory is unset: the systemd user default is HOME.\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 

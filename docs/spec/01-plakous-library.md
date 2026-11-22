@@ -914,6 +914,8 @@ fit the context window and was never answered. Replaying it would refuse every
 later turn the same way, because the fold's own input would carry it too. The
 prompt was only ever in non-forkable working checkpoints, which stay loadable,
 and the host keeps the text it submitted, so nothing the user wrote is lost.
+The replacement shares the exact prefix before that segment; publication can
+reuse its encoded history nodes.
 When the history without the prompt does not fit, or that measurement cannot be
 established, the prompt is not the cause: it stays, followed by the failure
 note above.

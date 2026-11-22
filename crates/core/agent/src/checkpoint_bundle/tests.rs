@@ -1162,6 +1162,25 @@ fn appended_history_reuses_prefix_and_unique_growth_is_linear() -> TestResult {
 }
 
 #[test]
+fn withholding_the_last_segment_encodes_only_the_replacement() -> TestResult {
+    let prefix = CanonicalHistory::new((0..64).map(history_segment).collect::<Result<_, _>>()?)?;
+    let admitted = prefix.append(history_segment(64)?)?;
+    let prior =
+        RuntimeCheckpointCodec::bundle(&fixture_with_history(admitted.clone(), 1, false)?, None)?;
+    let retained = admitted.without_last_segment();
+    assert!(retained.shares_storage_with(&prefix));
+    let next = fixture_with_history(retained.append(history_segment(65)?)?, 2, false)?;
+    let advanced = RuntimeCheckpointCodec::advance(&next, &prior)?;
+    assert!(advanced.stats().visited_object_count() <= 20);
+    assert_eq!(
+        advanced.root(),
+        RuntimeCheckpointCodec::bundle(&next, None)?.root()
+    );
+    assert_eq!(RuntimeCheckpointCodec::materialize(&advanced)?, next);
+    Ok(())
+}
+
+#[test]
 fn bounded_history_replacement_and_old_address_reversion_are_incremental() -> TestResult {
     let original_history = CanonicalHistory::new(vec![history_segment(0)?])?;
     let original_checkpoint = fixture_with_history(original_history.clone(), 1, false)?;

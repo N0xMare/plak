@@ -771,6 +771,15 @@ impl CanonicalHistory {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
 
+    /// Returns the shared history before its final segment, or the same empty history.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn without_last_segment(&self) -> Self {
+        Self {
+            inner: self.inner.parent.as_ref().unwrap_or(&self.inner).clone(),
+        }
+    }
+
     /// Returns the append-only suffix shared after an exact ancestor allocation.
     ///
     /// This is a cold persistence optimization proof, not reconstruction data:
@@ -884,9 +893,10 @@ impl CanonicalHistory {
 
 impl PartialEq for CanonicalHistory {
     fn eq(&self, other: &Self) -> bool {
-        self.identity() == other.identity()
-            && self.inner.segment_count == other.inner.segment_count
-            && self.segments().iter().eq(other.segments())
+        self.shares_storage_with(other)
+            || (self.inner.segment_count == other.inner.segment_count
+                && self.inner.item_count == other.inner.item_count
+                && self.identity() == other.identity())
     }
 }
 

@@ -852,6 +852,8 @@ continuation count derived from durable Resume decisions, independently of
 submit-harness corrections.
 A spawner's row for a parked child carries the same `waiting_on` as its
 `wait_agent` row (§4.4).
+An unchanged process-local `waiting_on` refresh needs no writer turn and
+wakes no tree waiters.
 A result of up to 1024 bytes is `output_json`;
 a longer one is `output_preview` plus `output_bytes`, and `wait_agent` with
 that `agent_ids` returns it whole.
