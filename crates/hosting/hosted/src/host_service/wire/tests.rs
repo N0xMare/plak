@@ -2,6 +2,7 @@ use plakous_host_protocol::intent::Draft;
 
 use super::*;
 
+mod replay_profile;
 mod verdicts;
 
 fn root() -> NodeAddress {
