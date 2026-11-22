@@ -2,17 +2,15 @@
 
 #[inline]
 pub fn phase(name: &'static str) -> tracing::Span {
-    tracing::trace_span!(target: "plak::test_wire", "connection work", phase = name)
+    tracing::info_span!(target: "plak::test_wire", "connection work", phase = name)
 }
 
 pub fn pong(name: &'static str, id: u64) {
-    tracing::trace!(target: "plak::test_wire", phase = name, id, "pong timing");
+    let _timing =
+        tracing::info_span!(target: "plak::test_wire", "pong timing", phase = name, id).entered();
 }
 
 pub fn writer(name: &'static str, line: &[u8]) {
-    if !tracing::enabled!(target: "plak::test_wire", tracing::Level::TRACE) {
-        return;
-    }
     let Some(rest) = line.strip_prefix(br#"{"frame":"response","id":"#) else {
         return;
     };
