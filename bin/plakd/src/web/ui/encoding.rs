@@ -35,7 +35,9 @@ impl Preferences {
                 let coding = coding.trim();
                 let field = if coding.eq_ignore_ascii_case("br") {
                     &mut preferences.br
-                } else if coding.eq_ignore_ascii_case("gzip") {
+                } else if coding.eq_ignore_ascii_case("gzip")
+                    || coding.eq_ignore_ascii_case("x-gzip")
+                {
                     &mut preferences.gzip
                 } else if coding.eq_ignore_ascii_case("identity") {
                     &mut preferences.identity

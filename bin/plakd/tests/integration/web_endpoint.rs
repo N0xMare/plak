@@ -530,6 +530,77 @@ fn accounts_usage_keeps_recorded_totals_without_reading_the_gateways_key() {
 }
 
 #[test]
+fn web_capabilities_use_home_config_even_from_a_broken_trusted_project() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    fixture.write_config(&format!(
+        "[web]\nallow = [\"{LOGIN}\"]\norigin = \"{ORIGIN}\"\nfiles_read = true\nterminal = true\n"
+    ));
+    let project = fixture.workspace().join(".plak");
+    std::fs::create_dir(&project).unwrap();
+    write_private(
+        &project.join("config.toml"),
+        "[web]\nfiles_read = false\nterminal = \"not a boolean\"\n",
+    );
+    let trust = fixture
+        .base_command()
+        .args(["config", "trust"])
+        .output()
+        .unwrap();
+    assert!(trust.status.success(), "{:?}", trust.stderr);
+
+    let csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
+    let (mut web, started) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[],
+        csp,
+    );
+    assert!(
+        started,
+        "{}",
+        web.lines.try_iter().collect::<Vec<_>>().join("\n")
+    );
+    let mut socket = upgrade(&web, &cookie(&web));
+    send(
+        &mut socket,
+        &ClientFrame::Hello(Hello {
+            proto: WIRE_VERSION,
+            binary_id: "web-test".into(),
+            caps: Vec::new(),
+        }),
+    );
+    let welcome = next_frame(&mut socket);
+    let console = &welcome["extension"]["console"];
+    assert_eq!(console["files_read"]["enabled"], true, "{welcome}");
+    assert_eq!(console["terminal"]["enabled"], true, "{welcome}");
+    for (id, request) in [
+        (1, json!({"request":"terminal_list"})),
+        (
+            2,
+            json!({"request":"files_list","target":{"session":REQUEST},"path":""}),
+        ),
+    ] {
+        socket
+            .send(Message::text(
+                json!({"frame":"request","id":id,"op":{"op":"host","request":request}}).to_string(),
+            ))
+            .unwrap();
+    }
+    assert_eq!(
+        response(&mut socket, 1)["ok"]["response"],
+        json!({"response":"terminal_list","terminals":[]})
+    );
+    // Files admission reaches saved-workspace lookup, not capability_disabled.
+    assert_eq!(
+        response(&mut socket, 2)["ok"]["response"],
+        json!({"response":"refused","reason":{"reason":"workspace_unavailable"}})
+    );
+    drop(socket);
+    interrupt_and_wait(&mut web);
+}
+
+#[test]
 fn ui_reload_preserves_a_live_session_socket_and_rejects_an_invalid_replacement() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":ANSWER}}]}));
     let mut web = start(&fixture);

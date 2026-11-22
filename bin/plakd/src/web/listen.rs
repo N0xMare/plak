@@ -75,8 +75,7 @@ impl Drop for Listener {
 }
 
 impl Listener {
-    pub(crate) async fn bind(spec: &str, inherited: Option<OwnedFd>) -> CliResult<Self> {
-        let listen = Listen::parse(spec).map_err(CliFailure::new)?;
+    pub(super) async fn bind(listen: Listen, inherited: Option<OwnedFd>) -> CliResult<Self> {
         let (bound, file) = match inherited {
             Some(fd) => adopt(&listen, fd)?,
             None => bind(&listen).await?,

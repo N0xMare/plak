@@ -60,9 +60,6 @@ impl ProductSessions {
         idle_release: Option<std::time::Duration>,
         runtime: Option<tokio::runtime::Handle>,
     ) -> CliResult<Self> {
-        let tree = Arc::new(
-            crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?,
-        );
         let switches = crate::product_config::ProductConfig::console_switches(services.paths()?)
             .unwrap_or_else(|_| {
                 eprintln!(
@@ -77,6 +74,18 @@ impl ProductSessions {
                     web_terminal: false,
                 }
             });
+        Self::with_switches(services, idle_release, runtime, switches)
+    }
+
+    pub(super) fn with_switches(
+        services: &Services,
+        idle_release: Option<std::time::Duration>,
+        runtime: Option<tokio::runtime::Handle>,
+        switches: plakd_wire_types::console::ConfiguredSwitches,
+    ) -> CliResult<Self> {
+        let tree = Arc::new(
+            crate::store::tree::open_tree_store(services.paths()?).map_err(CliFailure::new)?,
+        );
         Ok(Self {
             console: super::console::Console::new(
                 services.paths()?.clone(),
@@ -97,10 +106,6 @@ impl ProductSessions {
             tree,
             idle_reason: Mutex::new(None),
         })
-    }
-
-    pub(super) fn console_switches(&self) -> plakd_wire_types::console::ConfiguredSwitches {
-        self.console.switches()
     }
 
     pub(super) fn serve_directory(&mut self, runtime: &tokio::runtime::Handle) -> CliResult<()> {
@@ -1343,7 +1348,7 @@ mod tests {
         std::fs::write(paths.config_file(), "[invalid").unwrap();
         let product = ProductSessions::new(&services, None, None).unwrap();
         assert_eq!(
-            product.console_switches(),
+            product.console.switches(),
             plakd_wire_types::console::ConfiguredSwitches {
                 web_accounts_read: false,
                 web_config_read: false,

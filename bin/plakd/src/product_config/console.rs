@@ -163,15 +163,20 @@ impl ProductConfig {
         paths: &crate::home::paths::PlakPaths,
     ) -> Result<plakd_wire_types::console::ConfiguredSwitches, String> {
         // Startup policy must not enumerate or admit unrelated templates.
-        let config = Self::load_config_file(&paths.config_file())?;
-        super::web::validate_switches(&config)?;
+        Self::load_home_file(paths)?.configured_console_switches()
+    }
+
+    pub(crate) fn configured_console_switches(
+        &self,
+    ) -> Result<plakd_wire_types::console::ConfiguredSwitches, String> {
+        super::web::validate_switches(self)?;
         Ok(plakd_wire_types::console::ConfiguredSwitches {
-            web_accounts_read: config.web_accounts_read,
-            web_config_read: config.web_config_read,
-            web_credentials_write: config.web_credentials_write,
-            web_config_write: config.web_config_write,
-            web_files_read: config.web_files_read,
-            web_terminal: config.web_terminal,
+            web_accounts_read: self.web_accounts_read,
+            web_config_read: self.web_config_read,
+            web_credentials_write: self.web_credentials_write,
+            web_config_write: self.web_config_write,
+            web_files_read: self.web_files_read,
+            web_terminal: self.web_terminal,
         })
     }
 

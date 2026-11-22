@@ -19,8 +19,10 @@ mod listen;
 mod socket;
 mod ui;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use plakd_wire_types::console::ConfiguredSwitches;
 use plakous_hosted::error::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::SessionHost;
 
@@ -33,16 +35,42 @@ use listen::Listen;
 pub(crate) use listen::Listener;
 
 pub(crate) fn preflight(services: &Services, args: &crate::command::HostWeb) -> CliResult<()> {
-    let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
-    let paths = services.paths()?;
-    let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
-    access(&listen, &config, args.dev_login.clone())?;
-    load_ui(
-        args.ui.as_deref(),
-        ProductConfig::console_switches(paths).map_err(CliFailure::new)?,
-    )?;
-    let _ = auth::CookieKey::load(paths)?;
+    let policy = WebPolicy::load(services, args)?;
+    load_ui(policy.ui.as_deref(), policy.switches)?;
+    let _ = auth::CookieKey::load(services.paths()?)?;
     Ok(())
+}
+
+/// The home-only listener and capability policy captured before serving.
+pub(crate) struct WebPolicy {
+    listen: Listen,
+    access: WebAccess,
+    ui: Option<PathBuf>,
+    pub(crate) switches: ConfiguredSwitches,
+}
+
+impl WebPolicy {
+    pub(crate) fn load(services: &Services, args: &crate::command::HostWeb) -> CliResult<Self> {
+        let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
+        let config = ProductConfig::load_home_file(services.paths()?).map_err(CliFailure::new)?;
+        let access = access(&listen, &config, args.dev_login.clone())?;
+        let switches = config
+            .configured_console_switches()
+            .map_err(CliFailure::new)?;
+        Ok(Self {
+            listen,
+            access,
+            ui: args.ui.clone(),
+            switches,
+        })
+    }
+
+    pub(crate) async fn bind_listener(
+        &self,
+        inherited: Option<std::os::fd::OwnedFd>,
+    ) -> CliResult<Listener> {
+        Listener::bind(self.listen.clone(), inherited).await
+    }
 }
 
 /// What every request to the endpoint shares.
@@ -63,29 +91,24 @@ pub(crate) struct WebEndpoint {
 }
 
 impl WebEndpoint {
-    /// Binds the endpoint `args` name for `host`, in the caller's runtime.
+    /// Composes the endpoint around the host's bound or inherited listener.
     ///
     /// # Errors
     ///
-    /// A listener that is not private or cannot be bound, `[web]` keys that
-    /// do not admit anyone, a UI directory without its CSP, or a cookie key
-    /// that cannot be read or made.
+    /// An invalid UI build or a cookie key that cannot be read or made.
     pub(crate) fn new(
         services: &Services,
-        args: &crate::command::HostWeb,
+        policy: WebPolicy,
         host: Arc<SessionHost<PlakExtension>>,
         stop: StopProbe,
         reload: tokio::signal::unix::Signal,
-        console_switches: plakd_wire_types::console::ConfiguredSwitches,
         listener: Arc<Listener>,
     ) -> CliResult<Self> {
-        let paths = services.paths()?;
-        let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
-        let access = access(listener.address(), &config, args.dev_login.clone())?;
-        // Capture the same immutable switches used by host enforcement and
-        // welcome; rereading config here must not weaken the UI's CSP.
-        let ui = load_ui(args.ui.as_deref(), console_switches)?;
-        let gate = auth::Gate::new(access, auth::CookieKey::load_or_create(paths)?);
+        let ui = load_ui(policy.ui.as_deref(), policy.switches)?;
+        let gate = auth::Gate::new(
+            policy.access,
+            auth::CookieKey::load_or_create(services.paths()?)?,
+        );
         Ok(Self {
             listener,
             reload,
@@ -132,7 +155,7 @@ impl WebEndpoint {
 
 fn load_ui(
     root: Option<&std::path::Path>,
-    console_switches: plakd_wire_types::console::ConfiguredSwitches,
+    console_switches: ConfiguredSwitches,
 ) -> CliResult<Option<ui::Builds>> {
     let console = console_switches.web_accounts_read
         || console_switches.web_config_read

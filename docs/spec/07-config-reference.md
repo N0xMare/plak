@@ -348,6 +348,15 @@ repository can never grant web access.
 | `gateway.key_file` | string | `(unset)` | absolute path; mode 0600; home-scoped; host restart required | The caller key file for a configured gateway address. A tcp address defaults to the home secrets gateway.key; a unix address sends a key only when this is set, and a same-UID unix peer without one is the local administrator. Captured at host startup. |
 | `gateway.allow_non_tailnet` | bool | `false` | true or false; home-scoped; host restart required | Admit a tcp gateway address outside loopback and the tailnet ranges. Default false. Captured at host startup. |
 
+The web listener and its capability switches come from one startup read of
+the home's `config.toml`, not the current project's effective configuration.
+`files_read` and `terminal` can each be enabled alone; neither requires an
+account or configuration capability. When any console capability is enabled,
+a served UI must satisfy the enforced CSP in chapter 04 §2.10. A terminal UI
+can include `'wasm-unsafe-eval'` in its script policy only with `web.terminal`
+enabled. Use a compliant build or omit `--ui` for a headless endpoint.
+`SIGUSR1` reloads UI files and CSP, not the home switches.
+
 On Linux, the socket written by `plakd host install` is
 `/run/user/<uid>/plak/gateway.sock`, matching systemd's `%t` regardless of
 the installer's environment.

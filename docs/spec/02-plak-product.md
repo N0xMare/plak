@@ -5567,7 +5567,12 @@ does not inherit another connection's pending answers.
   `http://127.0.0.1:<port>`. The host binds it after its control socket, and
   a listener that cannot be bound stops the host before it serves; it prints
   `plakd host: web on <listener>` before its start line, and stops serving
-  when the host stops. A connection is a client of the host's session
+  when the host stops. Startup reads listener and capability policy from
+  the same home `config.toml` snapshot, without resolving workspace
+  configuration or templates. That policy governs the UI CSP, welcome and
+  capability enforcement. An invalid home web policy refuses startup;
+  an invalid project file can still refuse operations that use that project.
+  A connection is a client of the host's session
   directory (§4.4), as one on the control socket is: its `welcome` names no
   session, it finds its sessions with `list_sessions` or `watch_sessions`,
   creates one with `new_session`, and attaches a row's node, which opens a
@@ -5625,7 +5630,14 @@ does not inherit another connection's pending answers.
   public, max-age=31536000, immutable`, everything else `no-cache`. Every
   asset can use a precompressed `.br` or `.gz` sibling within the same
   build caps, selected by `Accept-Encoding` with `Vary: Accept-Encoding`.
-  The original asset supplies the media type. The index (including the
+  The host sends the selected sidecar bytes unchanged with `Content-Encoding:
+  br` or `gzip` (`x-gzip` is an alias in requests); the original asset
+  supplies the media type and cache policy. The build must supply sidecars
+  that decode to the original bytes, including for integrity-checked assets.
+  With no acceptable sidecar, the host sends the original if accepted, or
+  `406` with `Vary: Accept-Encoding` if identity is also excluded. The host
+  does not compress at request time. `version.json` is an ordinary
+  `no-cache` asset when present. The index (including the
   route fallback) and the build's service worker have representation-specific
   strong ETags; matching `If-None-Match` on GET or HEAD returns a bodyless
   `304` without content type or encoding headers. Every

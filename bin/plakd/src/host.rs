@@ -159,16 +159,26 @@ fn serve_host(
         runtime.shutdown_timeout(Duration::from_secs(1));
         return replacement.exec(paths);
     }
-    let (listeners, environment) =
-        HostListeners::bind(paths, command, &runtime, &ownership.state, inherited)?;
+    let web_policy = command
+        .web
+        .as_ref()
+        .map(|args| crate::web::WebPolicy::load(services, args))
+        .transpose()?;
+    let (listeners, environment) = HostListeners::bind(
+        paths,
+        web_policy.as_ref(),
+        &runtime,
+        &ownership.state,
+        inherited,
+    )?;
     store_revisions::upgrade_stopped(paths, stores_pending, &ownership.state)?;
     let environment = environment.unwrap_or_else(environment::HostEnvironment::capture);
     let opened = open_host(
         services,
-        command,
+        command.idle_release,
         &runtime,
         HostSignals { reload, stop },
-        listeners.web.as_ref(),
+        web_policy.zip(listeners.web.as_ref()),
         &environment,
         &binary,
     )?;
@@ -237,7 +247,7 @@ struct HostListeners {
 impl HostListeners {
     fn bind(
         paths: &crate::home::paths::PlakPaths,
-        command: &HostCommand,
+        web_policy: Option<&crate::web::WebPolicy>,
         runtime: &tokio::runtime::Runtime,
         state: &lock::HostLock,
         inherited: Option<InheritedListeners>,
@@ -256,10 +266,8 @@ impl HostListeners {
             None => socket::Bound::bind(&paths.host_socket(), state)?,
         };
         drop(entered);
-        let web = match (&command.web, web) {
-            (Some(args), fd) => Some(Arc::new(
-                runtime.block_on(crate::web::Listener::bind(&args.listen, fd))?,
-            )),
+        let web = match (web_policy, web) {
+            (Some(policy), fd) => Some(Arc::new(runtime.block_on(policy.bind_listener(fd))?)),
             (None, None) => None,
             (None, Some(_)) => return Err(CliFailure::new("unexpected inherited web listener")),
         };
@@ -412,10 +420,10 @@ struct OpenedHost {
 
 fn open_host(
     services: &Services,
-    command: &HostCommand,
+    idle_release: Option<Duration>,
     runtime: &tokio::runtime::Runtime,
     signals: HostSignals,
-    web_listener: Option<&Arc<crate::web::Listener>>,
+    web: Option<(crate::web::WebPolicy, &Arc<crate::web::Listener>)>,
     environment: &environment::HostEnvironment,
     binary: &str,
 ) -> CliResult<OpenedHost> {
@@ -423,25 +431,21 @@ fn open_host(
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
     let (services, local) = upgrade::prepare_host(&services)?;
-    let mut sessions = sessions::ProductSessions::new(
-        &services,
-        command.idle_release,
-        Some(runtime.handle().clone()),
-    )?;
+    let session_runtime = Some(runtime.handle().clone());
+    let mut sessions = match &web {
+        Some((policy, _)) => sessions::ProductSessions::with_switches(
+            &services,
+            idle_release,
+            session_runtime,
+            policy.switches,
+        ),
+        None => sessions::ProductSessions::new(&services, idle_release, session_runtime),
+    }?;
     sessions.serve_directory(runtime.handle())?;
-    let console_switches = sessions.console_switches();
     let product = Arc::new(sessions);
     let host = SessionHost::new_shared(product.clone(), binary.to_owned(), terminals.generation());
     terminals.serve(&host, runtime.handle())?;
-    let (web, idle_reload) = compose_web(
-        runtime,
-        &services,
-        command,
-        &host,
-        signals,
-        console_switches,
-        web_listener,
-    )?;
+    let (web, idle_reload) = compose_web(runtime, &services, web, &host, signals)?;
     let entered = runtime.enter();
     let upgrade_listener = upgrade::bind(paths)?;
     drop(entered);
@@ -633,23 +637,20 @@ fn stop_listeners(
 fn compose_web(
     runtime: &tokio::runtime::Runtime,
     services: &Services,
-    command: &HostCommand,
+    web: Option<(crate::web::WebPolicy, &Arc<crate::web::Listener>)>,
     host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
     signals: HostSignals,
-    switches: plakd_wire_types::console::ConfiguredSwitches,
-    listener: Option<&Arc<crate::web::Listener>>,
 ) -> CliResult<(
     Option<crate::web::WebEndpoint>,
     Option<tokio::task::JoinHandle<()>>,
 )> {
-    if let (Some(args), Some(listener)) = (&command.web, listener) {
+    if let Some((policy, listener)) = web {
         let endpoint = crate::web::WebEndpoint::new(
             services,
-            args,
+            policy,
             Arc::clone(host),
             signals.stop,
             signals.reload,
-            switches,
             Arc::clone(listener),
         )?;
         eprintln!("plakd host: web on {}", endpoint.listener());

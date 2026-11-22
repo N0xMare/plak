@@ -119,9 +119,14 @@ impl Ui {
             ));
         }
         if console && !csp::console_policy(&file.header, terminal) {
-            return Err(CliFailure::new(
-                "plakd host --web: console reads require a restrictive enforced CSP: scripts without unsafe-inline/eval, connect-src 'self', require-trusted-types-for 'script', frame-ancestors 'none', object-src 'none', base-uri 'none'",
-            ));
+            let wasm = if terminal {
+                " Terminal UI builds may add 'wasm-unsafe-eval' to script-src."
+            } else {
+                " A build using 'wasm-unsafe-eval' needs web.terminal enabled."
+            };
+            return Err(CliFailure::new(format!(
+                "plakd host --web: enabled [web] console capabilities (including files_read and terminal) require an enforced CSP in csp.json: no unsafe-inline or unsafe-eval, scripts restricted to self/none/hashes, connect-src 'self', require-trusted-types-for 'script', frame-ancestors 'none', object-src 'none', base-uri 'none'.{wasm} Use a compliant UI build or omit --ui to serve only /wire."
+            )));
         }
         let value = |text: &str| {
             HeaderValue::from_str(text).map_err(|_| {

@@ -425,6 +425,60 @@ async fn precompressed_assets_and_revalidation_use_the_selected_representation()
     );
 }
 
+#[tokio::test]
+async fn negotiates_asset_bytes_and_falls_back_without_compressing() {
+    use http_body_util::BodyExt as _;
+    // The two encodings of the fixture's original b"asset".
+    const BR: &[u8] = b"\x0f\x02\x80asset\x03";
+    const GZIP: &[u8] =
+        b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xffK,.N-\x01\x00\\Z\xaf\x02\x05\x00\x00\x00";
+    const VERSION: &str = r#"{"version":"test-build"}"#;
+    let dir = ui_dir();
+    std::fs::write(dir.path().join("_app/immutable/a.js.br"), BR).unwrap();
+    std::fs::write(dir.path().join("_app/immutable/a.js.gz"), GZIP).unwrap();
+    std::fs::write(dir.path().join("version.json"), VERSION).unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(outside.path(), GZIP).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("version.json.gz")).unwrap();
+    let ui = Ui::load(dir.path(), false, false).unwrap();
+    let asset = "/_app/immutable/a.js";
+    for (accept, coding, bytes) in [
+        (None, None, b"asset".as_slice()),
+        (Some(""), None, b"asset".as_slice()),
+        (Some("gzip, BR"), Some("br"), BR),
+        (Some("br;q=0.2, gzip;q=0.9"), Some("gzip"), GZIP),
+        (Some("br;q=0, *;q=0.5"), Some("gzip"), GZIP),
+        (Some("X-GZIP"), Some("gzip"), GZIP),
+        (Some("br;q=0.5, identity;q=1"), None, b"asset".as_slice()),
+    ] {
+        let headers = accept.map(|value| [("accept-encoding", value)]);
+        let response = get(&ui, asset, headers.as_ref().map_or(&[][..], |h| &h[..]));
+        assert_eq!(response.status(), 200, "{accept:?}");
+        assert_eq!(header(&response, "content-encoding"), coding, "{accept:?}");
+        assert_eq!(header(&response, "vary"), Some("Accept-Encoding"));
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            bytes
+        );
+    }
+    let version = get(&ui, "/version.json", &[("accept-encoding", "br, gzip")]);
+    assert_eq!(header(&version, "content-encoding"), None);
+    assert_eq!(header(&version, "vary"), Some("Accept-Encoding"));
+    assert_eq!(header(&version, "cache-control"), Some("no-cache"));
+    assert_eq!(header(&version, "content-type"), Some("application/json"));
+    assert_eq!(
+        version.into_body().collect().await.unwrap().to_bytes(),
+        VERSION
+    );
+    let unacceptable = get(
+        &ui,
+        "/version.json",
+        &[("accept-encoding", "gzip, identity;q=0")],
+    );
+    assert_eq!(unacceptable.status(), 406);
+    assert_eq!(header(&unacceptable, "vary"), Some("Accept-Encoding"));
+}
+
 /// A worker registered from any path but /service-worker.js gets the kill
 /// switch and Clear-Site-Data; the real worker is served from the build.
 #[test]

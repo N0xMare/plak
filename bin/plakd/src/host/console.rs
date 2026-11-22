@@ -283,6 +283,7 @@ impl Console {
         })
     }
 
+    #[cfg(test)]
     pub(super) const fn switches(&self) -> ConfiguredSwitches {
         self.switches
     }
