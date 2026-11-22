@@ -334,15 +334,15 @@ fn assert_changed_image_rollback(legacy: bool) {
     let mut successor = upgrade(&web, &login);
     let restored = directory(&mut successor);
     assert_ne!(restored["host_generation"], old["host_generation"]);
-    assert_eq!(restored["binary_id"], binary);
-    if !legacy {
+    let holder = std::fs::read_to_string(paths.host_lock()).unwrap();
+    if legacy {
+        assert_eq!(holder.split_whitespace().next(), Some(pid.as_str()));
+    } else {
+        assert_eq!(restored["binary_id"], binary);
         assert_eq!([inode(&control_path), inode(&web.socket)], sockets);
+        assert_eq!(holder.trim(), format!("{pid} {binary}"));
     }
     assert!(web.child.as_mut().unwrap().try_wait().unwrap().is_none());
-    assert_eq!(
-        std::fs::read_to_string(paths.host_lock()).unwrap().trim(),
-        format!("{pid} {binary}")
-    );
     assert_eq!(read_control(&mut coordinator(&fixture))["binary"], binary);
     let _new_session = create(&mut successor);
     interrupt_and_wait(&mut web);
@@ -361,7 +361,7 @@ fn destination_without_handoff_capability_rebinds_and_keeps_the_session() {
     attach(&mut source, &root, 1);
     let candidate = replacement_image(&fixture).canonicalize().unwrap();
     let binary = identify(&mut image_command(&fixture, &candidate));
-    assert_ne!(old["binary_id"], binary);
+    assert_ne!(identify(&mut fixture.command()), binary);
     let mut control = prepare(&fixture, &candidate, &binary);
     ready(&mut control);
     wait_line(&web, "waiting at paired exec gate");
@@ -380,7 +380,8 @@ fn destination_without_handoff_capability_rebinds_and_keeps_the_session() {
     let mut successor = upgrade(&web, &login);
     let welcome = directory(&mut successor);
     assert_ne!(welcome["host_generation"], old["host_generation"]);
-    assert_eq!(welcome["binary_id"], binary);
+    assert_eq!(welcome["state_key"], old["state_key"]);
+    // Legacy Welcome can precede the cold image hash. The coordinator waits for it.
     assert_eq!(read_control(&mut coordinator(&fixture))["binary"], binary);
     attach(&mut successor, &root, 2);
     interrupt_and_wait(&mut web);
