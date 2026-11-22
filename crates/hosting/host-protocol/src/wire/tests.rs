@@ -542,14 +542,15 @@ fn snapshot(rows: usize, text: usize) -> PresentationSnapshot {
 /// refused.
 #[test]
 fn a_large_snapshot_travels_as_pages() {
-    let whole = snapshot(5, 3 * 1024 * 1024);
+    let whole = snapshot(30, 512 * 1024);
     whole.validate().unwrap();
     let pages = page_snapshot(whole.clone(), 4).unwrap();
-    assert!(pages.len() > 1);
+    assert_eq!(pages.len(), 30);
     let mut assembler = SnapshotAssembler::default();
     let mut rebuilt = None;
     for page in pages.clone() {
-        assert!(encode_line(&Host::Snapshot(page.clone())).is_ok());
+        let line = encode_line(&Host::Snapshot(page.clone())).unwrap();
+        assert!(line.len() <= PAGE_BUDGET_BYTES);
         rebuilt = assembler.push(page).unwrap();
     }
     assert_eq!(rebuilt, Some(whole));
@@ -558,6 +559,9 @@ fn a_large_snapshot_travels_as_pages() {
     let small = page_snapshot(snapshot(2, 10), 4).unwrap();
     assert_eq!(small.len(), 1);
     assert!(small[0].last);
+    let indivisible = page_snapshot(snapshot(1, 3 * 1024 * 1024), 4).unwrap();
+    assert_eq!(indivisible.len(), 1);
+    assert!(encode_line(&Host::Snapshot(indivisible.into_iter().next().unwrap())).is_ok());
 }
 
 fn chunk(id: &str, len: usize) -> BlobChunk {

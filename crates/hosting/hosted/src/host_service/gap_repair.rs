@@ -34,8 +34,8 @@ impl<P: ProtocolExtension> HostService<P> {
                     match (&scope, &snapshot.baseline) {
                         (TranscriptScope::Root, Some((baseline, patches)))
                             if !held.fresh.contains(&scope)
-                                && 1 + patches.len()
-                                    <= held.capacity(self.capacity).saturating_sub(
+                                && patches.len()
+                                    < held.capacity(self.capacity).saturating_sub(
                                         held.queue.len().saturating_sub(held.snapshot_held),
                                     ) =>
                         {

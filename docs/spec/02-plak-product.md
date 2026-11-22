@@ -5573,7 +5573,7 @@ does not inherit another connection's pending answers.
   optional trailing newline, at most 16 MiB, enforced while reading; a
   binary message, a message past the cap, no hello within 10 s, more than 20
   messages a second (burst 60), a pong 30 s late (the host pings every 15
-  s), or a client more than 8192 frames or 64 MiB behind ends
+  s), or an outbox over 8192 slots or 64 MiB of non-snapshot bytes ends
   that connection with a close code and nothing else. `/wire` upgrades a
   `GET` only. Sending a pending batch or ping detaches only that client
   after 10 s without any bytes accepted by the transport, or after a hard

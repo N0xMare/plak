@@ -154,7 +154,7 @@ fn patch_pressure_asks_for_a_fresh_revision_without_ending_the_attachment() {
         service.observe(patch(revision));
     }
     assert!(service.attached(id));
-    assert!(service.take(id).is_empty());
+    assert_eq!(service.take(id), [] as [Outbound<Core>; 0]);
     assert_eq!(resyncs(&intents, &TranscriptScope::Root), 1);
     let snapshot = Observation::PresentationSnapshot(PresentationSnapshot::empty(5));
     service.observe(snapshot.clone());
