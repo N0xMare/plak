@@ -118,7 +118,23 @@ class ReferenceClientTests(unittest.TestCase):
                     "request_id": str(uuid.uuid4()),
                 },
             )
-            return answer["session"]
+            session = answer["session"]
+            # Creation is durable before its directory row is projected.
+            # Start the one-shot client examples only after that publication.
+            watch = client.request(2, {"op": "watch_sessions", "include_archived": False})
+            self.assertEqual(watch["answer"], "watching")
+
+            def published(frame):
+                return (
+                    frame.get("frame") == "directory"
+                    and frame.get("attachment") == watch["attachment"]
+                    and any(row["session"] == session for row in frame["rows"])
+                )
+
+            if not any(published(frame) for frame in client.frames):
+                while not published(client.receive()):
+                    pass
+            return session
 
     def test_socket_driver_reads_a_real_attach_snapshot_without_a_turn(self):
         session = self.create_session()

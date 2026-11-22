@@ -59,7 +59,10 @@ options in the schema. Creating a session is an explicit operation, not a
 side effect of connecting. Supply a UUID `request_id`, the selected `runner`
 object and absolute `workspace` in the request's `new_session` operation.
 Reuse that UUID if its answer is lost; do not create another session to resolve
-an unknown outcome. The `created` answer identifies the session to attach.
+an unknown outcome. The `created` answer supplies the node for an immediate
+attach. Directory reads reflect a background projection: a list immediately
+after creation may not include the row yet. Watch the directory if you need
+its published row.
 
 Each frame is one newline-terminated JSON object on a socket or stdio stream.
 Send hello first:

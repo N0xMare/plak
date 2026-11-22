@@ -1223,7 +1223,7 @@ fn host_crash_cuts_of_create_materialize_and_release_recover() {
         else {
             panic!("cut {store}:{store_ordinal}: the replay made no session");
         };
-        let rows = client.rows(2);
+        let rows = client.rows_until(2, |rows| !rows.is_empty());
         assert_eq!(rows.len(), 1, "cut {store}:{store_ordinal}: {rows:?}");
         assert_eq!(
             rows[0].hosted_elsewhere, None,
