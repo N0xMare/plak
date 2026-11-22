@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::CliResult;
 use crate::shipping_artifact::{check, fail};
+use crate::{CliFailure, CliResult};
 
 use super::artifacts::Artifacts;
 use super::evidence::{self, Cohort, Log, Pending, Row};
@@ -14,6 +14,7 @@ use super::protocol::{
     Canary, ClientOp, Connection, DeployRunnerWarning, Health, HostImages, HostOp, Observed,
     RunnerLink, RunnerOp, StageIdentity,
 };
+use super::ssh::SshFailure;
 use super::{Halt, Report, Result};
 
 mod gateway;
@@ -153,14 +154,12 @@ impl<F: Fleet> Deploy<'_, F> {
             }
             let found = match self.observe_runner(runner) {
                 Ok(found) => found,
-                Err(error)
-                    if prior.is_none()
-                        && super::ssh::unreachable(&error)
-                        && unreferenced(warnings, &runner.id) =>
+                Err(SshFailure::Unavailable(_))
+                    if prior.is_none() && unreferenced(warnings, &runner.id) =>
                 {
                     continue;
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(CliFailure::from(error).into()),
             };
             self.stage_allowed(found.production_history)?;
             targets.accounts.insert(found.account.clone());
@@ -393,14 +392,16 @@ impl<F: Fleet> Deploy<'_, F> {
                 .filter(|runner| plan.runner_changes.contains(&runner.id))
             {
                 let artifact = self.artifacts.image(runner.node.platform);
-                self.fleet.runner(
-                    runner,
-                    RunnerOp::Stage {
-                        manifest: artifact.raw.clone(),
-                        manifest_sha256: artifact.pin.clone(),
-                        flavor: artifact.manifest.flavor,
-                    },
-                )?;
+                self.fleet
+                    .runner(
+                        runner,
+                        RunnerOp::Stage {
+                            manifest: artifact.raw.clone(),
+                            manifest_sha256: artifact.pin.clone(),
+                            flavor: artifact.manifest.flavor,
+                        },
+                    )
+                    .map_err(CliFailure::from)?;
             }
             log.record(&self.intent, "stage_runners", &())?;
         }
@@ -514,7 +515,10 @@ impl<F: Fleet> Deploy<'_, F> {
         }
     }
 
-    fn observe_runner(&self, runner: &Runner) -> CliResult<super::protocol::RunnerObserved> {
+    fn observe_runner(
+        &self,
+        runner: &Runner,
+    ) -> std::result::Result<super::protocol::RunnerObserved, SshFailure> {
         fleet::runner(
             &self.fleet,
             runner,
@@ -547,14 +551,16 @@ impl<F: Fleet> Deploy<'_, F> {
             .filter(|runner| plan.runner_changes.contains(&runner.id))
         {
             report.put("step", &format!("runner_link_{}", runner.id))?;
-            self.fleet.runner(
-                runner,
-                RunnerOp::Advance {
-                    ticket: pending.ticket,
-                    candidate: self.artifacts.image(runner.node.platform).candidate(),
-                    source: pending.runners[&runner.id].link.clone(),
-                },
-            )?;
+            self.fleet
+                .runner(
+                    runner,
+                    RunnerOp::Advance {
+                        ticket: pending.ticket,
+                        candidate: self.artifacts.image(runner.node.platform).candidate(),
+                        source: pending.runners[&runner.id].link.clone(),
+                    },
+                )
+                .map_err(CliFailure::from)?;
         }
         Ok(())
     }
@@ -564,7 +570,9 @@ impl<F: Fleet> Deploy<'_, F> {
             let Some(source) = plan.runners.get(&runner.id) else {
                 continue;
             };
-            let found = self.observe_runner(runner).map_err(link_lost)?;
+            let found = self
+                .observe_runner(runner)
+                .map_err(|error| link_lost(error.into()))?;
             self.stage_allowed(found.production_history)?;
             if found.link != self.runner_destination(runner) || found.account != source.account {
                 return Err(Halt::reconcile(
@@ -748,8 +756,13 @@ impl<F: Fleet> Deploy<'_, F> {
                     source: old.clone(),
                 },
             )
-            .map_err(link_lost)?;
-        if self.observe_runner(runner).map_err(link_lost)?.link != *old {
+            .map_err(|error| link_lost(error.into()))?;
+        if self
+            .observe_runner(runner)
+            .map_err(|error| link_lost(error.into()))?
+            .link
+            != *old
+        {
             return Err(Halt::reconcile(
                 "restored runner link did not match the recorded source",
             ));

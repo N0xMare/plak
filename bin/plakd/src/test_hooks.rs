@@ -161,16 +161,50 @@ pub(crate) fn upgrade_input_limit() -> Option<String> {
 }
 
 pub(crate) fn upgrade_runner_revision() -> Option<String> {
-    let image = hook_environment("PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE")?;
-    (std::env::current_exe().ok()?.as_os_str() == image)
-        .then(|| std::env::var("PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION").ok())
-        .flatten()
+    [
+        (
+            "PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE",
+            "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
+        ),
+        (
+            "PLAK_TEST_HOST_UPGRADE_RUNNER_NEXT_IMAGE",
+            "PLAK_TEST_HOST_UPGRADE_RUNNER_NEXT_REVISION",
+        ),
+    ]
+    .into_iter()
+    .find_map(|(image, revision)| {
+        upgrade_runner_image(image)
+            .then(|| std::env::var(revision).ok())
+            .flatten()
+    })
+}
+
+pub(crate) fn upgrade_runner_protocol() -> Option<u32> {
+    upgrade_runner_image("PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE").then(|| {
+        std::env::var("PLAK_TEST_HOST_UPGRADE_RUNNER_PROTOCOL")
+            .ok()?
+            .parse()
+            .ok()
+    })?
+}
+
+fn upgrade_runner_image(name: &str) -> bool {
+    hook_environment(name)
+        .and_then(|image| PathBuf::from(image).canonicalize().ok())
+        .is_some_and(|image| {
+            std::env::current_exe()
+                .and_then(|path| path.canonicalize())
+                .is_ok_and(|path| path == image)
+        })
 }
 
 pub(crate) fn upgrade_runner_environment() -> Vec<(&'static str, std::ffi::OsString)> {
     [
         "PLAK_TEST_HOST_UPGRADE_RUNNER_IMAGE",
         "PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION",
+        "PLAK_TEST_HOST_UPGRADE_RUNNER_PROTOCOL",
+        "PLAK_TEST_HOST_UPGRADE_RUNNER_NEXT_IMAGE",
+        "PLAK_TEST_HOST_UPGRADE_RUNNER_NEXT_REVISION",
     ]
     .into_iter()
     .filter_map(|name| hook_environment(name).map(|value| (name, value)))

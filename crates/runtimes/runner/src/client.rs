@@ -183,6 +183,7 @@ enum InspectionAnswer {
 
 struct State {
     sender: Option<mpsc::UnboundedSender<HostFrame>>,
+    carry_lines: bool,
     connection: u64,
     /// Ends the current connection: a newer one, or a silent link.
     closer: CancellationToken,
@@ -418,6 +419,7 @@ impl RunnerClient {
                 next: AtomicU64::new(0),
                 state: Mutex::new(State {
                     sender: None,
+                    carry_lines: false,
                     connection: 0,
                     closer: CancellationToken::new(),
                     last_heard: Instant::now(),
@@ -538,6 +540,20 @@ impl RunnerClient {
     /// A failed send is `NotSent`; a lost or unanswered read is
     /// `ReadInterrupted`. A runner refusal remains `Unavailable`.
     pub async fn lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
+        self.inspect_lines(false).await
+    }
+
+    /// Includes retained-job recovery candidates when the same build
+    /// advertises that inventory. Otherwise reads the native lines only.
+    ///
+    /// # Errors
+    ///
+    /// As for [Self::lines]. An incomplete retained inventory is a refusal.
+    pub async fn recovery_lines(&self) -> Result<Vec<LineStatus>, RunnerFailure> {
+        self.inspect_lines(true).await
+    }
+
+    async fn inspect_lines(&self, recovery: bool) -> Result<Vec<LineStatus>, RunnerFailure> {
         if self.inner.qualification {
             return Err(RunnerFailure::NotSent(
                 "qualification never inspects or sweeps lines".into(),
@@ -545,20 +561,30 @@ impl RunnerClient {
         }
         let request_id = self.inner.next_id("q");
         let (waiter, answer) = oneshot::channel();
-        lock(&self.inner.state)
-            .questions
-            .insert(request_id.clone(), waiter);
-        if !self.inner.send(HostFrame::Lines {
-            request_id: request_id.clone(),
-        }) {
+        {
             let mut state = lock(&self.inner.state);
-            state.questions.remove(&request_id);
-            if let Some(refusal) = &state.refusal {
-                return Err(RunnerFailure::Unavailable(format!(
-                    "the runner refused the inspection: {refusal:?}"
-                )));
+            let frame = if recovery && state.carry_lines {
+                HostFrame::CarryLines {
+                    request_id: request_id.clone(),
+                }
+            } else {
+                HostFrame::Lines {
+                    request_id: request_id.clone(),
+                }
+            };
+            if !state
+                .sender
+                .as_ref()
+                .is_some_and(|sender| sender.send(frame).is_ok())
+            {
+                if let Some(refusal) = &state.refusal {
+                    return Err(RunnerFailure::Unavailable(format!(
+                        "the runner refused the inspection: {refusal:?}"
+                    )));
+                }
+                return Err(RunnerFailure::NotSent("the runner is not connected".into()));
             }
-            return Err(RunnerFailure::NotSent("the runner is not connected".into()));
+            state.questions.insert(request_id.clone(), waiter);
         }
         if let Ok(Ok(lines)) = tokio::time::timeout(self.inner.windows.read, answer).await {
             return match lines? {
@@ -650,6 +676,11 @@ impl RunnerClient {
             state.closer.cancel();
             state.lose(|request| restarted || !replayable(request), restarted);
             state.instance.clone_from(&hello.instance);
+            state.carry_lines = !self.inner.bind.inspect
+                && hello.version == self.inner.bind.version
+                && hello.capabilities.iter().any(|capability| {
+                    capability == plakous_runner_protocol::capabilities::CARRY_LINES
+                });
             state.connection += 1;
             state.closer = closer.clone();
             state.last_heard = Instant::now();

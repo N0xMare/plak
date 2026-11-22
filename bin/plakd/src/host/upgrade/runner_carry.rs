@@ -109,7 +109,7 @@ pub(super) fn inspect(
             .filter(|client| client.is_connected())
             .map(|client| {
                 runtime.block_on(async {
-                    tokio::time::timeout(Duration::from_secs(5), client.lines()).await
+                    tokio::time::timeout(Duration::from_secs(5), client.recovery_lines()).await
                 })
             });
         let lines =
@@ -134,6 +134,9 @@ pub(super) fn inspect(
 }
 
 fn check_line(id: &str, line: &LineStatus, check: Check) -> CliResult<()> {
+    if check == Check::CrossKey && !line.adopted && line.owner.is_none() {
+        return Err(inspection_incomplete(id));
+    }
     if line.foreground && check != Check::BeforeDrain {
         return Err(blocked(&format!(
             "runner {id} line {} still has unpromoted foreground work; let it finish or promote it using the source build, then retry",

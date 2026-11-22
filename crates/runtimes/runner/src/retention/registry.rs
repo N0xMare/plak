@@ -143,6 +143,8 @@ impl Registry {
             if name == own.build.as_str() {
                 continue;
             }
+            let build = plakous_runner_protocol::retention::Id::try_from(name.to_owned())
+                .map_err(super::invalid)?;
             super::private_parent(&directory.path())?;
             for socket in std::fs::read_dir(directory.path())? {
                 let socket = socket?;
@@ -156,42 +158,32 @@ impl Registry {
                     continue;
                 };
                 if super::Codec::select(version, current).is_err() {
-                    super::check_socket(&std::fs::symlink_metadata(socket.path())?)?;
-                    match tokio::time::timeout(
-                        std::time::Duration::from_millis(250),
-                        tokio::net::UnixStream::connect(socket.path()),
-                    )
-                    .await
-                    {
-                        Ok(Err(error))
-                            if matches!(
-                                error.kind(),
-                                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-                            ) =>
-                        {
-                            continue;
-                        }
-                        _ => {
-                            return Err(super::invalid(
-                                "finish/consume/disown jobs through a retained compatible build, then retry",
-                            ));
-                        }
+                    let probe = async {
+                        super::check_socket(&std::fs::symlink_metadata(socket.path())?)?;
+                        tokio::time::timeout(
+                            std::time::Duration::from_millis(250),
+                            tokio::net::UnixStream::connect(socket.path()),
+                        )
+                        .await
+                        .map_err(super::timed_out)?
                     }
+                    .await;
+                    if probe.as_ref().is_err_and(|error| {
+                        discovery_endpoint_gone(&self.builds, build.as_str(), error)
+                    }) {
+                        continue;
+                    }
+                    return Err(super::invalid(
+                        "finish/consume/disown jobs through a retained compatible build, then retry",
+                    ));
                 }
-                let build = plakous_runner_protocol::retention::Id::try_from(
-                    directory.file_name().to_string_lossy().into_owned(),
-                )
-                .map_err(super::invalid)?;
                 let mut client =
                     match super::Client::inspect(&self.builds, &build, scope, version, current)
                         .await
                     {
                         Ok(client) => client,
                         Err(error)
-                            if matches!(
-                                error.kind(),
-                                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                            ) =>
+                            if discovery_endpoint_gone(&self.builds, build.as_str(), &error) =>
                         {
                             continue;
                         }
@@ -773,6 +765,14 @@ impl Registry {
             .map(|(origin, jobs)| (origin, jobs.len()))
             .collect()
     }
+}
+
+fn discovery_endpoint_gone(builds: &Path, build: &str, error: &io::Error) -> bool {
+    // A full listen queue can refuse connections to a live endpoint.
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused | io::ErrorKind::TimedOut
+    ) && super::loss::native_lock_free(builds, build)
 }
 
 fn original_key(host: &str, origin: &Origin) -> String {

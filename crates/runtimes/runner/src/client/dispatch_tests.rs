@@ -62,6 +62,7 @@ fn connected(journal: &Arc<ClosingJournal>) -> (RunnerClient, mpsc::UnboundedRec
             ids: "client".into(),
             next: AtomicU64::new(0),
             state: Mutex::new(State {
+                carry_lines: false,
                 sender: Some(sender),
                 connection: 1,
                 closer: journal.closer.clone(),

@@ -535,6 +535,7 @@ impl RunnerService {
             .collect();
         let mut needed = false;
         for ((host, line), sessions) in held {
+            let retention_only = lock(&self.inner.tables).retention_only(&host, &line);
             // Results can become terminal after the source disconnects but
             // before any successor gets far enough to CAS the line.
             let jobs = sessions.jobs();
@@ -557,7 +558,8 @@ impl RunnerService {
                     clock.last = Some(clock.last.map_or(observed, |last| last.max(observed)));
                 }
             }
-            let expired = !unsettled
+            let expired = retention_only
+                && !unsettled
                 && clock
                     .last
                     .is_some_and(|last| now.saturating_duration_since(last) >= TERMINAL_RETENTION);

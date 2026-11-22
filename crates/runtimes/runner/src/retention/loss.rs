@@ -48,15 +48,17 @@ pub(super) fn positive(builds: &Path, origin: &Origin, previous: Option<SocketId
     match SocketIdentity::observe(builds, origin) {
         Ok(current) => {
             previous.is_some_and(|old| old.device != current.device || old.inode != current.inode)
-                || previous.is_some() && native_lock_free(builds, origin)
+                || previous.is_some() && native_lock_free(builds, origin.build.as_str())
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => native_lock_free(builds, origin),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            native_lock_free(builds, origin.build.as_str())
+        }
         Err(_) => false,
     }
 }
 
-fn native_lock_free(builds: &Path, origin: &Origin) -> bool {
-    let path = builds.join(origin.build.as_str()).join(NATIVE_LOCK);
+pub(super) fn native_lock_free(builds: &Path, build: &str) -> bool {
+    let path = builds.join(build).join(NATIVE_LOCK);
     let Ok(metadata) = std::fs::symlink_metadata(&path) else {
         return false;
     };

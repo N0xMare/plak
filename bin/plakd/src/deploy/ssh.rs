@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
-use crate::CliResult;
 use crate::operator_process;
 use crate::shipping_artifact::{self as shipping, FileFacts, check, fail, io};
+use crate::{CliFailure, CliResult};
 
 use super::inventory::{Node, Platform, Stage};
 use super::protocol::{Call, MaintainerBuild, Reply, Request, VERSION};
@@ -66,6 +66,25 @@ pub(super) struct Ssh {
     stage: Stage,
 }
 
+pub(super) enum SshFailure {
+    Unavailable(CliFailure),
+    Rejected(CliFailure),
+}
+
+impl From<CliFailure> for SshFailure {
+    fn from(error: CliFailure) -> Self {
+        Self::Rejected(error)
+    }
+}
+
+impl From<SshFailure> for CliFailure {
+    fn from(error: SshFailure) -> Self {
+        match error {
+            SshFailure::Unavailable(cause) | SshFailure::Rejected(cause) => cause,
+        }
+    }
+}
+
 impl Ssh {
     pub(super) fn new(stage: Stage) -> CliResult<Self> {
         let operator_machine = Platform::native().map(machine_id).transpose()?;
@@ -75,7 +94,7 @@ impl Ssh {
         })
     }
 
-    pub(super) fn require_glibc(node: &Node, ceiling: Option<[u32; 3]>) -> CliResult<()> {
+    pub(super) fn require_glibc(node: &Node, ceiling: Option<[u32; 3]>) -> Result<(), SshFailure> {
         let Some(ceiling) = ceiling else {
             return Ok(());
         };
@@ -85,19 +104,22 @@ impl Ssh {
             tempfile::tempfile().map_err(io)?,
             super::timing::LOGIN,
         )
-        .map_err(|_| fail("cannot read target GLIBC version with getconf"))?;
+        .map_err(|error| match error {
+            SshFailure::Unavailable(_) => error,
+            SshFailure::Rejected(_) => fail("cannot read target GLIBC version with getconf").into(),
+        })?;
         let version = super::probe::text(&output)?
             .trim()
             .strip_prefix("glibc ")
             .ok_or_else(|| fail("target did not report a GNU libc version"))?;
         let version = crate::snapshot_install::maintainer::glibc_version(version)?;
-        check(
+        Ok(check(
             version >= ceiling,
             &format!(
                 "target GLIBC {}.{}.{} is older than required {}.{}.{}",
                 version[0], version[1], version[2], ceiling[0], ceiling[1], ceiling[2],
             ),
-        )
+        )?)
     }
 
     pub(super) fn call<T: DeserializeOwned>(
@@ -108,7 +130,7 @@ impl Ssh {
         maintainer_build: Option<MaintainerBuild>,
         files: &[Blob<'_>],
         timeout: u64,
-    ) -> CliResult<T> {
+    ) -> Result<T, SshFailure> {
         let mut input = tempfile::tempfile().map_err(io)?;
         let command = match image {
             Image::Installed(path, expected) => {
@@ -142,16 +164,17 @@ impl Ssh {
             .map_err(|_| fail("SSH target did not return a typed verdict"))?
         {
             Reply::Ok(value) => serde_json::from_value(value)
-                .map_err(|_| fail("SSH target returned unexpected facts")),
-            Reply::Error(reason) => Err(fail(&reason)),
+                .map_err(|_| fail("SSH target returned unexpected facts").into()),
+            Reply::Error(reason) => Err(fail(&reason).into()),
             Reply::ProtocolMismatch { supported, remedy } => Err(fail(&format!(
                 "deploy protocol mismatch: operator v{VERSION}, target v{supported}; {remedy}"
-            ))),
+            ))
+            .into()),
         }
     }
 }
 
-fn run(node: &Node, script: &str, mut input: File, timeout: u64) -> CliResult<Vec<u8>> {
+fn run(node: &Node, script: &str, mut input: File, timeout: u64) -> Result<Vec<u8>, SshFailure> {
     input.rewind().map_err(io)?;
     let mut command = operator_process::command("ssh".as_ref());
     command.args([
@@ -179,42 +202,39 @@ fn run(node: &Node, script: &str, mut input: File, timeout: u64) -> CliResult<Ve
         Duration::from_secs(timeout),
         shipping::LIMIT,
     )
-    .map_err(|_| fail("SSH exchange was unavailable or exceeded its bound"))?;
+    .map_err(|_| {
+        SshFailure::Unavailable(fail("SSH exchange was unavailable or exceeded its bound"))
+    })?;
     if !output.status.success() {
-        return Err(fail(&format!(
-            "SSH returned no bounded verdict ({})",
-            stderr_class(&output.stderr)
-        )));
+        let (name, class) = stderr_class(&output.stderr);
+        return Err(class(fail(&format!(
+            "SSH returned no bounded verdict ({name})"
+        ))));
     }
     Ok(output.stdout)
 }
 
-fn stderr_class(bytes: &[u8]) -> &'static str {
+fn stderr_class(bytes: &[u8]) -> (&'static str, fn(CliFailure) -> SshFailure) {
+    use SshFailure::{Rejected, Unavailable};
     let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    [
-        ("host key verification failed", "host_key"),
-        ("remote host identification has changed", "host_key"),
-        ("permission denied", "authentication"),
-        ("could not resolve hostname", "name_resolution"),
-        ("connection refused", "connection_refused"),
-        ("timed out", "timeout"),
-        ("broken pipe", "transport_lost"),
-        ("closed by remote host", "transport_lost"),
-    ]
-    .into_iter()
-    .find_map(|(needle, kind)| text.contains(needle).then_some(kind))
-    .unwrap_or("remote_command_or_transport")
-}
-
-pub(super) fn unreachable(error: &crate::CliFailure) -> bool {
-    matches!(
-        error.message(),
-        "SSH exchange was unavailable or exceeded its bound"
-            | "SSH returned no bounded verdict (name_resolution)"
-            | "SSH returned no bounded verdict (connection_refused)"
-            | "SSH returned no bounded verdict (timeout)"
-            | "SSH returned no bounded verdict (transport_lost)"
-    )
+    let patterns: [(_, _, fn(CliFailure) -> SshFailure); 8] = [
+        ("host key verification failed", "host_key", Rejected),
+        (
+            "remote host identification has changed",
+            "host_key",
+            Rejected,
+        ),
+        ("permission denied", "authentication", Rejected),
+        ("could not resolve hostname", "name_resolution", Unavailable),
+        ("connection refused", "connection_refused", Unavailable),
+        ("timed out", "timeout", Unavailable),
+        ("broken pipe", "transport_lost", Unavailable),
+        ("closed by remote host", "transport_lost", Unavailable),
+    ];
+    patterns
+        .into_iter()
+        .find_map(|(needle, name, class)| text.contains(needle).then_some((name, class)))
+        .unwrap_or(("remote_command_or_transport", Rejected))
 }
 
 pub(super) fn machine_id(platform: Platform) -> CliResult<String> {

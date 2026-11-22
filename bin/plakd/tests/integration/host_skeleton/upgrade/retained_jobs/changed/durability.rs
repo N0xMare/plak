@@ -5,6 +5,15 @@ use plakous_hosted::test_support_runner::HostCut;
 
 #[test]
 fn resume_after_each_handoff_boundary_preserves_original_jobs() {
+    handoff_cuts(false);
+}
+
+#[test]
+fn paired_resume_after_each_handoff_boundary_preserves_original_jobs() {
+    handoff_cuts(true);
+}
+
+fn handoff_cuts(paired: bool) {
     for (flag, cut) in [
         ("PLAK_TEST_HOST_UPGRADE_CUT", "before-answer"),
         ("PLAK_TEST_HOST_UPGRADE_CUT", "after-source-release"),
@@ -12,20 +21,40 @@ fn resume_after_each_handoff_boundary_preserves_original_jobs() {
         ("PLAK_TEST_HOST_READOPT_CUT", HostCut::Transfer.name()),
         ("PLAK_TEST_HOST_READOPT_CUT", HostCut::Terminals.name()),
     ] {
-        crash(flag, cut, false);
+        crash(flag, cut, false, paired);
     }
 }
 
 #[test]
 fn original_daemon_loss_on_both_sides_of_transfer_is_unknown_and_never_replays() {
-    crash("PLAK_TEST_HOST_UPGRADE_CUT", "after-source-release", true);
-    crash("PLAK_TEST_HOST_READOPT_CUT", HostCut::Transfer.name(), true);
+    daemon_loss(false);
 }
 
-fn crash(flag: &str, cut: &str, lose_original: bool) {
+#[test]
+fn paired_original_daemon_loss_on_both_sides_of_transfer_is_unknown_and_never_replays() {
+    daemon_loss(true);
+}
+
+fn daemon_loss(paired: bool) {
+    crash(
+        "PLAK_TEST_HOST_UPGRADE_CUT",
+        "after-source-release",
+        true,
+        paired,
+    );
+    crash(
+        "PLAK_TEST_HOST_READOPT_CUT",
+        HostCut::Transfer.name(),
+        true,
+        paired,
+    );
+}
+
+fn crash(flag: &str, cut: &str, lose_original: bool, paired: bool) {
     let Some(fixture) = fixture() else { return };
     let fixture = fixture.with_session_lease_seconds(2);
     let _cleanup = HomeHost(fixture.home());
+    let paired = paired.then(|| Paired::new(&fixture));
     let config = fixture.home().join("config.toml");
     let prior = std::fs::read_to_string(&config).unwrap();
     std::fs::write(
@@ -34,16 +63,27 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
     )
     .unwrap();
     let image = replacement_image(&fixture).canonicalize().unwrap();
-    let environment = candidate_environment(&image);
+    let mut environment = candidate_environment(&image).to_vec();
+    if let Some(paired) = &paired {
+        environment.push(("PATH", paired.path.clone()));
+    }
     let mut source_environment = environment.to_vec();
     source_environment.push((flag, cut.into()));
     source_script(&fixture);
     let mut host = start_env(&fixture, &[], &source_environment);
     runner::wait_local_runner_ready(&host);
     let mut client = Client::connect(&host);
-    let root = start_root(&fixture, &mut client, "local", None, 1);
+    let placement = paired.as_ref().map(|paired| {
+        runner::remote_ready(&mut client, &paired.id);
+        paired.id.as_str()
+    });
+    let root = start_root(&fixture, &mut client, "carried", placement, 1);
+    let lock = original_lock(&fixture, paired.as_ref());
     drop(client);
     destination_script(&fixture);
+    if let Some(paired) = &paired {
+        paired.advance(&image);
+    }
     let mut requester = TestChild::spawn(
         candidate_upgrade(&fixture, &image, &environment)
             .stdout(Stdio::null())
@@ -63,7 +103,6 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
         // Leave the original's stale socket in place, as SIGKILL would.
         let daemon = rustix::process::Pid::from_raw(root.foreground.1).unwrap();
         rustix::process::kill_process(daemon, rustix::process::Signal::KILL).unwrap();
-        let lock = local_runner_root(&fixture.home()).join("run/r.lock");
         let lock = std::fs::File::options().write(true).open(lock).unwrap();
         let deadline = Instant::now() + WAIT;
         loop {
@@ -79,14 +118,14 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
     }
     let mut replacement = await_serving_host(spawn_host(
         image_command(&fixture, &image)
-            .envs(environment)
+            .envs(environment.iter().cloned())
             .arg("host"),
     ))
     .unwrap();
     runner::wait_local_runner_ready(&replacement);
     if !lose_original {
         for job in ["bg", "fg"] {
-            std::fs::write(fixture.root.join(format!("local-{job}-finish")), "").unwrap();
+            std::fs::write(fixture.root.join(format!("{}-{job}-finish", root.name)), "").unwrap();
         }
         wait_exit(root.background.0);
         wait_exit(root.foreground.0);
@@ -95,10 +134,30 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
     // The pre-Ready crash has no planned release record for the start scan.
     // Reopening supplies the ordinary loss-recovery entry point.
     let mut client = Client::connect(&replacement);
+    if let Some(paired) = &paired {
+        runner::remote_ready(&mut client, &paired.id);
+    }
     client.attach(20, &root.node);
-    notices(&fixture, &root.session, !lose_original, cut);
+    wait_notices(&fixture, &root.session, cut);
     assert_eq!(marked(&fixture, &root.name, "bg"), root.background);
     assert_eq!(marked(&fixture, &root.name, "fg"), root.foreground);
     drop(client);
     stop(&mut replacement);
+    notices(&fixture, &root.session, !lose_original, cut);
+}
+
+fn original_lock(fixture: &Fixture, paired: Option<&Paired>) -> PathBuf {
+    let Some(paired) = paired else {
+        return local_runner_root(&fixture.home()).join("run/r.lock");
+    };
+    let directory = paired.runner.home.join("runner/builds");
+    let mut locks = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join("run"))
+        .flat_map(|run| std::fs::read_dir(run).unwrap())
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "lock"));
+    let lock = locks.next().unwrap();
+    assert!(locks.next().is_none(), "more than one original native lock");
+    lock
 }

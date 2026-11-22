@@ -301,6 +301,7 @@ impl RunnerService {
             capabilities: vec![
                 capabilities::WORKSPACE_VERBS.to_owned(),
                 capabilities::STREAMS.to_owned(),
+                capabilities::CARRY_LINES.to_owned(),
             ],
             path: options.path,
             home: options.home,
@@ -438,31 +439,20 @@ impl RunnerService {
             closer.cancel();
             return;
         }
-        let Bind {
-            host_id: host,
-            host_instance: instance,
-            ..
-        } = bind;
-        self.serve_bound_connection(
-            &host,
-            &instance,
-            &mut reader,
-            sender,
-            terminal_sender,
-            closer,
-        )
-        .await;
+        self.serve_bound_connection(&bind, &mut reader, sender, terminal_sender, closer)
+            .await;
     }
 
     async fn serve_bound_connection<R: AsyncRead + Unpin>(
         &self,
-        host: &str,
-        instance: &str,
+        bind: &Bind,
         reader: &mut FrameStream<R>,
         sender: mpsc::UnboundedSender<RunnerFrame>,
         terminal_sender: mpsc::Sender<RunnerFrame>,
         closer: CancellationToken,
     ) {
+        let host = bind.host_id.as_str();
+        let instance = bind.host_instance.as_str();
         let connection = self.enter(host, instance, &sender, &closer);
         let mut terminal_tick = tokio::time::interval(Duration::from_millis(64));
         let mut read_deadline = tokio::time::Instant::now() + self.inner.dead;
@@ -503,7 +493,12 @@ impl RunnerService {
                 }
             };
             read_deadline = tokio::time::Instant::now() + self.inner.dead;
-            self.receive(host, instance, connection, frame, &sender, &terminal_sender);
+            match frame {
+                HostFrame::CarryLines { request_id } if bind.version == self.hello().version => {
+                    self.receive_carry_lines(host, instance, request_id, &sender);
+                }
+                _ => self.receive(host, instance, connection, frame, &sender, &terminal_sender),
+            }
         }
         self.leave(host, instance, connection);
         closer.cancel();
@@ -804,7 +799,21 @@ impl RunnerService {
                 });
             }
             HostFrame::Lines { request_id } => {
-                self.receive_lines(host, instance, request_id, sender);
+                let service = self.clone();
+                let host = host.to_owned();
+                let sender = sender.clone();
+                tokio::spawn(async move {
+                    let lines = service.lines(Some(&host)).await;
+                    let _ = sender.send(RunnerFrame::Lines { request_id, lines });
+                });
+            }
+            HostFrame::CarryLines { request_id } => {
+                let _ = sender.send(refused(
+                    Some(request_id),
+                    Refusal::Unsupported {
+                        what: "carry inventory requires an exact-triple bind".into(),
+                    },
+                ));
             }
             HostFrame::OwnerFloors { request_id, lines } => {
                 self.receive_owner_floors(host, instance, connection, request_id, lines, sender);

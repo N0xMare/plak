@@ -7407,9 +7407,19 @@ the normal recovery-required path before Ready. The driver's placement parking
   their exact triple's native socket; a new product build does not reuse the
   incumbent's floors, call journal or service unit. Because the library's
   home-local bind does not itself prove that both ends
-  are one build, every change to the runner's semantics (a holder, fence or
+  are one build, every change to the shared native protocol's semantics (a holder, fence or
   key rule, a refusal's meaning, a journal or floors rule, a frame's meaning)
   bumps `PROTOCOL_VERSION`.
+  Exact-triple extensions may add a separately advertised frame without
+  changing the shared protocol. A client sends `CarryLines` only if the
+  peer advertised `carry-lines` and its hello matches the complete bind
+  triple; the runner independently refuses it without that exact bound
+  triple. This read adds unadopted retention candidates for the startup
+  sweep and upgrade inspection, and refuses an incomplete inventory.
+  Ordinary `Lines`, including protocol-only embedded inspection, keeps
+  its native line-table meaning and does not probe foreign endpoints.
+  The exact-triple layout changes which journal and floors the product
+  opens, not their encodings or the holder and floor rules on a bound link.
   Protocol 5 excludes model-call reads from effect keys and from host
   journaling and acknowledgement. Frame schemas are unchanged; the version
   separates builds with different read-key and interruption semantics because
@@ -7610,11 +7620,14 @@ supplies positive evidence. A private hard link to that lock permits a
 liveness check without reading native stores.
 A known original-instance loss records unknown terminal facts, never adopts
 PIDs or silently starts replacements. Known terminal outcomes do not regress.
-A bound native Lines query lists lines with retained allocations in the same
-host namespace as candidates for readoption. Such a candidate is not a native
-owner or a terminal fact. The host must hold the line's durable head lease,
-transfer its exact owner and then record any terminal under that fence.
-Unbound inspection and qualification do not sweep.
+Before transfer, a refused or timed-out discovery connection (or an
+endpoint that disappears during discovery) is incomplete unless the
+original build's native lock is free. The exact-triple CarryLines read
+lists lines with retained allocations in the same host namespace as
+candidates for readoption. Such a candidate is not a native owner or a
+terminal fact. The host must hold the line's durable head lease, transfer
+its exact owner and then record any terminal under that fence. Ordinary
+Lines, unbound inspection and qualification do not sweep.
 
 Job controls retain their original key, digest, replay age and original-worker
 receipt; ambiguous input is not resent. Proven answers survive a failed later
@@ -7626,11 +7639,12 @@ loss of the native controller's authority or closure of its consumer. Native
 reply acks are forwarded only for control IDs actually relayed to that original,
 skipping lost and empty origins. Lines remains scoped observation.
 
-A retention-enabled daemon keeps original terminals until consumption or
-until 24 hours after its last original terminal when no unsettled job remains.
-This applies before the first retention transfer too: a command can finish
-after the source host disconnects but before the successor discovers it.
-Once nothing is retained, the daemon exits under its ordinary idle grace.
+A retention-enabled daemon keeps original terminals until consumption.
+Only a retention-only line may also expire them, 24 hours after its last
+original terminal, when no unsettled job remains. A native line does not
+expire them before transfer: a command can finish after the source host
+disconnects but before the successor discovers it. Once nothing is retained,
+the daemon exits under its ordinary idle grace.
 The retention clock never kills running jobs or restarts their existing caps.
 Old immutable executable snapshots and matching sidecars remain available until
 explicit operator cleanup, not merely until host Ready or acknowledgement.

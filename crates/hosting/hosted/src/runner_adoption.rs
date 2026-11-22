@@ -93,7 +93,7 @@ pub async fn readopt_lines(
         .map_err(|error| RunnerFailure::Unavailable(error.to_string()))?;
     let mut readopted = Vec::new();
     let mut failed = Vec::new();
-    for status in client.lines().await? {
+    for status in client.recovery_lines().await? {
         if let Ok(line) = LineId::from_str(&status.line)
             && sessions
                 .line_head(line)

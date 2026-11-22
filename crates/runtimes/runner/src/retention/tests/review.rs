@@ -1,6 +1,55 @@
 use super::*;
 
 #[tokio::test]
+async fn retention_discovery_refused_connect_is_incomplete_until_the_native_lock_is_free() {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let (_root, directory, service, _) = fixture();
+    let endpoint = Endpoint::bind(&directory, &service).await.unwrap();
+    let path = endpoint.path.clone();
+    let native = directory.join("native.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&native)
+        .unwrap();
+    lock.try_lock().unwrap();
+    link_native_lock(&directory, &native).unwrap();
+    drop(endpoint);
+    let listener = UnixListener::bind(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // A stale listener name yields the same ECONNREFUSED as a saturated
+    // macOS listen queue. Hold the real native lock to model the live daemon.
+    drop(listener);
+
+    let own = directory.parent().unwrap().join("v8-next");
+    std::fs::create_dir(&own).unwrap();
+    std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let registry = registry::Registry::open(&own).unwrap();
+    let scope = Bind {
+        version: 1,
+        host_id: identity("home"),
+        host_instance: identity("after"),
+    };
+    let current = Origin {
+        version: 1,
+        build: identity("v8-next"),
+        instance: identity("next"),
+    };
+    let error = registry.discover(&scope, &current).await.unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+    drop(lock);
+    assert!(
+        registry
+            .discover(&scope, &current)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn retention_review_version_two_discovers_and_speaks_one_refusing_zero_and_three() {
     let (_root, directory, service, _) = fixture();
     let endpoint = Endpoint::bind(&directory, &service).await.unwrap();

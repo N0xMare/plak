@@ -28,19 +28,23 @@ pub(super) fn image_command(fixture: &Fixture, image: &Path) -> Command {
 }
 
 pub(super) fn replacement_image(fixture: &Fixture) -> PathBuf {
-    let image = fixture.root.join("replacement");
+    replacement_image_named(fixture, "replacement")
+}
+
+pub(super) fn replacement_image_named(fixture: &Fixture, name: &str) -> PathBuf {
+    let image = fixture.root.join(name);
     std::fs::copy(env!("CARGO_BIN_EXE_plakd"), &image).unwrap();
     #[cfg(not(target_os = "macos"))]
     std::fs::OpenOptions::new()
         .append(true)
         .open(&image)
         .unwrap()
-        .write_all(b"\0")
+        .write_all(name.as_bytes())
         .unwrap();
     #[cfg(target_os = "macos")]
     assert!(
         Command::new("/usr/bin/codesign")
-            .args(["--force", "--sign", "-", "--identifier", "upgrade-fixture"])
+            .args(["--force", "--sign", "-", "--identifier", name])
             .arg(&image)
             .status()
             .unwrap()

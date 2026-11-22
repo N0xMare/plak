@@ -44,8 +44,7 @@ async fn operator_stream_full_bulk_channel_gates_input_and_preserves_ack_sequenc
     let run = service.clone();
     let task = tokio::spawn(async move {
         run.serve_bound_connection(
-            "paired",
-            "generation",
+            &bind(&run),
             &mut FrameStream::new(incoming),
             control,
             bulk,
@@ -127,8 +126,7 @@ async fn operator_stream_congested_read_gate_honors_read_deadline() {
     tokio::time::timeout(
         Duration::from_secs(1),
         service.serve_bound_connection(
-            "paired",
-            "generation",
+            &bind(&service),
             &mut FrameStream::new(incoming),
             control,
             bulk,
@@ -137,4 +135,13 @@ async fn operator_stream_congested_read_gate_honors_read_deadline() {
     )
     .await
     .unwrap();
+}
+
+fn bind(service: &RunnerService) -> Bind {
+    Bind {
+        host_id: "paired".into(),
+        host_instance: "generation".into(),
+        version: service.hello().version.clone(),
+        inspect: false,
+    }
 }

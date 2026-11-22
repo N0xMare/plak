@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use super::{RunnerService, lock};
 
 impl RunnerService {
-    pub(in crate::service) fn receive_lines(
+    pub(in crate::service) fn receive_carry_lines(
         &self,
         host: &str,
         instance: &str,

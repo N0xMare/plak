@@ -333,9 +333,11 @@ another session's jobs.
   binary-ids                  development-build identity cache, 0600 (§1), disposable
   host-id                     this home's host identity (runners, tree custody), 0600, made at first use
   host/run/<state key>.sock   `plakd host`'s control socket, 0600 in 0700 directories (section 4.6, chapter 04 section 4.7); not state
-  host/runner/                this home's stable local runner-id, 0600
+  host/runner/                0700; local runner-id (0600), minted on first start
+                              in this layout and shared by its exact-build daemons
   host/runner/<triple>/       one exact home-local runner build (chapter 01 §8.4), 0700:
-                              version.json (the exact triple), owners.json (its owner floors, as below), empty/ (where a
+                              version.json (the exact triple, created under the 0600 version.lock),
+                              owners.json (its owner floors, as below), empty/ (where a
                               request naming no workspace is answered), run/ (0700: the 0600
                               r.sock and the 0600 lock file its daemon holds for its life); not
                               state, and never reached by `runner connect --stdio`;
@@ -343,7 +345,9 @@ another session's jobs.
   runners/<name>/runner.json  paired identity, machine id, effective roots and version, 0600
   runners/<runner id>/calls/       the keyed calls this host sent the runner and has no answer for (chapter 01 §8.4)
   runner/                     this machine's runner home, 0700 (an existing one is closed to 0700):
-                              runner.toml (07 §3.7), runner-id, builds/<triple-key>/owners.json (owner floors:
+                              runner.toml (07 §3.7), runner-id, builds/<triple-key>/version.json
+                              (exact triple, created under the 0600 version.lock),
+                              builds/<triple-key>/owners.json (owner floors:
                               each line's newest accepted owner and its holder instance; a
                               file the runner cannot read refuses its start),
                               builds/<triple-key>/run/ (0700: the 0600 daemon socket and the 0600 lock file the daemon
@@ -5868,6 +5872,11 @@ loss yields typed `outcome_unknown` for allocations without exact terminal
 evidence; a transient link failure does not assert that an original exited.
 The old daemon exits on its own when its retention obligations and idle grace
 end. No job authority is added to the host upgrade receipt or state key.
+Live job carry requires a retention speaker for the original daemon's
+version. Skip-upgrades beyond the destination's current and immediately
+previous retention versions are not supported with live jobs: settle them
+using a compatible build or upgrade through compatible intermediate builds
+and settle them before leaving the supported retention versions.
 
 The paired runner's dedicated link advances to the destination before its
 binding-free qualification; its existing source connection continues to the

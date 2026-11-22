@@ -57,6 +57,8 @@ pub mod verbs {
 /// family only when the runner advertised it; anything else is answered
 /// [`Refusal::Unsupported`].
 pub mod capabilities {
+    /// Exact-triple inventory for job carry and recovery.
+    pub const CARRY_LINES: &str = "carry-lines";
     /// Independent operator-only interactive shells, with no agent line owner.
     pub const OPERATOR_PTY: &str = "operator-pty";
     /// The fixed request/response workspace and process verbs.
@@ -400,6 +402,12 @@ pub enum HostFrame {
     /// Asks for the runner's line table: this host's lines, or every
     /// host's on an inspecting connection.
     Lines {
+        /// Names the answer.
+        request_id: String,
+    },
+    /// Like Lines, plus original-runner recovery candidates. Only an
+    /// exact-triple bound host may send this after seeing CARRY_LINES.
+    CarryLines {
         /// Names the answer.
         request_id: String,
     },

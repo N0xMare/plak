@@ -58,11 +58,15 @@ pub(crate) const STRICT_SSH_OPTIONS: [&str; 37] = [
 /// This build's version triple: the protocol, the source revision it was
 /// built from (`unknown` when the build did not say) and its flavor.
 pub(crate) fn version() -> VersionTriple {
-    VersionTriple::current(
+    let mut version = VersionTriple::current(
         crate::test_hooks::upgrade_runner_revision()
             .unwrap_or_else(|| crate::build_identity::SOURCE_REVISION.to_owned()),
         crate::build_identity::FLAVOR,
-    )
+    );
+    if let Some(protocol) = crate::test_hooks::upgrade_runner_protocol() {
+        version.protocol = protocol;
+    }
+    version
 }
 
 /// The ssh invocation that runs `remote` on `destination`.

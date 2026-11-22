@@ -103,6 +103,7 @@ const fn host_variant(frame: &HostFrame) -> &'static str {
         HostFrame::Ack { .. } => "ack",
         HostFrame::TransferOwner(_) => "transfer_owner",
         HostFrame::Lines { .. } => "lines",
+        HostFrame::CarryLines { .. } => "carry_lines",
         HostFrame::OwnerFloors { .. } => "owner_floors",
         HostFrame::JobTerminals { .. } => "job_terminals",
         HostFrame::ForgetOwnerWitnesses { .. } => "forget_owner_witnesses",
@@ -431,4 +432,16 @@ fn a_frame_changes_only_with_a_protocol_version_bump() {
         "a frame, verb or capability changed under protocol {PROTOCOL_VERSION}: bump \
          PROTOCOL_VERSION and pin the new frames in place of the old ones. Now:\n{encoded}"
     );
+}
+
+#[test]
+fn exact_triple_carry_inventory_extension_is_pinned_separately() {
+    let frame = HostFrame::CarryLines {
+        request_id: "request".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(frame).unwrap(),
+        json!({"kind":"carry_lines","request_id":"request"})
+    );
+    assert_eq!(capabilities::CARRY_LINES, "carry-lines");
 }

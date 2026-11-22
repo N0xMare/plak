@@ -187,6 +187,54 @@ fn command() -> JoinedProcessStartRequest {
     .unwrap()
 }
 
+#[tokio::test]
+async fn incomplete_carry_inventory_refuses_only_the_exact_triple_extension() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut service, directory) = Worker::service(root.path(), "current");
+    Arc::get_mut(&mut service.inner).unwrap().home_local = Some("home".into());
+    let _endpoint = crate::retention::Endpoint::bind(&directory, &service)
+        .await
+        .unwrap();
+    let broken = directory.parent().unwrap().join("v9-unavailable");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&broken)
+        .unwrap();
+    std::fs::write(broken.join("retention-v1.sock"), "").unwrap();
+    let exact = service.hello().version.clone();
+    for (version, sees_carry) in [
+        (exact.clone(), true),
+        (
+            VersionTriple {
+                source_revision: "another".into(),
+                ..exact
+            },
+            false,
+        ),
+    ] {
+        let (host, runner) = tokio::io::duplex(8192);
+        let service = service.clone();
+        let serving = tokio::spawn(async move { service.serve_connection(runner).await });
+        let (client, _) = crate::RunnerClient::connect_home_local(
+            host,
+            Bind {
+                host_id: "home".into(),
+                host_instance: "host".into(),
+                version,
+                inspect: false,
+            },
+            ClientWindows::default(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(client.lines().await.unwrap().is_empty());
+        assert_eq!(client.recovery_lines().await.is_err(), sees_carry);
+        client.disconnect();
+        serving.await.unwrap();
+    }
+}
+
 async fn finish(port: &RunnerSessions, process: JoinedProcessSessionId) -> Vec<u8> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut cursor = JoinedProcessOutputCursor::new(0);
@@ -346,6 +394,99 @@ async fn retention_three_workers_consumed_original_can_exit_before_the_next_upgr
         .await
         .unwrap();
     finish(&new, next).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retention_controls_write_disown_and_consume_the_original_allocation() {
+    let root = tempfile::tempdir().unwrap();
+    let first = Worker::new(root.path(), "first").await;
+    let (_old_link, old) = first.port(root.path(), "old-host", 1).await;
+    let command = JoinedProcessStartRequest::new(
+        JoinedProcessCommand::literal(
+            "/bin/sh",
+            ["-c", "IFS= read -r msg; /bin/sleep 60 </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$msg\" \"$!\""]
+                .map(str::to_owned)
+                .to_vec(),
+        )
+        .unwrap(),
+        ".",
+        Vec::new(),
+        true,
+        JoinedProcessTerminalMode::Pipes,
+    )
+    .unwrap();
+    let process = old.start(command, control(60)).await.unwrap();
+    old.promote(process).await.unwrap();
+    let next = Worker::new(root.path(), "next").await;
+    let (_new_link, new) = next.port(root.path(), "new-host", 2).await;
+    let number = new.jobs().await.unwrap()[0].number;
+    new.write_stdin(
+        process,
+        b"through-retention\n",
+        JoinedProcessInputDisposition::Close,
+        control(61),
+    )
+    .await
+    .unwrap();
+    let leftover = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs = new.jobs().await.unwrap();
+            let native_leftover = lock(&first.service.inner.lines)
+                .values()
+                .any(|(sessions, _)| sessions.leftover(process).is_some());
+            if native_leftover
+                && let Some(pid) = jobs[0].output.trim().strip_prefix("through-retention ")
+                && let Some(pid) = rustix::process::Pid::from_raw(pid.parse().unwrap())
+            {
+                break KillLeftover(pid);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    new.disown_leftovers().await.unwrap();
+    assert_eq!(new.jobs().await.unwrap()[0].status, JobStatus::Released);
+    rustix::process::test_kill_process(leftover.0).unwrap();
+    new.acknowledge_jobs(vec![number]).await.unwrap();
+    assert!(new.jobs().await.unwrap().is_empty());
+    assert!(!first.service.retention_keeps_alive(Instant::now()));
+}
+
+struct KillLeftover(rustix::process::Pid);
+
+impl Drop for KillLeftover {
+    fn drop(&mut self) {
+        let _ = rustix::process::kill_process(self.0, rustix::process::Signal::KILL);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retention_lifetime_does_not_consume_a_native_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let runner = Worker::new(root.path(), "native").await;
+    let (_link, port) = runner.port(root.path(), "native-host", 1).await;
+    let process = port.start(command(), control(40)).await.unwrap();
+    port.promote(process).await.unwrap();
+    port.write_stdin(
+        process,
+        b"",
+        JoinedProcessInputDisposition::Close,
+        control(41),
+    )
+    .await
+    .unwrap();
+    finish(&port, process).await;
+    let jobs = port.jobs().await.unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert!(
+        runner
+            .service
+            .retention_keeps_alive(Instant::now() + Duration::from_secs(25 * 3600))
+    );
+    assert_eq!(port.jobs().await.unwrap(), jobs);
+    port.acknowledge_jobs(vec![jobs[0].number]).await.unwrap();
+    assert!(!runner.service.retention_keeps_alive(Instant::now()));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

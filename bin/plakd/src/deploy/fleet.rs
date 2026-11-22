@@ -1,20 +1,20 @@
 use std::{cell::Cell, path::PathBuf};
 
-use crate::CliResult;
 use crate::shipping_artifact::{NAMES, fail};
+use crate::{CliFailure, CliResult};
 
 use super::artifacts::{Artifacts, ProductArtifact};
 use super::inventory::{Client, Host, Node, Runner, Stage};
 use super::protocol::{
     Call, ClientObserved, ClientOp, GatewayOp, HostOp, Observed, RunnerObserved, RunnerOp,
 };
-use super::ssh::{Blob, Image, Ssh};
+use super::ssh::{Blob, Image, Ssh, SshFailure};
 use super::timing;
 
 pub(super) trait Fleet {
     fn host(&self, op: HostOp) -> CliResult<serde_json::Value>;
     fn gateway(&self, op: GatewayOp) -> CliResult<serde_json::Value>;
-    fn runner(&self, runner: &Runner, op: RunnerOp) -> CliResult<serde_json::Value>;
+    fn runner(&self, runner: &Runner, op: RunnerOp) -> Result<serde_json::Value, SshFailure>;
     fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value>;
     fn use_installed_candidate(&self);
 }
@@ -43,7 +43,7 @@ impl<'a> Remote<'a> {
         staging: bool,
         installed: bool,
         timeout: u64,
-    ) -> CliResult<serde_json::Value> {
+    ) -> Result<serde_json::Value, SshFailure> {
         let artifact = self.artifacts.image(node.platform);
         let bootstrap = &artifact.paths["plakd"];
         let deployed = deployed(node, artifact);
@@ -105,7 +105,7 @@ impl Fleet for Remote<'_> {
         Ok(reply)
     }
 
-    fn runner(&self, runner: &Runner, op: RunnerOp) -> CliResult<serde_json::Value> {
+    fn runner(&self, runner: &Runner, op: RunnerOp) -> Result<serde_json::Value, SshFailure> {
         let staging = matches!(op, RunnerOp::Stage { .. });
         let installed = matches!(op, RunnerOp::Advance { .. } | RunnerOp::Restore { .. });
         let timeout = timing::runner(&op);
@@ -133,6 +133,7 @@ impl Fleet for Remote<'_> {
             self.staged.get(),
             timeout,
         )
+        .map_err(CliFailure::from)
     }
 
     fn client(&self, client: &Client, op: ClientOp) -> CliResult<serde_json::Value> {
@@ -147,18 +148,20 @@ impl Fleet for Remote<'_> {
             }]
         });
         let timeout = timing::client(&op);
-        self.ssh.call(
-            &client.node,
-            Image::Transfer(bootstrap, &native.manifest.files["plakd"]),
-            Call::Client {
-                node: client.node.clone(),
-                client: artifact.request(client),
-                op,
-            },
-            native.maintainer_build(client.node.platform),
-            files.as_ref().map_or(&[], |files| files.as_slice()),
-            timeout,
-        )
+        self.ssh
+            .call(
+                &client.node,
+                Image::Transfer(bootstrap, &native.manifest.files["plakd"]),
+                Call::Client {
+                    node: client.node.clone(),
+                    client: artifact.request(client),
+                    op,
+                },
+                native.maintainer_build(client.node.platform),
+                files.as_ref().map_or(&[], |files| files.as_slice()),
+                timeout,
+            )
+            .map_err(CliFailure::from)
     }
 
     fn use_installed_candidate(&self) {
@@ -174,8 +177,8 @@ pub(super) fn runner(
     fleet: &impl Fleet,
     runner: &Runner,
     expected: super::protocol::Candidate,
-) -> CliResult<RunnerObserved> {
-    evidence_decode(fleet.runner(runner, RunnerOp::Observe { expected })?)
+) -> Result<RunnerObserved, SshFailure> {
+    evidence_decode(fleet.runner(runner, RunnerOp::Observe { expected })?).map_err(SshFailure::from)
 }
 
 pub(super) fn client(fleet: &impl Fleet, client: &Client) -> CliResult<ClientObserved> {
