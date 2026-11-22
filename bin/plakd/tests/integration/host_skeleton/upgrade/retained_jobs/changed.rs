@@ -8,6 +8,7 @@ use plakous_offline_crash_harness::ledger_signature::inspect_process_notices;
 
 mod durability;
 mod qualifiers;
+mod rollback;
 
 const REVISION: &str = "candidate-runner-revision";
 const NEXT_REVISION: &str = "subsequent-runner-revision";

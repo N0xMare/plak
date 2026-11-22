@@ -5842,6 +5842,8 @@ work is not continued. For cross-key carry it still wins over preparation and
 reopens the source gates. The source seals control admission and joins
 already-admitted Stop receipts before Ready; a Stop that has not settled
 within that join bound prevents surrender.
+The held phase seals admission, joins Stop, rechecks held roots, inspects
+runner inventory when required, and rechecks the image before sending Ready.
 Mandatory owner/placement rendezvous and planned-release
 acknowledgements keep bounded joins; finite modes share one natural deadline
 plus one freeze allowance, never multiplied by sessions. Idle's freeze
