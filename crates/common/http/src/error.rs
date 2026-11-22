@@ -541,6 +541,10 @@ impl Failure {
     }
 }
 
+#[allow(
+    clippy::missing_fields_in_debug,
+    reason = "gateway-local write accounting must not change the capture log format"
+)]
 impl fmt::Debug for Failure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
