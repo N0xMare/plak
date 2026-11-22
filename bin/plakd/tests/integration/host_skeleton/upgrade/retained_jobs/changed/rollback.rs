@@ -279,7 +279,9 @@ fn assert_jobs(fixture: &Fixture, roots: [&Root; 2]) {
 }
 
 fn finish_and_check_admission(fixture: &Fixture, client: &mut Client, roots: [&Root; 2]) {
-    let request = new_session(&fixture.workspace());
+    let workspace = fixture.root.join("admitted");
+    std::fs::create_dir(&workspace).unwrap();
+    let request = new_session(&workspace);
     let deadline = Instant::now() + WAIT;
     loop {
         match client.request(50, request.clone()) {
