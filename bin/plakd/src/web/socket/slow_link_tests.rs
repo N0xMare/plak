@@ -134,14 +134,10 @@ async fn slow_link_web_reads_ping_during_a_blocked_send_and_answers_before_the_n
         assert_eq!(client.next().await.unwrap().unwrap(), Message::text(first));
         let reply = client.next().await.unwrap().unwrap().into_text().unwrap();
         assert!(matches!(
-            plakous_host_protocol::wire::decode_line::<
-                plakous_host_protocol::wire::HostFrame<PlakExtension>,
-            >(&reply),
-            Ok(plakous_host_protocol::wire::HostFrame::Response {
+            decode_line::<HostFrame<PlakExtension>>(&reply),
+            Ok(HostFrame::Response {
                 id: 42,
-                outcome: plakous_host_protocol::wire::Outcome::Ok(
-                    plakous_host_protocol::wire::Answer::Pong
-                )
+                outcome: Outcome::Ok(Answer::Pong)
             })
         ));
         assert_eq!(client.next().await.unwrap().unwrap(), Message::text(second));
