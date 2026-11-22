@@ -708,6 +708,11 @@ among the 4 most recent finalized root commands of the branch; past that bound
 the duplicate is refused, unrecorded, as `ControlErrorKind::Reclaimed`. Past that
 window, a feed reader that still names an older terminal receives a generic
 terminal row (`NotRetained`), not the terminal's failure or abandonment detail.
+After durable publication, the driver keeps the terminal receipt, not a reply
+handle that would pin the old checkpoint. A duplicate reconstructs its result
+from the exact retained publication checkpoint. Already-issued handles still
+resolve to their original publication; a runtime without a store keeps its
+in-memory results.
 A bridge MUST therefore settle each handed-off
 item (consume it on the first acknowledgement or a duplicate within the bound)
 before 4 further root turns finish, and treats `Reclaimed` as proof that the

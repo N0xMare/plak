@@ -518,13 +518,16 @@ impl Driver {
         let result = if let Some(result) = recorded.result.clone() {
             Some(result)
         } else if let Some(terminal) = recorded.terminal.as_ref() {
-            match self.rehydrate_terminal_result(terminal).await {
-                Ok(result) => {
-                    let result = TurnResultHandle::resolved(result);
-                    if let Some(entry) = self.command_ledger.get_mut(&command_id) {
-                        entry.result = Some(result.clone());
+            match self.rehydrate_terminal_result(&terminal.record).await {
+                Ok(mut result) => {
+                    if let Some(live) = &terminal.live {
+                        super::terminal::attach_published_reresolution(
+                            &mut result,
+                            live.refusal.clone(),
+                        );
+                        result.feed_seq = live.feed_seq;
                     }
-                    Some(result)
+                    Some(TurnResultHandle::resolved(result))
                 }
                 Err(error) => {
                     let rejection = if error.store_error() == Some(SessionStoreError::Pruned) {

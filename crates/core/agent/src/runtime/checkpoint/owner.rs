@@ -841,6 +841,10 @@ impl CheckpointOwner {
         }
         Ok(Arc::clone(stored.checkpoint()))
     }
+
+    pub(in crate::runtime) fn has_store(&self) -> bool {
+        lock_mutex(&self.state).durable.is_some()
+    }
 }
 
 impl CheckpointReader {

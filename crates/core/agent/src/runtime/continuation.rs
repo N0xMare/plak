@@ -82,6 +82,20 @@ pub(super) fn runtime_component(
         .map_err(runtime_manifest_error)
 }
 
+pub(super) fn command_receipt_components(
+    bytes: Vec<u8>,
+) -> Result<(ReconstructiveComponent, ReconstructiveComponent), AgentError> {
+    let bytes: Arc<[u8]> = bytes.into();
+    let component = |kind| {
+        ReconstructiveComponent::new(kind, RUNTIME_COMPONENT_CODEC_REVISION, Arc::clone(&bytes))
+            .map_err(runtime_manifest_error)
+    };
+    Ok((
+        component(RuntimeComponentKind::Command)?,
+        component(RuntimeComponentKind::Operation)?,
+    ))
+}
+
 pub(super) fn runtime_component_revision(
     kind: RuntimeComponentKind,
     revision: u32,

@@ -758,7 +758,19 @@ struct CommandLedgerEntry {
     admission_reclaimed: bool,
     effect: ActorCommandEffect,
     result: Option<TurnResultHandle>,
-    terminal: Option<DurableTerminalResultRecord>,
+    terminal: Option<CommandTerminal>,
+}
+
+#[derive(Clone)]
+struct CommandTerminal {
+    record: DurableTerminalResultRecord,
+    live: Option<LiveTerminalFacts>,
+}
+
+#[derive(Clone)]
+struct LiveTerminalFacts {
+    refusal: Option<ModelReresolutionError>,
+    feed_seq: Option<crate::feed::FeedSeq>,
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]

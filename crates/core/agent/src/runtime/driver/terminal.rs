@@ -8,7 +8,10 @@ use crate::runtime::terminal::{
     DurableTerminalResultRecord, actor_panic_error, cancelled_error, encode_terminal_result_record,
     recovery_gate_error, remove_known_turn, terminal_turn_result, valid_terminal_enrichment,
 };
-use crate::runtime::{PromptCommand, TerminalProposal, TurnResult, TurnResultOutcome};
+use crate::runtime::{
+    CommandTerminal, LiveTerminalFacts, PromptCommand, TerminalProposal, TurnResult,
+    TurnResultOutcome,
+};
 use crate::{
     AgentError, AgentErrorKind, AgentEventKind, DurableOperationState, EventContext, PruneReceipt,
     TelemetryObservationKind, TelemetryTerminalStatus,
@@ -169,9 +172,9 @@ impl Driver {
             proposal = proposal.with_cleanup_failure(error);
         }
         let attempted = AssertUnwindSafe(async {
-            let mut result = self.commit_terminal_proposal(command, proposal).await?;
+            let (mut result, terminal) = self.commit_terminal_proposal(command, proposal).await?;
             result.feed_seq = self.authority.feed_seq_at(result.checkpoint.id());
-            command.shared.publish_terminal(result).map(|_| ())
+            self.publish_terminal_reply(command, result, Some(terminal))
         })
         .catch_unwind()
         .await;
@@ -188,6 +191,37 @@ impl Driver {
         }
         self.publish_terminal_fallback(command, &actor_panic_error())
             .await
+    }
+
+    fn publish_terminal_reply(
+        &mut self,
+        command: &PromptCommand,
+        result: TurnResult,
+        terminal: Option<DurableTerminalResultRecord>,
+    ) -> Result<(), AgentError> {
+        if self.authority.has_store()
+            && let Some(terminal) = terminal
+            && let Some(entry) = self.command_ledger.get_mut(&command.command_id)
+        {
+            // The record at the fenced checkpoint is enough to reconstruct
+            // a duplicate. Do not pin that checkpoint with the reply handle.
+            entry.terminal = Some(CommandTerminal {
+                record: terminal,
+                live: Some(LiveTerminalFacts {
+                    refusal: match &result.outcome {
+                        TurnResultOutcome::Completed(_) => None,
+                        TurnResultOutcome::Cancelled(error)
+                        | TurnResultOutcome::Failed(error)
+                        | TurnResultOutcome::RecoveryRequired(error) => {
+                            error.reresolution_error().cloned()
+                        }
+                    },
+                    feed_seq: result.feed_seq,
+                }),
+            });
+            entry.result = None;
+        }
+        command.shared.publish_terminal(result).map(|_| ())
     }
 
     /// Idle-only maintenance; failures leave history for the next terminal's retry.
@@ -259,11 +293,15 @@ impl Driver {
     ) -> Result<(), AgentError> {
         let checkpoint = self.authority.checkpoint();
         let recovered = match terminal_record_at_checkpoint(&checkpoint, &command.command_id) {
-            Ok(terminal) => self.rehydrate_terminal_result(&terminal).await.ok(),
+            Ok(terminal) => self
+                .rehydrate_terminal_result(&terminal)
+                .await
+                .ok()
+                .map(|result| (result, terminal)),
             Err(_) => None,
         };
-        let result = if let Some(result) = recovered {
-            result
+        let (result, terminal) = if let Some((result, terminal)) = recovered {
+            (result, Some(terminal))
         } else {
             self.gate_recovery();
             let error = AgentError::new(
@@ -273,20 +311,24 @@ impl Driver {
                     cause.message()
                 ),
             );
-            TurnResult {
-                context_overflow_remedy: None,
-                turn_id: command.turn_id,
-                outcome: TurnResultOutcome::RecoveryRequired(error),
-                recovery_operation: Some(command.operation_id.into()),
-                conversation: checkpoint.manifest().canonical().projection(),
-                checkpoint,
-                usage: command.shared.usage(),
-                feed_seq: None,
-            }
+            (
+                TurnResult {
+                    context_overflow_remedy: None,
+                    turn_id: command.turn_id,
+                    outcome: TurnResultOutcome::RecoveryRequired(error),
+                    recovery_operation: Some(command.operation_id.into()),
+                    conversation: checkpoint.manifest().canonical().projection(),
+                    checkpoint,
+                    usage: command.shared.usage(),
+                    feed_seq: None,
+                },
+                None,
+            )
         };
-        match std::panic::catch_unwind(AssertUnwindSafe(|| command.shared.publish_terminal(result)))
-        {
-            Ok(Ok(_)) => Ok(()),
+        match std::panic::catch_unwind(AssertUnwindSafe(|| {
+            self.publish_terminal_reply(command, result, terminal)
+        })) {
+            Ok(Ok(())) => Ok(()),
             Ok(Err(_)) | Err(_) if command.shared.has_published_result() => Ok(()),
             Ok(Err(error)) => {
                 command.shared.publish_terminal_failure(error.clone());
@@ -322,17 +364,19 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         proposal: TerminalProposal,
-    ) -> Result<TurnResult, AgentError> {
+    ) -> Result<(TurnResult, DurableTerminalResultRecord), AgentError> {
         if let TerminalProposal::Completed(result) = proposal {
             let terminal = terminal_record_at_checkpoint(result.checkpoint(), &command.command_id)?;
-            return self.rehydrate_terminal_result(&terminal).await;
+            let result = self.rehydrate_terminal_result(&terminal).await?;
+            return Ok((result, terminal));
         }
         let committed = {
             let authority = self.authority.checkpoint();
             terminal_record_at_checkpoint(&authority, &command.command_id).ok()
         };
         if let Some(terminal) = committed {
-            return self.rehydrate_terminal_result(&terminal).await;
+            let result = self.rehydrate_terminal_result(&terminal).await?;
+            return Ok((result, terminal));
         }
         let operation_id = match self.root_operation_for_command(command) {
             Ok(operation_id) => operation_id,
@@ -375,7 +419,7 @@ impl Driver {
                 let terminal = terminal_record_at_checkpoint(&checkpoint, &command.command_id)?;
                 let mut result = self.rehydrate_terminal_result(&terminal).await?;
                 attach_published_reresolution(&mut result, live_refusal);
-                Ok(result)
+                Ok((result, terminal))
             }
             Err(error) => Err(self.required_terminal_publication_failure(&error)),
         }
@@ -455,7 +499,7 @@ fn proposal_reresolution(
     error.reresolution_error().cloned()
 }
 
-fn attach_published_reresolution(
+pub(super) fn attach_published_reresolution(
     result: &mut TurnResult,
     refusal: Option<crate::runtime::ModelReresolutionError>,
 ) {

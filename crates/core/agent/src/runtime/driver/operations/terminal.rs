@@ -321,8 +321,8 @@ impl Driver {
                 "queued cancellation receipt could not be canonically encoded",
             )
         })?;
-        let command_component = runtime_component(RuntimeComponentKind::Command, bytes.clone())?;
-        let operation_request = runtime_component(RuntimeComponentKind::Operation, bytes)?;
+        let (command_component, operation_request) =
+            crate::runtime::continuation::command_receipt_components(bytes)?;
         let error = DurableAgentError::from_error(&cancelled_error())?;
         let (history, ledger, context, family, lifecycle_root) = {
             let authority = self.authority.checkpoint();

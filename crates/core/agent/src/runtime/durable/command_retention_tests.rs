@@ -8,6 +8,73 @@
 use super::*;
 use crate::runtime::control::{command_binding, command_canonical_bytes, durable_rejection};
 
+#[test]
+fn command_and_operation_receipts_share_bytes_but_not_integrity() -> TestResult {
+    let (command, operation) =
+        crate::runtime::continuation::command_receipt_components(vec![23; 8192])?;
+    assert_eq!(command.kind(), RuntimeComponentKind::Command);
+    assert_eq!(operation.kind(), RuntimeComponentKind::Operation);
+    assert_ne!(command.integrity(), operation.integrity());
+    assert!(std::ptr::eq(command.bytes(), operation.bytes()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_live_duplicate_reloads_its_authority_without_caching_the_checkpoint() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease duration")?,
+    )?;
+    let agent = sessions
+        .create(
+            "create:live-receipt",
+            durable_artifact_test_builder(workspace, artifact_test_model(0, 96_001)?),
+        )
+        .await?;
+    let first_id = CommandId::new("first-live-receipt")?;
+    let first = agent.start(first_id.clone(), "first prompt").await?;
+    let issued = first.result().cloned().ok_or("first result handle")?;
+    let first = first.into_turn().ok_or("first turn")?.result().await?;
+    let (turn, checkpoint, feed) = (first.turn_id(), first.checkpoint_id(), first.feed_seq());
+    assert!(feed.is_some());
+    drop(first);
+    agent
+        .start(CommandId::new("later-live-receipt")?, "later prompt")
+        .await?
+        .into_turn()
+        .ok_or("later turn")?
+        .result()
+        .await?;
+    let before = store.checkpoint_loads.load(Ordering::Acquire);
+    for count in 1..=2 {
+        let duplicate = agent.start(first_id.clone(), "first prompt").await?;
+        assert_eq!(
+            duplicate.acknowledgement().disposition(),
+            CommandAckDisposition::Duplicate
+        );
+        let result = duplicate
+            .into_result()
+            .ok_or("duplicate result")?
+            .result()
+            .await?;
+        assert_eq!(
+            (result.turn_id(), result.checkpoint_id(), result.feed_seq()),
+            (turn, checkpoint, feed)
+        );
+        assert_eq!(
+            store.checkpoint_loads.load(Ordering::Acquire),
+            before + count
+        );
+    }
+    assert_eq!(issued.result().await?.checkpoint_id(), checkpoint);
+    agent.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestResult {
     let directory = tempfile::tempdir()?;

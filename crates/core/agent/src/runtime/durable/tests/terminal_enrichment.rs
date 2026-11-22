@@ -96,6 +96,7 @@ fn historical_reader(
             .terminal
             .as_mut()
             .ok_or("retained terminal")?
+            .record
             .usage
             .record_model_operation(None)?;
     }

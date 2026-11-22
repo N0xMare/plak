@@ -206,8 +206,8 @@ impl Driver {
                 "command receipt could not be canonically encoded",
             )
         })?;
-        let component = runtime_component(RuntimeComponentKind::Command, bytes.clone())?;
-        let operation = runtime_component(RuntimeComponentKind::Operation, bytes)?;
+        let (component, operation) =
+            crate::runtime::continuation::command_receipt_components(bytes)?;
         let accepted = rejection.is_none();
         // Root and steering receipts begin work; cancel, decision and shutdown
         // receipts settle work already admitted and must fit in the reserve.

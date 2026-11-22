@@ -224,7 +224,8 @@ pub(in crate::runtime) fn rehydrate_runtime_indexes(
                 admission_reclaimed: durable && !feed_sequences.contains_key(&command_id),
                 effect,
                 result: None,
-                terminal,
+                terminal: terminal
+                    .map(|record| crate::runtime::CommandTerminal { record, live: None }),
             },
         );
     }
