@@ -1196,3 +1196,37 @@ fn fold_delivery(
         }
     }
 }
+#[test]
+fn root_attachment_replay_preserves_the_published_patch_chain() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    assert!(publisher.snapshot(PresentationSnapshot::default(), &sink));
+    let HostEvent::PresentationSnapshot(initial) = receiver.try_recv().unwrap() else {
+        panic!("initial baseline");
+    };
+    let next = PresentationSnapshot {
+        items: vec![TranscriptItem {
+            key: RowKey::new(1, Lane::Runtime, 0),
+            row: TranscriptRow::assistant("committed"),
+        }],
+        ..PresentationSnapshot::default()
+    };
+    assert!(publisher.publish(next.clone(), &sink));
+    publisher.replay_root(&sink);
+    publisher.replay_root(&sink);
+    let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
+        panic!("the replay must not supersede the queued patch");
+    };
+    assert_eq!(patch.from_revision, initial.revision);
+    let HostEvent::PresentationSnapshot(replayed) = receiver.try_recv().unwrap() else {
+        panic!("expected repair");
+    };
+    assert_eq!(replayed.revision, patch.to_revision);
+    assert_eq!(replayed.items, next.items);
+    assert!(receiver.try_recv().is_err());
+    assert!(publisher.publish(PresentationSnapshot::default(), &sink));
+    let HostEvent::TranscriptPatch(after) = receiver.try_recv().unwrap() else {
+        panic!("expected next revision");
+    };
+    assert_eq!(after.from_revision, replayed.revision);
+}

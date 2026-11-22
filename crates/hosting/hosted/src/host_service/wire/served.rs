@@ -13,7 +13,9 @@ use plakous_host_protocol::views::transcript::TranscriptScope;
 use plakous_host_protocol::wire::{AttachmentId, NodeAddress};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
 
-use super::super::{ChildNodes, HostService, MovedRequester, TreeNodes, kept_for_attach};
+use super::super::{
+    ChildNodes, HostService, MovedRequester, TreeNodes, fanout::Publication, kept_for_attach,
+};
 use super::ATTACHMENT_CAPACITY;
 
 /// Finds a session's root node by its id.
@@ -29,12 +31,12 @@ pub(super) struct ServedSession<P: ProtocolExtension> {
     /// How many switches the service went through.
     generation: u64,
     /// A session opening held until the binding that names its session.
-    held: Option<Vec<SessionObservation<P>>>,
+    held: Option<Vec<Publication<P>>>,
     /// After a switch, the next session's events an attach snapshot does
     /// not carry, kept for every attachment a switch moved until its
     /// connection attaches the root again or leaves; the next switch
     /// replaces it.
-    replay: Vec<SessionObservation<P>>,
+    replay: Vec<Publication<P>>,
     /// The moved attachments still owed the replay.
     owed: BTreeMap<AttachmentId, MovedRequester>,
     /// An opening outgrew the hold before its binding: the service holds
@@ -97,20 +99,21 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// Takes one observation, moving the service to the session it switched
     /// to; `false` when the switch's root cannot be found and the service
     /// must end.
-    pub(super) fn observe(&mut self, event: SessionObservation<P>) -> bool {
-        if !self.owed.is_empty() && !self.replay_lost && !kept_for_attach(&event) {
-            self.replay.push(event.clone());
+    pub(super) fn observe(&mut self, publication: Publication<P>) -> bool {
+        let event = &publication.observation;
+        if !self.owed.is_empty() && !self.replay_lost && !kept_for_attach(event) {
+            self.replay.push(publication.clone());
             self.limit_replay();
         }
         let opening = matches!(event, SessionObservation::SessionOpening);
-        let binding = match &event {
+        let binding = match event {
             SessionObservation::Binding { session_id, .. } => Some(session_id.clone()),
             _ => None,
         };
         let Some(held) = self.held.as_mut() else {
             // A window opened inside a held opening is the next session's
             // own; the request that switches is the one before it.
-            if let SessionObservation::IntentStarted(started) = &event {
+            if let SessionObservation::IntentStarted(started) = event {
                 self.requested = started.as_deref().and_then(super::session_request_of).map(
                     |(requester, id)| {
                         (
@@ -121,19 +124,19 @@ impl<P: ProtocolExtension> ServedSession<P> {
                 );
             }
             if opening && !self.unresolved {
-                self.held = Some(vec![event]);
+                self.held = Some(vec![publication]);
                 return true;
             }
             if let Some(next) = binding.flatten() {
                 if self.unresolved {
-                    return self.resolve(next, event);
+                    return self.resolve(next, publication);
                 }
-                return self.switch(next, vec![event]);
+                return self.switch(next, vec![publication]);
             }
-            self.service.observe(event);
+            self.service.publish(publication);
             return true;
         };
-        held.push(event);
+        held.push(publication);
         if binding.is_none() && held.len() <= ATTACHMENT_CAPACITY {
             return true;
         }
@@ -161,12 +164,12 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// another's switches and moves them, owed what follows. Either way the
     /// next attach asks the session for a fresh baseline, which carries
     /// what the hold kept from them.
-    fn resolve(&mut self, next: String, binding: SessionObservation<P>) -> bool {
+    fn resolve(&mut self, next: String, binding: Publication<P>) -> bool {
         self.unresolved = false;
         self.service.hold_attachments(false);
         if next == self.session {
             self.service.resync_attachments();
-            self.service.observe(binding);
+            self.service.publish(binding);
             return true;
         }
         self.switch(next, vec![binding])
@@ -177,7 +180,7 @@ impl<P: ProtocolExtension> ServedSession<P> {
     /// its root, and each moved connection's next root attachment gets the
     /// opening's events after its attach snapshot. `false` when that root
     /// cannot be found.
-    fn switch(&mut self, next: String, observations: Vec<SessionObservation<P>>) -> bool {
+    fn switch(&mut self, next: String, observations: Vec<Publication<P>>) -> bool {
         if next == self.session {
             self.pass(observations);
             return true;
@@ -203,14 +206,15 @@ impl<P: ProtocolExtension> ServedSession<P> {
         // The service keeps what an attach re-emits; the rest of the
         // opening after its last root snapshot waits for the next attach.
         let baseline = observations.iter().rposition(|observation| {
-            matches!(observation, SessionObservation::PresentationSnapshot(snapshot)
+            matches!(&observation.observation, SessionObservation::PresentationSnapshot(snapshot)
                 if snapshot.scope == TranscriptScope::Root)
         });
         self.replay = observations
             .iter()
             .enumerate()
             .filter(|(index, observation)| {
-                baseline.is_none_or(|baseline| *index > baseline) && !kept_for_attach(observation)
+                baseline.is_none_or(|baseline| *index > baseline)
+                    && !kept_for_attach(&observation.observation)
             })
             .map(|(_, observation)| observation.clone())
             .collect();
@@ -287,9 +291,9 @@ impl<P: ProtocolExtension> ServedSession<P> {
         }
     }
 
-    fn pass(&self, observations: Vec<SessionObservation<P>>) {
+    fn pass(&self, observations: Vec<Publication<P>>) {
         for observation in observations {
-            self.service.observe(observation);
+            self.service.publish(observation);
         }
     }
 }

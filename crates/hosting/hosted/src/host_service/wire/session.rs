@@ -147,15 +147,19 @@ impl<P: ProtocolExtension> WireSession<P> {
                 return;
             }
             let mut lost = LostTranscripts::default();
+            let mut batch = Vec::with_capacity(16);
             loop {
                 match events.recv_timeout(POLL) {
                     Ok(event) => {
+                        use super::super::fanout::Publication;
+                        batch.push(Publication::prepare(event));
+                        batch.extend(events.try_iter().take(15).map(Publication::prepare));
                         let mut guard = served::lock(&pumped);
-                        let mut affects_directory = directory_event(&event);
-                        let mut found = guard.observe(event);
-                        while let Ok(event) = events.try_recv() {
-                            affects_directory |= directory_event(&event);
-                            found &= guard.observe(event);
+                        let mut affects_directory = false;
+                        let mut found = true;
+                        for publication in batch.drain(..) {
+                            affects_directory |= directory_event(&publication.observation);
+                            found &= guard.observe(publication);
                         }
                         lost.check(&guard.service(), &events);
                         drop(guard);

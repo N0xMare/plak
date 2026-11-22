@@ -5148,7 +5148,11 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   window it interrupted, or one without a correlation when a correlation
   reset closed that window. A transcript observation (snapshot, keyed patch,
   stream) goes, whatever its class, to the attachments holding its scope: the root's to
-  all, an agent's to those that opened it. The session serves one agent
+  all, an agent's to those that opened it. A root snapshot produced for
+  attachment repair at the already published revision goes only to
+  attachments waiting for a baseline. It does not retire pending stream
+  rows or change the revision of the next patch; an advancing snapshot goes
+  to all holders. The session serves one agent
   transcript: its first holder's open reaches the session, a later holder's
   open asks for a fresh snapshot of it instead, and only its last holder's
   close reaches the session; a scope change takes effect only once the
@@ -5163,24 +5167,34 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   either replay limit drops the kept baseline as a whole. Without a kept
   baseline a new attachment asks for a fresh one (the attach fails if it
   cannot ask), and it receives no root patches until a snapshot arrives.
-  If the first snapshot does not arrive, the attachment retries through
-  the normal five-second transcript repair deadline.
-  An attachment's queue starts with the kept observations. Beyond that
-  attach snapshot, which does not count against it, a queue holds at most
-  its capacity: a droppable event evicts the oldest droppable one (its
+  The service keeps one outstanding automatic repair request per scope,
+  and attached root resync requests share it;
+  unanswered requests are eligible for retry after five seconds. A repair
+  from retained data is not queued behind another baseline of the same
+  scope and is limited to one replay per attachment per five seconds.
+  An attachment's queue starts with the kept observations. A wire attachment
+  charges all queued observations, including those retained at attach,
+  against 64 MiB of sized JSON and queue-entry overhead. The kept observations
+  do not count against the separate 4096-item live queue limit.
+  A newer snapshot removes queued snapshots and patches of its scope,
+  then takes its turn after the surviving observations; output already
+  handed to the writer is not replaced. A droppable event evicts the oldest
+  droppable one (its
   sequence gap shows the loss) or is itself dropped; a state replaces a
   queued state of its kind, taking a fresh sequence number after what came
-  before it; a state, required event or addressed answer that still finds
-  no room drops the attachment, whose queue becomes one `resync_required`
-  and which takes and sends nothing more. An overflowing transcript patch
-  instead discards that scope's queued patch chain, suppresses further
-  patches in that scope and asks for a fresh snapshot once there is room.
+  before it. When the queue runs out of room, it can discard a scope's
+  queued snapshot and patch chain rather than grow, withholding further
+  patches until a fresh snapshot fits. A state, required event or
+  non-transcript addressed answer that still finds no room drops the
+  attachment, whose queue becomes one `resync_required` and which takes
+  and sends nothing more.
   An individually oversized wire patch takes the same repair path. Other
   observations keep their order and the transport stays connected.
-  Transcript content an attachment
-  lost to a full queue is a gap in that scope, repaid at its next take or
-  observation: the root's from the kept baseline when usable, otherwise by
-  asking the session for a fresh snapshot of that scope. Content of a transcript the
+  Droppable stream and legacy row loss does not trigger a repair while a
+  keyed chain is intact; the next keyed patch reconciles the view.
+  Other transcript gaps are repaired at a take or observation from usable
+  retained root data or by asking for a fresh snapshot of the scope.
+  Content of a transcript the
   session's own observation mailbox dropped before the host service took
   it is lost to every holder: each attachment holding that scope is ended
   with `resync_required` once per loss, the kept root baseline goes with
@@ -5575,7 +5589,8 @@ does not inherit another connection's pending answers.
   socket it bound. A `127.0.0.1` listener is dev mode only: it needs
   `--dev-login` (maintainer or test-support builds only; the default release
   refuses it explicitly), warns at start, and its origin is
-  `http://127.0.0.1:<port>`. The host binds it after its control socket, and
+  `http://127.0.0.1:<port>`. Accepted TCP connections disable Nagle; the unix
+  listener is unchanged. The host binds it after its control socket, and
   a listener that cannot be bound stops the host before it serves; it prints
   `plakd host: web on <listener>` before its start line, and stops serving
   when the host stops. Startup reads listener and capability policy from

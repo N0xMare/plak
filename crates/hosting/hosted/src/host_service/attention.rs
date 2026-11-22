@@ -44,7 +44,7 @@ impl<P: ProtocolExtension> HostService<P> {
             .as_ref()
             .filter(|(tree, _)| tree == tree_id)
             .map_or((0, 0), |(_, counts)| *counts);
-        for observation in &snapshot.states {
+        for (observation, _) in &snapshot.states {
             match observation {
                 SessionObservation::SetBusy(busy) => {
                     kept.busy = *busy;

@@ -1,7 +1,7 @@
 //! Withdraw only unclaimed inputs; join durable verdicts and their wire writes.
 
 use super::DraftDelivery;
-use crate::host_service::HostService;
+use crate::host_service::{HostService, Payload};
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::wire::{AttachmentId, ClientDraftId};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
@@ -86,7 +86,8 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
             SessionObservation::DraftRejected(intent),
         ] {
             let class = observation.class();
-            held.offer(observation.into(), class, capacity);
+            let size = Payload::measure(&observation);
+            held.offer(observation.into(), class, capacity, size);
             held.correlate_draft(Some(id));
         }
         self.track_draft_delivery(attachment, &mut delivery);

@@ -1,6 +1,7 @@
 //! Opt-in memory and replay probe for three attachments to one resident view.
 
 use super::*;
+use crate::host_service::queue::MAX_QUEUE_BYTES;
 use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptPatch};
 use plakous_host_protocol::{Core, intent_channel};
 use std::sync::{Barrier, mpsc};
@@ -178,4 +179,71 @@ fn three_resident_attachments_replay_profile() {
         );
         assert_eq!(clients.len(), 3);
     });
+}
+
+#[test]
+#[ignore = "Linux RSS sampling while a resident held writer falls behind large rolling patches"]
+fn sustained_stream_attachment_pressure_profile() {
+    let (actions, intents) = intent_channel::<Core>();
+    let service = HostService::new(actions.clone(), root(), ATTACHMENT_CAPACITY);
+    service.observe(snapshot(1, 1));
+    let link = Link {
+        started: Instant::now(),
+        first_page: None,
+        slow: true,
+        bytes: 0,
+    };
+    let mut slow = WireConnection::on_service(service.clone(), link, actions, Leave::Detach);
+    let Some(Outcome::Ok(Answer::Attached { attachment })) =
+        slow.request(1, Op::Attach { node: root() })
+    else {
+        panic!("slow attach");
+    };
+    slow.flush().unwrap();
+    let fast = service.attach(&root(), Face::Remote).unwrap();
+    service.take(fast);
+    let baseline = rss().0;
+    let cpu = cpu_ticks();
+    let started = Instant::now();
+    let mut max_queued = 0;
+    for index in 0..32 {
+        let start = index * PATCH_ROWS + 1;
+        for _ in 0..16 {
+            service.observe(SessionObservation::AssistantDelta("streaming".into()));
+        }
+        service.observe(SessionObservation::TranscriptPatch(TranscriptPatch {
+            scope: TranscriptScope::Root,
+            from_revision: index + 1,
+            to_revision: index + 2,
+            upserts: rows(start + VIEW_ROWS, PATCH_ROWS),
+            deletes: (start..start + PATCH_ROWS)
+                .map(|key| RowKey::new(key, Lane::Runtime, 0))
+                .collect(),
+        }));
+        service.take(fast);
+        max_queued = max_queued.max(service.lock().attachments[&attachment].queue.bytes());
+        assert!(service.attached(attachment));
+    }
+    assert!(intents.try_recv().unwrap().is_root_attachment_repair());
+    assert!(intents.try_recv().is_err());
+    let pressure = rss();
+    service.observe(snapshot(33, 32 * PATCH_ROWS + 1));
+    // The healthy view already has exactly this revision.
+    assert_eq!(service.take(fast), [] as [Outbound<Core>; 0]);
+    let link = &mut slow.stdout.inner;
+    link.started = Instant::now();
+    link.first_page = None;
+    slow.flush().unwrap();
+    assert!(service.attached(attachment));
+    let end = rss();
+    eprintln!(
+        "stream_pressure_profile baseline_rss_kib={baseline} stalled_rss_kib={} peak_rss_kib={} max_queued_bytes={max_queued} first_repair_page_ms={} elapsed_ms={} cpu_ticks={}",
+        pressure.0,
+        end.1,
+        slow.stdout.inner.first_page.unwrap().as_millis(),
+        started.elapsed().as_millis(),
+        cpu_ticks() - cpu,
+    );
+    assert!(max_queued <= MAX_QUEUE_BYTES);
+    assert!(end.1 < 512 * 1024, "fixture RSS outgrew its budget");
 }

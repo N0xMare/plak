@@ -70,6 +70,31 @@ pub(in crate::runtime) struct Presentations {
 }
 
 impl Presentations {
+    pub(in crate::runtime) fn replay_root<P: ProtocolExtension>(
+        &mut self,
+        sink: &HostEventSender<P>,
+    ) {
+        let root = TranscriptScope::Root;
+        // A real producer gap needs the normal advancing publication, with
+        // pending live rows. Otherwise keep the current revision and live rows.
+        if sink.transcript_resnapshot_required_for(&root) {
+            self.resync(&root, sink);
+        } else if let Some(state) = self.states.get(&root).filter(|state| state.revision() != 0) {
+            let _ = sink.replay_root_snapshot(PresentationSnapshot {
+                revision: state.revision(),
+                items: state
+                    .items()
+                    .iter()
+                    .map(|(key, row)| TranscriptItem {
+                        key: *key,
+                        row: row.clone(),
+                    })
+                    .collect(),
+                ..PresentationSnapshot::default()
+            });
+        }
+    }
+
     pub(in crate::runtime) fn snapshot<P: ProtocolExtension>(
         &mut self,
         mut snapshot: PresentationSnapshot,

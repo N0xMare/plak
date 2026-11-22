@@ -330,11 +330,13 @@ async fn accept(listener: &Bound) -> Option<Accepted> {
             .await
             .ok()
             .map(|(stream, _)| Box::new(stream) as Accepted),
-        Bound::Loopback(listener) => listener
-            .accept()
-            .await
-            .ok()
-            .map(|(stream, _)| Box::new(stream) as Accepted),
+        Bound::Loopback(listener) => {
+            let (stream, _) = listener.accept().await.ok()?;
+            if let Err(error) = stream.set_nodelay(true) {
+                tracing::debug!(%error, "could not disable Nagle on the web connection");
+            }
+            Some(Box::new(stream) as Accepted)
+        }
     }
 }
 

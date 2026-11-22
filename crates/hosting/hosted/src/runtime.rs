@@ -645,6 +645,17 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             .resync(scope, &self.inner)
     }
 
+    fn repair_attachment(&self, delivery: &plakous_host_protocol::IntentDelivery<P>) -> bool {
+        if !delivery.is_root_attachment_repair() {
+            return false;
+        }
+        self.presentations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replay_root(&self.inner);
+        true
+    }
+
     fn retire_agent_transcript(&self) {
         self.presentations
             .lock()

@@ -19,7 +19,7 @@
 //! refused, with its own refusal, when the node is closed, retiring, out
 //! of reach or unknown.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError};
 
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow, TranscriptScope};
@@ -27,7 +27,7 @@ use plakous_host_protocol::wire::{AttachmentId, RequestRefusal};
 use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent, SessionObservation};
 
 use super::wire::Face;
-use super::{Attachment, HostService, Scopes, origin, refusal_of};
+use super::{Attachment, HostService, Payload, Queue, Scopes, origin, refusal_of};
 
 /// Where a child node of the session's tree stands.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,13 +260,14 @@ impl<P: ProtocolExtension> HostService<P> {
                 reply_origin: id,
                 sender: Some(sender),
                 node: Some(agent.to_owned()),
-                queue: VecDeque::new(),
+                queue: Queue::default(),
                 seq: 0,
                 scopes: Scopes::Held(BTreeSet::from([scope])),
                 gapped: BTreeSet::new(),
                 fresh: BTreeSet::new(),
                 repairing: BTreeMap::new(),
-                snapshot_held: 0,
+                retained_after: None,
+                keyed: BTreeSet::new(),
                 dropped: false,
                 // As a root attachment made before an unresolved
                 // opening's binding, it takes nothing until that binding.
@@ -278,7 +279,8 @@ impl<P: ProtocolExtension> HostService<P> {
         {
             let observation = SessionObservation::SessionInfo(info);
             let class = observation.class();
-            held.offer(observation.into(), class, self.capacity);
+            let size = Payload::measure(&observation);
+            held.offer(observation.into(), class, self.capacity, size);
         }
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
         Ok(id)
@@ -326,7 +328,8 @@ impl<P: ProtocolExtension> HostService<P> {
                                 )),
                             ] {
                                 let class = answer.class();
-                                held.offer(answer.into(), class, capacity);
+                                let size = Payload::measure(&answer);
+                                held.offer(answer.into(), class, capacity, size);
                             }
                         }
                     }),

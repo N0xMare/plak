@@ -16,7 +16,7 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
         true
     }
     /// Driver-owned intent payload.
-    type Intent: Clone + fmt::Debug + Eq + Send + 'static;
+    type Intent: Clone + fmt::Debug + Eq + Send + serde::Serialize + 'static;
     /// Driver-owned observation payload.
     type Observation: ObservationExtension;
     /// Attachment-free product request; never enters an agent mailbox.
@@ -105,7 +105,9 @@ pub trait ProtocolExtension: Clone + fmt::Debug + Eq + Send + Sync + 'static {
 }
 
 /// Mailbox classification the observation channel applies to an extension.
-pub trait ObservationExtension: Clone + fmt::Debug + Eq + Send + 'static {
+pub trait ObservationExtension:
+    Clone + fmt::Debug + Eq + Send + serde::Serialize + 'static
+{
     /// Whether the observation replaces its own older value in the mailbox
     /// (a snapshot) rather than accumulating (a delta or a note).
     fn latest_state(&self) -> bool;

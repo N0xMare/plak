@@ -5,6 +5,7 @@ use plakous_host_protocol::{Core, Draft, IntentReceiver, intent_channel, observa
 use super::*;
 
 mod child;
+mod fanout;
 mod gap_repair;
 mod retained;
 
@@ -240,11 +241,11 @@ fn the_attach_snapshot_re_emits_states_baseline_pending_approvals_and_the_wait()
 }
 
 /// Without a kept baseline, a new attachment asks the session for a fresh
-/// root snapshot, correlated to itself.
+/// root snapshot through the shared repair path.
 #[test]
 fn an_attach_without_a_baseline_asks_for_one() {
     let (service, intents) = service(16);
-    let id = service.attach(&root(), Face::Remote).unwrap();
+    service.attach(&root(), Face::Remote).unwrap();
     let delivery = intents.try_recv().unwrap();
     assert!(matches!(
         *delivery,
@@ -252,12 +253,7 @@ fn an_attach_without_a_baseline_asks_for_one() {
             scope: TranscriptScope::Root
         }
     ));
-    assert_eq!(
-        delivery.started(),
-        Some(plakous_host_protocol::ContentObservation::IntentStarted(
-            Some(format!("remote-attachment:{id}"))
-        ))
-    );
+    assert!(delivery.is_root_attachment_repair());
 }
 
 /// Answers go to the attachment whose intent the session answers, broadcast

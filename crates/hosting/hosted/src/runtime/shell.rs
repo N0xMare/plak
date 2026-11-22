@@ -80,6 +80,9 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         };
+        if events.repair_attachment(&delivery) {
+            continue;
+        }
         if let Some(started) = delivery.started() {
             let _ = events.send(started);
         }

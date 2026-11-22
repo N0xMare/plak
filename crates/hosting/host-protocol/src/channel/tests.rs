@@ -1305,7 +1305,7 @@ fn saturated_deltas_keep_credential_wait_park_and_clear() {
 fn saturated_snapshots_are_not_spent_and_a_queued_wait_survives_them() {
     use crate::intent::{Never, ObservationExtension, ProtocolExtension};
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
+    #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
     struct Snap(u16);
     impl ObservationExtension for Snap {
         fn latest_state(&self) -> bool {

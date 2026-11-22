@@ -21,7 +21,7 @@ fn last_user_prompt_time_is_in_process_and_omitted_from_jsonl_v1() {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Overlay;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 struct OpenOverlay;
 
 impl ObservationExtension for OpenOverlay {

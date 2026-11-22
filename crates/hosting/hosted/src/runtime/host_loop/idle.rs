@@ -317,6 +317,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 self.role.idle_since = None;
                 return Ok(HostStep::Continue);
             };
+            if let Ok(delivery) = &received
+                && self.role.events.repair_attachment(delivery)
+            {
+                self.role.idle_since = None;
+                return Ok(HostStep::Continue);
+            }
             let received = received.map(|delivery| {
                 if let Some(started) = delivery.started() {
                     command_reply = delivery.correlated();

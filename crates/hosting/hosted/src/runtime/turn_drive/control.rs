@@ -218,6 +218,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
             ) else {
                 return true;
             };
+            if let Ok(delivery) = &received
+                && self.host.events.repair_attachment(delivery)
+            {
+                return false;
+            }
             let received = received.map(|delivery| {
                 if let Some(started) = delivery.started() {
                     command_reply = delivery.correlated();

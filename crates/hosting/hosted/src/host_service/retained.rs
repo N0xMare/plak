@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use plakous_host_protocol::views::{PresentationSnapshot, transcript::TranscriptPatch};
 
+use super::queue::MAX_QUEUE_BYTES;
 use super::{
     Face, ObservationClass, ProtocolExtension, SessionObservation, Snapshot, TranscriptScope,
     same_kind,
@@ -62,39 +63,69 @@ impl<P: ProtocolExtension> Payload<P> {
             Self::Other(other) => face.receives(other),
         }
     }
+
+    pub(super) fn measure(observation: &SessionObservation<P>) -> usize {
+        match observation {
+            SessionObservation::TranscriptPatch(patch) => encoded_size(patch),
+            SessionObservation::PresentationSnapshot(snapshot) => encoded_size(snapshot),
+            other => encoded_size(other),
+        }
+    }
 }
 
 pub(super) struct RetainedBaseline {
-    snapshot: Arc<PresentationSnapshot>,
-    patches: Vec<Arc<TranscriptPatch>>,
+    snapshot: (Arc<PresentationSnapshot>, usize),
+    patches: Vec<(Arc<TranscriptPatch>, usize)>,
     remaining: usize,
 }
 
 impl RetainedBaseline {
-    pub(super) fn observations<P: ProtocolExtension>(&self) -> impl Iterator<Item = Payload<P>> {
-        std::iter::once(Payload::Snapshot(Arc::clone(&self.snapshot)))
-            .chain(self.patches.iter().cloned().map(Payload::Patch))
+    pub(super) fn observations<P: ProtocolExtension>(
+        &self,
+    ) -> impl Iterator<Item = (Payload<P>, usize)> {
+        std::iter::once((
+            Payload::Snapshot(Arc::clone(&self.snapshot.0)),
+            self.snapshot.1,
+        ))
+        .chain(
+            self.patches
+                .iter()
+                .cloned()
+                .map(|(patch, size)| (Payload::Patch(patch), size)),
+        )
     }
 
     pub(super) fn patch_count(&self) -> usize {
         self.patches.len()
     }
 
-    fn keep_patch(&mut self, patch: &Arc<TranscriptPatch>) -> bool {
-        let mut budget = Budget(self.remaining);
+    fn keep_patch(&mut self, patch: &Arc<TranscriptPatch>, size: usize) -> bool {
+        let revision = self
+            .patches
+            .last()
+            .map_or(self.snapshot.0.revision, |(last, _)| last.to_revision);
         if self.patches.len() >= MAX_PATCHES
-            || serde_json::to_writer(&mut budget, patch.as_ref()).is_err()
+            || size > self.remaining
+            || patch.from_revision != revision
         {
             return false;
         }
-        self.remaining = budget.0;
-        self.patches.push(Arc::clone(patch));
+        self.remaining -= size;
+        self.patches.push((Arc::clone(patch), size));
         true
     }
 }
 
-// Charge the encoded patch (including deletes and metadata), without
-// allocating an encoding or scanning bytes past the available budget.
+fn encoded_size(value: &impl serde::Serialize) -> usize {
+    let mut budget = Budget(MAX_QUEUE_BYTES);
+    if serde_json::to_writer(&mut budget, value).is_ok() {
+        MAX_QUEUE_BYTES - budget.0
+    } else {
+        MAX_QUEUE_BYTES + 1
+    }
+}
+
+// Charge the JSON without allocating an encoded frame.
 struct Budget(usize);
 
 impl Write for Budget {
@@ -102,7 +133,7 @@ impl Write for Budget {
         self.0 = self
             .0
             .checked_sub(bytes.len())
-            .ok_or_else(|| io::Error::other("retained patch budget exceeded"))?;
+            .ok_or_else(|| io::Error::other("attachment budget exceeded"))?;
         Ok(bytes.len())
     }
 
@@ -112,12 +143,12 @@ impl Write for Budget {
 }
 
 impl<P: ProtocolExtension> Snapshot<P> {
-    pub(super) fn remember(&mut self, payload: &Payload<P>, class: ObservationClass) {
+    pub(super) fn remember(&mut self, payload: &Payload<P>, class: ObservationClass, size: usize) {
         let observation = match payload {
             Payload::Snapshot(baseline) => {
                 if baseline.scope == TranscriptScope::Root {
                     self.baseline = Some(RetainedBaseline {
-                        snapshot: Arc::clone(baseline),
+                        snapshot: (Arc::clone(baseline), size),
                         patches: Vec::new(),
                         remaining: MAX_PATCH_BYTES,
                     });
@@ -127,7 +158,7 @@ impl<P: ProtocolExtension> Snapshot<P> {
             Payload::Patch(patch) => {
                 if patch.scope == TranscriptScope::Root
                     && let Some(baseline) = &mut self.baseline
-                    && !baseline.keep_patch(patch)
+                    && !baseline.keep_patch(patch, size)
                 {
                     self.baseline = None;
                 }
@@ -146,25 +177,25 @@ impl<P: ProtocolExtension> Snapshot<P> {
         }
         match observation {
             SessionObservation::ApprovalRequired { approval_id, .. } => {
-                self.approvals.retain(|(id, _)| id != approval_id);
+                self.approvals.retain(|(id, ..)| id != approval_id);
                 self.approvals
-                    .push((approval_id.clone(), observation.clone()));
+                    .push((approval_id.clone(), observation.clone(), size));
             }
             SessionObservation::ApprovalResolved { approval_id, .. } => {
-                self.approvals.retain(|(id, _)| id != approval_id);
+                self.approvals.retain(|(id, ..)| id != approval_id);
             }
             SessionObservation::CredentialWait { account } => {
-                self.credential_wait = account.is_some().then(|| observation.clone());
+                self.credential_wait = account.is_some().then(|| (observation.clone(), size));
             }
             SessionObservation::ClearView => self.baseline = None,
             _ if class == ObservationClass::State => {
                 match self
                     .states
                     .iter_mut()
-                    .find(|held| same_kind(held, observation))
+                    .find(|(held, _)| same_kind(held, observation))
                 {
-                    Some(held) => *held = observation.clone(),
-                    None => self.states.push(observation.clone()),
+                    Some(held) => *held = (observation.clone(), size),
+                    None => self.states.push((observation.clone(), size)),
                 }
             }
             _ => {}

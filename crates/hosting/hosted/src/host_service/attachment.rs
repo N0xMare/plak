@@ -2,9 +2,10 @@
 
 use plakous_host_protocol::observation::Delivery;
 
+use super::queue::MAX_QUEUE_BYTES;
 use super::{
     Attachment, AttachmentId, Face, LOCAL_ATTACHMENT, ObservationClass, Payload, Pending,
-    ProtocolExtension, REMOTE_ATTACHMENT, SessionObservation, TranscriptScope, same_kind,
+    ProtocolExtension, Queue, REMOTE_ATTACHMENT, SessionObservation, TranscriptScope, same_kind,
 };
 
 /// The origin tag an attachment's intents carry, so the session's
@@ -59,22 +60,21 @@ pub(super) fn kept_for_attach<P: ProtocolExtension>(observation: &SessionObserva
 impl<P: ProtocolExtension> Attachment<P> {
     pub(super) fn miss_patch(&mut self, scope: &TranscriptScope) {
         self.gapped.insert(scope.clone());
-        if !self.fresh.insert(scope.clone()) {
-            return;
+        if self.fresh.insert(scope.clone()) {
+            self.discard_transcript(scope);
         }
-        // A patch chain with a missing revision cannot be repaired by
-        // replaying later deltas. Keep all other observations in order.
-        let mut index = 0;
-        let mut kept_snapshot = 0;
-        self.queue.retain(|item| {
-            let keep = !matches!(item, Pending::Event {
-                observation: Payload::Patch(patch), ..
-            } if patch.scope == *scope);
-            kept_snapshot += usize::from(keep && index < self.snapshot_held);
-            index += 1;
-            keep
-        });
-        self.snapshot_held = kept_snapshot;
+    }
+
+    pub(super) fn discard_transcript(&mut self, scope: &TranscriptScope) {
+        self.queue.retain(|item| queued_scope(item) != Some(scope));
+    }
+
+    pub(super) fn queued_baseline(&self, scope: &TranscriptScope) -> bool {
+        self.queue.iter().any(|item| {
+            matches!(item, Pending::Event {
+            observation: Payload::Snapshot(snapshot), ..
+        } if snapshot.scope == *scope)
+        })
     }
 
     /// How many items this attachment's queue holds: a face's is unbounded,
@@ -83,6 +83,14 @@ impl<P: ProtocolExtension> Attachment<P> {
     pub(super) const fn capacity(&self, service: usize) -> usize {
         if self.sender.is_some() {
             service
+        } else {
+            usize::MAX
+        }
+    }
+
+    pub(super) const fn byte_limit(&self) -> usize {
+        if self.sender.is_some() {
+            MAX_QUEUE_BYTES
         } else {
             usize::MAX
         }
@@ -101,7 +109,9 @@ impl<P: ProtocolExtension> Attachment<P> {
             | SessionObservation::Row(_) => TranscriptScope::Root,
             _ => return,
         };
-        self.gapped.insert(scope);
+        if !self.keyed.contains(&scope) {
+            self.gapped.insert(scope);
+        }
     }
 
     /// Queues `observation`, making room by its class, or drops the
@@ -111,34 +121,84 @@ impl<P: ProtocolExtension> Attachment<P> {
         observation: Payload<P>,
         class: ObservationClass,
         capacity: usize,
+        encoded: usize,
     ) {
         if self.dropped || self.waiting || !observation.received_by(self.face) {
             return;
         }
-        let patch_scope = match &observation {
-            Payload::Patch(patch) => Some(&patch.scope),
-            _ => None,
-        };
-        if patch_scope.is_some_and(|scope| self.fresh.contains(scope)) {
+        let scope = payload_scope(&observation);
+        if matches!(&observation, Payload::Patch(patch) if self.fresh.contains(&patch.scope)) {
             self.seq += 1;
             return;
         }
+        if let Payload::Snapshot(snapshot) = &observation {
+            // The snapshot covers everything queued for its scope. Its
+            // replacement takes its own turn after surviving observations.
+            self.discard_transcript(&snapshot.scope);
+        }
         let droppable = class == ObservationClass::Event(Delivery::Droppable);
-        if class == ObservationClass::State
+        let replacement = if class == ObservationClass::State
             && let Payload::Other(new) = &observation
-            && let Some(index) = self.queue.iter().position(|item| {
+        {
+            self.queue.iter().position(|item| {
                 matches!(item, Pending::Event { class: ObservationClass::State, observation: Payload::Other(held), .. }
                     if same_kind(held, new))
             })
-        {
+        } else {
+            None
+        };
+        if let Some(index) = replacement {
             // A queued state of its kind is superseded: the old one goes,
             // and the new one takes its turn after what came before it.
             self.queue.remove(index);
-            if index < self.snapshot_held {
-                self.snapshot_held -= 1;
+        }
+        self.seq += 1;
+        let cost = Queue::<P>::charge(encoded);
+        if !self.make_room(cost, capacity, !droppable && scope.is_none()) {
+            if let Some(scope) = scope {
+                self.miss_patch(scope);
+            } else if droppable {
+                if let Payload::Other(lost) = &observation {
+                    self.note_loss(lost);
+                }
+            } else {
+                self.dropped = true;
+                self.queue.clear();
+                self.queue.push_boundary(Pending::ResyncRequired);
             }
-        } else if self.queue.len() - self.snapshot_held.min(self.queue.len()) >= capacity {
-            let oldest_droppable = self.queue.iter().position(|item| {
+            return;
+        }
+        if let Payload::Snapshot(snapshot) = &observation {
+            // The baseline includes any transcript evicted to make room for it.
+            self.gapped.remove(&snapshot.scope);
+            self.fresh.remove(&snapshot.scope);
+            self.repairing.remove(&snapshot.scope);
+            self.keyed.insert(snapshot.scope.clone());
+        }
+        if matches!(
+            observation,
+            Payload::Other(SessionObservation::ClearView | SessionObservation::SessionOpening)
+        ) {
+            self.keyed.clear();
+        }
+        self.queue.push(
+            Pending::Event {
+                client_id: None,
+                seq: self.seq,
+                class,
+                observation,
+            },
+            cost,
+        );
+    }
+
+    fn make_room(&mut self, cost: usize, capacity: usize, may_discard_transcript: bool) -> bool {
+        let limit = self.byte_limit();
+        if cost > limit {
+            return false;
+        }
+        while !self.queue.fits(cost, capacity, limit) {
+            let oldest = self.queue.iter().position(|item| {
                 matches!(
                     item,
                     Pending::Event {
@@ -147,50 +207,41 @@ impl<P: ProtocolExtension> Attachment<P> {
                     }
                 )
             });
-            match (oldest_droppable, droppable) {
-                (Some(index), _) => {
-                    if let Some(Pending::Event {
-                        observation: Payload::Other(lost), ..
-                    }) = self.queue.remove(index)
-                    {
-                        self.note_loss(&lost);
-                    }
+            if let Some(index) = oldest {
+                if let Some(Pending::Event {
+                    observation: Payload::Other(lost),
+                    ..
+                }) = self.queue.remove(index)
+                {
+                    self.note_loss(&lost);
                 }
-                (None, true) => {
-                    // Dropped: the gap in the sequence tells the client.
-                    if let Payload::Other(lost) = &observation {
-                        self.note_loss(lost);
-                    }
-                    self.seq += 1;
-                    return;
-                }
-                (None, false) => {
-                    if let Some(scope) = patch_scope
-                        && self.sender.is_some()
-                    {
-                        self.miss_patch(scope);
-                        self.seq += 1;
-                        return;
-                    }
-                    self.dropped = true;
-                    self.queue.clear();
-                    self.queue.push_back(Pending::ResyncRequired);
-                    return;
-                }
+            } else if let Some(scope) = may_discard_transcript
+                .then(|| self.queue.iter().find_map(queued_scope).cloned())
+                .flatten()
+            {
+                // Keep counted answers and ordered boundaries even if
+                // their admission requires dropping a transcript replay.
+                self.discard_transcript(&scope);
+                self.miss_patch(&scope);
+            } else {
+                return false;
             }
         }
-        self.seq += 1;
-        if let Payload::Snapshot(snapshot) = &observation {
-            // The baseline includes any transcript evicted to make room for it.
-            self.gapped.remove(&snapshot.scope);
-            self.fresh.remove(&snapshot.scope);
-            self.repairing.remove(&snapshot.scope);
-        }
-        self.queue.push_back(Pending::Event {
-            client_id: None,
-            seq: self.seq,
-            class,
-            observation,
-        });
+        true
+    }
+}
+
+fn payload_scope<P: ProtocolExtension>(payload: &Payload<P>) -> Option<&TranscriptScope> {
+    match payload {
+        Payload::Snapshot(snapshot) => Some(&snapshot.scope),
+        Payload::Patch(patch) => Some(&patch.scope),
+        Payload::Other(_) => None,
+    }
+}
+
+fn queued_scope<P: ProtocolExtension>(item: &Pending<P>) -> Option<&TranscriptScope> {
+    match item {
+        Pending::Event { observation, .. } => payload_scope(observation),
+        _ => None,
     }
 }
