@@ -414,13 +414,18 @@ impl ProductStore {
         let database = product_sqlite_path(paths)?;
         #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
+        let mut verified_submissions = views::VerifiedSubmissions::default();
         let connection = schema::schema().open_writer(&database, |connection| {
-            let _ = connection;
             #[cfg(feature = "test-support")]
-            plakous_offline_crash_harness::commit_trace::install(connection, "product").map_err(
-                |_| AdmissionError::Unavailable("could not install commit trace".into()),
-            )?;
-            Ok(())
+            if plakous_offline_crash_harness::commit_trace::install(connection, "product")
+                .map_err(|_| AdmissionError::Unavailable("could not install commit trace".into()))?
+            {
+                // SQLite allows one update hook; commit tracing keeps it.
+                return Ok(());
+            }
+            verified_submissions.track_updates(connection).map_err(|_| {
+                AdmissionError::Unavailable("could not track submission changes".into())
+            })
         })?;
         Ok(Self {
             connection,
@@ -436,7 +441,7 @@ impl ProductStore {
             },
             baselines: HashMap::new(),
             synchronous_full: true,
-            verified_submissions: views::VerifiedSubmissions::default(),
+            verified_submissions,
             #[cfg(test)]
             capacity_fault: None,
         })

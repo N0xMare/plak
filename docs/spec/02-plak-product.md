@@ -2101,6 +2101,12 @@ row is therefore refused from the next connection's first load, not by that
 connection. A new product-store connection checks every row on its first load,
 and a connection that discards a submission or deletes its session forgets what
 it verified for it.
+Queue joins and projector passes enumerate the relevant submission row keys
+in a store snapshot, reading payloads only for keys without a verified image
+in that snapshot. Local submission writes invalidate their keys even if
+rolled back; an external database change or schema change invalidates the
+key index before any reuse. A write transaction never seeds the index. The
+same permanent binding checks apply to every payload the index cannot supply.
 After a root or steer acknowledgement, the host grants the projector at most
 400 ms to refresh this join. A timeout or refusal leaves projection debt, not
 invented queue flags. Until the background projector supplies the missing

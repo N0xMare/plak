@@ -7,23 +7,26 @@
 
 use plakous_hosted::session_store::RecordStoreError;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use plakous::sessions::SessionLocator;
 use plakous::sessions::feed::FeedSeq;
 use plakous_hosted::sessions::projector::{
     AnchoredIntent, HostPauseCause, Lane, OperatorNotice, ProductIntents, ProjectionCommit,
     RootContinuation, RootInterrupt, RowKey, SessionViewState, SessionViews, Submission,
-    SubmissionKind, ViewWrites, WorkflowRequest,
+    ViewWrites, WorkflowRequest,
 };
 use plakous_hosted::sessions::{TranscriptRow, encode_workflow_kind};
-use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, TransactionState, params};
+use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, params};
 
 use super::{ProductStore, from_i64, to_i64};
 
 pub(super) mod intents;
 pub(super) use intents::attention_facts_on;
 pub(super) use intents::intents_of;
+mod submissions;
+pub(super) use submissions::VerifiedSubmissions;
+use submissions::load_submissions_where;
 
 const WAKE_SUPPRESSION: &str = "wake_suppression";
 const PAUSE_CAUSE: &str = "pause_cause";
@@ -1334,120 +1337,6 @@ fn insert_notice(
         )
         .map_err(|error| super::write_error(error, format!("could not record operator notice {}", notice.notice_id)))?;
     Ok(())
-}
-
-/// The submissions one store verified against their permanent identity
-/// bindings (spec 02 §2.6), by owner session and command id, with the exact
-/// immutable fields that matched. A command binding is never removed and never
-/// changes once written, so a row equal to its verified fields needs no second
-/// check through this store; a changed row misses and is checked again, and a
-/// new process checks every row on its first load. It grows by one entry per
-/// verified submission until a discard, a session delete or the end of the
-/// connection.
-#[derive(Debug, Default)]
-pub(super) struct VerifiedSubmissions(HashMap<String, HashMap<String, Submission>>);
-
-impl VerifiedSubmissions {
-    fn contains(&self, owner: &str, submission: &Submission) -> bool {
-        self.0
-            .get(owner)
-            .and_then(|verified| verified.get(&submission.command_id))
-            == Some(submission)
-    }
-
-    /// Forgets a discarded submission.
-    pub(super) fn forget(&mut self, owner: &str, command_id: &str) {
-        if let Some(verified) = self.0.get_mut(owner) {
-            verified.remove(command_id);
-        }
-    }
-
-    /// Forgets every submission of a deleted session.
-    pub(super) fn forget_session(&mut self, owner: &str) {
-        self.0.remove(owner);
-    }
-}
-
-/// Loads submissions and checks each against its permanent identity binding,
-/// unless `verified` holds its exact fields. The unverified rows are checked in
-/// one query. Only rows read outside a write transaction are remembered: a
-/// write transaction's own rows and bindings are not durable until it commits.
-fn load_submissions_where(
-    connection: &Connection,
-    verified: &mut VerifiedSubmissions,
-    filter: &str,
-    value: &str,
-) -> Result<Vec<(String, Submission)>, String> {
-    let mut statement = connection
-        .prepare(&format!(
-            "SELECT session_id,command_id,kind,queue_item_id,queue_revision,target_turn_id,canonical_command,submitted_at_ms FROM submissions WHERE {filter} ORDER BY rowid"
-        ))
-        .map_err(unavailable)?;
-    let submissions = statement
-        .query_map([value], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                Submission {
-                    command_id: row.get(1)?,
-                    kind: SubmissionKind::parse(&row.get::<_, String>(2)?)
-                        .ok_or(rusqlite::Error::InvalidQuery)?,
-                    queue_item_id: row.get(3)?,
-                    queue_item_revision: from_i64(row.get(4)?)?,
-                    target_turn_id: row.get(5)?,
-                    canonical_command: row.get(6)?,
-                    submitted_at_ms: from_i64(row.get(7)?)?,
-                },
-            ))
-        })
-        .map_err(unavailable)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(invalid)?;
-    let unverified = submissions
-        .iter()
-        .filter(|(owner, submission)| !verified.contains(owner, submission))
-        .collect::<Vec<_>>();
-    if unverified.is_empty() {
-        return Ok(submissions);
-    }
-    let identities = serde_json::to_string(
-        &unverified
-            .iter()
-            .map(|(_, submission)| submission.binding_identity())
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|_| "submission identities are not encodable".to_owned())?;
-    let bindings = connection
-        .prepare(
-            "SELECT b.identity,b.owner_session_id,b.binding_digest FROM json_each(?1) AS wanted JOIN identity_bindings AS b ON b.identity=wanted.value WHERE b.kind='command' AND b.terminal_disposition IS NULL AND b.terminal_outcome IS NULL",
-        )
-        .map_err(unavailable)?
-        .query_map([identities], |row| {
-            Ok((row.get::<_, String>(0)?, (row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
-        })
-        .map_err(unavailable)?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(unavailable)?;
-    for (owner, submission) in &unverified {
-        let (bound_owner, digest) = bindings
-            .get(&submission.binding_identity())
-            .ok_or_else(|| "submission contradicts its permanent identity binding".to_owned())?;
-        if bound_owner != owner || *digest != submission.binding_digest(owner) {
-            return Err("submission contradicts its permanent identity binding".to_owned());
-        }
-    }
-    if matches!(
-        connection.transaction_state(None::<&str>),
-        Ok(TransactionState::None | TransactionState::Read)
-    ) {
-        for (owner, submission) in unverified {
-            verified
-                .0
-                .entry(owner.clone())
-                .or_default()
-                .insert(submission.command_id.clone(), submission.clone());
-        }
-    }
-    Ok(submissions)
 }
 
 mod cursor_intents;

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use plakous_hosted::sessions::projector::{
-    CallView, Counters, OpenTurn, ProcessTrack, SessionViewState,
+    CallView, Counters, OpenTurn, ProcessTrack, SessionViewState, SubmissionKind,
 };
 use plakous_hosted::sessions::{
     NoticeScope, ProductCompactReason, SessionRecord, SessionWorkflowKind,
@@ -958,6 +958,87 @@ fn keyed_views_are_session_scoped_and_cascade_on_session_deletion() {
             0
         );
     }
+}
+
+#[test]
+fn warm_projection_and_queue_join_do_not_reread_verified_submission_bodies() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let submission = Submission {
+        command_id: "exact-root".into(),
+        kind: SubmissionKind::RootStart,
+        queue_item_id: "exact-item".into(),
+        queue_item_revision: 1,
+        target_turn_id: None,
+        canonical_command: "exact prompt".into(),
+        submitted_at_ms: 42,
+    };
+    store.write_submission(&id, &submission).unwrap();
+    assert_eq!(store.load_intents(&id).unwrap().submissions, [submission]);
+    let expected = store.load_queue_commands(&id).unwrap();
+    assert!(expected.has_pending());
+
+    store
+        .connection
+        .authorizer(Some(|ctx: AuthContext<'_>| {
+            if matches!(
+                ctx.action,
+                AuthAction::Read {
+                    table_name: "submissions",
+                    column_name: "canonical_command"
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .unwrap();
+    assert_eq!(store.load_queue_commands(&id).unwrap(), expected);
+    let views = views_at(1, &[]);
+    assert_eq!(
+        store
+            .commit_projection_views(
+                &id,
+                &ViewWrites::between(&SessionViews::empty(), &views),
+                &views.state,
+            )
+            .unwrap(),
+        ProjectionCommit::Applied
+    );
+    assert_eq!(store.load_queue_commands(&id).unwrap(), expected);
+    store
+        .connection
+        .authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+
+    let tamper = "UPDATE submissions SET canonical_command='changed' WHERE session_id=?1";
+    let peer = ProductStore::open(&PlakPaths::explicit(root.path().join("p"))).unwrap();
+    {
+        let tx = peer.connection.unchecked_transaction().unwrap();
+        tx.execute(tamper, [&id]).unwrap();
+        tx.rollback().unwrap();
+    }
+    assert_eq!(store.load_queue_commands(&id).unwrap(), expected);
+    peer.connection.execute(tamper, [&id]).unwrap();
+    assert_eq!(
+        store.load_queue_commands(&id).unwrap_err(),
+        "submission contradicts its permanent identity binding"
+    );
+    peer.connection
+        .execute(
+            "UPDATE submissions SET canonical_command='exact prompt' WHERE session_id=?1",
+            [&id],
+        )
+        .unwrap();
+    assert_eq!(store.load_queue_commands(&id).unwrap(), expected);
+    store.connection.execute(tamper, [&id]).unwrap();
+    assert_eq!(
+        store.load_queue_commands(&id).unwrap_err(),
+        "submission contradicts its permanent identity binding"
+    );
 }
 
 #[test]
