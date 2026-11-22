@@ -39,6 +39,9 @@ use crate::surface_protocol::PlakExtension;
 const ACCEPT_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /// How often a connection looks for a stop.
 const STOP_POLL: Duration = Duration::from_millis(200);
+/// The codec zero-fills this chunk even when a nonblocking read has no data.
+/// Large messages still span chunks up to the unchanged frame and message caps.
+const READ_CHUNK_BYTES: usize = 16 * 1024;
 /// How often the host pings, and how long a ping may go unanswered.
 const PING_EVERY: Duration = Duration::from_secs(15);
 const PONG_DEADLINE: Duration = Duration::from_secs(30);
@@ -120,6 +123,7 @@ type Socket = WebSocketStream<ProgressIo<TokioIo<Upgraded>>>;
 /// session ends.
 pub(crate) async fn serve(upgraded: Upgraded, served: Arc<Served>, slot: ConnectionSlot) {
     let config = WebSocketConfig::default()
+        .read_buffer_size(READ_CHUNK_BYTES)
         .max_message_size(Some(MAX_LINE_BYTES))
         .max_frame_size(Some(MAX_LINE_BYTES));
     let socket = WebSocketStream::from_raw_socket(

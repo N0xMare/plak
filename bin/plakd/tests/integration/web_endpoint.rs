@@ -893,8 +893,8 @@ fn a_live_socket_is_never_replaced() {
     assert_eq!(page(&web, Some(LOGIN), HOST).status, 200);
 }
 
-/// A message past the 16 MiB frame cap ends that connection with no answer;
-/// the session itself is untouched and takes the next one.
+/// A frame can span many reads. A message past the 16 MiB frame cap ends
+/// only that connection with no answer; the session takes the next one.
 #[test]
 fn an_oversized_frame_ends_only_its_connection() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": [{"output": {"text": ANSWER}}]}));
@@ -903,6 +903,16 @@ fn an_oversized_frame_ends_only_its_connection() {
     let mut socket = upgrade(&web, &cookie);
     let root = hello(&mut socket);
     attach(&mut socket, &root, 1);
+    let mut padded = " ".repeat(256 * 1024);
+    padded.push_str(
+        &encode_line(&ClientFrame::<Core>::Request {
+            id: 2,
+            op: Op::Ping,
+        })
+        .unwrap(),
+    );
+    socket.send(Message::text(padded)).unwrap();
+    assert_eq!(response(&mut socket, 2), json!({"ok":{"answer":"pong"}}));
     let oversized = "x".repeat(16 * 1024 * 1024 + 1);
     // The host may close while the message is still being written.
     let _ = socket.send(Message::text(oversized));

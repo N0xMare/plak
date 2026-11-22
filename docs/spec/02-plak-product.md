@@ -5618,8 +5618,9 @@ does not inherit another connection's pending answers.
   its pong deadline starts when the writer reaches it, not while queued
   behind an in-flight message. The reader polls buffered text/control
   frames before overdue heartbeat ticks. Missed heartbeat intervals are
-  skipped rather than burst-replayed. The endpoint does not negotiate
-  WebSocket compression.
+  skipped rather than burst-replayed. The codec reads in 16 KiB chunks;
+  larger messages span reads under the same frame and message caps.
+  The endpoint does not negotiate WebSocket compression.
 - **Static files.** `--ui <dir>` must hold `csp.json`
   (`{"header": "...", "report_only_header": "..."}`, the second optional),
   whose `header` must carry `frame-ancestors 'none'`; without `--ui` only
