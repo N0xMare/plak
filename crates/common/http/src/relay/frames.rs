@@ -111,8 +111,7 @@ impl RelayFrames {
         }
     }
 
-    /// After `End{complete}`: the relay body must end with nothing after it,
-    /// which also lets its connection carry the next relay request.
+    /// After `End{complete}`: the relay body must end with nothing after it.
     async fn finish(&mut self) -> Option<Result<http_body::Frame<Bytes>, ErrorKind>> {
         let mut hop = self.hop.take()?;
         loop {

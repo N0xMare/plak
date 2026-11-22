@@ -1889,9 +1889,12 @@ path and query rule, with the custodied header names equal to the row's;
 an off-table origin, path, method or query, a reserved or hop-by-hop header,
 a plain entry reusing a custodied name and a malformed header are refused
 before any upstream byte. Token, device, JWKS, userinfo, discovery and
-profile endpoints are never relayable. The gateway follows no redirect (a
-3xx is relayed unchanged) and never retries an upstream request. An idle
-socket may be reused only for a marked inference row, after the same caller,
+profile endpoints are never relayable. The caller opens a fresh HTTP/1.1
+connection for each gateway request; a lost reply after possible admission
+is not proof of an unsent request and does not authorize a relay-client
+resend. The gateway follows no redirect (a 3xx is relayed unchanged) and
+never retries an upstream request. An idle upstream socket may be reused
+only for a marked inference row, after the same caller,
 scope, disable, pin and credential checks as on a fresh connection. The pool
 adds the exact logical origin, gateway protocol version, custody slot, account
 binding and credential generation to the transport's connection key. Inference

@@ -228,7 +228,9 @@ impl GatewayService for Service {
                 .into_iter()
                 .find_map(|origin| envelope.url.strip_prefix(origin))
                 .filter(|path| path.starts_with("/v1/"));
-            let Some(path) = path.filter(|_| envelope.method == "POST") else {
+            let Some(path) = path.filter(|path| {
+                envelope.method == "POST" || (envelope.method == "GET" && *path == "/v1/catalog")
+            }) else {
                 return Err(GatewayRefusal::UpstreamNotPinned {});
             };
             if envelope.custodied_names().collect::<Vec<_>>() != ["authorization"] {
@@ -317,6 +319,7 @@ fn endpoint(server: RelayServer<Service>, peer: Peer) -> GatewayEndpoint {
     }))
 }
 
+mod caller_hop;
 mod pooling;
 
 fn relayed(endpoint: GatewayEndpoint) -> Client {

@@ -12864,7 +12864,11 @@ digit, or a known credential prefix). Sanitization is idempotent, including
 deserialize/re-encode of retained diagnostics.
 
 A relayed exchange (§7.5) composes the two hops into one transmission fact
-on facts, not phases. A gateway hop that failed before the gateway could
+on facts, not phases. The caller opens a fresh HTTP/1.1 connection for each
+gateway request, including version negotiation, JSON calls and relay
+envelopes. A negotiated version is cached, not a connection. A new request
+never uses a caller socket left idle by a previous call or gateway instance.
+A gateway hop that failed before the gateway could
 hold the whole relay request (`NotStarted` or `RequestIncomplete`) is an
 upstream `NotStarted`: the gateway dials only after a full read. A gateway
 refusal (a non-200 answer with `plak-gateway-error`) is unsent: `busy` is a
@@ -12874,7 +12878,8 @@ cause that no turn replays (`fence_moved` first re-prepares, above). A hop
 lost after the whole relay request may have been sent, an unmarked non-200
 answer, a wrong content type, `End{cancelled}` or `End{gateway_failed}`
 before the head, and a frame decode error before it are `MayHaveTransmitted`
-in the response head. `End{upstream_failed}` before the head carries the
+in the response head; losing a fresh hop after admission does not make
+the request safe to resend. `End{upstream_failed}` before the head carries the
 gateway's measured upstream phase, transmission and kind verbatim. The
 `Head` frame is the `Response`; any break after it (a lost hop,
 `End{upstream_failed}`, `cancelled` or `gateway_failed`, a decode, sequence
@@ -13508,7 +13513,8 @@ dropping an idle connection aborts its driver. The model clients of every route
 (Claude, Codex and Grok subscription inference, the Anthropic, OpenAI Platform
 and xAI API clients, and OpenRouter's configured model clients) are pooled;
 OAuth, token refresh, catalog, discovery and key-usage clients stay one-shot.
-A gateway relay server has a separate pool for its upstream HTTP/1.1 TLS
+The caller-to-gateway hop is always one-shot, independent of provider-route
+pooling. A gateway relay server has a pool for its upstream HTTP/1.1 TLS
 connections on marked inference rows. Only a request validated against the
 same exact logical origin, protocol version, custody slot, account binding
 and credential generation can reuse that connection. The per-key cap and

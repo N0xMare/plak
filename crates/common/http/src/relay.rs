@@ -278,7 +278,10 @@ impl RelayClient {
             .transpose()?;
         let hop = Client::new_http1(hop_limits(&Limits::default()))?;
         Ok(Self {
-            hop: hop.with_dialer(Arc::new(Dial(endpoint))).pooled(),
+            // A carried version is not a live connection to that instance.
+            // Never dispatch a new call into a gateway socket that may be
+            // closing; a missing reply cannot prove the gateway did not act.
+            hop: hop.with_dialer(Arc::new(Dial(endpoint))),
             key,
             version: OnceCell::new(),
         })
