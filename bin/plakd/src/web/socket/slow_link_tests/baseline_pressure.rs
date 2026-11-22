@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 const ROW_BYTES: usize = 512 * 1024;
 const PATCH_ROWS: u64 = 10;
 const PATCHES: u64 = 64;
-const RATE_BYTES: usize = 16 * 1024 * 1024;
+const RATE_BYTES: u64 = 16 * 1024 * 1024;
 
 fn rows(first: u64, count: u64) -> Vec<TranscriptItem> {
     (first..first + count)
@@ -57,10 +57,7 @@ async fn shaped_pair() -> (Server, Client, tokio::task::JoinHandle<()>) {
             let mut buffer = vec![0; PIPE];
             let delay = Duration::from_millis(25);
             let mut next = Instant::now() + delay;
-            loop {
-                let Ok(read) = from_server.read(&mut buffer).await else {
-                    break;
-                };
+            while let Ok(read) = from_server.read(&mut buffer).await {
                 if read == 0 {
                     break;
                 }
@@ -68,7 +65,8 @@ async fn shaped_pair() -> (Server, Client, tokio::task::JoinHandle<()>) {
                 if now.saturating_duration_since(next) > delay {
                     next = now + delay;
                 }
-                next += Duration::from_secs_f64(read as f64 / RATE_BYTES as f64);
+                let nanos = u64::try_from(read).unwrap() * 1_000_000_000 / RATE_BYTES;
+                next += Duration::from_nanos(nanos);
                 tokio::time::sleep_until(next).await;
                 if to_client.write_all(&buffer[..read]).await.is_err() {
                     break;
@@ -100,6 +98,7 @@ fn process_cpu() -> Duration {
 
 async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Duration>, u64) {
     let mut first = None;
+    let mut baseline_complete = false;
     let mut patches = 0;
     while let Some(Ok(message)) = client.next().await {
         match message {
@@ -107,6 +106,7 @@ async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Durati
                 let raw = line.as_bytes();
                 if raw.starts_with(br#"{"frame":"snapshot","#) {
                     first.get_or_insert_with(|| started.elapsed());
+                    baseline_complete |= raw.ends_with(br#","last":true}"#);
                 }
                 if raw.starts_with(br#"{"frame":"event","#)
                     && raw[..raw.len().min(256)]
@@ -115,6 +115,10 @@ async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Durati
                 {
                     patches += 1;
                     if patches == PATCHES {
+                        assert!(
+                            baseline_complete,
+                            "the baseline must finish before its replay"
+                        );
                         client
                             .send(Message::text(r#"{"frame":"bye"}"#))
                             .await
@@ -134,13 +138,13 @@ async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Durati
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "several hundred MiB over a shaped link per attempt"]
 async fn large_attach_baseline_pressure_probe() {
-    let (_home, mut served) = context();
-    served.host = principal_tests::archived_history(history);
+    let (_home, mut fixture) = context();
+    fixture.host = principal_tests::archived_history(history);
     let mut complete = 0;
     for round in 1..=2 {
         let outbox = Outbox::default();
         let snapshots = outbox.clone();
-        let mut connection = served
+        let mut connection = fixture
             .host
             .connect(
                 outbox.clone(),
@@ -158,14 +162,14 @@ async fn large_attach_baseline_pressure_probe() {
         client.send(Message::text(ATTACH)).await.unwrap();
         let (ended, (first, patches)) = tokio::time::timeout(Duration::from_secs(120), async {
             tokio::join!(
-                attached(server, &served, &mut connection, &outbox),
+                attached(server, &fixture, &mut connection, &outbox),
                 receive_attach(&mut client, started)
             )
         })
         .await
         .unwrap();
         shaper.abort();
-        let spent = process_cpu() - cpu;
+        let spent = process_cpu().checked_sub(cpu).unwrap();
         eprintln!(
             "baseline_pressure round={round} ended={:?} first_page_ms={:?} patches={patches} wall_ms={} process_cpu_ms={}",
             ended.as_str(),
