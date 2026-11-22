@@ -168,6 +168,47 @@ def test_match(selector: str, name: str) -> bool:
     return test_matcher(selector)(name)
 
 
+def lane_members(body: str, inventory: set[str]) -> set[str]:
+    """Evaluate the reviewed subset of nextest expressions used by special lanes."""
+    tokens = list(reversed(re.findall(r"test\([^)]+\)|\S", body)))
+
+    def take(token: str) -> bool:
+        if tokens and tokens[-1] == token:
+            tokens.pop()
+            return True
+        return False
+
+    def atom() -> set[str]:
+        if take("("):
+            matches = union()
+            if not take(")"):
+                raise ValueError("missing closing parenthesis in lane filter")
+            return matches
+        token = tokens.pop() if tokens else ""
+        predicate = PREDICATE.fullmatch(token)
+        if predicate is None:
+            raise ValueError(f"expected a test predicate in lane filter, got {token!r}")
+        match = test_matcher(predicate[1])
+        return {test for test in inventory if match(test)}
+
+    def difference() -> set[str]:
+        matches = atom()
+        while take("-"):
+            matches -= atom()
+        return matches
+
+    def union() -> set[str]:
+        matches = difference()
+        while take("|"):
+            matches |= difference()
+        return matches
+
+    matches = union()
+    if tokens:
+        raise ValueError(f"unexpected token in lane filter: {tokens[-1]!r}")
+    return matches
+
+
 class NextestLaneTests(unittest.TestCase):
     def test_qualified_module_predicates_require_a_test_below_that_module(self) -> None:
         exact = {"host::runner::foreground::runs"}
@@ -239,14 +280,19 @@ class NextestLaneTests(unittest.TestCase):
             self.assertTrue(terms, name)
             self.assertEqual(len(terms), len(set(terms)), f"duplicate {name} predicate")
             body = profiles()[name]["default-filter"]
-            self.assertEqual(re.sub(r"[|()]", "", PREDICATE.sub("", body)).split(), [], name)
-            matchers = [test_matcher(term) for term in terms]
-            matches = {test for test in inventory if any(match(test) for match in matchers)}
+            matches = lane_members(body, inventory)
             self.assertFalse(
                 membership.keys() & matches,
                 f"{name} overlaps an earlier lane: {sorted(membership.keys() & matches)}",
             )
             membership.update(dict.fromkeys(matches, name))
+
+    def test_difference_excludes_a_subfamily_without_subtracting_from_other_families(self) -> None:
+        inventory = {"major::normal", "major::crash", "other::crash"}
+        self.assertEqual(
+            lane_members("(test(major::) - test(crash)) | (test(other::))", inventory),
+            {"major::normal", "other::crash"},
+        )
 
     def test_lane_profiles_keep_reviewed_thread_counts_and_budget_timeout(self) -> None:
         self.assertEqual(profiles()["serial"]["test-threads"], 4)
