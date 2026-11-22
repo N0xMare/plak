@@ -406,7 +406,7 @@ pub enum HostFrame {
         request_id: String,
     },
     /// Like Lines, plus original-runner recovery candidates. Only an
-    /// exact-triple bound host may send this after seeing CARRY_LINES.
+    /// exact-triple bound host may send this after seeing `carry-lines`.
     CarryLines {
         /// Names the answer.
         request_id: String,

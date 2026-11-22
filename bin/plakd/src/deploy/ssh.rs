@@ -113,13 +113,14 @@ impl Ssh {
             .strip_prefix("glibc ")
             .ok_or_else(|| fail("target did not report a GNU libc version"))?;
         let version = crate::snapshot_install::maintainer::glibc_version(version)?;
-        Ok(check(
+        check(
             version >= ceiling,
             &format!(
                 "target GLIBC {}.{}.{} is older than required {}.{}.{}",
                 version[0], version[1], version[2], ceiling[0], ceiling[1], ceiling[2],
             ),
-        )?)
+        )
+        .map_err(SshFailure::from)
     }
 
     pub(super) fn call<T: DeserializeOwned>(
@@ -206,35 +207,40 @@ fn run(node: &Node, script: &str, mut input: File, timeout: u64) -> Result<Vec<u
         SshFailure::Unavailable(fail("SSH exchange was unavailable or exceeded its bound"))
     })?;
     if !output.status.success() {
-        let (name, class) = stderr_class(&output.stderr);
-        return Err(class(fail(&format!(
-            "SSH returned no bounded verdict ({name})"
-        ))));
+        return Err(stderr_failure(&output.stderr));
     }
     Ok(output.stdout)
 }
 
-fn stderr_class(bytes: &[u8]) -> (&'static str, fn(CliFailure) -> SshFailure) {
-    use SshFailure::{Rejected, Unavailable};
+fn stderr_failure(bytes: &[u8]) -> SshFailure {
+    enum Class {
+        Rejected(&'static str),
+        Unavailable(&'static str),
+    }
+    use Class::{Rejected, Unavailable};
     let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    let patterns: [(_, _, fn(CliFailure) -> SshFailure); 8] = [
-        ("host key verification failed", "host_key", Rejected),
+    let patterns = [
+        ("host key verification failed", Rejected("host_key")),
         (
             "remote host identification has changed",
-            "host_key",
-            Rejected,
+            Rejected("host_key"),
         ),
-        ("permission denied", "authentication", Rejected),
-        ("could not resolve hostname", "name_resolution", Unavailable),
-        ("connection refused", "connection_refused", Unavailable),
-        ("timed out", "timeout", Unavailable),
-        ("broken pipe", "transport_lost", Unavailable),
-        ("closed by remote host", "transport_lost", Unavailable),
+        ("permission denied", Rejected("authentication")),
+        ("could not resolve hostname", Unavailable("name_resolution")),
+        ("connection refused", Unavailable("connection_refused")),
+        ("timed out", Unavailable("timeout")),
+        ("broken pipe", Unavailable("transport_lost")),
+        ("closed by remote host", Unavailable("transport_lost")),
     ];
-    patterns
+    let class = patterns
         .into_iter()
-        .find_map(|(needle, name, class)| text.contains(needle).then_some((name, class)))
-        .unwrap_or(("remote_command_or_transport", Rejected))
+        .find_map(|(needle, class)| text.contains(needle).then_some(class))
+        .unwrap_or(Rejected("remote_command_or_transport"));
+    let refused = |name| fail(&format!("SSH returned no bounded verdict ({name})"));
+    match class {
+        Rejected(name) => SshFailure::Rejected(refused(name)),
+        Unavailable(name) => SshFailure::Unavailable(refused(name)),
+    }
 }
 
 pub(super) fn machine_id(platform: Platform) -> CliResult<String> {

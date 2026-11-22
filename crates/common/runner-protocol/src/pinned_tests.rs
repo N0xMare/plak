@@ -1,10 +1,8 @@
 //! The current protocol's frames, pinned. A home-local runner binds any
 //! build of its protocol version (spec 01 §8.4), so a frame that changes
 //! without a [`PROTOCOL_VERSION`] bump would meet a peer that reads it
-//! differently. Every variant of every frame enum is encoded here once; a
-//! change to any of them, to a verb or to a capability fails this test until
-//! the version is bumped and the fixture is replaced with the new version's
-//! frames.
+//! differently. Every shared frame variant, verb and capability is pinned;
+//! an exact-triple-only extension gets a separate pin.
 
 use serde_json::{Value, json};
 

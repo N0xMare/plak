@@ -979,7 +979,7 @@ fn unreferenced(warnings: &[DeployRunnerWarning], id: &str) -> bool {
     })
 }
 
-fn link_lost(_: crate::CliFailure) -> Halt {
+fn link_lost(_: CliFailure) -> Halt {
     Halt::reconcile("link outcome is unresolved; use deploy status before continuing")
 }
 
