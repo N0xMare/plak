@@ -349,6 +349,15 @@ def parser():
     process.add_argument("scratch", type=Path)
     process.add_argument("--io-seconds", type=float, default=30)
     process.add_argument("--output-interval", type=int, default=2)
+    stream = sub.add_parser("stream-cost", help="measure one root streamed to attached viewers")
+    stream.add_argument("binary", type=Path)
+    stream.add_argument("scratch", type=Path)
+    stream.add_argument("--history-turns", type=int, default=56)
+    stream.add_argument("--prompt-bytes", type=int, default=240 << 10)
+    stream.add_argument("--clients", type=int, default=3)
+    stream.add_argument("--seconds", type=float, default=30)
+    stream.add_argument("--idle-seconds", type=float, default=10)
+    stream.add_argument("--delta-ms", type=int, default=12)
     io = sub.add_parser("io", help="measure Linux /proc without connecting to the process")
     io.add_argument("pid", type=int)
     io.add_argument("--seconds", type=float, default=30)
@@ -373,6 +382,21 @@ def main():
                 "process samples require a window up to 120 seconds and output every 1–30 seconds"
             )
         asyncio.run(process_wait(args, emit, proc_sample, report_build))
+    elif args.command == "stream-cost":
+        from host_latency_stream_cost import stream_cost
+
+        if not (
+            1 <= args.clients <= 3
+            and 1 <= args.history_turns <= 400
+            and 1 <= args.prompt_bytes < (1 << 20) - 1024
+            and 0 < args.seconds <= 60
+            and 0 < args.idle_seconds <= 60
+            and 5 <= args.delta_ms <= 100
+        ):
+            cli.error("invalid stream-cost workload size or timing")
+        if args.clients > 1 and importlib.util.find_spec("websockets") is None:
+            cli.error("install websockets==15.0.1 to attach web viewers")
+        asyncio.run(stream_cost(args, emit, proc_sample))
     else:
         if importlib.util.find_spec("websockets") is None:
             raise SystemExit("install websockets==15.0.1 in the probe's Python environment")

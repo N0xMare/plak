@@ -66,3 +66,11 @@ commands and once with a line of output every two seconds per command.
 Rows report host and runner separately. Voluntary context switches, summed
 over each process's threads, are a proxy for blocking wakeups; subtract
 the zero-wait row to estimate the cost attributable to the waits.
+
+`just perf host-latency stream-cost <plakd> <new-scratch-path>` isolates live
+fan-out on one large resident transcript. By default one terminal and two
+web clients hold the same root. It records the idle floor, turn admission
+through first delivery, and steady streaming separately. Reported CPU
+microseconds per event divide total host CPU by the assistant delta count
+at the terminal, not by the sum of all deliveries. Use `--clients 1` or a
+smaller `--history-turns` to control for fan-out or transcript size.

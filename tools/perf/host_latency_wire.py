@@ -39,6 +39,7 @@ class Attachment:
     last: float | None = None
     pages: int = 0
     bytes: int = 0
+    repair_bytes: int = 0
     seq: int = 0
     ended: bool = False
     deltas: int = 0
@@ -174,6 +175,8 @@ class Client:
                         state.bytes += size
                         if frame["last"]:
                             state.last = stamp
+                    elif kind == "snapshot":
+                        state.repair_bytes += size
                     elif kind == "event":
                         if frame["seq"] != state.seq + 1:
                             self.sequence_gaps += 1
@@ -194,8 +197,7 @@ class Client:
                     else:
                         if kind == "resync_required":
                             self.resyncs += 1
-                        if kind != "snapshot":
-                            state.ended = True
+                        state.ended = True
                     self.changed.set()
         except asyncio.CancelledError:
             pass
