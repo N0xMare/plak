@@ -2,8 +2,8 @@
 //! shared session service, over a socket pair.
 
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::client::{self, SessionAnswer, SessionChange, Transport};
 use plakous_host_protocol::views::PresentationSnapshot;
@@ -48,10 +48,10 @@ struct Served {
     session: WireSession<Core>,
     published: ObservationSender<Core>,
     intents: IntentReceiver<Core>,
-    /// While set, no connection writes what its attachment queued.
-    paused: Arc<AtomicBool>,
+    /// Held across flush so setting it also waits for an in-flight write.
+    paused: Arc<Mutex<bool>>,
     /// Why the last connection's server side ended.
-    exited: Arc<std::sync::Mutex<Option<String>>>,
+    exited: Arc<Mutex<Option<String>>>,
 }
 
 impl Served {
@@ -132,7 +132,7 @@ fn drive(
     welcome: Welcome<Core>,
     out: &mut UnixStream,
     stop: &AtomicBool,
-    paused: &AtomicBool,
+    paused: &Mutex<bool>,
 ) -> Result<&'static str, String> {
     if !handshake::<Core>(lines, welcome, out, &|| false).map_err(|error| error.to_string())? {
         return Ok("refused");
@@ -155,7 +155,8 @@ fn drive(
                 return Ok("the client's transport ended");
             }
         }
-        if !paused.load(Ordering::Acquire) {
+        let paused = paused.lock().unwrap();
+        if !*paused {
             connection.flush().map_err(|error| error.to_string())?;
         }
     }
@@ -256,10 +257,10 @@ fn a_client_follows_two_switches() {
     wait_for(&receiver, |observation| {
         matches!(observation, SessionObservation::PresentationSnapshot(_))
     });
-    served.paused.store(true, Ordering::Release);
+    *served.paused.lock().unwrap() = true;
     served.switch(vec![binding("s2")], "s2");
     served.switch(vec![binding("s3")], "s3");
-    served.paused.store(false, Ordering::Release);
+    *served.paused.lock().unwrap() = false;
     // The third session's attach snapshot, then its own observation.
     wait_for(&receiver, |observation| {
         matches!(observation, SessionObservation::PresentationSnapshot(_))
@@ -283,21 +284,14 @@ fn a_client_resyncs_after_an_overflow() {
     wait_for(&receiver, |observation| {
         matches!(observation, SessionObservation::PresentationSnapshot(_))
     });
-    served.paused.store(true, Ordering::Release);
+    *served.paused.lock().unwrap() = true;
+    // Fill the attachment itself, not the smaller, asynchronous session mailbox.
+    let publisher = served.session.publisher();
     for index in 0..=ATTACHMENT_CAPACITY {
         let row = TranscriptRow::error(NoticeScope::Host, format!("error {index}"));
-        served.published.send(SessionObservation::Row(row)).unwrap();
-        // The session's own mailbox is smaller than the attachment's queue.
-        if index % 256 == 0 {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        publisher.publish(SessionObservation::Row(row));
     }
-    served
-        .published
-        .send(SessionObservation::SetBusy(true))
-        .unwrap();
-    std::thread::sleep(Duration::from_millis(50));
-    served.paused.store(false, Ordering::Release);
+    *served.paused.lock().unwrap() = false;
     // Its queue was replaced by the resync: it attaches again and takes
     // the new attachment's snapshot.
     let deadline = Instant::now() + WAIT;
