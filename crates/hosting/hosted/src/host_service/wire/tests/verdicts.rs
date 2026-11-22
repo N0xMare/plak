@@ -151,7 +151,7 @@ fn draft_barrier_withdraws_only_unclaimed_inputs_and_joins_verdict_writes() {
     registry
         .wait_resolved(Instant::now(), &AtomicBool::new(false))
         .unwrap();
-    let verdicts: Vec<_> = host_frames(&wire.stdout)
+    let verdicts: Vec<_> = host_frames(&wire.stdout.inner)
         .into_iter()
         .filter_map(|frame| match frame {
             HostFrame::Event {
@@ -221,7 +221,7 @@ fn draft_barrier_uses_explicit_rejection_id_not_another_child_mail_window() {
     registry
         .wait_resolved(Instant::now(), &AtomicBool::new(false))
         .unwrap();
-    let frames = host_frames(&wire.stdout);
+    let frames = host_frames(&wire.stdout.inner);
     assert!(frames.iter().any(|frame| matches!(frame, HostFrame::Response { id: 99, outcome: Outcome::Refused(RequestRefusal::MailRefused { detail }) } if detail.contains("upgrading"))));
     assert!(wire.mails.contains_key("another-window"));
 }
