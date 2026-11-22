@@ -19,10 +19,8 @@ fn received(stream: &mut UnixStream) -> RunnerFrame {
 }
 
 fn bind(fixture: &Fixture) -> (UnixStream, String) {
-    let mut stream = UnixStream::connect(
-        crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock"),
-    )
-    .unwrap();
+    let mut stream =
+        UnixStream::connect(local_runner_root(&fixture.home()).join("run/r.sock")).unwrap();
     stream.set_read_timeout(Some(WAIT)).unwrap();
     let RunnerFrame::Hello(hello) = received(&mut stream) else {
         panic!("no hello")
@@ -131,7 +129,7 @@ fn startup_acknowledges_answered_keys_and_empties_its_journal() {
             payload: json!({"root": fixture.workspace(), "cwd": fixture.workspace(), "request": {"session":"00000000000000000000000000000000", "bytes":"", "close":true}}),
         },
     };
-    let directory = crate::offline_support::local_runner_root(&fixture.home())
+    let directory = local_runner_root(&fixture.home())
         .join("calls")
         .join(plakd::home::state::state_key());
     let journal = FileCallJournal::open(directory).unwrap();

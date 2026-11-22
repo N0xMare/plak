@@ -36,7 +36,7 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
     let root = start_root(&fixture, &mut client, "local", None, 1);
     drop(client);
     destination_script(&fixture);
-    let mut requester = crate::offline_support::TestChild::spawn(
+    let mut requester = TestChild::spawn(
         candidate_upgrade(&fixture, &image, &environment)
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
@@ -55,7 +55,7 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
         // Leave the original's stale socket in place, as SIGKILL would.
         let daemon = rustix::process::Pid::from_raw(root.foreground.1).unwrap();
         rustix::process::kill_process(daemon, rustix::process::Signal::KILL).unwrap();
-        let lock = crate::offline_support::local_runner_root(&fixture.home()).join("run/r.lock");
+        let lock = local_runner_root(&fixture.home()).join("run/r.lock");
         let lock = std::fs::File::options().write(true).open(lock).unwrap();
         let deadline = Instant::now() + WAIT;
         loop {

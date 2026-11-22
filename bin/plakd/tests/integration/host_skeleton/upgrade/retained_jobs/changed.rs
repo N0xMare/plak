@@ -161,17 +161,22 @@ fn start_root(
     runner: Option<&str>,
     id: u64,
 ) -> Root {
-    let workspace = fixture.workspace().join(name);
+    let workspace = if runner.is_some() {
+        fixture.workspace().join(name)
+    } else {
+        fixture.root.join(name)
+    };
     std::fs::create_dir(&workspace).unwrap();
-    let mut request = new_session_request(&workspace, None, &format!("create-{name}"));
+    let mut request = new_session_request(&workspace, None, &uuid::Uuid::new_v4().to_string());
     if let (Some(runner_id), Op::NewSession { runner: label, .. }) = (runner, &mut request) {
         *label = plakous_host_protocol::wire::RunnerLabel {
             name: "remote".into(),
             runner_id: runner_id.into(),
         };
     }
-    let Outcome::Ok(Answer::Created { session, node, .. }) = client.request(id, request) else {
-        panic!("creation refused for {name}");
+    let created = client.request(id, request);
+    let Outcome::Ok(Answer::Created { session, node, .. }) = created else {
+        panic!("creation refused for {name}: {created:?}");
     };
     let attachment = client.attach(id + 1, &node);
     submit(client, id + 2, attachment);

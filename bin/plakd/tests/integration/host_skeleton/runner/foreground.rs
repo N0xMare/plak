@@ -38,7 +38,7 @@ impl Drop for Paused {
 }
 
 fn clock(fixture: &Fixture, milliseconds: u64) {
-    let directory = crate::offline_support::local_runner_root(&fixture.home());
+    let directory = local_runner_root(&fixture.home());
     std::fs::create_dir_all(&directory).unwrap();
     let temporary = directory.join("lease-clock-next");
     std::fs::write(&temporary, milliseconds.to_string()).unwrap();

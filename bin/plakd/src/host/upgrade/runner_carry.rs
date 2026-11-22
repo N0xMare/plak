@@ -1,10 +1,10 @@
 //! Source-side inventory checks. Only the successor can transfer retained jobs.
 
-use super::{CliFailure, CliResult, Duration, Services};
+use super::{CliFailure, CliResult, Duration, Request, Services, progress};
 use crate::deploy::{
     DeployRunnerInspection, DeployRunnerVerdict, DeployRunnerWarning, RUNNER_INSPECTION_REFUSAL,
 };
-use plakous::runner::protocol::LineStatus;
+use plakous::runner::protocol::{LineStatus, VersionTriple};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -12,6 +12,45 @@ pub(super) enum Check {
     BeforeDrain,
     Held,
     CrossKey,
+}
+
+pub(super) fn before_drain(
+    request: &Request,
+    services: &Services,
+    destination: &VersionTriple,
+    runtime: &tokio::runtime::Handle,
+    report: &progress::Report<'_>,
+) -> CliResult<bool> {
+    let cross_key = request.source_key != request.destination_key;
+    if cross_key && !request.inspect_runners.is_empty() {
+        return Err(deploy_refusal(
+            "deploy runner inspection requires a same-key upgrade",
+        ));
+    }
+    let needed =
+        destination != &crate::commands::runner::version() || !request.inspect_runners.is_empty();
+    if needed {
+        let check = if cross_key {
+            Check::CrossKey
+        } else {
+            Check::BeforeDrain
+        };
+        progress::timed(report, progress::Phase::RunnerProcess, || {
+            inspect(services, &request.inspect_runners, check, runtime).map(drop)
+        })?;
+    }
+    Ok(needed)
+}
+
+pub(super) fn held(
+    request: &Request,
+    services: &Services,
+    runtime: &tokio::runtime::Handle,
+) -> CliResult<()> {
+    for warning in inspect(services, &request.inspect_runners, Check::Held, runtime)? {
+        tracing::warn!(target: "plak.runner", %warning);
+    }
+    Ok(())
 }
 
 pub(super) fn inspect(

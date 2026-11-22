@@ -1,10 +1,37 @@
-use plakous_runner_protocol::{LineStatus, Refusal};
+use plakous_runner_protocol::{LineStatus, Refusal, RunnerFrame};
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
 
 use super::{RunnerService, lock};
 
 impl RunnerService {
-    pub(in crate::service) async fn discover_retained_lines(
+    pub(in crate::service) fn receive_lines(
+        &self,
+        host: &str,
+        instance: &str,
+        request_id: String,
+        sender: &mpsc::UnboundedSender<RunnerFrame>,
+    ) {
+        let (service, host, instance, sender) = (
+            self.clone(),
+            host.to_owned(),
+            instance.to_owned(),
+            sender.clone(),
+        );
+        tokio::spawn(async move {
+            let mut lines = service.lines(Some(&host)).await;
+            let answer = match service
+                .discover_retained_lines(&host, &instance, &mut lines)
+                .await
+            {
+                Ok(()) => RunnerFrame::Lines { request_id, lines },
+                Err(refusal) => super::super::refused(Some(request_id), refusal),
+            };
+            let _ = sender.send(answer);
+        });
+    }
+
+    async fn discover_retained_lines(
         &self,
         host: &str,
         instance: &str,

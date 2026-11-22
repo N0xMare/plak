@@ -960,22 +960,13 @@ fn prepare(
     let (destination, image, reopen) =
         qualification::qualify_destination(services, &request, arguments, report)?;
     let cross_key = request.source_key != request.destination_key;
-    if cross_key && !request.inspect_runners.is_empty() {
-        return Err(runner_carry::deploy_refusal(
-            "deploy runner inspection requires a same-key upgrade",
-        ));
-    }
-    let changed_runner = destination.runner_version != crate::commands::runner::version();
-    if changed_runner || !request.inspect_runners.is_empty() {
-        progress::timed(report, progress::Phase::RunnerProcess, || {
-            let check = if cross_key {
-                runner_carry::Check::CrossKey
-            } else {
-                runner_carry::Check::BeforeDrain
-            };
-            runner_carry::inspect(services, &request.inspect_runners, check, runtime).map(drop)
-        })?;
-    }
+    let inspect_runner = runner_carry::before_drain(
+        &request,
+        services,
+        &destination.runner_version,
+        runtime,
+        report,
+    )?;
     if cross_key {
         match settled_roots(services) {
             Ok(roots) => progress::timed(report, progress::Phase::CarryCapacity, || {
@@ -1031,15 +1022,8 @@ fn prepare(
         ready.pause.commit()?;
         host.join_paused_stops(&ready.pause, Instant::now() + Duration::from_secs(10))?;
         qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
-        if changed_runner {
-            for warning in runner_carry::inspect(
-                services,
-                &request.inspect_runners,
-                runner_carry::Check::Held,
-                runtime,
-            )? {
-                tracing::warn!(target: "plak.runner", %warning);
-            }
+        if inspect_runner {
+            runner_carry::held(&request, services, runtime)?;
         }
         ready.image.recheck(&ready.executable)?;
         check_cancel(cancelled)?;

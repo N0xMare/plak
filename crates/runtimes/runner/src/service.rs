@@ -804,21 +804,7 @@ impl RunnerService {
                 });
             }
             HostFrame::Lines { request_id } => {
-                let service = self.clone();
-                let host = host.to_owned();
-                let instance = instance.to_owned();
-                let sender = sender.clone();
-                tokio::spawn(async move {
-                    let mut lines = service.lines(Some(&host)).await;
-                    let answer = match service
-                        .discover_retained_lines(&host, &instance, &mut lines)
-                        .await
-                    {
-                        Ok(()) => RunnerFrame::Lines { request_id, lines },
-                        Err(refusal) => refused(Some(request_id), refusal),
-                    };
-                    let _ = sender.send(answer);
-                });
+                self.receive_lines(host, instance, request_id, sender);
             }
             HostFrame::OwnerFloors { request_id, lines } => {
                 self.receive_owner_floors(host, instance, connection, request_id, lines, sender);

@@ -160,7 +160,7 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
         let directory = if protocol == 1 {
             fixture.home().join("host/runner/v1")
         } else {
-            crate::offline_support::local_runner_root(&fixture.home())
+            local_runner_root(&fixture.home())
         }
         .join("run");
         std::fs::create_dir_all(&directory).unwrap();
@@ -246,7 +246,7 @@ fn an_upgraded_host_inspects_the_old_protocol_and_starts_a_separate_daemon() {
     inspect.join().unwrap();
     assert!(socket.exists());
     assert!(
-        crate::offline_support::local_runner_root(&fixture.home())
+        local_runner_root(&fixture.home())
             .join("run/r.sock")
             .exists()
     );
@@ -304,7 +304,7 @@ pub(super) fn local_daemon_lines(fixture: &Fixture) -> Vec<plakous::runner::prot
         .unwrap()
         .block_on(async {
             let stream = tokio::net::UnixStream::connect(
-                crate::offline_support::local_runner_root(&fixture.home()).join("run/r.sock"),
+                local_runner_root(&fixture.home()).join("run/r.sock"),
             )
             .await
             .unwrap();
@@ -339,7 +339,7 @@ fn runner_frame(stream: &mut UnixStream) -> plakous::runner::protocol::HostFrame
 #[test]
 fn a_starter_losing_to_the_exiting_daemons_lock_is_retried() {
     let Some(fixture) = fixture() else { return };
-    let home = crate::offline_support::local_runner_root(&fixture.home());
+    let home = local_runner_root(&fixture.home());
     std::fs::create_dir_all(home.join("run")).unwrap();
     let lock = std::fs::File::create(home.join("run/r.lock")).unwrap();
     lock.try_lock().unwrap();
