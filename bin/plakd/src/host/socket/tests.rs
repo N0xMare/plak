@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use plakous_host_protocol::wire::{
-    Answer, ClientFrame, Hello, HostFrame, Op, Outcome, WIRE_VERSION,
+    Answer, ClientFrame, Hello, HostFrame, NodeAddress, Op, Outcome, RequestRefusal, WIRE_VERSION,
+    decode_line, encode_line,
 };
-use plakous_hosted::host_service::wire::HostPrincipal;
+use plakous_hosted::host_service::wire::{HostPrincipal, StoredSessionView};
 
 use super::*;
 
@@ -169,6 +170,104 @@ async fn slow_link_socket_reads_ping_during_a_blocked_send_and_answers_before_th
     );
 }
 
+#[tokio::test]
+async fn socket_reads_ready_pings_before_draining_an_attach_baseline() {
+    tokio::time::timeout(Duration::from_secs(5), check_ready_pings(2, false))
+        .await
+        .expect("short ping burst did not finish");
+}
+
+#[tokio::test]
+async fn socket_ready_pings_cannot_starve_an_attach_baseline() {
+    // Fill both eight-read phases before the ready Bye discards the baseline.
+    tokio::time::timeout(Duration::from_secs(5), check_ready_pings(16, true))
+        .await
+        .expect("long ping burst did not finish");
+}
+
+async fn check_ready_pings(count: u64, expect_baseline: bool) {
+    use tokio::io::AsyncBufReadExt as _;
+
+    let sessions = NoSessions {
+        archived: true,
+        ..NoSessions::default()
+    };
+    let host = SessionHost::new(sessions, "fixture", 0);
+    let outbox = Outbox::default();
+    let mut connection = host.connect(
+        outbox.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(0),
+        || false,
+    );
+    let attach = ClientFrame::<PlakExtension>::Request {
+        id: 1,
+        op: Op::Attach {
+            node: archived_node(),
+        },
+    };
+    assert!(connection.frame(encode_line(&attach)).unwrap());
+    let (server, mut client) = UnixStream::pair().unwrap();
+    let (read, write) = server.into_split();
+    let mut write = ProgressIo::new(write);
+    // Send Attached, but leave its baseline in the service queue.
+    super::send(&mut write, &outbox, || false).await.unwrap();
+    let mut reader = Reader {
+        read,
+        lines: LineReader::default(),
+        queued: VecDeque::new(),
+        buffer: zeroize::Zeroizing::new(vec![0; 8192]),
+    };
+    let pings = (2..2 + count).map(|id| ClientFrame::Request { id, op: Op::Ping });
+    for frame in pings.chain([ClientFrame::<PlakExtension>::Bye]) {
+        client
+            .write_all(encode_line(&frame).unwrap().as_bytes())
+            .await
+            .unwrap();
+    }
+    // Make every client frame readable before the driver gets its first poll.
+    while reader.queued.len() < usize::try_from(count + 1).unwrap() {
+        assert!(reader.fill().await);
+    }
+
+    let reading = async {
+        let mut lines = tokio::io::BufReader::new(client).lines();
+        assert!(matches!(
+            decode_line::<HostFrame<PlakExtension>>(&lines.next_line().await.unwrap().unwrap()),
+            Ok(HostFrame::Response {
+                id: 1,
+                outcome: Outcome::Ok(Answer::Attached { .. })
+            })
+        ));
+        let mut pongs = Vec::new();
+        let mut snapshots = 0;
+        while let Some(line) = lines.next_line().await.unwrap() {
+            match decode_line::<HostFrame<PlakExtension>>(&line).unwrap() {
+                HostFrame::Response {
+                    id,
+                    outcome: Outcome::Ok(Answer::Pong),
+                } => pongs.push(id),
+                HostFrame::Snapshot(_) => snapshots += 1,
+                frame => panic!("unexpected frame: {frame:?}"),
+            }
+        }
+        assert_eq!(pongs, (2..2 + count).collect::<Vec<_>>());
+        assert_eq!(snapshots, usize::from(expect_baseline));
+    };
+    let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| false);
+    tokio::join!(
+        attached(reader, write, &mut connection, &outbox, &host, &stop),
+        reading
+    );
+}
+
+fn archived_node() -> NodeAddress {
+    NodeAddress {
+        tree_id: "archived".into(),
+        agent_id: "archived".into(),
+    }
+}
+
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -177,11 +276,12 @@ fn short_home() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
 
-/// Sessions as a test scripts them: none.
+/// Sessions as a test scripts them: empty by default.
 #[derive(Default)]
 pub(in crate::host) struct NoSessions {
     principals: Arc<Mutex<Vec<HostPrincipal>>>,
     durable: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    archived: bool,
 }
 
 impl NoSessions {
@@ -225,8 +325,8 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
     ) -> <PlakExtension as plakous_host_protocol::ProtocolExtension>::WelcomeExtension {
         None
     }
-    fn contains(&self, _: &str) -> Result<bool, String> {
-        Ok(false)
+    fn contains(&self, session: &str) -> Result<bool, String> {
+        Ok(self.archived && session == "archived")
     }
     fn rows(
         &self,
@@ -237,11 +337,29 @@ impl plakous_hosted::host_service::wire::HostSessions<PlakExtension> for NoSessi
         Ok(Vec::new())
     }
 
-    fn session_of(
+    fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
+        Ok((self.archived && *node == archived_node()).then(|| node.tree_id.clone()))
+    }
+
+    fn stored_view(
         &self,
-        _node: &plakous_host_protocol::wire::NodeAddress,
-    ) -> Result<Option<String>, String> {
-        Ok(None)
+        session: &str,
+        _: bool,
+    ) -> Result<Option<StoredSessionView<PlakExtension>>, RequestRefusal> {
+        use plakous_host_protocol::{
+            SessionObservation, views::presentation::PresentationSnapshot,
+        };
+
+        Ok(
+            (self.archived && session == "archived").then(|| StoredSessionView {
+                archived: true,
+                session: session.into(),
+                root: archived_node(),
+                observations: vec![SessionObservation::PresentationSnapshot(
+                    PresentationSnapshot::empty(1),
+                )],
+            }),
+        )
     }
 
     fn open(

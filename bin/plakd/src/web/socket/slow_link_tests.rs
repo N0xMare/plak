@@ -84,10 +84,13 @@ async fn send_pending(outbox: &Outbox, server: &mut Server) {
 }
 
 async fn attached_answer(client: &mut Client) {
+    let reply = tokio::time::timeout(Duration::from_secs(1), client.next())
+        .await
+        .expect("timed out waiting for Attached")
+        .unwrap()
+        .unwrap();
     assert!(matches!(
-        decode_line::<HostFrame<PlakExtension>>(
-            client.next().await.unwrap().unwrap().to_text().unwrap()
-        ),
+        decode_line::<HostFrame<PlakExtension>>(reply.to_text().unwrap()),
         Ok(HostFrame::Response {
             id: 1,
             outcome: Outcome::Ok(Answer::Attached { .. })
