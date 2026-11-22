@@ -99,26 +99,29 @@ fn process_cpu() -> Duration {
 async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Duration>, u64) {
     let mut first = None;
     let mut baseline_complete = false;
-    let mut patches = 0;
+    let mut patches = 0_u64;
     while let Some(Ok(message)) = client.next().await {
         match message {
             Message::Text(line) => {
                 let raw = line.as_bytes();
                 if raw.starts_with(br#"{"frame":"snapshot","#) {
-                    first.get_or_insert_with(|| started.elapsed());
+                    first.get_or_insert_with(|| {
+                        let elapsed = started.elapsed();
+                        eprintln!("baseline_pressure first_page_ms={}", elapsed.as_millis());
+                        elapsed
+                    });
                     baseline_complete |= raw.ends_with(br#","last":true}"#);
                 }
-                if raw.starts_with(br#"{"frame":"event","#)
-                    && raw[..raw.len().min(256)]
-                        .windows(18)
-                        .any(|part| part == b"\"transcript_patch\"")
-                {
+                if is_patch(raw) {
+                    assert!(
+                        baseline_complete,
+                        "the baseline must finish before its replay"
+                    );
                     patches += 1;
+                    if patches.is_multiple_of(16) {
+                        eprintln!("baseline_pressure patches={patches}");
+                    }
                     if patches == PATCHES {
-                        assert!(
-                            baseline_complete,
-                            "the baseline must finish before its replay"
-                        );
                         client
                             .send(Message::text(r#"{"frame":"bye"}"#))
                             .await
@@ -133,6 +136,22 @@ async fn receive_attach(client: &mut Client, started: Instant) -> (Option<Durati
         }
     }
     (first, patches)
+}
+
+fn is_patch(line: &[u8]) -> bool {
+    if !line.starts_with(br#"{"frame":"event","#) {
+        return false;
+    }
+    // The observation can put its multi-megabyte body before the kind tag.
+    [
+        &line[..line.len().min(256)],
+        &line[line.len().saturating_sub(256)..],
+    ]
+    .into_iter()
+    .any(|end| {
+        let tag = br#""kind":"transcript_patch""#;
+        end.windows(tag.len()).any(|part| part == tag)
+    })
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
