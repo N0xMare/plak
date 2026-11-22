@@ -1,9 +1,24 @@
 //! Bounded transcript repair with retry after an unanswered snapshot request.
 
-use super::{HostService, ProtocolExtension, SessionIntent, State, TranscriptScope, wake_stats};
+use super::{
+    Attachment, HostService, ProtocolExtension, SessionIntent, State, TranscriptScope, wake_stats,
+};
 use std::time::{Duration, Instant};
 
 const REPAIR_RETRY: Duration = Duration::from_secs(5);
+
+impl<P: ProtocolExtension> Attachment<P> {
+    pub(super) fn await_root_baseline(&mut self) {
+        let scope = TranscriptScope::Root;
+        self.fresh.insert(scope.clone());
+        self.defer_repair(scope, Instant::now());
+    }
+
+    fn defer_repair(&mut self, scope: TranscriptScope, now: Instant) {
+        self.repairing.insert(scope.clone(), now + REPAIR_RETRY);
+        self.gapped.insert(scope);
+    }
+}
 
 impl<P: ProtocolExtension> HostService<P> {
     pub(super) fn repair_gaps(&self) {
@@ -46,8 +61,7 @@ impl<P: ProtocolExtension> HostService<P> {
                         }
                         _ => {
                             if let Some(sender) = held.sender.clone() {
-                                held.repairing.insert(scope.clone(), now + REPAIR_RETRY);
-                                held.gapped.insert(scope.clone());
+                                held.defer_repair(scope.clone(), now);
                                 asks.push((*id, sender, scope));
                             }
                         }

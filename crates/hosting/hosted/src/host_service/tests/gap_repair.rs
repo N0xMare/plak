@@ -13,6 +13,46 @@ fn resyncs(intents: &IntentReceiver<Core>, scope: &TranscriptScope) -> usize {
     count
 }
 
+fn attach_with_no_kept_replay(service: &HostService<Core>) -> AttachmentId {
+    let id = service.attach(&root(), Face::Remote).unwrap();
+    // Finish the initial baseline wait, then discard the replay cache.
+    service.observe(Observation::PresentationSnapshot(
+        PresentationSnapshot::empty(1),
+    ));
+    service.observe(Observation::ClearView);
+    service.take(id);
+    id
+}
+
+#[test]
+fn an_attachment_retries_its_missing_initial_baseline_and_resumes_delivery() {
+    for ask in [true, false] {
+        let (service, intents) = service(4);
+        let scope = TranscriptScope::Root;
+        let id = service.attach_asking(&root(), Face::Remote, ask).unwrap();
+        // Take the initial ask without publishing an answer.
+        assert_eq!(resyncs(&intents, &scope), usize::from(ask));
+        service.observe(root_patch(1));
+        assert_eq!(service.take(id), [] as [Outbound<Core>; 0]);
+        let deadline = service.lock().attachments[&id].repairing[&scope];
+        service.repair_gaps_at(
+            deadline
+                .checked_sub(std::time::Duration::from_millis(1))
+                .unwrap(),
+        );
+        assert_eq!(resyncs(&intents, &scope), 0);
+        service.repair_gaps_at(deadline);
+        assert_eq!(resyncs(&intents, &scope), 1);
+
+        let baseline = Observation::PresentationSnapshot(PresentationSnapshot::empty(2));
+        service.observe(baseline.clone());
+        service.observe(root_patch(2));
+        assert_eq!(observations(service.take(id)), [baseline, root_patch(2)]);
+        service.repair_gaps_at(deadline + std::time::Duration::from_secs(10));
+        assert_eq!(resyncs(&intents, &scope), 0);
+    }
+}
+
 #[test]
 fn a_saturated_attachment_bounds_gap_repair_until_a_snapshot_arrives() {
     for scope in [
@@ -20,7 +60,7 @@ fn a_saturated_attachment_bounds_gap_repair_until_a_snapshot_arrives() {
         TranscriptScope::Agent("child".into()),
     ] {
         let (service, intents) = service(4);
-        let id = service.attach(&root(), Face::Remote).unwrap();
+        let id = attach_with_no_kept_replay(&service);
         if let TranscriptScope::Agent(agent_id) = &scope {
             service
                 .intent(
@@ -72,7 +112,7 @@ fn a_saturated_attachment_bounds_gap_repair_until_a_snapshot_arrives() {
 #[test]
 fn an_unanswered_gap_repair_retries_after_its_deadline_without_new_loss() {
     let (service, intents) = service(4);
-    let id = service.attach(&root(), Face::Remote).unwrap();
+    let id = attach_with_no_kept_replay(&service);
     let scope = TranscriptScope::Root;
     service.take(id);
     resyncs(&intents, &scope);
@@ -101,7 +141,7 @@ fn a_snapshot_clears_losses_recorded_while_its_repair_was_outstanding() {
         TranscriptScope::Agent("child".into()),
     ] {
         let (service, intents) = service(4);
-        let id = service.attach(&root(), Face::Remote).unwrap();
+        let id = attach_with_no_kept_replay(&service);
         if let TranscriptScope::Agent(agent_id) = &scope {
             service
                 .intent(

@@ -5159,6 +5159,8 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   either replay limit drops the kept baseline as a whole. Without a kept
   baseline a new attachment asks for a fresh one (the attach fails if it
   cannot ask), and it receives no root patches until a snapshot arrives.
+  If the first snapshot does not arrive, the attachment retries through
+  the normal five-second transcript repair deadline.
   An attachment's queue starts with the kept observations. Beyond that
   attach snapshot, which does not count against it, a queue holds at most
   its capacity: a droppable event evicts the oldest droppable one (its

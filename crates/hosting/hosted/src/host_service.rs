@@ -892,8 +892,8 @@ impl<P: ProtocolExtension> HostService<P> {
     }
 
     /// As [`Self::attach`], except that a root attach with no baseline kept
-    /// asks the session for one only when `ask`: a caller that knows the
-    /// session's next root baseline reaches the attachment need not.
+    /// asks the session immediately only when `ask`: a caller expecting
+    /// an opening snapshot can let the normal repair deadline cover it.
     ///
     /// # Errors
     ///
@@ -915,7 +915,10 @@ impl<P: ProtocolExtension> HostService<P> {
         };
         let (id, asked) = {
             let mut state = self.lock();
-            let (id, attachment, asked) = self.admission(&mut state, Some(mailbox), face);
+            let (id, mut attachment, asked) = self.admission(&mut state, Some(mailbox), face);
+            if asked.is_some() {
+                attachment.await_root_baseline();
+            }
             state.insert_counted(id, attachment)?;
             (id, asked)
         };
@@ -973,11 +976,6 @@ impl<P: ProtocolExtension> HostService<P> {
             None => Scopes::All,
         };
         let ask = sender.clone().filter(|_| needs_baseline);
-        let fresh = if ask.is_some() {
-            BTreeSet::from([TranscriptScope::Root])
-        } else {
-            BTreeSet::new()
-        };
         let mut attachment = Attachment {
             face,
             reply_origin: id,
@@ -987,7 +985,7 @@ impl<P: ProtocolExtension> HostService<P> {
             seq: 0,
             scopes,
             gapped: BTreeSet::new(),
-            fresh,
+            fresh: BTreeSet::new(),
             repairing: BTreeMap::new(),
             snapshot_held: items.len(),
             dropped: false,
