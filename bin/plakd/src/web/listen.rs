@@ -4,6 +4,7 @@
 
 use std::fmt;
 use std::net::SocketAddr;
+use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -58,6 +59,88 @@ impl Listen {
             ));
         }
         Ok(Self::Loopback(address))
+    }
+}
+
+pub(crate) struct Listener {
+    listen: Listen,
+    bound: Bound,
+    file: Option<SocketFile>,
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        self.remove();
+    }
+}
+
+impl Listener {
+    pub(crate) async fn bind(spec: &str, inherited: Option<OwnedFd>) -> CliResult<Self> {
+        let listen = Listen::parse(spec).map_err(CliFailure::new)?;
+        let (bound, file) = match inherited {
+            Some(fd) => adopt(&listen, fd)?,
+            None => bind(&listen).await?,
+        };
+        Ok(Self {
+            listen,
+            bound,
+            file,
+        })
+    }
+
+    pub(crate) fn as_fd(&self) -> BorrowedFd<'_> {
+        match &self.bound {
+            Bound::Unix(listener) => listener.as_fd(),
+            Bound::Loopback(listener) => listener.as_fd(),
+        }
+    }
+
+    pub(crate) fn remove(&self) {
+        cleanup(self.file.as_ref());
+    }
+
+    pub(super) fn address(&self) -> &Listen {
+        &self.listen
+    }
+}
+
+fn adopt(listen: &Listen, fd: OwnedFd) -> CliResult<(Bound, Option<SocketFile>)> {
+    use std::os::unix::fs::MetadataExt as _;
+    let failed = || CliFailure::new("plakd host --web: cannot adopt inherited listener");
+    crate::host::reexec::listener(&fd).map_err(|_| failed())?;
+    match listen {
+        Listen::Unix(path) => {
+            let listener = std::os::unix::net::UnixListener::from(fd);
+            private_directory(path.parent().ok_or_else(failed)?)?;
+            let metadata = std::fs::symlink_metadata(path).map_err(|_| failed())?;
+            if listener.local_addr().map_err(|_| failed())?.as_pathname() != Some(path)
+                || !is_socket(&metadata)
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+            {
+                return Err(failed());
+            }
+            listener.set_nonblocking(true).map_err(|_| failed())?;
+            Ok((
+                Bound::Unix(tokio::net::UnixListener::from_std(listener).map_err(|_| failed())?),
+                Some(SocketFile {
+                    path: path.clone(),
+                    dev: metadata.dev(),
+                    ino: metadata.ino(),
+                }),
+            ))
+        }
+        Listen::Loopback(address) => {
+            let listener = std::net::TcpListener::from(fd);
+            let actual = listener.local_addr().map_err(|_| failed())?;
+            if actual.ip() != address.ip() || (address.port() != 0 && actual != *address) {
+                return Err(failed());
+            }
+            listener.set_nonblocking(true).map_err(|_| failed())?;
+            Ok((
+                Bound::Loopback(tokio::net::TcpListener::from_std(listener).map_err(|_| failed())?),
+                None,
+            ))
+        }
     }
 }
 
@@ -195,7 +278,7 @@ fn private_directory(directory: &Path) -> CliResult<()> {
 }
 
 /// Removes the unix socket this process bound, and only that one.
-pub(crate) fn cleanup(file: Option<SocketFile>) {
+pub(crate) fn cleanup(file: Option<&SocketFile>) {
     use std::os::unix::fs::MetadataExt as _;
     let Some(file) = file else {
         return;
@@ -208,7 +291,7 @@ pub(crate) fn cleanup(file: Option<SocketFile>) {
 }
 
 /// Accepts and serves connections until the host is asked to stop.
-pub(crate) async fn serve(listener: Bound, served: Arc<Served>) {
+pub(crate) async fn serve(listener: &Listener, served: Arc<Served>) {
     let open = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
     let mut watch = tokio::time::interval(WATCH);
     loop {
@@ -218,7 +301,7 @@ pub(crate) async fn serve(listener: Bound, served: Arc<Served>) {
                     return;
                 }
             }
-            accepted = accept(&listener) => {
+            accepted = accept(&listener.bound) => {
                 // Past the cap a connection is closed at once: nothing
                 // before authentication can hold more than this many.
                 if let Some(io) = accepted

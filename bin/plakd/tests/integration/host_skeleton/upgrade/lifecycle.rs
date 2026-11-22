@@ -179,6 +179,7 @@ fn host_lifecycle_sigterm_notice_precedes_transport_eof() {
 
 #[test]
 fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
+    use std::os::unix::fs::MetadataExt as _;
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let order = fixture.root.join("ready-order");
@@ -191,6 +192,7 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
         )],
     );
     let mut stalled = UnixStream::connect(&host.socket).unwrap();
+    let inode = std::fs::symlink_metadata(&host.socket).unwrap().ino();
     stalled.write_all(b"{\"frame\":\"hello\"").unwrap();
     let (reader, generation) = observe(&host);
     let id = binary(&fixture);
@@ -228,6 +230,10 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
         "a committed restart must be awaited, not refused"
     );
     assert_ne!(welcome["host_generation"], generation);
+    assert_eq!(
+        std::fs::symlink_metadata(&host.socket).unwrap().ino(),
+        inode
+    );
     let result = upgrading.join().unwrap();
     assert!(
         result.status.success(),

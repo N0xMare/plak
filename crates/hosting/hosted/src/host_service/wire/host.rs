@@ -107,8 +107,9 @@ pub struct SessionHost<P: ProtocolExtension> {
         Mutex<BTreeMap<u64, lifecycle::Delivery<plakous_host_protocol::wire::HostLifecycle<P>>>>,
     lifecycle_latest: Mutex<Option<plakous_host_protocol::wire::HostLifecycle<P>>>,
     upgrade_admission: Arc<std::sync::RwLock<bool>>,
-    upgrade_cancelled: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    upgrade_controls: Mutex<admission::PausedControls>,
     upgrade_committed: Arc<std::sync::atomic::AtomicBool>,
+    pending_stops: Mutex<Vec<Arc<super::StopSettlement<P>>>>,
     admission: admission::Admission,
     next_connection: AtomicU64,
     drafts: super::super::drafts::DraftRegistry,
@@ -159,18 +160,29 @@ where
         binary_id: impl Into<String>,
         generation: u64,
     ) -> Arc<Self> {
+        Self::new_shared(Arc::new(sessions), binary_id, generation)
+    }
+
+    /// Constructs a host sharing its product directory with a startup worker.
+    #[must_use]
+    pub fn new_shared(
+        sessions: Arc<dyn HostSessions<P>>,
+        binary_id: impl Into<String>,
+        generation: u64,
+    ) -> Arc<Self> {
         let (changes, _) = watch::channel(0);
         let admission = admission::Admission::new(sessions.host_read_limits());
         Arc::new(Self {
             lifecycle: Mutex::default(),
             lifecycle_latest: Mutex::default(),
             upgrade_admission: Arc::default(),
-            upgrade_cancelled: Mutex::default(),
+            upgrade_controls: Mutex::default(),
             upgrade_committed: Arc::default(),
+            pending_stops: Mutex::default(),
             admission,
             next_connection: AtomicU64::new(1),
             drafts: super::super::drafts::DraftRegistry::default(),
-            sessions: Arc::new(sessions),
+            sessions,
             slots: Mutex::new(Vec::new()),
             changes,
             next_host_attachment: AtomicU64::new(1),
@@ -587,16 +599,13 @@ where
             }
             Ok(frame) => frame,
         };
-        if *paused && !self.cancel_upgrade_for_control(&frame) {
+        if *paused && !self.allowed_during_pause(&frame) {
             if let ClientFrame::Request { id, .. } = frame {
                 write_frame(
                     &mut self.out,
                     &HostFrame::<P>::Response {
                         id,
-                        outcome: Outcome::Refused(RequestRefusal::SessionUnavailable {
-                            detail: "the host is preparing an upgrade; retry after it finishes"
-                                .to_owned(),
-                        }),
+                        outcome: Outcome::Refused(RequestRefusal::Backpressure),
                     },
                 )?;
             }
@@ -633,7 +642,7 @@ where
         ) {
             self.flush_attachments(false)?;
         }
-        match self.request(id, op, &text)? {
+        match self.request(id, op, &text, !*paused)? {
             Forwarded::Answered(outcome) => {
                 write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
                 Ok(true)
@@ -672,6 +681,7 @@ where
         request_id: plakous_host_protocol::wire::RequestId,
         op: Op<P>,
         text: &str,
+        allow_open: bool,
     ) -> CliResult<Forwarded<P>> {
         let answered = |outcome| Ok(Forwarded::Answered(outcome));
         let refused = |refusal| Ok(Forwarded::Answered(Outcome::Refused(refusal)));
@@ -735,7 +745,7 @@ where
                 abandon_jobs,
             } => answered(self.delete_session(session, abandon_children, abandon_jobs)),
             Op::StopSession { session } => self.stop(&session, text),
-            Op::Attach { node } => self.start_attach(request_id, node, text),
+            Op::Attach { node } => self.start_attach(request_id, node, text, allow_open),
             Op::RetryAttach {
                 attachment,
                 request_id,
@@ -884,7 +894,11 @@ where
             .as_ref()
             .is_some_and(|link| link.session.session_id() == session)
         {
-            return self.forward(text.to_owned()).map(Forwarded::Reading);
+            let reading = self.forward(text.to_owned())?;
+            if let Some(link) = &self.node {
+                self.track_stop(&link.connection);
+            }
+            return Ok(Forwarded::Reading(reading));
         }
         if !self.knows(session) {
             return refused(RequestRefusal::UnknownSession);
@@ -908,6 +922,7 @@ where
                     connection = connection.identified(login.clone());
                 }
                 let reading = connection.frame(Ok(text.to_owned()))?;
+                self.track_stop(&connection);
                 self.draining = Some(NodeLink {
                     changes: session.changes(),
                     releases,
@@ -918,6 +933,18 @@ where
                 Ok(Forwarded::Reading(reading))
             }
             Err(failure) => refused(self.host.sessions.refusal(session, &failure)),
+        }
+    }
+
+    fn track_stop(&self, connection: &WireConnection<P, W>) {
+        if let Some((_, stop, _)) = &connection.stop {
+            let mut pending = self
+                .host
+                .pending_stops
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            pending.retain(|tracked| tracked.pending());
+            pending.push(Arc::clone(stop));
         }
     }
 

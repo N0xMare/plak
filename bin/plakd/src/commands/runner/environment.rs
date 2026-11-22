@@ -4,7 +4,7 @@
 //! own: a host never sees the shell a client was started in.
 
 /// Where the host's `PATH` came from.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 enum PathSource {
     /// The user's login shell answered.
     LoginShell,
@@ -15,7 +15,7 @@ enum PathSource {
 }
 
 /// The environment captured at start.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(crate) struct HostEnvironment {
     path: String,
     home: Option<String>,

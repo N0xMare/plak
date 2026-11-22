@@ -30,6 +30,7 @@ use crate::surface_protocol::PlakExtension;
 
 pub(crate) use auth::{WebAccess, WebOrigin};
 use listen::Listen;
+pub(crate) use listen::Listener;
 
 pub(crate) fn preflight(services: &Services, args: &crate::command::HostWeb) -> CliResult<()> {
     let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
@@ -56,9 +57,7 @@ pub(crate) struct Served {
 
 /// The bound web endpoint of a host.
 pub(crate) struct WebEndpoint {
-    listen: Listen,
-    listener: listen::Bound,
-    socket_file: Option<listen::SocketFile>,
+    listener: Arc<Listener>,
     served: Arc<Served>,
     reload: tokio::signal::unix::Signal,
 }
@@ -71,27 +70,24 @@ impl WebEndpoint {
     /// A listener that is not private or cannot be bound, `[web]` keys that
     /// do not admit anyone, a UI directory without its CSP, or a cookie key
     /// that cannot be read or made.
-    pub(crate) async fn bind(
+    pub(crate) fn new(
         services: &Services,
         args: &crate::command::HostWeb,
         host: Arc<SessionHost<PlakExtension>>,
         stop: StopProbe,
         reload: tokio::signal::unix::Signal,
         console_switches: plakd_wire_types::console::ConfiguredSwitches,
+        listener: Arc<Listener>,
     ) -> CliResult<Self> {
-        let listen = Listen::parse(&args.listen).map_err(CliFailure::new)?;
         let paths = services.paths()?;
         let config = ProductConfig::load(paths).map_err(CliFailure::new)?;
-        let access = access(&listen, &config, args.dev_login.clone())?;
+        let access = access(listener.address(), &config, args.dev_login.clone())?;
         // Capture the same immutable switches used by host enforcement and
         // welcome; rereading config here must not weaken the UI's CSP.
         let ui = load_ui(args.ui.as_deref(), console_switches)?;
         let gate = auth::Gate::new(access, auth::CookieKey::load_or_create(paths)?);
-        let (listener, socket_file) = listen::bind(&listen).await?;
         Ok(Self {
-            listen,
             listener,
-            socket_file,
             reload,
             served: Arc::new(Served {
                 host,
@@ -104,14 +100,13 @@ impl WebEndpoint {
 
     /// What the start line names.
     pub(crate) fn listener(&self) -> String {
-        self.listen.to_string()
+        self.listener.address().to_string()
     }
 
-    /// Serves until the process is asked to stop, then removes the socket
-    /// it bound.
+    /// Serves until the process is asked to stop. The host owns cleanup.
     pub(crate) async fn serve(mut self) {
-        tracing::info!(target: "plak::web", listener = %self.listen, "plakd host web endpoint serving");
-        let serving = listen::serve(self.listener, Arc::clone(&self.served));
+        tracing::info!(target: "plak::web", listener = %self.listener.address(), "plakd host web endpoint serving");
+        let serving = listen::serve(&self.listener, Arc::clone(&self.served));
         tokio::pin!(serving);
         loop {
             tokio::select! {
@@ -132,7 +127,6 @@ impl WebEndpoint {
                 }
             }
         }
-        listen::cleanup(self.socket_file);
     }
 }
 

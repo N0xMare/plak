@@ -10,7 +10,45 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{CliFailure, CliResult};
 
-pub(crate) fn verify_image(path: &Path, expected: &str) -> CliResult<()> {
+/// Filesystem identity of the bytes hashed during qualification.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct VerifiedImage {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+    mode: u32,
+}
+
+impl VerifiedImage {
+    fn of(metadata: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt as _;
+        Self {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            len: metadata.len(),
+            mtime: (metadata.mtime(), metadata.mtime_nsec()),
+            ctime: (metadata.ctime(), metadata.ctime_nsec()),
+            mode: metadata.mode(),
+        }
+    }
+
+    pub(crate) fn recheck(&self, path: &Path) -> CliResult<()> {
+        if path
+            .metadata()
+            .is_ok_and(|metadata| Self::of(&metadata) == *self)
+        {
+            Ok(())
+        } else {
+            Err(CliFailure::new(
+                "host_upgrade_binary_mismatch: qualified image changed",
+            ))
+        }
+    }
+}
+
+pub(crate) fn verify_image(path: &Path, expected: &str) -> CliResult<VerifiedImage> {
     use std::os::unix::fs::MetadataExt as _;
     let mut image = File::open(path).map_err(|error| CliFailure::new(error.to_string()))?;
     let metadata = image
@@ -21,6 +59,7 @@ pub(crate) fn verify_image(path: &Path, expected: &str) -> CliResult<()> {
             "host_upgrade_image_refused: destination must be a non-shared-writable executable regular file",
         ));
     }
+    let verified = VerifiedImage::of(&metadata);
     let mut hash = Sha256::new();
     let mut buffer = [0; 8 * 1024];
     loop {
@@ -43,7 +82,8 @@ pub(crate) fn verify_image(path: &Path, expected: &str) -> CliResult<()> {
             "host_upgrade_binary_mismatch: executable does not match its expected binary identity",
         ));
     }
-    Ok(())
+    verified.recheck(path)?;
+    Ok(verified)
 }
 
 pub(crate) fn command(executable: &Path, home: &Path, key: &str) -> Command {
@@ -51,6 +91,7 @@ pub(crate) fn command(executable: &Path, home: &Path, key: &str) -> Command {
     command
         .env("PLAK_HOME", home)
         .current_dir(home)
+        .env_remove(crate::environment::HOST_REEXEC)
         .env_remove("PLAK_TEST_STATE_KEY");
     command.envs(crate::test_hooks::upgrade_key_environment(key));
     command

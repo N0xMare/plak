@@ -40,6 +40,10 @@ pub trait HostSessions<P: ProtocolExtension>: Send + Sync {
     /// Categorical audit hook for refusals that precede product decoding or
     /// execution. Implementations must not log the request body.
     fn host_request_refused(&self, _context: HostRequestContext, _reason: &RequestRefusal) {}
+    /// Whether this product operation can run without changing custody or starting work.
+    fn host_request_during_pause(&self, _request: &P::HostRequest) -> bool {
+        false
+    }
     /// Retires process-local operator authority when its authenticated
     /// connection leaves. It never stops or releases an agent session.
     fn host_disconnect(&self, _principal: &HostPrincipal, _connection_id: u64, _generation: u64) {}

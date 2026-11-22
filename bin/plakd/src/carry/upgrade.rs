@@ -178,6 +178,8 @@ pub(crate) struct DestinationProbe {
     pub(crate) runner_protocol: u32,
     pub(crate) runner_version: plakous::runner::protocol::VersionTriple,
     pub(crate) config_error: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) accepts_reexec: bool,
 }
 
 pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationProbe> {
@@ -209,6 +211,7 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
             .and(policy.map(|_| ()))
             .err()
             .map(|error| error.message().to_owned()),
+        accepts_reexec: crate::host::AVAILABLE && crate::environment::upgrade_reexec_probe(),
     })
 }
 

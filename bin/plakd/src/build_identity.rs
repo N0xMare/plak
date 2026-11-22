@@ -72,6 +72,11 @@ impl FileIdentity {
 
 static LAUNCH: OnceLock<Launch> = OnceLock::new();
 static BINARY_ID: OnceLock<Option<String>> = OnceLock::new();
+
+/// The old generation already verified the image before the paired exec.
+pub(crate) fn use_reexec_identity(binary: String) {
+    let _ = BINARY_ID.set(Some(binary));
+}
 #[cfg(test)]
 // Hold background work so cache assertions distinguish caller-side hashing.
 static BACKGROUND_IDENTITY_TEST_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -323,6 +323,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         test_hooks::install().map_err(CliFailure::new)?;
     }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
+    let host_reexec = match &command {
+        Command::Host(_) => host::receive_reexec()?.map(|(binary, inherited)| {
+            build_identity::use_reexec_identity(binary);
+            inherited
+        }),
+        _ => None,
+    };
 
     if matches!(command, Command::Help) {
         cli::render::global_help(&mut io::stdout().lock())
@@ -540,7 +547,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
     // Machine transports own their streams before standard-stream locks.
     let command = match command {
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
-        Command::Host(command) => return host::run_host_command(&services, &command),
+        Command::Host(command) => return host::run_host_command(&services, &command, host_reexec),
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
         Command::HostUpgrade {
             expect_binary,

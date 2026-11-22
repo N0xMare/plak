@@ -78,9 +78,28 @@ fn web_lifecycle_sigterm_delivers_stopping_shutdown_before_close() {
 
 #[test]
 fn web_lifecycle_same_key_upgrade_delivers_draining_then_restarting() {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
-    let mut web = start(&fixture);
-    let mut socket = upgrade(&web, &cookie(&web));
+    let shell = fixture.root.join("login-shell");
+    let invoked = fixture.home().join("shell-invocations");
+    std::fs::write(
+        &shell,
+        "#!/bin/sh\necho \"$PPID\" >> \"$PLAK_HOME/shell-invocations\"\nprintf /usr/bin:/bin\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (mut web, ready) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[("SHELL", shell.to_str().unwrap())],
+        CSP,
+    );
+    assert!(ready);
+    let pid = web.child.as_ref().unwrap().id().to_string();
+    let login = cookie(&web);
+    let inode = std::fs::symlink_metadata(&web.socket).unwrap().ino();
+    let mut socket = upgrade(&web, &login);
     let welcome = directory(&mut socket);
     // Read while the upgrade runs: frames left unread until the host has
     // exited cannot be reached once a pending reply fails to write.
@@ -129,5 +148,99 @@ fn web_lifecycle_same_key_upgrade_delivers_draining_then_restarting() {
             .all(|notice| notice["reason"] == "paired_upgrade"
                 && notice["target"]["state_key"] == welcome["state_key"])
     );
+    assert_eq!(std::fs::symlink_metadata(&web.socket).unwrap().ino(), inode);
+    let mut successor = upgrade(&web, &login);
+    assert_ne!(
+        directory(&mut successor)["host_generation"],
+        welcome["host_generation"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(invoked)
+            .unwrap()
+            .lines()
+            .filter(|line| *line == pid)
+            .count(),
+        1
+    );
+    drop(successor);
+    interrupt_and_wait(&mut web);
+}
+
+#[test]
+fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let config = fixture.home().join("config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!(
+            "{original}\n[web]\nallow = [\"{LOGIN}\"]\norigin = \"{ORIGIN}\"\nconfig_read = true\n"
+        ),
+    );
+    let gate = fixture.root.join("scan-gate");
+    let (mut web, ready) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[(
+            "PLAK_TEST_HOST_CONTINUATION_SCAN_GATE",
+            gate.to_str().unwrap(),
+        )],
+        CSP,
+    );
+    assert!(ready);
+    let login = cookie(&web);
+    let mut source = upgrade(&web, &login);
+    let old = directory(&mut source);
+    let probe = fixture
+        .command()
+        .args(["version", "--host-upgrade-probe"])
+        .output()
+        .unwrap();
+    let probe: Value = serde_json::from_slice(&probe.stdout).unwrap();
+    std::fs::write(&gate, []).unwrap();
+    let mut requester = Child::spawn(
+        fixture
+            .command()
+            .args([
+                "host",
+                "upgrade",
+                "--expect-binary",
+                probe["binary_id"].as_str().unwrap(),
+                "--drain",
+                "0",
+            ])
+            .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    );
+    let _notices = notices_until_close(&mut source, &old["host_generation"]);
+    let mut socket = upgrade(&web, &login);
+    assert_ne!(
+        directory(&mut socket)["host_generation"],
+        old["host_generation"]
+    );
+    send(
+        &mut socket,
+        &ClientFrame::Request {
+            id: 1,
+            op: Op::ListSessions {
+                workspace: None,
+                runner: None,
+                include_archived: false,
+            },
+        },
+    );
+    assert_eq!(
+        response(&mut socket, 1),
+        json!({"ok":{"answer":"sessions","rows":[]}})
+    );
+    socket.send(Message::text(json!({
+        "frame": "request", "id": 2, "op": {"op": "host", "request": {"request": "config_get"}}
+    }).to_string())).unwrap();
+    assert!(response(&mut socket, 2).get("ok").is_some());
+    std::fs::remove_file(gate).unwrap();
+    assert!(requester.wait().unwrap().success());
+    drop(socket);
     interrupt_and_wait(&mut web);
 }

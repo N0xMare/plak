@@ -38,6 +38,7 @@ pub(super) struct AttachRequest {
     id: RequestId,
     node: NodeAddress,
     text: String,
+    allow_open: bool,
 }
 
 pub(super) struct PendingAttach<P: ProtocolExtension> {
@@ -55,7 +56,7 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    fn prepare_attach(&self, node: &NodeAddress) -> CliResult<Target<P>> {
+    fn prepare_attach(&self, node: &NodeAddress, allow_open: bool) -> CliResult<Target<P>> {
         if let Some(successor) = self
             .sessions
             .successor_node(node)
@@ -77,6 +78,9 @@ where
                 held: Some(resident),
                 from_open: false,
             }));
+        }
+        if !allow_open {
+            return Ok(Target::Refused(RequestRefusal::Backpressure));
         }
         let id = match slot.peek() {
             super::SlotView::Resident(session) => session.session_id(),
@@ -169,6 +173,7 @@ where
         id: RequestId,
         node: NodeAddress,
         text: &str,
+        allow_open: bool,
     ) -> CliResult<Forwarded<P>> {
         if self.host_reads.contains_key(&id) {
             return Ok(Forwarded::Answered(Outcome::Refused(
@@ -187,6 +192,7 @@ where
                 id,
                 node,
                 text: text.to_owned(),
+                allow_open,
             });
             return Ok(Forwarded::Reading(true));
         }
@@ -194,11 +200,11 @@ where
             .ok()
             .filter(|_| self.buffered_output)
         else {
-            let target = self.host.prepare_attach(&node)?;
+            let target = self.host.prepare_attach(&node, allow_open)?;
             if let Some(done) = self.finish_attach(target, text, true)? {
                 return Ok(done);
             }
-            let target = self.host.prepare_attach(&node)?;
+            let target = self.host.prepare_attach(&node, allow_open)?;
             let Some(done) = self.finish_attach(target, text, false)? else {
                 unreachable!("the second preparation answers");
             };
@@ -209,6 +215,7 @@ where
                 id,
                 node,
                 text: text.to_owned(),
+                allow_open,
             },
             runtime,
             true,
@@ -226,6 +233,7 @@ where
         let host = Arc::clone(&self.host);
         let wake = Arc::clone(&self.read_ready);
         let node = request.node.clone();
+        let allow_open = request.allow_open;
         runtime.spawn_blocking(move || {
             let paused = host
                 .upgrade_admission
@@ -234,13 +242,7 @@ where
             if send.is_closed() {
                 return;
             }
-            let result = if *paused {
-                Ok(Target::Refused(RequestRefusal::SessionUnavailable {
-                    detail: "the host is preparing an upgrade; retry after it finishes".into(),
-                }))
-            } else {
-                host.prepare_attach(&node)
-            };
+            let result = host.prepare_attach(&node, allow_open && !*paused);
             if send.is_closed() {
                 return;
             }
@@ -279,8 +281,14 @@ where
             return Ok(());
         };
         self.complete_attach(request.id, finished)?;
-        while let Some(AttachRequest { id, node, text }) = self.attach_queue.pop_front() {
-            let started = self.start_attach(id, node, &text)?;
+        while let Some(AttachRequest {
+            id,
+            node,
+            text,
+            allow_open,
+        }) = self.attach_queue.pop_front()
+        {
+            let started = self.start_attach(id, node, &text, allow_open)?;
             self.complete_attach(id, started)?;
             if self.attaching.is_some() {
                 break;

@@ -113,6 +113,7 @@ pub(super) struct Ready {
     pub(super) executable: PathBuf,
     pub(super) key: String,
     pub(super) binary: String,
+    image: process::VerifiedImage,
     leases: Leases,
     pause: AdmissionPause,
     _standalone: std::fs::File,
@@ -141,11 +142,12 @@ impl Coordinator {
         services: &Services,
         arguments: Arc<Vec<String>>,
         scanning: Arc<std::sync::atomic::AtomicUsize>,
+        inventory_ready: Option<tokio::sync::oneshot::Receiver<()>>,
     ) -> Self {
         let pending: Pending = Arc::default();
         let worker: Worker = Arc::default();
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let task = runtime.spawn(serve(
+        let serving = serve(
             listener,
             Arc::clone(host),
             services.clone(),
@@ -156,7 +158,15 @@ impl Coordinator {
                 scanning,
             }),
             arguments,
-        ));
+        );
+        let task = runtime.spawn(async move {
+            if let Some(ready) = inventory_ready
+                && ready.await.is_err()
+            {
+                return;
+            }
+            serving.await;
+        });
         Self {
             pending,
             worker,
@@ -204,7 +214,6 @@ pub(super) fn has_ready(pending: &Pending) -> bool {
 pub(super) fn replace(
     ready: Option<Ready>,
     services: &Services,
-    command: &crate::command::HostCommand,
     stop: crate::web::StopProbe,
     arguments: &[String],
     home_lock: super::lock::HostLock,
@@ -216,17 +225,29 @@ pub(super) fn replace(
     process::verify_image(&ready.executable, &ready.binary)?;
     let mut replacement = process::command(&ready.executable, services.paths()?.home(), &ready.key);
     replacement.args(arguments);
-    let same_key = ready.key == crate::home::state::state_key();
     drop(ready);
     let failure = replacement.exec();
     drop(home_lock);
-    if same_key {
-        eprintln!("host upgrade executable could not start: {failure}; restoring the old host");
-        return super::serve_host(services, command);
-    }
     Err(CliFailure::new(format!(
         "host upgrade committed but destination could not start: {failure}; retry using its recorded executable"
     )))
+}
+
+impl Ready {
+    pub(super) fn same_key(&self) -> bool {
+        self.key == crate::home::state::state_key()
+    }
+
+    pub(super) fn paired_command(
+        &self,
+        home: &std::path::Path,
+        arguments: &[String],
+    ) -> CliResult<std::process::Command> {
+        self.image.recheck(&self.executable)?;
+        let mut command = process::command(&self.executable, home, &self.key);
+        command.args(arguments);
+        Ok(command)
+    }
 }
 
 pub(super) fn host_argv(command: &crate::command::HostCommand) -> CliResult<Vec<String>> {
@@ -932,7 +953,7 @@ fn prepare(
             "host_upgrade_pending_ack: finish the recorded destination's pending successors before another upgrade",
         ));
     }
-    let (destination, reopen) =
+    let (destination, image, reopen) =
         qualification::qualify_destination(services, &request, arguments, report)?;
     let cross_key = request.source_key != request.destination_key;
     if cross_key && !request.inspect_runners.is_empty() {
@@ -955,7 +976,7 @@ fn prepare(
     let standalone = progress::timed(report, progress::Phase::StandaloneAdmission, || {
         crate::carry::upgrade::admission(paths, true)
     })?;
-    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
+    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled), cross_key)?;
     super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
     let budget = step_drain::Budget::new(request.drain)?;
     progress("resolving earlier admission verdicts")?;
@@ -979,6 +1000,7 @@ fn prepare(
         executable: request.destination.clone(),
         key: request.destination_key.clone(),
         binary: request.expected_binary.clone(),
+        image,
         pause,
         leases: Leases::new()?,
         _standalone: standalone,
@@ -994,9 +1016,12 @@ fn prepare(
             runtime,
             &progress,
         )?);
+        ready.pause.commit()?;
+        host.join_paused_stops(&ready.pause, Instant::now() + Duration::from_secs(10))?;
         qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
         request.check_processes(services, &destination.runner_version, runtime)?;
-        ready.pause.commit()?;
+        ready.image.recheck(&ready.executable)?;
+        check_cancel(cancelled)?;
         return Ok((ready, None));
     }
     let failures = host.hand_off_paused(

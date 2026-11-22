@@ -320,7 +320,7 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     session_request: Option<(RequestId, String, AttachmentId)>,
     /// The `stop_session` in flight: its frame's id, its ticket, and when
     /// it is answered without the stop.
-    stop: Option<(RequestId, StopTicket, Instant)>,
+    stop: Option<(RequestId, std::sync::Arc<StopSettlement<P>>, Instant)>,
     runner_pending: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
     runner_labels: Option<RunnerLabels>,
     /// Who the transport admitted, when it names a login.
@@ -342,6 +342,30 @@ type RunnerLabels =
 /// How long a stop may take before its request is answered without it: the
 /// root's cancel bound and the tree's release bound, with room.
 const STOP_DEADLINE: Duration = Duration::from_secs(90);
+
+pub(super) struct StopSettlement<P: ProtocolExtension> {
+    actions: IntentSender<P>,
+    ticket: StopTicket,
+    outcome: std::sync::Mutex<Option<Result<(), String>>>,
+}
+
+impl<P: ProtocolExtension> StopSettlement<P> {
+    // The connection and the handoff barrier share the one mailbox receipt.
+    fn outcome(&self) -> Option<Result<(), String>> {
+        let mut outcome = self
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if outcome.is_none() {
+            *outcome = self.actions.stop_settled(self.ticket);
+        }
+        outcome.clone()
+    }
+
+    fn pending(&self) -> bool {
+        self.outcome().is_none()
+    }
+}
 
 /// How many roots a connection remembers telling its client: an attach of
 /// an older one is unknown, as a root never told is.
@@ -1140,7 +1164,15 @@ where
         }
         match self.actions.request_stop() {
             Ok(ticket) => {
-                self.stop = Some((id, ticket, Instant::now() + STOP_DEADLINE));
+                self.stop = Some((
+                    id,
+                    std::sync::Arc::new(StopSettlement {
+                        actions: self.actions.clone(),
+                        ticket,
+                        outcome: std::sync::Mutex::default(),
+                    }),
+                    Instant::now() + STOP_DEADLINE,
+                ));
                 None
             }
             Err(IntentSendError::Saturated(_)) => refused(RequestRefusal::Backpressure),
@@ -1161,10 +1193,10 @@ where
     /// bound passed: `stopped` when it is durable, else
     /// `session_unavailable` with why.
     fn settle_stop(&mut self) {
-        let Some((id, ticket, deadline)) = self.stop else {
+        let Some((id, stop, deadline)) = &self.stop else {
             return;
         };
-        let outcome = match self.actions.stop_settled(ticket) {
+        let outcome = match stop.outcome() {
             Some(Ok(())) => Outcome::Ok(Answer::Stopped {
                 runner_pending: self
                     .runner_pending
@@ -1172,13 +1204,14 @@ where
                     .is_some_and(|pending| pending()),
             }),
             Some(Err(detail)) => Outcome::Refused(RequestRefusal::SessionUnavailable { detail }),
-            None if Instant::now() >= deadline => {
+            None if Instant::now() >= *deadline => {
                 Outcome::Refused(RequestRefusal::SessionUnavailable {
                     detail: "the stop did not finish in time; it may still take effect".to_owned(),
                 })
             }
             None => return,
         };
+        let id = *id;
         self.stop = None;
         self.settled.push((id, outcome));
     }

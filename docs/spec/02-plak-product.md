@@ -4184,6 +4184,14 @@ ready carried-root aliases use the existing `RequestRefusal::Moved`, not a new
 successor field. Versions still match exactly: a wire-10 hello gets only
 `version_mismatch`, no Welcome or lifecycle frame.
 
+During an admission pause, the host continues to answer Ping, directory reads
+and watches, and authorized read-only console requests. A client may detach or
+attach to a resident session without opening a new runtime. A request that
+would open a dormant or still-loading session, start new work, or change
+product state is refused with `backpressure` before delivery, except for the
+exact Stop and Interrupt controls described in §4.6. Clients hold unsent
+drafts themselves; a pause never queues them for the next generation.
+
 The public stdio bridge reads exactly one bounded newline-terminated Hello,
 within the same ten-second handshake deadline and maximum line bound, before
 discovery or explicit auto-start. It forwards that Hello unchanged if discovery
@@ -5712,6 +5720,23 @@ This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
+It re-execs the source PID, retaining the host's control and web listeners and
+the home-wide and per-key locks. On Linux and macOS, rustix passes their
+descriptors in one private Unix socketpair message using `SCM_RIGHTS`. The
+exec temporarily carries the receiver on stdin; the new image restores the
+original stdin and sets close-on-exec on the adopted descriptors before it
+spawns anything. Neither listener is unlinked or rebound. New connections can
+wait in the existing kernel backlogs; old client streams end rather than
+moving into the new generation. The private upgrade coordinator is rebound.
+The destination must advertise support for this handoff when the source asks
+during qualification. Installing the first image with this support does not
+change how a source without it closes its own listeners.
+The source rechecks the qualified image's filesystem identity before exec
+instead of hashing the image again, and passes the verified binary identity and
+the captured tool PATH and HOME to the destination. The destination still
+checks gateway availability and stores before serving. It answers Welcome and
+the in-memory directory while it finds and loads owed sessions; startup
+admission remains paused until the continuation inventory is captured.
 When its destination needs a higher store revision, pre-drain qualification
 takes consistent read-only copies of the existing product and tree stores in
 a private scratch directory, applies the registered steps there, and probes
@@ -5797,9 +5822,13 @@ only already-admitted dispatches and are retried without latching future calls.
 Failed/refused promotion must join naturally or preparation aborts; no promotion
 receipt is added. Upgrade yields use Notice, not Background: Background remains the manual
 process-only control and must not mask observation waits. No in-flight effect
-journal crosses surrender. A root or child
-stop/interrupt wins over preparation, which reopens the source gates rather than
-continuing stopped work. Mandatory owner/placement rendezvous and planned-release
+journal crosses surrender. A root or child stop/interrupt acts normally during
+reversible same-key preparation; it does not cancel the upgrade, and stopped
+work is not continued. For cross-key carry it still wins over preparation and
+reopens the source gates. The source seals control admission and joins
+already-admitted Stop receipts before Ready; a Stop that has not settled
+within that join bound prevents surrender.
+Mandatory owner/placement rendezvous and planned-release
 acknowledgements keep bounded joins; finite modes share one natural deadline
 plus one freeze allowance, never multiplied by sessions. Idle's freeze
 rendezvous completes only when natural work has reached boundaries.
@@ -6182,13 +6211,14 @@ settles asynchronously after endpoint binding, before local admission.
   dormant session is `released`; one the host does not know is
   `unknown_session`. The release writes nothing of its own: it is the idle
   release's joined quit.
-- **Start scan.** Before it serves, it reads which of the directory's
+- **Start scan.** Before admitting work (and, on a cold start, before serving),
+  the host reads which of the directory's
   sessions the last host left a continuation that runs by itself: a root
   whose latest loss is a planned handoff, a root continuation decided and
   not yet admitted (a crash left it pending), and, under `[host]
   resume_after_loss = "continue"`, a root whose lost turn waits for Resume
   and was not itself a continuation.
-  Once it serves, a thread of its own opens each, one at a time, printing
+  A thread of its own then opens each, one at a time, printing
   `plakd host: continuing session <id>`; the open runs the continuation as
   any open does (chapter 03 §14.1), once, and the session stays resident
   while anything keeps it. A stop ends the scan. A stopped root, or one

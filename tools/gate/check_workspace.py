@@ -393,6 +393,9 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
         ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
         ("var_os", (("string", "XDG_CONFIG_HOME"),)),
+        # Private, same-PID host transport handshake and capability probe.
+        ("var_os", (("identifier", "REEXEC_PROBE"),)),
+        ("var", (("identifier", "HOST_REEXEC"),)),
         # Explicit unmanaged-host OS/tool allowlist; fixture inputs go through
         # the existing test-support reader, never the caller's entire environment.
         ("var_os", (("identifier", "name"),)),
@@ -653,6 +656,7 @@ EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
     ("plakd", "src/operator_process.rs"): {"Command", "ExitStatus", "Stdio"},
     ("plakd", "src/snapshot_install/archive.rs"): {"Stdio"},
     ("plakd", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
+    ("plakd", "src/host/reexec.rs"): {"Command", "Stdio"},
     ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
     ("plakd", "src/commands/runner/dial.rs"): {"Stdio"},
@@ -750,6 +754,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/web/listen.rs"): {"select"},
     ("plakd", "src/web/socket.rs"): {"info", "select"},
     ("plakd", "src/host/socket.rs"): {"select"},
+    ("plakd", "src/host/reexec.rs"): {"cmsg_space"},
     # The wire schema document's envelope.
     ("plakd", "src/wire_schema.rs"): {"json"},
     ("plakd", "src/commands/secret_input.rs"): {"select"},

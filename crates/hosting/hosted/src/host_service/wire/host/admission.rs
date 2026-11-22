@@ -119,6 +119,14 @@ pub struct AdmissionPause {
     cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
 
+#[derive(Default)]
+pub(super) enum PausedControls {
+    #[default]
+    Refuse,
+    Allow,
+    Cancel(Arc<std::sync::atomic::AtomicBool>),
+}
+
 impl AdmissionPause {
     /// Linearizes surrender against an existing-session stop, without opening ingress.
     ///
@@ -155,17 +163,64 @@ where
     /// # Errors
     /// Another upgrade already paused this host, or the host is stopping.
     pub fn pause_admissions(&self) -> CliResult<AdmissionPause> {
-        self.pause_admissions_for_upgrade(Arc::default())
+        self.pause(Arc::default(), PausedControls::Refuse)
     }
 
-    /// Pauses ingress with the coordinator's cancellation flag. Existing-session
-    /// stop/interrupt requests cancel reversible preparation before ordinary handling.
+    /// Pauses ingress with the coordinator's cancellation flag. Stop/interrupt
+    /// controls cancel reversible preparation only for cross-key carry.
     ///
     /// # Errors
     /// Another pause exists or the host is stopping.
     pub fn pause_admissions_for_upgrade(
         &self,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
+        cross_key: bool,
+    ) -> CliResult<AdmissionPause> {
+        let controls = if cross_key {
+            PausedControls::Cancel(Arc::clone(&cancelled))
+        } else {
+            PausedControls::Allow
+        };
+        self.pause(cancelled, controls)
+    }
+
+    /// Joins Stop receipts after sealing ingress and before publishing Ready.
+    ///
+    /// # Errors
+    /// The pause does not own the host, or admitted stops did not settle in time.
+    pub fn join_paused_stops(&self, pause: &AdmissionPause, deadline: Instant) -> CliResult<()> {
+        use std::sync::atomic::Ordering;
+        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
+            || !pause.committed.load(Ordering::Acquire)
+        {
+            return Err(CliFailure::new(
+                "joining stops requires a sealed upgrade pause",
+            ));
+        }
+        loop {
+            {
+                let mut pending = self
+                    .pending_stops
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                pending.retain(|stop| stop.pending());
+                if pending.is_empty() {
+                    return Ok(());
+                }
+            }
+            if pause.cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
+                return Err(CliFailure::new(
+                    "host_upgrade_stop_unsettled: a stop did not settle before surrender",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn pause(
+        &self,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+        controls: PausedControls,
     ) -> CliResult<AdmissionPause> {
         let mut paused = self
             .upgrade_admission
@@ -178,9 +233,9 @@ where
         self.upgrade_committed
             .store(false, std::sync::atomic::Ordering::Release);
         *self
-            .upgrade_cancelled
+            .upgrade_controls
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&cancelled));
+            .unwrap_or_else(PoisonError::into_inner) = controls;
         Ok(AdmissionPause {
             gate: Arc::clone(&self.upgrade_admission),
             committed: Arc::clone(&self.upgrade_committed),

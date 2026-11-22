@@ -13,7 +13,7 @@ pub(super) fn qualify_destination(
     request: &Request,
     arguments: &[String],
     report: &progress::Report<'_>,
-) -> CliResult<(DestinationProbe, Option<reopen::Preflight>)> {
+) -> CliResult<(DestinationProbe, process::VerifiedImage, Option<reopen::Preflight>)> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
@@ -27,7 +27,7 @@ pub(super) fn qualify_destination(
             "host_upgrade_stale_source: source instance or state key changed",
         ));
     }
-    progress::timed(report, progress::Phase::Image, || {
+    let image = progress::timed(report, progress::Phase::Image, || {
         process::verify_image(
             &std::env::current_exe().map_err(io_failure)?,
             crate::build_identity::binary_id(),
@@ -60,7 +60,7 @@ pub(super) fn qualify_destination(
             })
         })
         .transpose()?;
-    Ok((probe, reopen))
+    Ok((probe, image, reopen))
 }
 
 pub(super) fn recheck_held(
@@ -145,6 +145,9 @@ fn service_probe(
     probe_command
         .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
         .arg(service_file);
+    if request.source_key == request.destination_key {
+        probe_command.env(crate::environment::REEXEC_PROBE, "1");
+    }
     let probe: DestinationProbe = serde_json::from_slice(
         &process::run(probe_command, PROBE_BOUND)?.stdout,
     )
@@ -167,12 +170,17 @@ fn service_probe(
                 .unwrap_or("identity, import version or host capability does not match")
         )));
     }
-    if request.source_key == request.destination_key
-        && probe.runner_protocol != crate::commands::runner::version().protocol
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
-        ));
+    if request.source_key == request.destination_key {
+        if !probe.accepts_reexec {
+            return Err(CliFailure::new(
+                "host_upgrade_destination_unsupported: destination cannot inherit the same-key host transport",
+            ));
+        }
+        if probe.runner_protocol != crate::commands::runner::version().protocol {
+            return Err(CliFailure::new(
+                "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
+            ));
+        }
     }
     Ok(probe)
 }

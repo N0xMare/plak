@@ -2,8 +2,8 @@ use super::RootActor;
 
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     /// Park outer operations, without blocking urgent planned release.
-    pub(super) async fn wait_step_hold(&self) -> bool {
-        let control = &self.role.events.step_control;
+    pub(super) async fn wait_step_hold(&mut self) -> bool {
+        let control = std::sync::Arc::clone(&self.role.events.step_control);
         control.observe_agent(self.opened.agent());
         loop {
             let mut changed = Box::pin(control.changed.notified());
@@ -25,18 +25,19 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
                 &self.role.interrupt_state,
             );
             watch.poll();
-            if self
-                .role
-                .interrupt_state
-                .borrow()
-                .has_deferred_stop_or_interrupt()
-            {
-                control.interrupt();
-            }
             if self.role.actions.abandon_and_release_requested()
                 || self.role.interrupt_state.borrow().has_deferred_quit()
             {
                 return true;
+            }
+            let pending = self.role.interrupt_state.borrow_mut().take_step_control();
+            if let Some(pending) = pending {
+                let (action, _acknowledgement) = pending.into_parts();
+                if let super::UserAction::StopSession { ticket } = action {
+                    self.stop_session(ticket, None).await;
+                }
+                // An interrupt of an idle root never starts another turn.
+                continue;
             }
             if !control.requested() {
                 break;

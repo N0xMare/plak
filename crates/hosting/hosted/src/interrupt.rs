@@ -124,13 +124,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> InterruptWatchState<P> {
     }
 
     pub(crate) fn has_deferred_stop_or_interrupt(&self) -> bool {
-        self.deferred.iter().any(|delivery| {
-            matches!(
-                IntentClass::of(&**delivery),
-                IntentClass::Urgent | IntentClass::Stop | IntentClass::Quit
-            )
-        })
+        self.deferred
+            .iter()
+            .any(|delivery| is_step_control(delivery))
     }
+
+    pub(crate) fn take_step_control(&mut self) -> Option<UserActionDelivery<P>> {
+        let index = self
+            .deferred
+            .iter()
+            .position(|delivery| is_step_control(delivery))?;
+        self.deferred.remove(index)
+    }
+}
+
+fn is_step_control<P: plakous_host_protocol::ProtocolExtension>(action: &UserAction<P>) -> bool {
+    matches!(
+        IntentClass::of(action),
+        IntentClass::Urgent | IntentClass::Stop | IntentClass::Quit
+    )
 }
 
 /// Defers an urgent `item` behind the urgent actions already deferred and

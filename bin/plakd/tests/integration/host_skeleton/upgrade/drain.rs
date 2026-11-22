@@ -2,6 +2,7 @@
 
 use super::*;
 use plakd::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
+use plakous_host_protocol::wire::RequestRefusal;
 use plakous_offline_crash_harness::evidence::{EvidenceKind, read_evidence};
 
 pub(super) mod observations;
@@ -513,11 +514,8 @@ fn natural_boundary(mode: &str) {
     let deadline = Instant::now() + WAIT;
     loop {
         match client.request(10, new_session(&fixture.root.join("absent-workspace"))) {
-            Outcome::Refused(reason) => {
-                if format!("{reason:?}").contains("upgrad") {
-                    break;
-                }
-            }
+            Outcome::Refused(RequestRefusal::Backpressure) => break,
+            Outcome::Refused(_) => {}
             other @ Outcome::Ok(_) => panic!("unexpected admission probe: {other:?}"),
         }
         assert!(
@@ -589,9 +587,8 @@ fn requester_loss(mode: &str) {
     let mut requester = Requester(Some(command.spawn().unwrap()));
     let deadline = Instant::now() + WAIT;
     loop {
-        if let Outcome::Refused(reason) =
+        if let Outcome::Refused(RequestRefusal::Backpressure) =
             client.request(10, new_session(&fixture.root.join("absent-workspace")))
-            && format!("{reason:?}").contains("upgrad")
         {
             break;
         }
@@ -622,8 +619,8 @@ fn requester_loss(mode: &str) {
     requester.0.take().unwrap().wait().unwrap();
     loop {
         match client.request(11, new_session(&fixture.root.join("absent-workspace"))) {
-            Outcome::Refused(reason) if !format!("{reason:?}").contains("upgrad") => break,
-            Outcome::Refused(_) => {}
+            Outcome::Refused(RequestRefusal::Backpressure) => {}
+            Outcome::Refused(_) => break,
             other @ Outcome::Ok(_) => panic!("unexpected probe outcome: {other:?}"),
         }
         assert!(

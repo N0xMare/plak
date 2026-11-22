@@ -15,7 +15,7 @@ fn host_step_drain_only_an_exact_attached_interrupt_can_withdraw_preparation() {
     let attachment = attached(&out.take(), 1);
     let cancelled = Arc::new(AtomicBool::new(false));
     let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled))
+        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
         .unwrap();
     for observed in [attachment + 1, attachment] {
         request(
@@ -45,7 +45,7 @@ fn host_step_drain_stop_withdraws_preparation_but_never_crosses_commit() {
     );
     let cancelled = Arc::new(AtomicBool::new(false));
     let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled))
+        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
         .unwrap();
     request(
         &mut connection,
@@ -68,7 +68,7 @@ fn host_step_drain_stop_withdraws_preparation_but_never_crosses_commit() {
     drop(pause);
     let cancelled = Arc::new(AtomicBool::new(false));
     let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled))
+        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
         .unwrap();
     pause.commit().unwrap();
     request(
@@ -81,7 +81,7 @@ fn host_step_drain_stop_withdraws_preparation_but_never_crosses_commit() {
     assert!(!cancelled.load(Ordering::Acquire));
     assert!(matches!(
         outcome(&out.take(), 3),
-        Outcome::Refused(RequestRefusal::SessionUnavailable { .. })
+        Outcome::Refused(RequestRefusal::Backpressure)
     ));
     assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
     drop(pause);
@@ -93,6 +93,54 @@ fn host_step_drain_stop_withdraws_preparation_but_never_crosses_commit() {
         },
     );
     assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn same_key_stop_and_interrupt_act_without_withdrawing_preparation() {
+    let (host, fake) = host(&["s1", "s2"]);
+    let out = Out::default();
+    let mut connection = host.connect(
+        out.clone(),
+        Face::Remote,
+        HostPrincipal::Socket(501),
+        || false,
+    );
+    request(&mut connection, 1, Op::Attach { node: node("s1") });
+    let attachment = attached(&out.take(), 1);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let pause = host
+        .pause_admissions_for_upgrade(Arc::clone(&cancelled), false)
+        .unwrap();
+    request(
+        &mut connection,
+        2,
+        Op::Intent {
+            attachment,
+            intent: SessionIntent::Interrupt,
+            client_id: None,
+            blobs: Vec::new(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 2),
+        Outcome::Ok(Answer::Accepted { duplicate: false })
+    );
+    request(
+        &mut connection,
+        3,
+        Op::StopSession {
+            session: "s2".into(),
+        },
+    );
+    assert_eq!(
+        outcome(&out.take(), 3),
+        Outcome::Ok(Answer::Stopped {
+            runner_pending: false
+        })
+    );
+    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
+    assert!(!cancelled.load(Ordering::Acquire));
+    pause.commit().unwrap();
 }
 
 #[tokio::test]

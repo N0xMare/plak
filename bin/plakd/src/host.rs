@@ -18,6 +18,8 @@ mod gateway_startup;
 mod idle;
 pub(crate) mod lifecycle;
 mod lock;
+pub(crate) mod reexec;
+pub(crate) use reexec::receive as receive_reexec;
 mod requested_reload;
 pub(crate) mod send;
 mod sessions;
@@ -122,16 +124,21 @@ fn startup_runtime() -> CliResult<(
 pub(crate) fn run_host_command(
     services: &Services,
     command: &HostCommand,
+    inherited: Option<reexec::Inherited>,
 ) -> CliResult<ProcessOutcome> {
     match command.start {
         crate::command::HostStart::Helper => return starter::helper(services.paths()?),
         crate::command::HostStart::Supervisor => return starter::supervise(services.paths()?),
         crate::command::HostStart::Foreground | crate::command::HostStart::Detached => {}
     }
-    serve_host(services, command)
+    serve_host(services, command, inherited)
 }
 
-fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOutcome> {
+fn serve_host(
+    services: &Services,
+    command: &HostCommand,
+    inherited: Option<reexec::Inherited>,
+) -> CliResult<ProcessOutcome> {
     let host_arguments = Arc::new(upgrade::host_argv(command)?);
     // Arm reload before any startup I/O, even for a control-only host.
     let (runtime, reload, stop) = startup_runtime()?;
@@ -144,96 +151,248 @@ fn serve_host(services: &Services, command: &HostCommand) -> CliResult<ProcessOu
     crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
-    let (home_lock, lock) = lock::HostLock::take_home(paths, &binary)?;
+    let (ownership, inherited) = HostOwnership::take(paths, &binary, inherited)?;
+    let paired_start = inherited.is_some();
     let stores_pending = crate::store::revisions::host::pending(paths)?;
     if let Some(replacement) = upgrade::startup_replacement(services)? {
-        drop(lock);
-        drop(home_lock);
+        drop(ownership);
         runtime.shutdown_timeout(Duration::from_secs(1));
         return replacement.exec(paths);
     }
-    store_revisions::upgrade_stopped(paths, stores_pending, &lock)?;
+    let (listeners, environment) =
+        HostListeners::bind(paths, command, &runtime, &ownership.state, inherited)?;
+    store_revisions::upgrade_stopped(paths, stores_pending, &ownership.state)?;
+    let environment = environment.unwrap_or_else(environment::HostEnvironment::capture);
     let opened = open_host(
         services,
         command,
         &runtime,
         HostSignals { reload, stop },
-        paths,
-        &lock,
+        listeners.web.as_ref(),
+        &environment,
         &binary,
     )?;
-    let OpenedHost {
+    let inventory = if paired_start {
+        StartupInventory::Discover(Arc::clone(&opened.product))
+    } else {
+        StartupInventory::Known(opened.product.owed()?)
+    };
+    announce_host(&listeners.control, &environment, paths, &custody);
+    let owner = RunningHost {
+        listeners,
+        ownership,
+        opened,
+        inventory,
+        runtime,
         environment,
-        mut bound,
-        upgrade_listener,
-        services,
-        terminals,
-        host,
-        owed,
-        web,
-        idle_reload,
-        restart_services,
-    } = opened;
-    let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    announce_host(&bound, &environment, paths, &custody);
-    let receipt_recovery = startup_scan(&services, &host, &runtime, stop, owed, &scanning);
-    let reload_requests = runtime.spawn(requested_reload::serve(
-        Arc::clone(&host),
-        paths.clone(),
-        binary,
-    ));
-    // The web endpoint serves beside the control socket and stops with it.
-    let web = web.map(|web| runtime.spawn(web.serve()));
-    let idle = (command.start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
-    let upgrades = upgrade::Coordinator::start(
-        &runtime,
-        upgrade_listener,
-        &host,
-        &services,
-        Arc::clone(&host_arguments),
-        Arc::clone(&scanning),
-    );
-    let pending = upgrades.pending();
-    let marker_pending = Arc::clone(&pending);
-    let stopping = runtime.block_on(bound.serve(
-        &host,
-        move || stop.stopped() || upgrade::has_ready(&pending),
-        idle,
-        scanning,
-        || {
-            let restarting = !stop.stopped() && upgrade::has_ready(&marker_pending);
-            let _ = lock.stopping(restarting);
-            let _ = home_lock.stopping(restarting);
-        },
-    ));
-    receipt_recovery.cancel();
-    let ready = upgrades.stop(&runtime, paths);
-    lifecycle::stopping(&host);
-    runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
-    stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
-    // The socket goes first, so no client reaches a host that is handing
-    // its sessions off, and before the lock: a host that takes the lock
-    // next finds no socket of this one.
-    bound.remove();
-    runtime.block_on(terminals.stop());
-    // The handoff first closes the host: no session opens or is created
-    // from then on.
-    hand_off(&host, stopping.elapsed());
-    receipt_recovery.join();
-    eprintln!(
-        "plakd host: stopped in {} ms",
-        stopping.elapsed().as_millis()
-    );
-    drop(lock);
-    runtime.shutdown_timeout(Duration::from_secs(1));
-    upgrade::replace(
-        ready,
-        &restart_services,
-        command,
         stop,
-        &host_arguments,
-        home_lock,
-    )
+        binary,
+    };
+    owner.run(command.start, host_arguments)
+}
+
+struct HostOwnership {
+    state: lock::HostLock,
+    home: lock::HostLock,
+}
+
+struct InheritedListeners {
+    control: std::os::fd::OwnedFd,
+    web: Option<std::os::fd::OwnedFd>,
+    environment: environment::HostEnvironment,
+}
+
+impl HostOwnership {
+    fn take(
+        paths: &crate::home::paths::PlakPaths,
+        binary: &str,
+        inherited: Option<reexec::Inherited>,
+    ) -> CliResult<(Self, Option<InheritedListeners>)> {
+        let Some(inherited) = inherited else {
+            let (home, state) = lock::HostLock::take_home(paths, binary)?;
+            return Ok((Self { state, home }, None));
+        };
+        let home = lock::HostLock::adopt(
+            inherited.home_lock,
+            &crate::wire_transport::hosts::home_lock(paths),
+            binary,
+        )?;
+        let state = lock::HostLock::adopt(inherited.state_lock, &paths.host_lock(), binary)?;
+        Ok((
+            Self { state, home },
+            Some(InheritedListeners {
+                control: inherited.control,
+                web: inherited.web,
+                environment: inherited.environment,
+            }),
+        ))
+    }
+}
+
+struct HostListeners {
+    control: socket::Bound,
+    web: Option<Arc<crate::web::Listener>>,
+}
+
+impl HostListeners {
+    fn bind(
+        paths: &crate::home::paths::PlakPaths,
+        command: &HostCommand,
+        runtime: &tokio::runtime::Runtime,
+        state: &lock::HostLock,
+        inherited: Option<InheritedListeners>,
+    ) -> CliResult<(Self, Option<environment::HostEnvironment>)> {
+        let (control, web, environment) = match inherited {
+            Some(inherited) => (
+                Some(inherited.control),
+                inherited.web,
+                Some(inherited.environment),
+            ),
+            None => (None, None, None),
+        };
+        let entered = runtime.enter();
+        let control = match control {
+            Some(fd) => socket::Bound::adopt(fd, &paths.host_socket(), state)?,
+            None => socket::Bound::bind(&paths.host_socket(), state)?,
+        };
+        drop(entered);
+        let web = match (&command.web, web) {
+            (Some(args), fd) => Some(Arc::new(
+                runtime.block_on(crate::web::Listener::bind(&args.listen, fd))?,
+            )),
+            (None, None) => None,
+            (None, Some(_)) => return Err(CliFailure::new("unexpected inherited web listener")),
+        };
+        Ok((Self { control, web }, environment))
+    }
+
+    fn remove(&self) {
+        self.control.remove();
+        if let Some(web) = &self.web {
+            web.remove();
+        }
+    }
+}
+
+struct RunningHost {
+    listeners: HostListeners,
+    ownership: HostOwnership,
+    opened: OpenedHost,
+    inventory: StartupInventory,
+    runtime: tokio::runtime::Runtime,
+    environment: environment::HostEnvironment,
+    stop: crate::web::StopProbe,
+    binary: String,
+}
+
+impl RunningHost {
+    fn run(
+        self,
+        start: crate::command::HostStart,
+        host_arguments: Arc<Vec<String>>,
+    ) -> CliResult<ProcessOutcome> {
+        let Self {
+            mut listeners,
+            ownership,
+            opened,
+            inventory,
+            runtime,
+            environment,
+            stop,
+            binary,
+        } = self;
+        let OpenedHost {
+            upgrade_listener,
+            services,
+            terminals,
+            host,
+            product: _,
+            web,
+            idle_reload,
+        } = opened;
+        let paths = services.paths()?;
+        let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (receipt_recovery, mut startup) =
+            startup_scan(&services, &host, &runtime, stop, inventory, &scanning)?;
+        let reload_requests = runtime.spawn(requested_reload::serve(
+            Arc::clone(&host),
+            paths.clone(),
+            binary,
+        ));
+        // The web endpoint serves beside the control socket and stops with it.
+        let web = web.map(|web| runtime.spawn(web.serve()));
+        let idle = (start == crate::command::HostStart::Detached).then(idle::IdleExit::default);
+        let upgrades = upgrade::Coordinator::start(
+            &runtime,
+            upgrade_listener,
+            &host,
+            &services,
+            Arc::clone(&host_arguments),
+            Arc::clone(&scanning),
+            startup.ready.take(),
+        );
+        let pending = upgrades.pending();
+        let marker_pending = Arc::clone(&pending);
+        let startup_failed = Arc::clone(&startup.failed);
+        ownership.state.running()?;
+        ownership.home.running()?;
+        let stopping = runtime.block_on(listeners.control.serve(
+            &host,
+            move || {
+                stop.stopped()
+                    || startup_failed.load(std::sync::atomic::Ordering::Acquire)
+                    || upgrade::has_ready(&pending)
+            },
+            idle,
+            scanning,
+            || {
+                let restarting = !stop.stopped() && upgrade::has_ready(&marker_pending);
+                let _ = ownership.state.stopping(restarting);
+                let _ = ownership.home.stopping(restarting);
+            },
+        ));
+        receipt_recovery.cancel();
+        let ready = upgrades.stop(&runtime, paths);
+        let paired = !stop.stopped() && ready.as_ref().is_some_and(upgrade::Ready::same_key);
+        lifecycle::stopping(&host);
+        runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
+        stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
+        // The socket goes first, so no client reaches a host that is handing
+        // its sessions off, and before the lock: a host that takes the lock
+        // next finds no socket of this one.
+        if !paired {
+            listeners.remove();
+        }
+        runtime.block_on(terminals.stop());
+        // The handoff first closes the host: no session opens or is created
+        // from then on.
+        hand_off(&host, stopping.elapsed());
+        receipt_recovery.join();
+        let scan_result = startup.join();
+        eprintln!(
+            "plakd host: stopped in {} ms",
+            stopping.elapsed().as_millis()
+        );
+        runtime.shutdown_timeout(Duration::from_secs(1));
+        scan_result?;
+        if paired {
+            let ready = ready.ok_or_else(|| CliFailure::new("missing paired host upgrade"))?;
+            if stop.stopped() {
+                return Ok(ProcessOutcome::Success);
+            }
+            return reexec::replace(
+                ready,
+                paths.home(),
+                &host_arguments,
+                &environment,
+                &ownership,
+                &listeners,
+            );
+        }
+        drop(listeners);
+        drop(ownership.state);
+        upgrade::replace(ready, &services, stop, &host_arguments, ownership.home)
+    }
 }
 
 struct HostSignals {
@@ -242,16 +401,13 @@ struct HostSignals {
 }
 
 struct OpenedHost {
-    environment: environment::HostEnvironment,
-    bound: socket::Bound,
     upgrade_listener: tokio::net::UnixListener,
     services: Services,
     terminals: Arc<terminals::TerminalRegistry>,
     host: Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
-    owed: Vec<String>,
+    product: Arc<sessions::ProductSessions>,
     web: Option<crate::web::WebEndpoint>,
     idle_reload: Option<tokio::task::JoinHandle<()>>,
-    restart_services: Services,
 }
 
 fn open_host(
@@ -259,17 +415,12 @@ fn open_host(
     command: &HostCommand,
     runtime: &tokio::runtime::Runtime,
     signals: HostSignals,
-    paths: &crate::home::paths::PlakPaths,
-    host_lock: &lock::HostLock,
+    web_listener: Option<&Arc<crate::web::Listener>>,
+    environment: &environment::HostEnvironment,
     binary: &str,
 ) -> CliResult<OpenedHost> {
+    let paths = services.paths()?;
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
-    let environment = environment::HostEnvironment::capture();
-    let entered = runtime.enter();
-    let bound = socket::Bound::bind(&paths.host_socket(), host_lock)?;
-    let upgrade_listener = upgrade::bind(paths)?;
-    drop(entered);
-    let restart_services = services.clone();
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
     let (services, local) = upgrade::prepare_host(&services)?;
     let mut sessions = sessions::ProductSessions::new(
@@ -277,40 +428,32 @@ fn open_host(
         command.idle_release,
         Some(runtime.handle().clone()),
     )?;
-    // Read before the host serves, so nothing this host does is mistaken
-    // for what the last one left.
-    let owed = sessions.owed()?;
     sessions.serve_directory(runtime.handle())?;
     let console_switches = sessions.console_switches();
-    let host = SessionHost::new(sessions, binary.to_owned(), terminals.generation());
+    let product = Arc::new(sessions);
+    let host = SessionHost::new_shared(product.clone(), binary.to_owned(), terminals.generation());
     terminals.serve(&host, runtime.handle())?;
-    let (web, idle_reload) = match bind_web(
+    let (web, idle_reload) = compose_web(
         runtime,
         &services,
         command,
         &host,
-        signals.stop,
-        signals.reload,
+        signals,
         console_switches,
-    ) {
-        Ok(endpoint) => endpoint,
-        Err(failure) => {
-            bound.remove();
-            return Err(failure);
-        }
-    };
-    runner::host::start(&services, local, &environment, runtime);
+        web_listener,
+    )?;
+    let entered = runtime.enter();
+    let upgrade_listener = upgrade::bind(paths)?;
+    drop(entered);
+    runner::host::start(&services, local, environment, runtime);
     Ok(OpenedHost {
-        environment,
-        bound,
         upgrade_listener,
         services,
         terminals,
         host,
-        owed,
+        product,
         web,
         idle_reload,
-        restart_services,
     })
 }
 
@@ -335,19 +478,118 @@ fn startup_scan(
     host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
     runtime: &tokio::runtime::Runtime,
     stop: crate::web::StopProbe,
-    owed: Vec<String>,
+    inventory: StartupInventory,
     scanning: &Arc<std::sync::atomic::AtomicUsize>,
-) -> upgrade::Recovery {
+) -> CliResult<(upgrade::Recovery, StartupScan)> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let failed = Arc::new(AtomicBool::new(false));
     let recovery = upgrade::start_retry(services, host, runtime.handle());
-    scan(
-        host,
-        owed,
-        move || stop.stopped(),
-        services,
-        runtime.handle(),
+    let product = match inventory {
+        StartupInventory::Known(owed) => {
+            scan(
+                host,
+                owed,
+                move || stop.stopped(),
+                services,
+                runtime.handle(),
+                Arc::clone(scanning),
+            );
+            return Ok((
+                recovery,
+                StartupScan {
+                    worker: None,
+                    failed,
+                    ready: None,
+                },
+            ));
+        }
+        StartupInventory::Discover(product) => product,
+    };
+    // Capture owed work before admitting any request that could change it.
+    // Welcome and directory observations don't need this recovery inventory.
+    let pause = host.pause_admissions()?;
+    let (host, services, runtime, scanning) = (
+        Arc::clone(host),
+        services.clone(),
+        runtime.handle().clone(),
         Arc::clone(scanning),
     );
-    recovery
+    let worker_failed = Arc::clone(&failed);
+    let (settled, ready) = tokio::sync::oneshot::channel();
+    let worker = std::thread::Builder::new()
+        .name("plakd-startup-scan".into())
+        .spawn(move || {
+            let finished = owed_at_start(&product, stop).map(|owed| {
+                scan(
+                    &host,
+                    owed,
+                    move || stop.stopped(),
+                    &services,
+                    &runtime,
+                    scanning,
+                );
+            });
+            let hold = if finished.is_err() {
+                worker_failed.store(true, Ordering::Release);
+                // Keep ingress paused until the host has closed.
+                Some(pause)
+            } else {
+                drop(pause);
+                let _ = settled.send(());
+                None
+            };
+            (finished, hold)
+        })
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    Ok((
+        recovery,
+        StartupScan {
+            worker: Some(worker),
+            failed,
+            ready: Some(ready),
+        },
+    ))
+}
+
+enum StartupInventory {
+    Known(Vec<String>),
+    Discover(Arc<sessions::ProductSessions>),
+}
+
+fn owed_at_start(
+    product: &sessions::ProductSessions,
+    stop: crate::web::StopProbe,
+) -> CliResult<Vec<String>> {
+    while crate::test_hooks::host_lifecycle::continuation_scan_blocked() {
+        if stop.stopped() {
+            return Ok(Vec::new());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    product.owed()
+}
+
+type InventoryResult = (
+    CliResult<()>,
+    Option<plakous_hosted::host_service::wire::AdmissionPause>,
+);
+
+struct StartupScan {
+    worker: Option<std::thread::JoinHandle<InventoryResult>>,
+    failed: Arc<std::sync::atomic::AtomicBool>,
+    ready: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+impl StartupScan {
+    fn join(self) -> CliResult<()> {
+        let Some(worker) = self.worker else {
+            return Ok(());
+        };
+        let (result, _pause) = worker
+            .join()
+            .map_err(|_| CliFailure::new("host continuation scan panicked"))?;
+        result
+    }
 }
 
 fn announce_host(
@@ -388,32 +630,33 @@ fn stop_listeners(
     }
 }
 
-fn bind_web(
+fn compose_web(
     runtime: &tokio::runtime::Runtime,
     services: &Services,
     command: &HostCommand,
     host: &Arc<SessionHost<crate::surface_protocol::PlakExtension>>,
-    stop: crate::web::StopProbe,
-    reload: tokio::signal::unix::Signal,
+    signals: HostSignals,
     switches: plakd_wire_types::console::ConfiguredSwitches,
+    listener: Option<&Arc<crate::web::Listener>>,
 ) -> CliResult<(
     Option<crate::web::WebEndpoint>,
     Option<tokio::task::JoinHandle<()>>,
 )> {
-    if let Some(args) = &command.web {
-        let endpoint = runtime.block_on(crate::web::WebEndpoint::bind(
+    if let (Some(args), Some(listener)) = (&command.web, listener) {
+        let endpoint = crate::web::WebEndpoint::new(
             services,
             args,
             Arc::clone(host),
-            stop,
-            reload,
+            signals.stop,
+            signals.reload,
             switches,
-        ))?;
+            Arc::clone(listener),
+        )?;
         eprintln!("plakd host: web on {}", endpoint.listener());
         Ok((Some(endpoint), None))
     } else {
         let idle_reload = runtime.spawn(async move {
-            let mut reload = reload;
+            let mut reload = signals.reload;
             while reload.recv().await.is_some() {
                 eprintln!("plakd host: no UI build to reload");
             }

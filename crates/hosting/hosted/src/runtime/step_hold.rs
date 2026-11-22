@@ -20,7 +20,6 @@ struct State {
     generation: Option<u64>,
     boundary: Option<OwnerBoundary>,
     observed_agent: Option<WeakAgent>,
-    interrupted: bool,
     closed: bool,
 }
 
@@ -64,7 +63,6 @@ impl StepControl {
         let generation = state.sequence;
         state.generation = Some(generation);
         state.boundary = None;
-        state.interrupted = false;
         self.requested.store(true, Ordering::Release);
         self.changed.notify_waiters();
         Ok(WorkerStepPause {
@@ -100,14 +98,6 @@ impl StepControl {
             .closed = true;
         self.changed.notify_waiters();
     }
-
-    pub(crate) fn interrupt(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.generation.is_some() && !state.interrupted {
-            state.interrupted = true;
-            self.changed.notify_waiters();
-        }
-    }
 }
 
 pub(crate) struct WorkerStepPause {
@@ -127,11 +117,6 @@ impl WorkerStepPause {
                 "the observed session owner ended before its hold",
             ));
         }
-        if state.interrupted {
-            return Err(CliFailure::new(
-                "host_step_drain_interrupted: an operator stop or interrupt takes precedence; source remains authoritative",
-            ));
-        }
         Ok(state.observed_agent.as_ref().and_then(WeakAgent::upgrade))
     }
     pub(crate) fn boundary(&self) -> CliResult<Option<OwnerBoundary>> {
@@ -143,11 +128,6 @@ impl WorkerStepPause {
         if state.closed || state.generation != Some(self.generation) {
             return Err(CliFailure::new(
                 "the held session owner ended before handoff",
-            ));
-        }
-        if state.interrupted {
-            return Err(CliFailure::new(
-                "host_step_drain_interrupted: an operator stop or interrupt takes precedence; source remains authoritative",
             ));
         }
         Ok(state.boundary.clone())

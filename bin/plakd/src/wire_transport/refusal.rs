@@ -51,7 +51,7 @@ pub(crate) fn refusal(reason: RequestRefusal) -> CliFailure {
         | RequestRefusal::SessionUnavailable { detail } | RequestRefusal::MailRefused { detail } => detail.clone(),
         RequestRefusal::DraftPending { .. } => "the draft is still awaiting durable admission; inspect its outcome before retrying".into(),
         RequestRefusal::DraftRegistryFull { .. } => "this host's draft identity registry is full; restart the host before sending a new draft".into(),
-        RequestRefusal::Backpressure => "the session mailbox is full; retry when it drains".into(),
+        RequestRefusal::Backpressure => "the host or session is not admitting work; retry when it is ready".into(),
         RequestRefusal::OneInFlight => "another operation is in flight; wait for its outcome".into(),
         RequestRefusal::Disconnected => "the session is not running; attach again".into(),
         RequestRefusal::RefusedForRole { row } => format!("this node's role does not admit {row}"),

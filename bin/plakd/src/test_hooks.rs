@@ -76,6 +76,11 @@ pub(crate) fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewaySer
 
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
+    pub(crate) fn continuation_scan_blocked() -> bool {
+        super::hook_environment("PLAK_TEST_HOST_CONTINUATION_SCAN_GATE")
+            .is_some_and(|path| std::path::Path::new(&path).exists())
+    }
+
     pub(crate) fn directory_revalidation(default: std::time::Duration) -> std::time::Duration {
         super::hook_environment("PLAK_TEST_DIRECTORY_REVALIDATE_MS")
             .and_then(|value| value.to_str()?.parse::<u64>().ok())

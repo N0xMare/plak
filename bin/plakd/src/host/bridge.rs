@@ -111,8 +111,14 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
     let mut started = false;
     let mut waiting_for_restart = false;
     loop {
-        let live = hosts::live_until(paths, deadline).map_err(verify)?;
         let holder = hosts::lock_holder(&hosts::home_lock(paths)).map_err(verify)?;
+        // Do not fill the inherited listener's backlog with discovery probes
+        // while the lock proves a committed restart is in progress.
+        let live = if marked(holder.as_deref(), &[], "restarting") {
+            Vec::new()
+        } else {
+            hosts::live_until(paths, deadline).map_err(verify)?
+        };
         if live.len() > 1 {
             return Err(Box::new((
                 BridgeUnavailableReason::IncompatibleState,

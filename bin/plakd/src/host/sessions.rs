@@ -380,6 +380,26 @@ const fn environment_of(held_elsewhere: bool) -> SessionEnvironment {
 }
 
 impl HostSessions<PlakExtension> for ProductSessions {
+    fn host_request_during_pause(&self, request: &plakd_wire_types::console::HostRequest) -> bool {
+        use plakd_wire_types::console::HostRequest as R;
+        matches!(
+            request,
+            R::TerminalList { .. }
+                | R::FilesList { .. }
+                | R::FilesRead { .. }
+                | R::FilesSearch { .. }
+                | R::ChangesStatus { .. }
+                | R::ChangesDiff { .. }
+                | R::ProfilesList { .. }
+                | R::ProfilesGet { .. }
+                | R::TemplatesList { .. }
+                | R::TemplatesGet { .. }
+                | R::ConfigGet { .. }
+                | R::ConsoleMetadataGet { .. }
+                | R::AccountsStatus { .. }
+                | R::AccountsUsage { .. }
+        )
+    }
     fn state_key(&self) -> String {
         crate::home::state::state_key()
     }

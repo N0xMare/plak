@@ -215,9 +215,7 @@ fn host_step_drain_changed_triple_rechecks_a_process_started_during_preparation(
     let deadline = Instant::now() + WAIT;
     loop {
         let probe = new_session(&fixture.root.join("absent-workspace"));
-        if let Outcome::Refused(reason) = client.request(10, probe)
-            && format!("{reason:?}").contains("upgrad")
-        {
+        if let Outcome::Refused(RequestRefusal::Backpressure) = client.request(10, probe) {
             break;
         }
         assert!(Instant::now() < deadline, "upgrade never paused admissions");

@@ -13,6 +13,7 @@
 //! progress for 10 s, detaches; its sessions run on.
 
 use std::collections::VecDeque;
+use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -63,7 +64,42 @@ pub(super) struct Bound {
     file: (u64, u64),
 }
 
+impl Drop for Bound {
+    fn drop(&mut self) {
+        self.remove();
+    }
+}
+
 impl Bound {
+    pub(super) fn adopt(fd: OwnedFd, path: &Path, _held: &HostLock) -> CliResult<Self> {
+        use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+        let failed = || CliFailure::new("cannot adopt the inherited host control socket");
+        super::reexec::listener(&fd).map_err(|_| failed())?;
+        let listener = std::os::unix::net::UnixListener::from(fd);
+        let named = listener.local_addr().map_err(|_| failed())?;
+        let metadata = std::fs::symlink_metadata(path).map_err(|_| failed())?;
+        let run = path.parent().ok_or_else(failed)?;
+        let owner = std::fs::symlink_metadata(run).map_err(|_| failed())?.uid();
+        if named.as_pathname() != Some(path)
+            || !metadata.file_type().is_socket()
+            || metadata.uid() != owner
+            || metadata.mode() & 0o777 != 0o600
+        {
+            return Err(failed());
+        }
+        listener.set_nonblocking(true).map_err(|_| failed())?;
+        Ok(Self {
+            listener: UnixListener::from_std(listener).map_err(|_| failed())?,
+            path: path.to_path_buf(),
+            file: (metadata.dev(), metadata.ino()),
+            owner,
+        })
+    }
+
+    pub(super) fn as_fd(&self) -> BorrowedFd<'_> {
+        self.listener.as_fd()
+    }
+
     /// Binds `path`, replacing a socket a host that died left there; the
     /// caller holds `host.lock`, which is what makes that safe.
     ///

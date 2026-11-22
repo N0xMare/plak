@@ -6,12 +6,16 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
+pub(crate) fn receive_reexec() -> CliResult<Option<(String, std::convert::Infallible)>> {
+    Ok(None)
+}
+
 pub(crate) fn preflight_upgrade_service(
     services: &Services,
     command: &crate::command::HostCommand,
     _probe: &std::path::Path,
 ) -> CliResult<()> {
-    run_host_command(services, command).map(|_| ())
+    run_host_command(services, command, None).map(|_| ())
 }
 
 /// Refuses: this build has no host.
@@ -22,6 +26,7 @@ pub(crate) fn preflight_upgrade_service(
 pub(crate) fn run_host_command(
     _services: &Services,
     _command: &crate::command::HostCommand,
+    _reexec: Option<std::convert::Infallible>,
 ) -> CliResult<ProcessOutcome> {
     Err(plakous_hosted::capabilities::CapabilityUnavailable {
         id: "host",
@@ -32,7 +37,7 @@ pub(crate) fn run_host_command(
 }
 
 pub(crate) fn connect_stdio(services: &Services, _auto_start: bool) -> CliResult<ProcessOutcome> {
-    run_host_command(services, &crate::command::HostCommand::default())
+    run_host_command(services, &crate::command::HostCommand::default(), None)
 }
 
 pub(crate) fn upgrade(
@@ -43,5 +48,5 @@ pub(crate) fn upgrade(
     _abandon: Option<&str>,
     _inspection: Option<crate::deploy::DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
-    run_host_command(services, &crate::command::HostCommand::default())
+    run_host_command(services, &crate::command::HostCommand::default(), None)
 }

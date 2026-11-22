@@ -1,5 +1,9 @@
 //! No-op lifecycle probes when `test-hooks` is disabled.
 
+pub(crate) const fn continuation_scan_blocked() -> bool {
+    false
+}
+
 pub(crate) const fn directory_revalidation(default: std::time::Duration) -> std::time::Duration {
     default
 }
