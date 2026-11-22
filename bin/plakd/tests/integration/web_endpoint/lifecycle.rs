@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod handoff;
+
 fn directory(socket: &mut WebSocket<UnixStream>) -> Value {
     send(
         socket,
@@ -168,7 +170,10 @@ fn web_lifecycle_same_key_upgrade_delivers_draining_then_restarting() {
 
 #[test]
 fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
-    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "steps": [{"output": {"text": "continued"}}]
+    }));
     let config = fixture.home().join("config.toml");
     let original = std::fs::read_to_string(&config).unwrap();
     write_private(
@@ -178,20 +183,25 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
         ),
     );
     let gate = fixture.root.join("scan-gate");
+    let release = fixture.root.join("provider-release");
     let (mut web, ready) = launch_on_with_env(
         &fixture,
         &socket_dir(&fixture).join("plak.sock"),
         &[],
-        &[(
-            "PLAK_TEST_HOST_CONTINUATION_SCAN_GATE",
-            gate.to_str().unwrap(),
-        )],
+        &[
+            (
+                "PLAK_TEST_HOST_CONTINUATION_SCAN_GATE",
+                gate.to_str().unwrap(),
+            ),
+            ("PLAK_TEST_PROVIDER_RELEASE", release.to_str().unwrap()),
+        ],
         latency::CONSOLE_CSP,
     );
     assert!(ready, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
     let login = cookie(&web);
     let mut source = upgrade(&web, &login);
     let old = directory(&mut source);
+    let root = start_owed_turn(&fixture, &mut source);
     let probe = fixture
         .command()
         .args(["version", "--host-upgrade-probe"])
@@ -220,8 +230,57 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
         directory(&mut socket)["host_generation"],
         old["host_generation"]
     );
+    assert_owed_directory(&fixture, &mut socket, &root);
+    socket.send(Message::text(json!({
+        "frame": "request", "id": 2, "op": {"op": "host", "request": {"request": "config_get"}}
+    }).to_string())).unwrap();
+    assert!(response(&mut socket, 2).get("ok").is_some());
     send(
         &mut socket,
+        &ClientFrame::Request {
+            id: 3,
+            op: Op::Attach { node: root.clone() },
+        },
+    );
+    assert_eq!(
+        response(&mut socket, 3),
+        json!({"refused":{"refusal":"backpressure"}})
+    );
+    std::fs::remove_file(gate).unwrap();
+    std::fs::write(release, []).unwrap();
+    assert!(requester.wait().unwrap().success());
+    attach(&mut socket, &root, 4);
+    drop(socket);
+    interrupt_and_wait(&mut web);
+}
+
+fn start_owed_turn(fixture: &Fixture, socket: &mut WebSocket<UnixStream>) -> NodeAddress {
+    let root = create(socket);
+    let attachment = attach(socket, &root, 1);
+    send(
+        socket,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::Intent {
+                attachment,
+                intent: SessionIntent::Prompt(Draft::from("keep this turn across the handoff")),
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                blobs: Vec::new(),
+            },
+        },
+    );
+    assert_eq!(response(socket, 2)["ok"]["answer"], "accepted");
+    wait_for_provider_dispatch(fixture);
+    root
+}
+
+fn assert_owed_directory(
+    fixture: &Fixture,
+    socket: &mut WebSocket<UnixStream>,
+    root: &NodeAddress,
+) {
+    send(
+        socket,
         &ClientFrame::Request {
             id: 1,
             op: Op::ListSessions {
@@ -231,16 +290,16 @@ fn web_welcome_and_console_reads_do_not_wait_for_owed_sessions() {
             },
         },
     );
-    assert_eq!(
-        response(&mut socket, 1),
-        json!({"ok":{"answer":"sessions","rows":[]}})
-    );
-    socket.send(Message::text(json!({
-        "frame": "request", "id": 2, "op": {"op": "host", "request": {"request": "config_get"}}
-    }).to_string())).unwrap();
-    assert!(response(&mut socket, 2).get("ok").is_some());
-    std::fs::remove_file(gate).unwrap();
-    assert!(requester.wait().unwrap().success());
-    drop(socket);
-    interrupt_and_wait(&mut web);
+    let rows = response(socket, 1);
+    assert_eq!(rows["ok"]["answer"], "sessions", "{rows}");
+    let rows = rows["ok"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["node"], serde_json::to_value(root).unwrap());
+    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
+    let store = plakd::store::session_records::SqliteSessionStore::new(paths);
+    let session = rows[0]["session"].as_str().unwrap();
+    assert!(matches!(
+        plakous_hosted::runtime::root_standing(&store, session).unwrap(),
+        plakous_hosted::runtime::RootStanding::Continuing { handoff: true, .. }
+    ));
 }

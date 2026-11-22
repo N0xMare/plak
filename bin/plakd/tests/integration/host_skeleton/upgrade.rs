@@ -545,18 +545,6 @@ fn host_upgrade_preflight_refuses_capacity_versions_config_and_wrong_identity_be
     }
 }
 
-fn image_command(fixture: &Fixture, image: &std::path::Path) -> std::process::Command {
-    let template = fixture.command();
-    let mut command = std::process::Command::new(image);
-    command.env_clear().envs(
-        template
-            .get_envs()
-            .filter_map(|(name, value)| value.map(|value| (name, value))),
-    );
-    command.current_dir(template.get_current_dir().unwrap());
-    command
-}
-
 #[test]
 fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
     let Some(fixture) = fixture() else { return };
@@ -606,28 +594,6 @@ fn host_upgrade_same_key_uses_planned_handoff_and_preserves_daemon_jobs() {
     assert!(!fixture.home().join("host/upgrades").exists());
     assert_eq!(crash::dispatches(&fixture), dispatches);
     stop(&mut host);
-}
-
-fn replacement_image(fixture: &Fixture) -> PathBuf {
-    let image = fixture.root.join("replacement");
-    std::fs::copy(env!("CARGO_BIN_EXE_plakd"), &image).unwrap();
-    #[cfg(not(target_os = "macos"))]
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&image)
-        .unwrap()
-        .write_all(b"\0")
-        .unwrap();
-    #[cfg(target_os = "macos")]
-    assert!(
-        std::process::Command::new("/usr/bin/codesign")
-            .args(["--force", "--sign", "-", "--identifier", "upgrade-fixture"])
-            .arg(&image)
-            .status()
-            .unwrap()
-            .success()
-    );
-    image
 }
 
 fn seed_binding_heads(fixture: &Fixture) {

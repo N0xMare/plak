@@ -211,7 +211,9 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
             .and(policy.map(|_| ()))
             .err()
             .map(|error| error.message().to_owned()),
-        accepts_reexec: crate::host::AVAILABLE && crate::environment::upgrade_reexec_probe(),
+        accepts_reexec: crate::host::AVAILABLE
+            && crate::environment::upgrade_reexec_probe()
+            && !crate::test_hooks::upgrade_reexec_probe_omitted(),
     })
 }
 

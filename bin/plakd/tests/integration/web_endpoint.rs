@@ -312,6 +312,10 @@ fn hello(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
         None,
         "a host of many sessions names none"
     );
+    create(socket)
+}
+
+fn create(socket: &mut WebSocket<UnixStream>) -> NodeAddress {
     send(
         socket,
         &ClientFrame::Request {

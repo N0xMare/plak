@@ -1,7 +1,7 @@
 //! Same-PID transport handoff. The kernel keeps queued connections and
 //! flock descriptions alive inside a private Unix socketpair message.
 
-use std::io::{IoSlice, IoSliceMut};
+use std::io::{IoSlice, IoSliceMut, Seek as _};
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
 use std::os::unix::{net::UnixDatagram, process::CommandExt as _};
@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::commands::runner::environment::HostEnvironment;
 use crate::{CliFailure, CliResult};
 
-const MAX_FDS: usize = 5;
+const MAX_FDS: usize = 6;
+const MAX_ENVELOPE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
 struct Envelope {
@@ -39,17 +40,7 @@ fn failed(error: impl std::fmt::Display) -> CliFailure {
     CliFailure::new(format!("host upgrade transport handoff: {error}"))
 }
 
-pub(crate) fn receive() -> CliResult<Option<(String, Inherited)>> {
-    let Some(envelope) = crate::environment::host::reexec() else {
-        return Ok(None);
-    };
-    let envelope: Envelope = serde_json::from_str(&envelope).map_err(failed)?;
-    if envelope.pid != std::process::id() {
-        return Ok(None);
-    }
-    if !crate::carry::upgrade::binary_id_valid(&envelope.binary) {
-        return Err(failed("invalid inherited binary identity"));
-    }
+pub(crate) fn receive() -> CliResult<(String, Inherited)> {
     let stdin = std::io::stdin();
     let fds = receive_fds(stdin.as_fd())?;
     let mut fds = fds.into_iter();
@@ -59,6 +50,18 @@ pub(crate) fn receive() -> CliResult<Option<(String, Inherited)>> {
     };
     // Restore stdin before startup can launch any child process.
     rustix::stdio::dup2_stdin(next()?).map_err(failed)?;
+    let file = std::fs::File::from(next()?);
+    let metadata = file.metadata().map_err(failed)?;
+    if !metadata.is_file() || metadata.len() > MAX_ENVELOPE_BYTES {
+        return Err(failed("invalid inherited envelope file"));
+    }
+    let envelope: Envelope =
+        serde_json::from_reader(std::io::BufReader::new(file)).map_err(failed)?;
+    if envelope.pid != std::process::id()
+        || !crate::carry::upgrade::binary_id_valid(&envelope.binary)
+    {
+        return Err(failed("invalid inherited host identity"));
+    }
     let inherited = Inherited {
         home_lock: next()?,
         state_lock: next()?,
@@ -69,7 +72,7 @@ pub(crate) fn receive() -> CliResult<Option<(String, Inherited)>> {
     if fds.next().is_some() {
         return Err(failed("unexpected inherited descriptor"));
     }
-    Ok(Some((envelope.binary, inherited)))
+    Ok((envelope.binary, inherited))
 }
 
 pub(super) fn replace(
@@ -80,7 +83,8 @@ pub(super) fn replace(
     ownership: &super::HostOwnership,
     listeners: &super::HostListeners,
 ) -> CliResult<crate::ProcessOutcome> {
-    let destination = ready.paired_command(home, arguments);
+    crate::test_hooks::host_lifecycle::before_paired_exec();
+    let destination = ready.paired_command(home);
     let target = ready.binary.clone();
     // Release store and session holds before the successor starts.
     drop(ready);
@@ -91,16 +95,25 @@ pub(super) fn replace(
     ];
     let web = listeners.web.as_deref().map(crate::web::Listener::as_fd);
     let failure = match destination {
-        Ok(command) => exec(command, &target, environment, descriptors, web),
+        Ok(command) => exec(
+            command,
+            home,
+            arguments,
+            &target,
+            environment,
+            descriptors,
+            web,
+        ),
         Err(failure) => failure,
     };
     eprintln!("{failure}; restoring the old host");
     let source = std::env::current_exe().map_err(failed)?;
-    let mut command =
+    let command =
         crate::carry::upgrade::process::command(&source, home, &crate::home::state::state_key());
-    command.args(arguments);
     Err(exec(
         command,
+        home,
+        arguments,
         crate::build_identity::binary_id(),
         environment,
         descriptors,
@@ -110,6 +123,8 @@ pub(super) fn replace(
 
 fn exec(
     mut command: Command,
+    home: &std::path::Path,
+    arguments: &[String],
     binary: &str,
     environment: &HostEnvironment,
     [home_lock, state_lock, control]: [BorrowedFd<'_>; 3],
@@ -121,22 +136,38 @@ fn exec(
             .try_clone_to_owned()
             .map_err(failed)?;
         let (send, receive) = UnixDatagram::pair().map_err(failed)?;
-        let fds = [saved_stdin.as_fd(), home_lock, state_lock, control];
-        let mut fds = fds.to_vec();
+        // Pass metadata by descriptor as well: no private marker or PATH/HOME
+        // can leak through the successor's process environment to its tools.
+        let mut file = tempfile::tempfile_in(home).map_err(failed)?;
+        serde_json::to_writer(
+            &mut file,
+            &Envelope {
+                pid: std::process::id(),
+                binary: binary.to_owned(),
+                environment: environment.clone(),
+                web: web.is_some(),
+            },
+        )
+        .map_err(failed)?;
+        if file.stream_position().map_err(failed)? > MAX_ENVELOPE_BYTES {
+            return Err(failed("handoff envelope exceeds its size limit"));
+        }
+        file.rewind().map_err(failed)?;
+        let mut fds = vec![
+            saved_stdin.as_fd(),
+            file.as_fd(),
+            home_lock,
+            state_lock,
+            control,
+        ];
         fds.extend(web);
         send_fds(&send, &fds)?;
-        let envelope = serde_json::to_string(&Envelope {
-            pid: std::process::id(),
-            binary: binary.to_owned(),
-            environment: environment.clone(),
-            web: web.is_some(),
-        })
-        .map_err(failed)?;
         // Command owns the only exception to close-on-exec: this one endpoint
         // temporarily occupies stdin. The listening sockets are never made
         // inheritable in the source's descriptor table.
         let error = command
-            .env(crate::environment::HOST_REEXEC, envelope)
+            .arg(crate::HOST_REEXEC_ARG)
+            .args(arguments)
             .stdin(Stdio::from(OwnedFd::from(receive)))
             .exec();
         rustix::stdio::dup2_stdin(saved_stdin).map_err(failed)?;

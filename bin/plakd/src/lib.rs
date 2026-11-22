@@ -227,6 +227,8 @@ use crate::presentation::{
 };
 use crate::shell::services::Services;
 
+const HOST_REEXEC_ARG: &str = "__host-reexec-v2";
+
 /// Run the Plak CLI using process arguments from the environment.
 pub fn main_from_env() -> ExitCode {
     open_file_limit::raise();
@@ -235,7 +237,12 @@ pub fn main_from_env() -> ExitCode {
     let _ = local_time_zone();
     let mut arguments = env::args_os();
     build_identity::record_launch(arguments.next().as_deref());
-    run_from_args(arguments)
+    let mut arguments: Vec<_> = arguments.collect();
+    let reexec = arguments.first().is_some_and(|arg| arg == HOST_REEXEC_ARG);
+    if reexec {
+        arguments.remove(0);
+    }
+    run_to_exit(run(arguments, reexec))
 }
 
 /// This process's zone, read once and reused; UTC when the platform cannot
@@ -250,7 +257,11 @@ fn local_time_zone() -> &'static jiff::tz::TimeZone {
 /// Exit codes (spec 02 §3.3): 0 ok, 2 usage, 3 auth, 4 cancel, 5 agent,
 /// 6 run bound, 130 escalated quit, else 1.
 pub fn run_from_args(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
-    match run(arguments) {
+    run_to_exit(run(arguments, false))
+}
+
+fn run_to_exit(result: CliResult<ProcessOutcome>) -> ExitCode {
+    match result {
         Ok(ProcessOutcome::Success) => ExitCode::SUCCESS,
         Ok(ProcessOutcome::Interrupted) => ExitCode::from(4),
         Ok(ProcessOutcome::EscalatedQuit) => ExitCode::from(130),
@@ -307,7 +318,14 @@ fn log_command_start(command: &Command) {
     clippy::too_many_lines,
     reason = "The composition root orders read-only shortcuts, signal installation, service construction, product-state admission, and face dispatch."
 )]
-fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
+fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult<ProcessOutcome> {
+    let host_reexec = if reexec {
+        let (binary, inherited) = host::receive_reexec()?;
+        build_identity::use_reexec_identity(binary);
+        Some(inherited)
+    } else {
+        None
+    };
     // The launch directory, read once: the CLI's workspace, and what a
     // relative path on the command line means. Nothing below resolves a
     // path against the process working directory.
@@ -323,13 +341,11 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         test_hooks::install().map_err(CliFailure::new)?;
     }
     let command = cli::parse(arguments)?.resolved_against(launch.as_deref());
-    let host_reexec = match &command {
-        Command::Host(_) => host::receive_reexec()?.map(|(binary, inherited)| {
-            build_identity::use_reexec_identity(binary);
-            inherited
-        }),
-        _ => None,
-    };
+    if reexec && !matches!(&command, Command::Host(_)) {
+        return Err(CliFailure::new(
+            "host transport handoff requires the host command",
+        ));
+    }
 
     if matches!(command, Command::Help) {
         cli::render::global_help(&mut io::stdout().lock())

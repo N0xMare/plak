@@ -1,5 +1,7 @@
 //! No-op lifecycle probes when `test-hooks` is disabled.
 
+pub(crate) const fn before_paired_exec() {}
+
 pub(crate) const fn continuation_scan_blocked() -> bool {
     false
 }

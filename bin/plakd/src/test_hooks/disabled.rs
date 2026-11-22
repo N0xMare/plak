@@ -68,6 +68,10 @@ pub(crate) fn upgrade_crash_cut(_name: &str) {}
 pub(crate) const fn upgrade_preparation_refused(_name: &str) -> bool {
     false
 }
+
+pub(crate) const fn upgrade_reexec_probe_omitted() -> bool {
+    false
+}
 #[allow(dead_code, reason = "only the optional host starts replacement images")]
 pub(crate) fn upgrade_key_environment(_key: &str) -> impl Iterator<Item = (&'static str, String)> {
     std::iter::empty()

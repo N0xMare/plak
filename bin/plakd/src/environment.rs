@@ -52,7 +52,7 @@ pub(crate) fn xdg_config_home() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
 }
 
-pub(crate) const REEXEC_PROBE: &str = "PLAK_HOST_UPGRADE_PROBE_REEXEC_V1";
+pub(crate) const REEXEC_PROBE: &str = "PLAK_HOST_UPGRADE_PROBE_REEXEC_V2";
 pub(crate) const HOST_REEXEC: &str = "PLAK_HOST_REEXEC_V1";
 
 pub(crate) fn upgrade_reexec_probe() -> bool {
@@ -61,12 +61,6 @@ pub(crate) fn upgrade_reexec_probe() -> bool {
 
 #[cfg(feature = "web")]
 pub(crate) mod host {
-    use super::HOST_REEXEC;
-
-    pub(crate) fn reexec() -> Option<String> {
-        std::env::var(HOST_REEXEC).ok()
-    }
-
     /// Deliberate OS/tool inputs, never the caller's API credentials or arbitrary
     /// product/reload overrides. The fixture seam is empty in shipped builds.
     pub(crate) fn start_environment() -> Vec<(&'static str, std::ffi::OsString)> {

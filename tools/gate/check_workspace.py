@@ -393,9 +393,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
         ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
         ("var_os", (("string", "XDG_CONFIG_HOME"),)),
-        # Private, same-PID host transport handshake and capability probe.
+        # Private host transport capability probe.
         ("var_os", (("identifier", "REEXEC_PROBE"),)),
-        ("var", (("identifier", "HOST_REEXEC"),)),
         # Explicit unmanaged-host OS/tool allowlist; fixture inputs go through
         # the existing test-support reader, never the caller's entire environment.
         ("var_os", (("identifier", "name"),)),

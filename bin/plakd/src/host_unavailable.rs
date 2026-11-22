@@ -6,8 +6,10 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
-pub(crate) fn receive_reexec() -> CliResult<Option<(String, std::convert::Infallible)>> {
-    Ok(None)
+pub(crate) fn receive_reexec() -> CliResult<(String, std::convert::Infallible)> {
+    Err(plakous_hosted::error::CliFailure::new(
+        "host transport handoff is unavailable",
+    ))
 }
 
 pub(crate) fn preflight_upgrade_service(

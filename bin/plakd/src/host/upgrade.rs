@@ -241,12 +241,9 @@ impl Ready {
     pub(super) fn paired_command(
         &self,
         home: &std::path::Path,
-        arguments: &[String],
     ) -> CliResult<std::process::Command> {
         self.image.recheck(&self.executable)?;
-        let mut command = process::command(&self.executable, home, &self.key);
-        command.args(arguments);
-        Ok(command)
+        Ok(process::command(&self.executable, home, &self.key))
     }
 }
 

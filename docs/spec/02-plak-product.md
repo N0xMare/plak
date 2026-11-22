@@ -4190,7 +4190,8 @@ attach to a resident session without opening a new runtime. A request that
 would open a dormant or still-loading session, start new work, or change
 product state is refused with `backpressure` before delivery, except for the
 exact Stop and Interrupt controls described in §4.6. Clients hold unsent
-drafts themselves; a pause never queues them for the next generation.
+drafts themselves; a pause drops blob frames without acknowledgement and
+never queues them for the next generation.
 
 The public stdio bridge reads exactly one bounded newline-terminated Hello,
 within the same ten-second handshake deadline and maximum line bound, before
@@ -5725,7 +5726,9 @@ the home-wide and per-key locks. On Linux and macOS, rustix passes their
 descriptors in one private Unix socketpair message using `SCM_RIGHTS`. The
 exec temporarily carries the receiver on stdin; the new image restores the
 original stdin and sets close-on-exec on the adopted descriptors before it
-spawns anything. Neither listener is unlinked or rebound. New connections can
+spawns anything. The metadata envelope travels by descriptor in an anonymous
+file in the same message, not through the environment inherited by child
+processes. Neither listener is unlinked or rebound. New connections can
 wait in the existing kernel backlogs; old client streams end rather than
 moving into the new generation. The private upgrade coordinator is rebound.
 The destination must advertise support for this handoff when the source asks
@@ -5733,7 +5736,11 @@ during qualification. Installing the first image with this support does not
 change how a source without it closes its own listeners.
 The source rechecks the qualified image's filesystem identity before exec
 instead of hashing the image again, and passes the verified binary identity and
-the captured tool PATH and HOME to the destination. The destination still
+the captured tool PATH and HOME to the destination. If that last check or
+the exec fails, it re-execs the source with the same listeners and locks.
+A successor that refuses inherited transport exits without keeping ownership;
+an ordinary start can then acquire the locks and replace stale socket paths.
+The destination still
 checks gateway availability and stores before serving. It answers Welcome and
 the in-memory directory while it finds and loads owed sessions; startup
 admission remains paused until the continuation inventory is captured.

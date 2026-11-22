@@ -82,8 +82,11 @@ fn operator_control(mode: &str, interrupt: bool) {
         std::fs::read_to_string(progress).unwrap()
     );
     assert!(!fixture.home().join("host/upgrades").exists());
-    assert_eq!(root_record(&fixture, &session).1, 0);
-    if !interrupt {
+    let (interrupts, continuations) = root_record(&fixture, &session);
+    assert_eq!(continuations, 0);
+    if interrupt {
+        assert_eq!(interrupts, vec![RootInterruptCause::Operator]);
+    } else {
         assert!(matches!(
             plakous_hosted::runtime::root_standing(&store(&fixture), &session).unwrap(),
             plakous_hosted::runtime::RootStanding::Stopped

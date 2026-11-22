@@ -102,6 +102,14 @@ attach afresh, and never replay a prompt because of a notice or a lost reply.
 Notices can be missed or repeated. Cross-key carried roots still redirect via
 the existing `moved` refusal once the destination is ready.
 
+During an admission pause, the host drops non-request payload frames such as
+blobs without acknowledging them. Hold unsent drafts and their blobs in the
+client. A Welcome from the expected binary and a different host generation
+confirms the handoff, not that owed sessions have loaded. Retry an attach or
+prompt that explicitly returns `backpressure` until the session is ready.
+For a refused prompt, keep its submission ID and resend its blobs with the
+retry; a missing reply is not a refusal and does not authorize replay.
+
 The stdio bridge reads one bounded Hello first. With a matching version it can
 instead print one `{"frame":"refused","kind":"bridge_unavailable","reason":"absent","retry_after_ms":500}`
 and exit 1. Other reasons are

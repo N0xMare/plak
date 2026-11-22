@@ -15,6 +15,40 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 pub(super) const WAIT: Duration = Duration::from_secs(45);
 
+pub(super) fn image_command(fixture: &Fixture, image: &Path) -> Command {
+    let template = fixture.command();
+    let mut command = Command::new(image);
+    command.env_clear().envs(
+        template
+            .get_envs()
+            .filter_map(|(name, value)| value.map(|value| (name, value))),
+    );
+    command.current_dir(template.get_current_dir().unwrap());
+    command
+}
+
+pub(super) fn replacement_image(fixture: &Fixture) -> PathBuf {
+    let image = fixture.root.join("replacement");
+    std::fs::copy(env!("CARGO_BIN_EXE_plakd"), &image).unwrap();
+    #[cfg(not(target_os = "macos"))]
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&image)
+        .unwrap()
+        .write_all(b"\0")
+        .unwrap();
+    #[cfg(target_os = "macos")]
+    assert!(
+        Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-", "--identifier", "upgrade-fixture"])
+            .arg(&image)
+            .status()
+            .unwrap()
+            .success()
+    );
+    image
+}
+
 /// Owns a fixture child from spawn, including failed readiness waits.
 pub(super) struct TestChild(Child);
 

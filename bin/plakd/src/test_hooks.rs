@@ -76,6 +76,20 @@ pub(crate) fn gateway_loopback_anthropic<S: plakous::gateway::server::GatewaySer
 
 #[cfg(feature = "web")]
 pub(crate) mod host_lifecycle {
+    pub(crate) fn before_paired_exec() {
+        let Some(gate) = super::hook_environment("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC") else {
+            return;
+        };
+        let gate = std::path::Path::new(&gate);
+        if gate.exists() {
+            eprintln!("plakd host: waiting at paired exec gate");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while gate.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+
     pub(crate) fn continuation_scan_blocked() -> bool {
         super::hook_environment("PLAK_TEST_HOST_CONTINUATION_SCAN_GATE")
             .is_some_and(|path| std::path::Path::new(&path).exists())
@@ -152,6 +166,10 @@ pub(crate) fn upgrade_runner_revision() -> Option<String> {
 
 pub(crate) fn upgrade_import_refused() -> bool {
     std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1")
+}
+
+pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
+    hook_environment("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC").is_some()
 }
 
 /// Model a candidate's incompatible executable revision, never a stored verdict.
