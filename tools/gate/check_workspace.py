@@ -432,8 +432,6 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
     ("plakd", "src/test_hooks.rs"): [
         ("var", (("string", "PLAK_TEST_SNAPSHOT_FIXTURE"),)),
         ("var", (("string", "PLAK_TEST_GATEWAY_REVIEW_CLOCK"),)),
-        ("var_os", (("string", "PLAK_TEST_HOST_HANDOFF_BUDGET"),)),
-        ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_READY_ORDER"),)),
         ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT"),)),
         ("var", (("string", "PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL"),)),
@@ -724,6 +722,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runner_reader.rs"): {"json"},
     # `test-support` only: scripted offline model plans for child fixtures.
     ("plakd", "src/test_hooks.rs"): {"json"},
+    ("plakd", "src/test_hooks/host_lifecycle.rs"): {"json"},
     ("plakd", "src/build_identity.rs"): {"cfg", "option_env"},
     # The `test-support`-only persistence benchmark checks that its final
     # reload retained every transcript line it timed.

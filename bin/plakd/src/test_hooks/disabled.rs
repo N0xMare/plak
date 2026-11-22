@@ -30,7 +30,7 @@ pub(crate) const fn gateway_loopback_anthropic<S: plakous::gateway::server::Gate
 }
 
 #[cfg(feature = "web")]
-#[path = "host_lifecycle.rs"]
+#[path = "host_lifecycle/disabled.rs"]
 pub(crate) mod host_lifecycle;
 pub(crate) const fn binding_executor_cut() -> bool {
     false
