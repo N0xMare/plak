@@ -304,6 +304,15 @@ pub trait SessionRecordStore: Send + Sync {
     /// A message when the store cannot be read or a row is invalid.
     fn load_views(&self, id: &str) -> Result<Option<SessionViews>, String>;
 
+    /// The root-turn count from the session's committed projector state.
+    /// No projector cursor means no count. This does not load detailed views
+    /// or authorize work.
+    ///
+    /// # Errors
+    /// A message when the cursor or state is unreadable or invalid, or the
+    /// state is missing under an existing cursor.
+    fn load_projected_root_turn_count(&self, id: &str) -> Result<Option<u64>, String>;
+
     /// The record at the head of `tree_id`'s root line: the root node's
     /// record no successor on the same node supersedes. A tree's root agent
     /// is named after the tree.
@@ -1421,6 +1430,16 @@ mod memory {
                 .views
                 .get(id)
                 .cloned())
+        }
+
+        fn load_projected_root_turn_count(&self, id: &str) -> Result<Option<u64>, String> {
+            Ok(self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .views
+                .get(id)
+                .map(|views| views.state.counters.root_turns))
         }
 
         fn load_queue_commands(&self, id: &str) -> Result<crate::sessions::QueueCommands, String> {

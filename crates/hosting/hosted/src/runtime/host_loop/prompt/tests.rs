@@ -180,6 +180,32 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
         .unwrap();
 }
 
+#[derive(Default)]
+struct RefuseProjection {
+    count_reads: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::runtime::fault_store::StoreFaults for RefuseProjection {
+    fn before(
+        &self,
+        call: crate::runtime::fault_store::StoreCall,
+        _: Option<&SessionRecord>,
+    ) -> Result<(), String> {
+        use crate::runtime::fault_store::StoreCall;
+        match call {
+            StoreCall::CommitProjectionViews => {
+                return Err("injected projector commit refusal".into());
+            }
+            StoreCall::LoadProjectedRootTurnCount => {
+                self.count_reads
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
 fn assert_hosted_calls_projected(defer_projection: bool) {
     use crate::surface_protocol::UserAction;
 
@@ -198,16 +224,16 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     let mut host =
         RootActor::open_blocking(config, &actions, crate::runtime::Sender::over(tx), None).unwrap();
     let store = host.role.config.store.clone();
-    if defer_projection {
+    let faults = defer_projection.then(|| {
         host.role.live.take();
-        host.role.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+        let refusing = Arc::new(crate::runtime::fault_store::FaultStore::new(
             store.clone(),
-            crate::runtime::test_support::SlowProjection {
-                delay: std::time::Duration::ZERO,
-                refuse: true,
-            },
+            RefuseProjection::default(),
         ));
-    }
+        let faults = refusing.faults.clone();
+        host.role.config.store = refusing;
+        faults
+    });
     action_tx
         .send(UserAction::Prompt("hosted prompt".into()))
         .unwrap();
@@ -226,7 +252,13 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
             .await
     })
     .unwrap();
-    if defer_projection {
+    if let Some(faults) = faults {
+        assert_eq!(
+            faults
+                .count_reads
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         assert_eq!(host.role.config.session.tool_call_count, 0);
     }
     host.role.config.store = store;

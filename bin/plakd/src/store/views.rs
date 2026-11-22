@@ -518,6 +518,14 @@ impl ProductStore {
         views_of(&self.connection, session_id)
     }
 
+    pub(super) fn load_projected_root_turn_count(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<u64>, String> {
+        Ok(view_cursor_and_state(&self.connection, session_id)?
+            .map(|(_, state)| state.counters.root_turns))
+    }
+
     /// The queue join reads submissions and delivery state in one snapshot,
     /// without decoding transcript rows.
     pub fn load_queue_commands(

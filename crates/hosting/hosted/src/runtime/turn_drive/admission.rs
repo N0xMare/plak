@@ -456,10 +456,12 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     }
     // The after-ack pass's views already hold the count; a stored read is
     // only for a pass that left debt.
-    if let Some(root_turns) = projected_root_turns {
+    let root_turns = match projected_root_turns {
+        Some(root_turns) => Some(root_turns),
+        None => store.load_projected_root_turn_count(&session.id)?,
+    };
+    if let Some(root_turns) = root_turns {
         candidate.root_turn_count = root_turns;
-    } else if let Some(views) = store.load_views(&session.id)? {
-        candidate.root_turn_count = views.state.counters.root_turns;
     }
     if !host_authored {
         candidate.child_wake_suppressed = false;

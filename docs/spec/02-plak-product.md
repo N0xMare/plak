@@ -2399,6 +2399,13 @@ proceeds with projection debt, not a snapshot of stale rows. A task that stops
 while a settle waits fails that request at once rather than leaving it
 unanswered.
 
+When root admission proceeds with after-ack debt, it can refresh only its
+root-turn count from the committed projector cursor and state read
+together for that session. With no cursor it keeps the held count; an
+unreadable cursor or missing or invalid state under a cursor fails the read
+before the candidate is saved. This read does not load transcript or keyed
+views, settle debt, advance a cursor, or replace the record revision check.
+
 An admitted root turn waits on runtime events and the authoritative result,
 operator intents, and changes from the tree and other live publishers. When
 assistant text is buffered, the host flushes it on the 20 ms coalescing

@@ -183,6 +183,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load_views(id)
     }
 
+    fn load_projected_root_turn_count(&self, id: &str) -> Result<Option<u64>, String> {
+        self.inner.load_projected_root_turn_count(id)
+    }
+
     fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
         self.inner.root_line_head(tree_id)
     }

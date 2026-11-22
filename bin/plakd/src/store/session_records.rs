@@ -343,6 +343,10 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load_views(id))
     }
 
+    fn load_projected_root_turn_count(&self, id: &str) -> Result<Option<u64>, String> {
+        self.with_store(|store| store.load_projected_root_turn_count(id))
+    }
+
     fn root_line_head(&self, tree_id: &str) -> Result<Option<SessionRecord>, String> {
         self.with_store(|store| store.root_line_head(tree_id))
     }

@@ -96,6 +96,69 @@ fn queue_command_join_does_not_decode_transcript_rows() {
 }
 
 #[test]
+fn projected_root_count_uses_the_committed_header_without_loading_details() {
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    assert_eq!(store.load_projected_root_turn_count(&id).unwrap(), None);
+
+    let mut views = views_at(1, &[]);
+    views.state.counters.root_turns = 37;
+    store
+        .commit_projection_views(
+            &id,
+            &ViewWrites::between(&SessionViews::empty(), &views),
+            &views.state,
+        )
+        .unwrap();
+    let expected = store
+        .load_views(&id)
+        .unwrap()
+        .unwrap()
+        .state
+        .counters
+        .root_turns;
+
+    // Neither the listing scalar nor a damaged presentation row is count
+    // authority. The persisted projector state is.
+    store
+        .connection
+        .execute(
+            "UPDATE session_views SET root_turn_count=99 WHERE session_id=?1",
+            [&id],
+        )
+        .unwrap();
+    store.connection.execute(
+        "INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row) VALUES(?1,1,0,0,'{\"kind\":\"invalid\"}')",
+        [&id],
+    ).unwrap();
+    assert!(store.load_views(&id).is_err());
+    assert_eq!(
+        store.load_projected_root_turn_count(&id).unwrap(),
+        Some(expected)
+    );
+
+    store
+        .connection
+        .execute(
+            "UPDATE session_views SET state='null' WHERE session_id=?1",
+            [&id],
+        )
+        .unwrap();
+    assert_eq!(
+        store.load_projected_root_turn_count(&id),
+        Err("product session views are invalid".to_owned())
+    );
+    store
+        .connection
+        .execute("DELETE FROM session_views WHERE session_id=?1", [&id])
+        .unwrap();
+    assert_eq!(
+        store.load_projected_root_turn_count(&id),
+        Err("product session views are missing their state".to_owned())
+    );
+}
+
+#[test]
 fn inherited_submissions_do_not_hydrate_ancestor_transcripts_or_other_intents() {
     let root = tempdir().unwrap();
     let (mut store, id) = store_with_session(root.path());

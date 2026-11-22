@@ -21,6 +21,7 @@ pub(crate) enum StoreCall {
     SubmissionOwner,
     LoadInheritedSubmissions,
     LoadViews,
+    LoadProjectedRootTurnCount,
     LoadQueueCommands,
     CommitProjectionViews,
 }
@@ -271,6 +272,12 @@ impl<F: StoreFaults + 'static> SessionRecordStore for FaultStore<F> {
     fn load_views(&self, id: &str) -> Result<Option<sessions::projector::SessionViews>, String> {
         self.faults.before(StoreCall::LoadViews, None)?;
         self.inner.load_views(id)
+    }
+
+    fn load_projected_root_turn_count(&self, id: &str) -> Result<Option<u64>, String> {
+        self.faults
+            .before(StoreCall::LoadProjectedRootTurnCount, None)?;
+        self.inner.load_projected_root_turn_count(id)
     }
 
     fn load_tree_source(&self, id: &str) -> Result<Option<String>, String> {
