@@ -1042,6 +1042,190 @@ fn warm_projection_and_queue_join_do_not_reread_verified_submission_bodies() {
 }
 
 #[test]
+fn local_submission_rollback_invalidates_the_warm_body() {
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let expected = seed_submission(&mut store, &id, "root");
+    let reads = submission_body_reads(&mut store.connection);
+    assert_eq!(
+        store.load_intents(&id).unwrap().submissions,
+        [expected.clone()]
+    );
+    let versions = sqlite_versions(&store.connection);
+    reads.store(0, std::sync::atomic::Ordering::Relaxed);
+    {
+        let tx = store.connection.transaction().unwrap();
+        tx.execute(
+            "UPDATE submissions SET canonical_command='rolled back' WHERE session_id=?1",
+            [&id],
+        )
+        .unwrap();
+        tx.rollback().unwrap();
+    }
+    assert_eq!(sqlite_versions(&store.connection), versions);
+    assert_eq!(store.load_intents(&id).unwrap().submissions, [expected]);
+    assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+#[test]
+fn a_submission_read_in_a_write_transaction_cannot_seed_the_index() {
+    use std::sync::atomic::Ordering;
+
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let expected = seed_submission(&mut store, &id, "root");
+    assert_eq!(
+        store.load_intents(&id).unwrap().submissions,
+        [expected.clone()]
+    );
+    let reads = submission_body_reads(&mut store.connection);
+    let provisional = Submission {
+        canonical_command: "uncommitted".into(),
+        ..expected.clone()
+    };
+    let tx = store
+        .connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    tx.execute(
+        "UPDATE submissions SET canonical_command=?2 WHERE session_id=?1",
+        params![id, provisional.canonical_command],
+    )
+    .unwrap();
+    tx.execute(
+        "UPDATE identity_bindings SET binding_digest=?2 WHERE identity=?1",
+        params![
+            provisional.binding_identity(),
+            provisional.binding_digest(&id)
+        ],
+    )
+    .unwrap();
+    let read =
+        load_submissions_where(&tx, &mut store.verified_submissions, "session_id=?1", &id).unwrap();
+    assert_eq!(read, [(id.clone(), provisional)]);
+    assert_eq!(reads.swap(0, Ordering::Relaxed), 1);
+    tx.rollback().unwrap();
+
+    assert_eq!(store.load_intents(&id).unwrap().submissions, [expected]);
+    assert_eq!(reads.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn local_ddl_invalidates_the_index_without_submission_updates() {
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let expected = seed_submission(&mut store, &id, "root");
+    assert_eq!(
+        store.load_intents(&id).unwrap().submissions,
+        [expected.clone()]
+    );
+    let reads = submission_body_reads(&mut store.connection);
+    let (data, schema) = sqlite_versions(&store.connection);
+    store
+        .connection
+        .execute_batch("CREATE TABLE schema_change (entry INTEGER)")
+        .unwrap();
+    assert_eq!(sqlite_versions(&store.connection), (data, schema + 1));
+    assert_eq!(store.load_intents(&id).unwrap().submissions, [expected]);
+    assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
+#[test]
+fn vacuum_schema_cookie_invalidates_renumbered_rowids() {
+    let root = tempdir().unwrap();
+    let (mut store, id) = store_with_session(root.path());
+    let first = seed_submission(&mut store, &id, "first");
+    let second = seed_submission(&mut store, &id, "second");
+    // SQLite preserves rowids of the indexed product table today. Use an
+    // unindexed copy with holes so VACUUM really reuses the first row's key.
+    store
+        .connection
+        .execute_batch(
+            "CREATE TABLE unindexed AS SELECT * FROM submissions ORDER BY rowid;
+         UPDATE unindexed SET rowid=-rowid;
+         UPDATE unindexed SET rowid=-2*rowid;
+         DROP TABLE submissions;
+         ALTER TABLE unindexed RENAME TO submissions;",
+        )
+        .unwrap();
+    let rowid = |store: &ProductStore, command: &str| {
+        store
+            .connection
+            .query_row(
+                "SELECT rowid FROM submissions WHERE command_id=?1",
+                [command],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(rowid(&store, "first"), 2);
+    assert_eq!(rowid(&store, "second"), 4);
+    assert_eq!(
+        store.load_intents(&id).unwrap().submissions,
+        [first.clone(), second.clone()]
+    );
+    let (data, schema) = sqlite_versions(&store.connection);
+    store.connection.execute_batch("VACUUM").unwrap();
+    assert_eq!(sqlite_versions(&store.connection), (data, schema + 1));
+    assert_eq!(rowid(&store, "second"), 2);
+    assert_eq!(
+        store.load_intents(&id).unwrap().submissions,
+        [first, second]
+    );
+}
+
+fn seed_submission(store: &mut ProductStore, id: &str, command: &str) -> Submission {
+    let submission = Submission {
+        command_id: command.into(),
+        kind: SubmissionKind::RootStart,
+        queue_item_id: "item".into(),
+        queue_item_revision: 1,
+        target_turn_id: None,
+        canonical_command: format!("prompt for {command}"),
+        submitted_at_ms: 42,
+    };
+    store.write_submission(id, &submission).unwrap();
+    submission
+}
+
+fn submission_body_reads(
+    connection: &mut Connection,
+) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let reads = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&reads);
+    connection
+        .authorizer(Some(move |ctx: AuthContext<'_>| {
+            if matches!(
+                ctx.action,
+                AuthAction::Read {
+                    table_name: "submissions",
+                    column_name: "canonical_command"
+                }
+            ) {
+                count.fetch_add(1, Ordering::Relaxed);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+    reads
+}
+
+fn sqlite_versions(connection: &Connection) -> (i64, i64) {
+    (
+        connection
+            .query_row("PRAGMA data_version", [], |row| row.get(0))
+            .unwrap(),
+        connection
+            .query_row("PRAGMA schema_version", [], |row| row.get(0))
+            .unwrap(),
+    )
+}
+
+#[test]
 fn intents_round_trip_by_session() {
     let root = tempdir().unwrap();
     let (mut store, session) = store_with_session(root.path());

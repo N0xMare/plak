@@ -3166,6 +3166,30 @@ def validate_product_session_authority_sources(package: str, sources: dict[str, 
     return errors
 
 
+def validate_product_update_hook_sources(sources: dict[str, str]) -> list[str]:
+    """Allow only the submission invalidator and its exclusive trace alternative."""
+    update_hooks: list[str] = []
+    trace_hooks: list[str] = []
+    update = RustToken("identifier", "update_hook")
+    trace = rust_tokens("commit_trace::install")
+    for path, source in sorted(sources.items()):
+        tokens = rust_tokens(source)
+        update_hooks.extend(path for token in tokens if token == update)
+        trace_hooks.extend(
+            path for index in range(len(tokens)) if tokens[index : index + len(trace)] == trace
+        )
+    errors: list[str] = []
+    if update_hooks != ["src/store/views/submissions.rs"]:
+        errors.append(
+            f"plakd: one update hook belongs to the submission index, found {update_hooks!r}"
+        )
+    if trace_hooks != ["src/store/mod.rs"]:
+        errors.append(
+            f"plakd: only the product store opener may install the trace, found {trace_hooks!r}"
+        )
+    return errors
+
+
 # Where the product home may be discovered from the process environment.
 #
 # `PlakPaths::from_env()` reads `$PLAK_HOME`/XDG: it is a composition-root act,
@@ -6144,6 +6168,8 @@ def _check_workspace() -> int:
         sources, discovery_errors = package_sources(package, ROOT)
         errors.extend(discovery_errors)
         errors.extend(validate_product_session_authority_sources(package.name, sources))
+        if package.name == "plakd":
+            errors.extend(validate_product_update_hook_sources(sources))
         errors.extend(validate_product_home_discovery(package.name, sources))
         errors.extend(validate_cli_security_sources(package.name, sources))
         errors.extend(

@@ -182,7 +182,9 @@ fn live_patch_fold_and_quiet_settlement_keep_the_same_keys_after_exact_reopen() 
 
 #[derive(Default)]
 struct RefuseProjection {
+    in_fallback: Arc<std::sync::atomic::AtomicBool>,
     count_reads: std::sync::atomic::AtomicUsize,
+    full_view_reads: std::sync::atomic::AtomicUsize,
 }
 
 impl crate::runtime::fault_store::StoreFaults for RefuseProjection {
@@ -191,15 +193,20 @@ impl crate::runtime::fault_store::StoreFaults for RefuseProjection {
         call: crate::runtime::fault_store::StoreCall,
         _: Option<&SessionRecord>,
     ) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+
         use crate::runtime::fault_store::StoreCall;
         match call {
             StoreCall::CommitProjectionViews => {
                 return Err("injected projector commit refusal".into());
             }
             StoreCall::LoadProjectedRootTurnCount => {
-                self.count_reads
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.count_reads.fetch_add(1, Ordering::Relaxed);
             }
+            StoreCall::LoadViews if self.in_fallback.load(Ordering::Relaxed) => {
+                self.full_view_reads.fetch_add(1, Ordering::Relaxed);
+            }
+            StoreCall::Save => self.in_fallback.store(false, Ordering::Relaxed),
             _ => {}
         }
         Ok(())
@@ -207,6 +214,9 @@ impl crate::runtime::fault_store::StoreFaults for RefuseProjection {
 }
 
 fn assert_hosted_calls_projected(defer_projection: bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::runtime::{HostBoundary, HostWorkflow};
     use crate::surface_protocol::UserAction;
 
     let root = tempfile::tempdir().unwrap();
@@ -218,7 +228,21 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
         }))
         .unwrap(),
     );
-    let (config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
+    let (mut config, _) = crate::runtime::recover_tests::scripted_host_with(root.path(), plan);
+    let in_fallback = Arc::new(AtomicBool::new(false));
+    if defer_projection {
+        let in_fallback = Arc::clone(&in_fallback);
+        crate::runtime::test_kit::scripted_mut(&mut config).observe =
+            Arc::new(move |workflow, boundary| {
+                if workflow == HostWorkflow::RootDelivery
+                    && boundary == HostBoundary::ProductCommitted
+                {
+                    // Count the fallback up to the candidate save, not the
+                    // projector pass that was deliberately refused.
+                    in_fallback.store(true, Ordering::Relaxed);
+                }
+            });
+    }
     let (action_tx, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
     let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
     let mut host =
@@ -228,7 +252,10 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
         host.role.live.take();
         let refusing = Arc::new(crate::runtime::fault_store::FaultStore::new(
             store.clone(),
-            RefuseProjection::default(),
+            RefuseProjection {
+                in_fallback,
+                ..RefuseProjection::default()
+            },
         ));
         let faults = refusing.faults.clone();
         host.role.config.store = refusing;
@@ -253,12 +280,8 @@ fn assert_hosted_calls_projected(defer_projection: bool) {
     })
     .unwrap();
     if let Some(faults) = faults {
-        assert_eq!(
-            faults
-                .count_reads
-                .load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
+        assert_eq!(faults.count_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(faults.full_view_reads.load(Ordering::Relaxed), 0);
         assert_eq!(host.role.config.session.tool_call_count, 0);
     }
     host.role.config.store = store;

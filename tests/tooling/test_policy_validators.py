@@ -2546,6 +2546,23 @@ fn render_transcript() {}
                 )
                 self.assertTrue(errors)
 
+    def test_product_update_hook_ownership(self) -> None:
+        check = workspace_policy.validate_product_update_hook_sources
+        sources = {
+            "src/store/views/submissions.rs": "connection.update_hook(Some(notice));",
+            "src/store/mod.rs": "plakous_offline_crash_harness::commit_trace::install(conn);",
+            "src/other.rs": """
+                // update_hook and commit_trace::install are not code here.
+                const NOTE: &str = "update_hook";
+                #[cfg(test)]
+                fn fixture() { connection.update_hook(None); }
+            """,
+        }
+        self.assertEqual(check(sources), [])
+        for operation in ("connection.update_hook(None);", "commit_trace::install(conn);"):
+            with self.subTest(operation=operation):
+                self.assertEqual(len(check({**sources, "src/other.rs": operation})), 1)
+
     def test_neutral_provider_scan_ignores_decoys_and_rejects_tokens_and_concat(self) -> None:
         self.assertEqual(
             workspace_policy.provider_names_in_rust(

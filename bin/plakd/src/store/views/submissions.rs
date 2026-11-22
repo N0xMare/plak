@@ -45,10 +45,13 @@ impl SubmissionIndex {
 }
 
 impl VerifiedSubmissions {
+    // Owns the product connection's only update hook. The opener skips this
+    // when the crash-sweep tracer owns that hook; then no rowid index exists.
     pub(in crate::store) fn track_updates(
         &mut self,
         connection: &mut Connection,
     ) -> rusqlite::Result<()> {
+        debug_assert!(self.index.is_none());
         let index = SubmissionIndex::default();
         let changed = Arc::clone(&index.changed);
         connection.update_hook(Some(move |_, database: &str, table: &str, rowid| {
