@@ -77,9 +77,9 @@ impl Presentations {
         let root = TranscriptScope::Root;
         // A real producer gap needs the normal advancing publication, with
         // pending live rows. Otherwise keep the current revision and live rows.
-        if sink.transcript_resnapshot_required_for(&root) {
-            self.resync(&root, sink);
-        } else if let Some(state) = self.states.get(&root).filter(|state| state.revision() != 0) {
+        if !sink.transcript_resnapshot_required_for(&root)
+            && let Some(state) = self.states.get(&root).filter(|state| state.revision() != 0)
+        {
             let _ = sink.replay_root_snapshot(PresentationSnapshot {
                 revision: state.revision(),
                 items: state
@@ -92,6 +92,8 @@ impl Presentations {
                     .collect(),
                 ..PresentationSnapshot::default()
             });
+        } else {
+            self.resync(&root, sink);
         }
     }
 

@@ -259,8 +259,10 @@ struct Snapshot<P: ProtocolExtension> {
 
 struct State<P: ProtocolExtension> {
     pending_drafts: BTreeMap<plakous_host_protocol::wire::ClientDraftId, drafts::PendingDraft>,
-    draft_inputs:
-        BTreeMap<plakous_host_protocol::wire::ClientDraftId, (AttachmentId, SessionIntent<P>)>,
+    draft_inputs: BTreeMap<
+        plakous_host_protocol::wire::ClientDraftId,
+        (AttachmentId, fanout::Publication<P>),
+    >,
     draft_delivery: Option<drafts::DraftDelivery>,
     draft_outputs: BTreeMap<(AttachmentId, u64), drafts::DraftDelivery>,
     draft_window: Option<plakous_host_protocol::wire::ClientDraftId>,
@@ -990,8 +992,8 @@ impl<P: ProtocolExtension> HostService<P> {
         );
         if let Some(attention) = state.count.attention() {
             let event = SessionObservation::Row(attention.notice());
-            let size = Payload::measure(&event);
-            items.push((Payload::Other(event), size));
+            // A fixed reason, remedy and count, with no user data.
+            items.push((Payload::Other(event), 512));
         }
         let sender = mailbox.map(|actions| actions.tagged(origin(id, face)));
         let scopes = match self.actions {

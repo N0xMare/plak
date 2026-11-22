@@ -424,11 +424,10 @@ fn a_client_correlation_comes_back_and_unowned_answers_reach_all() {
     assert_eq!(observations(service.take(second)).len(), 2);
 }
 
-/// Transcript content lost to a full queue is repaid with the kept root
-/// baseline at the next take, after the loss; a scope without one is asked
-/// of the session.
+/// Losing a stream append leaves an installed keyed chain intact. An
+/// unkeyed scope still asks the session for its missing baseline.
 #[test]
-fn a_lost_transcript_is_repaid_with_a_fresh_baseline() {
+fn droppable_loss_repairs_only_the_unkeyed_scope() {
     let (service, intents) = service(2);
     service.observe(Observation::PresentationSnapshot(
         PresentationSnapshot::empty(5),
@@ -446,15 +445,17 @@ fn a_lost_transcript_is_repaid_with_a_fresh_baseline() {
     while intents.try_recv().is_ok() {}
     service.observe(Observation::AssistantDelta("a".into()));
     service.observe(stream(TranscriptScope::Agent("c1".into())));
-    // Full: this delta evicts the first, a root loss.
+    // Full: this delta evicts the first, but the root's baseline is intact.
     service.observe(Observation::AssistantDelta("b".into()));
     let taken = observations(service.take(id));
-    assert!(
-        taken.contains(&Observation::PresentationSnapshot(
-            PresentationSnapshot::empty(5)
-        )),
-        "{taken:?}"
+    assert_eq!(
+        taken,
+        [
+            stream(TranscriptScope::Agent("c1".into())),
+            Observation::AssistantDelta("b".into())
+        ]
     );
+    assert!(intents.try_recv().is_err());
     // The agent stream lost on a further overflow is asked of the session.
     service.observe(Observation::AssistantDelta("c".into()));
     service.observe(Observation::AssistantDelta("d".into()));

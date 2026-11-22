@@ -150,10 +150,16 @@ fn retained_repairs_wait_for_the_previous_baseline_and_the_cooldown() {
     let now = std::time::Instant::now();
     note_gap();
     service.repair_gaps_at(now);
-    assert_eq!(observations(service.take(id)), [baseline.clone()]);
+    assert_eq!(
+        observations(service.take(id)),
+        std::slice::from_ref(&baseline)
+    );
     note_gap();
     service.repair_gaps_at(now);
-    assert_eq!(observations(service.take(id)), [baseline.clone()]);
+    assert_eq!(
+        observations(service.take(id)),
+        std::slice::from_ref(&baseline)
+    );
     let after = service.lock().attachments[&id].retained_after.unwrap();
     note_gap();
     service.repair_gaps_at(now);

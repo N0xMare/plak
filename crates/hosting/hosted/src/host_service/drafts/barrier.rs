@@ -1,7 +1,7 @@
 //! Withdraw only unclaimed inputs; join durable verdicts and their wire writes.
 
 use super::DraftDelivery;
-use crate::host_service::{HostService, Payload};
+use crate::host_service::{HostService, fanout::Publication};
 use plakous_host_protocol::views::transcript::{NoticeScope, TranscriptRow};
 use plakous_host_protocol::wire::{AttachmentId, ClientDraftId};
 use plakous_host_protocol::{ProtocolExtension, SessionObservation};
@@ -10,6 +10,10 @@ use std::collections::BTreeSet;
 impl<P: ProtocolExtension> HostService<P> {
     pub(in crate::host_service) fn reject_queued_wire_drafts(&self) {
         let Some(sender) = self.mailbox() else { return };
+        let notice = Publication::prepare(SessionObservation::Row(TranscriptRow::error(
+            NoticeScope::Session,
+            "the host is upgrading; this draft was not admitted",
+        )));
         let mut state = self.lock();
         let ids: BTreeSet<_> = state
             .pending_drafts
@@ -18,7 +22,7 @@ impl<P: ProtocolExtension> HostService<P> {
             .collect();
         for (correlation, _delivery) in sender.withdraw_queued_correlations(&ids) {
             if let Ok(id) = correlation.parse() {
-                state.reject_upgrading_draft(id, self.capacity);
+                state.reject_upgrading_draft(id, self.capacity, &notice);
             }
         }
     }
@@ -62,12 +66,17 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
         }
     }
 
-    fn reject_upgrading_draft(&mut self, id: ClientDraftId, capacity: usize) {
+    fn reject_upgrading_draft(
+        &mut self,
+        id: ClientDraftId,
+        capacity: usize,
+        notice: &Publication<P>,
+    ) {
         let Some(pending) = self.pending_drafts.remove(&id) else {
             return;
         };
         let mut delivery = Some(pending.verdict(false));
-        let Some((attachment, intent)) = self.draft_inputs.remove(&id) else {
+        let Some((attachment, rejection)) = self.draft_inputs.remove(&id) else {
             return;
         };
         let Some(held) = self
@@ -78,15 +87,8 @@ impl<P: ProtocolExtension> crate::host_service::State<P> {
             return;
         };
         let capacity = held.capacity(capacity);
-        for observation in [
-            SessionObservation::Row(TranscriptRow::error(
-                NoticeScope::Session,
-                "the host is upgrading; this draft was not admitted",
-            )),
-            SessionObservation::DraftRejected(intent),
-        ] {
+        for Publication { observation, size } in [notice.clone(), rejection] {
             let class = observation.class();
-            let size = Payload::measure(&observation);
             held.offer(observation.into(), class, capacity, size);
             held.correlate_draft(Some(id));
         }

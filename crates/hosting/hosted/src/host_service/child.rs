@@ -27,7 +27,7 @@ use plakous_host_protocol::wire::{AttachmentId, RequestRefusal};
 use plakous_host_protocol::{IntentSender, ProtocolExtension, SessionIntent, SessionObservation};
 
 use super::wire::Face;
-use super::{Attachment, HostService, Payload, Queue, Scopes, origin, refusal_of};
+use super::{Attachment, HostService, Queue, Scopes, fanout::Publication, origin, refusal_of};
 
 /// Where a child node of the session's tree stands.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -221,7 +221,9 @@ impl<P: ProtocolExtension> HostService<P> {
             return Err(RequestRefusal::UnknownNode);
         };
         admitted(nodes.state(agent))?;
-        let info = nodes.session_info(agent);
+        let info = nodes
+            .session_info(agent)
+            .map(|info| Publication::prepare(SessionObservation::SessionInfo(info)));
         let Some(actions) = self.mailbox() else {
             return Err(RequestRefusal::Disconnected);
         };
@@ -274,12 +276,10 @@ impl<P: ProtocolExtension> HostService<P> {
                 waiting,
             },
         )?;
-        if let Some(info) = info
+        if let Some(Publication { observation, size }) = info
             && let Some(held) = state.attachments.get_mut(&id)
         {
-            let observation = SessionObservation::SessionInfo(info);
             let class = observation.class();
-            let size = Payload::measure(&observation);
             held.offer(observation.into(), class, self.capacity, size);
         }
         *state.agent_holders.entry(agent.to_owned()).or_default() += 1;
@@ -318,18 +318,19 @@ impl<P: ProtocolExtension> HostService<P> {
                         let Err(error) = interrupted else {
                             return;
                         };
+                        let answers = [
+                            SessionObservation::IntentStarted(client),
+                            SessionObservation::Row(TranscriptRow::error(
+                                NoticeScope::Tree,
+                                format!("interrupt failed: {error}"),
+                            )),
+                        ]
+                        .map(Publication::prepare);
                         let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
                         if let Some(held) = state.attachments.get_mut(&attachment) {
-                            for answer in [
-                                SessionObservation::IntentStarted(client),
-                                SessionObservation::Row(TranscriptRow::error(
-                                    NoticeScope::Tree,
-                                    format!("interrupt failed: {error}"),
-                                )),
-                            ] {
-                                let class = answer.class();
-                                let size = Payload::measure(&answer);
-                                held.offer(answer.into(), class, capacity, size);
+                            for Publication { observation, size } in answers {
+                                let class = observation.class();
+                                held.offer(observation.into(), class, capacity, size);
                             }
                         }
                     }),

@@ -235,9 +235,12 @@ impl<P: ProtocolExtension> super::HostService<P> {
         attachment: AttachmentId,
         intent: plakous_host_protocol::SessionIntent<P>,
     ) {
+        let rejection = super::fanout::Publication::prepare(
+            plakous_host_protocol::SessionObservation::DraftRejected(intent),
+        );
         let mut state = self.lock();
         state.pending_drafts.insert(id, pending);
-        state.draft_inputs.insert(id, (attachment, intent));
+        state.draft_inputs.insert(id, (attachment, rejection));
     }
 
     pub(super) fn refuse_wire_draft(&self, id: ClientDraftId) {

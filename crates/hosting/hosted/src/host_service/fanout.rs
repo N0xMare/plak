@@ -41,6 +41,7 @@ impl<P: ProtocolExtension> HostService<P> {
             // that child's answer, and none of it is the root's to keep.
             let child_answer = state.requester.filter(|owner| {
                 !matches!(observation, SessionObservation::IntentStarted(_))
+                    && baseline_scope(&observation).is_none()
                     && state
                         .attachments
                         .get(owner)
