@@ -180,6 +180,11 @@ impl OpenAiPlatformModel {
         let checked_at = clock.now();
         let runtime = fresh_runtime_authority(&authority, &descriptor, checked_at)?;
         let account_binding = runtime.account_binding();
+        let client = client.with_credential_scope(
+            "openai.platform.responses",
+            account_binding.bytes(),
+            runtime.credential_authority_binding().bytes(),
+        );
         let configuration = compile_platform_configuration(&authority, &selected, &runtime)?;
         configuration
             .seal_runtime_authority(&descriptor, runtime, checked_at)

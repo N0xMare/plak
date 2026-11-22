@@ -3626,8 +3626,10 @@ Plakous has one neutral runtime and three wire-family kernels:
 
 Chat ignores additive fields on known chunk and choice envelopes and usage
 objects; selected provider and cost fields still obey the configured dialect.
-Chat deltas and function-call objects remain closed because they carry model
-output and tool intent. Messages ignores additive fields on known event and
+A choice requires a delta or a finish reason. Known content fields, including
+`message` and `text`, cannot appear on the choice itself, even with a delta or
+a finish reason present. Chat deltas and function-call objects remain closed
+because they carry model output and tool intent. Messages ignores additive fields on known event and
 message envelopes, usage and known text, thinking, signature and refusal
 objects. Its terminal delta, tool start and input delta, caller, container,
 and recognized route-specific authority shapes stay closed. Neither handles an
@@ -3732,6 +3734,10 @@ with unparsed input under a tool-call terminal. Tool admission rejects them
 as `InvalidArguments` before execution and returns a correlated tool failure
 to the model. Chat only lowers such a requested call into a historical input
 object when paired with its terminal failure, never a success or update.
+Responses likewise requires the correlated failure. On a custom-tool rebind
+it sends the raw input text; for a function it wraps the text in a JSON
+object, as it does when lowering a historical UTF-8 custom call onto a
+function-only target. This is historical input, not a new invocation.
 Messages uses its historical input-object projection. Invalid framing,
 ambiguous Chat JSON, non-object values, and incomplete programmatic or
 provider-hosted input still fail closed.
@@ -3981,7 +3987,7 @@ limits and ordinary context admission still apply.
 Long stateless requests remain bounded by context admission: byte estimators
 count `encrypted_content` as part of the request, not as free replay. The
 complete prepared wire body and the standard inference transport (including
-the default credential gateway) have the same 32 MiB ceiling (§13.2).
+the default credential gateway) have the same 32,000,000-byte ceiling (§13.2).
 Fresh Responses lowering preserves local and MCP calls in their stored
 `Requested` state, with the ordinary protected call/result correlation checks.
 Tool execution appends results without changing that stored state. A projected
@@ -13600,16 +13606,21 @@ OAuth, refresh, profile and key-usage exchanges do not inherit it.
 
 **Connection reuse is opt-in and limited to inference.** A plain
 `plakous-http` client opens a fresh connection for every `execute`.
-`Client::pooled()` opts the client into reuse. Independently constructed
-direct clients with built-in trust and standard dialing use the same
-process-wide pool and TLS configuration for a given ALPN policy. This lets
-sessions and sub-agents share connections to the same authority in the host
-runtime. Caller TLS and custom dialing remain private to a client and its
-derivatives; those pools close with their last owner. There is no separate
-pool task. Dropping an idle connection aborts its driver. The model clients of every route
+`Client::pooled()` opts the client into reuse. Unscoped pools belong to that
+client and its derivatives. Authenticated inference clients set an opaque
+scope from the exact route, account binding, and credential authority. Only
+scoped direct clients with built-in trust and standard dialing use the
+process-wide pool. This lets sessions and sub-agents share sockets within
+the same credential and route, never between accounts or between API key and
+OAuth. Caller TLS and custom dialing remain private. Dropping an idle
+connection aborts its driver. The model clients of every route
 (Claude, Codex and Grok subscription inference, the Anthropic, OpenAI Platform
 and xAI API clients, and OpenRouter's configured model clients) are pooled;
 OAuth, token refresh, catalog, discovery and key-usage clients stay one-shot.
+OAuth and refresh use private built-in TLS configurations. Built-in TLS
+resumption is disabled, as it is when a caller TLS client is scoped to an
+authenticated credential, so provider sockets cannot offer cross-account
+tickets on a fresh dial.
 The caller-to-gateway hop is always one-shot, independent of provider-route
 pooling. A gateway relay server has a pool for its upstream HTTP/1.1 TLS
 connections on marked inference rows. Only a request validated against the
@@ -13621,8 +13632,8 @@ evicts the key whose most recently parked socket has been idle longest.
 Neither a pool hit nor stale-checkout replacement changes relay authority,
 the relay protocol, or the caller-side route transport identity.
 A pool key is the origin's host, port and scheme (HTTPS or loopback HTTP), the
-shared Rustls configuration, the transport policy, the address policy, the
-Tokio runtime that owns the driver, and the limits fixed into a connection at
+Rustls configuration, transport and address policies, the Tokio runtime that
+owns the driver, the applicable credential scope, and the limits fixed into a connection at
 negotiation (response header bounds and the HTTP/2 receive window). A connection carries one
 exchange at a time on HTTP/1.1 and HTTP/2 alike, and request progress is reset
 for each exchange, so transmission facts describe that exchange alone.
@@ -13699,7 +13710,7 @@ they share the residual race with a server closing a connection after the idle
 check but before the request reached it, which ends them `MayHaveTransmitted`
 without the turn kernel's replay. Pooling is part of the transport behavior
 identity: the identity carries a pooled or one-shot frame, and the transport
-behavior revision is 6. Family-interleaved, staggered connection racing is
+behavior revision is 7. Family-interleaved, staggered connection racing is
 part of that revision-bound transport behavior.
 
 Responses operation deadline diagnostics aggregate the existing bounded, lossy
@@ -13911,12 +13922,12 @@ All queues, frames, events, blocks, JSON depth/nodes/strings, accumulated text
 and arguments, media and blobs, decompression, snapshot graphs,
 tool output, rounds, concurrency, and retries have explicit hard bounds.
 Exceeding one returns a typed limit error without a partial semantic commit.
-For standard inference, the local maximum is 32 MiB of the exact serialized
-request body, including base64 and all other JSON fields, not the decoded
-image size. It matches the prepared-wire bound and is below the documented
-public [Anthropic Messages](https://platform.claude.com/docs/en/api/errors)
-request and [OpenAI image input](https://developers.openai.com/api/docs/guides/images-vision)
-aggregate limits. On routes without an established body-wide ceiling,
+For standard inference, the local maximum is 32,000,000 bytes of the exact
+serialized request body, including base64 and all other JSON fields, not the
+decoded image size. This is the prepared-wire bound, a conservative decimal
+32 MB ceiling for Anthropic Messages and below the documented
+[OpenAI image input](https://developers.openai.com/api/docs/guides/images-vision)
+aggregate limit. On routes without an established body-wide ceiling,
 including brokered and subscription routes, this is a local ceiling, not a
 promise of provider acceptance; upstream/model media and context limits
 still apply. An oversized preparation reports `WireTooLarge` mapped to

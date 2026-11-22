@@ -236,6 +236,26 @@ async fn upstream_origin_and_tls_configuration_each_partition_the_pool() {
 }
 
 #[tokio::test]
+async fn a_saturated_gateway_buffer_budget_refuses_before_the_upstream() {
+    let peer = TlsPeer::start().await;
+    let server = peer.relay(Service::new(), peer.upstream());
+    let budget = &server.inner.request_budget;
+    let hold = budget
+        .try_acquire_many(u32::try_from(budget.available_permits()).unwrap())
+        .unwrap();
+    let client = via(&server);
+    let failure = send(&client, LOGICAL, "/v1/x", placeholder(7))
+        .await
+        .unwrap_err();
+    assert_eq!(failure.cause(), Some("gateway_busy"));
+    assert_eq!(failure.transmission(), TransmissionFact::NotStarted);
+    assert_eq!(peer.counts(), (0, 0));
+    drop(hold);
+    drain(&client, LOGICAL, "/v1/x", placeholder(7)).await;
+    assert_eq!(peer.counts(), (1, 1));
+}
+
+#[tokio::test]
 async fn the_gateway_reuses_after_a_tool_step_but_not_at_the_thirty_second_idle_bound() {
     let peer = TlsPeer::start().await;
     let server = peer.relay(Service::new(), peer.upstream());

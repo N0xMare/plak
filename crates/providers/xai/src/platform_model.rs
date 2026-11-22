@@ -228,6 +228,11 @@ impl XaiPlatformModel {
             return Err(XaiPlatformBuildError::Authentication);
         }
         let execution_authority = platform_binding::execution_authority(&grant)?;
+        let client = client.with_credential_scope(
+            "xai.platform.responses",
+            execution_authority.account_binding().bytes(),
+            execution_authority.credential_authority_binding().bytes(),
+        );
         let descriptor = platform_binding::descriptor(
             &execution_authority,
             selected.route().requested_model().as_str(),

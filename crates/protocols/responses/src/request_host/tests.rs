@@ -3821,7 +3821,7 @@ fn invalid_custom_tool_arguments_are_refused() -> TestResult {
 /// Rebind re-projection: a Codex Code Mode `exec` cell (a
 /// UTF-8 custom call, canonical as a JSON string literal) replayed onto a
 /// Responses target that exposes no custom tool — Codex Direct, Grok —
-/// lowers as a `function_call` carrying the original program text, and its
+/// lowers as a `function_call` carrying the program text in a JSON object, and its
 /// yields fold into the one `function_call_output` in source order.
 struct CodeModeReplayFixture {
     request: ModelRequest,
@@ -3922,10 +3922,9 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
     let input = lowered.body()["input"].as_array().expect("input");
     assert_eq!(input[0]["type"], "function_call");
     assert_eq!(input[0]["name"], "exec");
-    assert_eq!(
-        input[0]["arguments"], program,
-        "original string input, verbatim"
-    );
+    let arguments: Value =
+        serde_json::from_str(input[0]["arguments"].as_str().expect("arguments"))?;
+    assert_eq!(arguments, json!({"input": program}));
     assert_eq!(input[1]["type"], "function_call");
     assert_eq!(input[1]["name"], "wait");
     assert_eq!(input[1]["arguments"], r#"{"cell":"c1"}"#);
@@ -3948,6 +3947,89 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
             .all(|item| item["type"] != "custom_tool_call_output"),
         "a function call never owns a custom_tool_call_output: {input:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn invalid_tool_input_rebinds_only_with_its_correlated_failure() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let raw = "{";
+    let call = ToolCallBlock::new(
+        id::<CallId>(40)?,
+        ToolName::new("lookup")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::new(Some("call_1".into()), None, ToolCallerLineage::Direct)?,
+        raw,
+    )?;
+    for custom in [false, true] {
+        for kind in [ToolResultKind::Success, ToolResultKind::Failure] {
+            let assistant = ConversationItem::new(
+                id::<EntryId>(41)?,
+                Actor::Assistant,
+                vec![ContentBlock::ToolCall(call.clone())],
+                Provenance::ModelOutput,
+            )?;
+            let tool_result = ConversationItem::new(
+                id::<EntryId>(42)?,
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(ToolResultBlock::new(
+                    call.call_id(),
+                    ToolExecutionOwner::Local,
+                    kind,
+                    vec![ToolResultPart::Text(TextBlock::new(
+                        "invalid arguments",
+                        None,
+                    )?)],
+                    call.correlation().clone(),
+                )?)],
+                Provenance::ToolExecution,
+            )?;
+            let request = crate::test_support::model_request_builder(
+                ConversationView::from_items(vec![assistant, tool_result])?,
+                workflow_metadata()?,
+            )
+            .tools(vec![tool("lookup", custom)?])
+            .build()?;
+            let lowered = lower_responses_request(
+                &request,
+                ResponsesRequestConfig::new(
+                    &protocol,
+                    Some(&family),
+                    &model,
+                    ResponsesRequestPolicy::openai_codex(
+                        false,
+                        true,
+                        "reasoning.encrypted_content",
+                    ),
+                    None,
+                ),
+            );
+            if kind == ToolResultKind::Success {
+                assert!(matches!(
+                    lowered,
+                    Err(ResponsesRequestError::ProtectedTool(
+                        ResponsesProtectedToolError::UnparsedArgumentsResult
+                    ))
+                ));
+                continue;
+            }
+            let lowered = lowered?;
+            let input = lowered.body()["input"].as_array().expect("input");
+            if custom {
+                assert_eq!(input[0]["type"], "custom_tool_call");
+                assert_eq!(input[0]["input"], raw);
+                assert_eq!(input[1]["type"], "custom_tool_call_output");
+            } else {
+                assert_eq!(input[0]["type"], "function_call");
+                let arguments: Value =
+                    serde_json::from_str(input[0]["arguments"].as_str().expect("arguments"))?;
+                assert_eq!(arguments, json!({"input": raw}));
+                assert_eq!(input[1]["type"], "function_call_output");
+            }
+            assert_eq!(input[0]["call_id"], input[1]["call_id"]);
+        }
+    }
     Ok(())
 }
 

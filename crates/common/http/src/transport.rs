@@ -57,15 +57,29 @@ pub(crate) mod test_hop;
 pub(crate) mod test_tls;
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
-const TRANSPORT_BEHAVIOR_REVISION: u32 = 6;
+const TRANSPORT_BEHAVIOR_REVISION: u32 = 7;
 /// How long a cleanly finished exchange waits for its HTTP/1.1 connection to
 /// accept another request before giving up on keeping it.
 const RELEASE_READY_BOUND: Duration = Duration::from_secs(1);
 
-fn webpki_config(alpn: &[&[u8]]) -> Result<Arc<ClientConfig>, ConfigError> {
+fn webpki_config(alpn: &[&[u8]]) -> Result<ClientConfig, ConfigError> {
     let mut config = default_tls_config()?;
     config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
-    Ok(Arc::new(config))
+    // A provider must not see a ticket learned under another HTTP credential.
+    config.resumption = rustls::client::Resumption::disabled();
+    Ok(config)
+}
+
+fn shared_webpki(policy: TransportPolicy) -> Option<Arc<ClientConfig>> {
+    static H1: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
+        LazyLock::new(|| webpki_config(&[b"http/1.1"]).map(Arc::new));
+    static H2: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
+        LazyLock::new(|| webpki_config(&[b"h2", b"http/1.1"]).map(Arc::new));
+    match policy {
+        TransportPolicy::WebPkiHttp1Only => H1.as_ref().ok().cloned(),
+        TransportPolicy::WebPkiHttp2Preferred => H2.as_ref().ok().cloned(),
+        TransportPolicy::CallerTlsHttp2Preferred => None,
+    }
 }
 
 /// Strict memory and phase-time bounds for physical exchanges.
@@ -155,7 +169,7 @@ impl Limits {
         Self {
             // Match the prepared wire bound, including e.g. base64 images and
             // the rest of their serialized inference request.
-            max_request_body_bytes: 32 * 1024 * 1024,
+            max_request_body_bytes: 32_000_000,
             response_head_timeout: STREAMING_IDLE_TIMEOUT,
             response_body_timeout: STREAMING_IDLE_TIMEOUT,
             ..Self::default()
@@ -203,6 +217,7 @@ struct ClientInner {
     tls_config: Arc<ClientConfig>,
     /// Idle connections, shared with every client derived from this one.
     pool: Option<Arc<Pool>>,
+    credential_scope: Option<[u8; 32]>,
     address_policy: Option<AddressPolicy>,
     resolver: Resolver,
     connector: connect::Connector,
@@ -295,11 +310,9 @@ impl Client {
     ///
     /// Returns [`ConfigError`] when a limit is invalid.
     pub fn new(limits: Limits) -> Result<Self, ConfigError> {
-        static TLS: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
-            LazyLock::new(|| webpki_config(&[b"h2", b"http/1.1"]));
         Self::with_tls_config_and_policy(
             limits,
-            (*TLS).clone()?,
+            Arc::new(webpki_config(&[b"h2", b"http/1.1"])?),
             TransportPolicy::WebPkiHttp2Preferred,
             Some(default_trust_identity()),
         )
@@ -315,11 +328,9 @@ impl Client {
     ///
     /// Returns [`ConfigError`] when a limit is invalid.
     pub fn new_http1(limits: Limits) -> Result<Self, ConfigError> {
-        static TLS: LazyLock<Result<Arc<ClientConfig>, ConfigError>> =
-            LazyLock::new(|| webpki_config(&[b"http/1.1"]));
         Self::with_tls_config_and_policy(
             limits,
-            (*TLS).clone()?,
+            Arc::new(webpki_config(&[b"http/1.1"])?),
             TransportPolicy::WebPkiHttp1Only,
             Some(default_trust_identity()),
         )
@@ -390,6 +401,7 @@ impl Client {
                 behavior_identity,
                 tls_config,
                 pool: None,
+                credential_scope: None,
                 address_policy: None,
                 resolver: Resolver::System,
                 connector: connect::Connector::default(),
@@ -430,6 +442,7 @@ impl Client {
                 behavior_identity,
                 tls_config: Arc::clone(&inner.tls_config),
                 pool: inner.pool.clone(),
+                credential_scope: inner.credential_scope,
                 address_policy: inner.address_policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
@@ -471,6 +484,7 @@ impl Client {
                 }),
                 tls_config: Arc::clone(&inner.tls_config),
                 pool: inner.pool.clone(),
+                credential_scope: inner.credential_scope,
                 address_policy: policy,
                 resolver: inner.resolver.clone(),
                 connector: inner.connector.clone(),
@@ -500,6 +514,7 @@ impl Client {
                 behavior_identity: inner.behavior_identity,
                 tls_config: Arc::clone(&inner.tls_config),
                 pool: inner.pool.clone(),
+                credential_scope: inner.credential_scope,
                 address_policy: inner.address_policy,
                 resolver,
                 connector: inner.connector.clone(),
@@ -512,51 +527,55 @@ impl Client {
     /// Returns a client with the same TLS, policy, limits, observer and fault
     /// plan that keeps cleanly finished connections for reuse.
     ///
-    /// Built-in trust clients with ordinary dialing share a process-wide pool,
-    /// keyed also by the runtime that owns the driver. Caller TLS and custom
-    /// dialing use a private pool shared only by derived clients. A connection
+    /// Unless scoped by [`Self::with_credential_scope`], the pool belongs to
+    /// this client and its derivatives. A connection
     /// carries one exchange at a time and is reusable for at most 30 seconds
     /// after a clean, fully read response. Inference routes use pooling.
     /// One-shot endpoints such as OAuth, catalogs and discovery stay unpooled.
     #[must_use]
     pub fn pooled(&self) -> Self {
-        let inner = &self.inner;
-        Self {
-            observer: self.observer.clone(),
-            #[cfg(feature = "fault-injection")]
-            faults: self.faults.clone(),
-            inner: Arc::new(ClientInner {
-                limits: inner.limits.clone(),
-                policy: inner.policy,
-                trust_identity: inner.trust_identity,
-                behavior_identity: inner.trust_identity.map(|trust| {
-                    transport_behavior_identity(
-                        &inner.limits,
-                        inner.policy,
-                        trust,
-                        true,
-                        inner.address_policy,
-                    )
-                }),
-                tls_config: Arc::clone(&inner.tls_config),
-                pool: Some(
-                    if inner.policy != TransportPolicy::CallerTlsHttp2Preferred
-                        && inner.dial.is_none()
-                        && inner.relay.is_none()
-                        && matches!(inner.resolver, Resolver::System)
-                    {
-                        pool::shared_pool()
-                    } else {
-                        Arc::new(Pool::new(None))
-                    },
-                ),
-                address_policy: inner.address_policy,
-                resolver: inner.resolver.clone(),
-                connector: inner.connector.clone(),
-                dial: inner.dial.clone(),
-                relay: inner.relay.clone(),
-            }),
-        }
+        self.with_inner(|inner| {
+            inner.behavior_identity = inner.trust_identity.map(|trust| {
+                transport_behavior_identity(
+                    &inner.limits,
+                    inner.policy,
+                    trust,
+                    true,
+                    inner.address_policy,
+                )
+            });
+            inner.pool = Some(Arc::new(Pool::new(None)));
+            inner.share_scoped_pool();
+        })
+    }
+
+    /// Partitions pooled connections by exact route, account and credential authority.
+    ///
+    /// Supply existing opaque binding digests, never key or token bytes.
+    /// A pooled built-in TLS client with standard direct dialing may share
+    /// its pool with independently built clients in exactly the same scope.
+    /// Unpooled clients remain unpooled.
+    #[must_use]
+    pub fn with_credential_scope(
+        &self,
+        route: &'static str,
+        account_binding: &[u8],
+        credential_binding: &[u8],
+    ) -> Self {
+        self.with_inner(|inner| {
+            inner.credential_scope = Some(identity::credential_scope(
+                route,
+                account_binding,
+                credential_binding,
+            ));
+            if inner.policy == TransportPolicy::CallerTlsHttp2Preferred {
+                let mut config = (*inner.tls_config).clone();
+                config.resumption = rustls::client::Resumption::disabled();
+                inner.tls_config = Arc::new(config);
+            } else {
+                inner.share_scoped_pool();
+            }
+        })
     }
 
     /// Whether this client keeps cleanly finished connections for reuse.
@@ -595,6 +614,7 @@ impl Client {
             behavior_identity: inner.behavior_identity,
             tls_config: Arc::clone(&inner.tls_config),
             pool: inner.pool.clone(),
+            credential_scope: inner.credential_scope,
             address_policy: inner.address_policy,
             resolver: inner.resolver.clone(),
             connector: inner.connector.clone(),
@@ -705,6 +725,21 @@ impl Client {
                 observation.finish(ExchangeTerminal::Failed(failure));
                 Err(failure)
             }
+        }
+    }
+}
+
+impl ClientInner {
+    fn share_scoped_pool(&mut self) {
+        if self.credential_scope.is_some()
+            && self.pool.is_some()
+            && self.dial.is_none()
+            && self.relay.is_none()
+            && matches!(self.resolver, Resolver::System)
+            && let Some(config) = shared_webpki(self.policy)
+        {
+            self.tls_config = config;
+            self.pool = Some(pool::shared_pool());
         }
     }
 }

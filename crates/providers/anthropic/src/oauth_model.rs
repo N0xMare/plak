@@ -693,6 +693,11 @@ impl ClaudeNativeAuthManager {
         let expires_at = pin_expires_at(now)?;
         let (account_binding, credential_authority_binding) =
             claude_route_bindings(identity.account_uuid(), self.credential_source_scope())?;
+        let client = client.with_credential_scope(
+            "anthropic.oauth.messages",
+            account_binding.bytes(),
+            credential_authority_binding.bytes(),
+        );
         let context_authority_binding = RuntimeModelAuthority::authority_class_for(
             account_binding,
             credential_authority_binding,

@@ -114,7 +114,7 @@ struct PreparedModelProjectionWire {
 }
 
 /// Maximum exact credential-free wire body represented by one preparation.
-pub const MAX_PREPARED_WIRE_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_PREPARED_WIRE_BYTES: u64 = 32_000_000;
 
 const MAX_PREPARATION_LABEL_BYTES: usize = 128;
 

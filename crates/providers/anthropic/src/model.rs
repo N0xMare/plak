@@ -249,6 +249,11 @@ impl AnthropicLanguageModel {
             .stable_binding()
             .ok_or_else(|| configuration_error("Anthropic account binding unavailable"))?;
         let credential_binding = route.credential_binding()?;
+        let client = client.with_credential_scope(
+            "anthropic.platform.messages",
+            account_binding.bytes(),
+            credential_binding.bytes(),
+        );
         let now = clock.now();
         let context = caller_context(
             account_binding,

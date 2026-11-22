@@ -1054,6 +1054,41 @@ fn closed_local_tool_call_keeps_malformed_input_for_a_tool_error() {
 }
 
 #[test]
+fn choice_cannot_hide_output_outside_the_delta() {
+    for (name, content) in [
+        ("message", json!({"role":"assistant","content":"hidden"})),
+        ("text", json!("hidden")),
+        ("tool_calls", json!([{"id":"hidden"}])),
+        ("reasoning_content", json!("hidden")),
+    ] {
+        let mut choice = json!({"index": 0, "delta": {}, "finish_reason": "stop"});
+        choice[name] = content;
+        let error = projector()
+            .push(&data(&chunk(json!([choice]))))
+            .expect_err("misplaced payload must fail even when a delta is present");
+        assert_eq!(error.kind(), ChatStreamErrorKind::InvalidResponse);
+    }
+    let empty = chunk(json!([{"index":0,"future_metadata":1}]));
+    assert!(projector().push(&data(&empty)).is_err());
+
+    let mut stream = projector();
+    push_json(&mut stream, role());
+    push_json(
+        &mut stream,
+        chunk(json!([{"index":0,"delta":{"content":"ok"}}])),
+    );
+    push_json(
+        &mut stream,
+        chunk(json!([{"index":0,"finish_reason":"stop"}])),
+    );
+    push_json(&mut stream, usage());
+    stream
+        .push(b"data: [DONE]\n\n")
+        .expect("finish-only choice is legal");
+    assert!(stream.finish().is_ok());
+}
+
+#[test]
 fn additive_envelope_choice_and_usage_fields_do_not_change_chat_output() {
     let mut stream = projector();
     let mut start = role();

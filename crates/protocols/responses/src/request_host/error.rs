@@ -131,6 +131,9 @@ pub enum ResponsesProtectedToolError {
     /// Call/result canonical identities disagreed despite a remote-ID collision.
     #[error("tool call/result canonical identity mismatch")]
     CallIdentityMismatch,
+    /// Unparsed input may pair only with its failure, never a success or update.
+    #[error("unparsed tool arguments require a terminal tool failure")]
+    UnparsedArgumentsResult,
     /// Two canonical or replayed calls reused one remote call identity.
     #[error("tool call identity was reused")]
     DuplicateCall,

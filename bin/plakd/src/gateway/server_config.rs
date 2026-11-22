@@ -107,7 +107,9 @@ impl ServerConfig {
         if max_inflight == 0 || max_inflight_per_caller == 0 {
             return Err("inflight limits must be at least 1".to_owned());
         }
-        let max_request_body_bytes = file.max_request_body_bytes.unwrap_or(32 * 1024 * 1024);
+        let max_request_body_bytes = file
+            .max_request_body_bytes
+            .unwrap_or(plakous::gateway::server::DEFAULT_MAX_REQUEST_BODY_BYTES as u64);
         Ok(Self {
             socket,
             listen_tcp,

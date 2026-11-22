@@ -619,7 +619,7 @@ impl ChatStreamProjector {
                 [choice]
                     if self.binding.extensions == ChatStreamExtensions::OpenRouterV1
                         && choice.index == 0
-                        && !choice.delta.semantic()
+                        && choice.delta.as_ref().is_none_or(|delta| !delta.semantic())
                         && choice
                             .finish_reason
                             .as_deref()
@@ -653,7 +653,14 @@ impl ChatStreamProjector {
                 "choice index or lifecycle is invalid",
             );
         }
-        if let Some(role) = &choice.delta.role {
+        if choice.delta.is_none() && choice.finish_reason.is_none() {
+            return self.fail(
+                ChatStreamErrorKind::InvalidResponse,
+                "Chat choice must carry a delta or a finish reason",
+            );
+        }
+        let delta = choice.delta.get_or_insert_with(Delta::default);
+        if let Some(role) = &delta.role {
             if role != "assistant"
                 || (self.role_seen && self.binding.extensions != ChatStreamExtensions::OpenRouterV1)
             {
@@ -664,7 +671,7 @@ impl ChatStreamProjector {
             }
             self.role_seen = true;
         }
-        if let Some(value) = &choice.delta.content {
+        if let Some(value) = &delta.content {
             if value.is_empty() {
                 if self.binding.extensions == ChatStreamExtensions::None {
                     return self.fail(ChatStreamErrorKind::InvalidResponse, "empty text delta");
@@ -678,20 +685,18 @@ impl ChatStreamProjector {
                 )));
             }
         }
-        if choice.delta.reasoning.is_some() && choice.delta.reasoning_content.is_some() {
+        if delta.reasoning.is_some() && delta.reasoning_content.is_some() {
             return self.fail(
                 ChatStreamErrorKind::InvalidResponse,
                 "reasoning aliases are mutually exclusive",
             );
         }
-        let reasoning_delta = choice
-            .delta
+        let reasoning_delta = delta
             .reasoning
             .as_ref()
             .map(|value| (BoundReasoningAlias::Reasoning, value))
             .or_else(|| {
-                choice
-                    .delta
+                delta
                     .reasoning_content
                     .as_ref()
                     .map(|value| (BoundReasoningAlias::ReasoningContent, value))
@@ -705,7 +710,7 @@ impl ChatStreamProjector {
                 value.as_bytes(),
             )));
         }
-        if let Some(details) = choice.delta.reasoning_details.take() {
+        if let Some(details) = delta.reasoning_details.take() {
             if self.binding.reasoning_replay.includes_exact_details() {
                 self.retain_reasoning_details(details)?;
             } else if self.binding.extensions == ChatStreamExtensions::None {
@@ -715,12 +720,12 @@ impl ChatStreamProjector {
                 );
             }
         }
-        for part in &choice.delta.tool_calls {
+        for part in &delta.tool_calls {
             self.tool_delta(part)?;
         }
         self.check_output_bound()?;
         if let Some(reason) = &choice.finish_reason {
-            if choice.delta.semantic() {
+            if delta.semantic() {
                 return self.fail(
                     ChatStreamErrorKind::InvalidResponse,
                     "finish reason shared a semantic delta",
@@ -1317,9 +1322,24 @@ struct Chunk {
 #[derive(Deserialize)]
 struct Choice {
     index: u32,
-    #[serde(default)]
-    delta: Delta,
+    delta: Option<Delta>,
     finish_reason: Option<String>,
+    #[serde(
+        default,
+        rename = "message",
+        alias = "text",
+        alias = "content",
+        alias = "tool_calls",
+        alias = "function_call",
+        alias = "reasoning",
+        alias = "reasoning_content",
+        alias = "reasoning_details",
+        alias = "refusal",
+        alias = "audio",
+        alias = "annotations",
+        deserialize_with = "wire::reject_choice_content"
+    )]
+    _out_of_delta_content: (),
 }
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]

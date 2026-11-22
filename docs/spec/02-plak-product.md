@@ -6824,11 +6824,16 @@ old; upgrade the gateway`.
 | `state_root` | the host state home (§2.3) | The store to adopt; must be those exact bytes |
 | `audit_retention_days` | 30 | 1..=365 days of audit files kept |
 | `max_inflight` / `max_inflight_per_caller` | 256 / 128 | At least 1; more is refused `busy` |
-| `max_request_body_bytes` | 33554432 | Upper bound on one relayed upstream body |
+| `max_request_body_bytes` | 32000000 | Upper bound on one relayed upstream body |
 | `allow_non_tailnet` | false | Admit a `listen_tcp` outside loopback and the tailnet |
 
 Any other key is refused. `gateway.toml` is read only by `gateway serve`,
-`gateway init` and `gateway status --dry-run`.
+`gateway init` and `gateway status --dry-run`. Independently of the in-flight
+request counts, the server reserves at most 512 MiB across buffered relay
+requests, enough for sixteen default-sized bodies including their framing.
+It reserves the exact HTTP length, or the maximum envelope and body bound
+when length is unknown, before reading the body and holds it through
+forwarding. Budget exhaustion is a pre-dispatch `busy` refusal.
 
 Caller keys have the form `plakgw1.<id>.<secret>`. The registry stores the
 hash, scopes and source networks. The gateway is the only writer of

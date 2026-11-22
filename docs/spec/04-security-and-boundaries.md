@@ -1902,7 +1902,10 @@ scope, disable, pin and credential checks as on a fresh connection. The pool
 adds the exact logical origin, gateway protocol version, custody slot, account
 binding and credential generation to the transport's connection key. Inference
 credentials remain per-request headers, not TLS client credentials or a
-connection login. The upstream peer may associate prior traffic with a live
+connection login. Built-in TLS does not resume across sockets; direct inference
+keys additionally bind the authenticated route, account and credential
+authority (chapter 01 §13.1). The gateway reserves its aggregate relay-buffer
+budget before reading incoming relay bodies (chapter 02, credential gateway). The upstream peer may associate prior traffic with a live
 connection, so a different authority or credential generation never uses
 that socket. Only a fully sent request and cleanly drained response can return
 a socket. On a protocol error before the reused socket's TLS stream accepts

@@ -153,6 +153,14 @@ fn update_identity_frame(hasher: &mut Sha256, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
+pub(super) fn credential_scope(route: &str, account: &[u8], credential: &[u8]) -> [u8; 32] {
+    let mut hasher = framed_identity_hasher(b"plakous-http/direct-credential-scope-v1");
+    for field in [route.as_bytes(), account, credential] {
+        update_identity_frame(&mut hasher, field);
+    }
+    hasher.finalize().into()
+}
+
 pub(super) fn default_tls_config() -> Result<ClientConfig, ConfigError> {
     let roots = webpki_roots::TLS_SERVER_ROOTS
         .iter()

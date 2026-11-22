@@ -792,6 +792,11 @@ impl XaiNativeAuthManager {
                 .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?,
             profile_revision: XAI_GROK_COMPATIBILITY_PROFILE.to_owned(),
         };
+        let client = client.with_credential_scope(
+            "xai.subscription.responses",
+            evidence.account_fingerprint.bytes(),
+            evidence.credential_authority_binding.bytes(),
+        );
         let model = XaiLanguageModel::with_config(resolved, client, config)?;
         self.core.ensure_resolution_receipt_current(&receipt)?;
         drop(catalog);

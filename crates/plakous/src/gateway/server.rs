@@ -26,8 +26,8 @@ use plakous_gateway_protocol::{Endpoint, GatewayAccount, PREVIOUS_VERSION, UuidT
 pub use plakous_http::CancellationToken;
 use plakous_http::SensitiveBytes;
 pub use plakous_http::relay_server::{
-    GatewayService, Injection, Peer, RelayOutcome, RelayRecord, RelayServer, ServeError,
-    ServiceFuture, new_instance,
+    DEFAULT_MAX_REQUEST_BODY_BYTES, GatewayService, Injection, Peer, RelayOutcome, RelayRecord,
+    RelayServer, ServeError, ServiceFuture, new_instance,
 };
 
 use super::{GatewayEndpoint, InMemoryGateway};

@@ -21,7 +21,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use http_body_util::BodyExt as _;
-use hyper::body::Incoming;
+use hyper::body::{Body as _, Incoming};
 use hyper_util::rt::TokioIo;
 use plakous_gateway_protocol::envelope::{self, RelayEnvelope};
 use plakous_gateway_protocol::frame::{Data, Frame, Head, MAX_DATA_BYTES, RelayEnd};
@@ -31,7 +31,7 @@ use plakous_gateway_protocol::{
     Endpoint, GatewayAccount, SUPPORTED_VERSIONS, UuidText, VersionsReply, call,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::transport::pool::{Pool, PoolScope, PoolUse};
 use crate::{
@@ -48,7 +48,8 @@ mod test_dial_override;
 use stream::Chunker;
 
 /// The largest upstream request body a relay request may carry by default.
-pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
+pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 32_000_000;
+const RELAY_BUFFER_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const MAX_UPSTREAM_IDLE_KEYS: usize = 64;
 
 /// A fresh random gateway process instance id; `None` only when the system
@@ -237,6 +238,7 @@ struct ServerInner<S> {
     upstream_pool: Arc<Pool>,
     instance: UuidText,
     max_request_body_bytes: usize,
+    request_budget: Arc<Semaphore>,
     draining: CancellationToken,
     /// Repository tests' loopback dial targets for pinned origins; always
     /// empty in product builds, which cannot set them.
@@ -261,6 +263,7 @@ impl<S: GatewayService> RelayServer<S> {
                 upstream_pool: Arc::new(Pool::new(Some(MAX_UPSTREAM_IDLE_KEYS))),
                 instance,
                 max_request_body_bytes: DEFAULT_MAX_REQUEST_BODY_BYTES,
+                request_budget: Arc::new(Semaphore::new(RELAY_BUFFER_BUDGET_BYTES)),
                 draining: CancellationToken::new(),
                 dial_overrides: Vec::new(),
             }),
@@ -281,6 +284,7 @@ impl<S: GatewayService> RelayServer<S> {
             upstream_pool: Arc::clone(&inner.upstream_pool),
             instance: inner.instance.clone(),
             max_request_body_bytes: inner.max_request_body_bytes,
+            request_budget: Arc::clone(&inner.request_budget),
             draining: inner.draining.clone(),
             dial_overrides: inner.dial_overrides.clone(),
         };
@@ -403,6 +407,21 @@ impl<S: GatewayService> ServerInner<S> {
         let bound = self
             .max_request_body_bytes
             .saturating_add(4 + envelope::MAX_ENVELOPE_BYTES);
+        let bound = match request.body().size_hint().exact() {
+            Some(bytes) => usize::try_from(bytes)
+                .ok()
+                .filter(|bytes| *bytes <= bound)
+                .ok_or(GatewayRefusal::LimitExceeded {})?,
+            None => bound,
+        };
+        // Reserve before polling the incoming body; the relay task takes over
+        // the reservation for as long as it can retain the forwarded body.
+        let permits = u32::try_from(bound).map_err(|_| GatewayRefusal::LimitExceeded {})?;
+        let buffer_hold = Arc::clone(&self.request_budget)
+            .try_acquire_many_owned(permits)
+            .map_err(|_| GatewayRefusal::Busy {
+                retry_after_ms: 500,
+            })?;
         let whole = read_whole(request.into_body(), bound).await?;
         let started = Instant::now();
         let (envelope, upstream_body) =
@@ -443,6 +462,7 @@ impl<S: GatewayService> ServerInner<S> {
         let (sender, receiver) = mpsc::channel(4);
         let inner = Arc::clone(self);
         tokio::spawn(async move {
+            let _buffer_hold = buffer_hold;
             inner.pump(prepared, sender, record, started).await;
         });
         Ok(http::Response::builder()
@@ -792,7 +812,13 @@ async fn send(sender: &mpsc::Sender<Bytes>, frame: &Frame) -> Result<(), ()> {
 
 /// Reads a whole request body; over `bound` is a refusal.
 async fn read_whole(mut body: Incoming, bound: usize) -> Result<Bytes, GatewayRefusal> {
-    let mut whole = Vec::new();
+    let capacity = body
+        .size_hint()
+        .exact()
+        .and_then(|bytes| usize::try_from(bytes).ok())
+        .unwrap_or(bound)
+        .min(bound);
+    let mut whole = Vec::with_capacity(capacity);
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|_| GatewayRefusal::EnvelopeInvalid {})?;
         if let Ok(data) = frame.into_data() {

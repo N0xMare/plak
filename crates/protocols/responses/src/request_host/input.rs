@@ -1,5 +1,7 @@
 //! Conversation-item lowering into Responses input items.
 
+use std::borrow::Cow;
+
 use super::{
     Actor, BTreeMap, BTreeSet, CallId, CompactionBlock, ContentBlock, ConversationItem,
     ImageDetailHint, MAX_RESPONSE_ID_BYTES, MediaSource, ModelRequest, OpaqueFallback, Provenance,
@@ -40,6 +42,7 @@ pub(super) struct ToolCallSource {
     owner: ToolExecutionOwner,
     name: ToolName,
     caller_lineage: ToolCallerLineage,
+    unparsed: bool,
 }
 
 pub(super) struct ToolResultMatches<'a> {
@@ -139,6 +142,9 @@ impl<'a> ToolResultMatches<'a> {
         ) {
             return Err(ResponsesProtectedToolError::CallIdentityMismatch.into());
         }
+        if source.unparsed && result.kind() != ToolResultKind::Failure {
+            return Err(ResponsesProtectedToolError::UnparsedArgumentsResult.into());
+        }
         if !self.matched.insert(remote_id.to_owned()) {
             return Err(ResponsesProtectedToolError::DuplicateResult.into());
         }
@@ -166,6 +172,9 @@ impl<'a> ToolResultMatches<'a> {
         }
         if &source.owner != update.owner() {
             return Err(ResponsesProtectedToolError::OwnerMismatch.into());
+        }
+        if source.unparsed {
+            return Err(ResponsesProtectedToolError::UnparsedArgumentsResult.into());
         }
         match source.kind {
             ToolCallKind::Custom => Ok(Some(source.name.clone())),
@@ -243,6 +252,7 @@ pub(super) fn derive_tool_calls(
                     owner: call.owner().clone(),
                     name: call.exposed_name().clone(),
                     caller_lineage: call.correlation().caller_lineage().clone(),
+                    unparsed: call.arguments().is_none(),
                 },
             )?;
         }
@@ -289,6 +299,7 @@ pub(super) fn remember_replayed_call(
             owner: call.owner().clone(),
             name: call.exposed_name().clone(),
             caller_lineage: call.correlation().caller_lineage().clone(),
+            unparsed: call.arguments().is_none(),
         },
     )
 }
@@ -372,10 +383,15 @@ pub(super) fn lower_item(
                     .remote_call_id()
                     .map_or_else(|| call.call_id().to_string(), ToOwned::to_owned);
                 if custom_tools.contains(call.exposed_name()) {
-                    let custom_input = call
-                        .arguments()
-                        .and_then(Value::as_str)
-                        .ok_or(ResponsesRequestContentError::InvalidCustomToolArguments)?;
+                    let custom_input = match call.arguments() {
+                        Some(Value::String(input)) => input,
+                        None => call.raw_arguments(),
+                        Some(_) => {
+                            return Err(
+                                ResponsesRequestContentError::InvalidCustomToolArguments.into()
+                            );
+                        }
+                    };
                     let mut wire = json!({
                         "type": "custom_tool_call",
                         "call_id": remote_id,
@@ -385,18 +401,21 @@ pub(super) fn lower_item(
                     lower_program_caller(&mut wire, call.correlation().caller_lineage())?;
                     output.push(wire);
                 } else {
-                    // A UTF-8 cell (Codex Code Mode `exec`) replayed onto a target
-                    // that does not expose the tool as custom: the function call
-                    // carries the cell's original string input verbatim. The
-                    // canonical block keeps that input as a JSON string literal
-                    // so `arguments()` is `Some(String)` exactly for this shape;
-                    // a structured call is always a JSON object.
+                    // The wire requires a JSON-encoded argument string. Keep
+                    // historical UTF-8 or refused malformed input in an object,
+                    // with the correlated result; it is not a new invocation.
                     let arguments = match call.arguments() {
-                        Some(Value::String(input)) => input.as_str(),
-                        _ => call.raw_arguments(),
+                        Some(Value::String(input)) => {
+                            Cow::Owned(json!({"input": input}).to_string())
+                        }
+                        None => Cow::Owned(json!({"input": call.raw_arguments()}).to_string()),
+                        Some(_) => Cow::Borrowed(call.raw_arguments()),
                     };
-                    let mut wire =
-                        function_call_item(remote_id, call.exposed_name().as_str(), arguments);
+                    let mut wire = function_call_item(
+                        remote_id,
+                        call.exposed_name().as_str(),
+                        arguments.as_ref(),
+                    );
                     lower_program_caller(&mut wire, call.correlation().caller_lineage())?;
                     output.push(wire);
                 }

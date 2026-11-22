@@ -1138,7 +1138,7 @@ pub mod openrouter {
                 evidence,
                 context_contract,
                 selected,
-                self.client.pooled(),
+                self.inference_client("openrouter.chat"),
             )
         }
 
@@ -1162,7 +1162,7 @@ pub mod openrouter {
                 evidence,
                 context_contract,
                 behavior,
-                self.client.pooled(),
+                self.inference_client("openrouter.chat"),
             )
         }
 
@@ -1183,7 +1183,7 @@ pub mod openrouter {
                 evidence,
                 context_contract,
                 behavior,
-                self.client.pooled(),
+                self.inference_client("openrouter.responses"),
             )
         }
 
@@ -1204,7 +1204,7 @@ pub mod openrouter {
                 evidence,
                 context_contract,
                 behavior,
-                self.client.pooled(),
+                self.inference_client("openrouter.messages"),
             )
         }
 
@@ -1227,7 +1227,7 @@ pub mod openrouter {
                 context_contract,
                 profile,
                 selected,
-                self.client.pooled(),
+                self.inference_client("openrouter.chat"),
             )
         }
 
@@ -1242,7 +1242,20 @@ pub mod openrouter {
             &self,
             evidence: OpenRouterChatModelEvidence,
         ) -> Result<OpenRouterRetrieval, OpenRouterChatBuildError> {
-            OpenRouterRetrieval::new(self.route.clone(), evidence, self.client.pooled())
+            OpenRouterRetrieval::new(
+                self.route.clone(),
+                evidence,
+                self.inference_client("openrouter.chat"),
+            )
+        }
+
+        fn inference_client(&self, route: &'static str) -> Client {
+            let identity = self.route.identity();
+            self.client.pooled().with_credential_scope(
+                route,
+                identity.account_binding().bytes(),
+                identity.credential_authority_binding().bytes(),
+            )
         }
 
         /// Returns the immutable integration class of every model built by this lane.

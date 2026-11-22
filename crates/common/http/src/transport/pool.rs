@@ -68,6 +68,7 @@ impl Hash for TlsConfigKey {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(super) struct PoolKey {
     pub(super) scope: Option<Arc<PoolScope>>,
+    pub(super) credential_scope: Option<[u8; 32]>,
     /// A parked connection's driver only runs on the runtime that spawned it.
     pub(super) runtime: tokio::runtime::Id,
     pub(super) host: String,

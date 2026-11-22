@@ -177,6 +177,7 @@ impl Client {
     fn pool_key(&self, origin: &Origin, scope: Option<Arc<PoolScope>>) -> PoolKey {
         PoolKey {
             scope,
+            credential_scope: self.inner.credential_scope,
             runtime: tokio::runtime::Handle::current().id(),
             host: origin.host().to_owned(),
             port: origin.port(),

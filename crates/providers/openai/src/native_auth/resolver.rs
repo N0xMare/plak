@@ -361,7 +361,12 @@ impl CodexModelResolver {
             .client
             .with_limits(Limits::for_streaming_inference())
             .map_err(|_| NativeCodexAuthError::Catalog)?
-            .pooled();
+            .pooled()
+            .with_credential_scope(
+                "openai.codex.responses",
+                account_fingerprint.bytes(),
+                credential_authority_binding.bytes(),
+            );
         if let Some(observer) = &self.inference_observer {
             inference_client = inference_client.with_observer(Some(Arc::clone(observer)));
         }

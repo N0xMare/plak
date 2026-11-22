@@ -520,7 +520,7 @@ fn streaming_requests_fit_the_inference_bound_but_bulk_rest_requests_do_not() ->
             limits,
         )
     };
-    let body = Bytes::from(vec![b'x'; 32 * 1024 * 1024 + 1]);
+    let body = Bytes::from(vec![b'x'; 32_000_001]);
     let inference = Limits::for_streaming_inference();
     let at_bound = body.slice(..body.len() - 1);
     assert!(build(at_bound.clone(), &inference).is_ok());

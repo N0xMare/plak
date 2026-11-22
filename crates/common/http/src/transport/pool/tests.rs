@@ -57,6 +57,7 @@ async fn a_pool_of_64_keys_evicts_the_key_whose_newest_socket_is_oldest() -> Tes
     let client = Client::new(Limits::default())?;
     let key = |port| PoolKey {
         scope: None,
+        credential_scope: None,
         runtime: tokio::runtime::Handle::current().id(),
         host: "example.test".into(),
         port,
@@ -395,36 +396,16 @@ async fn a_connection_idle_for_the_bound_is_closed_instead_of_reused() -> TestRe
 #[tokio::test]
 async fn separate_inference_clients_share_a_tls_handshake_over_tool_steps() -> TestResult {
     let server = Server::start(H1).await?;
+    let shared = Arc::new(Pool::new(None));
     let config = Arc::new(server.client.clone());
-    let new_client = || {
-        // The local CA stands in for the shared built-in trust configuration.
-        Client::with_tls_config_and_policy(
-            Limits::for_streaming_inference(),
-            Arc::clone(&config),
-            crate::TransportPolicy::WebPkiHttp1Only,
-            Some(super::super::default_trust_identity()),
-        )
-        .map(|client| client.pooled())
-    };
-    let first = new_client()?;
+    let first = scoped_test_client(&config, &shared, "test.route", b"account-a", b"grant-a")?;
     assert_eq!(
         exchange(&first, &server.origin, "/ok").await?,
         ConnectionUse::Fresh
     );
     for idle in [Duration::from_secs(8), Duration::from_secs(20)] {
-        for (key, entries) in pool(&first)?
-            .idle
-            .lock()
-            .map_err(|_| "pool poisoned")?
-            .iter_mut()
-        {
-            if key.port == server.origin.port() && Arc::ptr_eq(&key.tls_config.0, &config) {
-                for entry in entries {
-                    entry.since -= idle;
-                }
-            }
-        }
-        let next = new_client()?;
+        shared.age(idle);
+        let next = scoped_test_client(&config, &shared, "test.route", b"account-a", b"grant-a")?;
         assert_eq!(
             exchange(&next, &server.origin, "/ok").await?,
             ConnectionUse::Reused
@@ -435,6 +416,66 @@ async fn separate_inference_clients_share_a_tls_handshake_over_tool_steps() -> T
         1,
         "three steps used one TLS connection"
     );
+    Ok(())
+}
+
+fn scoped_test_client(
+    config: &Arc<ClientConfig>,
+    pool: &Arc<Pool>,
+    route: &'static str,
+    account: &[u8],
+    credential: &[u8],
+) -> TestResult<Client> {
+    // The fake CA and private shared pool model the production checkout
+    // without changing process-wide state in a multi-test binary.
+    Ok(Client::with_tls_config_and_policy(
+        Limits::for_streaming_inference(),
+        Arc::clone(config),
+        crate::TransportPolicy::WebPkiHttp1Only,
+        Some(super::super::default_trust_identity()),
+    )?
+    .pooled()
+    .with_credential_scope(route, account, credential)
+    .with_inner(|inner| {
+        inner.tls_config = Arc::clone(config);
+        inner.pool = Some(Arc::clone(pool));
+    }))
+}
+
+#[test]
+fn built_in_pool_sharing_requires_explicit_credential_scope() -> TestResult {
+    let first = Client::new_http1(Limits::default())?;
+    let second = Client::new_http1(Limits::default())?;
+    assert!(!Arc::ptr_eq(
+        &first.inner.tls_config,
+        &second.inner.tls_config
+    ));
+    let first = first.pooled();
+    let second = second.pooled();
+    assert!(!Arc::ptr_eq(pool(&first)?, pool(&second)?));
+    let first = first.with_credential_scope("oauth", b"a", b"x");
+    let second = second.with_credential_scope("oauth", b"a", b"x");
+    assert!(Arc::ptr_eq(pool(&first)?, pool(&second)?));
+    Ok(())
+}
+
+#[tokio::test]
+async fn one_provider_authority_cannot_share_sockets_between_accounts_or_routes() -> TestResult {
+    let server = Server::start(H1).await?;
+    let shared = Arc::new(Pool::new(None));
+    let config = Arc::new(server.client.clone());
+    for (route, account, grant, expected) in [
+        ("oauth", b"a", b"x", ConnectionUse::Fresh),
+        ("oauth", b"b", b"x", ConnectionUse::Fresh),
+        ("api", b"a", b"x", ConnectionUse::Fresh),
+        ("oauth", b"a", b"y", ConnectionUse::Fresh),
+        ("oauth", b"a", b"x", ConnectionUse::Reused),
+        ("oauth", b"b", b"x", ConnectionUse::Reused),
+    ] {
+        let client = scoped_test_client(&config, &shared, route, account, grant)?;
+        assert_eq!(exchange(&client, &server.origin, "/ok").await?, expected);
+    }
+    assert_eq!(server.connections(), 4);
     Ok(())
 }
 
@@ -637,6 +678,7 @@ async fn dropping_the_last_pooled_client_closes_its_idle_connections() -> TestRe
         pool(&client)?.checkin(
             PoolKey {
                 scope: None,
+                credential_scope: None,
                 runtime: tokio::runtime::Handle::current().id(),
                 host: address.ip().to_string(),
                 port: address.port(),

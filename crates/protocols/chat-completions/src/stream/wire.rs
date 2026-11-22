@@ -33,6 +33,12 @@ pub(super) fn present_value<'de, D: Deserializer<'de>>(
     serde_json::Value::deserialize(deserializer).map(Some)
 }
 
+pub(super) fn reject_choice_content<'de, D: Deserializer<'de>>(_: D) -> Result<(), D::Error> {
+    Err(serde::de::Error::custom(
+        "Chat choice content must be inside delta",
+    ))
+}
+
 impl UsageWire {
     pub(super) fn canonical(
         self,
