@@ -1707,10 +1707,12 @@ Explicit archived-inclusive lists filter before applying row limits. An archived
 session is read-only until explicitly unarchived; inspection must not open its
 runtime, recover, drain its queue or execute a continuation. Rename, unarchive
 and guarded delete remain available. Repeating the archive state is a no-op.
-The attached prompt and delivery guards read archive and identity metadata
-without loading transcript views. Their read retains the raw queue and prompt
-history baseline for subsequent saves. Immutable submission still checks
-archive and revision inside its write transaction.
+The attached prompt and delivery guards read archive and validate the create
+and active queue identity bindings in one snapshot, without loading prompt
+history, queue payloads or transcript views. A record save may reuse the raw
+collections from a load or commit at its exact revision; otherwise it
+reconciles the stored collections inside the write transaction. Immutable
+submission still checks archive and revision inside its write transaction.
 A stop addressed to an archived read-only attachment is also a no-op:
 it acknowledges `stopped {runner_pending:false}` without opening a runtime.
 Archive refuses a busy turn, any live child, a running process, a durable

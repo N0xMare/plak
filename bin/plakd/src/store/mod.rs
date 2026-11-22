@@ -182,7 +182,7 @@ pub struct ProductStore {
     /// The collections this handle last loaded or committed per record; a
     /// commit rewrites only what moved. A record this handle never saw is
     /// synced in full.
-    baselines: HashMap<String, StoreBaseline>,
+    baselines: HashMap<String, (u64, StoreBaseline)>,
     /// Whether the connection commits under `synchronous=FULL`. Projection-only
     /// commits relax it to `NORMAL`; every other commit restores it first.
     synchronous_full: bool,
@@ -451,8 +451,10 @@ impl ProductStore {
 
     /// Remember the collections just loaded or committed for `session`.
     fn remember(&mut self, session: &SessionRecord) {
-        self.baselines
-            .insert(session.id.clone(), StoreBaseline::of(session));
+        self.baselines.insert(
+            session.id.clone(),
+            (session.store_revision, StoreBaseline::of(session)),
+        );
     }
 
     /// Set the fsync discipline for the next commit on this connection.
@@ -521,7 +523,10 @@ impl ProductStore {
             &transaction,
             session,
             expected,
-            self.baselines.get(&session.id),
+            self.baselines
+                .get(&session.id)
+                .filter(|(revision, _)| *revision == expected)
+                .map(|(_, baseline)| baseline),
         )?;
         if let Some(submission) = submission {
             views::insert_submission(
@@ -629,7 +634,8 @@ impl ProductStore {
         transaction
             .commit()
             .map_err(|_| "could not finish product store read".to_owned())?;
-        self.baselines.insert(session.id.clone(), baseline);
+        self.baselines
+            .insert(session.id.clone(), (session.store_revision, baseline));
         Ok(session)
     }
 
@@ -783,10 +789,15 @@ fn validate_queue_bindings(
     pending_queue: &[QueueItem],
 ) -> Result<(), String> {
     for item in pending_queue {
-        let queue:Option<(String,String,String,Option<String>)>=connection.query_row("SELECT kind,owner_session_id,binding_digest,terminal_disposition FROM identity_bindings WHERE identity=?1",[&item.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|"could not inspect queue identity".to_owned())?;
-        if queue != Some(("queue".to_owned(), id.to_owned(), id.to_owned(), None)) {
-            return Err("active queue identity contradicts global registry".to_owned());
-        }
+        validate_queue_binding(connection, id, &item.id)?;
+    }
+    Ok(())
+}
+
+fn validate_queue_binding(connection: &Connection, id: &str, item: &str) -> Result<(), String> {
+    let queue:Option<(String,String,String,Option<String>)>=connection.query_row("SELECT kind,owner_session_id,binding_digest,terminal_disposition FROM identity_bindings WHERE identity=?1",[item],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_|"could not inspect queue identity".to_owned())?;
+    if queue != Some(("queue".to_owned(), id.to_owned(), id.to_owned(), None)) {
+        return Err("active queue identity contradicts global registry".to_owned());
     }
     Ok(())
 }

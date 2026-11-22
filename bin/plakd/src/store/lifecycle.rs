@@ -47,7 +47,7 @@ pub(super) fn admit_work(
 }
 
 impl ProductStore {
-    pub(super) fn load_admission_archived(&mut self, id: &str) -> Result<bool, String> {
+    pub(super) fn load_admission_archived(&self, id: &str) -> Result<bool, String> {
         let tx = self
             .connection
             .unchecked_transaction()
@@ -62,16 +62,21 @@ impl ProductStore {
             .map_err(|_| "product session admission metadata is invalid".to_owned())?
             .ok_or_else(|| "session not found".to_owned())?;
         super::validate_create_binding(&tx, id, &operation)?;
-        // Do not replace an unfiltered save baseline with the public queue
-        // projection: accepted drafts can still be present in the intent rows.
-        let baseline = plakous_hosted::sessions::StoreBaseline {
-            pending_queue: super::load_queue(&tx, id)?,
-            prompt_history: super::load_prompt_history(&tx, id)?,
-        };
-        super::validate_queue_bindings(&tx, id, &baseline.pending_queue)?;
+        let identities = super::query_collect(
+            &tx,
+            "SELECT item_id,revision,submitted_at FROM queue_items WHERE session_id=?1 ORDER BY position",
+            id,
+            |row| {
+                super::from_i64(row.get(1)?)?;
+                super::from_i64(row.get(2)?)?;
+                row.get::<_, String>(0)
+            },
+        )?;
+        for item in identities {
+            super::validate_queue_binding(&tx, id, &item)?;
+        }
         tx.commit()
             .map_err(|_| "could not finish product store read".to_owned())?;
-        self.baselines.insert(id.to_owned(), baseline);
         Ok(archived)
     }
 
@@ -211,8 +216,8 @@ mod tests {
     use crate::store::sessions::SessionRecord;
 
     #[test]
-    fn admission_reads_identity_and_remembers_raw_collections_without_loading_notices() {
-        use plakous_hosted::sessions::{NoticeScope, QueueItem, StoreBaseline, TranscriptRow};
+    fn admission_validates_identity_without_reading_collection_payloads() {
+        use plakous_hosted::sessions::{NoticeScope, QueueItem, TranscriptRow};
 
         let (_home, paths) = PlakPaths::isolated_test_home();
         let mut store = ProductStore::open(&paths).unwrap();
@@ -228,16 +233,21 @@ mod tests {
                 [&record.id],
             )
             .unwrap();
+        store
+            .connection
+            .execute(
+                "UPDATE prompt_history SET prompt=CAST(x'FF' AS TEXT) WHERE session_id=?1",
+                [&record.id],
+            )
+            .unwrap();
+        assert!(super::super::load_prompt_history(&store.connection, &record.id).is_err());
         store.baselines.clear();
         assert!(
             store.load(&record.id).is_err(),
             "a full load decodes the notice"
         );
         assert!(!store.load_admission_archived(&record.id).unwrap());
-        assert_eq!(
-            store.baselines.get(&record.id),
-            Some(&StoreBaseline::of(&record))
-        );
+        assert!(store.baselines.is_empty());
         store.set_archived(&record.id, true).unwrap();
         assert!(store.load_admission_archived(&record.id).unwrap());
         assert!(admit_work(&store.connection, &record.id).is_err());

@@ -120,8 +120,8 @@ pub trait SessionRecordStore: Send + Sync {
     /// `session not found`, or a message when the row is invalid.
     fn load(&self, id: &str) -> Result<SessionRecord, String>;
 
-    /// Reads the archival guard from the stored session, retaining any
-    /// collection baseline needed by subsequent revision-fenced saves.
+    /// Reads the archival guard and its identity facts from the stored session.
+    /// This does not hydrate the payloads of its saved collections.
     ///
     /// # Errors
     /// A missing session, or invalid admission metadata.
