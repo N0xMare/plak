@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::commands::runner::environment::HostEnvironment;
 use crate::{CliFailure, CliResult};
 
-const MAX_FDS: usize = 7;
+const MAX_FDS: usize = 6;
 const MAX_ENVELOPE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
@@ -40,6 +40,18 @@ fn failed(error: impl std::fmt::Display) -> CliFailure {
     CliFailure::new(format!("host upgrade transport handoff: {error}"))
 }
 
+fn restore_stdio(
+    input: BorrowedFd<'_>,
+    output: BorrowedFd<'_>,
+    error: BorrowedFd<'_>,
+) -> CliResult<()> {
+    use rustix::stdio::{dup2_stderr, dup2_stdin, dup2_stdout};
+    let input = dup2_stdin(input);
+    let output = dup2_stdout(output);
+    let error = dup2_stderr(error);
+    input.and(output).and(error).map_err(failed)
+}
+
 pub(crate) fn receive() -> CliResult<(String, Inherited)> {
     let stdin = std::io::stdin();
     let fds = receive_fds(stdin.as_fd())?;
@@ -48,10 +60,11 @@ pub(crate) fn receive() -> CliResult<(String, Inherited)> {
         fds.next()
             .ok_or_else(|| failed("missing inherited descriptor"))
     };
-    // Restore stdio only after recvmsg has installed the rights. Closing
-    // the sender with rights still queued can break the listeners on Darwin.
-    rustix::stdio::dup2_stdin(next()?).map_err(failed)?;
-    rustix::stdio::dup2_stdout(next()?).map_err(failed)?;
+    let control = std::io::stdout().as_fd().try_clone_to_owned();
+    let web = std::io::stderr().as_fd().try_clone_to_owned();
+    let [input, output, error] = [next()?, next()?, next()?];
+    restore_stdio(input.as_fd(), output.as_fd(), error.as_fd())?;
+    let control = control.map_err(failed)?;
     let file = std::fs::File::from(next()?);
     let metadata = file.metadata().map_err(failed)?;
     if !metadata.is_file() || metadata.len() > MAX_ENVELOPE_BYTES {
@@ -67,8 +80,8 @@ pub(crate) fn receive() -> CliResult<(String, Inherited)> {
     let inherited = Inherited {
         home_lock: next()?,
         state_lock: next()?,
-        control: next()?,
-        web: envelope.web.then(&mut next).transpose()?,
+        control,
+        web: envelope.web.then_some(web).transpose().map_err(failed)?,
         environment: envelope.environment,
     };
     if fds.next().is_some() {
@@ -145,6 +158,10 @@ fn exec(
             .as_fd()
             .try_clone_to_owned()
             .map_err(failed)?;
+        let saved_stderr = std::io::stderr()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(failed)?;
         let (send, receive) = UnixDatagram::pair().map_err(failed)?;
         // Pass metadata by descriptor as well: no private marker or PATH/HOME
         // can leak through the successor's process environment to its tools.
@@ -163,28 +180,37 @@ fn exec(
             return Err(failed("handoff envelope exceeds its size limit"));
         }
         file.rewind().map_err(failed)?;
-        let mut fds = vec![
+        let fds = [
             saved_stdin.as_fd(),
             saved_stdout.as_fd(),
+            saved_stderr.as_fd(),
             file.as_fd(),
             home_lock,
             state_lock,
-            control,
         ];
-        fds.extend(web);
         send_fds(&send, &fds)?;
-        // Keep both ends alive until receipt. On Darwin, closing the sender
-        // before recvmsg can make accepted streams report a false EOF.
-        // Command's stdio setup leaves the listeners themselves CLOEXEC.
-        let error = command
+        // A Darwin Unix listener received by SCM_RIGHTS can make accepted
+        // streams report false EOF. Pass listeners directly through stdio;
+        // their original descriptors remain CLOEXEC.
+        let control = control.try_clone_to_owned().map_err(failed)?;
+        let web = web
+            .map(|fd| fd.try_clone_to_owned())
+            .transpose()
+            .map_err(failed)?;
+        command
             .arg(crate::HOST_REEXEC_ARG)
             .args(arguments)
             .stdin(Stdio::from(OwnedFd::from(receive)))
-            .stdout(Stdio::from(OwnedFd::from(send)))
-            .exec();
-        let input = rustix::stdio::dup2_stdin(saved_stdin);
-        let output = rustix::stdio::dup2_stdout(saved_stdout);
-        input.and(output).map_err(failed)?;
+            .stdout(Stdio::from(control));
+        if let Some(web) = web {
+            command.stderr(Stdio::from(web));
+        }
+        let error = command.exec();
+        restore_stdio(
+            saved_stdin.as_fd(),
+            saved_stdout.as_fd(),
+            saved_stderr.as_fd(),
+        )?;
         Ok(failed(error))
     })();
     match result {

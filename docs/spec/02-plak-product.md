@@ -5756,21 +5756,24 @@ This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
-It re-execs the source PID. When the destination advertises support in the
-capability probe, the source retains the control and web listeners and the
-home-wide and per-key locks. On Linux and macOS, rustix passes their
-descriptors in one private Unix socketpair message using `SCM_RIGHTS`. The
-exec temporarily carries the receiver on stdin and the sender on stdout.
-On macOS, closing the sender before receipt can make newly accepted
-connections report a false EOF. The new image receives the descriptors,
-sets close-on-exec on them, and restores both streams before it spawns
-anything. The metadata envelope travels by descriptor in an anonymous
-file in the same message, not through the environment inherited by child
-processes. Neither listener is unlinked or rebound. New connections can
+It re-execs the source PID. When the destination advertises support for
+the source's private descriptor-handoff marker during qualification, the
+source retains the control and web listeners and the home-wide and per-key
+locks. The exec temporarily carries the control listener on stdout and the
+optional web listener on stderr. These listeners are inherited directly:
+on macOS a Unix listener transferred by `SCM_RIGHTS` can make newly accepted
+connections report a false EOF. Stdin carries the receiver of a private Unix
+socketpair message containing the ownership locks, the original standard
+streams, and an anonymous file with the metadata envelope. The new image
+takes close-on-exec copies of the listeners, receives the other descriptors
+using rustix, and restores all standard streams before spawning anything.
+Nothing travels through the environment inherited by child processes.
+Neither listener is unlinked or rebound. New connections can
 wait in the existing kernel backlogs; old client streams end rather than
 moving into the new generation. The private upgrade coordinator is rebound.
-If either image does not support descriptor handoff, the upgrade uses the
-legacy path: the source closes and unlinks its listeners and holds its locks
+If the source does not support descriptor handoff or the destination does not
+answer the source's marker, the upgrade uses the legacy path: the source
+closes and unlinks its listeners and holds its locks
 until exec closes them. The successor takes the locks and binds normally.
 Reconnects can be refused in that gap; the same sessions and admission
 verdicts still carry over.

@@ -52,7 +52,7 @@ pub(crate) fn xdg_config_home() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
 }
 
-pub(crate) const REEXEC_PROBE: &str = "PLAK_HOST_UPGRADE_PROBE_REEXEC_V3";
+pub(crate) const REEXEC_PROBE: &str = "PLAK_HOST_UPGRADE_PROBE_REEXEC_V4";
 pub(crate) const HOST_REEXEC: &str = "PLAK_HOST_REEXEC_V1";
 
 pub(crate) fn upgrade_reexec_probe() -> bool {

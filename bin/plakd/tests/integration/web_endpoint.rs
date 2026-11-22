@@ -120,6 +120,7 @@ fn launch_on_with_env(
     let (forward, lines) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            eprintln!("{line}");
             if line.starts_with("plakd host: serving on ") {
                 let _ = ready.send(true);
             } else {
