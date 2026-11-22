@@ -264,6 +264,7 @@ where
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Closed) => return Err(CliFailure::new("attach worker ended")),
         };
+        let _timing = super::super::test_timing::phase("settle attach").entered();
         let Some(PendingAttach {
             request,
             runtime,

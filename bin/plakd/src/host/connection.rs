@@ -304,6 +304,7 @@ impl Write for Outbox {
             return Err(io::Error::other("incomplete wire frame"));
         }
         if independent_reply(line) {
+            plakous_hosted::host_service::wire::test_timing::writer("enqueue", line);
             self.control(Some(line.to_vec()))?;
         } else {
             let mut queue = self.lock();

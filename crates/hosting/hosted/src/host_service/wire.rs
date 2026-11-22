@@ -39,6 +39,13 @@ use super::{HostService, Outbound, TreeNodes};
 use crate::error::{CliFailure, CliResult};
 use lines::Next;
 mod drafts;
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_timing;
+#[cfg(not(any(test, feature = "test-support")))]
+#[doc(hidden)]
+#[path = "wire/test_timing/disabled.rs"]
+pub mod test_timing;
 use served::{ServedSession, Shared};
 
 /// How often a connection with a stop hook looks at it, and how often the

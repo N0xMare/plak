@@ -20,7 +20,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use plakous_host_protocol::wire::MAX_LINE_BYTES;
-use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, handshake};
+use plakous_hosted::host_service::wire::{Face, HELLO_DEADLINE, handshake, test_timing};
 use tokio::task::JoinSet;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -283,6 +283,7 @@ struct WebWriter<S> {
 impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
     async fn send_frame(&mut self, frame: Frame) -> Result<(), SendError> {
         let message = if let Some(mut line) = frame {
+            test_timing::writer("writer start", &line);
             line.pop(); // the outbox holds newline-terminated frames
             Message::text(String::from_utf8(line).map_err(|_| SendError::Disconnected)?)
         } else {
@@ -407,6 +408,7 @@ async fn attached<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send
                 break result.map_or_else(Ended::from, |()| Ended::Left);
             }
             message = next_text(&mut reader, &heartbeat) => {
+                let _timing = test_timing::phase("read ready").entered();
                 let line = match message {
                     Ok(line) => line,
                     Err(ended) => break ended,

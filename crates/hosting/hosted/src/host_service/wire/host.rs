@@ -689,7 +689,10 @@ where
         }
         match op {
             Op::Host { request } => Ok(self.start_host_read(request_id, request)),
-            Op::Ping => answered(Outcome::Ok(Answer::Pong)),
+            Op::Ping => {
+                super::test_timing::pong("dispatch", request_id);
+                answered(Outcome::Ok(Answer::Pong))
+            }
             Op::ListSessions {
                 runner,
                 include_archived,
@@ -1257,6 +1260,12 @@ where
     }
 
     fn flush_attachments(&mut self, bulk: bool) -> CliResult<()> {
+        let _timing = super::test_timing::phase(if bulk {
+            "drain attachment"
+        } else {
+            "settle ended attachment"
+        })
+        .entered();
         if let Some(link) = &mut self.readonly {
             if !matches!(link.refusal, RequestRefusal::SessionArchived { .. }) {
                 let root = self.host.lock().iter().find_map(|slot| {
