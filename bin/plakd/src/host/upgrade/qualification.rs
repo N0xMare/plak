@@ -13,7 +13,11 @@ pub(super) fn qualify_destination(
     request: &Request,
     arguments: &[String],
     report: &progress::Report<'_>,
-) -> CliResult<(DestinationProbe, process::VerifiedImage, Option<reopen::Preflight>)> {
+) -> CliResult<(
+    DestinationProbe,
+    process::VerifiedImage,
+    Option<reopen::Preflight>,
+)> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
