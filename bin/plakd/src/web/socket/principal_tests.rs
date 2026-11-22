@@ -154,10 +154,38 @@ impl HostSessions<PlakExtension> for FixtureSessions {
     }
     fn open(
         &self,
-        _: &str,
+        session: &str,
     ) -> CliResult<plakous_hosted::host_service::wire::OpenedSession<PlakExtension>> {
         self.opens.fetch_add(1, Ordering::SeqCst);
-        Err(CliFailure::new("no session"))
+        if session != "resident" {
+            return Err(CliFailure::new("no session"));
+        }
+        let (actions, intents) = plakous_host_protocol::intent_channel();
+        let (observations, events) = plakous_host_protocol::observation_channel();
+        let worker = plakous_hosted::runtime::HostWorkerHandle::spawn(move || {
+            let _observations = observations;
+            while !intents.abandon_and_release_requested() {
+                if let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) =
+                    intents.recv_timeout(Duration::from_millis(10))
+                {
+                    break;
+                }
+            }
+            Ok(())
+        });
+        Ok(plakous_hosted::host_service::wire::OpenedSession {
+            runner_pending: None,
+            root: plakous_host_protocol::wire::NodeAddress {
+                tree_id: session.into(),
+                agent_id: session.into(),
+            },
+            session_id: session.into(),
+            actions,
+            events,
+            worker,
+            attachments: Default::default(),
+            roots: Box::new(|_| None),
+        })
     }
     fn refusal(&self, _: &str, _: &CliFailure) -> plakous_host_protocol::wire::RequestRefusal {
         plakous_host_protocol::wire::RequestRefusal::UnknownSession
