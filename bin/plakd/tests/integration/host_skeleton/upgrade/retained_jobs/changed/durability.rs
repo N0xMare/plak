@@ -26,6 +26,13 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
     let Some(fixture) = fixture() else { return };
     let fixture = fixture.with_session_lease_seconds(2);
     let _cleanup = HomeHost(fixture.home());
+    let config = fixture.home().join("config.toml");
+    let prior = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        config,
+        format!("{prior}\n[host]\nresume_after_loss = \"continue\"\n"),
+    )
+    .unwrap();
     let image = replacement_image(&fixture).canonicalize().unwrap();
     let environment = candidate_environment(&image);
     let mut source_environment = environment.to_vec();
@@ -85,7 +92,7 @@ fn crash(flag: &str, cut: &str, lose_original: bool) {
         wait_exit(root.foreground.0);
     }
     release_continuation(&fixture);
-    notices(&fixture, &root.session, !lose_original);
+    notices(&fixture, &root.session, !lose_original, cut);
     assert_eq!(marked(&fixture, &root.name, "bg"), root.background);
     assert_eq!(marked(&fixture, &root.name, "fg"), root.foreground);
     stop(&mut replacement);

@@ -102,7 +102,7 @@ fn local_and_paired_foreground_and_background_results_survive_changed_triple() {
     }
     release_continuation(&fixture);
     for root in [&local, &remote] {
-        notices(&fixture, &root.session, true);
+        notices(&fixture, &root.session, true, &root.name);
         assert_eq!(root_record(&fixture, &root.session).1, 1);
         let (_, fresh_daemon) = marked(&fixture, &root.name, "new");
         assert_ne!(fresh_daemon, root.foreground.1);
@@ -230,7 +230,7 @@ fn wait_exit(pid: i32) {
     }
 }
 
-fn notices(fixture: &Fixture, session: &str, exited: bool) {
+fn notices(fixture: &Fixture, session: &str, exited: bool, context: &str) {
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let deadline = Instant::now() + WAIT;
     loop {
@@ -278,7 +278,10 @@ fn notices(fixture: &Fixture, session: &str, exited: bool) {
             }
             break;
         }
-        assert!(Instant::now() < deadline, "{session} job notices: {seen:?}");
+        assert!(
+            Instant::now() < deadline,
+            "{context}: job notices: {seen:?}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }

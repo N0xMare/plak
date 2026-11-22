@@ -29,16 +29,18 @@ pub(super) fn before_drain(
     }
     let needed =
         destination != &crate::commands::runner::version() || !request.inspect_runners.is_empty();
-    if needed {
-        let check = if cross_key {
-            Check::CrossKey
-        } else {
-            Check::BeforeDrain
-        };
-        progress::timed(report, progress::Phase::RunnerProcess, || {
+    progress::timed(report, progress::Phase::RunnerProcess, || {
+        if needed {
+            let check = if cross_key {
+                Check::CrossKey
+            } else {
+                Check::BeforeDrain
+            };
             inspect(services, &request.inspect_runners, check, runtime).map(drop)
-        })?;
-    }
+        } else {
+            Ok(())
+        }
+    })?;
     Ok(needed)
 }
 

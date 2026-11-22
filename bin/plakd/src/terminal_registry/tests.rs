@@ -144,8 +144,10 @@ async fn operator_host_quiet_reclamation_holds_existing_startup_lock_without_sto
         .paths
         .home()
         .join("host/runner")
-        .join(format!("v{}", crate::commands::runner::version().protocol))
-        .join("run/runner.sock");
+        .join(plakous::runner::daemon::triple_key(
+            &crate::commands::runner::version(),
+        ))
+        .join("run/r.sock");
     assert!(!socket.exists(), "reclamation never auto-starts a daemon");
     let probe = std::fs::OpenOptions::new()
         .write(true)

@@ -132,6 +132,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn progress_frames_preserve_buffered_following_replies() {
+        use super::super::{Answer, read_frame};
+        let bytes = b"{\"status\":\"progress\",\"detail\":\"waiting 1s: model=1\"}\n{\"status\":\"progress\",\"detail\":\"waiting 2s: paid_compaction=1\"}\n{\"status\":\"ready\",\"receipt\":null}\n";
+        let mut reader = std::io::BufReader::new(bytes.as_slice());
+        for expected in ["model=1", "paid_compaction=1"] {
+            let Answer::Progress {
+                detail,
+                qualification: None,
+            } = read_frame(&mut reader).unwrap()
+            else {
+                panic!("missing progress");
+            };
+            assert!(detail.contains(expected));
+        }
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Answer::Ready { receipt: None }
+        ));
+    }
+
+    #[test]
     fn ordinary_upgrade_omits_runner_inspection_fields() {
         let exact = r#"{"source_instance":"source","source_key":"key","destination":"/example/plakd","destination_key":"key","expected_binary":"0123456789ab","wait_seconds":0,"drain":{"mode":"idle"},"abandon":null}"#;
         let mut request: Request = serde_json::from_str(exact).unwrap();
