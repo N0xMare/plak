@@ -56,16 +56,8 @@ pub(super) fn probe_sessions() -> Result<(), &'static str> {
         {
             return Err("operator session scan failed isolation probe");
         }
-        let rows = scan().map_err(|()| "operator cleanup scan unavailable")?;
-        if ![own, separate].iter().all(|target| {
-            rows.iter().any(|row| {
-                row.pid == target.pid
-                    && !row.zombie
-                    && row.started == target.started
-                    && row.session == target.session
-                    && row.group == target.group
-            })
-        }) || child
+        scan::confirm_startup([&own, &separate], scan)?;
+        if child
             .try_wait()
             .map_err(|_| "operator PTY probe could not be checked")?
             .is_some()

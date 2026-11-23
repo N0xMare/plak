@@ -14,6 +14,32 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
 
 type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
 const MAX_TRACKED_PROCESSES: usize = 4096;
+const STARTUP_SCAN_ATTEMPTS: usize = 3;
+
+pub(super) fn confirm_startup(
+    targets: [&Identity; 2],
+    mut fresh: impl FnMut() -> Result<Vec<Identity>, ()>,
+) -> Result<(), &'static str> {
+    // Enumeration failure does not contradict either targeted identity. Each
+    // attempt discards every partial row; a completed contradictory scan is
+    // not retried and no startup rows are carried into cleanup.
+    let rows = (0..STARTUP_SCAN_ATTEMPTS)
+        .find_map(|_| fresh().ok())
+        .ok_or("operator cleanup scan unavailable")?;
+    if targets.iter().all(|target| {
+        rows.iter().any(|row| {
+            row.pid == target.pid
+                && !row.zombie
+                && row.started == target.started
+                && row.session == target.session
+                && row.group == target.group
+        })
+    }) {
+        Ok(())
+    } else {
+        Err("operator cleanup scan failed isolation probe")
+    }
+}
 
 /// Running PTYs share observation work. Cleanup deliberately bypasses this
 /// cache: both absence proofs and each pre-signal validation are fresh scans.
@@ -616,6 +642,63 @@ mod tests {
             started: format!("start-{pid}"),
             zombie: false,
             anchor: None,
+        }
+    }
+
+    #[test]
+    fn operator_startup_retries_incomplete_enumeration_but_not_identity_disagreement() {
+        let runner = row(5, 1, "1");
+        let child = row(10, 5, "10");
+        let targets = [&runner, &child];
+        let mut attempts = 0;
+        assert_eq!(
+            confirm_startup(targets, || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(())
+                } else {
+                    Ok(vec![runner.clone(), child.clone()])
+                }
+            }),
+            Ok(())
+        );
+        assert_eq!(attempts, 3);
+
+        attempts = 0;
+        assert_eq!(
+            confirm_startup(targets, || {
+                attempts += 1;
+                Err(())
+            }),
+            Err("operator cleanup scan unavailable")
+        );
+        assert_eq!(attempts, 3);
+
+        for contradict in [
+            row(11, 5, "10"),
+            row(10, 5, "5"),
+            Identity {
+                started: "reused".into(),
+                ..child.clone()
+            },
+            Identity {
+                group: 11,
+                ..child.clone()
+            },
+            Identity {
+                zombie: true,
+                ..child.clone()
+            },
+        ] {
+            attempts = 0;
+            assert_eq!(
+                confirm_startup(targets, || {
+                    attempts += 1;
+                    Ok(vec![runner.clone(), contradict.clone()])
+                }),
+                Err("operator cleanup scan failed isolation probe")
+            );
+            assert_eq!(attempts, 1);
         }
     }
 
