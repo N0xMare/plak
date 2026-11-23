@@ -6,6 +6,7 @@
 )]
 
 use super::super::*;
+use plakous_agent::internal::BranchId;
 
 pub(in super::super) fn archive(
     b: &mut Backend,
