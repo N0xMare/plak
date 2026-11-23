@@ -179,7 +179,7 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
         let mut host = start_env(&fixture, &[], &[("PLAK_LOG", "info".into())]);
         dropped.join().unwrap();
         // Serving the socket is not proof that the host finished binding and
-        // reconciling the replacement. Keep the peer alive through that verdict.
+        // reconciling the replacement daemon; keep the host running until that verdict.
         assert_eq!(
             local_runner_status(&mut Client::connect(&host)),
             plakous_host_protocol::wire::RunnerStatus::Ready

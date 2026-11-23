@@ -507,6 +507,7 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
     );
     let mut config = fixture.host_config();
     config.topology_enabled = false;
+    let store = config.store.clone();
     let id = config.session.id.clone();
     let (prepared, root_delivery) = mpsc::channel();
     plakous_hosted::runtime::test_kit::scripted_mut(&mut config).observe =
@@ -543,6 +544,12 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
     assert!(
         root_delivery.try_recv().is_err(),
         "handshake failure admits no root turn"
+    );
+    assert!(
+        store.load(&id).map_or(true, |record| {
+            record.plakous_locator.is_none() && record.pending_queue.is_empty()
+        }),
+        "handshake failure leaves no durable root locator or queued input"
     );
 }
 

@@ -365,6 +365,33 @@ fn wait_ack(fixture: &Fixture, client: &mut Client) {
     }
 }
 
+/// A successor receipt can precede publication of its directory row.
+fn wait_for_successor_node(host: &Host, session: &str) -> NodeAddress {
+    let mut watcher = Client::connect(host);
+    watcher.read_deadline = Some(Instant::now() + WAIT);
+    watcher.retain_observations();
+    let Outcome::Ok(Answer::Watching { attachment }) = watcher.request(
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    ) else {
+        panic!("no directory watch");
+    };
+    loop {
+        if let HostFrame::Directory {
+            attachment: watched,
+            rows,
+            ..
+        } = watcher.next()
+            && watched == attachment
+            && let Some(row) = rows.into_iter().find(|row| row.session == session)
+        {
+            return row.node;
+        }
+    }
+}
+
 #[test]
 fn host_upgrade_remote_outage_withholds_only_its_successors_and_retries_without_restart() {
     let Some(fixture) = fixture() else { return };
@@ -410,23 +437,13 @@ fn host_upgrade_remote_outage_withholds_only_its_successors_and_retries_without_
         ],
     );
     let next_local = successor(&fixture, &local);
+    let node = wait_for_successor_node(&destination, &next_local);
     let mut client = Client::connect(&destination);
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(row) = client.rows(1).iter().find(|row| row.session == next_local) {
-            let attachment = client.attach(2, &row.node);
-            assert_eq!(
-                client.request(3, Op::Detach { attachment }),
-                Outcome::Ok(Answer::Detached)
-            );
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "ready local successor stayed withheld"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let attachment = client.attach(2, &node);
+    assert_eq!(
+        client.request(3, Op::Detach { attachment }),
+        Outcome::Ok(Answer::Detached)
+    );
     let pending = receipts(&fixture).pop().unwrap();
     assert_eq!(pending["phase"], "committed");
     for remote in &sources {

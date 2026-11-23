@@ -4872,9 +4872,13 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   The synchronous opener retains its typed placement refusal as process-local
   error metadata; the host does not reconstruct refusals from rendered prose.
 - **Stop effects.** `stopped {runner_pending}` certifies durable host-side
-  cancellation before physical runner settlement. Dormant cancellation uses
-  only the saved placement's non-admitting recovery ports, including when its
-  runner is blocked, unconfigured or has never bound. The root stop and child
+  cancellation before physical runner settlement.
+  Signalled children count as live work until they retire, at which point a
+  watch publishes the changed directory row, so `list_sessions` immediately
+  after `stopped` may still count them.
+  Dormant cancellation uses only the saved placement's non-admitting recovery
+  ports, including when its runner is blocked, unconfigured or has never bound.
+  The root stop and child
   wake suppression commit before any child/root process stop is attempted.
   Unavailable settlement returns success with `runner_pending:true`; the
   original durable intent keys remain owed across reconnect/restart. An owned

@@ -72,13 +72,8 @@ fn host_upgrade_retry_keeps_an_existing_foreground_call_on_the_same_runner() {
     wait_mapping(&fixture, &first);
     assert!(!ready(&fixture, &second));
     let session = successor(&fixture, &first);
+    let node = wait_for_successor_node(&destination, &session);
     let mut client = Client::connect(&destination);
-    let node = client
-        .rows(1)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap()
-        .node;
     let attachment = client.attach(2, &node);
     assert_eq!(
         client.request(
