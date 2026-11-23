@@ -960,9 +960,9 @@ the newer set keeps its timer armed after the old attempt completes. The review 
 reseeds the head-free repair, fresh descendant-debt fence and release-ordering
 decisions; build failures and empty selections are not mutant kills.
 Neither an attachment nor a paid continuation is created by a stop.
-The fixture stops a session with no node attachment, checks durable
-cancellation at the stop receipt and observes the changed directory row on a
-watch. The live child counts are a projection, not part of the stop receipt.
+The unattached-stop fixture stops a session with no node attachment, checks
+durable cancellation at the stop receipt and observes the changed directory
+row on a watch. The live child counts are a projection, not part of the stop receipt.
 
 Host serving is not a runner-readiness barrier. Daemon recovery fixtures use
 the product's local `Ready` verdict, published after ownership sweep, answered-key

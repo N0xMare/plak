@@ -6056,7 +6056,9 @@ an importer never creates another bind under the serving process instance.
 The fresh successor's job read uses that same connection, without loading an
 old call journal or adopting an old line.
 The normal runner Ready sweep follows import and precedes that successor's
-acknowledgement. A post-surrender runner outage or credential/configuration
+acknowledgement.
+A successor's Ready mapping and acknowledgement do not imply its directory row is published; a watch publishes it.
+A post-surrender runner outage or credential/configuration
 refusal keeps the affected successors withheld; a host-owned worker retries
 without preventing ready roots from serving. Retries wake on registry status
 changes and otherwise back off exponentially from five seconds to three minutes;
