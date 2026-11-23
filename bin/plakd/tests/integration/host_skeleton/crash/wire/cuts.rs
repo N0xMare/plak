@@ -301,7 +301,7 @@ fn assert_pilot_inventory(shape: &str, child: bool, signature: &Signature) {
     let inventory: Value =
         serde_json::from_str(include_str!("../../../crash_sweep/shard_inventory.json")).unwrap();
     let mut counts = BTreeMap::<&str, usize>::new();
-    for (store, _, _) in signature {
+    for (store, ..) in signature {
         *counts.entry(store).or_default() += 1;
     }
     assert_eq!(
