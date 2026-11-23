@@ -4175,8 +4175,6 @@ fn run_user_prompt(
         .unwrap();
 }
 
-/// A stop, then a prompt: the prompt's admission clears wake suppression, so
-/// a child result wakes the root. The recorded stop does not keep refusing.
 #[test]
 fn a_held_root_parks_automatic_wake_until_a_new_prompt() {
     use crate::sessions::projector::{
@@ -4225,6 +4223,8 @@ fn a_held_root_parks_automatic_wake_until_a_new_prompt() {
     });
 }
 
+/// A stop, then a prompt: the prompt's admission clears wake suppression, so
+/// a child result wakes the root. The recorded stop does not keep refusing.
 #[test]
 fn a_prompt_after_a_stop_lets_a_child_result_wake_the_root() {
     with_host(0, |host, runtime, actions, _| {

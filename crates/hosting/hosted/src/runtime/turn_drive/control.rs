@@ -28,6 +28,14 @@ const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 const HANDOFF_CANCEL_GRACE: Duration = HOST_CANCEL_SETTLE_TIMEOUT;
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
 
+fn quit_cancel_origin(origin: CancelOrigin, handoff: bool, cancel_accepted: bool) -> CancelOrigin {
+    if handoff && !cancel_accepted && origin == CancelOrigin::Ordinary {
+        CancelOrigin::PlannedHandoff
+    } else {
+        origin
+    }
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
     async fn request_cancel(&self) -> Result<CancellationStatus, plakous::agent::ControlError> {
         #[cfg(test)]
@@ -373,6 +381,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     } else {
                         QUIT_CANCEL_GRACE
                     };
+                    if self.turn_result.is_none() {
+                        self.cancel_origin =
+                            quit_cancel_origin(self.cancel_origin, handoff, self.cancel_accepted);
+                    }
                     let settlement = if self.turn_result.is_some() {
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "terminal");
@@ -386,9 +398,6 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         };
                         settle_cancel(settled, grace).await
                     } else {
-                        if handoff && self.cancel_origin == CancelOrigin::Ordinary {
-                            self.cancel_origin = CancelOrigin::PlannedHandoff;
-                        }
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "requested");
                         settle_cancel(self.control.cancel(), grace).await
@@ -1057,5 +1066,22 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 ))
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_late_terminal_keeps_the_cancel_origin_selected_at_handoff_quit() {
+        assert!(matches!(
+            quit_cancel_origin(CancelOrigin::OperatorInterrupt, true, true),
+            CancelOrigin::OperatorInterrupt
+        ));
+        assert!(matches!(
+            quit_cancel_origin(CancelOrigin::Ordinary, true, false),
+            CancelOrigin::PlannedHandoff
+        ));
     }
 }
