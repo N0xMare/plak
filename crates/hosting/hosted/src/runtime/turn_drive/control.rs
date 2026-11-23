@@ -1,5 +1,6 @@
 //! Busy-turn control intents and their acknowledgements.
 
+use super::super::turn::CancelOrigin;
 use super::HostBoundary;
 use super::{
     CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, Instant,
@@ -385,6 +386,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         };
                         settle_cancel(settled, grace).await
                     } else {
+                        if handoff && self.cancel_origin == CancelOrigin::Ordinary {
+                            self.cancel_origin = CancelOrigin::PlannedHandoff;
+                        }
                         #[cfg(test)]
                         super::quit_trace::step(&self.host.session.id, "requested");
                         settle_cancel(self.control.cancel(), grace).await
@@ -583,6 +587,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                     });
                 }
                 Ok(UserAction::Interrupt) => {
+                    self.cancel_origin = CancelOrigin::OperatorInterrupt;
                     // The operator's stop is durable before its cancel: a
                     // host lost before the turn's terminal leaves a stop,
                     // which nothing continues (spec 03 §14.1). A refused

@@ -107,6 +107,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                             self.host.session,
                             self.host.events,
                             self.cancel_unsettled.as_ref(),
+                            self.cancel_origin,
                         )
                         .await;
                         Ok(TurnHostOutcome::Interrupted {
@@ -154,6 +155,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                         self.host.session,
                         self.host.events,
                         self.cancel_unsettled.as_ref(),
+                        self.cancel_origin,
                     )
                     .await;
                     emit_turn_lifecycle(

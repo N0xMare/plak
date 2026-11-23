@@ -26,7 +26,7 @@ fn operator_attention_warns_at_most_once_per_minute_on_entry() {
 }
 
 #[test]
-fn held_process_loss_needs_operator_but_does_not_pause_wakes() {
+fn held_process_loss_needs_operator_but_does_not_mark_auto_continue_paused() {
     use crate::sessions::projector::{
         RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
     };

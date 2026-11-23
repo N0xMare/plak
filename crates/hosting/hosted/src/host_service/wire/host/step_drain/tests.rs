@@ -53,14 +53,15 @@ async fn late_root_cascade_preserves_only_the_committed_upgrade_handoff() {
         drain.record_child_handoffs(Duration::from_secs(5)).await,
         Vec::<(String, String)>::new()
     );
-    crate::runtime::cascade_root_for_step_drain_test(id)
+    crate::runtime::handoff_cancel_for_step_drain_test(id)
         .await
         .unwrap();
     assert_eq!(
         fixture.stored_continuation_causes()[&child],
         Some(ContinuationCause::Handoff)
     );
-    drop(drain);
+    // An operator Interrupt may have been admitted before the seal and
+    // reached settlement only now, while the committed hold still exists.
     crate::runtime::cascade_root_for_step_drain_test(id)
         .await
         .unwrap();
@@ -71,5 +72,6 @@ async fn late_root_cascade_preserves_only_the_committed_upgrade_handoff() {
             .unwrap(),
         Some(InterruptCause::Cascade),
     );
+    drop(drain);
     crate::topology_runtime::force_release(id).await;
 }

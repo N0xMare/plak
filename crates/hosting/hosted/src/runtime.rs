@@ -211,6 +211,8 @@ mod topology_state;
 #[cfg(test)]
 pub(crate) use topology_state::mark_root_interrupted as cascade_root_for_step_drain_test;
 #[cfg(test)]
+pub(crate) use topology_state::mark_root_interrupted_after_handoff_cancel as handoff_cancel_for_step_drain_test;
+#[cfg(test)]
 pub(crate) use topology_state::mark_root_interrupted_for_run;
 mod transcript_rows;
 pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_tool_row};

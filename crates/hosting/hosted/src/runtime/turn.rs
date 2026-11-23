@@ -486,22 +486,14 @@ pub(super) async fn settle_late_cancel<P: plakous_host_protocol::ProtocolExtensi
     session: &mut SessionRecord,
     events: &Sender<P>,
     cancel_unsettled: Option<&CancelUnsettled>,
+    origin: CancelOrigin,
 ) {
     if cancel_unsettled.is_none() {
         return;
     }
     // The turn's own terminal already swept its tool rows before this runs, so
     // nothing is left to defer behind.
-    let _ = apply_cancel_settlement(
-        rows,
-        store,
-        home,
-        session,
-        events,
-        &CancelSettlement::Settled,
-        None,
-    )
-    .await;
+    let _ = apply_settled_cancel(rows, store, home, session, events, None, origin).await;
 }
 
 /// Projects one bounded cancel settlement.
@@ -533,46 +525,16 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
 ) -> CancelStatusPublication {
     match settlement {
         CancelSettlement::Settled => {
-            let tree_id = durable_tree_id(rows, session);
-            match topology_state::mark_root_interrupted(&tree_id).await {
-                Ok(0) => {}
-                Ok(children) => {
-                    let _ = events.notice(TranscriptRow::info(
-                        NoticeScope::Tree,
-                        format!(
-                            "interrupting {children} running child agent{}; mail resumes {} after release",
-                            if children == 1 { "" } else { "s" },
-                            if children == 1 { "it" } else { "them" }
-                        ),
-                    ));
-                }
-                Err(error) => {
-                    let _ = events.notice(TranscriptRow::error(
-                        NoticeScope::Tree,
-                        format!("tree interrupt marker failed: {error}"),
-                    ));
-                }
-            }
-            let _ = commit_session_update(store, home, session, |candidate| {
-                candidate.queue_drain_state = SessionQueueDrainState::RestoredPaused;
-                true
-            });
-            emit_queue_snapshot(events, session);
-            // The strip must not say `interrupted` over a tool row the host is
-            // still holding open. Publication waits for the last one to
-            // terminalise — through its own observed terminal if it reports
-            // one, or through the sweep at the turn's terminal if it never
-            // does. Only the presentation waits: the tree marker and the
-            // paused queue above are authority and are written now.
-            if let Some(projection) = projection {
-                if has_running_tool_activity(session) {
-                    return CancelStatusPublication::Deferred;
-                }
-                publish_cancel_window_tool_lines(events, projection);
-            } else if has_running_tool_activity(session) {
-                return CancelStatusPublication::Deferred;
-            }
-            publish_interrupted_status(events, session);
+            apply_settled_cancel(
+                rows,
+                store,
+                home,
+                session,
+                events,
+                projection,
+                CancelOrigin::Ordinary,
+            )
+            .await
         }
         CancelSettlement::Unsettled(detail) => {
             let _ = events.send(ContentEvent::Status {
@@ -583,9 +545,73 @@ pub(super) async fn apply_cancel_settlement<P: plakous_host_protocol::ProtocolEx
                 }),
             });
             let _ = events.notice(TranscriptRow::error(NoticeScope::Turn, detail.to_string()));
+            CancelStatusPublication::Published
         }
     }
+}
+
+async fn apply_settled_cancel<P: plakous_host_protocol::ProtocolExtension>(
+    rows: &dyn TopologyRows,
+    store: &dyn SessionRecordStore,
+    home: &SessionHome,
+    session: &mut SessionRecord,
+    events: &Sender<P>,
+    projection: Option<&mut TurnProjection<P>>,
+    origin: CancelOrigin,
+) -> CancelStatusPublication {
+    let tree_id = durable_tree_id(rows, session);
+    let cascade = if origin == CancelOrigin::PlannedHandoff {
+        topology_state::mark_root_interrupted_after_handoff_cancel(&tree_id).await
+    } else {
+        topology_state::mark_root_interrupted(&tree_id).await
+    };
+    match cascade {
+        Ok(0) => {}
+        Ok(children) => {
+            let _ = events.notice(TranscriptRow::info(
+                NoticeScope::Tree,
+                format!(
+                    "interrupting {children} running child agent{}; mail resumes {} after release",
+                    if children == 1 { "" } else { "s" },
+                    if children == 1 { "it" } else { "them" }
+                ),
+            ));
+        }
+        Err(error) => {
+            let _ = events.notice(TranscriptRow::error(
+                NoticeScope::Tree,
+                format!("tree interrupt marker failed: {error}"),
+            ));
+        }
+    }
+    let _ = commit_session_update(store, home, session, |candidate| {
+        candidate.queue_drain_state = SessionQueueDrainState::RestoredPaused;
+        true
+    });
+    emit_queue_snapshot(events, session);
+    // The strip must not say `interrupted` over a tool row the host is
+    // still holding open. Publication waits for the last one to
+    // terminalise — through its own observed terminal if it reports
+    // one, or through the sweep at the turn's terminal if it never
+    // does. Only the presentation waits: the tree marker and the
+    // paused queue above are authority and are written now.
+    if let Some(projection) = projection {
+        if has_running_tool_activity(session) {
+            return CancelStatusPublication::Deferred;
+        }
+        publish_cancel_window_tool_lines(events, projection);
+    } else if has_running_tool_activity(session) {
+        return CancelStatusPublication::Deferred;
+    }
+    publish_interrupted_status(events, session);
     CancelStatusPublication::Published
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum CancelOrigin {
+    Ordinary,
+    OperatorInterrupt,
+    PlannedHandoff,
 }
 
 /// Whether the settled-cancel `interrupted` status has been published yet.

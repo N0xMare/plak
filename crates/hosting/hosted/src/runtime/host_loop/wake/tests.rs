@@ -4178,6 +4178,54 @@ fn run_user_prompt(
 /// A stop, then a prompt: the prompt's admission clears wake suppression, so
 /// a child result wakes the root. The recorded stop does not keep refusing.
 #[test]
+fn a_held_root_parks_automatic_wake_until_a_new_prompt() {
+    use crate::sessions::projector::{
+        RootInterrupt, RootInterruptCause, RootLossIntent, RootStopAnchor,
+    };
+
+    with_host(0, |host, runtime, actions, _| {
+        let config = &mut host.role.config;
+        config.resume_after_loss = crate::runtime::ResumeAfterLoss::Hold;
+        config.store.save(&mut config.session).unwrap();
+        config
+            .store
+            .write_root_loss(
+                &config.session.id,
+                RootLossIntent::Interrupt(RootInterrupt {
+                    anchor: RootStopAnchor::Turn {
+                        turn_id: "lost-before-automatic-wake".into(),
+                    },
+                    cause: RootInterruptCause::OwnerLost,
+                }),
+            )
+            .unwrap();
+        post_child_result(runtime);
+        let now = Instant::now();
+        for at in [now, now + QUIET_WINDOW] {
+            assert!(matches!(
+                host.block(async |host| host.child_wake_prompt(at).await)
+                    .unwrap(),
+                HostStep::Continue
+            ));
+        }
+        assert_eq!(
+            host.role.child_wake.diagnostics.last_decision(),
+            Some(("parked", "root_loss_continuation"))
+        );
+
+        run_user_prompt(host, actions, "continue with new instructions");
+        post_child_result(runtime);
+        let now = Instant::now();
+        let _ = host.block(async |host| host.child_wake_prompt(now).await);
+        assert!(matches!(
+            host.block(async |host| host.child_wake_prompt(now + QUIET_WINDOW).await)
+                .unwrap(),
+            HostStep::Prompt { .. }
+        ));
+    });
+}
+
+#[test]
 fn a_prompt_after_a_stop_lets_a_child_result_wake_the_root() {
     with_host(0, |host, runtime, actions, _| {
         run_user_prompt(host, actions, "store it");

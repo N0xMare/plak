@@ -4147,7 +4147,9 @@ the root's latest interrupt, no continuation decision names it, and no root
 turn was admitted since (a submission written at or after the loss's cursor
 whose command was accepted; the lost turn's own submission is older, so a new
 operator prompt ends the hold, which is the later-turn rule applied to the
-root). Consent is one product-store root continuation naming the loss's stop
+root). Result mail and process notices do not resume a held root: automatic
+wakes wait for its loss continuation to settle or for a new operator prompt.
+Consent is one product-store root continuation naming the loss's stop
 anchor, deciding a new turn under a `plak:resume-loss:root:` command id
 derived from the durable product session id and the loss intent's position
 (anchor and ordinal). Equal feed positions in different sessions cannot alias.
@@ -4263,10 +4265,10 @@ reserves the root cancel and release allowance; it reports unrecorded
 trees by identity. Each root's own planned release then records its
 handoff. A crash between these record points leaves the recorded children
 handed off and the unreleased roots held under the owner-loss policy.
-A root cancel that settles late during this release does not cascade over
-an exact recorded child handoff. An explicit Stop still ends the hold.
-Result mail and process notices do not resume a held root: automatic
-wakes wait for its loss continuation to settle or for a new operator prompt.
+A late settlement of the planned release's own cancel does not cascade over
+an exact recorded child handoff. An operator Interrupt admitted before the
+seal still cascades if it settles after those records; an explicit Stop
+still ends the hold.
 Outside a committed same-key upgrade, only the root's own planned
 release records child handoffs.
 

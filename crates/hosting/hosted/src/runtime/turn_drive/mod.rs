@@ -133,6 +133,7 @@ struct RootTurn<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The runtime accepted a cancel for this turn, or reported the turn
     /// already ended; a refused request leaves this unset.
     cancel_accepted: bool,
+    cancel_origin: super::turn::CancelOrigin,
     cancel_settle_deadline: Option<tokio::time::Instant>,
     interrupted_status_pending: bool,
     abandoned_by_quit: bool,
@@ -245,6 +246,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootTurn<'a, P> {
             cancel_unsettled: None,
             cancel_pending: false,
             cancel_accepted: false,
+            cancel_origin: super::turn::CancelOrigin::Ordinary,
             cancel_settle_deadline: None,
             interrupted_status_pending: false,
             abandoned_by_quit: false,

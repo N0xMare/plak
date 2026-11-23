@@ -431,6 +431,7 @@ fn a_late_cancelled_terminal_applies_the_settled_bookkeeping() {
         &mut config.session,
         &events,
         None,
+        CancelOrigin::Ordinary,
     ));
     assert_eq!(
         config.session.queue_drain_state,
@@ -445,6 +446,7 @@ fn a_late_cancelled_terminal_applies_the_settled_bookkeeping() {
         &mut config.session,
         &events,
         Some(&CancelUnsettled::Deadline { timeout_ms: 5000 }),
+        CancelOrigin::OperatorInterrupt,
     ));
     let observed: Vec<HostEvent> = rx.try_iter().collect();
     assert!(

@@ -20,6 +20,11 @@ pub(super) struct Diagnostics {
 }
 
 impl Diagnostics {
+    #[cfg(test)]
+    pub(super) fn last_decision(&self) -> Option<(&'static str, &'static str)> {
+        self.last
+    }
+
     fn bind(&mut self, session: &str) {
         if self.session != session {
             *self = Self {

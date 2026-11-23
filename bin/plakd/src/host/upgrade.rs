@@ -238,6 +238,7 @@ pub(super) fn replace(
 impl Ready {
     pub(super) async fn record_child_handoffs(&self, remaining: Duration) {
         use plakous_hosted::host_service::wire::HostStepDrain;
+        use plakous_hosted::session_log::{SessionEvent, SessionLog};
         let Some(prepared) = &self.step_drain else {
             return;
         };
@@ -248,25 +249,17 @@ impl Ready {
         };
         for (tree, error) in prepared.drain.record_child_handoffs(budget).await {
             eprintln!("plakd host: child handoff not recorded for tree {tree}: {error}");
-            let home = self.session_home.clone();
-            let session = prepared
-                .root_sessions
-                .get(&tree)
-                .cloned()
-                .unwrap_or_else(|| tree.clone());
-            tokio::task::spawn_blocking(move || {
-                use plakous_hosted::session_log::{SessionEvent, SessionLog};
-                if home.session_events_file(&session).is_file()
-                    && let Ok(log) = SessionLog::open(&home, &session)
-                {
-                    let _ = log.append(
-                        SessionEvent::new("session.handoff_unrecorded")
-                            .str("node", "tree")
-                            .str("tree", &tree)
-                            .str("error", error),
-                    );
-                }
-            });
+            let session = prepared.root_sessions.get(&tree).unwrap_or(&tree);
+            if self.session_home.session_events_file(session).is_file()
+                && let Ok(log) = SessionLog::open(&self.session_home, session)
+            {
+                let _ = log.append(
+                    SessionEvent::new("session.handoff_unrecorded")
+                        .str("node", "tree")
+                        .str("tree", &tree)
+                        .str("error", error),
+                );
+            }
         }
         crate::test_hooks::host_lifecycle::after_child_handoffs();
     }
