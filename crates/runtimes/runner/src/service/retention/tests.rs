@@ -145,7 +145,7 @@ async fn consumed_unjoined_terminal_keeps_native_ack_and_retention_answers() {
             control.clone(),
         )
         .unwrap();
-    plakous_tools::internal::promote(&sessions, process).unwrap();
+    sessions.promote_without_monitor_for_test(process).unwrap();
     let mut changes = process_session_changes(&sessions, process).unwrap();
     sessions
         .write_stdin(process, b"retained\n", JoinedProcessInputDisposition::Close)

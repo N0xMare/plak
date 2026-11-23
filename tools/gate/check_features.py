@@ -306,13 +306,14 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-store": "7e9c37178c2bc5a89ec6bfcb9e0b03451cafb1e9ba5effb562898aaff5f03e6d",
     # Runner waits use the existing Tokio select macro on all targets.
     # Linux group scans use the existing Nix wrapper to handle kernel PGID zero.
-    "plakous-tools": "cc8e5911b5bc23f2aaef5350b40cd081600055997d385f6b9a6d76a1d477d1f0",
+    # The unjoined process fixture is available only to test builds.
+    "plakous-tools": "f0a6273fc66b5c2cf5f733776d1eed84c9bd3138e4b1c0aa28c9feae5a1e8067",
     "plakous-xai": "79c5017fc78cbb3df7a27f4d37335a0fd6df59ed653eb5770f4ceadef1b4bea3",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
     "plakous-gateway-protocol": "cfed7c1c57d094c562580177e4a0728ec596318e81609ca85c99e2892cba01c5",
     # Independent operator PTYs use the existing PTY/descriptor and account
     # lookup dependencies directly; authority is specified in chapter 04 §2.9.
-    "plakous-runner": "d66265ca4ae462a54102e718f6bde52f315a86ac778de4b35fce916115917bea",
+    "plakous-runner": "a8c42617525ed6bd9da50101a69c278dea9a0e93afd3e1ab2b304aed0682e224",
 }
 
 
@@ -444,7 +445,11 @@ def validate_test_only_dependency_features() -> list[str]:
     ):
         if "test-clock" in resolved_dependency_features(package, (), package):
             errors.append(f"{package} [default]: test-clock is test-only")
-    for package, profiles in (("plakous", ((), ("full",))), ("plakous-openai", ((),))):
+    for package, profiles in (
+        ("plakous", ((), ("full",))),
+        ("plakous-openai", ((),)),
+        ("plakous-tools", ((),)),
+    ):
         for profile in profiles:
             if "test-support" in resolved_dependency_features(package, profile, package):
                 errors.append(
@@ -757,11 +762,11 @@ def optional_features(manifest: dict[str, object]) -> list[str]:
     if not isinstance(features, dict):
         return []
     hidden = {"default", "full", "test-clock"}
-    # The facade's test seam and the cell/agent deadline seams are hidden the
-    # same way as test-clock. Product and worker fixtures keep their witnesses.
+    # Test-only library seams are hidden like test-clock. Product and worker
+    # fixtures keep their witnesses.
     package = manifest.get("package")
     name = package.get("name") if isinstance(package, dict) else None
-    if name == "plakous":
+    if name in {"plakous", "plakous-tools"}:
         hidden.add("test-support")
     if name in {"plakous-cell", "plakous-agent"}:
         hidden.add("test-hooks")

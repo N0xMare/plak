@@ -25,6 +25,7 @@ reason = "Existing item-level lint debt after the joined-process registry split;
 
 [features]
 default = []
+test-support = []
 
 [dependencies]
 base64.workspace = true

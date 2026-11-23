@@ -5,6 +5,8 @@ mod job_output;
 mod jobs;
 mod runner_arm;
 mod stop;
+#[cfg(all(unix, feature = "test-support"))]
+mod test_support;
 
 use crate::environment::backend::job_output::{JobOutputAdmission, JobOutputWriter, JobOutputs};
 use crate::environment::backend::{JOINED_STDIN_CLOSED, JobOutputFile, JobOutputRoot};
