@@ -183,7 +183,10 @@ async fn assert_recovery(
         .runtime
         .read(|tree| {
             assert_eq!(tree.retired_children().contains_key(child), cut > 0);
-            assert!(tree.pending_result_mail("root").is_empty());
+            assert_eq!(
+                tree.pending_result_mail("root"),
+                [] as [crate::agent_tree::MailRecord; 0]
+            );
         })
         .unwrap();
     assert_eq!(sessions.head_is_quiescent(removed).await.is_ok(), cut < 2);
@@ -205,7 +208,10 @@ async fn assert_recovery(
             let summary = &tree.retired_children()[child];
             assert_eq!(summary.output.as_deref(), Some(r#"{"ok":true}"#));
             assert!(summary.mail.is_some());
-            assert!(tree.pending_result_mail("root").is_empty());
+            assert_eq!(
+                tree.pending_result_mail("root"),
+                [] as [crate::agent_tree::MailRecord; 0]
+            );
         })
         .unwrap();
     let request = OpenSessionRequest::new(

@@ -1372,16 +1372,13 @@ impl ProductConfig {
             ConfigField::ApiFullWindow => self.api_full_window = value.boolean()?,
             ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
-            ConfigField::RuntimeStoreRetireFinishedChildren => {
-                self.retire_finished_children = value.boolean()?
-            }
             ConfigField::SkillsEnabled => self.skills_enabled = value.boolean()?,
             ConfigField::RuntimeStoreMaxCheckpoints
             | ConfigField::RuntimeStoreMaxObjects
             | ConfigField::RuntimeStoreMaxObjectBytes
-            | ConfigField::RuntimeStoreMaxSessions => {
-                let (index, bound) = runtime_store_bound(key, value)?;
-                self.runtime_store_bounds[index] = bound;
+            | ConfigField::RuntimeStoreMaxSessions
+            | ConfigField::RuntimeStoreRetireFinishedChildren => {
+                self.assign_runtime_store(key, value)?
             }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = parse_positive(key.path, value)?;
@@ -1413,6 +1410,20 @@ impl ProductConfig {
             ConfigField::GatewayAddress
             | ConfigField::GatewayKeyFile
             | ConfigField::GatewayAllowNonTailnet => self.assign_gateway(key, value)?,
+        }
+        Ok(())
+    }
+
+    fn assign_runtime_store(
+        &mut self,
+        key: &ConfigKey,
+        value: FieldValue<'_>,
+    ) -> Result<(), String> {
+        if key.field == ConfigField::RuntimeStoreRetireFinishedChildren {
+            self.retire_finished_children = value.boolean()?;
+        } else {
+            let (index, bound) = runtime_store_bound(key, value)?;
+            self.runtime_store_bounds[index] = bound;
         }
         Ok(())
     }
