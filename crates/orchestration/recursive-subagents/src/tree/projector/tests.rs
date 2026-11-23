@@ -1730,7 +1730,7 @@ fn historical_child_retirement_certifies_pre_witness_carriers_with_or_without_tu
                 .parse()
                 .unwrap(),
         );
-        let occupied = std::collections::BTreeSet::new();
+        let occupied = BTreeSet::new();
         let mut newer = tree.clone();
         newer
             .commands

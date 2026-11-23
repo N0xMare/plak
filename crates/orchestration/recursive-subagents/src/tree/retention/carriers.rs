@@ -240,9 +240,9 @@ impl ProductAgentTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plakous::agent::{AgentErrorKind, CommandId, ContextOverflowRemedy, TurnUsage};
+    use plakous::agent::{AgentErrorKind, CommandId, TurnUsage};
     use plakous::model::{FinishReason, TurnOrigin, Usage};
-    use plakous::sessions::feed::{FeedChange, FeedCommandKind, FeedContextLimit, FeedHeader};
+    use plakous::sessions::feed::{FeedChange, FeedCommandKind, FeedHeader};
 
     fn record(seq: u64, fact: FeedFact) -> FeedRecord {
         let locator: SessionLocator = concat!(
@@ -296,7 +296,7 @@ mod tests {
                     outcome,
                     closed_exchange: true,
                     steering_settled_unapplied: false,
-                    usage: TurnUsage::new(Usage::new(0, 0, 0, 0, 0), 0, 0),
+                    usage: TurnUsage::new(Usage::new(0, 0, 0, 0, 0), 0, 0, 0).unwrap(),
                 },
             )
         };
@@ -306,10 +306,9 @@ mod tests {
         let withheld = FeedTurnOutcome::Failed {
             kind: AgentErrorKind::Model,
             model_kind: None,
-            context: Some(FeedContextLimit {
-                withheld: true,
-                remedy: ContextOverflowRemedy::ResendShorter,
-            }),
+            context: Some(
+                serde_json::from_str(r#"{"withheld":true,"remedy":"resend_shorter"}"#).unwrap(),
+            ),
         };
         for (seq, id, outcome, expected) in [
             (12, "carrier", completed, Some(true)),
