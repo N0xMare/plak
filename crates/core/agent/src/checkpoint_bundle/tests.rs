@@ -373,8 +373,22 @@ pub(crate) fn fixture_with_history_and_ledger(
         supplied_ledger,
         supplied_lifecycle,
         RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?,
-        crate::manifest::NamedState::default(),
+        FixtureState::default(),
     )
+}
+
+struct FixtureState {
+    named: crate::manifest::NamedState,
+    tool_environment: &'static [u8],
+}
+
+impl Default for FixtureState {
+    fn default() -> Self {
+        Self {
+            named: crate::manifest::NamedState::default(),
+            tool_environment: b"environment-v1",
+        }
+    }
 }
 
 fn fixture_with_context(
@@ -384,7 +398,7 @@ fn fixture_with_context(
     supplied_ledger: Option<RuntimeOperationLedger>,
     supplied_lifecycle: Option<RuntimeLifecycle>,
     context: RuntimeContextState,
-    named_state: crate::manifest::NamedState,
+    state: FixtureState,
 ) -> TestResult<RuntimeCheckpoint> {
     let provider_configuration = provider_configuration()?;
     let descriptor = provider_configuration.effective().descriptor();
@@ -445,7 +459,7 @@ fn fixture_with_context(
         component(
             RuntimeComponentKind::ExecutionEnvironment,
             1,
-            b"environment-v1",
+            state.tool_environment,
         )?,
         component(RuntimeComponentKind::EffectPolicy, 1, b"effect-policy-v1")?,
         BindingReference::new("policy-authority", "policy-ref", 1)?,
@@ -562,7 +576,7 @@ fn fixture_with_context(
         Some(artifact),
         None,
         crate::manifest::JobLedger::default(),
-        named_state,
+        state.named,
         RuntimeDurability::Required,
     )?;
     Ok(RuntimeCheckpoint::new(manifest)?)
@@ -746,7 +760,7 @@ fn anchored_quiescent_fixture() -> TestResult<RuntimeCheckpoint> {
         None,
         None,
         context,
-        crate::manifest::NamedState::default(),
+        FixtureState::default(),
     )
 }
 
@@ -763,7 +777,10 @@ fn named_state_fixture(checkpoint_number: u128) -> TestResult<RuntimeCheckpoint>
         None,
         None,
         RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?,
-        state,
+        FixtureState {
+            named: state,
+            ..FixtureState::default()
+        },
     )
 }
 
@@ -1162,6 +1179,46 @@ fn appended_history_reuses_prefix_and_unique_growth_is_linear() -> TestResult {
 }
 
 #[test]
+fn tool_manifest_advance_reuses_equal_tools_and_encodes_changed_tools() -> TestResult {
+    let history = CanonicalHistory::new(vec![history_segment(0)?])?;
+    let prior = fixture_with_history(history.clone(), 1, false)?;
+    let bundle = RuntimeCheckpointCodec::bundle(&prior, None)?;
+    for changed in [false, true] {
+        let next = fixture_with_context(
+            history.clone(),
+            2,
+            false,
+            None,
+            None,
+            RuntimeContextState::genesis(id(1)?, id(2)?, [0x4b; 32])?,
+            if changed {
+                FixtureState {
+                    tool_environment: b"environment-v2",
+                    ..FixtureState::default()
+                }
+            } else {
+                FixtureState::default()
+            },
+        )?;
+        let advanced = RuntimeCheckpointCodec::advance(&next, &bundle)?;
+        assert_eq!(
+            advanced.root(),
+            RuntimeCheckpointCodec::bundle(&next, None)?.root()
+        );
+        assert_eq!(RuntimeCheckpointCodec::materialize(&advanced)?, next);
+        assert_eq!(
+            advanced
+                .supplied_objects()
+                .iter()
+                .filter(|object| object.address().kind() == RuntimeObjectKind::ToolRuntime)
+                .count(),
+            usize::from(changed)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn withholding_the_last_segment_encodes_only_the_replacement() -> TestResult {
     let prefix = CanonicalHistory::new((0..64).map(history_segment).collect::<Result<_, _>>()?)?;
     let admitted = prefix.append(history_segment(64)?)?;
@@ -1177,6 +1234,33 @@ fn withholding_the_last_segment_encodes_only_the_replacement() -> TestResult {
         RuntimeCheckpointCodec::bundle(&next, None)?.root()
     );
     assert_eq!(RuntimeCheckpointCodec::materialize(&advanced)?, next);
+    Ok(())
+}
+
+#[test]
+fn withholding_without_a_replacement_or_prior_prefix_matches_a_full_encode() -> TestResult {
+    for (count, replace) in [(2, false), (1, true)] {
+        let history =
+            CanonicalHistory::new((0..count).map(history_segment).collect::<Result<_, _>>()?)?;
+        let prior = fixture_with_history(history.clone(), 1, false)?;
+        let bundle = RuntimeCheckpointCodec::bundle(&prior, None)?;
+        let prefix = history.without_last_segment();
+        let next = fixture_with_history(
+            if replace {
+                prefix.append(history_segment(3)?)?
+            } else {
+                prefix
+            },
+            2,
+            false,
+        )?;
+        let advanced = RuntimeCheckpointCodec::advance(&next, &bundle)?;
+        assert_eq!(
+            advanced.root(),
+            RuntimeCheckpointCodec::bundle(&next, None)?.root()
+        );
+        assert_eq!(RuntimeCheckpointCodec::materialize(&advanced)?, next);
+    }
     Ok(())
 }
 

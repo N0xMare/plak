@@ -56,6 +56,22 @@ fn text(value: u128, actor: Actor, content: &str) -> ConversationItem {
     )
 }
 
+#[test]
+fn history_equality_uses_content_across_allocations() {
+    let history = |last| {
+        CanonicalHistory::new(vec![
+            HistorySegment::inferred(vec![text(1, Actor::User, "prompt")]).expect("prompt"),
+            HistorySegment::inferred(vec![text(2, Actor::Assistant, last)]).expect("answer"),
+        ])
+        .expect("history")
+    };
+    let first = history("same");
+    let equal = history("same");
+    assert!(!first.shares_storage_with(&equal));
+    assert_eq!(first, equal);
+    assert_ne!(first, history("different"));
+}
+
 fn complete_exchange(value: u128) -> HistorySegment {
     let call_id = CallId::try_from(Uuid::from_u128(value)).expect("call ID");
     let correlation = ToolCorrelation::default();

@@ -448,17 +448,12 @@ impl BundleBuilder {
                 // Withholding an admitted prompt replaces only the last group.
                 // The new history proves it shares the old group's predecessor.
                 let prefix = prior_canonical.history().without_last_segment();
-                match (
-                    prior.history_head,
-                    canonical.history().append_delta_since(&prefix),
-                ) {
-                    (Some(head), Some(delta)) => {
-                        let object = prior_bundle
-                            .lookup(head)
-                            .ok_or(CheckpointBundleError::MissingObject)?;
-                        let previous = parse_sequence_node(&object.canonical_bytes)?.previous;
-                        (previous, prefix.segments().len(), delta)
-                    }
+                let head = prior
+                    .history_head
+                    .and_then(|head| prior_bundle.lookup(head))
+                    .and_then(|object| parse_sequence_node(&object.canonical_bytes).ok());
+                match (head, canonical.history().append_delta_since(&prefix)) {
+                    (Some(head), Some(delta)) => (head.previous, prefix.segments().len(), delta),
                     _ => (None, 0, canonical.history().segments().to_vec()),
                 }
             }
