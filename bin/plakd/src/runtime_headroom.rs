@@ -374,7 +374,7 @@ mod tests {
 
         let (result, warning) = set(u128::from(used) * 2);
         result.unwrap();
-        assert!(warning.is_empty());
+        assert_eq!(warning, "");
     }
 
     #[test]
