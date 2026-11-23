@@ -3134,6 +3134,10 @@ line-terminal rows, not canonical history. Before aborting a product
 retirement intent, an exclusive stopped-home owner must prove the runtime
 still exists without an archive receipt or delete tombstone.
 
+A read-only head proof can also bind authenticated quiescent metadata to a
+feed cursor. It needs a complete retained suffix after that cursor, not
+necessarily an empty one: release and prune records do not publish a head.
+
 Pruning superseded history (§4, §5.1) is the in-place reclaim: it keeps the
 session whole and needs no archive. It runs only on a line's head: a
 predecessor branch of a live line is kept whole as read-only history

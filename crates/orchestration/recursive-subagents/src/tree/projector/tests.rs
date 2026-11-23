@@ -1706,6 +1706,56 @@ fn a_withheld_admission_returns_its_batch_once_from_the_terminal_fact() {
 }
 
 #[test]
+fn historical_child_retirement_certifies_pre_witness_carriers_with_or_without_turns() {
+    for with_turn in [true, false] {
+        let (_tmp, mut tree, ids) = root_with_results(1);
+        let child = tree.messages()[&ids[0]].from.clone();
+        batch(&mut tree, "legacy-carrier", &ids);
+        let mut feed = Feed::new(ROOT_SESSION);
+        feed.accepted("legacy-carrier", turn(1));
+        feed.terminal("legacy-carrier", turn(1), End::Completed);
+        project(&mut tree, "root", &feed);
+        assert!(tree.retirement_summary(&child).is_some());
+
+        // The persisted pre-witness shape: Accepted, with its sequence and
+        // optionally a turn, but no terminal receipt in the operation ledger.
+        tree.operations
+            .remove("plak:retirement_carrier_terminal:legacy-carrier");
+        if !with_turn {
+            tree.commands.get_mut("legacy-carrier").unwrap().turn_id = None;
+        }
+        assert!(tree.retirement_summary(&child).is_none());
+        let root = Some(
+            format!("{ROOT_SESSION}/{}/{}", uuid(0xb), uuid(0x3002))
+                .parse()
+                .unwrap(),
+        );
+        let occupied = std::collections::BTreeSet::new();
+        let mut newer = tree.clone();
+        newer
+            .commands
+            .get_mut("legacy-carrier")
+            .unwrap()
+            .accepted_seq = Some(tree.feed_cursor(ROOT_SESSION) + 1);
+        assert_eq!(
+            newer.historical_carriers(u64::MAX, root, &occupied).len(),
+            0
+        );
+
+        let mut proofs = tree.historical_carriers(u64::MAX, root, &occupied);
+        assert_eq!(proofs.len(), 1);
+        let proof = proofs.remove(0);
+        assert_eq!(proof.cursor, tree.feed_cursor(ROOT_SESSION));
+        newer.apply_historical_carriers(&proof, root);
+        assert!(newer.retirement_summary(&child).is_none());
+
+        tree.apply_historical_carriers(&proof, root);
+        assert!(tree.retirement_summary(&child).is_some());
+        assert_eq!(tree.historical_carriers(u64::MAX, root, &occupied).len(), 0);
+    }
+}
+
+#[test]
 fn a_rejected_command_consumes_nothing() {
     let (_tmp, mut tree, ids) = root_with_results(1);
     batch(&mut tree, "cmd-1", &ids);

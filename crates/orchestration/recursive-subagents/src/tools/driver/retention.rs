@@ -1,13 +1,16 @@
 //! Child conversation retirement and candidate-pin cleanup.
 
 use super::{ProductAgentTree, TopologyError, TopologyErrorCode, TreeDriver, VcsError};
-use crate::tree::retention::{MAX_RETIREMENT_BATCH, RetirementIssue, RetirementTicket};
+use crate::tree::retention::{
+    HistoricalCarrierBatch, MAX_RETIREMENT_BATCH, RetirementIssue, RetirementTicket,
+};
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum Action {
+    Certify,
     Probe,
     Delete,
 }
@@ -56,9 +59,12 @@ impl TreeDriver {
         sessions: &AgentSessions,
         enabled: bool,
         occupied: std::collections::BTreeSet<String>,
+        root: Option<SessionLocator>,
     ) -> Result<(), TopologyError> {
         let now = plakous::model::now_unix_millis();
         let heads = if enabled {
+            self.certify_historical_carriers(sessions, now, root, &occupied)
+                .await?;
             self.read(|tree| tree.child_retirement_heads(now, &occupied))?
         } else {
             Vec::new()
@@ -93,6 +99,8 @@ impl TreeDriver {
             let raw = ticket.locator.as_deref().unwrap_or_default();
             if let Err(issue) = self.dispatch_retirement(sessions, &ticket).await {
                 self.retry_refused(agent, Action::Delete, raw);
+                tracing::debug!(target: "plak.topology", class = issue.label(),
+                    "child retirement dispatch deferred");
                 self.publish_retirement_issue(agent.clone(), issue).await;
                 continue;
             }
@@ -107,6 +115,51 @@ impl TreeDriver {
             finished?;
         }
         self.cleanup_candidate_pins().await
+    }
+
+    async fn certify_historical_carriers(
+        &self,
+        sessions: &AgentSessions,
+        now: u64,
+        root: Option<SessionLocator>,
+        occupied: &std::collections::BTreeSet<String>,
+    ) -> Result<(), TopologyError> {
+        let mut certified: Vec<HistoricalCarrierBatch> = Vec::new();
+        for batch in self.read(|tree| tree.historical_carriers(now, root, occupied))? {
+            let key = format!("{}@{}", batch.branch, batch.cursor);
+            if !self.retry_ready(&batch.recipient, Action::Certify, &key) {
+                continue;
+            }
+            let recipient = batch.recipient.clone();
+            let (all, proof) = batch.certify(sessions).await;
+            if all {
+                self.retry_clear(&recipient, Action::Certify);
+            } else {
+                self.retry_refused(&recipient, Action::Certify, &key);
+            }
+            certified.extend(proof);
+        }
+        if certified.is_empty() {
+            return Ok(());
+        }
+        let driver = self.clone();
+        self.write(move |tree| {
+            let before = (**tree).clone();
+            for batch in &certified {
+                tree.apply_historical_carriers(batch, root);
+            }
+            if before.revision != tree.revision {
+                match driver.save_claimed(tree) {
+                    Ok(revision) => tree.acknowledge_revision(revision),
+                    Err(error) => {
+                        **tree = before;
+                        return Err(TopologyError::from(error));
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await?
     }
 
     async fn prepare_due_retirements(

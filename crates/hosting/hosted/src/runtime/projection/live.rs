@@ -88,11 +88,15 @@ impl LiveTarget {
                 .await
                 .map_err(|error| error.message)?;
             if runtime
-                .collect_dormant_children(&self.sessions, self.roots.retire_finished_children)
+                .collect_dormant_children(
+                    &self.sessions,
+                    self.roots.retire_finished_children,
+                    Some(self.followed),
+                )
                 .await
                 .is_err()
             {
-                tracing::debug!(target: "plak.topology", "child retirement housekeeping remains unsettled");
+                tracing::warn!(target: "plak.topology", "child retirement housekeeping remains unsettled");
             }
         }
         Ok(())

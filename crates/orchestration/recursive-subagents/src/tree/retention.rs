@@ -66,7 +66,7 @@ pub(crate) enum RetirementIssue {
 }
 
 impl RetirementIssue {
-    const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Held => "held",
             Self::MovedOrPinned => "moved_or_pinned",
@@ -79,6 +79,16 @@ pub(crate) type ApprovedHeads = BTreeMap<String, (super::AttemptId, String, u64)
 
 pub(crate) const MAX_RETIREMENT_BATCH: usize = 8;
 const MAX_RETIREMENT_SUMMARIES: usize = 16;
+
+mod carriers;
+pub(crate) use carriers::HistoricalCarrierBatch;
+
+struct RetirementSource<'a> {
+    parent: &'a str,
+    depth: u8,
+    attempt: &'a super::AttemptRecord,
+    mail: &'a super::MailRecord,
+}
 
 fn short_text(value: &str, max: usize) -> String {
     value[..value.floor_char_boundary(max.min(value.len()))].to_owned()
@@ -324,6 +334,10 @@ impl ProductAgentTree {
         {
             return;
         }
+        self.record_carrier_terminal(agent, command, turn);
+    }
+
+    fn record_carrier_terminal(&mut self, agent: &str, command: &str, turn: &str) {
         let key = Self::carrier_terminal_key(command);
         if self
             .operations
@@ -353,13 +367,17 @@ impl ProductAgentTree {
             row.recipient == parent
                 && row.fact == Some(CommandFact::Accepted)
                 && row.message_ids.iter().any(|id| id == mail)
-                && !self
-                    .operations
-                    .get(&Self::carrier_terminal_key(&row.command_id))
-                    .is_some_and(|fact| {
-                        row.turn_id.as_deref() == Some(fact.canonical_request.as_str())
-                    })
+                && !self.carrier_has_terminal(row)
         })
+    }
+
+    fn carrier_has_terminal(&self, row: &super::AgentCommand) -> bool {
+        self.operations
+            .get(&Self::carrier_terminal_key(&row.command_id))
+            .is_some_and(|fact| {
+                fact.caller_agent_id == row.recipient
+                    && row.turn_id.as_deref().unwrap_or_default() == fact.canonical_request
+            })
     }
 
     pub(super) fn conversation_retired(&self, agent: &str) -> bool {
@@ -479,6 +497,31 @@ impl ProductAgentTree {
     }
 
     pub(in crate::tree) fn retirement_summary(&self, agent: &str) -> Option<RetiredChild> {
+        let RetirementSource {
+            parent,
+            depth,
+            attempt,
+            mail,
+        } = self.retirement_source(agent)?;
+        if self.retirement_carrier_unsettled(parent, &mail.message_id) {
+            return None;
+        }
+        let output = attempt.output_json.as_ref();
+        Some(RetiredChild {
+            parent: parent.to_owned(),
+            depth,
+            attempt: attempt.attempt_id.clone(),
+            status: attempt.status,
+            ended_at: attempt.ended_at?,
+            mail: Some((mail.message_id.clone(), digest_text(&mail.body))),
+            next_message_sequence: self.next_message_sequence,
+            result: output.map(|text| (digest_text(text), text.len())),
+            output: output.cloned(),
+            description: short_text(&self.nodes.get(agent)?.description, 256),
+        })
+    }
+
+    fn retirement_source(&self, agent: &str) -> Option<RetirementSource<'_>> {
         let node = self.nodes.get(agent)?;
         let parent = node.parent_agent_id.as_ref()?;
         let attempt = self.current_attempt(agent)?;
@@ -527,30 +570,24 @@ impl ProductAgentTree {
             }
             let body: serde_json::Value = serde_json::from_str(&mail.body).ok()?;
             if body["attempt_id"].as_str() == Some(attempt.attempt_id.as_str()) {
-                current = Some((mail.message_id.clone(), digest_text(&mail.body)));
+                current = Some(mail);
             }
         }
         // Absence is not proof of disposition. A closed in-flight attempt
         // which never published results and has no witness is left alone.
-        let (mail, _) = current.as_ref()?;
-        if self.retirement_carrier_unsettled(parent, mail) {
+        if attempt.ended_at.is_none()
+            || attempt
+                .output_json
+                .as_ref()
+                .is_some_and(|text| text.len() > crate::protocol::MAX_OUTPUT_JSON_BYTES)
+        {
             return None;
         }
-        let output = attempt.output_json.as_ref();
-        if output.is_some_and(|text| text.len() > crate::protocol::MAX_OUTPUT_JSON_BYTES) {
-            return None;
-        }
-        Some(RetiredChild {
-            parent: parent.clone(),
+        Some(RetirementSource {
+            parent,
             depth: node.depth,
-            attempt: attempt.attempt_id.clone(),
-            status: attempt.status,
-            ended_at: attempt.ended_at?,
-            mail: current,
-            next_message_sequence: self.next_message_sequence,
-            result: output.map(|text| (digest_text(text), text.len())),
-            output: output.cloned(),
-            description: short_text(&node.description, 256),
+            attempt,
+            mail: current?,
         })
     }
 
@@ -588,7 +625,12 @@ impl ProductAgentTree {
     ) -> Vec<(String, super::AttemptId, String)> {
         self.due_children(now)
             .into_iter()
-            .filter(|agent| !occupied.contains(agent) && self.retirement_summary(agent).is_some())
+            .filter(|agent| {
+                !occupied.contains(agent)
+                    && self.retirement_source(agent).is_some_and(|source| {
+                        !self.retirement_carrier_unsettled(source.parent, &source.mail.message_id)
+                    })
+            })
             .filter_map(|agent| {
                 let node = &self.nodes[&agent];
                 Some((

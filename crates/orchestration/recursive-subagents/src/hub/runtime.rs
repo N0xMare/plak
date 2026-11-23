@@ -415,6 +415,7 @@ impl ProductTopologyRuntime {
         &self,
         sessions: &plakous::sessions::AgentSessions,
         enabled: bool,
+        root: Option<plakous::sessions::SessionLocator>,
     ) -> Result<(), String> {
         let live = self.live.lock().await;
         if self.is_closed() || self.step_paused.load(Ordering::Acquire) {
@@ -440,7 +441,7 @@ impl ProductTopologyRuntime {
                 .cloned(),
         );
         self.driver()
-            .collect_dormant_children(sessions, enabled, occupied)
+            .collect_dormant_children(sessions, enabled, occupied, root)
             .await
             .map_err(|error| error.message)
     }

@@ -2233,7 +2233,18 @@ after restart or after the policy is disabled.
 An accepted command carrying the selected result can still return it, even
 when its root or child recipient looks idle. Retirement requires durable
 evidence that the projector applied that command's non-withheld closing
-terminal. Older accepted carriers without such evidence are retained.
+terminal. For a historical Accepted command without a witness, the probe
+certifies only an acceptance at or before the recipient session's durable
+tree cursor and an authenticated quiescent current line head already published
+at that cursor. A complete feed suffix may contain releases or prunes, but
+cannot contain that head's publication. For a carrier with a turn identity,
+the authenticated feed can instead prove the matching acceptance and a
+non-withheld, non-recovery-required terminal at or before the cursor. This
+also works while a later turn is Working. The exact terminal scan is bounded;
+missing or incomplete proof defers. A carrier without a turn identity must
+use the quiescent-head proof. The
+tree publishes the witness under custody after rechecking the command,
+recipient binding and cursor.
 A pass skips refused exact locators with bounded exponential delay and
 admits at most eight proved new intents; refused probes do not consume
 that batch limit.
@@ -2257,7 +2268,8 @@ records. The runtime's bounded GC preserves objects reachable from other
 sessions. A durable allocation watermark
 prevents reuse of collected child identities and does not refund spent attempts.
 Immutable receipts belonging to still-retained callers remain replay authority.
-Retired children have a presentation-only closed row in the source tree.
+The newest sixteen retained child summaries have presentation-only closed
+rows in the source tree; pending summaries are never evicted.
 Exact reopen handles the runtime as intentionally absent, as do a fork and
 export; the summary is not carried. A separately retained candidate is still
 reported according to its own ownership.

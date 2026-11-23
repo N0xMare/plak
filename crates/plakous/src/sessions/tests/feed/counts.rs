@@ -57,6 +57,63 @@ async fn line_identity_does_not_load_conversation_checkpoints() -> TestResult {
 }
 
 #[tokio::test]
+async fn historical_child_retirement_head_must_have_published_by_the_cursor() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(CountingReads::new()?);
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        store.clone(),
+        RuntimeDurability::Disabled,
+    ))?;
+    let locator = completed_session(&sessions, &workspace, "retirement-head").await?;
+    let page = sessions
+        .feed_page(FeedPageRequest::after(FeedCursor::start(
+            locator.session_id(),
+        )))
+        .await?;
+    let FeedPage::Records { records, tail, .. } = page else {
+        return Err("expected the entire fixture feed".into());
+    };
+    let published = records
+        .iter()
+        .find_map(|record| match record.header().change {
+            FeedChange::Advanced { checkpoint, .. } if checkpoint == locator.checkpoint_id() => {
+                Some(record.header().seq.get())
+            }
+            _ => None,
+        })
+        .ok_or("missing head publication")?;
+    assert!(
+        published < tail.get(),
+        "lease release follows head publication"
+    );
+    store.reset();
+    assert!(
+        !sessions
+            .quiescent_head_at_feed_cursor(locator, published - 1)
+            .await?
+    );
+    assert!(
+        sessions
+            .quiescent_head_at_feed_cursor(locator, published)
+            .await?
+    );
+    assert!(
+        sessions
+            .quiescent_head_at_feed_cursor(locator, tail.get())
+            .await?
+    );
+    assert!(
+        !sessions
+            .quiescent_head_at_feed_cursor(locator, tail.get() + 1)
+            .await?
+    );
+    assert_eq!(store.branches.load(Ordering::SeqCst), 0);
+    assert_eq!(store.checkpoints.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn head_observations_do_not_request_materialized_branches() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);

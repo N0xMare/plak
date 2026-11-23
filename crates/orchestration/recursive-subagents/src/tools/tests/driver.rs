@@ -569,11 +569,11 @@ async fn child_retention_runtime_archive_delete_crash_cuts() {
                 .unwrap();
         }
         driver
-            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new())
+            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new(), None)
             .await
             .unwrap();
         driver
-            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new())
+            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new(), None)
             .await
             .unwrap();
         assert!(

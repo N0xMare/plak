@@ -50,7 +50,7 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, false)
+        .collect_dormant_children(&sessions, false, None)
         .await
         .unwrap();
     assert!(
@@ -96,7 +96,7 @@ fn collector_process() {
         }
         fixture
             .runtime
-            .collect_dormant_children(&sessions, true)
+            .collect_dormant_children(&sessions, true, None)
             .await
             .unwrap();
         sessions.reclaim().await.unwrap();
@@ -201,12 +201,12 @@ async fn assert_recovery(
     );
     fixture
         .runtime
-        .collect_dormant_children(&sessions, true)
+        .collect_dormant_children(&sessions, true, None)
         .await
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, false)
+        .collect_dormant_children(&sessions, false, None)
         .await
         .unwrap();
     sessions.reclaim().await.unwrap();

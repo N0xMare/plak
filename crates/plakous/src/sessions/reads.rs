@@ -170,6 +170,62 @@ impl AgentSessions {
 }
 
 impl AgentSessions {
+    /// Proves that the current head of this branch's line is quiescent and
+    /// already published at `cursor`, without reconstructing history.
+    ///
+    /// A later release or prune does not disqualify the head. A gap or a
+    /// suffix that does not fit in one authenticated feed page is unproven.
+    ///
+    /// # Errors
+    /// Returns typed lookup, metadata integrity or backend read failures.
+    #[doc(hidden)]
+    pub async fn quiescent_head_at_feed_cursor(
+        &self,
+        branch: SessionLocator,
+        cursor: u64,
+    ) -> Result<bool, AgentSessionsError> {
+        use super::feed::{FeedChange, FeedCursor, FeedPage, FeedPageRequest, FeedSeq};
+
+        let (head, metadata) = self
+            .store
+            .load_branch_metadata(branch.session_ref(), "quiescent_head_at_feed_cursor")
+            .await
+            .map_err(store_error)?;
+        if !matches!(metadata.lifecycle, RuntimeLifecycle::Quiescent) {
+            return Ok(false);
+        }
+        let seq = FeedSeq::new(cursor);
+        let FeedPage::Records { records, tail, .. } = self
+            .feed_page(FeedPageRequest::after(FeedCursor::new(
+                branch.session_id,
+                seq,
+            )))
+            .await?
+        else {
+            return Ok(false);
+        };
+        let checkpoint = head.checkpoint().checkpoint_id();
+        if records.last().map_or(seq, |record| record.header().seq) != tail
+            || records.iter().any(|record| match record.header().change {
+                FeedChange::Created { genesis, .. } => genesis == checkpoint,
+                FeedChange::Advanced {
+                    checkpoint: published,
+                    ..
+                } => published == checkpoint,
+                FeedChange::Branched { target, .. } => target == checkpoint,
+                _ => false,
+            })
+        {
+            return Ok(false);
+        }
+        let line = self
+            .store
+            .load_line(metadata.topology.line)
+            .await
+            .map_err(store_error)?;
+        Ok(line.head() == head.session() && line.generation() == metadata.topology.line_generation)
+    }
+
     pub(super) async fn head_metadata(
         &self,
         locator: SessionLocator,
