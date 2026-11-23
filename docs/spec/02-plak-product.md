@@ -1119,10 +1119,9 @@ binding digests instead bumps the generation and uses a cross-key settled
 carry. Steps accumulate within a generation and are deleted at its next
 generation bump. A fresh store creates the frozen generation base and runs
 the same steps in order. Each step starts at the pinned source fingerprint and
-validates the exact destination shape and fingerprint. Tree revision 12 adds
-local finished-child summaries to generation 11 without changing the state
-key, runtime authority format or export document. The same-key drain joins
-in-flight retirement before surrender (chapter 03 §6.7).
+validates the exact destination shape and fingerprint. Local finished-child
+summaries are an additive tree revision, not a new state key or export
+format (chapter 03 §6.7).
 
 Ordinary read-only opens and inspections never upgrade: they refuse an older
 revision in range with `upgrade pending`. A revision below the generation or
@@ -5945,8 +5944,9 @@ already-admitted Stop receipts before Ready; a Stop that has not settled
 within that join bound prevents surrender.
 The held phase seals admission, joins Stop, rechecks held roots, inspects
 runner inventory when required, and rechecks the image before sending Ready.
-After Ready the releasing host records planned continuation for joined
-children independently of each root owner's release (chapter 03 §14.1).
+The drain joins in-flight child retirement before surrender. After Ready,
+the releasing host records planned continuation for joined children
+independently of each root owner's release (chapter 03 §§6.7, 14.1).
 Mandatory owner/placement rendezvous and planned-release
 acknowledgements keep bounded joins; finite modes share one natural deadline
 plus one freeze allowance, never multiplied by sessions. Idle's freeze

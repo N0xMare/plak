@@ -3129,11 +3129,6 @@ different archived revision. Retry after deletion reads only the exact
 tombstone; it cannot delete a substitute session. The library itself has no
 automatic child retention policy.
 
-The retirement probe reads addressed lifecycle and job metadata plus
-line-terminal rows, not canonical history. Before aborting a product
-retirement intent, an exclusive stopped-home owner must prove the runtime
-still exists without an archive receipt or delete tombstone.
-
 A read-only head proof can also bind authenticated quiescent metadata to a
 feed cursor. It needs a complete retained suffix after that cursor, not
 necessarily an empty one: release and prune records do not publish a head.

@@ -878,10 +878,9 @@ on Linux it reads each PID's procfs `stat` record for start, session and group;
 on macOS it selects each PID with `ps -p` for its start record and checks
 membership with kernel `getsid` and `getpgid`. With the child still unreaped,
 the probe also requires one complete cleanup scan to match both live PIDs'
-start, session and group. It may start up to three fresh enumerations when a
-scan is incomplete, using the existing per-scan bound and discarding partial
-rows; a complete scan that does not match refuses without retry. The child
-must still be alive afterward. This capability check is not absence evidence
+start, session and group. It may retry an incomplete scan within the startup
+attempt bound, discarding partial rows. A complete scan that does not match
+refuses without retry. The child must still be alive afterward. This capability check is not absence evidence
 and does not change cleanup's scan or escalation rules.
 Before each group signal,
 one complete fresh scan must put every group member in the anchored leader's

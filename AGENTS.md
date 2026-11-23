@@ -27,7 +27,7 @@ just --list                # other recipes
 ```
 
 Production install requires exact-tree batch and install evidence and
-[qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-developer-gate-tiers).
+[qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-repository-settings).
 
 ## Where to read
 

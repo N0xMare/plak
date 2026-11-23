@@ -2242,12 +2242,8 @@ the authenticated feed can instead prove the matching acceptance and a
 non-withheld, non-recovery-required terminal at or before the cursor. This
 also works while a later turn is Working. The exact terminal scan is bounded;
 missing or incomplete proof defers. A carrier without a turn identity must
-use the quiescent-head proof. The
-tree publishes the witness under custody after rechecking the command,
-recipient binding and cursor.
-A pass skips refused exact locators with bounded exponential delay and
-admits at most eight proved new intents; refused probes do not consume
-that batch limit.
+use the quiescent-head proof. The tree publishes the witness under custody
+after rechecking the command, recipient binding and cursor.
 
 The tree checks no remaining owner, hold, work or recovery debt, then obtains
 the runtime store's exact retirement proof. A bounded pass prepares intents
@@ -2255,8 +2251,8 @@ under the tree's custody after rechecking eligibility and the same locator.
 That save closes follow-up and retains a bounded result summary: stable child,
 parent, attempt and mail identities, final status, result digest, exact
 submitted result where available and a short display label. It carries no
-prompt, transcript or captures. It uses the existing 256 KiB submit-result
-bound; a delivered preview does not authorize discarding the full result.
+prompt, transcript or captures. A delivered preview does not authorize
+discarding the full admitted result.
 
 Only the facade may archive the released session at the approved branch head
 and session revision and delete its next, archived revision. The store checks
@@ -2268,14 +2264,13 @@ records. The runtime's bounded GC preserves objects reachable from other
 sessions. A durable allocation watermark
 prevents reuse of collected child identities and does not refund spent attempts.
 Immutable receipts belonging to still-retained callers remain replay authority.
-The newest sixteen retained child summaries have presentation-only closed
-rows in the source tree; pending summaries are never evicted.
+Retained child summaries have presentation-only closed rows in the source tree.
 Exact reopen handles the runtime as intentionally absent, as do a fork and
 export; the summary is not carried. A separately retained candidate is still
 reported according to its own ownership.
 
-The tree keeps at most sixteen summaries, evicting the oldest completed
-ones before admitting more. A pending summary is not evicted. A refused
+The tree bounds retained summaries, evicting the oldest completed ones
+before admitting more. A pending summary is not evicted. A refused
 pending intent is housekeeping, not projection debt, and the tree names
 its refusal class without printing runtime content. With every home writer
 stopped, an operator can abort a pending intent before archive or a delete
