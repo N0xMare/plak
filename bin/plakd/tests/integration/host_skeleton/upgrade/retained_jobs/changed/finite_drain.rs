@@ -2,6 +2,7 @@
 
 use super::*;
 use plakd::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
+use plakous_offline_crash_harness::ledger_signature::inspect_jobs;
 use plakous_recursive_subagents::tree::{ContinuationCause, ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use std::fs::OpenOptions;
@@ -89,9 +90,14 @@ impl FiniteDrain {
 
     fn foreground_plan(&self, child: bool) -> serde_json::Value {
         let root = shell_words::quote(self.fixture.root.to_str().unwrap());
+        let observation = if child {
+            "printf ready > handoff-observation.txt; "
+        } else {
+            ""
+        };
         let command = format!(
             "base={root}/blocked-fg; mkfifo \"$base.release\"; exec 3<>\"$base.release\";\
-             printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; read gate <&3; exit 9"
+             {observation}printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; read gate <&3; exit 9"
         );
         let tool = if child {
             json!({"name": "bash", "arguments": {"command": command, "timeout": 600}})
@@ -160,7 +166,10 @@ fn finite_exec_drain_promotes_a_running_root_without_waiting_for_its_job() {
         }]
     }));
     sut.upgrade(&mut host, "5m");
+    let (head, _) = identity(&sut.fixture, &plakd::home::state::state_key(), &session);
+    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     sut.finish_job(original);
+    wait_retained_terminal(&paths.runtime_database(), head);
     release_continuation(&sut.fixture);
     let mut client = Client::connect(&host);
     profiles::wait_idle(&mut client, &session);
@@ -168,8 +177,6 @@ fn finite_exec_drain_promotes_a_running_root_without_waiting_for_its_job() {
     drop(client);
     stop(&mut host);
 
-    let (head, _) = identity(&sut.fixture, &plakd::home::state::state_key(), &session);
-    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     assert_eq!(
         inspect_process_notices(&paths.runtime_database(), head).unwrap(),
         [1]
@@ -228,7 +235,7 @@ fn child_with_pending_root(
             "version": 1, "process_tools": true,
         "steps": [
             {"gate": {"file": sut.fixture.root.join("resume-release")},
-             "output": {"tool": {"name": "wait", "arguments": {"timeout_ms": 0}}},
+             "output": {"tool": {"name": "read", "arguments": {"path": "handoff-observation.txt"}}},
              "finish": "tool_calls"},
             {
                 "output": {"tool": {"name": "submit_result", "arguments": {
@@ -263,7 +270,11 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
+    let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
+    let locator = child_locator(&store, child);
     sut.finish_job(child.original);
+    wait_retained_terminal(&paths.runtime_database(), locator);
     release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
     root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
@@ -273,20 +284,9 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     );
     stop(host);
 
-    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
-    let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
     assert_eq!(loss_resumptions(&tree), 1);
-    let locator = tree
-        .nodes()
-        .values()
-        .find(|node| node.parent_agent_id.is_some())
-        .unwrap()
-        .session_locator
-        .as_deref()
-        .unwrap()
-        .parse()
-        .unwrap();
+    assert_eq!(child_locator(&store, child), locator);
     assert_eq!(
         inspect_process_notices(&paths.runtime_database(), locator).unwrap(),
         [1]
@@ -308,6 +308,41 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
         "{turns:?}"
     );
     assert_eq!(marked(&sut.fixture, "blocked", "fg"), child.original);
+}
+
+fn child_locator(
+    store: &SqliteTreeStore,
+    child: &PendingChild,
+) -> plakous::sessions::SessionLocator {
+    let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
+    tree.nodes()
+        .values()
+        .find(|node| node.parent_agent_id.is_some())
+        .unwrap()
+        .session_locator
+        .as_deref()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+fn wait_retained_terminal(database: &Path, locator: plakous::sessions::SessionLocator) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if inspect_jobs(database, locator)
+            .unwrap()
+            .iter()
+            .any(|job| job.number == 1 && job.terminal)
+            || inspect_process_notices(database, locator).unwrap() == [1]
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the original runner's terminal did not reach the resumed branch"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn loss_resumptions(tree: &ProductAgentTree) -> usize {
