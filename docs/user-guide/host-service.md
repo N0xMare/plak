@@ -188,12 +188,32 @@ operation; the new unit has a new PID.
 
 On Linux, a same-key exec upgrade inherits the running environment. The
 allocator setting in the new unit does not take effect until the unit is
-rewritten and the service actually restarts; `plakd deploy` reports the older
-unit as template drift. Rehearse this separately from the cutover. After the
-cutover, back up and remove only the installed `plakd-host.service` file,
-then run the new build's `plakd host install` with the same `--web` and `--ui`
-arguments. Once installation succeeds, perform a planned
-`systemctl --user restart plakd-host.service`.
+rewritten and the service actually restarts. Until it is reinstalled,
+`plakd deploy plan` refuses the old unit as template drift with the
+“not the generated stable-link unit” (NORMALIZE) message. Rehearse this
+separately from the cutover. After the cutover, back up and remove only the
+installed `plakd-host.service` file, then run the new build's
+`plakd host install` with the same `--web` and `--ui` arguments and the same
+`PLAK_HOME` (the unit pins the product home).
+
+Before the planned restart, check the effective unit:
+
+```sh
+systemctl --user show plakd-host.service -p FragmentPath,DropInPaths,NeedDaemonReload
+```
+
+It must report the generated `FragmentPath` at
+`$HOME/.config/systemd/user/plakd-host.service`, empty `DropInPaths`, and
+`NeedDaemonReload=no`. Then restart and verify the running process:
+
+```sh
+systemctl --user restart plakd-host.service
+pid=$(systemctl --user show -p MainPID --value plakd-host.service)
+tr '\0' '\n' <"/proc/$pid/environ" | grep '^MALLOC_ARENA_MAX='
+```
+
+The last command prints `MALLOC_ARENA_MAX=2`. The setting only affects glibc;
+musl ignores it.
 
 An additive product or tree store revision can advance in place without
 changing the state key. The new host revises the stores after the old host

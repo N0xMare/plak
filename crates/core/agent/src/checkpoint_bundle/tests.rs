@@ -1239,7 +1239,7 @@ fn withholding_the_last_segment_encodes_only_the_replacement() -> TestResult {
 
 #[test]
 fn withholding_without_a_replacement_or_prior_prefix_matches_a_full_encode() -> TestResult {
-    for (count, replace) in [(2, false), (1, true)] {
+    for (count, replace) in [(64, false), (1, true)] {
         let history =
             CanonicalHistory::new((0..count).map(history_segment).collect::<Result<_, _>>()?)?;
         let prior = fixture_with_history(history.clone(), 1, false)?;
@@ -1255,6 +1255,7 @@ fn withholding_without_a_replacement_or_prior_prefix_matches_a_full_encode() -> 
             false,
         )?;
         let advanced = RuntimeCheckpointCodec::advance(&next, &bundle)?;
+        assert!(advanced.stats().visited_object_count() <= 20);
         assert_eq!(
             advanced.root(),
             RuntimeCheckpointCodec::bundle(&next, None)?.root()
