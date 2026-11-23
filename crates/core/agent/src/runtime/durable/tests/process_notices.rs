@@ -165,8 +165,7 @@ async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
         registry,
     )?;
     if on_runner {
-        builder =
-            builder.with_runner_services(super::placement_hold::placed_services(directory.path())?);
+        builder = builder.with_runner_services(placement_hold::placed_services(directory.path())?);
     }
     let runtime = DurableSessionRuntime::current(
         Arc::new(TestCreateStore::default()),
@@ -192,7 +191,7 @@ async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
             if service
                 .jobs()
                 .iter()
-                .any(|job| job.status == plakous_tools::JobStatus::Exited(7))
+                .any(|job| job.status == plakous_tools::JobStatus::Exited(Some(7)))
             {
                 return Ok::<(), plakous_tools::ExecutionBackendError>(());
             }
@@ -214,15 +213,10 @@ async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
         .await?;
     assert!(matches!(waited.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(tool.dispatches.load(Ordering::Acquire), 2);
-    assert!(
-        model
-            .observed_request_texts()
-            .iter()
-            .flatten()
-            .any(|text| text.contains("already_reported")),
-        "explicit Wait did not see the consumed terminal: {:?}",
-        model.observed_request_texts(),
-    );
+    assert!(waited.conversation().items().iter().flat_map(ConversationItem::blocks).any(|block|
+        matches!(block, ContentBlock::ToolResult(result) if result.parts().iter().any(|part|
+            matches!(part, ToolResultPart::Text(text) if text.text() == "already_reported")))),
+        "explicit Wait did not see the consumed terminal");
     assert_eq!(notice_count(&agent), 1);
     agent.shutdown().await?;
     Ok(())

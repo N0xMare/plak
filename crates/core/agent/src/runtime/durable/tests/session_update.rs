@@ -174,7 +174,7 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                         "live"
                     } else if matches!(
                         plakous_tools::internal::reported_process_session(&sessions, 1),
-                        Some((_, plakous_tools::JoinedProcessStatus::Exited(7)))
+                        Some((_, plakous_tools::JoinedProcessStatus::Exited(Some(7))))
                     ) {
                         "already_reported"
                     } else {

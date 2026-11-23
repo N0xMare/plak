@@ -268,7 +268,7 @@ async fn runner_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestR
             loop {
                 port.refresh_jobs()?;
                 if port.jobs().iter().any(|job| {
-                    job.number == number && job.status == plakous_tools::JobStatus::Exited(7)
+                    job.number == number && job.status == plakous_tools::JobStatus::Exited(Some(7))
                 }) {
                     return Ok::<(), plakous_tools::ExecutionBackendError>(());
                 }

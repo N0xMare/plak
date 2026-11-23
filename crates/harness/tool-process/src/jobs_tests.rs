@@ -1,7 +1,7 @@
 use super::*;
 use crate::canonical::{
     AwaitWake, CanonicalProcessAwaitRequest, CanonicalProcessInputDisposition,
-    CanonicalProcessStartRequest, CanonicalProcessWriteRequest,
+    CanonicalProcessPollRequest, CanonicalProcessStartRequest, CanonicalProcessWriteRequest,
 };
 use plakous_model::{CancellationToken, RunId};
 use plakous_tools::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope};
@@ -1359,11 +1359,9 @@ async fn local_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestRe
     let id = sessions.session_for_number(number).ok_or("live job")?;
     sessions.write_stdin(id, b"go\n", JoinedProcessInputDisposition::KeepOpen)?;
     tokio::time::timeout(Duration::from_secs(10), async {
-        while !sessions
-            .jobs()
-            .iter()
-            .any(|job| job.number == number && job.status == plakous_tools::JobStatus::Exited(7))
-        {
+        while !sessions.jobs().iter().any(|job| {
+            job.number == number && job.status == plakous_tools::JobStatus::Exited(Some(7))
+        }) {
             tokio::task::yield_now().await;
         }
     })
@@ -1428,5 +1426,22 @@ pub(super) async fn assert_notice_wait(
             "exit_code": 7,
         }]})
     );
+    let poll = ProcessSessionTools::poll_canonical(
+        environment,
+        &CanonicalProcessPollRequest {
+            session_id: handle,
+            cursor: None,
+            read_so_far: true,
+            wait_for_exit: false,
+            yield_time_ms: 0,
+            max_output_bytes: 4096,
+            max_output_records: 256,
+        },
+        &OperationContext::new(CancellationToken::new()),
+    )
+    .await?;
+    assert!(poll.projection.output.is_empty());
+    assert_eq!(poll.projection.exit_code, Some(7));
+    assert_eq!(poll.projection.session_id, None);
     Ok(())
 }
