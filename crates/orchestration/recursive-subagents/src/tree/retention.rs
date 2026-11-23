@@ -270,7 +270,7 @@ impl ProductAgentTree {
             || self.pending_mail(agent).iter().any(|mail| {
                 !matches!(
                     mail.durable,
-                    super::MailDurableState::Acknowledged | super::MailDurableState::Terminal
+                    MailDurableState::Acknowledged | MailDurableState::Terminal
                 )
             })
             || self

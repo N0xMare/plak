@@ -1319,7 +1319,7 @@ impl SessionStore for MemorySessionStore {
         &self,
         session: SessionRef,
         checkpoint: CheckpointId,
-    ) -> StoreFuture<'_, plakous_agent::internal::SessionRevision> {
+    ) -> StoreFuture<'_, SessionRevision> {
         Box::pin(async move {
             let state = self.lock()?;
             require_open(&state)?;
