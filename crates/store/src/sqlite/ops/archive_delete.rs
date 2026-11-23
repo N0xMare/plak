@@ -111,6 +111,17 @@ pub(in super::super) fn retirement_head(
     if row.head.checkpoint().checkpoint_id() != checkpoint {
         return Err(SessionStoreError::Conflict);
     }
+    let head = session_head(tx, session)?.ok_or(SessionStoreError::NotFound)?;
+    let (_, metadata) = inspection::branch_metadata_for_session(tx, selector, head)?;
+    let topology = metadata.topology;
+    lines::require_line_head(tx, selector, topology.line, topology.line_generation)?;
+    if !matches!(
+        metadata.lifecycle,
+        plakous_agent::internal::RuntimeLifecycle::Quiescent
+    ) || metadata.has_unsettled_jobs
+    {
+        return Err(SessionStoreError::Conflict);
+    }
     let pinned: bool = tx
         .query_row(
             "SELECT (SELECT count(*) FROM branches WHERE session_id=?1) <> 1
@@ -130,17 +141,6 @@ pub(in super::super) fn retirement_head(
             .optional()
             .map_err(map_sqlite)?
             .is_some()
-    {
-        return Err(SessionStoreError::Conflict);
-    }
-    let head = session_head(tx, session)?.ok_or(SessionStoreError::NotFound)?;
-    let (_, metadata) = inspection::branch_metadata_for_session(tx, selector, head)?;
-    let topology = metadata.topology;
-    lines::require_line_head(tx, selector, topology.line, topology.line_generation)?;
-    if !matches!(
-        metadata.lifecycle,
-        plakous_agent::internal::RuntimeLifecycle::Quiescent
-    ) || metadata.has_unsettled_jobs
     {
         return Err(SessionStoreError::Conflict);
     }

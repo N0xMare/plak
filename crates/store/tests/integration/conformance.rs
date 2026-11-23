@@ -1495,7 +1495,13 @@ pub(crate) async fn run_child_retirement_conformance(
             "{kind}"
         );
     }
-    pinned_child_retirement_heads(store, durability).await
+    pinned_child_retirement_heads(store, durability).await?;
+    store.shutdown().await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, head).await,
+        Err(SessionStoreError::Shutdown)
+    );
+    Ok(())
 }
 
 async fn pinned_child_retirement_heads(

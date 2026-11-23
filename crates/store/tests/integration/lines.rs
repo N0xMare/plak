@@ -835,6 +835,15 @@ async fn deletion_ends_the_line(
         Some(SessionStoreError::NotLineHead)
     );
     store.release(held.lease).await?;
+    assert_eq!(
+        store
+            .probe_child_retirement(
+                held.branch.session(),
+                held.branch.checkpoint().checkpoint_id()
+            )
+            .await,
+        Err(SessionStoreError::NotLineHead)
+    );
     assert!(store.load_line(fork_line).await.is_ok());
     Ok(())
 }
