@@ -6,12 +6,9 @@ There is no CLA and no DCO sign-off.
 
 ## Before you change anything
 
-- Read [`AGENTS.md`](../AGENTS.md) and the [spec overview](../docs/spec/00-overview.md),
-  then the spec chapter that owns your change. `docs/spec/` is the authority for
-  behavior; `docs/user-guide/` for usage.
-- A change to public semantics, crate boundaries, persistence or wire formats,
-  security boundaries or supported platforms updates the owning spec section in
-  the same pull request.
+- Use the section map in [`AGENTS.md`](../AGENTS.md) to read the spec section
+  that owns your change. Follow [spec admission](../docs/spec/00-overview.md#spec-admission)
+  when updating it.
 - Report security issues privately; see [SECURITY.md](SECURITY.md).
 
 ## Build and test
@@ -22,8 +19,8 @@ platforms are Apple Silicon macOS and Linux x86_64 musl.
 
 ```sh
 just dev-tools install   # once: pinned cargo-nextest, cargo-deny and ruff
-just fast PKG...         # worker gate: named packages and their dependents
-just check               # Linux workspace gate (no durability)
+just fast PKG...         # worker gate; add --rdeps for dependent tests
+just check               # workspace static group
 ```
 
 There is no CI except the release workflow ([spec 06 §6.6](../docs/spec/06-build-and-support-surface.md)).

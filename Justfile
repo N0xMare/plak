@@ -33,6 +33,9 @@ install-checks:
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
+[doc("workspace static checks")]
+check: (steps "static")
+
 # A pass on a clean tree records it as publication evidence.
 [doc("release candidate: every group, including archive verification and long soaks")]
 full:

@@ -1,0 +1,5 @@
+*.lock
+/eval/
+/crates/hosting/hosted/tests/fixtures/binding-contracts.json
+/crates/hosting/hosted/tests/fixtures/current-bindings/
+/crates/hosting/hosted/tests/fixtures/previous-release/

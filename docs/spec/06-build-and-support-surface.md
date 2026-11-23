@@ -779,6 +779,11 @@ tool descriptor/presentation comparison as not rehearsed because it requires
 credentialed runtime compilation. Success is an offline preflight, not a
 promise that authenticated resume succeeds.
 
+### Code style
+
+Write comments only for non-obvious invariants or trade-offs. Do not record
+history, narrate the code, or write a doc comment that merely restates the item.
+
 ## 5. Unsafe surface
 
 The workspace lint table sets `unsafe_code = "forbid"`, together with
@@ -1445,7 +1450,10 @@ including the configuration/window builder's runner workspace and skill reads.
 These probes dispatch no turn and do not open a foreign state key as session
 authority. The source hashes the destination and retains its own executable
 path in the ownership receipt; startup/retry verifies the selected image again.
-Keep both immutable snapshots with matching sidecars through acknowledgement.
+Use a tested maintainer snapshot for product host changes; keep the paired
+host and runner on the same source revision. Settle work before a coordinated
+upgrade and report both binary IDs. Keep both immutable snapshots with
+matching sidecars through acknowledgement.
 Installation alone does not execute an upgrade, and old snapshots/state are not
 automatically removed. For a remote placement, advance its dedicated command
 link to the matching immutable snapshot before invoking host upgrade; normal
@@ -2374,19 +2382,10 @@ group also refreshes stale index entries a version requirement names (§6.5).
 
 ## 9. Change requirements
 
-A change to **public semantics, crate boundaries, a persisted or wire format, a
-security boundary, or a supported platform** MUST update the section of this
-specification that owns the rule, in the same change. There is no changelog and
-no separate decision step: this specification is the record of what the system
-does, and documentation moves with the behavior it describes. The same applies
-to `../user-guide/` when a change alters what an operator types or sees.
+See [spec admission](00-overview.md#spec-admission) for which changes update
+the spec or user guide.
 
-Decision history is not tracked in this repository.
-
-Beyond the mechanical gate in chapter 05, three rules constrain every change.
-**Backward compatibility is not preserved**: obsolete paths are removed rather
-than wrapped in compatibility layers, fallbacks, or migrations, and an unshipped
-API or database carries no compatibility claim. **The simplest implementation
+Beyond the mechanical gate in chapter 05, **the simplest implementation
 that fully meets the current architecture wins**, without speculative
 abstraction, configuration, or indirection. **Visibility stays as narrow as it
 can be** — private, then `pub(crate)`, then public — with parsing and

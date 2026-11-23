@@ -1,170 +1,75 @@
 # plakd / Plakous
 
-This monorepo is **Plakous**, an embeddable single-agent multi-provider harness
-library, and **plakd**, the host server and operator/batch CLI that consumes only the public `plakous`
-facade and the host-layer crates above it. Plakous owns the loop, providers,
-profiles, auth, and admit/revalidate; plakd owns product policy and wire UX. There is no second
-runtime in plakd and no multi-agent topology in Plakous L0 — L0 is exactly
+**Plakous** is an embeddable single-agent, multi-provider harness. It owns the
+loop, providers, profiles, auth, admission and revalidation. L0 is exactly
 `plakous-model`, `plakous-tools`, `plakous-agent` and the `plakous` facade.
-The workspace version is 0.0.4. Supported and published-internal packages are
-publishable to crates.io as one exact cohort and repository-only packages are
-not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
-complete build.
-
-Host/web serving is supported in the default product. The public stdio bridge
-owns discovery and explicitly opted-in local startup; bare `plakd` prints help
-without opening a session or starting a host. There is no default plakd client
-or UI in this repository: bring and maintain your own client. Product wire DTOs
-belong in `plakd-wire-types`; handlers, credential resolution, settings
-metadata and runtime/store authority stay in plakd.
-
-## First reading
-
-`docs/spec/` is the authority for current behavior; `docs/user-guide/` is the
-authority for usage. Read `docs/spec/00-overview.md` first, then the chapter
-that owns what you are changing: `01` Plakous, `02` plakd, `03` orchestration,
-`04` security and boundaries, `05` testing and evidence, `06` build and support
-surface, `07` configuration reference.
-
-The tree carries no decision history. Commit messages and external notes are
-history, never prerequisite reading, and never cited as authority.
+**plakd** is the host server and operator/batch CLI. It consumes only the facade
+and higher host-layer crates, owns product policy and wire UX, and has no
+second runtime. No application client or UI is shipped here. Wire DTOs belong
+in `plakd-wire-types`; product handlers, settings, credential resolution and
+runtime/store authority stay in plakd.
 
 ## Dev
 
-Rust 1.100.0 is the pinned toolchain and MSRV. Work targets Linux x86_64 musl
-and Apple Silicon macOS. Run `just dev-tools install` to install or update the
-pinned tools and the `wasm32-unknown-unknown` target; cloud workspaces use
-`.agents/setup`. All tiers require working jj: `PLAK_TEST_JJ`, then `PATH`,
-then the newest pinned installation under `.dev-tools/jj`.
+Rust 1.100.0 is the pinned toolchain and MSRV. Supported platforms are Linux
+x86_64 musl and Apple Silicon macOS. All gates require a working jj: use
+`PLAK_TEST_JJ`, then `PATH`, then the newest pinned jj under `.dev-tools/jj`.
 
 ```text
-just fast [--rdeps] [PKG...] # static and changed-package parallel tests
-just batch                # standalone lint, contracts, tooling and core integration tests
-just batch-mac            # Mac workspace clippy and platform-sensitive tests
-just install              # Linux supplement: builds, rustdoc, full parallel and install tests
-just install-checks       # exact-tree Mac install supplement: full offline suite
-just steps GROUPS         # exactly those comma-separated groups, in canonical order
-just full                 # every group, including archive verification and long soaks
-just fmt                  # cargo fmt, then ruff format on the checked Python paths
-just clippy               # workspace all-features clippy, warnings denied
-just nextest ARGS         # pinned cargo nextest under the isolated test environment
-just publish [--execute]  # crates.io cohort dry run; --execute uploads
-just dev-tools ARGS       # pinned cargo-nextest, cargo-deny and ruff; `deny` is the dependency audit
-just build PROFILE        # debug, release, maintainer or profiling; no snapshot and no PATH change
-just install FLAVOR       # release (plain) or maintainer (dogfood) immutable snapshot on PATH
-just musl native          # complete Linux x86_64 musl coverage (use --batch for integration)
-just musl container       # full tier in the pinned offline Alpine image; maintainer-only
-just live RECIPE          # smoke, soak, jobs, mcp-oauth, census, estimate, daily-driver, qualify
-just perf RECIPE          # smoke, samply, flamegraph, stat, bloat, density, check; not a gate
-just prompts RECIPE       # render, diff, pins, native-compare
-just dev RECIPE           # home-install, home-reset, reload-rehearsal, coverage, test-timing, crash-sweep, crash-compare, jj-compat, weighted-lanes
-just harbor RECIPE        # opt-in bakeoff; `test` is the zero-inference adapter suite
+just dev-tools install     # install pinned tools and the wasm32 target
+just fast [--rdeps] [PKG...] # worker gate; run any affected groups too
+just check                 # workspace static group
+just batch-mac             # macOS integration gate
+just nextest ARGS          # manual tests in the isolated test environment
+just steps GROUPS          # named groups; tests-install for install-family changes
+just --list                # other recipes
 ```
 
-Finish worker changes with `just fast <packages>` and any affected groups. Set
-`PLAK_BATCH_BASE` to the pre-batch commit for integration. Neither batch runs
-the install profile. For changes to install-family tests or code they exercise
-(including crash-sweep shapes), run `just steps tests-install` before handoff.
-See spec 05 §1 and §2.3 for gate selection, lane membership and isolation.
-Production install requires exact-tree batch evidence plus the install tier
-(spec 06 §8), including the complete install profile, Mac suite and strict
-crash sweep.
-Publication requires clean-tree full evidence; inert docs can reuse it, but a
-`README.md` change needs fresh archive verification (spec 06 §6.5).
-`just musl container` is maintainer-only and needs the unpublished pinned image.
+## Where to read
 
-Edit the owning nextest budget or crash filter (install families in
-`.config/nextest-install.toml`), then run
-`python3 tools/gate/nextest_layout.py --sync`. Use `just nextest` for manual
-tests under the isolated environment (spec 05 §1). Transport injection needs
-a `test-support` binary and follows spec 05 §2.8. Prompt renders are regenerated
-into gitignored `target/prompt-renders/` and are **never committed**; update the
-in-code sha256 pins when reviewed prompt output changes.
-There is no CI; the tag release workflow and manual dry run are in spec 06 §6.6.
-Harbor and its adapter tests are outside all tiers. Follow the pinned
-architecture-matched vendor install and interactive subscription OAuth rules
-in `eval/README.md` and [spec 05, “The Harbor bakeoff plane”](docs/spec/05-testing-and-evidence.md#the-harbor-bakeoff-plane);
-do not use `claude --print` for native-home subscription comparisons.
+Use the map to read only the section that owns your change, not the overview
+and a whole chapter. The spec owns rules, code owns values, and
+`docs/user-guide/` owns usage. The [admission rule](docs/spec/00-overview.md#spec-admission)
+applies when editing specs.
+The tree carries no decision history; commit messages and external notes
+are not prerequisites or authority for current behavior.
 
-Declare dependency features (including test UUID generation) at the point of
-use; do not rely on workspace feature unification. Keep facade selections
-independent and persisted vocabulary readable with routes/tools omitted;
-only the default product build is supported. Follow the closure checks and
-reviewed feature cap in spec 06. Keep the root workspace exclusions for
-`.plak` state and fork worktrees; do not add unreviewed exclusions.
-Ratchet per-package item-level `clippy::too_many_lines`,
-`clippy::too_many_arguments`, and files over 1500 non-test lines in
-`[package.metadata.plakous-lint]`: lower the ceiling after removing debt, and
-do not add a crate-wide allow for either lint (spec 06 §4).
-
-Invariants the spec states — single-owner driver with one terminal result per
-admitted root turn, single-agent L0, exact-URL auth that never falls back across
-routes, single-dispatch paid compaction — are settled. Do not re-litigate them
-in a change; amend the chapter that owns them.
+| Work | Owning spec sections |
+| --- | --- |
+| Layering or compatibility | 00: [crate-set rule](docs/spec/00-overview.md#the-crate-set-rule) or [persisted versions](docs/spec/00-overview.md#persisted-versions) |
+| Library runtime, providers, auth, tools or facade | [01](docs/spec/01-plakous-library.md): §§1–5 loop and persistence; §§6–10 providers, auth, tools and compaction; §§11–13 observation, facade and errors |
+| Product home, CLI, host, wire, prompts or accounts | [02](docs/spec/02-plak-product.md): §§2–5 homes, CLI, run loop and clients; §§6–8 prompts, usage and credentials |
+| Agent tree or workspaces | [03](docs/spec/03-orchestration.md): §§1–4 templates, workspaces and grants; §§5–13 lifecycle and tools; §§14–16 recovery and wire |
+| Security and authority | [04](docs/spec/04-security-and-boundaries.md): §§1–2 trust, §§3–5 credentials, effects and redaction, §§6–9 remaining boundaries |
+| Gates, tests, prompts, live or eval | [05](docs/spec/05-testing-and-evidence.md): §1 gates, §2 offline tests and pins, §3 evidence and live, Harbor bakeoff for eval |
+| Platforms, features, build, release or style | [06](docs/spec/06-build-and-support-surface.md): §§1–3 distribution and support, §4 features and style, §§6–8 build, release, dependencies and tier policy |
+| Configuration | [07](docs/spec/07-config-reference.md): §§1–2 discovery and grammar, §§3–4 settings, §§5–8 errors, digest, commands and presets |
 
 ## Working agreements
 
-- Do not preserve backward compatibility. Remove obsolete paths instead of
-  adding compatibility layers, fallbacks, or migrations. Unshipped prototype
-  APIs and databases have no compatibility claim.
-- The first exception is cross-build session reference: the export document is the
-  cross-build session carrier. A build MUST import export documents of its own version
-  and of the immediately previous version. Any change to the document,
-  including the embedded canonical-history and binding encodings, bumps the
-  version; the previous version's importer is kept for one bump only. Older
-  builds need not import newer documents.
-- The second exception is the runner job-retention endpoint: a runner daemon MUST
-  serve, and the next build's daemon MUST speak, the retention endpoint of its own
-  version and of the immediately previous version, so that jobs started by the
-  previous build survive a planned upgrade. The endpoint is a same-user,
-  same-machine private socket with a fixed verb set (lines, transfer, jobs
-  snapshot/watch, read/poll, write, stop, disown, ack); it never starts work,
-  performs workspace effects or replays effects. Any change to its verbs or
-  encodings bumps its version; the previous version's speaker is kept for one
-  bump only.
-- The third exception is the credential gateway protocol: a gateway MUST
-  serve, and the next build's callers MUST speak, the gateway protocol of its
-  own version and of the immediately previous version, so that a planned
-  upgrade of either side keeps inference and account operations working. Its
-  endpoints are fixed and path-versioned; it relays one upstream exchange per
-  request, never retries, translates or fails over (a reused idle upstream
-  socket that fails with a protocol error before its TLS stream accepts any
-  request plaintext may be replaced once within that exchange, with the peer
-  receiving at most an incomplete request prefix), and grants no session or
-  store authority. Any change to its endpoints, encodings or binding facts
-  bumps its version;
-  the previous version's speaker is kept for one bump only.
-- The fourth exception is in-place store revisions: a build MAY upgrade a
-  store in place when the change only adds tables, indexes, views, or nullable
-  or defaulted columns whose default means exactly the old behaviour. Each
-  revision runs in one transaction on one store, reads no other store, follows
-  a copy of the stopped store, and is never reversed; an older build refuses a
-  newer revision without writing. A change to authority, lineage, history
-  encoding or binding digests bumps the store's generation instead, which
-  changes the state key and uses settled carry. Revisions accumulate within a
-  generation and are deleted when the generation bumps.
-- Choose the simplest implementation that fully meets the current architecture.
-  Avoid speculative abstractions, configuration, and indirection.
-- Grow in layers: smallest end-to-end product first, then add capability on a
-  product that already works. Never trade a working product for unfinished work.
-- Keep visibility as narrow as possible (`private`, then `pub(crate)`, then
-  public). Keep parsing and presentation at the product boundary; neutral core
-  types must not depend on CLI or client presentation, and provider names must not enter
-  `plakous-model` or `plakous-agent`.
-- Prefer established libraries already in the tree over reimplementation.
-- Optimize for the reader: explicit data flow, small modules, early returns,
-  enums for distinct states, typed errors with sources. Comments explain
-  non-obvious invariants, not control flow the code already shows.
-- Test externally meaningful behavior and failure modes, deterministically. The
-  daily bar is unit → offline integration; live e2e is opt-in and paid.
-- Product host changes need the tested maintainer snapshot and matching
-  sidecars. Keep a paired host and runner on the same source revision; the
-  runner uses a dedicated command link that normal installation does not move.
-  Settle work before a coordinated upgrade and report host and runner binary
-  IDs. An agent must not interrupt a running session or install merely to
-  review a refactor.
-- A change to public semantics, crate boundaries, persistence or wire formats,
-  security boundaries, or supported platforms MUST update the owning
-  `docs/spec/` section in the same change.
-- No credentials, auth headers, private session data, or unsanitized provider
-  fixtures in the tree, logs, or tests. The workspace forbids `unsafe`.
+- Remove obsolete paths rather than preserve backward compatibility. The
+  [four exceptions](docs/spec/00-overview.md#persisted-versions) are session
+  export, runner job retention, the credential gateway protocol and additive
+  in-place store revisions. For each of the first three, support the build's
+  own and immediately previous version; keep the previous importer or speaker
+  for one bump only.
+- Settled invariants: a single-owner driver with one terminal result per
+  admitted root turn, single-agent L0, exact-URL auth without fallback across
+  routes, and single-dispatch paid compaction. Amend the owning rule if it
+  changes; do not re-litigate these invariants in another change.
+- Choose the simplest implementation that meets the architecture. Grow from
+  a working end-to-end path; never trade it for unfinished work. Prefer
+  existing libraries and avoid speculative abstractions or configuration.
+- Keep visibility narrow. Parsing and presentation stay at the product
+  boundary; provider names stay out of `plakous-model` and `plakous-agent`.
+  Prefer explicit data flow, small modules, early returns, enums for distinct
+  states, and typed errors with sources.
+- Test meaningful behavior and failure modes deterministically. Use offline
+  tests for daily work; live provider tests are opt-in and paid. Follow
+  [test placement](docs/spec/05-testing-and-evidence.md#21-placement) and
+  [comment style](docs/spec/06-build-and-support-surface.md#code-style).
+- Do not install or interrupt a running session merely to review a refactor.
+  For an authorized product host change, follow the tested snapshot and
+  paired upgrade rules in [06 §6.3](docs/spec/06-build-and-support-surface.md#63-updating).
+- Never put credentials, auth headers, private session data or unsanitized
+  provider fixtures in the tree, logs or tests. No `unsafe`.

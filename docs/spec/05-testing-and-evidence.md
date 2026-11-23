@@ -919,8 +919,10 @@ exempt. Load probes run at most `nproc / 2` hogs, each under `timeout` and
 
 ### 2.1 Placement
 
-Protocol-4 host row attention/counts and launcher fencing are hosted tests;
-static UI validation and atomic build snapshots are product unit tests.
+A regression test belongs at the lowest layer that can fail. If a bug
+escaped, test it at the layer it escaped through. There is no per-crate
+test-line budget.
+
 Directory stop tests distinguish resident actors from lease-only dormant
 targets with an unavailable runner: cancellation and child-wake suppression
 must be durable before the pending answer, repeat preserves the intent and

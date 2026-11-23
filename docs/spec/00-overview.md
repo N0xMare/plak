@@ -189,6 +189,10 @@ neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade or worke
 
 ## Persisted versions
 
+Backward compatibility is not preserved outside the four exceptions below.
+Remove obsolete paths rather than add compatibility layers, fallbacks or
+migrations. Unshipped APIs and databases have no compatibility claim.
+
 The latest workspace release is **0.0.4**. This build opens only its current
 state key, `r28.e39.p39.t11`, as native authority (chapter 02 §2.5).
 Other keys are left untouched; explicit legacy pruning may take schema-blind
@@ -267,38 +271,20 @@ no cross-build native-store reader and changes no runtime schema or state key.
 
 ## How to read the rest of these docs
 
-Two directories are tracked, and together they are the documentation:
+The [spec index](README.md) maps current behavior; the
+[user guide](../user-guide/) owns usage. Read the section that owns the change.
 
-- **`docs/spec/`** — what the system is and how it behaves.
-  - `00-overview.md` (this file) — the crate-set rule, packages, platforms,
-    the crate map, and version facts.
-  - `01-plakous-library.md` — the normative behavior of the library: turn
-    lifecycle, kernel and checkpoint authority, store and recovery, providers
-    and admission, auth, tools, Code Mode, compaction, telemetry, facade,
-    errors.
-  - `02-plak-product.md` -- the product: the plakd home and its stores, the CLI
-    grammar and exit codes, the JSONL host protocol, external client boundaries, prompts and the
-    coding packs, usage, doctor, and the login surfaces.
-  - `03-orchestration.md` — the agent tree: templates and roster, grants and
-    tiers, spawn, mail, sealing, adoption, capacity, cells, the copy shim,
-    `on_mint`, persistence and reopen, and the known limits.
-  - `04-security-and-boundaries.md` — the threat register, enforced versus
-    convention, credentials, effects and authority, redaction, panics, unsafe
-    code and supply chain, and residual risk.
-  - `05-testing-and-evidence.md` — the gate layers, offline test conventions,
-    the evidence classes, live scenarios, the pre-release bar, known flaky
-    classes, and review focus.
-  - `06-build-and-support-surface.md` — support classes and inventories, the
-    crate map's rules, features, building and installing, dependency policy,
-    and the maintainer surface.
-  - `07-config-reference.md` -- every key `plakd` reads from disk, with its type,
-    default, constraint, and meaning, plus the shipped presets.
-- **`docs/user-guide/`** — operator-facing material: installing and running
-  plakd, logging in, configuring agents and templates, the host and CLI/
-  JSONL surfaces.
+### Spec admission
 
-Decision history is not tracked in this repository. This specification, not any
-archive, states current behavior.
+Change spec text only when a rule changes. Replace the rule in its owning
+section rather than append to it; keep no decision history. Do not add values
+that live in code, strings, inventories, private mechanisms, test descriptions,
+or tool mechanics. Refer to the owning code rather than copy its values.
+
+Changes to public semantics, crate boundaries, persisted or wire formats,
+security boundaries, or supported platforms MUST update the owning section
+in the same change. Update the user guide in that change too if what an
+operator types or sees changes.
 
 Normative statements are present tense. **MUST**, **MUST NOT**, **SHOULD**, and
 **MAY** appear only where omission would change safety, portability, or a
