@@ -796,8 +796,7 @@ impl SqliteSessionStore {
                     Lane::Read => ExecutedJob::Read,
                 });
             }
-            #[cfg(feature = "test-support")]
-            let settle = crate::commit_trace::SettleGuard;
+            let settle = trace_boundary::SettleGuard;
             let changes_before = backend.connection.total_changes();
             #[cfg(test)]
             let capacity_fault = if backend
@@ -853,13 +852,7 @@ impl SqliteSessionStore {
             // A traced gate run cuts at every commit and needs one commit
             // order per run: deferred reclamation this job left pending runs
             // right after it, before its reply, not whenever the actor idles.
-            #[cfg(feature = "test-support")]
-            {
-                drop(settle);
-                if crate::commit_trace::active() {
-                    while backend.background_step() {}
-                }
-            }
+            trace_boundary::finish(backend, settle);
             activity.finish(lane.label(), label, operation_label, started);
             let _ = reply.send(result);
         });
@@ -1176,6 +1169,7 @@ impl Backend {
         {
             return false;
         }
+        let _settle = trace_boundary::SettleGuard;
         #[cfg(test)]
         if let Some(hook) = &mut self.job_hook {
             hook(ExecutedJob::Background);
@@ -1200,6 +1194,25 @@ impl Backend {
         self.probe_synchronous("background");
         true
     }
+}
+
+#[cfg(feature = "test-support")]
+mod trace_boundary {
+    pub(super) use crate::commit_trace::SettleGuard;
+
+    pub(super) fn finish(backend: &mut super::Backend, foreground: SettleGuard) {
+        drop(foreground);
+        if crate::commit_trace::active() {
+            while backend.background_step() {}
+        }
+    }
+}
+
+#[cfg(not(feature = "test-support"))]
+mod trace_boundary {
+    pub(super) struct SettleGuard;
+
+    pub(super) const fn finish(_backend: &mut super::Backend, _foreground: SettleGuard) {}
 }
 
 impl SessionStore for SqliteSessionStore {
@@ -1413,7 +1426,7 @@ impl SessionStore for SqliteSessionStore {
         session: SessionRef,
         checkpoint: CheckpointId,
     ) -> StoreFuture<'_, SessionRevision> {
-        self.dispatch("child_retirement", move |b| {
+        self.dispatch_read("child_retirement", move |b| {
             b.require_open()?;
             let tx = b.connection.transaction().map_err(map_sqlite)?;
             require_bound_domain(&tx, b.domain)?;

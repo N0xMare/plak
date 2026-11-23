@@ -126,12 +126,14 @@ fn finished_child_retirement_sigkill_cuts_preserve_the_result_and_parent() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(seed(pilot.path()));
     let output = owner(pilot.path(), None).wait_with_output().unwrap();
+    let trace = pilot.path().join("collection-commits.jsonl");
     assert!(
         output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        "{}; commit trace: {}",
+        String::from_utf8_lossy(&output.stderr),
+        std::fs::read_to_string(&trace).unwrap_or_default()
     );
-    let rows = trace_rows(&pilot.path().join("collection-commits.jsonl"));
+    let rows = trace_rows(&trace);
     for (index, cut) in [
         None,
         Some(cut_for(&rows, "tree", "agent_retired_children")),
