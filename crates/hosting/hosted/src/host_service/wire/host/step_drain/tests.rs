@@ -18,11 +18,9 @@ async fn detached_tree(id: &str) -> (crate::agent::RecoveryFixture, HostStepDrai
 async fn host_step_drain_records_a_tree_without_a_resident_root() {
     let id = "step-drain-detached-tree";
     let (fixture, drain, child) = detached_tree(id).await;
-    assert!(
-        drain
-            .record_child_handoffs(Duration::from_secs(5))
-            .await
-            .is_empty()
+    assert_eq!(
+        drain.record_child_handoffs(Duration::from_secs(5)).await,
+        Vec::<(String, String)>::new()
     );
     assert_eq!(
         fixture.stored_continuation_causes()[&child],
@@ -36,12 +34,13 @@ async fn host_step_drain_records_a_tree_without_a_resident_root() {
 async fn host_step_drain_zero_child_record_budget_writes_nothing() {
     let id = "step-drain-zero-record-budget";
     let (fixture, drain, child) = detached_tree(id).await;
-    assert_eq!(fixture.stored_continuation_causes()[&child], None);
+    let before = fixture.stored_continuation_causes();
+    assert_eq!(before[&child], Some(ContinuationCause::OwnerLost));
     let failures = drain.record_child_handoffs(Duration::ZERO).await;
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].0, id);
     assert!(failures[0].1.contains("budget"));
-    assert_eq!(fixture.stored_continuation_causes()[&child], None);
+    assert_eq!(fixture.stored_continuation_causes(), before);
     drop(drain);
     crate::topology_runtime::force_release(id).await;
 }
@@ -50,11 +49,9 @@ async fn host_step_drain_zero_child_record_budget_writes_nothing() {
 async fn late_root_cascade_preserves_only_the_committed_upgrade_handoff() {
     let id = "step-drain-late-root-cascade";
     let (fixture, drain, child) = detached_tree(id).await;
-    assert!(
-        drain
-            .record_child_handoffs(Duration::from_secs(5))
-            .await
-            .is_empty()
+    assert_eq!(
+        drain.record_child_handoffs(Duration::from_secs(5)).await,
+        Vec::<(String, String)>::new()
     );
     crate::runtime::cascade_root_for_step_drain_test(id)
         .await

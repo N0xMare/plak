@@ -359,7 +359,7 @@ fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
             11,
             Op::Intent {
                 attachment,
-                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                client_id: None,
                 intent: SessionIntent::ResumeLossContinuation { agent_id: Some(id) },
                 blobs: Vec::new(),
             }

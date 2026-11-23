@@ -4265,6 +4265,8 @@ handoff. A crash between these record points leaves the recorded children
 handed off and the unreleased roots held under the owner-loss policy.
 A root cancel that settles late during this release does not cascade over
 an exact recorded child handoff. An explicit Stop still ends the hold.
+Result mail and process notices do not resume a held root: automatic
+wakes wait for its loss continuation to settle or for a new operator prompt.
 Outside a committed same-key upgrade, only the root's own planned
 release records child handoffs.
 

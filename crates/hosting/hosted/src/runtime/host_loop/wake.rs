@@ -539,6 +539,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             );
             return Ok(HostStep::Continue);
         }
+        // A result is not operator consent for a lost root. Check only when
+        // a batch would be admitted; the idle fast path reads no loss history.
+        if crate::runtime::root_standing(self.role.config.store.as_ref(), &session.id)
+            .map_err(CliFailure::new)?
+            .is_continuing()
+        {
+            self.role.child_wake.park();
+            self.wake_decision("parked", "root_loss_continuation", now);
+            return Ok(HostStep::Continue);
+        }
         // A wake is to be admitted: this is its admission pass to the tail,
         // which also settles acknowledgements and returns the batch reads.
         super::super::projection::root_tree_pass(
