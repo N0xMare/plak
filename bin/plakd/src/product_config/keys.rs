@@ -651,15 +651,6 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         scope: ConfigScope::Immediate,
     },
     ConfigKey {
-        path: "runtime_store.retire_finished_children",
-        field: ConfigField::RuntimeStoreRetireFinishedChildren,
-        kind: "bool",
-        constraint: "true or false; home-scoped",
-        doc: "Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.",
-        example: "false",
-        scope: ConfigScope::Immediate,
-    },
-    ConfigKey {
         path: "runtime_store.max_checkpoints",
         field: ConfigField::RuntimeStoreMaxCheckpoints,
         kind: "integer",
@@ -684,6 +675,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "at least 16, representable by the SQLite and platform integer ranges; home-scoped",
         doc: "Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup.",
         example: "4294967296",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.retire_finished_children",
+        field: ConfigField::RuntimeStoreRetireFinishedChildren,
+        kind: "bool",
+        constraint: "true or false; home-scoped",
+        doc: "Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.",
+        example: "false",
         scope: ConfigScope::Immediate,
     },
     ConfigKey {

@@ -25,8 +25,7 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
     let child = fixture
         .runtime
         .mutate_then_emit(false, move |tree| {
-            let mut request = SpawnAgentRequest::test_review();
-            request.output_schema_json = r#"{"type":"object"}"#.to_owned();
+            let request = SpawnAgentRequest::test_review();
             let child = tree.spawn_agent("root", &request, None).unwrap().agent_id;
             tree.bind_session_locator(&child, child_locator.to_string())
                 .unwrap();
@@ -35,7 +34,7 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
                 &child,
                 &crate::agent_tree_protocol::SubmitResultRequest {
                     turn_token,
-                    output_json: r#"{"status":"satisfied"}"#.to_owned(),
+                    output_json: r#"{"ok":true}"#.to_owned(),
                 },
                 Some("collection:submit"),
             )
@@ -202,7 +201,7 @@ async fn assert_recovery(
         .read(|tree| {
             assert!(tree.node(child).is_err());
             let summary = &tree.retired_children()[child];
-            assert_eq!(summary.output.as_deref(), Some(r#"{"status":"satisfied"}"#));
+            assert_eq!(summary.output.as_deref(), Some(r#"{"ok":true}"#));
             assert!(summary.mail.is_some());
             assert!(tree.pending_result_mail("root").is_empty());
         })
