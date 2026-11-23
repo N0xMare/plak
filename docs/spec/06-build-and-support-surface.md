@@ -779,11 +779,6 @@ tool descriptor/presentation comparison as not rehearsed because it requires
 credentialed runtime compilation. Success is an offline preflight, not a
 promise that authenticated resume succeeds.
 
-### Code style
-
-Write comments only for non-obvious invariants or trade-offs. Do not record
-history, narrate the code, or write a doc comment that merely restates the item.
-
 ## 5. Unsafe surface
 
 The workspace lint table sets `unsafe_code = "forbid"`, together with
@@ -2385,14 +2380,6 @@ group also refreshes stale index entries a version requirement names (§6.5).
 See [spec admission](00-overview.md#spec-admission) for which changes update
 the spec or user guide.
 
-Beyond the mechanical gate in chapter 05, **the simplest implementation
-that fully meets the current architecture wins**, without speculative
-abstraction, configuration, or indirection. **Visibility stays as narrow as it
-can be** — private, then `pub(crate)`, then public — with parsing and
-presentation kept at the product boundary, so neutral core types never depend on
-the CLI or client presentation and provider names never enter `plakous-model` or
-`plakous-agent`.
-
 Credentials, authorization headers, private session data, and unsanitized
 provider fixtures are never committed.
 
@@ -2420,3 +2407,19 @@ at a time, and output for a retired agent view queued before its successor
 attaches to a resident transcript, with one throttled output, and measures
 first-page latency, replay time, process RSS and CPU.
 Human client review is independent evidence, not a public gate dependency.
+
+### Code style
+
+Beyond the mechanical gate in chapter 05, **the simplest implementation
+that fully meets the current architecture wins**, without speculative
+abstraction, configuration, or indirection. **Visibility stays as narrow as it
+can be** — private, then `pub(crate)`, then public — with parsing and
+presentation kept at the product boundary, so neutral core types never depend on
+the CLI or client presentation and provider names never enter `plakous-model` or
+`plakous-agent`.
+
+Write comments only for non-obvious invariants or trade-offs. Do not record
+history, narrate the code, or restate an item's name in its doc comment.
+Doc comments that `missing_docs` requires state the item's contract (units,
+invariants, errors, ownership), not its name; an item with nothing beyond its
+name is a candidate for narrower visibility.

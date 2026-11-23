@@ -919,9 +919,9 @@ exempt. Load probes run at most `nproc / 2` hogs, each under `timeout` and
 
 ### 2.1 Placement
 
-A regression test belongs at the lowest layer that can fail. If a bug
-escaped, test it at the layer it escaped through. There is no per-crate
-test-line budget.
+Put a regression test at the lowest layer that can fail; when a bug escaped
+a layer's tests, also add one at the layer it escaped through. There is no
+per-crate test-line budget.
 
 Directory stop tests distinguish resident actors from lease-only dormant
 targets with an unavailable runner: cancellation and child-wake suppression

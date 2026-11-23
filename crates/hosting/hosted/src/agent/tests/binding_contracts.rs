@@ -393,7 +393,9 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
     let mut expected = expand_fixture(raw.clone())?;
     assert!(
         compact_fixture(expected.clone())? == raw,
-        "binding fixture is not in the canonical shape emitted by its writer"
+        "binding fixture {} is not in the canonical shape emitted by its writer; \
+         regenerate with PLAK_UPDATE_BINDING_CONTRACTS=1",
+        path.display()
     );
     // Expand behavior defaults for field-level comparison, but render a
     // canonical byte field as one value rather than one diff per shifted byte.
@@ -418,7 +420,9 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
     }
     assert!(
         changes.is_empty(),
-        "binding contract changed; review the field-level diff and prove predecessor exact reopen before repinning:\n{}",
+        "binding contract changed in {}; review the field-level diff and prove predecessor \
+         exact reopen before repinning with PLAK_UPDATE_BINDING_CONTRACTS=1:\n{}",
+        path.display(),
         changes.join("\n")
     );
     Ok(())

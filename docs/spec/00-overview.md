@@ -219,12 +219,13 @@ test-only state. Upgrade receipts coordinate exports and carry no histories,
 bindings, topology or job registries. No destination opens the source
 databases (chapter 02 §4.6).
 
-The first exception is the session export document. A build imports its
-version and the immediately previous one. Changes to the document, including
-history or binding encodings, bump the version; the previous importer is
-kept for one bump. The carrier preserves conversation history and exact
-account/model replay scope, CarryBinding, named state, runner and profile,
-not tree seal outcomes. Version 13 distinguishes `portable_session` from
+The first exception is the session export document. A build MUST import
+export documents of its own version and of the immediately previous version;
+the previous importer is kept for one bump only. Older builds need not import
+newer documents. Changes to the document, including history or binding
+encodings, bump the version. The carrier preserves conversation history and
+exact account/model replay scope, CarryBinding, named state, runner and
+profile, not tree seal outcomes. Version 13 distinguishes `portable_session` from
 the reserved `host_upgrade` kind; ordinary import accepts only portable
 sessions (chapter 02 §2.5.1).
 
@@ -276,10 +277,11 @@ The [spec index](README.md) maps current behavior; the
 
 ### Spec admission
 
-Change spec text only when a rule changes. Replace the rule in its owning
-section rather than append to it; keep no decision history. Do not add values
-that live in code, strings, inventories, private mechanisms, test descriptions,
-or tool mechanics. Refer to the owning code rather than copy its values.
+Change spec text only when a rule changes or the text is wrong. Replace the
+text in its owning section rather than append to it; keep no decision history.
+Do not add values that live in code, strings, inventories, private mechanisms,
+test descriptions, or tool mechanics. Refer to the owning code rather than
+copy its values.
 
 Changes to public semantics, crate boundaries, persisted or wire formats,
 security boundaries, or supported platforms MUST update the owning section

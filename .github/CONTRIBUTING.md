@@ -20,7 +20,7 @@ platforms are Apple Silicon macOS and Linux x86_64 musl.
 ```sh
 just dev-tools install   # once: pinned cargo-nextest, cargo-deny and ruff
 just fast PKG...         # worker gate; add --rdeps for dependent tests
-just check               # workspace static group
+just steps static        # workspace static group
 ```
 
 There is no CI except the release workflow ([spec 06 §6.6](../docs/spec/06-build-and-support-surface.md)).
