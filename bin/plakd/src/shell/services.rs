@@ -409,7 +409,7 @@ impl Services {
         Ok(*self.runtime_store_bounds.get_or_init(|| bounds))
     }
 
-    fn retire_finished_children(&self) -> CliResult<bool> {
+    pub(crate) fn retire_finished_children(&self) -> CliResult<bool> {
         if let Some(enabled) = self.retire_finished_children.get() {
             return Ok(*enabled);
         }

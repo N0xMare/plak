@@ -205,6 +205,7 @@ fn serve_host(
     // Custody is resolved once, here, and every consumer takes this value
     // through `services`; `[gateway]` changes need a host restart.
     let custody = services.custody()?;
+    let _ = services.retire_finished_children()?;
     runtime.block_on(refuse_external_gateway(services, &custody))?;
     paths.ensure_private_state_home().map_err(CliFailure::new)?;
     crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
