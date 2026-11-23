@@ -1,6 +1,76 @@
 //! Child conversation retirement and candidate-pin cleanup.
 
 use super::{ProductAgentTree, TopologyError, TopologyErrorCode, TreeDriver, VcsError};
+use crate::tree::retention::{MAX_RETIREMENT_BATCH, RetirementIssue, RetirementTicket};
+use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum Action {
+    Probe,
+    Delete,
+}
+
+#[derive(Default)]
+pub(super) struct Retries(BTreeMap<(String, Action), Retry>);
+
+struct Retry {
+    locator: String,
+    failures: u8,
+    next: Instant,
+}
+
+impl Retries {
+    fn ready(&self, agent: &str, action: Action, locator: &str, now: Instant) -> bool {
+        self.0
+            .get(&(agent.to_owned(), action))
+            .is_none_or(|entry| entry.locator != locator || entry.next <= now)
+    }
+    fn refused(&mut self, agent: &str, action: Action, locator: &str, now: Instant) {
+        let entry = self
+            .0
+            .entry((agent.to_owned(), action))
+            .or_insert_with(|| Retry {
+                locator: locator.to_owned(),
+                failures: 0,
+                next: now,
+            });
+        if entry.locator != locator {
+            entry.locator = locator.to_owned();
+            entry.failures = 0;
+        }
+        entry.failures = entry.failures.saturating_add(1).min(9);
+        entry.next = now + Duration::from_secs(1 << entry.failures);
+    }
+    fn clear(&mut self, agent: &str, action: Action) {
+        self.0.remove(&(agent.to_owned(), action));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, Duration, Instant, Retries};
+
+    #[test]
+    fn child_retirement_backoff_is_per_head_and_does_not_block_other_children() {
+        let start = Instant::now();
+        let mut retries = Retries::default();
+        let (probe, delete) = (Action::Probe, Action::Delete);
+        retries.refused("a", probe, "head1", start);
+        assert!(!retries.ready("a", probe, "head1", start));
+        assert!(retries.ready("b", probe, "head1", start));
+        assert!(retries.ready("a", probe, "head2", start));
+        assert!(retries.ready("a", delete, "head1", start));
+        let next = start + Duration::from_secs(2);
+        assert!(retries.ready("a", probe, "head1", next));
+        retries.refused("a", probe, "head1", next);
+        assert!(!retries.ready("a", probe, "head1", next + Duration::from_secs(3)));
+        assert!(retries.ready("a", probe, "head1", next + Duration::from_secs(4)));
+        retries.clear("a", probe);
+        assert!(retries.ready("a", probe, "head1", next));
+    }
+}
 
 impl TreeDriver {
     /// Retires sealed dormant conversations after publishing exact deletion intent.
@@ -17,76 +87,40 @@ impl TreeDriver {
         } else {
             Vec::new()
         };
-        let mut approved = std::collections::BTreeMap::new();
+        let mut approved = BTreeMap::new();
         for (agent, attempt, raw) in heads {
-            if !self.retirement_jobs_settled(&agent) {
+            if !self.retry_ready(&agent, Action::Probe, &raw) {
                 continue;
             }
-            let Ok(locator) = raw.parse() else { continue };
-            if let Ok(revision) = sessions.child_retirement_revision(locator).await {
+            let revision = if let Ok(locator) = raw.parse()
+                && self.retirement_jobs_settled(&agent)
+            {
+                sessions.child_retirement_revision(locator).await.ok()
+            } else {
+                None
+            };
+            if let Some(revision) = revision {
+                self.retry_clear(&agent, Action::Probe);
                 approved.insert(agent, (attempt, raw, revision));
+                if approved.len() >= MAX_RETIREMENT_BATCH {
+                    break;
+                }
+            } else {
+                self.retry_refused(&agent, Action::Probe, &raw);
             }
         }
-        let driver = self.clone();
         let tickets = self
-            .write(move |tree| {
-                let mut snapshot = None;
-                let result = tree.prepare_child_retention_guarded(now, Some(&approved), |before| {
-                    snapshot = Some(before.clone());
-                });
-                let result = result.and_then(|tickets| {
-                    // Even an old ticket needs the custody check before dispatch.
-                    if !tickets.is_empty() || snapshot.is_some() {
-                        driver.save_guarded(tree)?;
-                    }
-                    Ok(tickets)
-                });
-                if result.is_err()
-                    && let Some(snapshot) = snapshot
-                {
-                    **tree = snapshot;
-                }
-                result
-            })
+            .prepare_due_retirements(now, approved, &occupied)
             .await?;
-        let mut deferred = false;
-        for ticket in tickets? {
-            if occupied.contains(&ticket.agent_id) {
+        for ticket in tickets {
+            let agent = &ticket.agent_id;
+            let raw = ticket.locator.as_deref().unwrap_or_default();
+            if let Err(issue) = self.dispatch_retirement(sessions, &ticket).await {
+                self.retry_refused(agent, Action::Delete, raw);
+                self.publish_retirement_issue(agent.clone(), issue).await;
                 continue;
             }
-            if ticket.session_revision.is_none() {
-                // Before the additive revision, an already-published ticket
-                // had no exact runtime proof beyond the locator.
-                self.stop_agent_jobs(std::slice::from_ref(&ticket.agent_id))
-                    .await?;
-            } else if !self.retirement_jobs_settled(&ticket.agent_id)
-                || self.read(|tree| {
-                    tree.placement_held(&ticket.agent_id) || !tree.placement_ready(&ticket.agent_id)
-                })?
-            {
-                deferred = true;
-                continue;
-            }
-            if let Some(raw) = &ticket.locator {
-                let locator: plakous::sessions::SessionLocator = raw.parse().map_err(|_| {
-                    TopologyError::new(
-                        TopologyErrorCode::OperationRecoveryRequired,
-                        "retired child locator is invalid; session retained",
-                    )
-                })?;
-                if let Some(revision) = ticket.session_revision {
-                    if sessions
-                        .retire_child_session(locator, revision)
-                        .await
-                        .is_err()
-                    {
-                        deferred = true;
-                        continue;
-                    }
-                } else {
-                    finish_legacy_archive(sessions, locator).await?;
-                }
-            }
+            self.retry_clear(agent, Action::Delete);
             let driver = self.clone();
             let (finished, effects) = self
                 .mutate(move |tree| {
@@ -96,14 +130,132 @@ impl TreeDriver {
             self.settle(effects).await?;
             finished?;
         }
-        self.cleanup_candidate_pins().await?;
-        if deferred {
-            return Err(TopologyError::new(
-                TopologyErrorCode::OperationRecoveryRequired,
-                "child retirement remains pending; session and work refs retained",
-            ));
+        self.cleanup_candidate_pins().await
+    }
+
+    async fn prepare_due_retirements(
+        &self,
+        now: u64,
+        approved: crate::tree::retention::ApprovedHeads,
+        occupied: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<RetirementTicket>, TopologyError> {
+        let driver = self.clone();
+        let occupied = occupied.clone();
+        self.write(move |tree| {
+            let mut snapshot = None;
+            let result = tree.prepare_child_retention_guarded(now, Some(&approved), |before| {
+                snapshot = Some(before.clone());
+            });
+            let result = result.and_then(|mut tickets| {
+                tickets.retain(|ticket| {
+                    !occupied.contains(&ticket.agent_id)
+                        && driver.retry_ready(
+                            &ticket.agent_id,
+                            Action::Delete,
+                            ticket.locator.as_deref().unwrap_or_default(),
+                        )
+                });
+                // Even an old ticket needs the custody check before dispatch.
+                if !tickets.is_empty() || snapshot.is_some() {
+                    driver.save_guarded(tree)?;
+                }
+                Ok(tickets)
+            });
+            if result.is_err()
+                && let Some(snapshot) = snapshot
+            {
+                **tree = snapshot;
+            }
+            result
+        })
+        .await?
+    }
+
+    fn retry_ready(&self, agent: &str, action: Action, locator: &str) -> bool {
+        self.child_retirement_retry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .ready(agent, action, locator, Instant::now())
+    }
+    fn retry_refused(&self, agent: &str, action: Action, locator: &str) {
+        self.child_retirement_retry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .refused(agent, action, locator, Instant::now());
+    }
+    fn retry_clear(&self, agent: &str, action: Action) {
+        self.child_retirement_retry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear(agent, action);
+    }
+
+    async fn publish_retirement_issue(&self, agent: String, issue: RetirementIssue) {
+        let driver = self.clone();
+        let result = self
+            .write(move |tree| {
+                let before = (**tree).clone();
+                let result = tree.defer_child_retirement(&agent, issue).and_then(|()| {
+                    if tree.revision != before.revision {
+                        let acknowledged =
+                            driver.save_claimed(tree).map_err(TopologyError::from)?;
+                        tree.acknowledge_revision(acknowledged);
+                    }
+                    Ok(())
+                });
+                if result.is_err() {
+                    **tree = before;
+                }
+                result
+            })
+            .await;
+        if !matches!(result, Ok(Ok(()))) {
+            tracing::warn!("could not record pending child retirement disposition");
         }
-        Ok(())
+    }
+
+    async fn dispatch_retirement(
+        &self,
+        sessions: &AgentSessions,
+        ticket: &RetirementTicket,
+    ) -> Result<(), RetirementIssue> {
+        use RetirementIssue::{Held, MovedOrPinned, StoreUnavailable};
+        let id = &ticket.agent_id;
+        if ticket.session_revision.is_none() {
+            self.stop_agent_jobs(std::slice::from_ref(id))
+                .await
+                .map_err(|_| Held)?;
+        } else if !self.retirement_jobs_settled(id)
+            || self
+                .read(|tree| tree.placement_held(id) || !tree.placement_ready(id))
+                .map_err(|_| StoreUnavailable)?
+        {
+            return Err(Held);
+        }
+        let Some(raw) = &ticket.locator else {
+            return Ok(());
+        };
+        let locator: SessionLocator = raw.parse().map_err(|_| MovedOrPinned)?;
+        if let Some(revision) = ticket.session_revision {
+            sessions
+                .retire_child_session(locator, revision)
+                .await
+                .map_err(|error| match error.kind() {
+                    AgentSessionsErrorKind::UnsettledProcesses
+                    | AgentSessionsErrorKind::Busy
+                    | AgentSessionsErrorKind::NotQuiescent
+                    | AgentSessionsErrorKind::Ownership => Held,
+                    AgentSessionsErrorKind::InvalidInput
+                    | AgentSessionsErrorKind::StaleLocator
+                    | AgentSessionsErrorKind::NotLineHead
+                    | AgentSessionsErrorKind::NotFound => MovedOrPinned,
+                    _ => StoreUnavailable,
+                })
+        } else {
+            finish_legacy_archive(sessions, locator)
+                .await
+                .map_err(|_| StoreUnavailable)
+        }
     }
 
     fn retirement_jobs_settled(&self, agent: &str) -> bool {

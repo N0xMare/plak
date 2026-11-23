@@ -13,7 +13,7 @@ pub(crate) struct RuntimeManifestBundleMetadata {
     pub(crate) topology: RuntimeTopology,
     pub(crate) lifecycle: RuntimeLifecycle,
     interpreter_observation: Option<InterpreterObservation>,
-    jobs: JobLedger,
+    pub(crate) jobs: JobLedger,
     pub(crate) durability: RuntimeDurability,
 }
 

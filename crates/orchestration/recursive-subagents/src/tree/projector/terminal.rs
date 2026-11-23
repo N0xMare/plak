@@ -66,6 +66,9 @@ impl ProductAgentTree {
             }
             self.bump();
         }
+        if !withheld && outcome != FeedTurnOutcome::RecoveryRequired {
+            self.record_retirement_carrier_terminal(agent_id, command_id, turn_id);
+        }
         if agent_id == self.root_agent_id {
             return Ok(());
         }

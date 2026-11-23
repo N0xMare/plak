@@ -15,6 +15,19 @@ use {
 
 #[cfg(feature = "sessions-sqlite")]
 impl AgentSessions {
+    /// Checks whether an exclusive stopped-home owner can abort a child retirement.
+    ///
+    /// # Errors
+    /// Refuses an unreadable runtime store; absence does not authorize abort.
+    #[doc(hidden)]
+    pub fn child_retirement_can_abort_sqlite(
+        path: impl AsRef<Path>,
+        locator: SessionLocator,
+    ) -> Result<bool, AgentSessionsError> {
+        SqliteSessionStore::inspect_child_retirement_abort(path, locator.session_id())
+            .map_err(store_error)
+    }
+
     /// Read the current durable checkpoint revision of a SQLite branch.
     ///
     /// Only the locator's session and branch identify the read; its checkpoint

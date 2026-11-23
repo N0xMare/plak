@@ -1220,6 +1220,12 @@ on this machine that has exited needs no break-glass: the next attach proves it
 gone and takes the tree over. Without `--force` the command changes nothing and
 exits 2; a bare `plakd tree` or `plakd tree release` prints its help.
 
+`plakd tree abort-retirement <tree-id> <child>` changes a pending retirement
+only with the host stopped and exclusive standalone admission. It checks
+runtime archive and delete evidence before publishing the restored status
+under normal tree custody. It refuses any archive or delete already
+committed, as well as earlier intents that lack a recorded preceding status.
+
 `plakd state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` removes non-current directories and
 regular files under `state/` after confirmation that lists their paths and
 sizes and names non-current state (older or newer builds). Non-terminal

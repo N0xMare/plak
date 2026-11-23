@@ -568,6 +568,13 @@ fn unsupported_runtime_schemas_refuse_without_changing_files() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn sqlite_child_retirement_probe_conformance() -> Result<(), Box<dyn Error>> {
+    let db = Database::new();
+    let store = SqliteSessionStore::open(&db.path)?;
+    conformance::run_child_retirement_conformance(&store, RuntimeDurability::Required).await
+}
+
+#[tokio::test]
 async fn sqlite_semantic_deletion_reopens_and_recovers() -> Result<(), Box<dyn Error>> {
     let db = Database::new();
     let store = SqliteSessionStore::open(&db.path)?;

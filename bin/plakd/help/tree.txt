@@ -2,6 +2,7 @@ plakd tree — agent tree custody
 
 USAGE:
   plakd tree release --force <tree-id>
+  plakd tree abort-retirement <tree-id> <child>
 
 Break-glass: release the custody record of an agent tree whose holding plakd
 process runs on another machine or cannot be proven gone, so this machine can

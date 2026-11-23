@@ -385,10 +385,14 @@ impl ProductAgentTree {
         // derived it, so replaying that record records it again.
         let commands = &self.commands;
         self.operations.retain(|id, operation| {
-            operation.tool_name != super::RETURNED_ADMISSION_KIND
-                || !commands
-                    .get(id)
-                    .is_some_and(|command| selected(&command.recipient))
+            if operation.tool_name == super::retention::CARRIER_TERMINAL {
+                !selected(&operation.caller_agent_id)
+            } else {
+                operation.tool_name != super::RETURNED_ADMISSION_KIND
+                    || !commands
+                        .get(id)
+                        .is_some_and(|command| selected(&command.recipient))
+            }
         });
         for attempt in self
             .attempts

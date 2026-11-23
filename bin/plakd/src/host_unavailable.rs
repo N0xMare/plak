@@ -6,6 +6,17 @@ use crate::shell::services::Services;
 
 pub(crate) const AVAILABLE: bool = false;
 
+pub(crate) fn abort_child_retirement(
+    _paths: &crate::product_paths::PlakPaths,
+    _tree: &str,
+    _child: &str,
+    _stdout: &mut dyn std::io::Write,
+) -> CliResult<()> {
+    Err(plakous_hosted::error::CliFailure::new(
+        "stopped-home retirement abort is unavailable",
+    ))
+}
+
 pub(crate) fn receive_reexec() -> CliResult<(String, std::convert::Infallible)> {
     Err(plakous_hosted::error::CliFailure::new(
         "host transport handoff is unavailable",

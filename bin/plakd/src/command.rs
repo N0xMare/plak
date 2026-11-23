@@ -308,6 +308,11 @@ pub(crate) enum Command {
         tree_id: String,
         force: bool,
     },
+    /// Abort a pending child retirement offline.
+    TreeAbortRetirement {
+        tree_id: String,
+        child: String,
+    },
     StatePruneLegacy {
         yes: bool,
         forget_missing_launches: bool,
@@ -574,7 +579,7 @@ impl Command {
             #[cfg(feature = "maintainer")]
             Self::SessionRehearse { .. } => "session",
             Self::StatePruneLegacy { .. } => "state",
-            Self::TreeRelease { .. } => "tree",
+            Self::TreeRelease { .. } | Self::TreeAbortRetirement { .. } => "tree",
             Self::TelemetryStatus { .. }
             | Self::TelemetrySql { .. }
             | Self::TelemetryPrune { .. } => "telemetry",

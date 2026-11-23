@@ -796,6 +796,14 @@ that `plakd` is in fact still running, every change it then makes to the tree is
 refused. A holder still running on this machine is never released: quit it.
 Without `--force` nothing changes.
 
+### `plakd tree abort-retirement <tree-id> <child>`
+
+The tree shows pending child retirement and, on refusal, its class. To
+restore the child's previous status before the irreversible step, stop
+the host and any standalone users, then run this command. If the runtime
+was archived or deleted, the command refuses; let retirement settle
+instead. The same attempt is not automatically selected again.
+
 ### `plakd state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`
 
 `plakd doctor` lists non-current state paths and sizes. Pruning lists the same

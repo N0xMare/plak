@@ -377,6 +377,9 @@ impl TopCommand {
                         force,
                     }),
             } => Ok(Command::TreeRelease { tree_id, force }),
+            Self::Tree {
+                action: Some(TreeAction::AbortRetirement { tree_id, child }),
+            } => Ok(Command::TreeAbortRetirement { tree_id, child }),
             Self::Usage {
                 account,
                 session_id,

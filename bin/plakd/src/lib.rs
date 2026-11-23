@@ -723,6 +723,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             commands::tree::release(services.paths()?, &tree_id, &mut stdout, &mut stderr)?;
             Ok(ProcessOutcome::Success)
         }
+        Command::TreeAbortRetirement { tree_id, child } => {
+            host::abort_child_retirement(services.paths()?, &tree_id, &child, &mut stdout)?;
+            Ok(ProcessOutcome::Success)
+        }
         Command::StatePruneLegacy {
             yes,
             forget_missing_launches,
@@ -1243,6 +1247,7 @@ fn execute_command<Backend: AccountOps>(
         | Command::ConfigEdit
         | Command::StatePruneLegacy { .. }
         | Command::TreeRelease { .. }
+        | Command::TreeAbortRetirement { .. }
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe

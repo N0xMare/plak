@@ -929,7 +929,7 @@ mod projector;
 mod recovery;
 mod refresh;
 mod reopen_law;
-mod retention;
+pub(crate) mod retention;
 pub use retention::RetiredChild;
 mod revert;
 mod stages;

@@ -1415,6 +1415,130 @@ fn target_initial_bundle(
     bundle(&checkpoint, None)
 }
 
+pub(crate) async fn run_child_retirement_conformance(
+    store: &dyn SessionStore,
+    durability: RuntimeDurability,
+) -> TestResult {
+    let chain = prune_chain(store, durability, 90_000, 1, 512).await?;
+    let selector = chain.head.session();
+    let head = chain.ids[1];
+    let unknown = SessionRef::new(selector.session_id(), id(90_900)?);
+    for (label, target, checkpoint, expected) in [
+        ("unknown branch", unknown, head, SessionStoreError::NotFound),
+        ("held lease", selector, head, SessionStoreError::LeaseHeld),
+    ] {
+        assert_eq!(
+            store.probe_child_retirement(target, checkpoint).await,
+            Err(expected),
+            "{label}"
+        );
+    }
+    store.release(chain.created.lease().clone()).await?;
+    let revision = store.probe_child_retirement(selector, head).await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, chain.ids[0]).await,
+        Err(SessionStoreError::Conflict)
+    );
+    let archive = |revision, head| {
+        ArchiveSession::new(selector.session_id(), revision).retiring(selector.branch_id(), head)
+    };
+    assert_eq!(
+        store.archive(archive(revision, chain.ids[0])).await,
+        Err(SessionStoreError::Conflict)
+    );
+    assert_eq!(
+        store
+            .archive(archive(
+                SessionRevision::from_store(revision.get() + 1),
+                head
+            ))
+            .await,
+        Err(SessionStoreError::Conflict)
+    );
+    let receipt = store.archive(archive(revision, head)).await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, head).await,
+        Err(SessionStoreError::Archived)
+    );
+    store
+        .delete(DeleteSession::new(
+            selector.session_id(),
+            receipt.session().revision(),
+        ))
+        .await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, head).await,
+        Err(SessionStoreError::NotFound)
+    );
+    for (kind, base) in [("working", 91_000), ("unsettled job", 92_000)] {
+        let mut chain = prune_chain(store, durability, base, 0, 512).await?;
+        let selector = chain.head.session();
+        let head = id(base + 101)?;
+        chain.ids.push(head);
+        let working = working_successor(&chain, 1, durability)?;
+        let checkpoint = if kind == "working" {
+            working
+        } else {
+            quiescent_checkpoint_with_unsettled_job(&chain.last, working.manifest().topology())?
+        };
+        store
+            .commit(CommitCheckpoint::new(
+                chain.created.lease().clone(),
+                chain.head,
+                bundle(&checkpoint, Some(&chain.prior))?,
+            ))
+            .await?;
+        store.release(chain.created.lease().clone()).await?;
+        assert_eq!(
+            store.probe_child_retirement(selector, head).await,
+            Err(SessionStoreError::Conflict),
+            "{kind}"
+        );
+    }
+    Ok(())
+}
+
+fn quiescent_checkpoint_with_unsettled_job(
+    checkpoint: &RuntimeCheckpoint,
+    topology: RuntimeTopology,
+) -> TestResult<RuntimeCheckpoint> {
+    use plakous_agent::internal::{
+        JobLedger, JobRow, ProcessSessionId, ProcessSessionOwnerGeneration,
+    };
+    let manifest = checkpoint.manifest();
+    let job = JobRow {
+        number: 1,
+        command: "offline job fixture".to_owned(),
+        started_at: Timestamp::new(50, 0)?,
+        owner: plakous_agent::JobOwner {
+            line: topology.line,
+            generation: topology.line_generation,
+            session_id: topology.session_id,
+            branch_id: topology.branch_id,
+            fence: topology.lease_fence,
+        },
+        session_id: ProcessSessionId::new([1; 16])?,
+        owner_generation: ProcessSessionOwnerGeneration::new(1)?,
+        terminal: None,
+    };
+    Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
+        manifest.provenance().clone(),
+        topology,
+        RuntimeLifecycle::Quiescent,
+        manifest.harness_plan_component().clone(),
+        manifest.provider_configuration().clone(),
+        manifest.canonical().clone(),
+        manifest.binding().clone(),
+        manifest.tools().clone(),
+        manifest.ledger().clone(),
+        None,
+        None,
+        JobLedger::new(2, vec![job])?,
+        manifest.named_state().clone(),
+        manifest.durability(),
+    )?)?)
+}
+
 /// One branch with `commits` successors of its create checkpoint, each
 /// carrying distinct history so every pruned checkpoint frees objects.
 pub(crate) struct PruneChain {
@@ -2212,6 +2336,12 @@ pub(super) async fn memory_semantic_deletion_conformance() -> TestResult {
     assert_eq!(stats.unique_object_bytes(), 0);
     assert_eq!(stats.tombstones(), 2);
     Ok(())
+}
+
+#[tokio::test]
+async fn memory_child_retirement_probe_conformance() -> TestResult {
+    let store = MemorySessionStore::new(MemoryStoreLimits::default())?;
+    run_child_retirement_conformance(&store, RuntimeDurability::Disabled).await
 }
 
 #[tokio::test]

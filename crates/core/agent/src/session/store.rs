@@ -123,6 +123,11 @@ pub trait SessionStore: Send + Sync + 'static {
                 RuntimeCheckpointInspection {
                     topology,
                     durability: manifest.durability(),
+                    has_unsettled_jobs: manifest
+                        .jobs()
+                        .rows()
+                        .iter()
+                        .any(|row| row.terminal.is_none()),
                     lifecycle: manifest.lifecycle().clone(),
                     requests,
                 },

@@ -357,12 +357,7 @@ impl Services {
             &self.custody()?,
         )?
         .with_runtime_store_bounds(self.runtime_store_bounds()?)
-        .with_finished_child_retirement(
-            self.retire_finished_children
-                .get()
-                .copied()
-                .unwrap_or(false),
-        );
+        .with_finished_child_retirement(self.retire_finished_children()?);
         let roots = match &*self
             .local_daemon
             .read()
@@ -401,8 +396,6 @@ impl Services {
         let resolved = crate::gateway::HostCustody::from_config(home, &config)?;
         self.runtime_store_bounds
             .get_or_init(|| config.runtime_store_bounds);
-        self.retire_finished_children
-            .get_or_init(|| config.retire_finished_children);
         Ok(self.custody.get_or_init(|| resolved).clone())
     }
 
@@ -414,6 +407,16 @@ impl Services {
             .map_err(crate::CliFailure::new)?
             .runtime_store_bounds;
         Ok(*self.runtime_store_bounds.get_or_init(|| bounds))
+    }
+
+    fn retire_finished_children(&self) -> CliResult<bool> {
+        if let Some(enabled) = self.retire_finished_children.get() {
+            return Ok(*enabled);
+        }
+        let enabled = crate::product_config::ProductConfig::load_home_file(self.paths()?)
+            .map_err(crate::CliFailure::new)?
+            .retire_finished_children;
+        Ok(*self.retire_finished_children.get_or_init(|| enabled))
     }
 
     /// The process's one job bound.

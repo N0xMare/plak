@@ -127,6 +127,11 @@ impl RuntimeCheckpointCodec {
             topology: metadata.topology,
             lifecycle: metadata.lifecycle,
             durability: metadata.durability,
+            has_unsettled_jobs: metadata
+                .jobs
+                .rows()
+                .iter()
+                .any(|row| row.terminal.is_none()),
             requests,
         })
     }

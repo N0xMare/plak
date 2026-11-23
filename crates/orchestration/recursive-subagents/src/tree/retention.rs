@@ -1,7 +1,7 @@
 //! Retirement preserves sealed work independently of its conversation.
 
 use super::{
-    BTreeMap, CandidateId, Deserialize, MailDurableState, MessagePurpose, NodeStatus,
+    BTreeMap, CandidateId, CommandFact, Deserialize, MailDurableState, MessagePurpose, NodeStatus,
     OperationRecord, ProductAgentTree, Serialize, TopologyError, TopologyErrorCode, WorkspaceMode,
     WorkspaceStatus, canonical_json, digest_text,
 };
@@ -10,6 +10,8 @@ const KIND: &str = "child_retirement";
 const WATERMARK: &str = "plak:child_collection_watermark";
 const PIN_CLEANUP: &str = "candidate_unpin";
 const RESCUE_PIN: &str = "rescue_pin";
+pub(super) const CARRIER_TERMINAL: &str = "retirement_carrier_terminal";
+const ABORTED: &str = "child_retirement_aborted";
 
 /// A bounded local record of a retired child, not an execution target.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -49,11 +51,34 @@ pub(crate) struct RetirementTicket {
     collected: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) session_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prior_status: Option<NodeStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    issue: Option<RetirementIssue>,
 }
 
-type ApprovedHeads = BTreeMap<String, (super::AttemptId, String, u64)>;
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RetirementIssue {
+    Held,
+    MovedOrPinned,
+    StoreUnavailable,
+}
 
-const MAX_RETIREMENT_BATCH: usize = 8;
+impl RetirementIssue {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Held => "held",
+            Self::MovedOrPinned => "moved_or_pinned",
+            Self::StoreUnavailable => "store_unavailable",
+        }
+    }
+}
+
+pub(crate) type ApprovedHeads = BTreeMap<String, (super::AttemptId, String, u64)>;
+
+pub(crate) const MAX_RETIREMENT_BATCH: usize = 8;
+const MAX_RETIREMENT_SUMMARIES: usize = 16;
 
 fn short_text(value: &str, max: usize) -> String {
     value[..value.floor_char_boundary(max.min(value.len()))].to_owned()
@@ -194,6 +219,149 @@ impl ProductAgentTree {
         format!("plak:{KIND}:{agent}")
     }
 
+    fn retention_ticket(&self, agent: &str) -> Option<RetirementTicket> {
+        let op = self.operations.get(&Self::retirement_id(agent))?;
+        serde_json::from_str(&op.canonical_request).ok()
+    }
+
+    pub(super) fn retirement_fault(&self, agent: &str) -> Option<String> {
+        let ticket = self.retention_ticket(agent)?;
+        (!ticket.collected).then(|| match ticket.issue {
+            Some(issue) => format!("child retirement pending: {}", issue.label()),
+            None => "child retirement pending".to_owned(),
+        })
+    }
+
+    pub(crate) fn defer_child_retirement(
+        &mut self,
+        agent: &str,
+        issue: RetirementIssue,
+    ) -> Result<(), TopologyError> {
+        if let Some(mut ticket) = self.retention_ticket(agent)
+            && !ticket.collected
+            && ticket.issue != Some(issue)
+        {
+            ticket.issue = Some(issue);
+            self.write_retention(Self::retirement_id(agent), agent.to_owned(), &ticket)?;
+        }
+        Ok(())
+    }
+
+    /// Exact runtime address of a pending intent that can restore its original node status.
+    #[must_use]
+    pub fn child_retirement_abort_locator(&self, agent: &str) -> Option<String> {
+        let ticket = self.retention_ticket(agent)?;
+        (!ticket.collected && ticket.prior_status.is_some())
+            .then_some(ticket.locator)
+            .flatten()
+    }
+
+    /// Restores the original node status after an exclusive operator has proved
+    /// the pending intent's runtime was neither archived nor deleted.
+    ///
+    /// # Errors
+    /// Refuses a missing, completed or different intent.
+    pub fn abort_child_retirement(
+        &mut self,
+        agent: &str,
+        locator: &str,
+    ) -> Result<(), TopologyError> {
+        let stale = || {
+            TopologyError::new(
+                TopologyErrorCode::OperationRecoveryRequired,
+                "no matching abortable child retirement",
+            )
+        };
+        let status = self
+            .retention_ticket(agent)
+            .filter(|ticket| !ticket.collected && ticket.locator.as_deref() == Some(locator))
+            .and_then(|ticket| ticket.prior_status)
+            .ok_or_else(stale)?;
+        let node = self.nodes.get_mut(agent).ok_or_else(stale)?;
+        let attempt = node.attempt_id.clone().ok_or_else(stale)?;
+        node.status = status;
+        self.operations.remove(&Self::retirement_id(agent));
+        let marker = format!("plak:{ABORTED}:{agent}");
+        self.operations.insert(
+            marker.clone(),
+            OperationRecord {
+                operation_id: marker,
+                caller_agent_id: agent.to_owned(),
+                tool_name: ABORTED.to_owned(),
+                request_digest: digest_text(attempt.as_str()),
+                canonical_request: attempt.to_string(),
+                fold: None,
+                terminal_code: None,
+                terminal_response: None,
+            },
+        );
+        self.retired_children.remove(agent);
+        self.bump();
+        Ok(())
+    }
+
+    fn carrier_terminal_key(command: &str) -> String {
+        format!("plak:{CARRIER_TERMINAL}:{command}")
+    }
+
+    pub(in crate::tree) fn record_retirement_carrier_terminal(
+        &mut self,
+        agent: &str,
+        command: &str,
+        turn: &str,
+    ) {
+        let Some(row) = self.commands.get(command) else {
+            return;
+        };
+        if row.recipient != agent
+            || row.fact != Some(CommandFact::Accepted)
+            || row.turn_id.as_deref() != Some(turn)
+            || !row.message_ids.iter().any(|id| {
+                self.messages
+                    .get(id)
+                    .is_some_and(|mail| mail.purpose == MessagePurpose::Result)
+            })
+        {
+            return;
+        }
+        let key = Self::carrier_terminal_key(command);
+        if self
+            .operations
+            .get(&key)
+            .is_some_and(|row| row.canonical_request == turn)
+        {
+            return;
+        }
+        self.operations.insert(
+            key.clone(),
+            OperationRecord {
+                operation_id: key,
+                caller_agent_id: agent.to_owned(),
+                tool_name: CARRIER_TERMINAL.to_owned(),
+                request_digest: digest_text(turn),
+                canonical_request: turn.to_owned(),
+                fold: None,
+                terminal_code: None,
+                terminal_response: None,
+            },
+        );
+        self.bump();
+    }
+
+    pub(in crate::tree) fn retirement_carrier_unsettled(&self, parent: &str, mail: &str) -> bool {
+        self.commands.values().any(|row| {
+            row.recipient == parent
+                && row.fact == Some(CommandFact::Accepted)
+                && row.message_ids.iter().any(|id| id == mail)
+                && !self
+                    .operations
+                    .get(&Self::carrier_terminal_key(&row.command_id))
+                    .is_some_and(|fact| {
+                        row.turn_id.as_deref() == Some(fact.canonical_request.as_str())
+                    })
+        })
+    }
+
     pub(super) fn conversation_retired(&self, agent: &str) -> bool {
         self.operations.contains_key(&Self::retirement_id(agent))
     }
@@ -310,10 +478,17 @@ impl ProductAgentTree {
         self.prepare_child_retention_guarded(now, None, |_| {})
     }
 
-    fn retirement_summary(&self, agent: &str) -> Option<RetiredChild> {
+    pub(in crate::tree) fn retirement_summary(&self, agent: &str) -> Option<RetiredChild> {
         let node = self.nodes.get(agent)?;
         let parent = node.parent_agent_id.as_ref()?;
         let attempt = self.current_attempt(agent)?;
+        if self
+            .operations
+            .get(&format!("plak:{ABORTED}:{agent}"))
+            .is_some_and(|row| row.canonical_request == attempt.attempt_id.as_str())
+        {
+            return None;
+        }
         let receiver = self.nodes.get(parent)?;
         // An admitted command can return its mail at terminal publication,
         // and an uncommitted wait can roll back its acknowledgement on reopen.
@@ -357,7 +532,10 @@ impl ProductAgentTree {
         }
         // Absence is not proof of disposition. A closed in-flight attempt
         // which never published results and has no witness is left alone.
-        current.as_ref()?;
+        let (mail, _) = current.as_ref()?;
+        if self.retirement_carrier_unsettled(parent, mail) {
+            return None;
+        }
         let output = attempt.output_json.as_ref();
         if output.is_some_and(|text| text.len() > crate::protocol::MAX_OUTPUT_JSON_BYTES) {
             return None;
@@ -419,7 +597,6 @@ impl ProductAgentTree {
                     node.session_locator.clone()?,
                 ))
             })
-            .take(MAX_RETIREMENT_BATCH)
             .collect()
     }
 
@@ -432,6 +609,59 @@ impl ProductAgentTree {
         before_change: impl FnOnce(&Self),
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
         let mut before_change = Some(before_change);
+        let mut tickets = self.outstanding_child_retirement(&mut before_change)?;
+        for agent in self.due_children(now) {
+            let node = &self.nodes[&agent];
+            let (session_revision, summary) = match approved {
+                None => (None, None),
+                Some(approved) => {
+                    let Some((attempt, locator, rev)) = approved.get(&agent) else {
+                        continue;
+                    };
+                    if Some(locator) != node.session_locator.as_ref()
+                        || Some(attempt) != node.attempt_id.as_ref()
+                    {
+                        continue;
+                    }
+                    let Some(summary) = self.retirement_summary(&agent) else {
+                        continue;
+                    };
+                    (Some(*rev), Some(summary))
+                }
+            };
+            let ticket = RetirementTicket {
+                agent_id: agent.clone(),
+                locator: node.session_locator.clone(),
+                collected: false,
+                session_revision,
+                prior_status: summary.as_ref().map(|_| node.status),
+                issue: None,
+            };
+            if let Some(snapshot) = before_change.take() {
+                snapshot(self);
+            }
+            if summary.is_some() && !self.make_retirement_summary_room() {
+                continue;
+            }
+            self.write_retention(Self::retirement_id(&agent), agent.clone(), &ticket)?;
+            if let Some(summary) = summary {
+                self.retired_children.insert(agent.clone(), summary);
+            }
+            self.nodes
+                .get_mut(&agent)
+                .ok_or_else(|| {
+                    TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
+                })?
+                .status = NodeStatus::Closed;
+            tickets.push(ticket);
+        }
+        Ok(tickets)
+    }
+
+    fn outstanding_child_retirement(
+        &mut self,
+        before_change: &mut Option<impl FnOnce(&Self)>,
+    ) -> Result<Vec<RetirementTicket>, TopologyError> {
         let tickets: Vec<_> = self
             .operations
             .values()
@@ -478,48 +708,28 @@ impl ProductAgentTree {
                 pending.push(ticket);
             }
         }
-        let mut tickets = pending;
-        for agent in self.due_children(now) {
-            let node = &self.nodes[&agent];
-            let (session_revision, summary) = match approved {
-                None => (None, None),
-                Some(approved) => {
-                    let Some((attempt, locator, rev)) = approved.get(&agent) else {
-                        continue;
-                    };
-                    if Some(locator) != node.session_locator.as_ref()
-                        || Some(attempt) != node.attempt_id.as_ref()
-                    {
-                        continue;
-                    }
-                    let Some(summary) = self.retirement_summary(&agent) else {
-                        continue;
-                    };
-                    (Some(*rev), Some(summary))
-                }
-            };
-            let ticket = RetirementTicket {
-                agent_id: agent.clone(),
-                locator: node.session_locator.clone(),
-                collected: false,
-                session_revision,
-            };
-            if let Some(snapshot) = before_change.take() {
-                snapshot(self);
-            }
-            self.write_retention(Self::retirement_id(&agent), agent.clone(), &ticket)?;
-            if let Some(summary) = summary {
-                self.retired_children.insert(agent.clone(), summary);
-            }
-            self.nodes
-                .get_mut(&agent)
-                .ok_or_else(|| {
-                    TopologyError::new(TopologyErrorCode::GrantDenied, "agent id is unknown")
-                })?
-                .status = NodeStatus::Closed;
-            tickets.push(ticket);
+        Ok(pending)
+    }
+
+    fn make_retirement_summary_room(&mut self) -> bool {
+        if self.retired_children.len() < MAX_RETIREMENT_SUMMARIES {
+            return true;
         }
-        Ok(tickets)
+        let oldest = self
+            .retired_children
+            .iter()
+            .filter(|(id, _)| {
+                self.retention_ticket(id)
+                    .is_none_or(|ticket| ticket.collected)
+            })
+            .min_by_key(|(_, row)| (row.next_message_sequence, row.ended_at))
+            .map(|(id, _)| id.clone());
+        if let Some(id) = oldest {
+            self.retired_children.remove(&id);
+            true
+        } else {
+            false
+        }
     }
 
     #[allow(

@@ -41,6 +41,7 @@ pub struct TreeDriver {
     pub(crate) retirement_faults: tokio::sync::broadcast::Sender<(String, String)>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
+    child_retirement_retry: Arc<Mutex<retention::Retries>>,
     /// Whether the tree's store is refusing publications for capacity.
     storage_waiting: Arc<tokio::sync::watch::Sender<bool>>,
     // Readers must not infer admission state from a busy tree mutex. Every
@@ -156,6 +157,7 @@ impl TreeDriver {
             retirement_faults: tokio::sync::broadcast::channel(64).0,
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
+            child_retirement_retry: Arc::default(),
             storage_waiting: Arc::new(tokio::sync::watch::Sender::new(false)),
             writer: Arc::default(),
             storage_parking: Arc::default(),

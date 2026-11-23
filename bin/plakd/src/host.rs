@@ -136,6 +136,52 @@ pub(crate) fn run_host_command(
     serve_host(services, command, inherited)
 }
 
+pub(crate) fn abort_child_retirement(
+    paths: &crate::product_paths::PlakPaths,
+    tree_id: &str,
+    child: &str,
+    stdout: &mut dyn std::io::Write,
+) -> CliResult<()> {
+    use plakous_hosted::agent_tree::TreeStore as _;
+
+    if !paths.subagents_database().is_file() {
+        return Err(CliFailure::new("no persisted agent tree store"));
+    }
+    let _host = lock::HostLock::take_home(paths, crate::build_identity::binary_id())?;
+    let _writers = crate::carry::upgrade::admission(paths, true)?;
+    crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
+    let store = crate::store::tree::open_tree_store(paths).map_err(CliFailure::new)?;
+    let mut tree = store
+        .load(tree_id)
+        .map_err(|error| CliFailure::new(error.detail))?
+        .ok_or_else(|| CliFailure::new("unknown agent tree"))?
+        .rows()
+        .clone();
+    let locator = tree
+        .child_retirement_abort_locator(child)
+        .ok_or_else(|| CliFailure::new("no abortable child retirement"))?;
+    let runtime = locator
+        .parse()
+        .map_err(|_| CliFailure::new("invalid retirement locator"))?;
+    if !plakous::sessions::AgentSessions::child_retirement_can_abort_sqlite(
+        paths.runtime_database(),
+        runtime,
+    )
+    .map_err(|error| CliFailure::new(error.to_string()))?
+    {
+        return Err(CliFailure::new(
+            "child runtime is archived, deleted, or missing; retirement cannot be aborted",
+        ));
+    }
+    tree.abort_child_retirement(child, &locator)
+        .map_err(|error| CliFailure::new(error.message))?;
+    store
+        .save_in_custody(&tree)
+        .map_err(|error| CliFailure::new(error.to_string()))?;
+    writeln!(stdout, "aborted retirement of {child} in tree {tree_id}")
+        .map_err(|_| CliFailure::new("stdout failed"))
+}
+
 fn serve_host(
     services: &Services,
     command: &HostCommand,

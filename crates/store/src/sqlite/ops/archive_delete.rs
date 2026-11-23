@@ -133,18 +133,14 @@ pub(in super::super) fn retirement_head(
     {
         return Err(SessionStoreError::Conflict);
     }
-    let stored = load_checkpoint(tx, checkpoint)?;
-    let manifest = stored.checkpoint().manifest();
-    let topology = manifest.topology();
+    let head = session_head(tx, session)?.ok_or(SessionStoreError::NotFound)?;
+    let (_, metadata) = inspection::branch_metadata_for_session(tx, selector, head)?;
+    let topology = metadata.topology;
     lines::require_line_head(tx, selector, topology.line, topology.line_generation)?;
     if !matches!(
-        manifest.lifecycle(),
+        metadata.lifecycle,
         plakous_agent::internal::RuntimeLifecycle::Quiescent
-    ) || manifest
-        .jobs()
-        .rows()
-        .iter()
-        .any(|job| job.terminal.is_none())
+    ) || metadata.has_unsettled_jobs
     {
         return Err(SessionStoreError::Conflict);
     }

@@ -986,6 +986,8 @@ enum StateAction {
 
 #[derive(Debug, Subcommand)]
 enum TreeAction {
+    /// Abort a pending child retirement before archive, with the host stopped.
+    AbortRetirement { tree_id: String, child: String },
     /// Release an agent tree's custody without its holder (break-glass).
     Release {
         tree_id: Option<String>,

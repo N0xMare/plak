@@ -1664,6 +1664,7 @@ fn an_unclosed_terminal_restores_the_turns_waits_and_a_closed_one_retires_them()
 #[test]
 fn a_withheld_admission_returns_its_batch_once_from_the_terminal_fact() {
     let (_tmp, mut tree, ids) = root_with_results(1);
+    let child = tree.messages()[&ids[0]].from.clone();
     batch(&mut tree, "cmd-1", &ids);
     let mut feed = Feed::new(ROOT_SESSION);
     feed.accepted("cmd-1", turn(1));
@@ -1673,11 +1674,17 @@ fn a_withheld_admission_returns_its_batch_once_from_the_terminal_fact() {
         tree.command("cmd-1").unwrap().fact,
         Some(CommandFact::Accepted)
     );
+    assert!(!tree.node("root").unwrap().active_turn);
+    assert!(
+        tree.retirement_summary(&child).is_none(),
+        "the root carrier can still return its mail"
+    );
 
     feed.terminal("cmd-1", turn(1), End::Withheld);
     let applied = project(&mut tree, "root", &feed);
     assert_eq!(applied.applied, 1);
     assert_eq!(durable(&tree, &ids[0]), MailDurableState::Accepted);
+    assert!(tree.retirement_summary(&child).is_none());
     assert!(tree.admitted_mail_returned("cmd-1"));
     assert_eq!(
         tree.command("cmd-1").unwrap().fact,
@@ -1693,6 +1700,9 @@ fn a_withheld_admission_returns_its_batch_once_from_the_terminal_fact() {
     assert_eq!(again.applied, 0);
     assert_eq!(durable(&tree, &ids[0]), MailDurableState::Acknowledged);
     assert!(!tree.admitted_mail_returned("cmd-1"));
+    feed.terminal("cmd-2", turn(2), End::Completed);
+    project(&mut tree, "root", &feed);
+    assert!(!tree.retirement_carrier_unsettled("root", &ids[0]));
 }
 
 #[test]

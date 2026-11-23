@@ -201,6 +201,8 @@ pub struct RuntimeCheckpointInspection {
     pub lifecycle: crate::manifest::RuntimeLifecycle,
     /// Recorded durability.
     pub durability: crate::manifest::RuntimeDurability,
+    /// Whether a job in the authenticated metadata has no terminal evidence.
+    pub has_unsettled_jobs: bool,
     /// Operation ids and canonical request identities named by recovery obligations.
     pub requests: Vec<(u64, Digest)>,
 }

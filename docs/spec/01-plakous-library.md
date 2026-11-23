@@ -3129,6 +3129,11 @@ different archived revision. Retry after deletion reads only the exact
 tombstone; it cannot delete a substitute session. The library itself has no
 automatic child retention policy.
 
+The retirement probe reads addressed lifecycle and job metadata plus
+line-terminal rows, not canonical history. Before aborting a product
+retirement intent, an exclusive stopped-home owner must prove the runtime
+still exists without an archive receipt or delete tombstone.
+
 Pruning superseded history (§4, §5.1) is the in-place reclaim: it keeps the
 session whole and needs no archive. It runs only on a line's head: a
 predecessor branch of a live line is kept whole as read-only history

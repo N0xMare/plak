@@ -204,10 +204,14 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
             .map(|ended_at| ended_at / 1_000)
             .filter(|seconds| *seconds > 0),
         recovery_abandoned: attempt.is_some_and(super::AttemptRecord::recovery_was_abandoned),
-        fault: attempt
-            .filter(|attempt| attempt.candidate_handoff().is_some())
-            .and_then(super::AttemptRecord::presented_failure)
-            .map(|failure| failure.message)
+        fault: tree
+            .retirement_fault(id)
+            .or_else(|| {
+                attempt
+                    .filter(|attempt| attempt.candidate_handoff().is_some())
+                    .and_then(super::AttemptRecord::presented_failure)
+                    .map(|failure| failure.message)
+            })
             .or_else(|| tree.fault_reason(id).map(str::to_owned)),
         waiting_on: tree.waiting_on(id).map(|waiting| {
             waiting

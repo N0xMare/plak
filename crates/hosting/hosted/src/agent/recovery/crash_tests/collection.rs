@@ -137,6 +137,7 @@ fn finished_child_retirement_sigkill_cuts_preserve_the_result_and_parent() {
     for (index, cut) in [
         None,
         Some(cut_for(&rows, "tree", "agent_retired_children")),
+        Some(cut_for(&rows, "runtime", "archive_receipts")),
         Some(cut_for(&rows, "runtime", "delete_tombstones")),
         Some(cut_for(&rows, "runtime", "runtime_object_bytes")),
     ]
@@ -190,6 +191,14 @@ async fn assert_recovery(
         })
         .unwrap();
     assert_eq!(sessions.head_is_quiescent(removed).await.is_ok(), cut < 2);
+    assert_eq!(
+        plakous::sessions::AgentSessions::child_retirement_can_abort_sqlite(
+            root.join("plak/runtime.sqlite3"),
+            removed,
+        )
+        .unwrap(),
+        cut < 2
+    );
     fixture
         .runtime
         .collect_dormant_children(&sessions, true)

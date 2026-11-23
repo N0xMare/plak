@@ -1,13 +1,40 @@
 //! Read-only native checkpoint inspection; never owns a runtime or lease.
 use super::{
     BranchHead, CheckpointId, Connection, LoadedBranch, RuntimeCheckpointInspection,
-    RuntimeCheckpointKind, SessionRef, SessionStoreError, SqliteSessionStore, StoredCheckpoint,
-    admit_inspection_snapshot, branch_row, branch_row_with_checkpoint, bundle_error, live_session,
-    load_branch, load_checkpoint, load_object, map_sqlite,
+    RuntimeCheckpointKind, SessionHead, SessionRef, SessionStoreError, SqliteSessionStore,
+    StoredCheckpoint, admit_inspection_snapshot, branch_row, branch_row_with_checkpoint,
+    bundle_error, live_session, load_branch, load_checkpoint, load_object, map_sqlite,
 };
 use std::path::Path;
 
 impl SqliteSessionStore {
+    /// Checks the irreversible facts for a child-retirement abort.
+    /// The caller must exclude every writer until the tree intent is removed.
+    ///
+    /// # Errors
+    /// Returns a typed lookup, shape, or storage refusal.
+    pub fn inspect_child_retirement_abort(
+        path: impl AsRef<Path>,
+        session: super::SessionId,
+    ) -> Result<bool, SessionStoreError> {
+        let connection =
+            Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        let Some(head) = super::session_head(&snapshot, session)? else {
+            return Ok(false);
+        };
+        let irreversible: bool = snapshot
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM archive_receipts WHERE session_id=?1)
+             OR EXISTS(SELECT 1 FROM delete_tombstones WHERE session_id=?1)",
+                [super::id(session)],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite)?;
+        Ok(!head.is_archived() && !irreversible)
+    }
+
     /// Reads one immutable checkpoint without opening a writer or changing leases.
     ///
     /// # Errors
@@ -89,6 +116,14 @@ pub(super) fn branch_metadata(
     selector: SessionRef,
 ) -> Result<(BranchHead, RuntimeCheckpointInspection), SessionStoreError> {
     let session = live_session(snapshot, selector.session_id())?;
+    branch_metadata_for_session(snapshot, selector, session)
+}
+
+pub(super) fn branch_metadata_for_session(
+    snapshot: &Connection,
+    selector: SessionRef,
+    session: SessionHead,
+) -> Result<(BranchHead, RuntimeCheckpointInspection), SessionStoreError> {
     let (branch, row) =
         branch_row_with_checkpoint(snapshot, selector)?.ok_or(SessionStoreError::NotFound)?;
     let reference = row.reference;

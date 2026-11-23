@@ -2230,6 +2230,14 @@ mail disposition is also accepted; an absent result witness is not evidence.
 New intents are disabled by default; already-published intents still settle
 after restart or after the policy is disabled.
 
+An accepted command carrying the selected result can still return it, even
+when its root or child recipient looks idle. Retirement requires durable
+evidence that the projector applied that command's non-withheld closing
+terminal. Older accepted carriers without such evidence are retained.
+A pass skips refused exact locators with bounded exponential delay and
+admits at most eight proved new intents; refused probes do not consume
+that batch limit.
+
 The tree checks no remaining owner, hold, work or recovery debt, then obtains
 the runtime store's exact retirement proof. A bounded pass prepares intents
 under the tree's custody after rechecking eligibility and the same locator.
@@ -2253,6 +2261,15 @@ Retired children have a presentation-only closed row in the source tree.
 Exact reopen handles the runtime as intentionally absent, as do a fork and
 export; the summary is not carried. A separately retained candidate is still
 reported according to its own ownership.
+
+The tree keeps at most sixteen summaries, evicting the oldest completed
+ones before admitting more. A pending summary is not evicted. A refused
+pending intent is housekeeping, not projection debt, and the tree names
+its refusal class without printing runtime content. With every home writer
+stopped, an operator can abort a pending intent before archive or a delete
+tombstone exists. Abort restores the node's preceding status and exempts
+that attempt from automatic retirement; a subsequent attempt is eligible
+again. Explicitly closed nodes remain closed.
 
 Retention never deletes work. Unadopted, nonsuperseded, nonempty candidate refs never expire
 automatically: only explicit discard or user deletion relinquishes them.

@@ -180,6 +180,56 @@ fn child_retention_intent_is_idempotent_and_close_is_immediate() {
 }
 
 #[test]
+fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attempt() {
+    use crate::protocol::{MessagePurpose, SendAgentMessageRequest};
+    let (_tmp, mut tree) = tree();
+    let id = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&id, "exact-locator").unwrap();
+    tree.record_turn_completed(&id).unwrap();
+    tree.settle_for_test();
+    delivered(&mut tree);
+    let occupied = super::super::BTreeSet::new();
+    let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &occupied).remove(0);
+    let approved = super::ApprovedHeads::from([(agent, (attempt, locator, 1))]);
+    let prior_status = tree.node(&id).unwrap().status;
+    assert_eq!(
+        tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+            .unwrap()
+            .len(),
+        1
+    );
+    tree.defer_child_retirement(&id, super::RetirementIssue::Held)
+        .unwrap();
+    assert_eq!(
+        tree.retirement_fault(&id).as_deref(),
+        Some("child retirement pending: held")
+    );
+    assert!(tree.abort_child_retirement(&id, "wrong-locator").is_err());
+    tree.abort_child_retirement(&id, "exact-locator").unwrap();
+    assert_eq!(tree.node(&id).unwrap().status, prior_status);
+    assert!(tree.retirement_fault(&id).is_none());
+    assert_eq!(tree.child_retirement_heads(u64::MAX, &occupied), []);
+    tree.send_agent_message(
+        "root",
+        &SendAgentMessageRequest {
+            agent_id: id,
+            message: "new assignment".to_owned(),
+            purpose: Some(MessagePurpose::Followup),
+            refresh: Some(false),
+            acknowledge_recovery: None,
+            priority: None,
+            in_reply_to: None,
+            output_schema_json: None,
+        },
+        None,
+    )
+    .unwrap();
+}
+
+#[test]
 fn child_retirement_and_followup_are_serialized_by_the_attempt() {
     use crate::protocol::{MessagePurpose, SendAgentMessageRequest, TopologyErrorCode};
 
