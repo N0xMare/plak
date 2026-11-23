@@ -307,13 +307,13 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     # Runner waits use the existing Tokio select macro on all targets.
     # Linux group scans use the existing Nix wrapper to handle kernel PGID zero.
     # The unjoined process fixture is available only to test builds.
-    "plakous-tools": "f0a6273fc66b5c2cf5f733776d1eed84c9bd3138e4b1c0aa28c9feae5a1e8067",
+    "plakous-tools": "c32306d7ac8ba9ddc36dca74877dfce17d3fbf09aa00b18c8d9fbb8bf8f059f6",
     "plakous-xai": "79c5017fc78cbb3df7a27f4d37335a0fd6df59ed653eb5770f4ceadef1b4bea3",
     "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
     "plakous-gateway-protocol": "cfed7c1c57d094c562580177e4a0728ec596318e81609ca85c99e2892cba01c5",
     # Independent operator PTYs use the existing PTY/descriptor and account
     # lookup dependencies directly; authority is specified in chapter 04 §2.9.
-    "plakous-runner": "a8c42617525ed6bd9da50101a69c278dea9a0e93afd3e1ab2b304aed0682e224",
+    "plakous-runner": "3160894e7cff022316d783d80558a4dc40a06a22a72c9da25ff538e6b4b45e42",
 }
 
 
