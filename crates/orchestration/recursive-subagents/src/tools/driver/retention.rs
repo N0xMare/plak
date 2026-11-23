@@ -16,7 +16,29 @@ enum Action {
 }
 
 #[derive(Default)]
-pub(super) struct Retries(BTreeMap<(String, Action), Retry>);
+pub(super) struct Retries {
+    heads: BTreeMap<(String, Action), Retry>,
+    warnings: HousekeepingWarnings,
+}
+
+const HOUSEKEEPING_WARNING_INTERVAL: Duration = Duration::from_secs(3600);
+
+#[derive(Default)]
+struct HousekeepingWarnings(Vec<(TopologyErrorCode, Instant)>);
+
+impl HousekeepingWarnings {
+    fn due(&mut self, code: TopologyErrorCode, now: Instant) -> bool {
+        if let Some((_, last)) = self.0.iter_mut().find(|(prior, _)| *prior == code) {
+            if now.duration_since(*last) < HOUSEKEEPING_WARNING_INTERVAL {
+                return false;
+            }
+            *last = now;
+        } else {
+            self.0.push((code, now));
+        }
+        true
+    }
+}
 
 struct Retry {
     locator: String,
@@ -26,13 +48,13 @@ struct Retry {
 
 impl Retries {
     fn ready(&self, agent: &str, action: Action, locator: &str, now: Instant) -> bool {
-        self.0
+        self.heads
             .get(&(agent.to_owned(), action))
             .is_none_or(|entry| entry.locator != locator || entry.next <= now)
     }
     fn refused(&mut self, agent: &str, action: Action, locator: &str, now: Instant) {
         let entry = self
-            .0
+            .heads
             .entry((agent.to_owned(), action))
             .or_insert_with(|| Retry {
                 locator: locator.to_owned(),
@@ -47,7 +69,7 @@ impl Retries {
         entry.next = now + Duration::from_secs(1 << entry.failures);
     }
     fn clear(&mut self, agent: &str, action: Action) {
-        self.0.remove(&(agent.to_owned(), action));
+        self.heads.remove(&(agent.to_owned(), action));
     }
 }
 
@@ -143,23 +165,29 @@ impl TreeDriver {
             return Ok(());
         }
         let driver = self.clone();
-        self.write(move |tree| {
-            let before = (**tree).clone();
-            for batch in &certified {
-                tree.apply_historical_carriers(batch, root);
-            }
-            if before.revision != tree.revision {
-                match driver.save_claimed(tree) {
-                    Ok(revision) => tree.acknowledge_revision(revision),
-                    Err(error) => {
-                        **tree = before;
-                        return Err(TopologyError::from(error));
+        let saved = self
+            .write(move |tree| {
+                let before = (**tree).clone();
+                for batch in &certified {
+                    tree.apply_historical_carriers(batch, root);
+                }
+                if before.revision != tree.revision {
+                    match driver.save_claimed(tree) {
+                        Ok(revision) => tree.acknowledge_revision(revision),
+                        Err(error) => {
+                            **tree = before;
+                            return Err(TopologyError::from(error));
+                        }
                     }
                 }
-            }
-            Ok(())
-        })
-        .await?
+                Ok(())
+            })
+            .await
+            .flatten();
+        if let Err(error) = saved {
+            self.warn_child_housekeeping(error.code, "historical_carrier_save");
+        }
+        Ok(())
     }
 
     async fn prepare_due_retirements(
@@ -219,6 +247,18 @@ impl TreeDriver {
             .clear(agent, action);
     }
 
+    pub(crate) fn warn_child_housekeeping(&self, code: TopologyErrorCode, phase: &'static str) {
+        let due = self
+            .child_retirement_retry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .warnings
+            .due(code, Instant::now());
+        if due {
+            tracing::warn!(target: "plak.topology", ?code, phase, "child retirement housekeeping remains unsettled");
+        }
+    }
+
     async fn publish_retirement_issue(&self, agent: String, issue: RetirementIssue) {
         let driver = self.clone();
         let result = self
@@ -237,9 +277,10 @@ impl TreeDriver {
                 }
                 result
             })
-            .await;
-        if !matches!(result, Ok(Ok(()))) {
-            tracing::warn!(target: "plak.topology", "could not record pending child retirement disposition");
+            .await
+            .flatten();
+        if let Err(error) = result {
+            self.warn_child_housekeeping(error.code, "pending_disposition_save");
         }
     }
 
@@ -377,7 +418,25 @@ async fn finish_legacy_archive(
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Duration, Instant, Retries};
+    use super::{
+        Action, Duration, HOUSEKEEPING_WARNING_INTERVAL, HousekeepingWarnings, Instant, Retries,
+        TopologyErrorCode,
+    };
+
+    #[test]
+    fn child_retirement_warning_interval_is_independent_per_error_class() {
+        use TopologyErrorCode::{OperationRecoveryRequired, WorkspaceRecoveryRequired};
+        let mut warnings = HousekeepingWarnings::default();
+        let start = Instant::now();
+        assert!(warnings.due(OperationRecoveryRequired, start));
+        let later = start + Duration::from_secs(1);
+        assert!(warnings.due(WorkspaceRecoveryRequired, later));
+        assert!(!warnings.due(OperationRecoveryRequired, later));
+        let due = start + HOUSEKEEPING_WARNING_INTERVAL;
+        assert!(warnings.due(OperationRecoveryRequired, due));
+        assert!(!warnings.due(WorkspaceRecoveryRequired, due));
+        assert!(warnings.due(WorkspaceRecoveryRequired, due + Duration::from_secs(1)));
+    }
 
     #[test]
     fn child_retirement_backoff_is_per_head_and_does_not_block_other_children() {

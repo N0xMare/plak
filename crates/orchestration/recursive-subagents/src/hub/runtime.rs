@@ -417,6 +417,8 @@ impl ProductTopologyRuntime {
         enabled: bool,
         root: Option<plakous::sessions::SessionLocator>,
     ) -> Result<(), String> {
+        use crate::protocol::{TopologyError, TopologyErrorCode};
+
         let live = self.live.lock().await;
         if self.is_closed() || self.step_paused.load(Ordering::Acquire) {
             return Ok(());
@@ -426,24 +428,38 @@ impl ProductTopologyRuntime {
         };
         let mut occupied: std::collections::BTreeSet<_> = live.keys().cloned().collect();
         drop(live);
-        occupied.extend(
-            self.recovering
-                .lock()
-                .map_err(|_| "recovery inventory is unavailable")?
-                .iter()
-                .cloned(),
-        );
-        occupied.extend(
-            self.recycling
-                .lock()
-                .map_err(|_| "recycle inventory is unavailable")?
-                .iter()
-                .cloned(),
-        );
-        self.driver()
-            .collect_dormant_children(sessions, enabled, occupied, root)
-            .await
-            .map_err(|error| error.message)
+        let inventory = || {
+            for (inventory, failure) in [
+                (&self.recovering, "recovery inventory is unavailable"),
+                (&self.recycling, "recycle inventory is unavailable"),
+            ] {
+                occupied.extend(
+                    inventory
+                        .lock()
+                        .map_err(|_| {
+                            TopologyError::new(
+                                TopologyErrorCode::OperationRecoveryRequired,
+                                failure,
+                            )
+                        })?
+                        .iter()
+                        .cloned(),
+                );
+            }
+            Ok(occupied)
+        };
+        let result = match inventory() {
+            Ok(occupied) => {
+                self.driver()
+                    .collect_dormant_children(sessions, enabled, occupied, root)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        result.map_err(|error| {
+            self.driver.warn_child_housekeeping(error.code, "collect");
+            error.message
+        })
     }
 
     /// Holds `agent_id` for one `recover_node` run until the claim drops.

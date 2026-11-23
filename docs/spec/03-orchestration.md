@@ -2243,7 +2243,8 @@ non-withheld, non-recovery-required terminal at or before the cursor. This
 also works while a later turn is Working. The exact terminal scan is bounded;
 missing or incomplete proof defers. A carrier without a turn identity must
 use the quiescent-head proof. The tree publishes the witness under custody
-after rechecking the command, recipient binding and cursor.
+after rechecking the command, recipient binding and cursor. A refused save
+leaves those children unproved without blocking already-certified children.
 
 The tree checks no remaining owner, hold, work or recovery debt, then obtains
 the runtime store's exact retirement proof. A bounded pass prepares intents
@@ -2272,8 +2273,9 @@ reported according to its own ownership.
 The tree bounds retained summaries, evicting the oldest completed ones
 before admitting more. A pending summary is not evicted. A refused
 pending intent is housekeeping, not projection debt, and the tree names
-its refusal class without printing runtime content. With every home writer
-stopped, an operator can abort a pending intent before archive or a delete
+its refusal class without printing runtime content. The host rate-limits
+repeated housekeeping warnings by live tree and refusal class. With every
+home writer stopped, an operator can abort a pending intent before archive or a delete
 tombstone exists. Abort restores the node's preceding status and exempts
 that attempt from automatic retirement; a subsequent attempt is eligible
 again. Explicitly closed nodes remain closed.

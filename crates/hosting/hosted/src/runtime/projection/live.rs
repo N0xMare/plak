@@ -87,17 +87,13 @@ impl LiveTarget {
                 .reclaim_dormant_checkouts()
                 .await
                 .map_err(|error| error.message)?;
-            if runtime
+            let _ = runtime
                 .collect_dormant_children(
                     &self.sessions,
                     self.roots.retire_finished_children,
                     Some(self.followed),
                 )
-                .await
-                .is_err()
-            {
-                tracing::warn!(target: "plak.topology", "child retirement housekeeping remains unsettled");
-            }
+                .await;
         }
         Ok(())
     }

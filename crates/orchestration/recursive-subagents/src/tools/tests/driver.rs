@@ -503,6 +503,146 @@ fn scratch_and_refused_folds_do_not_publish_workspace_generation() {
 }
 
 #[tokio::test]
+async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_working_turn() {
+    use crate::tree::{AgentCommand, AgentCommandKind, TreeFeedReads};
+    use plakous::agent::CommandId;
+    use plakous::sessions::feed::{FeedCursor, FeedFact, FeedPage, FeedPageRequest};
+    use plakous::sessions::{
+        AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
+        SessionOperationId,
+    };
+    use plakous_offline_crash_harness::{
+        BoundaryController, gate::GateHandle, scripted_runtime_binding,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let gate = GateHandle::new();
+    let plan = Arc::new(
+        serde_json::from_value(json!({
+            "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+            "steps": [
+                {"output": {"text": "delivered"}},
+                {"stream": [{"gate": gate.script()}], "output": {"text": "later"}}
+            ]
+        }))
+        .unwrap(),
+    );
+    let sessions =
+        AgentSessions::new(SessionBackend::sqlite(root.path().join("runtime.sqlite3")).unwrap())
+            .unwrap();
+    let create = async |id| {
+        let controller = BoundaryController::quiet_from_evidence_path(
+            plakous_offline_crash_harness::protocol::CrashBoundary::None,
+            root.path().join(format!("{id}.jsonl")),
+        )
+        .unwrap();
+        let binding = scripted_runtime_binding(root.path(), controller, Arc::clone(&plan)).unwrap();
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new(id).unwrap(),
+                binding,
+            ))
+            .await
+            .unwrap()
+        else {
+            panic!("created session required")
+        };
+        session
+    };
+    let child_locator = create("child").await.release().await.unwrap();
+    let parent = create("parent").await;
+    let delivered = parent
+        .agent()
+        .start(CommandId::new("carrier").unwrap(), "result mail")
+        .await
+        .unwrap();
+    delivered.result().unwrap().clone().result().await.unwrap();
+    let locator = parent.locator();
+    let FeedPage::Records { records, tail, .. } = sessions
+        .feed_page(FeedPageRequest::after(FeedCursor::start(
+            locator.session_id(),
+        )))
+        .await
+        .unwrap()
+    else {
+        panic!("complete fixture feed required")
+    };
+    let accepted = records.iter().position(|record| record.facts().iter().any(|fact| {
+        matches!(fact, FeedFact::CommandAccepted { command_id, .. } if command_id.as_str() == "carrier")
+    })).unwrap();
+    assert!(records[accepted].header().seq < tail);
+
+    let mut tree = bootstrap_tree("historical-carrier", root.path());
+    let child = tree
+        .spawn_agent("root", &spawn_request(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&child, child_locator.to_string())
+        .unwrap();
+    tree.record_turn_completed(&child).unwrap();
+    tree.settle_for_test();
+    tree.attempt_mut_for_test(&child).ended_at = Some(1);
+    let mail = tree.pending_result_mail("root").remove(0).message_id;
+    tree.record_command(AgentCommand::intent(
+        "carrier",
+        "root",
+        None,
+        AgentCommandKind::RootBatch,
+        "result mail",
+        vec![mail],
+    ))
+    .unwrap();
+    let sid = locator.session_id().to_string();
+    tree.project_feed(
+        "root",
+        &sid,
+        &records[..=accepted],
+        &TreeFeedReads::default(),
+    )
+    .unwrap();
+    let driver = driver_on(tree, Arc::new(MemoryTreeStore::new()));
+    driver.mutate_and_settle(|_| ()).await.unwrap();
+
+    let later = parent
+        .agent()
+        .start(CommandId::new("later").unwrap(), "later turn")
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), gate.entered())
+        .await
+        .unwrap();
+    let working = parent.locator();
+    assert!(sessions.head_running_turn(working).await.unwrap().is_some());
+    let collect = || {
+        driver.collect_dormant_children(
+            &sessions,
+            true,
+            std::collections::BTreeSet::new(),
+            Some(working),
+        )
+    };
+    collect().await.unwrap();
+    assert!(sessions.head_is_quiescent(child_locator).await.unwrap());
+
+    // The historical tree had already projected the earlier terminal, but
+    // did not persist the new witness. Leave its Accepted row in that shape.
+    driver
+        .mutate_and_settle(move |tree| tree.seed_feed_cursor(&sid, tail.get()))
+        .await
+        .unwrap();
+    collect().await.unwrap();
+    assert!(
+        driver
+            .read(|tree| tree.retired_children().contains_key(&child))
+            .unwrap()
+    );
+    assert!(sessions.head_running_turn(working).await.unwrap().is_some());
+    gate.release();
+    later.result().unwrap().clone().result().await.unwrap();
+    parent.release().await.unwrap();
+}
+
+#[tokio::test]
 async fn child_retention_runtime_archive_delete_crash_cuts() {
     use plakous::sessions::*;
     use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding};

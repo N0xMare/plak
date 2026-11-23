@@ -702,7 +702,6 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # repair or a refused snapshot logs its cause, scope and key shape, never rows.
     ("plakous-hosted", "src/runtime/projection/transcript.rs"): {"debug_assert", "warn"},
     # Content-free retirement housekeeping and disposition persistence failures.
-    ("plakous-hosted", "src/runtime/projection/live.rs"): {"warn"},
     ("plakous-recursive-subagents", "src/tools/driver/retention.rs"): {"debug", "warn"},
     ("plakous-hosted", "src/sessions/transcript.rs"): {"debug_assert"},
     # A reload request dropped or settled at a session switch logs its id.
