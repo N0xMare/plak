@@ -408,6 +408,9 @@ impl ProductTopologyRuntime {
 
     /// Collects children outside the hub's live/recovery inventory. The
     /// runtime probe and tree admission still recheck exact ownership.
+    ///
+    /// # Errors
+    /// Reports unavailable inventories or a refusal to settle a published intent.
     pub async fn collect_dormant_children(
         &self,
         sessions: &plakous::sessions::AgentSessions,

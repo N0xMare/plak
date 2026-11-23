@@ -48,7 +48,8 @@ lease expiry does not revoke retention authority. Bare connection errors do not
 release retained capacity without positive original-instance/process-loss proof.
 
 The current state directory is `state/r28.e39.p39.t11/`: runtime SQLite
-schema 28, runtime format epoch 39, product schema 39, and tree schema 11.
+schema 28, runtime format epoch 39, product generation 39, and tree generation 11
+(current tree store revision 12).
 These are format identities, not configuration keys. Client wire protocol 12
 and runner protocol 9 require separate exact matches, with no negotiation.
 Product schema 39 adds `sessions.account_choices`. Runtime

@@ -135,7 +135,7 @@ pub(in super::super) fn retirement_head(
     let stored = load_checkpoint(tx, checkpoint)?;
     let manifest = stored.checkpoint().manifest();
     let topology = manifest.topology();
-    require_line_head(tx, selector, topology.line, topology.line_generation)?;
+    lines::require_line_head(tx, selector, topology.line, topology.line_generation)?;
     if !matches!(
         manifest.lifecycle(),
         plakous_agent::internal::RuntimeLifecycle::Quiescent

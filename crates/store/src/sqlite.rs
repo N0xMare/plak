@@ -89,7 +89,8 @@ use objects::*;
 use open::*;
 use ops::{
     acquire, archive, commit, create, delete, fork, incremental_vacuum, load_delete, prune,
-    recover_commit, recover_create, recover_fork, release, release_many, renew, revive,
+    recover_commit, recover_create, recover_fork, release, release_many, renew, retirement_head,
+    revive,
 };
 use plakous_agent::internal::{StoreReclaimMode, StoreReclaimReport};
 use reads::*;

@@ -7,6 +7,9 @@ use super::{
 
 impl AgentSessions {
     /// Reads the revision to bind a child-retirement intent without changing runtime state.
+    ///
+    /// # Errors
+    /// Refuses a stale, owned, unsettled or pinned runtime, or backend failure.
     #[doc(hidden)]
     pub async fn child_retirement_revision(
         &self,
@@ -22,6 +25,9 @@ impl AgentSessions {
 
     /// Resumes one exact retirement across either the archive or delete commit.
     /// It does not follow a moved branch or discover a new archived revision.
+    ///
+    /// # Errors
+    /// Returns typed ownership, exact-head, unsettled-work or storage refusal.
     #[doc(hidden)]
     pub async fn retire_child_session(
         &self,

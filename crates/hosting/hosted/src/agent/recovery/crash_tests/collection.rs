@@ -49,6 +49,18 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
         })
         .await
         .unwrap();
+    fixture
+        .runtime
+        .collect_dormant_children(&sessions, false)
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .runtime
+            .read(|tree| tree.retired_children().is_empty())
+            .unwrap()
+    );
+    assert!(sessions.head_is_quiescent(child_locator).await.unwrap());
     crate::topology_runtime::force_release(&fixture.tree_id).await;
     (child, parent_locator, child_locator)
 }
