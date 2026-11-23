@@ -281,6 +281,7 @@ fn fixture() -> Option<Fixture> {
 
 /// One connection to the host's socket.
 struct Client {
+    socket: PathBuf,
     stream: UnixStream,
     reader: BufReader<UnixStream>,
     retained: Option<std::collections::VecDeque<HostFrame<PlakExtension>>>,
@@ -297,6 +298,7 @@ impl Client {
     fn connect_at(socket: &std::path::Path) -> Self {
         let stream = UnixStream::connect(socket).unwrap();
         let mut client = Self {
+            socket: socket.to_path_buf(),
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
             retained: None,
@@ -387,6 +389,43 @@ impl Client {
         ) {
             Outcome::Ok(Answer::Sessions { rows }) => rows,
             other => panic!("not listed: {other:?}"),
+        }
+    }
+
+    /// A separate watch leaves this connection's attachment and observations intact.
+    fn wait_for_row(&self, session: &str, ready: impl FnMut(&SessionRow) -> bool) -> SessionRow {
+        Self::watch_row_at(&self.socket, session, ready)
+    }
+
+    fn watch_row_at(
+        socket: &std::path::Path,
+        session: &str,
+        mut ready: impl FnMut(&SessionRow) -> bool,
+    ) -> SessionRow {
+        let mut watcher = Self::connect_at(socket);
+        watcher.read_deadline = Some(std::time::Instant::now() + WAIT);
+        watcher.retain_observations();
+        let Outcome::Ok(Answer::Watching { attachment }) = watcher.request(
+            1,
+            Op::WatchSessions {
+                include_archived: false,
+            },
+        ) else {
+            panic!("no directory watch");
+        };
+        loop {
+            if let HostFrame::Directory {
+                attachment: watched,
+                rows,
+                ..
+            } = watcher.next()
+                && watched == attachment
+                && let Some(row) = rows
+                    .into_iter()
+                    .find(|row| row.session == session && ready(row))
+            {
+                return row;
+            }
         }
     }
 

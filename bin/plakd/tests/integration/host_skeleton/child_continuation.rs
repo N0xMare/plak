@@ -112,10 +112,7 @@ fn an_idle_parent_continues_its_handed_off_child_at_startup_without_an_attach() 
     let mut client = Client::connect(&host);
     assert_eq!(
         client
-            .rows(1)
-            .iter()
-            .find(|row| row.session == session)
-            .unwrap()
+            .wait_for_row(&session, |row| row.residency == SessionResidency::Resident)
             .residency,
         SessionResidency::Resident
     );

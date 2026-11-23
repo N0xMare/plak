@@ -417,27 +417,37 @@ fn wait_stopped_notice(
     notices_before_stop: Option<u64>,
 ) -> io::Result<()> {
     let until = Instant::now() + WAIT;
-    loop {
-        if mode.cut() && host.child.as_mut().unwrap().try_wait()?.is_some() {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-        }
-        if stopped_notice_committed(fixture, session) {
-            // Other SQLite connections can see the notice before its WAL
-            // callback publishes the trace line. Do not kill a complete
-            // pilot until the stop's indexed notice write is in the trace.
-            if let Some(trace) = mode.trace() {
-                let before = notices_before_stop.expect("recorded stop request");
-                if notice_trace_ordinal(trace)? > before {
+    if let Some(trace) = mode.trace() {
+        loop {
+            let next = host
+                .lines
+                .recv_timeout(until.saturating_duration_since(Instant::now()));
+            match next {
+                Ok(line) if line == "commit-trace: stop_notice" => {
+                    let before = notices_before_stop.expect("recorded stop request");
+                    assert!(
+                        notice_trace_ordinal(trace)? > before,
+                        "missing stop trace receipt"
+                    );
+                    assert!(
+                        stopped_notice_committed(fixture, session),
+                        "missing durable notice"
+                    );
                     return Ok(());
                 }
-            } else {
-                return Ok(());
+                Ok(_) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) if mode.cut() => {
+                    return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                }
+                Err(error) => panic!("the stop notice was not committed and traced: {error}"),
             }
         }
-        assert!(
-            Instant::now() < until,
-            "the stop notice was not committed and traced"
-        );
+    }
+    loop {
+        if stopped_notice_committed(fixture, session) {
+            return Ok(());
+        }
+        assert!(Instant::now() < until, "the stop notice was not committed");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -446,6 +456,7 @@ fn notice_trace_ordinal(trace: &Path) -> io::Result<u64> {
     Ok(indexed_trace_rows(&std::fs::read_to_string(trace)?)
         .filter(|row| {
             row["store"] == "product"
+                && row["label"] == "stop_notice"
                 && row["tables"]
                     .as_array()
                     .unwrap()
@@ -461,30 +472,31 @@ fn the_stop_trace_requires_a_complete_indexed_product_notice() {
     let directory = tempfile::tempdir().unwrap();
     let trace = directory.path().join("trace.jsonl");
     let mut file = std::fs::File::create(&trace).unwrap();
-    for (store, index, indexed, table) in [
-        ("product", 1, true, "operator_notices"),
-        ("runtime", 2, true, "operator_notices"),
-        ("product", 3, false, "operator_notices"),
-        ("product", 4, true, "sessions"),
+    for (store, index, indexed, label, table) in [
+        ("product", 1, true, "stop_notice", "operator_notices"),
+        ("runtime", 2, true, "stop_notice", "operator_notices"),
+        ("product", 3, false, "stop_notice", "operator_notices"),
+        ("product", 4, true, "stop_notice", "sessions"),
+        ("product", 5, true, "unlabelled", "operator_notices"),
     ] {
         writeln!(
             file,
             "{}",
             json!({"store": store, "store_ordinal": index,
-            "indexed": indexed, "tables": [table]})
+            "indexed": indexed, "label": label, "tables": [table]})
         )
         .unwrap();
     }
     write!(
         file,
         "{}",
-        json!({"store": "product", "store_ordinal": 5,
-        "indexed": true, "tables": ["sessions", "operator_notices"]})
+        json!({"store": "product", "store_ordinal": 6,
+        "indexed": true, "label": "stop_notice", "tables": ["sessions", "operator_notices"]})
     )
     .unwrap();
     assert_eq!(notice_trace_ordinal(&trace).unwrap(), 1);
     writeln!(file).unwrap();
-    assert_eq!(notice_trace_ordinal(&trace).unwrap(), 5);
+    assert_eq!(notice_trace_ordinal(&trace).unwrap(), 6);
 }
 
 #[test]

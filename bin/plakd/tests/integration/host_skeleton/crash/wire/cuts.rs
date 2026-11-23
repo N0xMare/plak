@@ -223,28 +223,28 @@ fn cut_case(
     assert!(
         actual
             .iter()
-            .any(|(seen, index, _)| seen == store && *index == ordinal),
+            .any(|(seen, index, ..)| seen == store && *index == ordinal),
         "missing {store}:{ordinal}"
     );
     for point in &actual {
         assert!(
             expected.contains(point),
-            "cut {store}:{ordinal}: unexpected indexed label {point:?}"
+            "cut {store}:{ordinal}: unexpected indexed signature {point:?}"
         );
     }
     for store in actual
         .iter()
-        .map(|(store, _, _)| store)
+        .map(|(store, ..)| store)
         .collect::<std::collections::BTreeSet<_>>()
     {
         let observed = actual
             .iter()
-            .filter(|(seen, _, _)| seen == store)
+            .filter(|(seen, ..)| seen == store)
             .collect::<Vec<_>>();
         let last = observed.last().unwrap().1;
         let prefix = expected
             .iter()
-            .filter(|(seen, index, _)| seen == store && *index <= last)
+            .filter(|(seen, index, ..)| seen == store && *index <= last)
             .collect::<Vec<_>>();
         assert_eq!(observed, prefix, "complete reached prefix for {store}");
     }

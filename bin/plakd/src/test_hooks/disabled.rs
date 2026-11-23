@@ -113,10 +113,14 @@ pub(crate) const fn runner_reconnect_window(default: std::time::Duration) -> std
 }
 pub(crate) fn runner_before_ready(
     _client: &plakous::runner::RunnerClient,
-) -> std::future::Ready<Result<(), plakous::runner::PlacementFailure>> {
-    std::future::ready(Ok(()))
+) -> std::future::Ready<Result<Option<std::path::PathBuf>, plakous::runner::PlacementFailure>> {
+    std::future::ready(Ok(None))
 }
-pub(crate) fn runner_ready_result(_result: &Result<(), plakous::runner::PlacementFailure>) {}
+pub(crate) fn runner_ready_result(
+    _receipt: Option<std::path::PathBuf>,
+    _result: &Result<(), plakous::runner::PlacementFailure>,
+) {
+}
 pub(crate) fn runner_link(
     client: plakous::runner::RunnerClient,
 ) -> std::sync::Arc<dyn plakous::tools::runner::RunnerLink> {

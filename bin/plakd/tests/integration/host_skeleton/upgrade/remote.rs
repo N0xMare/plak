@@ -367,29 +367,7 @@ fn wait_ack(fixture: &Fixture, client: &mut Client) {
 
 /// A successor receipt can precede publication of its directory row.
 fn wait_for_successor_node(host: &Host, session: &str) -> NodeAddress {
-    let mut watcher = Client::connect(host);
-    watcher.read_deadline = Some(Instant::now() + WAIT);
-    watcher.retain_observations();
-    let Outcome::Ok(Answer::Watching { attachment }) = watcher.request(
-        1,
-        Op::WatchSessions {
-            include_archived: false,
-        },
-    ) else {
-        panic!("no directory watch");
-    };
-    loop {
-        if let HostFrame::Directory {
-            attachment: watched,
-            rows,
-            ..
-        } = watcher.next()
-            && watched == attachment
-            && let Some(row) = rows.into_iter().find(|row| row.session == session)
-        {
-            return row.node;
-        }
-    }
+    Client::watch_row_at(&host.socket, session, |_| true).node
 }
 
 #[test]

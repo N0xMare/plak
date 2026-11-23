@@ -181,12 +181,7 @@ fn terminal(client: &mut Client, mode: WakeMode) {
 }
 
 fn following_effect(fixture: &Fixture, client: &mut Client, session: &str, delays: &[u64]) {
-    let node = client
-        .rows(40)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap()
-        .node;
+    let node = client.wait_for_row(session, |_| true).node;
     let attachment = client.attach(41, &node);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     client.read_deadline = Some(deadline);
@@ -286,12 +281,7 @@ fn runner_reopen_waits_for_its_readoption() {
         );
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    let node = client
-        .rows(40)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap()
-        .node;
+    let node = client.wait_for_row(&session, |_| true).node;
     let attachment = client.attach(41, &node);
     let answered = std::thread::scope(|scope| {
         scope.spawn(|| {

@@ -1283,7 +1283,7 @@ fn crash_while_native_credential_waiting_recovers_one_terminal_without_redispatc
     );
     agent.child.kill().unwrap();
     assert_eq!(agent.finish().status.signal(), Some(9));
-    let commits = trace::read(&fixture.root.join("commit-trace.jsonl"));
+    let commits = trace::read_after_external_kill(&fixture.root.join("commit-trace.jsonl"));
     let before = summary::read(&fixture);
     let result = cut_after_kill(&fixture, &session, shape, &commits, &before, &baseline);
     assert_eq!(result["invariants"], true, "{result}");

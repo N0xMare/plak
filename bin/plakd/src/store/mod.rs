@@ -524,7 +524,7 @@ impl ProductStore {
         if submission.is_some() && expected > 0 {
             lifecycle::admit_work(&transaction, &session.id)?;
         }
-        let next = commit_in_transaction(
+        let (next, wrote_stop_notice) = commit_in_transaction(
             &transaction,
             session,
             expected,
@@ -533,6 +533,8 @@ impl ProductStore {
                 .filter(|(revision, _)| *revision == expected)
                 .map(|(_, baseline)| baseline),
         )?;
+        #[cfg(not(feature = "test-support"))]
+        let _ = wrote_stop_notice;
         if let Some(submission) = submission {
             views::insert_submission(
                 &transaction,
@@ -564,9 +566,21 @@ impl ProductStore {
                 |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
             )
             .map_err(|error| write_error(error, "could not read operator metadata"))?;
-        transaction.commit().map_err(|error| {
-            write_error(error, "could not durably commit product session".to_owned())
-        })?;
+        {
+            #[cfg(feature = "test-support")]
+            let _label = wrote_stop_notice
+                .then(|| plakous_offline_crash_harness::commit_trace::label("stop_notice"));
+            transaction.commit().map_err(|error| {
+                write_error(error, "could not durably commit product session".to_owned())
+            })?;
+        }
+        #[cfg(feature = "test-support")]
+        if wrote_stop_notice
+            && std::env::var_os(plakous_offline_crash_harness::commit_trace::TRACE_ENV).is_some()
+        {
+            // The WAL callback synced the indexed row before commit returned.
+            eprintln!("commit-trace: stop_notice");
+        }
         session.store_revision = next;
         session.title_override = operator_fields.0;
         session.archived = operator_fields.1;
@@ -1143,7 +1157,7 @@ fn commit_in_transaction(
     session: &SessionRecord,
     expected: u64,
     baseline: Option<&StoreBaseline>,
-) -> Result<u64, RecordStoreError> {
+) -> Result<(u64, bool), RecordStoreError> {
     // Validate before any identity claim or revision change.
     session.validate_for_store()?;
     let next = if expected == 0 {
@@ -1174,11 +1188,11 @@ fn commit_in_transaction(
     if moved(baseline.is_some_and(|b| b.pending_queue == session.pending_queue)) {
         sync_queue(tx, session)?;
     }
-    views::write_notices(tx, session, expected == 0)?;
+    let wrote_stop_notice = views::write_notices(tx, session, expected == 0)?;
     if moved(baseline.is_some_and(|b| b.prompt_history == session.prompt_history)) {
         sync_prompt_history(tx, session)?;
     }
-    Ok(next)
+    Ok((next, wrote_stop_notice))
 }
 
 fn update_session(

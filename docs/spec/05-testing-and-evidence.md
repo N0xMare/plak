@@ -2301,7 +2301,11 @@ callbacks synchronously on the committing thread; thread-local pending context
 bridges rusqlite's non-capturing WAL callback. At the target store's indexed
 `store_ordinal=k`, the process
 raises `SIGKILL` after the line is fsynced and before any later traced connection
-can commit. At operation completion, `settle()` releases any remaining
+can commit. A separate external `SIGKILL` can interrupt an append before its
+newline. Only a reader that joined such a killed process may discard one
+unterminated final JSON object prefix; preceding complete rows remain strict.
+Clean pilots and indexed self-kills still require complete rows.
+At operation completion, `settle()` releases any remaining
 thread-local claim as frameless, without emitting a line or advancing an ordinal.
 Commit and WAL callbacks for a fully stepped framed commit run inside the same
 SQLite call, so its claim cannot survive to that boundary. Runtime settles at
@@ -2996,7 +3000,11 @@ emission control or unbounded capture-variant collection replaces this rule.
 Typed face-transcript equality covers row content, order and multiplicity on
 both connections; live provisional row keys need not equal committed anchors.
 `wire_host_restart` and `wire_host_restart_switch` cover root and child twin
-pilots and every reached per-store commit cut. Their indexed signatures match
+pilots and every reached per-store commit cut, comparing each indexed ordinal,
+label and table set. A traced pilot waits for the completed WAL receipt of
+the exact `stop_notice` insert before killing the host; neither the stop reply,
+SQLite visibility nor another operator notice is that receipt.
+Their indexed signatures match
 the original terminal pilots, including labels and their per-store order; a run
 of consecutive unlabelled commits in one store compares as one run, because how
 many commits the projector takes for one stream of rows depends on timing, not

@@ -14,17 +14,7 @@ pub(super) fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAdd
     };
     let attachment = client.attach(2, &node);
     client.prompt(3, attachment, "one admitted turn", ANSWER);
-    let deadline = Instant::now() + WAIT;
-    while client
-        .rows(4)
-        .iter()
-        .find(|row| row.session == session)
-        .unwrap()
-        .activity
-        == SessionActivity::Busy
-    {
-        assert!(Instant::now() < deadline, "the completed turn stayed busy");
-    }
+    client.wait_for_row(&session, |row| row.activity != SessionActivity::Busy);
     (client, session, node, attachment)
 }
 

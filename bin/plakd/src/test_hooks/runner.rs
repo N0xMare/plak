@@ -44,9 +44,9 @@ pub(crate) fn runner_reconnect_window(default: std::time::Duration) -> std::time
 
 pub(crate) async fn runner_before_ready(
     client: &plakous::runner::RunnerClient,
-) -> Result<(), plakous::runner::PlacementFailure> {
+) -> Result<Option<std::path::PathBuf>, plakous::runner::PlacementFailure> {
     let Some(directory) = hold_cuts() else {
-        return Ok(());
+        return Ok(None);
     };
     if directory.join("before-ready.armed").is_file()
         && link::claim(&directory.join("before-ready.entered"))
@@ -57,14 +57,16 @@ pub(crate) async fn runner_before_ready(
                 phase: plakous::runner::ProbePhase::Reconcile,
                 timed_out: true,
             })?;
+        return Ok(Some(directory.join("before-ready.result")));
     }
-    Ok(())
+    Ok(None)
 }
 
-pub(crate) fn runner_ready_result(result: &Result<(), plakous::runner::PlacementFailure>) {
-    if let Some(directory) = hold_cuts()
-        && directory.join("before-ready.entered").is_file()
-    {
+pub(crate) fn runner_ready_result(
+    receipt: Option<std::path::PathBuf>,
+    result: &Result<(), plakous::runner::PlacementFailure>,
+) {
+    if let Some(receipt) = receipt {
         let verdict = match result {
             Ok(()) => "ready",
             Err(plakous::runner::PlacementFailure::RunnerUnreachable {
@@ -73,7 +75,7 @@ pub(crate) fn runner_ready_result(result: &Result<(), plakous::runner::Placement
             }) => "link_lost",
             Err(_) => "blocked",
         };
-        let _ = link::write_marker(&directory.join("before-ready.result"), verdict.as_bytes());
+        let _ = link::write_marker(&receipt, verdict.as_bytes());
     }
 }
 

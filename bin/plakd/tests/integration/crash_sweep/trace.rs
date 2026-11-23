@@ -263,11 +263,32 @@ fn lease_renewals_and_partial_rows_do_not_advance_lifecycle_progress() {
 }
 
 pub(super) fn read(path: &Path) -> Vec<Commit> {
-    let body = std::fs::read_to_string(path).expect("commit trace");
-    assert!(body.ends_with('\n'), "trace ended with an incomplete row");
+    read_rows(&std::fs::read(path).expect("commit trace"), false)
+}
+
+/// Use only after joining a process ended by an external SIGKILL. Indexed
+/// cuts instead kill after syncing their target row and must use `read`.
+pub(super) fn read_after_external_kill(path: &Path) -> Vec<Commit> {
+    read_rows(&std::fs::read(path).expect("commit trace"), true)
+}
+
+fn read_rows(body: &[u8], external_kill: bool) -> Vec<Commit> {
+    assert!(!body.is_empty(), "empty commit trace");
     let commits: Vec<Commit> = body
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("trace row"))
+        .split_inclusive(|byte| *byte == b'\n')
+        .map_while(|line| {
+            if !line.ends_with(b"\n") {
+                assert!(
+                    external_kill
+                        && line.starts_with(b"{")
+                        && serde_json::from_slice::<Commit>(line)
+                            .map_or_else(|error| error.is_eof(), |_| true),
+                    "trace ended with an incomplete or invalid row"
+                );
+                return None;
+            }
+            Some(serde_json::from_slice(line).expect("trace row"))
+        })
         .collect();
     let mut ordinal = 0;
     let mut stores = std::collections::BTreeMap::new();
@@ -292,6 +313,20 @@ pub(super) fn read(path: &Path) -> Vec<Commit> {
         .into_iter()
         .filter(|commit| commit.indexed)
         .collect()
+}
+
+#[test]
+fn only_an_external_kill_may_leave_one_unpublished_trace_row() {
+    let row = r#"{"ordinal":1,"store":"runtime","store_index":1,"store_ordinal":1,"label":"commit","tables":[],"indexed":true}"#;
+    for tail in ["{\"ordinal\":2,", row] {
+        let body = format!("{row}\n{tail}");
+        assert_eq!(read_rows(body.as_bytes(), true).len(), 1);
+        assert!(std::panic::catch_unwind(|| read_rows(body.as_bytes(), false)).is_err());
+    }
+    for invalid in ["{bad", "{\"ordinal\":2,\n", "{}\n{\"ordinal\":2,"] {
+        let body = format!("{row}\n{invalid}");
+        assert!(std::panic::catch_unwind(|| read_rows(body.as_bytes(), true)).is_err());
+    }
 }
 
 pub(super) fn sequences(commits: &[Commit]) -> std::collections::BTreeMap<String, Vec<String>> {

@@ -501,7 +501,7 @@ async fn refresh_existing(
     } else {
         Some(reconcile_remote(services, &remote.id, &client).await?)
     };
-    crate::test_hooks::runner_before_ready(&client).await?;
+    let receipt = crate::test_hooks::runner_before_ready(&client).await?;
     let ready = services.runners().ready(
         &remote.id,
         connection,
@@ -510,7 +510,7 @@ async fn refresh_existing(
         discovery,
         services.now_unix_seconds(),
     );
-    crate::test_hooks::runner_ready_result(&ready);
+    crate::test_hooks::runner_ready_result(receipt, &ready);
     ready?;
     Ok(pending)
 }
@@ -688,7 +688,7 @@ async fn finish_remote_bind(
         crate::test_hooks::runner_link(dialed.client.clone()),
     )
     .map_err(|_| unavailable(ProbePhase::Bind, false))?;
-    crate::test_hooks::runner_before_ready(&dialed.client).await?;
+    let receipt = crate::test_hooks::runner_before_ready(&dialed.client).await?;
     let ready = services.runners().ready(
         &remote.id,
         connection,
@@ -697,7 +697,7 @@ async fn finish_remote_bind(
         discovery,
         services.now_unix_seconds(),
     );
-    crate::test_hooks::runner_ready_result(&ready);
+    crate::test_hooks::runner_ready_result(receipt, &ready);
     ready?;
     tracing::info!(target: "plak.runner", runner_id = %remote.id, "runner_reconnected");
     Ok((dialed, pending))

@@ -141,30 +141,22 @@ pub(super) fn until_within(
 }
 
 pub(super) fn row(client: &mut Client, session: &str) -> SessionRow {
-    client
-        .rows(71)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap()
+    client.wait_for_row(session, |_| true)
 }
 
 pub(super) fn held(client: &mut Client, session: &str) -> SessionRow {
-    until("resident placement hold", || {
-        let row = row(client, session);
+    client.wait_for_row(session, |row| {
         row.activity == SessionActivity::Busy
             && row.needs_operator
             && matches!(
                 row.runner_status,
                 plakous_host_protocol::wire::RunnerStatus::Blocked { .. }
             )
-    });
-    row(client, session)
+    })
 }
 
 pub(super) fn idle(client: &mut Client, session: &str) {
-    until("one terminal", || {
-        row(client, session).activity != SessionActivity::Busy
-    });
+    client.wait_for_row(session, |row| row.activity != SessionActivity::Busy);
 }
 
 pub(super) fn providers(fixture: &Fixture) -> usize {

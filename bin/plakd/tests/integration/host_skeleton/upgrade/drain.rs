@@ -287,17 +287,9 @@ fn finish_process_after_rollback(fixture: &Fixture, client: &mut Client, process
         5,
         "two seed turns, one process-call generation, its answer and one fold"
     );
-    assert!(
-        client
-            .rows(7)
-            .iter()
-            .find(|row| row.session == process_session)
-            .unwrap()
-            .live_work
-            .processes
-            > 0,
-        "Notice must not stop the promoted process"
-    );
+    // The rollback receipt preserves the process, but its projected count may
+    // not have reached the directory yet.
+    client.wait_for_row(process_session, |row| row.live_work.processes > 0);
     assert_eq!(
         client.request(
             8,

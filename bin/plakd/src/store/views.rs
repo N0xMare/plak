@@ -1190,12 +1190,12 @@ pub(super) fn write_notices(
     connection: &Connection,
     session: &plakous_hosted::sessions::SessionRecord,
     first_commit: bool,
-) -> Result<(), RecordStoreError> {
+) -> Result<bool, RecordStoreError> {
     if first_commit && session.carried_forward_from().is_some() {
         write_import_intents(connection, &session.id, session.transcript.imported_rows())?;
     }
     if session.transcript.pending_notices().is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let anchor: i64 = connection
         .query_row(
@@ -1213,6 +1213,7 @@ pub(super) fn write_notices(
             |row| row.get(0),
         )
         .map_err(|error| super::write_error(error, "product store write failed"))?;
+    let mut wrote_stop_notice = false;
     for (id, row) in session.transcript.pending_notice_entries() {
         if let Some(id) = id {
             let prior: Option<String> = connection
@@ -1245,9 +1246,15 @@ pub(super) fn write_notices(
                 row: row.clone(),
             },
         )?;
+        // Test traces name the write, not the notice content or session.
+        wrote_stop_notice |= cfg!(feature = "test-support")
+            && row.text()
+                == Some(
+                    "stopped: the session's work ended, and nothing continues it until it is prompted again",
+                );
         next = next.saturating_add(1);
     }
-    Ok(())
+    Ok(wrote_stop_notice)
 }
 
 /// The persisted transcript of one session: its views' rows merged with its

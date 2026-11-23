@@ -142,6 +142,51 @@ fn upgrade(fixture: &Fixture, binary: &str) -> std::process::Output {
     )
 }
 
+fn require_upgrade(fixture: &Fixture, host: &Host, stage: &str, result: &std::process::Output) {
+    if result.status.success() {
+        return;
+    }
+    fixture.preserve();
+    let home = fixture.home().join("host");
+    let lock = home.join("host.lock");
+    let custody = std::fs::File::open(&lock).map(|file| {
+        let held = file.try_lock();
+        let holder = std::fs::read_to_string(&lock);
+        (held, holder)
+    });
+    let run_entries = std::fs::read_dir(home.join("run")).map(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect::<Vec<_>>()
+    });
+    let attempts: Vec<_> = std::fs::read_dir(home.join("upgrades"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let bytes = std::fs::read(path.join("receipt.json")).ok()?;
+            let receipt: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            let recovery = std::fs::read_to_string(path.join("recovery.log"));
+            Some((
+                receipt["sequence"].clone(),
+                receipt["phase"].clone(),
+                receipt["source_key"].clone(),
+                receipt["destination_key"].clone(),
+                recovery,
+            ))
+        })
+        .collect();
+    let child = host.child.as_ref().map(|child| child.id());
+    let startup: Vec<_> = host.lines.try_iter().collect();
+    panic!(
+        "upgrade {stage}: {}; fixture={}; home custody={custody:?}; run entries={run_entries:?}; +         receipts (sequence, phase, source key, destination key, recovery stderr)={attempts:?}; +         fixture host pid={child:?}; host stderr={startup:?}",
+        String::from_utf8_lossy(&result.stderr),
+        fixture.root.display(),
+    );
+}
+
 /// Recovery can create a different serving PID. The held guard in this
 /// disposable home proves that the process belongs to this fixture.
 struct HomeHost(PathBuf);
@@ -261,11 +306,7 @@ fn host_upgrade_receipt_crash_cut(cut: &str) {
     );
     let recovered = upgrade(&fixture, &id);
     if committed {
-        assert!(
-            recovered.status.success(),
-            "{cut}: {}",
-            String::from_utf8_lossy(&recovered.stderr)
-        );
+        require_upgrade(&fixture, &host, cut, &recovered);
     } else {
         assert!(
             !recovered.status.success(),
@@ -274,11 +315,7 @@ fn host_upgrade_receipt_crash_cut(cut: &str) {
         assert!(String::from_utf8_lossy(&recovered.stderr).contains("host_upgrade_aborted"));
         let _ = export(&fixture, &source, false, "source-after-cut.json");
         let completed = upgrade(&fixture, &id);
-        assert!(
-            completed.status.success(),
-            "{cut}: {}",
-            String::from_utf8_lossy(&completed.stderr)
-        );
+        require_upgrade(&fixture, &host, cut, &completed);
     }
 
     let next = successor(&fixture, &source);

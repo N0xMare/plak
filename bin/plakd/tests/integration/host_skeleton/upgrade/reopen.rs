@@ -175,7 +175,12 @@ fn a_child_finishing_during_qualification_rechecks_its_idle_root() {
         assert_eq!(root_stamp(), root_before, "only the child tree may advance");
     });
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(result.status.success(), "{stderr}");
+    require_upgrade(
+        &fixture,
+        &host,
+        "child finished during qualification",
+        &result,
+    );
     assert!(
         gate.join(format!("{session}.rechecked")).is_file(),
         "{stderr}"

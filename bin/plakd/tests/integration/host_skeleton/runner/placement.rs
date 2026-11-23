@@ -283,12 +283,7 @@ fn cross_runner_child_fork_runs_holds_seals_and_adopts() {
     let agent = receipt["agent_id"].as_str().unwrap();
     wait_for(|| pair.cuts.join("before-answer.entered").is_file());
     let mut paused = Paused::new(pair.secondary.pid().unwrap());
-    wait_for(|| {
-        let row = client
-            .rows(15)
-            .into_iter()
-            .find(|row| row.session == session)
-            .unwrap();
+    client.wait_for_row(&session, |row| {
         assert_eq!(row.runner_status, RunnerStatus::Ready);
         row.needs_operator
     });
