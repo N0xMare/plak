@@ -14,6 +14,7 @@ import crash_sweep_shards as sweep  # noqa: E402
 COMMIT = "a" * 40
 TREE = "b" * 40
 TARGET = "x86_64-unknown-linux-musl"
+FORMATS = {"state_key": "r1.e2.p3.t4"}
 
 
 def receipt(i, n):
@@ -25,6 +26,7 @@ def receipt(i, n):
         "tree": TREE,
         "target": TARGET,
         "inventory": sweep.fingerprint(),
+        "formats": FORMATS,
         "indexed": [
             dict(
                 shape=shape,
@@ -59,7 +61,15 @@ def merge(rows, directory):
         with gzip.open(path, "wt", encoding="utf-8") as stream:
             json.dump(row, stream)
         paths.append(path)
-    return sweep.merge(paths, directory / "merged", commit=COMMIT, tree=TREE, target=TARGET)
+    return sweep.merge(
+        paths,
+        directory / "merged",
+        commit=COMMIT,
+        tree=TREE,
+        target=TARGET,
+        formats=FORMATS,
+        before_publish=lambda: None,
+    )
 
 
 class StrictSweepShardTests(unittest.TestCase):
@@ -100,6 +110,7 @@ class StrictSweepShardTests(unittest.TestCase):
                 "sweep identity",
             ),
             ([first, dict(second, inventory="stale")], "fingerprint mismatch"),
+            ([first, dict(second, formats={})], "stored format identities"),
         ):
             with self.subTest(error=message), tempfile.TemporaryDirectory() as scratch:
                 with self.assertRaisesRegex(ValueError, message):

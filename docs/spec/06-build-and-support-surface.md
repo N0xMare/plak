@@ -2291,25 +2291,20 @@ install-profile failure that the install tier catches before production.
 A production install requires the batch gate **and** the install tier on the
 exact tree: the complete macOS suite (`just install-checks`), the full Linux
 parallel and install profiles, full tooling, workspace rustdoc, the release-resolution and
-maintainer builds with the linkage check, and the strict crash sweep. The
+maintainer builds with the linkage check. The
 Linux batch supplies core serial and durability; the Linux install profile
 runs unconditionally, including the two exclusive indexed crash-sweep
 campaigns (chapter 05 §2.3). Run the Linux install groups with `just install` or
-`just musl native --install` for the shipped target. The strict crash sweep
-can run concurrently in separate checkouts. Either one full strict run
-or a verified merge of all strict shards on the exact tree and shipped
-target is required (chapter 05 §2.3). Individual shard passes are not gate
-evidence without the merge. An explicit `release` or `maintainer` argument to
-`just install` installs a snapshot instead of running the gate.
+`just musl native --install` for the shipped target. An explicit `release` or
+`maintainer` argument to `just install` installs a snapshot instead of running
+the gate.
 
-An urgent hotfix may enter production before its strict crash sweep finishes
-when it changes no persisted or wire format, store write path, recovery or
-host upgrade code. Every other part of the batch gate and the install tier
-must already have passed on the exact tree. The sweep then runs on that tree.
-This exception requires a supported return to the previous snapshot,
-including native authority for the existing roots. If the sweep fails,
-production returns to that snapshot through a same-key upgrade, and the fix
-does not re-enter production until a corrected tree passes the complete gate.
+The strict crash sweep runs nightly on main. For production install, check for
+a passing full strict receipt or verified shard merge on the shipped target
+for the candidate, or for an ancestor on main's first-parent history completed
+in the past 24 hours with the candidate's stored-format identities (chapter 05
+§2.3). A stored-format change or lack of qualifying evidence requires a passing
+strict sweep on the candidate before install.
 
 A prior tree's install evidence is not evidence for a changed tree. A
 dedicated detached Mac gate checkout with its own stable target directory

@@ -26,6 +26,9 @@ just steps GROUPS          # named groups; tests-install for install-family chan
 just --list                # other recipes
 ```
 
+Production install requires exact-tree batch and install evidence and
+[qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-developer-gate-tiers).
+
 ## Where to read
 
 Use the map to read only the section that owns your change, not the overview

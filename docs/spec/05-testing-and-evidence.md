@@ -2120,19 +2120,33 @@ first and places each shape on the lightest shard; estimates affect placement,
 not coverage. Shards use the all-shapes selection with one repeat and default
 pruning. The driver and inventory must belong to the tracked revision; the
 shard checks that the checkout is clean and unchanged, including untracked
-files, before and after running the tests. Receipts record the Rust build
-target, defaulting to the compiler's host triple when none was selected.
+files, before and after running the tests. A Cargo compilation after the
+initial build fails the shard. Receipts record the Rust build target,
+defaulting to the compiler's host triple when none was selected.
 
 Run `just dev crash-sweep --merge RECEIPT... --output DIRECTORY
 --expect-commit REV --expect-target TRIPLE` to verify the union against the
-revision, its tree and the required target. The merge rejects mismatched
+revision, its tree and the required target. The merge checks that the driver,
+shard module and inventory match the expected revision byte for byte and that
+the tracked checkout stays clean and unchanged. It rejects mismatched
 inventories; missing or duplicate shard indices, cuts, runner cases or
 restart groups; and missing, failed or refused invariant rows. The checked
-inventory identifies every expected per-store ordinal; default strict
-pilots also verify the counts before cutting. Changes to the registry or
+inventory identifies every expected per-store ordinal; strict indexed and
+wire pilots verify the per-store counts before cutting. Changes to the registry or
 cut inventory update that inventory against an unsharded run of the affected
 shapes, inspecting the pilot counts when they differ. A successful merge writes
 `sweep.jsonl`, `wire.jsonl` and `coverage.json` in the output directory.
+
+Run the full strict sweep nightly at the exact tip of main with
+`just dev crash-sweep --strict --output RECEIPT.json` on the shipped target.
+Full and merged receipts record completion time and stored-format identities:
+the state key, runtime/product/tree store revisions, export document version,
+runner retention protocol version and gateway protocol version.
+`just dev crash-sweep --check-evidence --candidate REV --receipts DIRECTORY`
+accepts only a passing full or merged receipt on the shipped target for the
+candidate, or for an ancestor on main's first-parent history completed in the
+past 24 hours, with identical format identities. Otherwise run strict on the
+candidate. Individual shards are not qualifying receipts.
 
 **Pilot and cut laws.** A clean post-setup seed supplies each fresh home.
 Twins must agree on each store's indexed `(store, label, tables)` sequence

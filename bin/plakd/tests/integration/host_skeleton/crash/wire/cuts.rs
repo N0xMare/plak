@@ -285,9 +285,26 @@ fn matrix(switching: bool, child: bool, group: usize) {
                 first.expected, second.expected,
                 "twin complete indexed signatures"
             );
+            if std::env::var("PLAK_CRASH_SWEEP_STRICT").is_ok_and(|value| value == "1") {
+                assert_pilot_inventory(shape, child, &first.expected);
+            }
             first
         },
         |store, ordinal, expected| cut_case(child, switching, store, ordinal, expected),
+    );
+}
+
+fn assert_pilot_inventory(shape: &str, child: bool, signature: &Signature) {
+    let inventory: Value =
+        serde_json::from_str(include_str!("../../../crash_sweep/shard_inventory.json")).unwrap();
+    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    for (store, _, _) in signature {
+        *counts.entry(store).or_default() += 1;
+    }
+    assert_eq!(
+        json!(counts),
+        inventory["wire"][shape]["stores"][usize::from(child)],
+        "{shape} child={child}: strict pilot inventory drifted before cutting"
     );
 }
 

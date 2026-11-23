@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import re
 
+import crash_sweep_evidence as evidence
+
 
 INVENTORY = (
     Path(__file__).resolve().parents[2]
@@ -138,7 +140,25 @@ def fingerprint():
     return hashlib.sha256(json.dumps(recorded, sort_keys=True).encode()).hexdigest()
 
 
-def merge(paths, output, *, commit, tree, target):
+def passed_report(receipt, kind, shards):
+    indexed, runners, wire = (receipt[key] for key in ("indexed", "runners", "wire"))
+    identity = {key: receipt[key] for key in ("commit", "tree", "target", "inventory", "formats")}
+    return evidence.passed(
+        identity,
+        kind,
+        dict(
+            shards=shards,
+            runners=sorted(runners),
+            indexed_cuts=len(indexed),
+            indexed_shapes=len({row["shape"] for row in indexed}),
+            runner_cases=len(runners),
+            wire_groups=len(wire),
+            wire_invariant_rows=sum(len(item["rows"]) for item in wire),
+        ),
+    )
+
+
+def merge(paths, output, *, commit, tree, target, formats, before_publish):
     indexed, runners, wire = [], [], []
     indices = []
     n = len(paths)
@@ -154,19 +174,15 @@ def merge(paths, output, *, commit, tree, target):
             raise ValueError(f"{path}: sweep identity does not match expected commit/tree/target")
         if receipt["inventory"] != fingerprint():
             raise ValueError(f"{path}: sweep inventory fingerprint mismatch")
+        if receipt["formats"] != formats:
+            raise ValueError(f"{path}: stored format identities do not match expected commit")
         validate(receipt, assignments[i - 1])
         indices.append(i)
         indexed.extend(receipt["indexed"])
         runners.extend(receipt["runners"])
         wire.extend(receipt["wire"])
     verify_keys(set(range(1, n + 1)), indices, "shard receipts")
-    counts = {
-        "indexed_cuts": len(indexed),
-        "indexed_shapes": len({row["shape"] for row in indexed}),
-        "runner_cases": len(runners),
-        "wire_groups": len(wire),
-        "wire_invariant_rows": sum(len(item["rows"]) for item in wire),
-    }
+    before_publish()
     output.mkdir(parents=True)
     write_rows(output / "sweep.jsonl", sorted(indexed, key=indexed_key))
     write_rows(
@@ -177,16 +193,21 @@ def merge(paths, output, *, commit, tree, target):
             for row in sorted(item["rows"], key=lambda row: (row["store"], row["cut"]))
         ),
     )
-    report = dict(
-        commit=commit,
-        tree=tree,
-        target=target,
-        inventory=fingerprint(),
-        shards=n,
-        runners=sorted(runners),
-        **counts,
+    report = passed_report(
+        dict(
+            commit=commit,
+            tree=tree,
+            target=target,
+            inventory=fingerprint(),
+            formats=formats,
+            indexed=indexed,
+            runners=runners,
+            wire=wire,
+        ),
+        "merged",
+        n,
     )
-    (output / "coverage.json").write_text(json.dumps(report, indent=2) + "\n")
+    evidence.write_receipt(output / "coverage.json", report)
     return report
 
 

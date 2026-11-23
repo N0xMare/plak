@@ -321,9 +321,26 @@ class CrashSweepTests(unittest.TestCase):
             child.wait.return_value = 0
             self.assertEqual(SWEEP.cargo_evidence(command, {}, 16), "".join(lines))
             self.assertEqual(output.getvalue(), "".join(lines))
+            child.stdout = ["    Compiling a-fixture\n", *lines]
+            with self.assertRaisesRegex(ValueError, "compiled after"):
+                SWEEP.cargo_evidence(command, {}, 16)
         for log, status in (("".join(lines), 101), (lines[0], 0)):
             with self.assertRaisesRegex(ValueError, "expected 16 successful tests"):
                 SWEEP.require_pass_count(log, status, 16, "test_name")
+
+    def test_list_refuses_compile_even_when_all_groups_are_listed(self):
+        name = "wire_host_restart"
+        selector = SWEEP.TERMINAL_SHAPES[name]
+        listed = "\n".join(
+            f"{selector}{kind}_{group}: test" for kind in ("root", "child") for group in range(8)
+        )
+        with patch.object(
+            SWEEP.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, listed, "    Compiling a-fixture\n"),
+        ):
+            with self.assertRaisesRegex(ValueError, "compiled after"):
+                SWEEP.list_family(name, selector, {}, check_compile=True)
 
     def test_wire_completion_line_can_follow_concurrent_test_output(self):
         with tempfile.TemporaryDirectory() as scratch:
