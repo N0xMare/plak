@@ -109,7 +109,13 @@ def pair(releases, probes, profile, aa):
 
 
 def policy(path):
-    raw = json.loads(path.read_text())
+    document = json.loads(path.read_text())
+    if set(document) != {"limits", "load_1m_limit"}:
+        raise ValueError("invalid soak policy fields")
+    load = document["load_1m_limit"]
+    if type(load) not in (float, int) or not math.isfinite(load) or load <= 0:
+        raise ValueError("invalid soak load limit")
+    raw = document["limits"]
     if set(raw) != set(METRICS):
         raise ValueError("soak policy metrics differ from the harness")
     for bounds in raw.values():
@@ -117,7 +123,7 @@ def policy(path):
             type(v) not in (float, int) or not math.isfinite(v) or v < 0 for v in bounds.values()
         ):
             raise ValueError("invalid soak policy bound")
-    return raw
+    return raw, load
 
 
 def compare(windows, bounds):

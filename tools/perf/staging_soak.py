@@ -17,6 +17,7 @@ from host_latency_fixture import Fixture, answer, create, tool, tree_script, tur
 from host_latency_wire import LOGIN, Client
 from staging_soak_evidence import SUBSTITUTIONS, compare, digest, harness_identity, pair, policy
 from staging_soak_measure import (
+    MAX_LOAD_PER_CPU,
     ROLES,
     Drafts,
     browser,
@@ -181,7 +182,7 @@ def exact_load(window, seconds, clients):
     )
 
 
-async def phase(fixture, roles, args, heavy, work, parked, image, which, cpu):
+async def phase(fixture, roles, args, heavy, work, parked, image, which, load_limit):
     processes = certify(fixture, roles, image)
     generation = await fresh(fixture, image["binary_id"])
     duration = args.seconds + args.warmup
@@ -213,11 +214,21 @@ async def phase(fixture, roles, args, heavy, work, parked, image, which, cpu):
         pids = {role: roles[role].pid for role in ROLES}
         print(json.dumps({"window": which, "event": "warmup_started"}), flush=True)
         warm = await drive(
-            fixture, pids, args.warmup, browsers, args.slow, heavy, workload, cpu, warmup=True
+            fixture,
+            pids,
+            args.warmup,
+            browsers,
+            args.slow,
+            heavy,
+            workload,
+            load_limit,
+            warmup=True,
         )
         steps_before = completed_tools(fixture, work)
         print(json.dumps({"window": which, "event": "measurement_started"}), flush=True)
-        result = await drive(fixture, pids, args.seconds, browsers, args.slow, heavy, workload, cpu)
+        result = await drive(
+            fixture, pids, args.seconds, browsers, args.slow, heavy, workload, load_limit
+        )
         if state.terminal or fixture.counts(parked)["active_children"] != PARKED:
             raise RuntimeError("parked children did not stay parked throughout the window")
         await parent.wait(lambda: state.terminal, timeout=45)
@@ -269,8 +280,8 @@ def skip_sockets(directory, names):
     return [name for name in names if stat.S_ISSOCK((Path(directory) / name).lstat().st_mode)]
 
 
-async def new_window(fixture, args, measured, side, cpu):
-    check_load(cpu["cpu_count"])
+async def new_window(fixture, args, measured, side, load_limit):
+    check_load(load_limit)
     fixture.binary = args.source
     roles = await start_auxiliaries(fixture)
     work_plan(fixture, args.seconds + args.warmup)
@@ -305,9 +316,11 @@ async def exercise(args, verdict):
         args.build_profile,
         args.aa,
     )
-    bounds = policy(args.policy) if args.policy else None
     cpu = cpu_facts()
-    check_load(cpu["cpu_count"])
+    bounds, load_limit = (
+        policy(args.policy) if args.policy else (None, MAX_LOAD_PER_CPU * cpu["cpu_count"])
+    )
+    check_load(load_limit)
     verdict.update(
         source=shipping[0],
         candidate=shipping[1],
@@ -315,6 +328,7 @@ async def exercise(args, verdict):
         measured_candidate=measured[1],
         harness=harness_identity(args.harness_revision),
         cpu=cpu,
+        load_1m_limit=load_limit,
         policy_sha256=digest(args.policy) if args.policy else None,
     )
     fixture = Fixture(args.scratch, args.source)
@@ -341,7 +355,7 @@ async def exercise(args, verdict):
             label = f"{side}{index}"
             shutil.rmtree(fixture.root)
             shutil.copytree(golden, fixture.root, symlinks=True)
-            roles, image, transition = await new_window(fixture, args, measured, side, cpu)
+            roles, image, transition = await new_window(fixture, args, measured, side, load_limit)
             result = await phase(
                 fixture,
                 roles,
@@ -351,7 +365,7 @@ async def exercise(args, verdict):
                 other[WORK_ROOTS],
                 image,
                 label,
-                cpu,
+                load_limit,
             )
             result["handoff"] = transition
             windows.append(result)

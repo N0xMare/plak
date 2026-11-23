@@ -37,10 +37,11 @@ every two seconds per each of twelve WebSocket clients, three of which read
 slowly. Busy or late slots fail rather than shifting the schedule. Every
 slot gets its full period; final replies are drained after the fixed CPU and
 RSS end sample. Both sides must complete every scheduled operation, with no
-lag or request failures. The probe records timestamps, CPU model and load
-averages, samples one-minute load each second, and refuses an excursion
-above 0.10 per available logical CPU. The warmup is excluded from measured
-CPU, reads, RSS and latency.
+lag or request failures. The probe records timestamps, CPU model, available
+logical CPUs and kernel release. It samples one-minute load each second and
+refuses excursions above the supplied policy ceiling. Controls without a
+policy use 0.10 per available logical CPU. The warmup is excluded from
+measured CPU, reads, RSS and latency.
 
 Attach latency ends at the first snapshot page and is grouped by fast and
 slow readers. Send-to-first-event ends at the first correlated draft event.
@@ -59,7 +60,9 @@ on both sides and omit `--policy` to measure same-image variation; this uses
 a same-image restart in place of the native replacement and cannot qualify a
 cut. Derive the policy from at least three controls at different times, on
 an otherwise quiet machine. Recalibrate when the environment or probe
-changes. A genuine CPU increase needs a recorded operator waiver if the
+changes. These short windows only detect sustained growth above the
+calibrated floor; slow leaks need a longer soak or production sampling.
+A genuine CPU increase needs a recorded operator waiver if the
 cut policy allows one; it does not invalidate the other checks.
 `--quick` is a wiring smoke, not qualification. A same-key cut operator
 can require a fresh passing verdict bound to the exact source and candidate

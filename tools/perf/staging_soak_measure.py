@@ -27,15 +27,17 @@ def cpu_facts():
         line.split(":", 1) for line in Path("/proc/cpuinfo").read_text().splitlines() if ":" in line
     )
     model = next((v.strip() for k, v in fields.items() if k.strip() == "model name"), None)
-    return {"model": model or platform.machine(), "cpu_count": len(os.sched_getaffinity(0))}
+    return {
+        "model": model or platform.machine(),
+        "cpu_count": len(os.sched_getaffinity(0)),
+        "kernel_release": platform.release(),
+    }
 
 
-def check_load(cpu_count):
+def check_load(limit):
     load = list(os.getloadavg())
-    if load[0] > cpu_count * MAX_LOAD_PER_CPU:
-        raise RuntimeError(
-            f"staging host too busy: one-minute load {load[0]:g} on {cpu_count} CPUs"
-        )
+    if load[0] > limit:
+        raise RuntimeError(f"staging host too busy: one-minute load {load[0]:g} > {limit:g}")
     return load
 
 
@@ -170,7 +172,9 @@ def distribution(key, values):
     }
 
 
-async def drive(fixture, pids, seconds, browsers, slow, nodes, workload, cpu, *, warmup=False):
+async def drive(
+    fixture, pids, seconds, browsers, slow, nodes, workload, load_limit, *, warmup=False
+):
     offset = fixture.diagnostics.stat().st_size
     old_resyncs = sum(client.resyncs for client in browsers)
     out = Measurements()
@@ -181,7 +185,7 @@ async def drive(fixture, pids, seconds, browsers, slow, nodes, workload, cpu, *,
     a = {role: proc_sample(pids[role]) for role in ROLES} if not warmup else {}
     rss_start = {role: rss_mib(pids[role]) for role in ROLES} if not warmup else {}
     samples = [(a["host"][0], rss_start["host"])] if not warmup else []
-    load_before = check_load(cpu["cpu_count"])
+    load_before = check_load(load_limit)
     loads = [load_before[0]]
     async with asyncio.TaskGroup() as tasks:
         for index, client in enumerate(browsers):
@@ -203,7 +207,7 @@ async def drive(fixture, pids, seconds, browsers, slow, nodes, workload, cpu, *,
             tasks.create_task(slots(tasks, "step", times, period, step, out))
         for n in range(1, seconds):
             await sleep_until(start + n)
-            loads.append(check_load(cpu["cpu_count"])[0])
+            loads.append(check_load(load_limit)[0])
             if not warmup:
                 samples.append((time.monotonic(), rss_mib(pids["host"])))
         await sleep_until(end)
@@ -211,7 +215,7 @@ async def drive(fixture, pids, seconds, browsers, slow, nodes, workload, cpu, *,
         rss_end = {role: rss_mib(pids[role]) for role in ROLES} if not warmup else {}
         if not warmup:
             samples.append((b["host"][0], rss_end["host"]))
-        load_after = check_load(cpu["cpu_count"])
+        load_after = check_load(load_limit)
         loads.append(load_after[0])
     drain_seconds = max(0, time.monotonic() - end)
     lag, failed = closes(fixture.diagnostics, offset)
