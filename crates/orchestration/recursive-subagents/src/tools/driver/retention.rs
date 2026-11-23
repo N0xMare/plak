@@ -48,30 +48,6 @@ impl Retries {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Action, Duration, Instant, Retries};
-
-    #[test]
-    fn child_retirement_backoff_is_per_head_and_does_not_block_other_children() {
-        let start = Instant::now();
-        let mut retries = Retries::default();
-        let (probe, delete) = (Action::Probe, Action::Delete);
-        retries.refused("a", probe, "head1", start);
-        assert!(!retries.ready("a", probe, "head1", start));
-        assert!(retries.ready("b", probe, "head1", start));
-        assert!(retries.ready("a", probe, "head2", start));
-        assert!(retries.ready("a", delete, "head1", start));
-        let next = start + Duration::from_secs(2);
-        assert!(retries.ready("a", probe, "head1", next));
-        retries.refused("a", probe, "head1", next);
-        assert!(!retries.ready("a", probe, "head1", next + Duration::from_secs(3)));
-        assert!(retries.ready("a", probe, "head1", next + Duration::from_secs(4)));
-        retries.clear("a", probe);
-        assert!(retries.ready("a", probe, "head1", next));
-    }
-}
-
 impl TreeDriver {
     /// Retires sealed dormant conversations after publishing exact deletion intent.
     /// Unadopted nonempty work refs are retained independently of runtime sessions.
@@ -343,5 +319,29 @@ async fn finish_legacy_archive(
             Ok(())
         }
         Err(error) => Err(refused(error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, Duration, Instant, Retries};
+
+    #[test]
+    fn child_retirement_backoff_is_per_head_and_does_not_block_other_children() {
+        let start = Instant::now();
+        let mut retries = Retries::default();
+        let (probe, delete) = (Action::Probe, Action::Delete);
+        retries.refused("a", probe, "head1", start);
+        assert!(!retries.ready("a", probe, "head1", start));
+        assert!(retries.ready("b", probe, "head1", start));
+        assert!(retries.ready("a", probe, "head2", start));
+        assert!(retries.ready("a", delete, "head1", start));
+        let next = start + Duration::from_secs(2);
+        assert!(retries.ready("a", probe, "head1", next));
+        retries.refused("a", probe, "head1", next);
+        assert!(!retries.ready("a", probe, "head1", next + Duration::from_secs(3)));
+        assert!(retries.ready("a", probe, "head1", next + Duration::from_secs(4)));
+        retries.clear("a", probe);
+        assert!(retries.ready("a", probe, "head1", next));
     }
 }

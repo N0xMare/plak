@@ -270,7 +270,7 @@ pub async fn join_release_in_flight(
 }
 
 enum RetirementJoin {
-    Startup(ChildStartup),
+    Startup(Box<ChildStartup>),
     Live {
         retirement: Retirement,
         deadline: tokio::time::Instant,
@@ -298,7 +298,7 @@ async fn begin_retire_live(
         startup
     };
     if let Some(startup) = startup {
-        return RetirementJoin::Startup(startup);
+        return RetirementJoin::Startup(Box::new(startup));
     }
     let retirement =
         live.lock()
