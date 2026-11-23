@@ -152,7 +152,8 @@ async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
             false,
         )
         .with_tool_first()
-        .with_scripted_tool_calls([(2, "probe", "{}".to_owned())]),
+        .with_assistant_continuations([1])
+        .with_scripted_tool_calls([(3, "probe", "{}".to_owned())]),
     );
     let release = Arc::new(Notify::new());
     *lock_mutex(&model.held_call_release) = Some(release.clone());
