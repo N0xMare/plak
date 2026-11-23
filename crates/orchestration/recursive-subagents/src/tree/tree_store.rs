@@ -152,6 +152,19 @@ impl From<String> for TreeStoreError {
 pub struct PersistedTree(pub(super) ProductAgentTree);
 
 impl PersistedTree {
+    /// Attaches local retirement summaries without restoring the child runtimes.
+    #[must_use]
+    pub fn with_retired_children(mut self, rows: BTreeMap<String, super::RetiredChild>) -> Self {
+        for summary in rows.values() {
+            self.0.next_message_sequence = self
+                .0
+                .next_message_sequence
+                .max(summary.next_message_sequence);
+        }
+        self.0.retired_children = rows;
+        self
+    }
+
     /// Builds the rows a store read back. Exact reconstruction: nothing is
     /// derived here that the reopen law owns.
     #[allow(clippy::too_many_arguments, reason = "exact persisted tree rows")]

@@ -20,8 +20,8 @@ use plakous_recursive_subagents::protocol::{
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptFailure, AttemptRecord, BlockedReason, CandidateRecord, FoldAnchor,
     ForkedFrom, MailRecord, NodeLineId, NodePlacement, NodeRecord, NodeWorkspace, OperationRecord,
-    PersistedTree, ProductAgentTree, SubmitNudgeBudget, TreeAdmissionState, TreeEpochs,
-    TreeStoreError, UsageRow, WorkspaceRecord,
+    PersistedTree, ProductAgentTree, RetiredChild, SubmitNudgeBudget, TreeAdmissionState,
+    TreeEpochs, TreeStoreError, UsageRow, WorkspaceRecord,
 };
 
 pub(crate) use codec::{Row, RowKey};
@@ -66,6 +66,7 @@ fn decode_id_list(value: &str) -> Result<Vec<String>, String> {
 /// never see a parent disappear under a child.
 pub fn delete_agent_tree_rows(tx: &Transaction<'_>, tree_id: &str) -> Result<(), TreeStoreError> {
     for statement in [
+        "DELETE FROM agent_retired_children WHERE tree_id=?1",
         "DELETE FROM agent_move_seeds WHERE tree_id=?1",
         "DELETE FROM agent_tree_runner_ancestors WHERE tree_id=?1",
         "DELETE FROM agent_tree_epochs WHERE tree_id=?1",
@@ -128,6 +129,7 @@ pub fn insert_agent_tree_rows(
     insert_rows(tx, tree_id, tree.workspaces())?;
     insert_rows(tx, tree_id, tree.messages())?;
     insert_rows(tx, tree_id, tree.operations())?;
+    insert_rows(tx, tree_id, tree.retired_children())?;
     insert_rows(tx, tree_id, tree.commands())?;
     insert_rows(tx, tree_id, tree.feed_cursors())?;
     insert_rows(tx, tree_id, &tree.epochs().successors)?;
@@ -319,6 +321,7 @@ pub fn load_agent_tree(
         .transpose()
         .map_err(|_| "agent tree provenance is invalid".to_owned())?;
     let runner_ancestors = load_runner_ancestors(tx, tree_id)?;
+    let retired_children = load_retired_children(tx, tree_id)?;
     let tree = PersistedTree::from_rows(
         tree_id.to_owned(),
         root_agent_id,
@@ -338,8 +341,29 @@ pub fn load_agent_tree(
         operations,
     )
     .with_feed_rows(commands, feed_cursors)
-    .with_lineage_rows(epochs, forked_from, runner_ancestors);
+    .with_lineage_rows(epochs, forked_from, runner_ancestors)
+    .with_retired_children(retired_children);
     Ok(Some(tree))
+}
+
+fn load_retired_children(
+    tx: &Transaction<'_>,
+    tree_id: &str,
+) -> Result<BTreeMap<String, RetiredChild>, String> {
+    let invalid = |_| "agent retirement summary is unreadable".to_owned();
+    let mut statement = tx
+        .prepare("SELECT agent_id, summary FROM agent_retired_children WHERE tree_id=?1")
+        .map_err(invalid)?;
+    let rows = statement
+        .query_map([tree_id], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))
+        .map_err(invalid)?;
+    rows.map(|row| {
+        let (agent, body) = row.map_err(invalid)?;
+        let summary = serde_json::from_str(&body)
+            .map_err(|_| "agent retirement summary is invalid".to_owned())?;
+        Ok((agent, summary))
+    })
+    .collect()
 }
 
 fn load_nodes(tx: &Transaction<'_>, tree_id: &str) -> Result<BTreeMap<String, NodeRecord>, String> {

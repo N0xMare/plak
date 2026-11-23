@@ -294,6 +294,8 @@ pub enum ConfigField {
     RuntimeStoreMaxObjectBytes,
     /// `[runtime_store] max_sessions`.
     RuntimeStoreMaxSessions,
+    /// `[runtime_store] retire_finished_children`.
+    RuntimeStoreRetireFinishedChildren,
     /// `[telemetry] max_age_days`.
     TelemetryMaxAgeDays,
     /// `[mcp] client_id_metadata_url`.
@@ -351,6 +353,7 @@ impl ConfigField {
                 | Self::RuntimeStoreMaxObjects
                 | Self::RuntimeStoreMaxObjectBytes
                 | Self::RuntimeStoreMaxSessions
+                | Self::RuntimeStoreRetireFinishedChildren
         )
     }
 
@@ -377,6 +380,7 @@ impl ConfigField {
                     | Self::RuntimeStoreMaxObjects
                     | Self::RuntimeStoreMaxObjectBytes
                     | Self::RuntimeStoreMaxSessions
+                    | Self::RuntimeStoreRetireFinishedChildren
             )
     }
 }
@@ -644,6 +648,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         constraint: "greater than 0, representable by the SQLite and platform integer ranges; home-scoped",
         doc: "Whole runtime-store session cap; includes children and archived sessions. Serving hosts read these limits at startup.",
         example: "1024",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.retire_finished_children",
+        field: ConfigField::RuntimeStoreRetireFinishedChildren,
+        kind: "bool",
+        constraint: "true or false; home-scoped",
+        doc: "Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.",
+        example: "false",
         scope: ConfigScope::Immediate,
     },
     ConfigKey {

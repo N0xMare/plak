@@ -6,6 +6,50 @@ use super::{
 };
 
 impl AgentSessions {
+    /// Reads the revision to bind a child-retirement intent without changing runtime state.
+    #[doc(hidden)]
+    pub async fn child_retirement_revision(
+        &self,
+        locator: SessionLocator,
+    ) -> Result<u64, AgentSessionsError> {
+        let _reservation = self.drivers.reserve_session(locator.session_id)?;
+        self.store
+            .probe_child_retirement(locator.session_ref(), locator.checkpoint_id)
+            .await
+            .map(plakous_agent::internal::SessionRevision::get)
+            .map_err(store_error)
+    }
+
+    /// Resumes one exact retirement across either the archive or delete commit.
+    /// It does not follow a moved branch or discover a new archived revision.
+    #[doc(hidden)]
+    pub async fn retire_child_session(
+        &self,
+        locator: SessionLocator,
+        expected_revision: u64,
+    ) -> Result<(), AgentSessionsError> {
+        let _reservation = self.drivers.reserve_session(locator.session_id)?;
+        let expected = plakous_agent::internal::SessionRevision::from_store(expected_revision);
+        let archived = expected.checked_next().ok_or_else(|| {
+            AgentSessionsError::new(
+                AgentSessionsErrorKind::InvalidInput,
+                "retirement revision exhausted",
+            )
+        })?;
+        let request = ArchiveSession::new(locator.session_id, expected)
+            .retiring(locator.branch_id, locator.checkpoint_id);
+        let delete = DeleteSession::new(locator.session_id, archived);
+        match self.store.archive(request).await {
+            Ok(_) => self.store.delete(delete).await,
+            Err(plakous_agent::internal::SessionStoreError::NotFound) => {
+                self.store.recover_delete(delete).await
+            }
+            Err(error) => return Err(store_error(error)),
+        }
+        .map_err(store_error)?;
+        Ok(())
+    }
+
     /// Drains deferred object reclaim in bounded, crash-safe transactions.
     /// Does not prune checkpoints or delete session authority.
     ///

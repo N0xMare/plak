@@ -3,7 +3,7 @@ use super::{GENERATION, SCHEMA, SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabas
 /// Identity golden for the semantic-move cohort's durable format.
 #[test]
 fn the_tree_schema_fingerprint_is_pinned() {
-    assert_eq!(SCHEMA_VERSION, 11);
+    assert_eq!(SCHEMA_VERSION, 12);
     assert_eq!(
         (GENERATION, SCHEMA.base_fingerprint),
         (
@@ -40,11 +40,48 @@ fn a_fresh_tree_database_is_versioned_and_reopens() {
     SubagentsDatabase::open(&database).expect("a current file reopens");
 }
 
+#[test]
+fn revision_twelve_adds_only_the_child_summary_table() {
+    use crate::admission::{AdmissionError, Schema, Status};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("subagents.sqlite3");
+    let previous = Schema {
+        revisions: &[],
+        ..SCHEMA
+    };
+    let old = previous.open_writer(&path, |_| Ok(())).unwrap();
+    let instance = |conn: &rusqlite::Connection| {
+        conn.query_row("SELECT instance_id FROM subagents_schema", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .unwrap()
+    };
+    let prior = instance(&old);
+    drop(old);
+    assert_eq!(SCHEMA.inspect(&path).unwrap(), Status::Pending(11));
+    SCHEMA
+        .lock_upgrade(&path)
+        .unwrap()
+        .unwrap()
+        .backup()
+        .unwrap()
+        .commit(|_, _| {})
+        .unwrap();
+    let live = SubagentsDatabase::open(&path).unwrap();
+    assert_eq!(instance(&live.connection), prior);
+    let backup_path = root.path().join("subagents.pre-revision-11.sqlite3");
+    assert_eq!(previous.inspect(&backup_path).unwrap(), Status::Current);
+    assert!(matches!(
+        previous.inspect(&path),
+        Err(AdmissionError::Unsupported(_))
+    ));
+}
+
 /// The admission steps are shared with the product store; the tree's
 /// refusals keep their exact text.
 #[test]
 fn tree_admission_refusals_are_exact() {
-    let base = SCHEMA.base_fingerprint;
+    let base = SCHEMA.fingerprint();
     let refusal = |damage: &str| {
         let root = tempfile::tempdir().unwrap();
         let database = root.path().join("subagents.sqlite3");
@@ -104,7 +141,7 @@ fn tree_admission_refusals_are_exact() {
         refusal("version"),
         (
             super::OpenErrorKind::UnsupportedPersistence,
-            "subagents schema 99, expected 11: this subagents.sqlite3 was created by an incompatible plakd build; move it aside to start fresh".to_owned()
+            "subagents schema 99, expected 12: this subagents.sqlite3 was created by an incompatible plakd build; move it aside to start fresh".to_owned()
         )
     );
 }
@@ -129,7 +166,7 @@ fn a_foreign_schema_version_is_refused_as_unsupported() {
         assert!(
             error
                 .message()
-                .contains(&format!("subagents schema {foreign}, expected 11")),
+                .contains(&format!("subagents schema {foreign}, expected 12")),
             "{error}"
         );
     }

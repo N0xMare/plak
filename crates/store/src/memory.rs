@@ -971,6 +971,9 @@ impl MemorySessionStore {
         let state = &mut *guard;
         require_open(state)?;
         let now = self.lease_now()?;
+        if let Some((branch, checkpoint)) = request.retirement_head() {
+            verify_retirement_head(state, request.session_id(), branch, checkpoint)?;
+        }
         if let Some(session) = state.sessions.get(&request.session_id())
             && session.archive_receipt.is_none()
         {
@@ -1312,6 +1315,32 @@ impl SessionStore for MemorySessionStore {
             Ok(receipt)
         })
     }
+    fn probe_child_retirement(
+        &self,
+        session: SessionRef,
+        checkpoint: CheckpointId,
+    ) -> StoreFuture<'_, plakous_agent::internal::SessionRevision> {
+        Box::pin(async move {
+            let state = self.lock()?;
+            require_open(&state)?;
+            let id = session.session_id();
+            let row = state.sessions.get(&id).ok_or(SessionStoreError::NotFound)?;
+            if row.head.is_archived() {
+                return Err(SessionStoreError::Archived);
+            }
+            verify_retirement_head(&state, id, session.branch_id(), checkpoint)?;
+            let branch = row
+                .branches
+                .get(&session.branch_id())
+                .ok_or(SessionStoreError::NotFound)?;
+            if let Some(lease) = &branch.active_lease
+                && !expired(lease, self.lease_now()?)?
+            {
+                return Err(SessionStoreError::LeaseHeld);
+            }
+            Ok(row.head.revision())
+        })
+    }
 
     fn delete(&self, request: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         Box::pin(async move { self.delete_sync(request) })
@@ -1408,6 +1437,58 @@ struct SessionRecord {
     head: SessionHead,
     branches: BTreeMap<plakous_agent::internal::BranchId, BranchRecord>,
     archive_receipt: Option<ArchiveReceipt>,
+}
+
+fn verify_retirement_head(
+    state: &StoreState,
+    session_id: SessionId,
+    branch: plakous_agent::internal::BranchId,
+    checkpoint: CheckpointId,
+) -> Result<(), SessionStoreError> {
+    let session = state
+        .sessions
+        .get(&session_id)
+        .ok_or(SessionStoreError::NotFound)?;
+    let head = session
+        .branches
+        .get(&branch)
+        .ok_or(SessionStoreError::NotFound)?;
+    if head.head.checkpoint().checkpoint_id() != checkpoint {
+        return Err(SessionStoreError::Conflict);
+    }
+    let record = state
+        .checkpoints
+        .get(&checkpoint)
+        .ok_or(SessionStoreError::corrupt())?;
+    let manifest = record.checkpoint.manifest();
+    let depends_on_session = |id: CheckpointId| {
+        state
+            .checkpoints
+            .get(&id)
+            .is_some_and(|row| row.checkpoint.manifest().topology().session_id == session_id)
+    };
+    if session.branches.len() != 1
+        || !matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent)
+        || manifest
+            .jobs()
+            .rows()
+            .iter()
+            .any(|job| job.terminal.is_none())
+        || !lines::terminals(state, manifest.topology().line)?.is_empty()
+        || state.checkpoints.values().any(|row| {
+            let topology = row.checkpoint.manifest().topology();
+            topology.session_id != session_id
+                && (topology
+                    .parent_checkpoint_id
+                    .is_some_and(depends_on_session)
+                    || topology
+                        .fork
+                        .is_some_and(|fork| depends_on_session(fork.checkpoint_id)))
+        })
+    {
+        return Err(SessionStoreError::Conflict);
+    }
+    Ok(())
 }
 
 #[derive(Clone)]

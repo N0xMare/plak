@@ -4,8 +4,8 @@ use super::{
     CreateSession, DeleteReceipt, DeleteSession, DurabilityReport, FeedPage, FeedSeq, FeedTail,
     ForkBranch, ForkReceipt, Future, LeaseInstant, LineRecord, LineTerminalsReceipt, LoadedBranch,
     NonZeroUsize, Page, Pin, PruneBranch, PruneReceipt, RecordLineJobTerminals, RecoverFork,
-    SessionId, SessionQuery, SessionRef, SessionStoreError, SessionSummary, StoreReclaimMode,
-    StoreReclaimReport, StoreUsage, StoredCheckpoint,
+    SessionId, SessionQuery, SessionRef, SessionRevision, SessionStoreError, SessionSummary,
+    StoreReclaimMode, StoreReclaimReport, StoreUsage, StoredCheckpoint,
 };
 use crate::checkpoint_bundle::RuntimeCheckpointInspection;
 use crate::manifest::{LineJobTerminal, RuntimeLifecycle};
@@ -215,6 +215,16 @@ pub trait SessionStore: Send + Sync + 'static {
     /// Archives one exact session revision after all live leases are absent.
     /// Never refused for retention capacity.
     fn archive(&self, request: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt>;
+
+    /// Checks whether an exact released session can be retired without
+    /// changing it. The owning store must check the same facts at archive.
+    fn probe_child_retirement(
+        &self,
+        _session: SessionRef,
+        _checkpoint: CheckpointId,
+    ) -> StoreFuture<'_, SessionRevision> {
+        Box::pin(async { Err(SessionStoreError::Conflict) })
+    }
 
     /// Deletes only one exact archived revision and retains its tombstone.
     /// Never refused for retention capacity: deletion only reclaims.

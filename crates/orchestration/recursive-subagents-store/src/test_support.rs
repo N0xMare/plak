@@ -42,11 +42,14 @@ pub fn enable_store_revision_fixture() {
 pub(super) fn schema(base: Schema) -> Schema {
     if ENABLED.load(Ordering::Relaxed) {
         Schema {
-            revisions: &[Revision {
-                sql: DDL,
-                objects: &[("subagents_revision_fixture", DDL)],
-                fingerprint: "09cee8161887c4c8f18e5d12fa2a6b858cb5955d959bcb744928b88fa33c9f4d",
-            }],
+            revisions: &[
+                crate::database::RETIREMENT_REVISION,
+                Revision {
+                    sql: DDL,
+                    objects: &[("subagents_revision_fixture", DDL)],
+                    fingerprint: "c5724458b476c2e24d662fb726937128f0f270c7df434b0c817bdc5ed02069fe",
+                },
+            ],
             ..base
         }
     } else {

@@ -568,8 +568,14 @@ async fn child_retention_runtime_archive_delete_crash_cuts() {
                 .await
                 .unwrap();
         }
-        driver.collect_dormant_children(&sessions).await.unwrap();
-        driver.collect_dormant_children(&sessions).await.unwrap();
+        driver
+            .collect_dormant_children(&sessions, false, Default::default())
+            .await
+            .unwrap();
+        driver
+            .collect_dormant_children(&sessions, false, Default::default())
+            .await
+            .unwrap();
         assert!(
             driver
                 .read(|tree| tree.node(&child.agent_id).is_err())

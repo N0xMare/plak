@@ -9,7 +9,9 @@ use plakous_host_protocol::views::{
     AttemptUsage, BlockedObservation, InterruptCauseView, LossContinuationView, NodeView, TreeView,
 };
 
-use super::{AttemptId, MailDurableState, ProductAgentTree, WorkspaceMode};
+use super::{
+    AttemptId, MailDurableState, NodeStatus, ProductAgentTree, RetiredChild, WorkspaceMode,
+};
 
 /// What the tree projects: enums, not labels.
 pub fn project_tree_view(tree: &ProductAgentTree) -> TreeView {
@@ -22,7 +24,57 @@ pub fn project_tree_view(tree: &ProductAgentTree) -> TreeView {
             .preorder_ids()
             .into_iter()
             .filter_map(|id| project_node(tree, &id))
+            .chain(
+                tree.retired_children()
+                    .iter()
+                    .filter(|(id, _)| tree.node(id).is_err())
+                    .map(|(id, summary)| retired_child(id, summary)),
+            )
             .collect(),
+    }
+}
+
+fn retired_child(id: &str, summary: &RetiredChild) -> NodeView {
+    NodeView {
+        runner: plakous_host_protocol::wire::RunnerLabel::local(),
+        agent_id: id.to_owned(),
+        parent_agent_id: Some(summary.parent.clone()),
+        depth: summary.depth,
+        status: NodeStatus::Closed,
+        attempt_status: Some(summary.status),
+        attempt_seq: attempt_sequence(id, &summary.attempt),
+        attempt_id: Some(summary.attempt.to_string()),
+        attempts: attempt_sequence(id, &summary.attempt).into_iter().collect(),
+        description: summary.description.clone(),
+        tier: None,
+        prompt: String::new(),
+        workspace_path: String::new(),
+        workspace_mode: WorkspaceMode::Inherit,
+        workspace_status: None,
+        candidate_id: None,
+        blocked: None,
+        usage: None,
+        active_turn: false,
+        live_progress: None,
+        unread_mail: 0,
+        has_session: false,
+        template: None,
+        model_account: String::new(),
+        model_tuple: String::new(),
+        model_effort: None,
+        turns: None,
+        started_at_unix: None,
+        ended_at_unix: Some(summary.ended_at / 1_000),
+        fault: None,
+        recovery_abandoned: false,
+        waiting_on: None,
+        dormancy: plakous_host_protocol::views::NodeDormancy {
+            conversation_retired: true,
+            closed: true,
+            ..Default::default()
+        },
+        interrupt_cause: None,
+        continuation: None,
     }
 }
 
@@ -30,6 +82,10 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
     let node = tree.node(id).ok()?;
     let workspace = tree.workspace(&node.workspace_id);
     let attempt = tree.attempt(id);
+    let retired = tree
+        .retired_children()
+        .get(id)
+        .filter(|_| tree.conversation_collected(id));
     Some(NodeView {
         runner: node.placement.runner_id.as_ref().map_or_else(
             plakous_host_protocol::wire::RunnerLabel::local,
@@ -42,22 +98,27 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
         parent_agent_id: node.parent_agent_id.clone(),
         depth: node.depth,
         status: node.presentation_status(tree.state),
-        attempt_status: attempt.map(|attempt| attempt.status),
+        attempt_status: attempt
+            .map(|attempt| attempt.status)
+            .or(retired.map(|row| row.status)),
         // A `followup` opens `a2` on the same node, so the sequence is what the
         // canvas shows; the full id is durable but far too wide for a box.
         attempt_seq: node
             .attempt_id
             .as_ref()
+            .or(retired.map(|row| &row.attempt))
             .and_then(|attempt_id| attempt_sequence(&node.agent_id, attempt_id)),
         attempt_id: node
             .attempt_id
             .as_ref()
+            .or(retired.map(|row| &row.attempt))
             .map(|attempt_id| attempt_id.as_str().to_owned()),
         // Earlier attempts are not deleted by a re-task, so the row can say
         // "third try" instead of implying a first one.
         attempts: node_attempt_sequences(tree, &node.agent_id),
         tier: Some(node.tier),
-        description: node.description.clone(),
+        description: retired
+            .map_or_else(|| node.description.clone(), |row| row.description.clone()),
         prompt: node.prompt.clone(),
         workspace_path: workspace
             .map(|workspace| workspace.path.display().to_string())
@@ -106,6 +167,7 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
             .filter(|seconds| *seconds > 0),
         ended_at_unix: attempt
             .and_then(|attempt| attempt.ended_at)
+            .or(retired.map(|row| row.ended_at))
             .map(|ended_at| ended_at / 1_000)
             .filter(|seconds| *seconds > 0),
         recovery_abandoned: attempt.is_some_and(super::AttemptRecord::recovery_was_abandoned),

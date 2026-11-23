@@ -117,6 +117,7 @@ impl TreeStepPause {
     #[must_use]
     pub fn effects_joined(&self) -> bool {
         self.0.driver().step_effects_joined()
+            && self.0.child_retirement.try_lock().is_ok()
             && self
                 .0
                 .recovering

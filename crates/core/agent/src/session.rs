@@ -557,6 +557,7 @@ pub struct ArchiveSession {
     session_id: SessionId,
     expected_revision: SessionRevision,
     abandon_jobs: bool,
+    retirement_head: Option<(BranchId, CheckpointId)>,
 }
 
 impl PartialEq for ArchiveSession {
@@ -576,6 +577,7 @@ impl ArchiveSession {
             session_id,
             expected_revision,
             abandon_jobs: false,
+            retirement_head: None,
         }
     }
 
@@ -592,6 +594,20 @@ impl ArchiveSession {
     #[must_use]
     pub const fn abandons_jobs(self) -> bool {
         self.abandon_jobs
+    }
+
+    /// Requires an exact, settled, single-branch session without dependents.
+    /// This is an additional check, not part of durable archive identity.
+    #[must_use]
+    pub const fn retiring(mut self, branch: BranchId, head: CheckpointId) -> Self {
+        self.retirement_head = Some((branch, head));
+        self
+    }
+
+    /// The exact retirement head, when requested by the host.
+    #[must_use]
+    pub const fn retirement_head(self) -> Option<(BranchId, CheckpointId)> {
+        self.retirement_head
     }
 
     /// Returns the target session.

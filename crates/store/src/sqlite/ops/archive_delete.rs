@@ -18,6 +18,9 @@ pub(in super::super) fn archive(
         .map_err(map_sqlite)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
+    if let Some((branch, checkpoint)) = r.retirement_head() {
+        retirement_head(&tx, r.session_id(), branch, checkpoint)?;
+    }
     if let Some(old) = load_archive(&tx, r.session_id())? {
         let out = if old.request() == r {
             Ok(old)
@@ -91,10 +94,58 @@ pub(in super::super) fn archive(
     Ok(receipt)
 }
 
+pub(in super::super) fn retirement_head(
+    tx: &Connection,
+    session: SessionId,
+    branch: BranchId,
+    checkpoint: CheckpointId,
+) -> Result<(), SessionStoreError> {
+    let row =
+        branch_row(tx, SessionRef::new(session, branch))?.ok_or(SessionStoreError::NotFound)?;
+    if row.head.checkpoint().checkpoint_id() != checkpoint {
+        return Err(SessionStoreError::Conflict);
+    }
+    let pinned: bool = tx
+        .query_row(
+            "SELECT (SELECT count(*) FROM branches WHERE session_id=?1) <> 1
+         OR EXISTS(SELECT 1 FROM runtime_move_sessions WHERE session_id=?1)
+         OR EXISTS(SELECT 1 FROM runtime_move_heads WHERE session_id=?1)
+         OR EXISTS(SELECT 1 FROM lines l WHERE l.head_session=?1 AND
+           (EXISTS(SELECT 1 FROM line_job_terminals j WHERE j.line_id=l.line_id)
+            OR EXISTS(SELECT 1 FROM runtime_move_lines m WHERE m.line_id=l.line_id)))",
+            [id(session)],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
+    if pinned
+        || tx
+            .query_row(SESSION_FOREIGN_DEPENDENCY, [id(session)], |_| Ok(()))
+            .optional()
+            .map_err(map_sqlite)?
+            .is_some()
+    {
+        return Err(SessionStoreError::Conflict);
+    }
+    let stored = load_checkpoint(tx, checkpoint)?;
+    let manifest = stored.checkpoint().manifest();
+    if !matches!(
+        manifest.lifecycle(),
+        plakous_agent::internal::RuntimeLifecycle::Quiescent
+    ) || manifest
+        .jobs()
+        .rows()
+        .iter()
+        .any(|job| job.terminal.is_none())
+    {
+        return Err(SessionStoreError::Conflict);
+    }
+    Ok(())
+}
+
 /// Archive refuses a live lease, and a job row with no terminal evidence unless
 /// the request abandons those jobs. Both checks stay inside the archive
 /// transaction.
-fn refuse_live_branches(
+pub(in super::super) fn refuse_live_branches(
     tx: &Connection,
     session: SessionId,
     now: LeaseInstant,

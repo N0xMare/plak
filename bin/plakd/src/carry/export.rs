@@ -276,7 +276,9 @@ fn tree_reference_facts(
     let child_count = count_archivable_children(
         tree.nodes()
             .values()
-            .filter(|node| node.parent_agent_id.is_some())
+            .filter(|node| {
+                node.parent_agent_id.is_some() && !tree.conversation_collected(&node.agent_id)
+            })
             .map(|node| (node.agent_id.as_str(), node.status)),
     )?;
     let mut facts = tree

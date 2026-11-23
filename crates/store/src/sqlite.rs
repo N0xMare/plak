@@ -1407,6 +1407,27 @@ impl SessionStore for SqliteSessionStore {
             Ok(receipt)
         })
     }
+    fn probe_child_retirement(
+        &self,
+        session: SessionRef,
+        checkpoint: CheckpointId,
+    ) -> StoreFuture<'_, SessionRevision> {
+        self.dispatch("child_retirement", move |b| {
+            b.require_open()?;
+            let tx = b.connection.transaction().map_err(map_sqlite)?;
+            require_bound_domain(&tx, b.domain)?;
+            let now = sample_clock(b.clock.as_ref(), b.domain)?;
+            let id = session.session_id();
+            let head = session_head(&tx, id)?.ok_or(SessionStoreError::NotFound)?;
+            if head.is_archived() {
+                return Err(SessionStoreError::Archived);
+            }
+            retirement_head(&tx, id, session.branch_id(), checkpoint)?;
+            refuse_live_branches(&tx, id, now, false)?;
+            tx.commit().map_err(map_sqlite)?;
+            Ok(head.revision())
+        })
+    }
     fn delete(&self, r: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         self.dispatch("delete", move |b| {
             #[cfg(feature = "test-support")]

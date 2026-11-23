@@ -3119,9 +3119,15 @@ archived but not deleted, with their archived revisions, so a consumer can
 finish each with `delete`. Whether an archived session is an interrupted
 deletion is the consumer's rule, not the library's: a consumer that archives
 only as the first half of a deletion may treat every listed session as one
-(Plak does, chapter 02 §2.5.3). A closed child-agent session is an ordinary session and may be
-archived and deleted the same way; nothing deletes child sessions
-automatically.
+(Plak does, chapter 02 §2.5.3). A closed child-agent session is an ordinary
+session. In the opt-in host retirement workflow (chapter 03 §6.7), the
+facade can prove a released, quiescent single-branch session is eligible and
+return its current session revision without changing it. Archive rechecks
+that revision and the exact branch checkpoint together with lease, runtime
+work, job terminals and pins. This proof does not authorize deletion at a
+different archived revision. Retry after deletion reads only the exact
+tombstone; it cannot delete a substitute session. The library itself has no
+automatic child retention policy.
 
 Pruning superseded history (§4, §5.1) is the in-place reclaim: it keeps the
 session whole and needs no archive. It runs only on a line's head: a

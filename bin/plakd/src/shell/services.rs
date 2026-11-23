@@ -37,6 +37,7 @@ pub(crate) struct Services {
     /// every clone: a host resolves it at startup and never re-reads it.
     custody: Arc<OnceLock<crate::gateway::HostCustody>>,
     runtime_store_bounds: Arc<OnceLock<[std::num::NonZeroUsize; 4]>>,
+    retire_finished_children: Arc<OnceLock<bool>>,
 }
 
 #[derive(Clone)]
@@ -134,6 +135,7 @@ impl Services {
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
             runtime_store_bounds: Arc::default(),
+            retire_finished_children: Arc::default(),
         }
     }
 
@@ -172,6 +174,7 @@ impl Services {
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
             runtime_store_bounds: Arc::default(),
+            retire_finished_children: Arc::default(),
         }
     }
 
@@ -202,6 +205,7 @@ impl Clone for Services {
             jobs: self.jobs.clone(),
             custody: Arc::clone(&self.custody),
             runtime_store_bounds: Arc::clone(&self.runtime_store_bounds),
+            retire_finished_children: Arc::clone(&self.retire_finished_children),
         }
     }
 }
@@ -352,7 +356,13 @@ impl Services {
             &self.jobs,
             &self.custody()?,
         )?
-        .with_runtime_store_bounds(self.runtime_store_bounds()?);
+        .with_runtime_store_bounds(self.runtime_store_bounds()?)
+        .with_finished_child_retirement(
+            self.retire_finished_children
+                .get()
+                .copied()
+                .unwrap_or(false),
+        );
         let roots = match &*self
             .local_daemon
             .read()
@@ -391,6 +401,8 @@ impl Services {
         let resolved = crate::gateway::HostCustody::from_config(home, &config)?;
         self.runtime_store_bounds
             .get_or_init(|| config.runtime_store_bounds);
+        self.retire_finished_children
+            .get_or_init(|| config.retire_finished_children);
         Ok(self.custody.get_or_init(|| resolved).clone())
     }
 

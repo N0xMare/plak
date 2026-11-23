@@ -40,6 +40,7 @@ impl ProductTopologyRuntime {
             step_released: tokio::sync::Notify::new(),
             step_recovery_due: AtomicBool::new(false),
             recycling: Mutex::new(HashSet::new()),
+            child_retirement: tokio::sync::Mutex::new(()),
             recovering: Mutex::new(HashSet::new()),
             recoveries: Mutex::new(Vec::new()),
             rejoin_spec: Mutex::new(None),
@@ -403,6 +404,42 @@ impl ProductTopologyRuntime {
         self.recycling
             .lock()
             .is_ok_and(|recycling| recycling.contains(agent_id))
+    }
+
+    /// Collects children outside the hub's live/recovery inventory. The
+    /// runtime probe and tree admission still recheck exact ownership.
+    pub async fn collect_dormant_children(
+        &self,
+        sessions: &plakous::sessions::AgentSessions,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let live = self.live.lock().await;
+        if self.is_closed() || self.step_paused.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let Ok(_maintenance) = self.child_retirement.try_lock() else {
+            return Ok(());
+        };
+        let mut occupied: std::collections::BTreeSet<_> = live.keys().cloned().collect();
+        drop(live);
+        occupied.extend(
+            self.recovering
+                .lock()
+                .map_err(|_| "recovery inventory is unavailable")?
+                .iter()
+                .cloned(),
+        );
+        occupied.extend(
+            self.recycling
+                .lock()
+                .map_err(|_| "recycle inventory is unavailable")?
+                .iter()
+                .cloned(),
+        );
+        self.driver()
+            .collect_dormant_children(sessions, enabled, occupied)
+            .await
+            .map_err(|error| error.message)
     }
 
     /// Holds `agent_id` for one `recover_node` run until the claim drops.

@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use super::*;
 
-const BASE: [i64; 2] = [39, 11];
-const CURRENT: [i64; 2] = [40, 12];
+const BASE: [i64; 2] = [39, 12];
+const CURRENT: [i64; 2] = [40, 13];
 
 #[test]
 fn product_revision_crash_before_commit_leaves_both_stores_openable_by_the_source() {
@@ -13,12 +13,12 @@ fn product_revision_crash_before_commit_leaves_both_stores_openable_by_the_sourc
 
 #[test]
 fn product_revision_crash_after_commit_restarts_a_mixed_revision_home() {
-    crash("product:after-commit", [40, 11]);
+    crash("product:after-commit", [40, 12]);
 }
 
 #[test]
 fn tree_revision_crash_before_commit_restarts_a_mixed_revision_home() {
-    crash("subagents:before-commit", [40, 11]);
+    crash("subagents:before-commit", [40, 12]);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
     assert_eq!(code, Some(86), "{cut}: {stderr}");
     assert_eq!(versions(&paths), expected);
     let product_backup = paths.state_dir().join("product.pre-revision-39.sqlite3");
-    let tree_backup = paths.state_dir().join("subagents.pre-revision-11.sqlite3");
+    let tree_backup = paths.state_dir().join("subagents.pre-revision-12.sqlite3");
     for (backup, revision) in [(&product_backup, BASE[0]), (&tree_backup, BASE[1])] {
         assert_eq!(version(backup), revision);
     }
@@ -91,8 +91,8 @@ fn crash(cut: &str, expected: [i64; 2]) {
             tree_copy_time
         );
         std::fs::copy(product_backup, paths.product_database()).unwrap();
-        assert_eq!(versions(&paths), [39, 12]);
-        older_refuses_unchanged(&fixture, &paths, "subagents schema 12");
+        assert_eq!(versions(&paths), [39, 13]);
+        older_refuses_unchanged(&fixture, &paths, "subagents schema 13");
         embedded_commands_refuse_unchanged(&fixture, &paths, &session);
     }
 }
@@ -154,7 +154,7 @@ fn embedded_commands_refuse_unchanged(
     assert!(!deleted.status.success(), "{deleted:?}");
     assert_incompatible(
         &String::from_utf8_lossy(&deleted.stderr),
-        "subagents schema 12",
+        "subagents schema 13",
     );
     assert_snapshot_unchanged(&before, &state);
 
@@ -166,7 +166,7 @@ fn embedded_commands_refuse_unchanged(
         .unwrap();
     assert!(!embedded.status.success(), "{embedded:?}");
     let stdout = String::from_utf8(embedded.stdout).unwrap();
-    assert_incompatible(&stdout, "subagents schema 12");
+    assert_incompatible(&stdout, "subagents schema 13");
     assert_eq!(
         stdout
             .lines()

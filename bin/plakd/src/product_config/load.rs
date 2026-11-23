@@ -270,6 +270,7 @@ pub struct ProductConfig {
     pub skills_enabled: bool,
     pub telemetry_max_bytes: u64,
     pub(crate) runtime_store_bounds: [std::num::NonZeroUsize; 4],
+    pub(crate) retire_finished_children: bool,
     pub telemetry_max_age_days: u64,
     /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
     /// MCP login may register with; home-scoped.
@@ -420,6 +421,9 @@ impl ProductConfig {
             ConfigField::RuntimeStoreMaxSessions => {
                 self.runtime_store_bounds[3] = source.runtime_store_bounds[3];
             }
+            ConfigField::RuntimeStoreRetireFinishedChildren => {
+                self.retire_finished_children = source.retire_finished_children;
+            }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = source.telemetry_max_bytes;
             }
@@ -550,6 +554,7 @@ impl ProductConfig {
             compaction_enabled: true,
             skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
+            retire_finished_children: false,
             runtime_store_bounds:
                 plakous::sessions::SessionBackend::default_sqlite_retention_bounds(),
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
@@ -861,6 +866,9 @@ impl ProductConfig {
             ConfigField::ApiFullWindow => Value::from(self.api_full_window),
             ConfigField::ReloadRequests => Value::from(self.reload_requests),
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
+            ConfigField::RuntimeStoreRetireFinishedChildren => {
+                Value::from(self.retire_finished_children)
+            }
             ConfigField::SkillsEnabled => Value::from(self.skills_enabled),
             ConfigField::RuntimeStoreMaxCheckpoints => {
                 Value::from(i64::try_from(self.runtime_store_bounds[0].get()).ok()?)
@@ -1364,6 +1372,9 @@ impl ProductConfig {
             ConfigField::ApiFullWindow => self.api_full_window = value.boolean()?,
             ConfigField::ReloadRequests => self.reload_requests = value.boolean()?,
             ConfigField::CompactionEnabled => self.compaction_enabled = value.boolean()?,
+            ConfigField::RuntimeStoreRetireFinishedChildren => {
+                self.retire_finished_children = value.boolean()?
+            }
             ConfigField::SkillsEnabled => self.skills_enabled = value.boolean()?,
             ConfigField::RuntimeStoreMaxCheckpoints
             | ConfigField::RuntimeStoreMaxObjects

@@ -785,6 +785,7 @@ pub struct ProductAgentTree {
     /// Parked children, process-local (`park`).
     parked: BTreeMap<String, park::ParkedChild>,
     operations: BTreeMap<String, OperationRecord>,
+    retired_children: BTreeMap<String, RetiredChild>,
     /// Runtime command intents by command id (`agent_commands`).
     commands: BTreeMap<String, AgentCommand>,
     /// The tree projector's cursor per runtime session (`agent_feed_cursors`).
@@ -929,6 +930,7 @@ mod recovery;
 mod refresh;
 mod reopen_law;
 mod retention;
+pub use retention::RetiredChild;
 mod revert;
 mod stages;
 mod succession;
@@ -1106,6 +1108,12 @@ impl ProductAgentTree {
     /// The operation ledger: what every idempotent call asked and answered.
     pub fn operations(&self) -> &BTreeMap<String, OperationRecord> {
         &self.operations
+    }
+
+    /// Summaries live in this tree only, not in fork genesis or carried history.
+    #[must_use]
+    pub fn retired_children(&self) -> &BTreeMap<String, RetiredChild> {
+        &self.retired_children
     }
 
     pub(crate) fn grant(&self, id: &str) -> Result<&TopologyGrant, TopologyError> {

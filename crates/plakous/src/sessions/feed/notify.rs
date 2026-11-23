@@ -401,6 +401,14 @@ impl SessionStore for NotifyingStore {
         })
     }
 
+    fn probe_child_retirement(
+        &self,
+        session: SessionRef,
+        checkpoint: CheckpointId,
+    ) -> StoreFuture<'_, plakous_agent::internal::SessionRevision> {
+        self.inner.probe_child_retirement(session, checkpoint)
+    }
+
     fn delete(&self, request: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
         let session = request.session_id();
         Box::pin(async move {

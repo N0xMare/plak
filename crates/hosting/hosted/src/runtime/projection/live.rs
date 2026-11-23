@@ -88,10 +88,8 @@ impl LiveTarget {
                 .await
                 .map_err(|error| error.message)?;
             runtime
-                .driver()
-                .collect_dormant_children(&self.sessions)
-                .await
-                .map_err(|error| error.message)?;
+                .collect_dormant_children(&self.sessions, self.roots.retire_finished_children)
+                .await?;
         }
         Ok(())
     }

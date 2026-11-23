@@ -12,7 +12,7 @@ use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TopologyGrant};
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptRecord, CandidateRecord, CustodyClaim, MailRecord, NodeRecord,
-    OperationRecord, ProductAgentTree, TreeStoreError, WorkspaceRecord,
+    OperationRecord, ProductAgentTree, RetiredChild, TreeStoreError, WorkspaceRecord,
 };
 use rusqlite::Transaction;
 
@@ -31,6 +31,7 @@ pub(crate) struct TreeImage {
     workspaces: BTreeMap<String, WorkspaceRecord>,
     messages: BTreeMap<String, MailRecord>,
     operations: BTreeMap<String, OperationRecord>,
+    retired_children: BTreeMap<String, RetiredChild>,
     commands: BTreeMap<String, AgentCommand>,
     feed_cursors: BTreeMap<String, u64>,
     epochs: BTreeMap<u64, OrchestrationSnapshot>,
@@ -52,6 +53,7 @@ impl TreeImage {
             workspaces: tree.workspaces().clone(),
             messages: tree.messages().clone(),
             operations: tree.operations().clone(),
+            retired_children: tree.retired_children().clone(),
             commands: tree.commands().clone(),
             feed_cursors: tree.feed_cursors().clone(),
             epochs: tree.epochs().successors.clone(),
@@ -110,6 +112,7 @@ impl TreeImage {
             workspaces: Changes::between(&self.workspaces, tree.workspaces()),
             messages: Changes::between(&self.messages, tree.messages()),
             operations: Changes::between(&self.operations, tree.operations()),
+            retired_children: Changes::between(&self.retired_children, tree.retired_children()),
             commands: Changes::between(&self.commands, tree.commands()),
             feed_cursors: Changes::between(&self.feed_cursors, tree.feed_cursors()),
             epochs: Changes::between(&self.epochs, &tree.epochs().successors),
@@ -122,6 +125,7 @@ impl TreeImage {
         delta.workspaces.replace(tx, tree_id)?;
         delta.messages.replace(tx, tree_id)?;
         delta.operations.replace(tx, tree_id)?;
+        delta.retired_children.replace(tx, tree_id)?;
         delta.commands.replace(tx, tree_id)?;
         delta.feed_cursors.replace(tx, tree_id)?;
         delta.epochs.replace(tx, tree_id)?;
@@ -140,6 +144,7 @@ pub(crate) struct Delta<'t> {
     workspaces: Changes<'t, WorkspaceRecord>,
     messages: Changes<'t, MailRecord>,
     operations: Changes<'t, OperationRecord>,
+    retired_children: Changes<'t, RetiredChild>,
     commands: Changes<'t, AgentCommand>,
     feed_cursors: Changes<'t, u64>,
     epochs: Changes<'t, OrchestrationSnapshot>,
@@ -157,6 +162,7 @@ impl Delta<'_> {
         self.workspaces.fold_into(&mut image.workspaces);
         self.messages.fold_into(&mut image.messages);
         self.operations.fold_into(&mut image.operations);
+        self.retired_children.fold_into(&mut image.retired_children);
         self.commands.fold_into(&mut image.commands);
         self.feed_cursors.fold_into(&mut image.feed_cursors);
         self.epochs.fold_into(&mut image.epochs);

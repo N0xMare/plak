@@ -8,7 +8,7 @@ use plakous_recursive_subagents::epoch::OrchestrationSnapshot;
 use plakous_recursive_subagents::protocol::{AttemptId, CandidateId, TemplateName, TopologyGrant};
 use plakous_recursive_subagents::tree::{
     AgentCommand, AttemptRecord, CandidateRecord, MailRecord, NodeLineId, NodeRecord,
-    OperationRecord, WorkspaceRecord,
+    OperationRecord, RetiredChild, WorkspaceRecord,
 };
 use std::collections::BTreeSet;
 
@@ -114,6 +114,27 @@ pub(crate) trait Row: Clone + PartialEq {
     /// column overrides it.
     fn same_row(&self, other: &Self) -> bool {
         self == other
+    }
+}
+
+impl Row for RetiredChild {
+    type Key = String;
+    const TABLE: Table = Table {
+        name: "agent_retired_children",
+        noun: "agent retirement summary",
+        columns: &["tree_id", "agent_id", "summary"],
+    };
+
+    fn write(
+        &self,
+        tx: &Transaction<'_>,
+        sql: &str,
+        tree_id: &str,
+        key: &String,
+    ) -> Result<rusqlite::Result<usize>, String> {
+        let body = serde_json::to_string(self)
+            .map_err(|_| "agent retirement summary is not serializable".to_owned())?;
+        Ok(tx.execute(sql, params![tree_id, key, body]))
     }
 }
 

@@ -178,3 +178,61 @@ fn child_retention_intent_is_idempotent_and_close_is_immediate() {
         [] as [crate::tree::retention::RetirementTicket; 0]
     );
 }
+
+#[test]
+fn child_retirement_and_followup_are_serialized_by_the_attempt() {
+    use crate::protocol::{MessagePurpose, SendAgentMessageRequest, TopologyErrorCode};
+
+    for followup_wins in [true, false] {
+        let (_tmp, mut tree) = tree();
+        let id = tree
+            .spawn_agent("root", &spawn_req(), None)
+            .unwrap()
+            .agent_id;
+        tree.bind_session_locator(&id, "exact-locator").unwrap();
+        tree.record_turn_completed(&id).unwrap();
+        tree.settle_for_test();
+        let excluded = super::super::BTreeSet::new();
+        assert!(
+            tree.child_retirement_heads(u64::MAX, &excluded).is_empty(),
+            "an unconsumed result cannot produce an intent"
+        );
+        delivered(&mut tree);
+        let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &excluded).remove(0);
+        let approved = super::ApprovedHeads::from([(agent, (attempt, locator, 1))]);
+        let request = SendAgentMessageRequest {
+            agent_id: id.clone(),
+            message: "new assignment".to_owned(),
+            purpose: Some(MessagePurpose::Followup),
+            refresh: Some(false),
+            acknowledge_recovery: None,
+            priority: None,
+            in_reply_to: None,
+            output_schema_json: None,
+        };
+        if followup_wins {
+            tree.send_agent_message("root", &request, None).unwrap();
+        }
+        let tickets = tree
+            .prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+            .unwrap();
+        if followup_wins {
+            assert!(tickets.is_empty());
+            assert!(tree.retired_children().is_empty());
+        } else {
+            assert_eq!(tickets.len(), 1);
+            assert_eq!(
+                tree.send_agent_message("root", &request, None)
+                    .unwrap_err()
+                    .code,
+                TopologyErrorCode::FollowupClosed
+            );
+            tree.finish_child_retention(&tickets[0]).unwrap();
+            let view = super::super::view::project_tree_view(&tree);
+            let row = view.nodes.iter().find(|node| node.agent_id == id).unwrap();
+            assert!(row.dormancy.conversation_retired);
+            assert!(!row.has_session);
+            assert!(row.prompt.is_empty());
+        }
+    }
+}

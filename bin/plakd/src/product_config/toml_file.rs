@@ -174,6 +174,7 @@ struct RuntimeStoreSection {
     objects: Entry,
     #[serde(rename = "max_object_bytes")]
     object_bytes: Entry,
+    retire_finished_children: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,6 +291,10 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign("runtime_store.max_checkpoints", &section.checkpoints)?;
         assign("runtime_store.max_objects", &section.objects)?;
         assign("runtime_store.max_object_bytes", &section.object_bytes)?;
+        assign(
+            "runtime_store.retire_finished_children",
+            &section.retire_finished_children,
+        )?;
     }
     if let Some(section) = &file.mcp {
         assign(

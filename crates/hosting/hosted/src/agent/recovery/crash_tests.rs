@@ -44,6 +44,8 @@ const ROOT_ENV: &str = "PLAK_CHILD_REOPEN_FIXTURE_ROOT";
 const MODE_ENV: &str = "PLAK_CHILD_REOPEN_FIXTURE_MODE";
 const READY: &str = "CHILD_CUT_READY";
 
+mod collection;
+
 type LiveFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 struct CancelOnly(crate::agent::children::ProductLiveCanceller);

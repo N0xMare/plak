@@ -351,6 +351,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `runtime_store.max_checkpoints` | integer | `524288` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; checkpoints, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.max_objects` | integer | `4194304` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.max_object_bytes` | integer | `4294967296` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup. |
+| `runtime_store.retire_finished_children` | bool | `false` | true or false; home-scoped | Retire settled child runtimes after their result is consumed. Serving hosts read this at startup. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plakd mcp login`. |
@@ -601,6 +602,7 @@ them on each command. Compaction is captured in `HostConfig` by
 | `runtime_store.max_checkpoints` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.max_objects` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.max_object_bytes` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
+| `runtime_store.retire_finished_children` | `host_restart` | Enables new automatic retirement intents; pending intents still settle. |
 | `skills.enabled` | `new_session` | Stored construction/rebind tools. |
 | `telemetry.max_bytes` | `host_restart` | Per-home writer start; CLI per command. |
 | `telemetry.max_age_days` | `host_restart` | Per-home writer start; CLI per command. |

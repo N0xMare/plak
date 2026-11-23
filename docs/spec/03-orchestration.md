@@ -1547,7 +1547,7 @@ comparison. Requested tier remains outside this identity; the existing receipt
 reports the effective tier. A missing admitted identity is recovery-required,
 never permission to reconstruct it from current state or spawn again.
 
-The tree store is schema **11**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. The tree records no session-level account choice; a spawned node holds the full account its card's kind resolved to (§2.1). Another schema lives
+The tree store is generation **11**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. The tree records no session-level account choice; a spawned node holds the full account its card's kind resolved to (§2.1). Another schema lives
 in another build's state directory (chapter 02 §2.5) and is never read; no
 migration or guessed identity is performed.
 
@@ -2218,21 +2218,41 @@ adoptable and usable as spawn inputs through the launch repository.
 
 ### 6.7 Conversation retention
 
-The attached host retires sealed, delivered dormant child conversations after
+With home `runtime_store.retire_finished_children` enabled, the attached host
+retires sealed, delivered dormant child conversations after
 `child_retention_days` (default 7), or oldest first above
 `child_retention_count` (default 128). Close requests retirement immediately,
 subject to the same settled-owner and coverage proofs. Live, undelivered,
 recovery-required, unfacted-command, waited-on and unsealed children are not
-collected. Leaf children are collected before their parents.
+collected. Leaf children are collected before their parents. An acknowledged
+result must no longer be subject to command return or wait rollback. Terminal
+mail disposition is also accepted; an absent result witness is not evidence.
+New intents are disabled by default; already-published intents still settle
+after restart or after the policy is disabled.
 
-Retirement first publishes an exact runtime-session deletion intent and closes
-follow-up admission. Only the facade may archive the exact released session
-locator and delete its archived revision; ownership or stale-locator failures
-retain the intent and records. Recovery finishes an interrupted archive/delete
-idempotently. Runtime deletion precedes collection of attempts, child tool
-receipts, command and acknowledged mail records. A durable allocation watermark
+The tree checks no remaining owner, hold, work or recovery debt, then obtains
+the runtime store's exact retirement proof. A bounded pass prepares intents
+under the tree's custody after rechecking eligibility and the same locator.
+That save closes follow-up and retains a bounded result summary: stable child,
+parent, attempt and mail identities, final status, result digest, exact small
+result where available, and a short display label. It carries no prompt,
+transcript or captures. For larger results the summary records the original
+digest and size rather than duplicating the result.
+
+Only the facade may archive the released session at the approved branch head
+and session revision and delete its next, archived revision. The store checks
+the head, lease, quiescence, process evidence and dependent checkpoints again
+before archive; a refusal retains the intent. After a crash, an exact delete
+tombstone can settle the tree without re-archiving. Runtime deletion precedes
+collection of attempts, child tool receipts, command and acknowledged mail
+records. The runtime's bounded GC preserves objects reachable from other
+sessions. A durable allocation watermark
 prevents reuse of collected child identities and does not refund spent attempts.
 Immutable receipts belonging to still-retained callers remain replay authority.
+Retired children have a presentation-only closed row in the source tree.
+Exact reopen handles the runtime as intentionally absent, as do a fork and
+export; the summary is not carried. A separately retained candidate is still
+reported according to its own ownership.
 
 Retention never deletes work. Unadopted, nonsuperseded, nonempty candidate refs never expire
 automatically: only explicit discard or user deletion relinquishes them.
@@ -3489,8 +3509,11 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 Product state lives in `product.sqlite3` at **schema 39**: intents and
 feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds, a rebind request's optional filled choices, and the `last_root_turn` view a continue reads (chapter 02 §4.4.1). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
-intent. The tree lives separately in `subagents.sqlite3` at **schema 11**, owned
-by `plakous-recursive-subagents-store`. Its thirteen domain tables and its custody
+intent. The tree lives separately in `subagents.sqlite3` at generation **11**,
+revision **12**, owned by `plakous-recursive-subagents-store`. The additive
+revision creates `agent_retired_children` without backfill. Its tree-owned
+summary survives runtime deletion, is deleted with its tree and is not a
+checkpoint, binding or move authority. The domain tables and custody
 record are below; §14.3 classifies every column family as an intent, a view of
 the feed, or an external-effect record.
 

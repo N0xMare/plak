@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use plakous_recursive_subagents::tree::PersistedTree;
 use rusqlite::{Connection, OpenFlags};
 
-use crate::admission::{AdmissionError, BUSY_TIMEOUT, Schema};
+use crate::admission::{AdmissionError, BUSY_TIMEOUT, Revision, Schema};
 use crate::rows::load_agent_tree;
 
 /// The tree store's component of the host's state directory key.
@@ -96,6 +96,14 @@ pub fn expected_schema_fingerprint() -> String {
     schema().fingerprint()
 }
 
+const RETIRED_CHILDREN: &str = "CREATE TABLE agent_retired_children(tree_id TEXT NOT NULL REFERENCES agent_trees(tree_id) ON DELETE CASCADE,agent_id TEXT NOT NULL,summary TEXT NOT NULL CHECK(json_valid(summary) AND length(CAST(summary AS BLOB))<=32768),PRIMARY KEY(tree_id,agent_id))";
+
+pub(super) const RETIREMENT_REVISION: Revision = Revision {
+    sql: RETIRED_CHILDREN,
+    objects: &[("agent_retired_children", RETIRED_CHILDREN)],
+    fingerprint: "04cb803bb9102efd520309285f5fdd780c2e6f704b987277ebac77fc37d93297",
+};
+
 /// The tree file's admission descriptors.
 const SCHEMA: Schema = Schema {
     noun: "tree",
@@ -104,7 +112,7 @@ const SCHEMA: Schema = Schema {
     generation: GENERATION,
     objects: SCHEMA_OBJECTS,
     base_fingerprint: "f853d767e6fb5d05a546fd1c32dbb7b160d85b35ae5caeb7fde2efade76ca23a",
-    revisions: &[],
+    revisions: &[RETIREMENT_REVISION],
 };
 
 /// Admission descriptors used by the host's stopped-store and scratch paths.

@@ -1,14 +1,41 @@
 //! Retirement preserves sealed work independently of its conversation.
 
 use super::{
-    CandidateId, Deserialize, NodeStatus, OperationRecord, ProductAgentTree, Serialize,
-    TopologyError, TopologyErrorCode, WorkspaceMode, WorkspaceStatus, canonical_json, digest_text,
+    BTreeMap, CandidateId, Deserialize, MailDurableState, MessagePurpose, NodeStatus,
+    OperationRecord, ProductAgentTree, Serialize, TopologyError, TopologyErrorCode, WorkspaceMode,
+    WorkspaceStatus, canonical_json, digest_text,
 };
 
 const KIND: &str = "child_retirement";
 const WATERMARK: &str = "plak:child_collection_watermark";
 const PIN_CLEANUP: &str = "candidate_unpin";
 const RESCUE_PIN: &str = "rescue_pin";
+
+/// A bounded local record of a retired child, not an execution target.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetiredChild {
+    /// The parent that received or disposed of the result.
+    pub parent: String,
+    /// Depth for the presentation-only tree row.
+    pub depth: u8,
+    /// Last attempt; earlier attempts cannot be reopened.
+    pub attempt: super::AttemptId,
+    /// The final attempt status, before folding the node to Closed.
+    pub status: super::AttemptStatus,
+    /// Unix milliseconds of attempt settlement.
+    pub ended_at: u64,
+    /// Stable message identity and digest, if result mail was published.
+    pub mail: Option<(String, String)>,
+    /// Allocator floor, even when the removed mail was the last in the tree.
+    pub(super) next_message_sequence: u64,
+    /// Original result digest and byte count, even when the result was too large to retain.
+    pub result: Option<(String, usize)>,
+    /// The exact submitted result when it fit the retention budget.
+    pub output: Option<String>,
+    /// Short display label for the retired child.
+    pub description: String,
+}
 
 pub(crate) struct PinCleanup {
     pub(crate) operation_id: String,
@@ -20,6 +47,16 @@ pub(crate) struct RetirementTicket {
     pub(crate) agent_id: String,
     pub(crate) locator: Option<String>,
     collected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session_revision: Option<u64>,
+}
+
+type ApprovedHeads = BTreeMap<String, (super::AttemptId, String, u64)>;
+
+const MAX_RETIREMENT_BATCH: usize = 8;
+
+fn short_text(value: &str, max: usize) -> String {
+    value[..value.floor_char_boundary(max.min(value.len()))].to_owned()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -161,7 +198,9 @@ impl ProductAgentTree {
         self.operations.contains_key(&Self::retirement_id(agent))
     }
 
-    pub(super) fn conversation_collected(&self, agent: &str) -> bool {
+    /// A collected child has no conversation to reopen or carry.
+    #[must_use]
+    pub fn conversation_collected(&self, agent: &str) -> bool {
         self.operations
             .get(&Self::retirement_id(agent))
             .and_then(|operation| {
@@ -268,7 +307,113 @@ impl ProductAgentTree {
         &mut self,
         now: u64,
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
-        self.prepare_child_retention_guarded(now, |_| {})
+        self.prepare_child_retention_guarded(now, None, |_| {})
+    }
+
+    fn retirement_summary(&self, agent: &str) -> Option<RetiredChild> {
+        let node = self.nodes.get(agent)?;
+        let parent = node.parent_agent_id.as_ref()?;
+        let attempt = self.current_attempt(agent)?;
+        let receiver = self.nodes.get(parent)?;
+        // An admitted command can return its mail at terminal publication,
+        // and an uncommitted wait can roll back its acknowledgement on reopen.
+        if self.placement_held(agent)
+            || !self.placement_ready(agent)
+            || self.is_parked(agent)
+            || self.recovery_owed(agent)
+            || self
+                .pending_transient_resume(agent)
+                .map_or(true, |pending| pending.is_some())
+            || self.terminal_recovery_refusal(agent).is_some()
+            || receiver.active_turn
+            || self.recovery_owed(parent)
+            || self.has_turn_owner(parent) && receiver.parent_agent_id.is_some()
+            || !self.retained_wait_receipts(parent).is_empty()
+        {
+            return None;
+        }
+        let mut current = None;
+        for mail in self
+            .messages
+            .values()
+            .filter(|mail| mail.from == agent && mail.purpose == MessagePurpose::Result)
+        {
+            if mail.to != *parent
+                || !matches!(
+                    mail.durable,
+                    MailDurableState::Acknowledged | MailDurableState::Terminal
+                )
+            {
+                return None;
+            }
+            let body: serde_json::Value = serde_json::from_str(&mail.body).ok()?;
+            if body["attempt_id"].as_str() == Some(attempt.attempt_id.as_str()) {
+                current = Some((mail.message_id.clone(), digest_text(&mail.body)));
+            }
+        }
+        // Absence is not proof of disposition. A closed in-flight attempt
+        // which never published results and has no witness is left alone.
+        current.as_ref()?;
+        let output = attempt.output_json.as_ref();
+        Some(RetiredChild {
+            parent: parent.clone(),
+            depth: node.depth,
+            attempt: attempt.attempt_id.clone(),
+            status: attempt.status,
+            ended_at: attempt.ended_at?,
+            mail: current,
+            next_message_sequence: self.next_message_sequence,
+            result: output.map(|text| (digest_text(text), text.len())),
+            output: output.filter(|text| text.len() <= 4096).cloned(),
+            description: short_text(&node.description, 256),
+        })
+    }
+
+    fn due_children(&self, now: u64) -> Vec<String> {
+        let mut eligible: Vec<_> = self
+            .nodes
+            .values()
+            .filter(|node| {
+                !self.conversation_retired(&node.agent_id) && self.retention_ready(&node.agent_id)
+            })
+            .filter_map(|node| Some((self.current_attempt(&node.agent_id)?.ended_at?, node)))
+            .collect();
+        eligible.sort_by(|(left, a), (right, b)| (left, &a.agent_id).cmp(&(right, &b.agent_id)));
+        let policy = self.current_epoch();
+        let excess = eligible
+            .len()
+            .saturating_sub(usize::from(policy.child_retention_count));
+        eligible
+            .into_iter()
+            .enumerate()
+            .filter(|(index, (ended, node))| {
+                *index < excess
+                    || node.status == NodeStatus::Closed
+                    || now.saturating_sub(*ended)
+                        >= u64::from(policy.child_retention_days) * 86_400_000
+            })
+            .map(|(_, (_, node))| node.agent_id.clone())
+            .collect()
+    }
+
+    pub(crate) fn child_retirement_heads(
+        &self,
+        now: u64,
+        occupied: &super::BTreeSet<String>,
+    ) -> Vec<(String, super::AttemptId, String)> {
+        self.due_children(now)
+            .into_iter()
+            .filter(|agent| !occupied.contains(agent) && self.retirement_summary(agent).is_some())
+            .filter_map(|agent| {
+                let node = &self.nodes[&agent];
+                Some((
+                    agent,
+                    node.attempt_id.clone()?,
+                    node.session_locator.clone()?,
+                ))
+            })
+            .take(MAX_RETIREMENT_BATCH)
+            .collect()
     }
 
     /// Calls `before_change` once, before the first mutation. A read-only
@@ -276,6 +421,7 @@ impl ProductAgentTree {
     pub(crate) fn prepare_child_retention_guarded(
         &mut self,
         now: u64,
+        approved: Option<&ApprovedHeads>,
         before_change: impl FnOnce(&Self),
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
         let mut before_change = Some(before_change);
@@ -326,40 +472,38 @@ impl ProductAgentTree {
             }
         }
         let mut tickets = pending;
-        let mut eligible: Vec<_> = self
-            .nodes
-            .values()
-            .filter(|node| {
-                !self.conversation_retired(&node.agent_id) && self.retention_ready(&node.agent_id)
-            })
-            .filter_map(|node| {
-                self.current_attempt(&node.agent_id)?
-                    .ended_at
-                    .map(|ended| (ended, node.agent_id.clone()))
-            })
-            .collect();
-        eligible.sort();
-        let excess = eligible
-            .len()
-            .saturating_sub(usize::from(self.current_epoch().child_retention_count));
-        for (index, (ended, agent)) in eligible.into_iter().enumerate() {
-            if index >= excess
-                && self.nodes[&agent].status != NodeStatus::Closed
-                && now.saturating_sub(ended)
-                    < u64::from(self.current_epoch().child_retention_days) * 86_400_000
-            {
-                continue;
-            }
+        for agent in self.due_children(now) {
             let node = &self.nodes[&agent];
+            let (session_revision, summary) = match approved {
+                None => (None, None),
+                Some(approved) => {
+                    let Some((attempt, locator, rev)) = approved.get(&agent) else {
+                        continue;
+                    };
+                    if Some(locator) != node.session_locator.as_ref()
+                        || Some(attempt) != node.attempt_id.as_ref()
+                    {
+                        continue;
+                    }
+                    let Some(summary) = self.retirement_summary(&agent) else {
+                        continue;
+                    };
+                    (Some(*rev), Some(summary))
+                }
+            };
             let ticket = RetirementTicket {
                 agent_id: agent.clone(),
                 locator: node.session_locator.clone(),
                 collected: false,
+                session_revision,
             };
             if let Some(snapshot) = before_change.take() {
                 snapshot(self);
             }
             self.write_retention(Self::retirement_id(&agent), agent.clone(), &ticket)?;
+            if let Some(summary) = summary {
+                self.retired_children.insert(agent.clone(), summary);
+            }
             self.nodes
                 .get_mut(&agent)
                 .ok_or_else(|| {
@@ -525,6 +669,7 @@ impl ProductAgentTree {
             let mut completed = ticket.clone();
             completed.collected = true;
             completed.locator = None;
+            completed.session_revision = None;
             self.write_retention(id, ticket.agent_id.clone(), &completed)?;
         }
         self.bump();

@@ -177,6 +177,7 @@ pub struct ProductStateRoots {
     /// names where the semantic store lives.
     runtime_database: PathBuf,
     runtime_store_bounds: [std::num::NonZeroUsize; 4],
+    pub(crate) retire_finished_children: bool,
     /// The XDG state root the product bound, kept beside the layout root the
     /// paths below name: `SubscriptionPaths` derives the whole Plak layout
     /// from this one directory, so a hosted caller that needs the native
@@ -306,6 +307,7 @@ impl ProductStateRoots {
             product: std::fs::canonicalize(&product).unwrap_or(product),
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
             runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
+            retire_finished_children: false,
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
@@ -882,6 +884,13 @@ impl ProductStateRoots {
         self
     }
 
+    /// Opt into retirement of settled child runtimes under the home policy.
+    #[must_use]
+    pub fn with_finished_child_retirement(mut self, enabled: bool) -> Self {
+        self.retire_finished_children = enabled;
+        self
+    }
+
     /// The runtime database every session of this home shares.
     pub(crate) fn runtime_database(&self) -> &std::path::Path {
         &self.runtime_database
@@ -1195,6 +1204,7 @@ impl ProductStateRoots {
             subscriptions: state_home.join("plak/subscriptions"),
             runtime_database: product.join("runtime.sqlite3"),
             runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
+            retire_finished_children: false,
             product,
             state_home,
             local_daemon: None,

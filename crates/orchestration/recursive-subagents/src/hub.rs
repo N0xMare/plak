@@ -567,6 +567,8 @@ pub enum RecoveryClaimRefusal {
 /// by tree id, so a second attach shares this one rather than opening the
 /// store twice.
 pub struct ProductTopologyRuntime {
+    // Destructive housekeeping is a step-drain participant, not a child turn.
+    child_retirement: tokio::sync::Mutex<()>,
     /// Live child turns, keyed by agent id. Its lock is separate from the
     /// tree's on purpose: admission and the shutdown drain must be one lock,
     /// and neither may be taken while the tree's is held.
