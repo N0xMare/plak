@@ -1521,7 +1521,7 @@ async fn pinned_child_retirement_heads(
         Err(SessionStoreError::Conflict)
     );
 
-    let chain = prune_chain(store, durability, 94_000, 0, 512).await?;
+    let chain = prune_chain(store, durability, 94_000, 1, 512).await?;
     let selector = chain.head.session();
     let fork = ordinary_fork(
         &chain,
@@ -1531,7 +1531,7 @@ async fn pinned_child_retirement_heads(
             owner: id(94_052)?,
             workflow: workflow(0xb3)?,
             session_revision: chain.created.session().revision(),
-            source_revision: 0,
+            source_revision: 1,
         },
         durability,
     )?;
@@ -1539,7 +1539,7 @@ async fn pinned_child_retirement_heads(
     store.release(receipt.lease().clone()).await?;
     store.release(chain.created.lease().clone()).await?;
     assert_eq!(
-        store.probe_child_retirement(selector, chain.ids[0]).await,
+        store.probe_child_retirement(selector, chain.ids[1]).await,
         Err(SessionStoreError::Conflict)
     );
     Ok(())

@@ -207,6 +207,12 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
         tree.retirement_fault(&id).as_deref(),
         Some("child retirement pending: held")
     );
+    let view = super::super::view::project_tree_view(&tree);
+    let shown = view.nodes.iter().find(|node| node.agent_id == id).unwrap();
+    assert_eq!(
+        shown.fault.as_deref(),
+        Some("child retirement pending: held")
+    );
     assert!(tree.abort_child_retirement(&id, "wrong-locator").is_err());
     tree.abort_child_retirement(&id, "exact-locator").unwrap();
     assert_eq!(tree.node(&id).unwrap().status, prior_status);
@@ -227,6 +233,44 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
         None,
     )
     .unwrap();
+}
+
+#[test]
+fn child_retirement_summary_bound_preserves_pending_and_evicts_oldest_finished() {
+    let (_tmp, mut tree) = tree();
+    let id = tree
+        .spawn_agent("root", &spawn_req(), None)
+        .unwrap()
+        .agent_id;
+    tree.bind_session_locator(&id, "exact-locator").unwrap();
+    tree.record_turn_completed(&id).unwrap();
+    tree.settle_for_test();
+    delivered(&mut tree);
+    let approved = tree
+        .child_retirement_heads(u64::MAX, &super::super::BTreeSet::new())
+        .into_iter()
+        .map(|(agent, attempt, locator)| (agent, (attempt, locator, 1)))
+        .collect();
+    tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
+        .unwrap();
+    let mut finished = tree.retired_children()[&id].clone();
+    tree.retired_children
+        .get_mut(&id)
+        .unwrap()
+        .next_message_sequence = 1;
+    for i in 1..super::MAX_RETIREMENT_SUMMARIES {
+        finished.next_message_sequence = i as u64 + 1;
+        tree.retired_children
+            .insert(format!("finished-{i}"), finished.clone());
+    }
+    assert!(tree.make_retirement_summary_room());
+    assert_eq!(
+        tree.retired_children().len(),
+        super::MAX_RETIREMENT_SUMMARIES - 1
+    );
+    assert!(tree.retired_children().contains_key(&id));
+    assert!(!tree.retired_children().contains_key("finished-1"));
+    assert!(tree.retired_children().contains_key("finished-2"));
 }
 
 #[test]

@@ -77,7 +77,7 @@ impl TreeDriver {
     /// Unadopted nonempty work refs are retained independently of runtime sessions.
     pub(crate) async fn collect_dormant_children(
         &self,
-        sessions: &plakous::sessions::AgentSessions,
+        sessions: &AgentSessions,
         enabled: bool,
         occupied: std::collections::BTreeSet<String>,
     ) -> Result<(), TopologyError> {
@@ -323,8 +323,8 @@ impl TreeDriver {
 }
 
 async fn finish_legacy_archive(
-    sessions: &plakous::sessions::AgentSessions,
-    locator: plakous::sessions::SessionLocator,
+    sessions: &AgentSessions,
+    locator: SessionLocator,
 ) -> Result<(), TopologyError> {
     let refused = |_| {
         TopologyError::new(
@@ -334,7 +334,7 @@ async fn finish_legacy_archive(
     };
     match sessions.delete_archived(locator.session_id()).await {
         Ok(_) => Ok(()),
-        Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::InvalidInput => {
+        Err(error) if error.kind() == AgentSessionsErrorKind::InvalidInput => {
             let archived = sessions.archive(locator).await.map_err(refused)?;
             sessions
                 .delete(archived.session_id(), archived.archived_revision())

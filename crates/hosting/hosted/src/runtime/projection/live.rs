@@ -87,9 +87,13 @@ impl LiveTarget {
                 .reclaim_dormant_checkouts()
                 .await
                 .map_err(|error| error.message)?;
-            runtime
+            if runtime
                 .collect_dormant_children(&self.sessions, self.roots.retire_finished_children)
-                .await?;
+                .await
+                .is_err()
+            {
+                tracing::debug!("child retirement housekeeping remains unsettled");
+            }
         }
         Ok(())
     }
