@@ -1,5 +1,10 @@
 //! Lifecycle probes used by the host fixtures.
 
+pub(crate) fn after_child_handoffs() {
+    use plakous_hosted::test_support_runner::{HostCut, cut};
+    cut(HostCut::AfterChildHandoffs);
+}
+
 pub(crate) fn before_paired_exec() {
     let Some(gate) = super::hook_environment("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC") else {
         return;

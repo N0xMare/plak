@@ -268,10 +268,7 @@ impl Ready {
                 }
             });
         }
-        #[cfg(feature = "test-support")]
-        plakous_hosted::test_support_runner::cut(
-            plakous_hosted::test_support_runner::HostCut::AfterChildHandoffs,
-        );
+        crate::test_hooks::host_lifecycle::after_child_handoffs();
     }
 
     pub(super) fn same_key(&self) -> bool {

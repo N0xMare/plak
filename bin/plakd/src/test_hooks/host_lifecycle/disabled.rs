@@ -1,5 +1,7 @@
 //! No-op lifecycle probes without test support.
 
+pub(crate) const fn after_child_handoffs() {}
+
 pub(crate) const fn before_paired_exec() {}
 
 pub(crate) const fn continuation_scan_blocked() -> bool {
