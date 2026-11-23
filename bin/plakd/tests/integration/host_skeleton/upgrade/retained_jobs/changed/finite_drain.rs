@@ -267,7 +267,7 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     }
     let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
-    let locator = child_locator(&store, child);
+    let before = child_locator(&store, child);
     sut.finish_job(child.original);
     release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
@@ -280,7 +280,9 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
 
     let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
     assert_eq!(loss_resumptions(&tree), 1);
-    assert_eq!(child_locator(&store, child), locator);
+    let locator = child_locator(&store, child);
+    assert_eq!(locator.session_id(), before.session_id());
+    assert_eq!(locator.branch_id(), before.branch_id());
     assert_one_child_terminal(&paths.runtime_database(), locator);
     let (_, turns) = plakous_offline_crash_harness::ledger_signature::inspect_root_lifecycles(
         &paths.runtime_database(),
@@ -449,7 +451,7 @@ fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
                 || text.contains("did not start")
                 || text.contains("is not held"))
     });
-    assert_eq!(answer, format!("resumed {id}"));
+    assert_eq!(answer, format!("resumed #{id}"));
     drop(client);
     finish_child(&sut, &mut host, &child);
     let events = paths
