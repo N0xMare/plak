@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import suppress
 
 WIRE = 12
 LOGIN = "probe@example.invalid"
@@ -48,12 +49,13 @@ class Attachment:
     phase: str | None = None
 
 
-async def browser_upgrade(socket):
+async def browser_upgrade(socket, login=LOGIN):
     from websockets.asyncio.client import unix_connect
 
     reader, writer = await asyncio.open_unix_connection(socket)
     try:
-        head = "".join(f"{k}: {v}\r\n" for k, v in FORWARDED.items())
+        forward = {**FORWARDED, "Tailscale-User-Login": login}
+        head = "".join(f"{k}: {v}\r\n" for k, v in forward.items())
         writer.write(f"GET / HTTP/1.1\r\n{head}Connection: close\r\n\r\n".encode())
         await writer.drain()
         raw = await reader.readuntil(b"\r\n\r\n")
@@ -69,7 +71,7 @@ async def browser_upgrade(socket):
         writer.close()
         await writer.wait_closed()
     # websockets supplies Host itself. Override it using the URI authority.
-    headers = {k: v for k, v in FORWARDED.items() if k != "Host"}
+    headers = {k: v for k, v in forward.items() if k != "Host"}
     return await unix_connect(
         str(socket),
         uri="ws://localhost/wire",
@@ -83,7 +85,7 @@ async def browser_upgrade(socket):
 
 
 class Client:
-    def __init__(self, fixture, face):
+    def __init__(self, fixture, face, *, login=LOGIN, read_delay=0, observe=None):
         self.fixture = fixture
         self.face = face
         self.bridge = None
@@ -97,6 +99,10 @@ class Client:
         self.resyncs = 0
         self.sequence_gaps = 0
         self.active = None
+        self.login = login
+        self.read_delay = read_delay
+        self.observe = observe
+        self.welcome = None
 
     async def __aenter__(self):
         try:
@@ -108,13 +114,16 @@ class Client:
                     pipes=True,
                 )
             else:
-                self.ws = await asyncio.wait_for(browser_upgrade(self.fixture.socket), DEADLINE)
+                self.ws = await asyncio.wait_for(
+                    browser_upgrade(self.fixture.socket, self.login), DEADLINE
+                )
             await self.send(
                 {"frame": "hello", "proto": WIRE, "binary_id": "host-latency", "caps": []}
             )
             frame, _, _ = await asyncio.wait_for(self.receive(), DEADLINE)
             if frame.get("frame") != "welcome" or frame.get("proto") != WIRE:
                 raise RuntimeError(f"wire {WIRE} handshake failed: {str(frame)[:400]}")
+            self.welcome = frame
             self.reader = asyncio.create_task(self.drain())
             return self
         except BaseException:
@@ -127,7 +136,8 @@ class Client:
     async def close(self):
         if self.reader:
             self.reader.cancel()
-            await self.reader
+            with suppress(asyncio.CancelledError):
+                await self.reader
         if self.ws:
             await self.ws.close()
         if self.bridge:
@@ -148,6 +158,8 @@ class Client:
 
     async def receive(self):
         if self.ws:
+            if self.read_delay:
+                await asyncio.sleep(self.read_delay)
             raw = await self.ws.recv(decode=False)
         else:
             raw = await self.bridge.stdout.readline()
@@ -159,6 +171,8 @@ class Client:
         try:
             while True:
                 frame, stamp, size = await self.receive()
+                if self.observe:
+                    self.observe(frame, stamp)
                 kind = frame["frame"]
                 if kind == "response":
                     future = self.pending.get(frame["id"])
@@ -254,12 +268,12 @@ class Client:
             self.attachments.pop(self.active)
             self.active = None
 
-    async def intent(self, text, kind="prompt"):
+    async def intent(self, text, kind="prompt", *, client_id=None):
         return await self.request(
             {
                 "op": "intent",
                 "attachment": self.active,
-                "client_id": str(uuid.uuid4()),
+                "client_id": client_id or str(uuid.uuid4()),
                 "intent": {"kind": kind, "body": {"text": text, "images": []}},
                 "blobs": [],
             }
