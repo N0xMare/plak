@@ -709,8 +709,10 @@ the duplicate is refused, unrecorded, as `ControlErrorKind::Reclaimed`. Past tha
 window, a feed reader that still names an older terminal receives a generic
 terminal row (`NotRetained`), not the terminal's failure or abandonment detail.
 After durable publication, the driver keeps the terminal receipt, not a reply
-handle that would pin the old checkpoint. A duplicate reconstructs its result
-from the exact retained publication checkpoint. Already-issued handles still
+handle that would pin the old checkpoint. A live duplicate reconstructs its result
+from the exact retained publication checkpoint, reloading it from the store when
+it is no longer the current head; a transient load failure is an unrecorded,
+retryable rejection. Already-issued handles still
 resolve to their original publication; a runtime without a store keeps its
 in-memory results.
 A bridge MUST therefore settle each handed-off

@@ -199,13 +199,9 @@ impl Driver {
         result: TurnResult,
         terminal: Option<DurableTerminalResultRecord>,
     ) -> Result<(), AgentError> {
-        if self.authority.has_store()
-            && let Some(terminal) = terminal
-            && let Some(entry) = self.command_ledger.get_mut(&command.command_id)
-        {
-            // The record at the fenced checkpoint is enough to reconstruct
-            // a duplicate. Do not pin that checkpoint with the reply handle.
-            entry.terminal = Some(CommandTerminal {
+        let receipt = terminal
+            .filter(|_| self.authority.has_store())
+            .map(|terminal| CommandTerminal {
                 record: terminal,
                 live: Some(LiveTerminalFacts {
                     refusal: match &result.outcome {
@@ -219,9 +215,16 @@ impl Driver {
                     feed_seq: result.feed_seq,
                 }),
             });
+        command.shared.publish_terminal(result)?;
+        if let Some(receipt) = receipt
+            && let Some(entry) = self.command_ledger.get_mut(&command.command_id)
+        {
+            // Once the slot published, the fenced receipt can answer a
+            // duplicate without this entry pinning the checkpoint.
+            entry.terminal = Some(receipt);
             entry.result = None;
         }
-        command.shared.publish_terminal(result).map(|_| ())
+        Ok(())
     }
 
     /// Idle-only maintenance; failures leave history for the next terminal's retry.

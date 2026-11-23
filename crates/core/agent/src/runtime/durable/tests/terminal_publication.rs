@@ -2214,6 +2214,68 @@ async fn shutdown_publication_faults_retry_the_exact_committed_terminal_once() -
 }
 
 #[tokio::test]
+async fn a_failed_terminal_publication_does_not_replace_the_live_reply() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            9_831,
+            false,
+        )
+        .with_joined_cancellation(Arc::new(AtomicBool::new(false))),
+    );
+    let agent = sessions
+        .create(
+            "create:failed-terminal-reply",
+            durable_artifact_test_builder(workspace, Arc::clone(&model)),
+        )
+        .await?;
+    let command = CommandId::new("failed-terminal-reply:first")?;
+    let admission = agent
+        .start(command.clone(), "hold for cancellation")
+        .await?;
+    let first_reply = admission.result().cloned().ok_or("first reply")?;
+    let turn = admission.into_turn().ok_or("first turn")?;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while model.calls.load(Ordering::Acquire) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    // The result slot is installed, but publication panics before returning
+    // success. The duplicate must still point at the original slot.
+    turn.control.shared.inject_terminal_fault(3);
+    turn.control().cancel().await?;
+    let first_result = first_reply.result().await?;
+    let later = agent.prompt("advance beyond the original result").await?;
+    assert_ne!(agent.checkpoint().id(), first_result.checkpoint_id());
+    let duplicate = agent.start(command, "hold for cancellation").await?;
+    assert_eq!(
+        duplicate.acknowledgement().disposition(),
+        CommandAckDisposition::Duplicate
+    );
+    let result = duplicate
+        .into_result()
+        .ok_or("duplicate reply")?
+        .result()
+        .await?;
+    assert!(Arc::ptr_eq(&first_result, &result));
+    later.control().cancel().await?;
+    later.result().await?;
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn persistent_queued_terminal_install_failure_still_cleans_up_and_settles_later_roots()
 -> TestResult {
     let directory = tempfile::tempdir()?;
