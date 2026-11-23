@@ -9,13 +9,14 @@ const STAT_BOUND: usize = 65_536;
 
 pub(super) fn capture(pid: u32) -> Result<Identity, ()> {
     let path = PathBuf::from(format!("/proc/{pid}/stat"));
-    read_stat(&path, pid, &mut [0; STAT_BOUND]).and_then(|row| row.ok_or(()))
+    let mut buffer = stat_buffer();
+    read_stat(&path, pid, &mut buffer).and_then(|row| row.ok_or(()))
 }
 
 pub(super) fn scan() -> Result<Vec<Identity>, ()> {
     let deadline = Instant::now() + Duration::from_secs(1);
     let mut path = PathBuf::from("/proc");
-    let mut buffer = [0; STAT_BOUND];
+    let mut buffer = stat_buffer();
     let mut rows = Vec::new();
     for (index, entry) in std::fs::read_dir(&path).map_err(|_| ())?.enumerate() {
         if index > MAX_ENTRIES || Instant::now() > deadline {
@@ -32,6 +33,10 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
         path.pop();
     }
     (Instant::now() <= deadline).then_some(rows).ok_or(())
+}
+
+fn stat_buffer() -> Box<[u8]> {
+    vec![0; STAT_BOUND].into_boxed_slice()
 }
 
 fn read_stat(path: &Path, pid: u32, buffer: &mut [u8]) -> Result<Option<Identity>, ()> {
