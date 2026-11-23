@@ -3,7 +3,6 @@
 use super::crash::dispatches;
 use super::*;
 use plakous_hosted::test_support_runner::HostCut;
-use std::time::Instant;
 
 pub(super) fn seeded(fixture: &Fixture, host: &Host) -> (Client, String, NodeAddress, u64) {
     let mut client = Client::connect(host);

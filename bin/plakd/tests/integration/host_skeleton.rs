@@ -281,7 +281,7 @@ fn fixture() -> Option<Fixture> {
 
 /// One connection to the host's socket.
 struct Client {
-    socket: PathBuf,
+    socket: Option<PathBuf>,
     stream: UnixStream,
     reader: BufReader<UnixStream>,
     retained: Option<std::collections::VecDeque<HostFrame<PlakExtension>>>,
@@ -298,7 +298,7 @@ impl Client {
     fn connect_at(socket: &std::path::Path) -> Self {
         let stream = UnixStream::connect(socket).unwrap();
         let mut client = Self {
-            socket: socket.to_path_buf(),
+            socket: Some(socket.to_path_buf()),
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
             retained: None,
@@ -394,7 +394,11 @@ impl Client {
 
     /// A separate watch leaves this connection's attachment and observations intact.
     fn wait_for_row(&self, session: &str, ready: impl FnMut(&SessionRow) -> bool) -> SessionRow {
-        Self::watch_row_at(&self.socket, session, ready)
+        let socket = self
+            .socket
+            .as_deref()
+            .expect("directory watch needs a host socket");
+        Self::watch_row_at(socket, session, ready)
     }
 
     fn watch_row_at(
@@ -541,6 +545,7 @@ fn prompt_refusals_fail_strict_callers_and_report_errors_to_retry_callers() {
     for (before_response, strict) in [(false, false), (true, false), (false, true), (true, true)] {
         let (stream, mut peer) = UnixStream::pair().unwrap();
         let mut client = Client {
+            socket: None,
             reader: BufReader::new(stream.try_clone().unwrap()),
             stream,
             retained: None,
