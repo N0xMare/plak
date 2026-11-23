@@ -802,7 +802,8 @@ impl ProcessSessionTools {
             .existing_joined_process_sessions()
             .ok_or_else(unknown)?;
         let number = u32::try_from(handle).map_err(|_| unknown())?;
-        let id = sessions.session_for_number(number).ok_or_else(unknown)?;
+        let id =
+            plakous_tools::internal::live_process_session(&sessions, number).ok_or_else(unknown)?;
         let (cursor, pending_utf8, quiet_polls) =
             plakous_tools::internal::process_session_projection_state(&sessions, id)
                 .map_err(backend_runtime_error)?;

@@ -1366,9 +1366,11 @@ async fn local_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestRe
         }
     })
     .await?;
-    assert!(sessions.active_session_ids().contains(&id));
     plakous_tools::internal::consume_jobs(&sessions, &[number]);
-    assert!(sessions.session_for_number(number).is_none());
+    assert_eq!(
+        plakous_tools::internal::reported_process_session(&sessions, number),
+        Some((id, plakous_tools::JoinedProcessStatus::Exited(Some(7))))
+    );
     assert_notice_wait(&environment, handle).await?;
     sessions.join_all()?;
     Ok(())

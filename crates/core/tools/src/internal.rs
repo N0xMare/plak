@@ -536,6 +536,14 @@ pub fn reported_process_session(
     sessions.reported_session_for_number(number)
 }
 
+/// Resolves a model handle without reopening a consumed terminal as live.
+pub fn live_process_session(
+    sessions: &crate::JoinedProcessSessions,
+    number: u32,
+) -> Option<crate::JoinedProcessSessionId> {
+    sessions.live_session_for_number(number)
+}
+
 pub fn active_process_session_identities(
     sessions: &crate::JoinedProcessSessions,
 ) -> Vec<([u8; 16], NonZeroU64)> {

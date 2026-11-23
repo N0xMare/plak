@@ -3,6 +3,12 @@
 use super::*;
 use crate::state::Tables;
 use crate::{FileOwnerFloors, OwnerFloors};
+use plakous_model::CancellationToken;
+use plakous_tools::{
+    ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope,
+    JoinedProcessCommand, JoinedProcessInputDisposition, JoinedProcessStartRequest,
+    JoinedProcessTerminalMode,
+};
 use std::sync::Arc;
 
 fn first() -> LineOwner {
@@ -112,4 +118,84 @@ fn retention_recovery_never_dispatches_an_unseen_job_control_or_exposes_it_nativ
         tables.admit("home", "new", &request, Instant::now()),
         Admission::Answer(RunnerFrame::Refused { .. })
     ));
+}
+
+#[tokio::test]
+async fn consumed_unjoined_terminal_keeps_native_ack_and_retention_answers() {
+    let root = tempfile::tempdir().unwrap();
+    let environment = ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+        root.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )
+    .unwrap();
+    let sessions = environment.joined_process_sessions().unwrap();
+    let control = OperationContext::new(CancellationToken::new());
+    let process = sessions
+        .start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::literal("/bin/cat", Vec::<String>::new()).unwrap(),
+                ".",
+                Vec::new(),
+                true,
+                JoinedProcessTerminalMode::Pipes,
+            )
+            .unwrap(),
+            control.clone(),
+        )
+        .unwrap();
+    plakous_tools::internal::promote(&sessions, process).unwrap();
+    let mut changes = process_session_changes(&sessions, process).unwrap();
+    sessions
+        .write_stdin(process, b"retained\n", JoinedProcessInputDisposition::Close)
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while sessions.joined_terminal_status(process).is_none() {
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    let status = JoinedProcessStatus::Exited(Some(0));
+    assert_eq!(sessions.joined_terminal_status(process), Some(status));
+
+    let assert_terminal_snapshot = || {
+        let Answer::Jobs { jobs, .. } = snapshot(&sessions, 0).unwrap() else {
+            panic!("expected a retention snapshot");
+        };
+        let [job] = jobs.as_slice() else {
+            panic!("expected the unretired terminal, got {jobs:?}");
+        };
+        assert!(job.terminal);
+        assert_eq!(job.status, wire::Status::Exited { code: Some(0) });
+        job.session.clone()
+    };
+    let job = assert_terminal_snapshot();
+    for _ in 0..2 {
+        serve_sessions(
+            &environment,
+            &sessions,
+            "fixture",
+            RunnerVerb::JobsAck.as_str(),
+            json!({ "numbers": [JoinedProcessSessions::job_number(process)] }),
+            control.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(!sessions.has_unreported_terminal_job());
+        assert_eq!(assert_terminal_snapshot(), job);
+        assert_eq!(session(&sessions, &job), Ok(process));
+    }
+    let output = read(&sessions, &job, 0, 1024, 0).await.unwrap();
+    assert!(matches!(
+        &output,
+        Answer::Output {
+            status: wire::ProcessStatus::Exited { code: Some(0) },
+            ..
+        }
+    ));
+    assert_eq!(read(&sessions, &job, 0, 1024, 0).await.unwrap(), output);
+    assert_eq!(sessions.join(process).unwrap(), status);
 }

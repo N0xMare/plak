@@ -585,9 +585,22 @@ impl JoinedProcessSessions {
         }
     }
 
-    /// Resolves a vendor handle only within this service's live/snapshot namespace.
+    /// Resolves a number in the service's ownership inventory, including
+    /// a locally consumed terminal until its owner is retired.
     #[must_use]
     pub fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
+        self.find_session_for_number(number, true)
+    }
+
+    pub(crate) fn live_session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
+        self.find_session_for_number(number, false)
+    }
+
+    fn find_session_for_number(
+        &self,
+        number: u32,
+        include_consumed: bool,
+    ) -> Option<JoinedProcessSessionId> {
         if let Some(arm) = self.runner_arm()
             && let Some(id) = arm.session_for_number(number)
         {
@@ -599,7 +612,8 @@ impl JoinedProcessSessions {
             .iter()
             .chain(state.finished.iter())
             .find(|(id, session)| {
-                Self::job_number(**id) == number && !session.consumed.load(Ordering::Acquire)
+                Self::job_number(**id) == number
+                    && (include_consumed || !session.consumed.load(Ordering::Acquire))
             })
             .map(|(id, _)| *id)
     }
