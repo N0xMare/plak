@@ -2290,6 +2290,7 @@ starting at 1. Runtime `renew` and `revive` commits have `indexed=false`, retain
 the previous global and runtime indexed ordinals (0 before the first), and
 are never kill targets; all other commits are indexed. Runtime dispatch closures
 scope the label to the store method name; unlabeled commits use `unlabelled`.
+A product session commit that inserts the stop notice is labelled `stop_notice`.
 SQLite's update hook supplies names only for rowid tables in `main`; WITHOUT
 ROWID tables and schema changes can have an empty array. Tables are observational
 touches, not an authoritative mutation inventory; rollback clears the pending
@@ -3001,12 +3002,9 @@ Typed face-transcript equality covers row content, order and multiplicity on
 both connections; live provisional row keys need not equal committed anchors.
 `wire_host_restart` and `wire_host_restart_switch` cover root and child twin
 pilots and every reached per-store commit cut, comparing each indexed ordinal
-and label, and the table sets of labelled commits. Unlabelled entries still
-count at their exact indexed ordinals; their raw table order is diagnostic,
-not a comparison requirement. In the switched-child journey, an unlabelled
-`sessions` write and an unlabelled `host_intents` write have exchanged product
-ordinals 14 and 15. Identifying the session writer and whether the order
-matters remains open. A traced pilot waits for the completed WAL receipt of
+and label, and the table sets of labelled commits. Unlabelled entries compare
+by store, indexed ordinal and label; their table sets are not compared.
+A traced pilot waits for the completed WAL receipt of
 the exact `stop_notice` insert before killing the host; neither the stop reply,
 SQLite visibility nor another operator notice is that receipt.
 Their indexed signatures match

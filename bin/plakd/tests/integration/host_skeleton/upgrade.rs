@@ -181,7 +181,9 @@ fn require_upgrade(fixture: &Fixture, host: &Host, stage: &str, result: &std::pr
     let child = host.child.as_ref().map(|child| child.id());
     let startup: Vec<_> = host.lines.try_iter().collect();
     panic!(
-        "upgrade {stage}: {}; fixture={}; home custody={custody:?}; run entries={run_entries:?}; +         receipts (sequence, phase, source key, destination key, recovery stderr)={attempts:?}; +         fixture host pid={child:?}; host stderr={startup:?}",
+        "upgrade {stage}: {}; fixture={}; home custody={custody:?}; run entries={run_entries:?}; \
+         receipts (sequence, phase, source key, destination key, recovery stderr)={attempts:?}; \
+         fixture host pid={child:?}; host stderr={startup:?}",
         String::from_utf8_lossy(&result.stderr),
         fixture.root.display(),
     );
