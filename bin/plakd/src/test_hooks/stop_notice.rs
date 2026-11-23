@@ -14,7 +14,8 @@ pub(crate) fn commit_session(
 ) -> rusqlite::Result<()> {
     // Name the write, not the notice content or session. A transaction that
     // matched a previously committed notice never reaches this with the flag.
-    let traced_stop = wrote_stop_notice && std::env::var_os(commit_trace::TRACE_ENV).is_some();
+    let traced_stop =
+        wrote_stop_notice && super::hook_environment(commit_trace::TRACE_ENV).is_some();
     let _label = traced_stop.then(|| commit_trace::label("stop_notice"));
     transaction.commit()?;
     if traced_stop {
