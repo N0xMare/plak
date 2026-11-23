@@ -16,6 +16,12 @@ pub struct TreeStepSnapshot {
 }
 
 impl ProductTopologyRuntime {
+    /// Whether this held tree is releasing for a committed same-key upgrade.
+    #[must_use]
+    pub fn step_handoff_committed(&self) -> bool {
+        self.step_handoff_committed.load(Ordering::Acquire)
+    }
+
     /// Retains a host recovery retry without turning a pause into durable debt.
     pub fn defer_step_recovery(&self) {
         self.step_recovery_due.store(true, Ordering::Release);
@@ -62,6 +68,17 @@ impl ProductTopologyRuntime {
 }
 
 impl TreeStepPause {
+    /// The runtime whose admission this guard holds.
+    #[must_use]
+    pub fn runtime(&self) -> &ProductTopologyRuntime {
+        &self.0
+    }
+
+    /// Protects durable child handoff records from a late root cancellation until release.
+    pub fn begin_committed_handoff(&self) {
+        self.0.step_handoff_committed.store(true, Ordering::Release);
+    }
+
     /// Snapshots admitted drivers only after startup/release transitions join.
     /// A terminal driver still awaiting its tree projection is not quiescent.
     ///
@@ -115,6 +132,9 @@ impl TreeStepPause {
 
 impl Drop for TreeStepPause {
     fn drop(&mut self) {
+        self.0
+            .step_handoff_committed
+            .store(false, Ordering::Release);
         self.0.step_paused.store(false, Ordering::Release);
         self.0.step_released.notify_waiters();
         if self.0.step_recovery_due.swap(false, Ordering::AcqRel) && !self.0.is_closed() {

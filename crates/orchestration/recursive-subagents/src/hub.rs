@@ -576,6 +576,7 @@ pub struct ProductTopologyRuntime {
     driver: TreeDriver,
     closed: AtomicBool,
     step_paused: AtomicBool,
+    step_handoff_committed: AtomicBool,
     step_released: tokio::sync::Notify,
     step_recovery_due: AtomicBool,
     /// Children whose fenced turn's owner is releasing and reopening their

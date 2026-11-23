@@ -66,7 +66,7 @@ fn handed_off_root(
     (host, client, session, node, attachment)
 }
 
-fn idle_stays(fixture: &Fixture, session: &str, expected: u64) {
+pub(super) fn idle_stays(fixture: &Fixture, session: &str, expected: u64) {
     let records = plakd::store::session_records::SqliteSessionStore::new(
         plakd::home::paths::PlakPaths::explicit(fixture.home()),
     );

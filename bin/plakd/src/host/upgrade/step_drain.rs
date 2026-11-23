@@ -7,6 +7,7 @@ use crate::{CliFailure, CliResult};
 use plakous_hosted::host_service::wire::{
     AdmissionPause, HostStepDrain, SessionHost, StepDrainMonitor,
 };
+use std::collections::BTreeMap;
 use std::sync::{Arc, atomic::AtomicBool};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,11 @@ pub(super) struct Budget {
     pub(super) start: Instant,
     pub(super) barrier_deadline: Instant,
     deadline: Option<Instant>,
+}
+
+pub(super) struct PreparedDrain {
+    pub(super) drain: HostStepDrain,
+    pub(super) root_sessions: BTreeMap<String, String>,
 }
 
 impl Budget {
@@ -45,7 +51,7 @@ pub(super) fn prepare(
     cancelled: &AtomicBool,
     runtime: &tokio::runtime::Handle,
     progress: &(dyn Fn(&str) -> CliResult<()> + Sync),
-) -> CliResult<HostStepDrain> {
+) -> CliResult<PreparedDrain> {
     while crate::test_hooks::upgrade_preparation_refused("step-drain-gate") {
         if cancelled.load(std::sync::atomic::Ordering::Acquire)
             || Instant::now() >= budget.barrier_deadline
@@ -58,11 +64,15 @@ pub(super) fn prepare(
     }
     let roots = crate::store::ProductStore::inspect_upgrade_roots(services.paths()?)
         .map_err(CliFailure::new)?;
+    let root_sessions = roots
+        .iter()
+        .map(|record| (record.node.tree_id.clone(), record.id.clone()))
+        .collect();
     let trees = roots
-        .into_iter()
+        .iter()
         .filter_map(|record| plakous_recursive_subagents::hub::lookup(&record.node.tree_id))
         .collect();
-    runtime.block_on(async {
+    let drain = runtime.block_on(async {
         host.drain_steps(
             pause,
             budget.deadline,
@@ -74,6 +84,10 @@ pub(super) fn prepare(
             trees,
         )
         .await
+    })?;
+    Ok(PreparedDrain {
+        drain,
+        root_sessions,
     })
 }
 

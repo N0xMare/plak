@@ -1,7 +1,8 @@
 //! A finite handoff must not spend model grace on a joined process promotion.
 
 use super::*;
-use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore as _};
+use plakd::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
+use plakous_recursive_subagents::tree::{ContinuationCause, ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt as _;
@@ -12,6 +13,14 @@ struct FiniteDrain {
     fixture: Fixture,
     image: PathBuf,
     environment: Vec<(&'static str, String)>,
+}
+
+impl Drop for FiniteDrain {
+    fn drop(&mut self) {
+        let _ = self
+            .open_release()
+            .and_then(|mut fifo| fifo.write_all(b"finish\n"));
+    }
 }
 
 impl FiniteDrain {
@@ -31,21 +40,22 @@ impl FiniteDrain {
     }
 
     fn start(&self) -> (Host, Client) {
-        let host = start_env(&self.fixture, &[], &self.environment);
+        self.start_with(None)
+    }
+
+    fn start_with(&self, setting: Option<(&str, String)>) -> (Host, Client) {
+        let mut environment = self.environment.clone();
+        environment.extend(setting);
+        let host = start_env(&self.fixture, &[], &environment);
         let mut client = Client::connect(&host);
         runner::remote_ready(&mut client, &self.paired.id);
         (host, client)
     }
 
     fn upgrade(&self, host: &mut Host, drain: &str) {
-        self.paired.advance(&self.image);
         let path = self.fixture.root.join("bounded-upgrade.log");
         let output = std::fs::File::create(&path).unwrap();
-        let mut upgrade = Child::spawn(
-            candidate_upgrade_with_drain(&self.fixture, &self.image, &self.environment, drain)
-                .stdout(output.try_clone().unwrap())
-                .stderr(output),
-        );
+        let mut upgrade = self.request_upgrade(drain, output);
         // The gated process cannot exit. Offline probes and exec have ample
         // time, but less than the model grace in the root test.
         let deadline = Instant::now() + WAIT * 2;
@@ -66,6 +76,15 @@ impl FiniteDrain {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    fn request_upgrade(&self, drain: &str, output: std::fs::File) -> Child {
+        self.paired.advance(&self.image);
+        Child::spawn(
+            candidate_upgrade_with_drain(&self.fixture, &self.image, &self.environment, drain)
+                .stdout(output.try_clone().unwrap())
+                .stderr(output),
+        )
     }
 
     fn foreground_plan(&self, child: bool) -> serde_json::Value {
@@ -112,14 +131,15 @@ impl FiniteDrain {
     fn finish_job(&self, original: (i32, i32)) {
         assert_eq!(original, self.wait_foreground());
         assert!(runner::alive(original.0), "the original job was stopped");
+        self.open_release().unwrap().write_all(b"finish\n").unwrap();
+        wait_exit(original.0);
+    }
+
+    fn open_release(&self) -> std::io::Result<std::fs::File> {
         OpenOptions::new()
             .write(true)
             .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
             .open(self.fixture.root.join("blocked-fg.release"))
-            .unwrap()
-            .write_all(b"finish\n")
-            .unwrap();
-        wait_exit(original.0);
     }
 }
 
@@ -161,6 +181,22 @@ fn finite_exec_drain_promotes_a_running_root_without_waiting_for_its_job() {
 fn finite_exec_drain_promotes_a_running_child_and_continues_it_once() {
     let Some(fixture) = fixture() else { return };
     let sut = FiniteDrain::new(fixture);
+    let (mut host, child) = child_with_pending_root(&sut, None);
+    sut.upgrade(&mut host, "0");
+    finish_child(&sut, &mut host, &child);
+}
+
+struct PendingChild {
+    session: String,
+    parent: NodeAddress,
+    original: (i32, i32),
+    root_turns: u64,
+}
+
+fn child_with_pending_root(
+    sut: &FiniteDrain,
+    setting: Option<(&str, String)>,
+) -> (Host, PendingChild) {
     crash::client_control::script(&sut.fixture, true);
     let child_script = sut.fixture.root.join("child.json");
     std::fs::write(&child_script, sut.foreground_plan(true).to_string()).unwrap();
@@ -171,10 +207,19 @@ fn finite_exec_drain_promotes_a_running_child_and_continues_it_once() {
         {"text": PREFIX}, {"gate": {"file": sut.fixture.root.join("parent-never-finishes")}}
     ]);
     sut.fixture.write_script(&parent_script);
-    let (mut host, mut client) = sut.start();
+    let (host, mut client) = sut.start_with(setting);
     let (session, parent, attachment) = sut.start_node(&mut client);
     client.prompt(3, attachment, "delegate a process", PREFIX);
     let original = sut.wait_foreground();
+    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
+    let root_turns = SqliteSessionStore::new(paths)
+        .load_views(&session)
+        .unwrap()
+        .unwrap()
+        .state
+        .counters
+        .root_turns;
+    assert_eq!(root_turns, 1);
     drop(client);
 
     std::fs::write(
@@ -194,9 +239,21 @@ fn finite_exec_drain_promotes_a_running_child_and_continues_it_once() {
         .to_string(),
     )
     .unwrap();
-    parent_script["steps"] = json!([{"output": {"text": ANSWER}}]);
+    parent_script["steps"] = json!([]);
+    parent_script["repeat_last_step"] = json!(false);
     sut.fixture.write_script(&parent_script);
-    sut.upgrade(&mut host, "0");
+    (
+        host,
+        PendingChild {
+            session,
+            parent,
+            original,
+            root_turns,
+        },
+    )
+}
+
+fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let deadline = Instant::now() + WAIT;
     while crash::client_control::child_dispatches(&sut.fixture) < 2 {
         assert!(
@@ -206,24 +263,20 @@ fn finite_exec_drain_promotes_a_running_child_and_continues_it_once() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
-    sut.finish_job(original);
+    sut.finish_job(child.original);
     release_continuation(&sut.fixture);
-    root_wake::submitted_result(&sut.fixture, &parent);
-    stop(&mut host);
+    root_wake::submitted_result(&sut.fixture, &child.parent);
+    root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
+    assert_eq!(
+        root_record(&sut.fixture, &child.session),
+        (vec![RootInterruptCause::OwnerLost], 0),
+    );
+    stop(host);
 
     let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
-    let tree = ProductAgentTree::reopen(store.load(&parent.tree_id).unwrap().unwrap());
-    assert_eq!(
-        root_record(&sut.fixture, &session).0,
-        [RootInterruptCause::OwnerLost]
-    );
-    let continued = tree
-        .commands()
-        .keys()
-        .filter(|id| id.starts_with(ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX))
-        .count();
-    assert_eq!(continued, 1);
+    let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
+    assert_eq!(loss_resumptions(&tree), 1);
     let locator = tree
         .nodes()
         .values()
@@ -254,5 +307,122 @@ fn finite_exec_drain_promotes_a_running_child_and_continues_it_once() {
             .all(|turn| matches!(turn["state"].as_str(), Some("completed" | "finalized"))),
         "{turns:?}"
     );
-    assert_eq!(marked(&sut.fixture, "blocked", "fg"), original);
+    assert_eq!(marked(&sut.fixture, "blocked", "fg"), child.original);
+}
+
+fn loss_resumptions(tree: &ProductAgentTree) -> usize {
+    tree.commands()
+        .keys()
+        .filter(|id| id.starts_with(ProductAgentTree::LOSS_RESUME_COMMAND_PREFIX))
+        .count()
+}
+
+#[test]
+fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
+    let Some(fixture) = fixture() else { return };
+    let sut = FiniteDrain::new(fixture);
+    let (mut host, child) = child_with_pending_root(
+        &sut,
+        Some((
+            "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE",
+            "child-handoff-no-budget".into(),
+        )),
+    );
+    sut.upgrade(&mut host, "0");
+    let mut client = Client::connect(&host);
+    let attachment = client.attach(10, &child.parent);
+    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
+    let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let id = loop {
+        let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
+        let id = tree
+            .nodes()
+            .values()
+            .find(|node| node.parent_agent_id.is_some())
+            .unwrap()
+            .agent_id
+            .clone();
+        assert_eq!(loss_resumptions(&tree), 0);
+        assert_eq!(crash::client_control::child_dispatches(&sut.fixture), 1);
+        if tree
+            .loss_continuation(&id)
+            .is_some_and(|held| held.cause == ContinuationCause::OwnerLost)
+        {
+            break id;
+        }
+        assert!(Instant::now() < deadline, "unrecorded child was not held");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(
+        client.request(
+            11,
+            Op::Intent {
+                attachment,
+                client_id: Some(uuid::Uuid::new_v4().to_string().parse().unwrap()),
+                intent: SessionIntent::ResumeLossContinuation { agent_id: Some(id) },
+                blobs: Vec::new(),
+            }
+        ),
+        Outcome::Ok(Answer::Accepted { duplicate: false }),
+    );
+    drop(client);
+    finish_child(&sut, &mut host, &child);
+    let events = paths
+        .session_home()
+        .session_events_file(&child.parent.tree_id);
+    assert!(
+        std::fs::read_to_string(events)
+            .unwrap()
+            .lines()
+            .any(|line| {
+                let row: serde_json::Value = serde_json::from_str(line).unwrap();
+                row["kind"] == "session.handoff_unrecorded" && row["tree"] == child.parent.tree_id
+            })
+    );
+}
+
+pub(super) fn crash_after_child_records() {
+    use plakous_hosted::test_support_runner::HostCut;
+    use std::os::unix::process::ExitStatusExt as _;
+    let Some(fixture) = fixture() else { return };
+    let sut = FiniteDrain::new(fixture);
+    let (mut host, child) = child_with_pending_root(
+        &sut,
+        Some((
+            "PLAK_TEST_HOST_READOPT_CUT",
+            HostCut::AfterChildHandoffs.name().into(),
+        )),
+    );
+    let output = std::fs::File::create(sut.fixture.root.join("child-record-cut.log")).unwrap();
+    let mut request = sut.request_upgrade("0", output);
+    assert_eq!(
+        runner::cut_exit(host.child.as_mut().unwrap()).signal(),
+        Some(9)
+    );
+    let _ = request.kill();
+    let _ = request.wait();
+    assert_eq!(root_record(&sut.fixture, &child.session), (vec![], 0));
+    let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
+    let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
+    let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
+    let id = tree
+        .nodes()
+        .values()
+        .find(|node| node.parent_agent_id.is_some())
+        .unwrap()
+        .agent_id
+        .as_str();
+    assert_eq!(
+        tree.loss_continuation(id).unwrap().cause,
+        ContinuationCause::Handoff
+    );
+    assert_eq!(loss_resumptions(&tree), 0);
+    let mut replacement = await_serving_host(spawn_host(
+        image_command(&sut.fixture, &sut.image)
+            .envs(sut.environment.iter().cloned())
+            .arg("host"),
+    ))
+    .unwrap();
+    finish_child(&sut, &mut replacement, &child);
 }

@@ -4252,25 +4252,32 @@ a running root turn is bounded by the host's cancel bound (5 s), not an
 interactive quit's 300 ms, so a turn slow to settle under load is still
 handed off; the reload's join waits that grace and the release after it
 (a child's cancel inside the hub's release, and its two-second join) beyond a
-quit's. A turn
-that does not settle within it degrades the release into an ordinary loss:
-the handoff is disarmed and nothing is recorded, the release abandons the
-turn by lease and says so with a warning, never an error, and the next open
-holds the turn. On a committed same-key upgrade, the releasing host records
-handoff for the children in every joined tree, before releasing its session
-owners. That includes a tree with no resident root, and a root whose own
-cancel later fails to settle. An unrecorded child still follows the ordinary
-owner-loss law; this does not change release outside a committed same-key
-upgrade. Inside the planned release,
-before any lease is released, the releasing host applies each running
-child's feed to its tail, then records an interrupt with cause `handoff` on
+quit's. An unsettled root cancel disarms that root's planned release. It
+writes no root handoff, abandons the turn by lease with a warning, and
+leaves it to the ordinary owner-loss law.
+
+A committed same-key upgrade has two record points. After Ready and
+before releasing session owners, the source records child handoffs for
+every joined tree, including trees with no resident root. This step
+reserves the root cancel and release allowance; it reports unrecorded
+trees by identity. Each root's own planned release then records its
+handoff. A crash between these record points leaves the recorded children
+handed off and the unreleased roots held under the owner-loss policy.
+A root cancel that settles late during this release does not cascade over
+an exact recorded child handoff. An explicit Stop still ends the hold.
+Outside a committed same-key upgrade, only the root's own planned
+release records child handoffs.
+
+Before writing its child records, the releasing host applies each running
+child's feed to its tail. It records an interrupt with cause `handoff` on
 each child that is running or parked and whose assignment started (a turn of
 its attempt was admitted; a child reserved for startup whose Start was
 never accepted is not handed off, and its startup is recovered instead; a
-child held after a loss keeps its hold), and, when its quit reached a running
-root turn, a product-store root interrupt with cause `handoff` anchored on
+child held after a loss keeps its hold). A repeated record for the same
+child turn adds no interrupt. When a planned release reaches a running
+root turn, it records a product-store root interrupt with cause `handoff` anchored on
 that turn, once its views applied the turn's admission (so the turn's own
-submission is older than the interrupt; when they had not, nothing is written
+submission is older than the interrupt; when they had not, no root record is written
 and the release logs `session.handoff_unrecorded` and reports failure after
 lease/task cleanup). The projection first puts
 the handoff's fold position past the acceptance of the turn it interrupts, so
@@ -4292,8 +4299,10 @@ reads the unsettled turn as its own loss, or as the handoff it was. For a
 planned handoff such a release is no failure: the release says which children
 it handed off with their turn still running (a live warning, `handed off c1
 with its turn still running; the next host continues it once`) and exits
-cleanly. A plain quit that cuts a child short reports the release as failed,
-as before, and the next open reads that child as a loss. Only the releasing host writes it; the face never touches
+cleanly. A plain quit that cuts a child short reports the release as failed.
+The next open follows any durable child handoff already recorded at the
+same-key upgrade point; otherwise it reads that child as a loss.
+Only the releasing host writes handoff records; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first
 recovery run, the root at its open, whose restored queue then drains. A

@@ -109,7 +109,8 @@ impl From<&crate::carry::ExportRefusal> for BlockerKind {
 }
 
 pub(super) struct Ready {
-    step_drain: Option<plakous_hosted::host_service::wire::HostStepDrain>,
+    step_drain: Option<step_drain::PreparedDrain>,
+    session_home: plakous_hosted::session_home::SessionHome,
     pub(super) executable: PathBuf,
     pub(super) key: String,
     pub(super) binary: String,
@@ -235,11 +236,42 @@ pub(super) fn replace(
 }
 
 impl Ready {
-    pub(super) async fn record_child_handoffs(&self, remaining: Duration) -> CliResult<()> {
-        match &self.step_drain {
-            Some(drain) => drain.record_child_handoffs(remaining).await,
-            None => Ok(()),
+    pub(super) async fn record_child_handoffs(&self, remaining: Duration) {
+        use plakous_hosted::host_service::wire::HostStepDrain;
+        let Some(prepared) = &self.step_drain else {
+            return;
+        };
+        let budget = if crate::test_hooks::upgrade_preparation_refused("child-handoff-no-budget") {
+            Duration::ZERO
+        } else {
+            remaining.saturating_sub(HostStepDrain::ROOT_RELEASE_RESERVE)
+        };
+        for (tree, error) in prepared.drain.record_child_handoffs(budget).await {
+            eprintln!("plakd host: child handoff not recorded for tree {tree}: {error}");
+            let home = self.session_home.clone();
+            let session = prepared
+                .root_sessions
+                .get(&tree)
+                .cloned()
+                .unwrap_or_else(|| tree.clone());
+            tokio::task::spawn_blocking(move || {
+                use plakous_hosted::session_log::{SessionEvent, SessionLog};
+                if home.session_events_file(&session).is_file()
+                    && let Ok(log) = SessionLog::open(&home, &session)
+                {
+                    let _ = log.append(
+                        SessionEvent::new("session.handoff_unrecorded")
+                            .str("node", "tree")
+                            .str("tree", &tree)
+                            .str("error", error),
+                    );
+                }
+            });
         }
+        #[cfg(feature = "test-support")]
+        plakous_hosted::test_support_runner::cut(
+            plakous_hosted::test_support_runner::HostCut::AfterChildHandoffs,
+        );
     }
 
     pub(super) fn same_key(&self) -> bool {
@@ -1012,6 +1044,7 @@ fn prepare(
     }
     let ready = Ready {
         step_drain: None,
+        session_home: paths.session_home(),
         executable: request.destination.clone(),
         key: request.destination_key.clone(),
         binary: request.expected_binary.clone(),

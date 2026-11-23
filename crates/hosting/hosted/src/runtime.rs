@@ -209,6 +209,8 @@ mod tool_facts;
 mod tools;
 mod topology_state;
 #[cfg(test)]
+pub(crate) use topology_state::mark_root_interrupted as cascade_root_for_step_drain_test;
+#[cfg(test)]
 pub(crate) use topology_state::mark_root_interrupted_for_run;
 mod transcript_rows;
 pub(crate) use transcript_rows::{Derived, item_rows, projected_tool_row, settle_tool_row};
@@ -280,7 +282,7 @@ const MAX_RESUME_CHOICES: usize = 200;
 /// attempted rather than raced away by this timeout. Reaching it means
 /// cleanup is genuinely incomplete: the failure says so instead of
 /// reporting a released locator that never happened.
-const HOST_RELEASE_DEADLINE: Duration = Duration::from_secs(25);
+pub(crate) const HOST_RELEASE_DEADLINE: Duration = Duration::from_secs(25);
 
 pub(crate) use plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT;
 

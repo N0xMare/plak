@@ -1,6 +1,11 @@
 //! Crash cuts straddle both the host's release and the receiver's owner CAS.
 
 use super::*;
+
+#[test]
+fn crash_after_child_handoffs_continues_the_child_and_holds_the_root() {
+    super::finite_drain::crash_after_child_records();
+}
 use plakous_hosted::test_support_runner::HostCut;
 
 #[test]

@@ -245,11 +245,15 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
         ChildStop::Cascade => crate::agent_tree::InterruptCause::Cascade,
         ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
     };
+    let preserve_handoffs = matches!(stop, ChildStop::Cascade) && runtime.step_handoff_committed();
     let mut interrupted = runtime
         .mutate_then_emit(false, move |tree| {
-            let interrupted = tree
-                .interrupt_running_descendants_for(cause)
-                .map_err(|error| error.message)?;
+            let interrupted = if preserve_handoffs {
+                tree.cascade_preserving_handoffs()
+            } else {
+                tree.interrupt_running_descendants_for(cause)
+            }
+            .map_err(|error| error.message)?;
             tree.mark_root_interrupted();
             Ok(interrupted)
         })

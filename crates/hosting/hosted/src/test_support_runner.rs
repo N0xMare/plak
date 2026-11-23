@@ -27,6 +27,8 @@ pub enum HostCut {
     Terminals,
     /// A quit reached a running root turn, before its handoff is recorded.
     BeforeRootHandoff,
+    /// Same-key child handoffs are recorded, before releasing the roots.
+    AfterChildHandoffs,
     /// A reopen fenced the resident session, before its worker is joined.
     ReopenFenced,
     /// A reopen joined the released worker, before the binding repair.
@@ -43,7 +45,7 @@ pub enum HostCut {
 )]
 impl HostCut {
     /// Every cut, for tests that iterate the set. Selection does not read it.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::SkipReadopt,
         Self::Lease,
         Self::Transfer,
@@ -51,6 +53,7 @@ impl HostCut {
         Self::AfterStop,
         Self::Terminals,
         Self::BeforeRootHandoff,
+        Self::AfterChildHandoffs,
         Self::ReopenFenced,
         Self::ReopenReleased,
         Self::ReopenCarried,
@@ -68,6 +71,7 @@ impl HostCut {
             Self::AfterStop => "after-stop",
             Self::Terminals => "terminals",
             Self::BeforeRootHandoff => "before-root-handoff",
+            Self::AfterChildHandoffs => "after-child-handoffs",
             Self::ReopenFenced => "reopen:fenced",
             Self::ReopenReleased => "reopen:released",
             Self::ReopenCarried => "reopen:carried",
@@ -87,6 +91,7 @@ impl HostCut {
             "after-stop" => Self::AfterStop,
             "terminals" => Self::Terminals,
             "before-root-handoff" => Self::BeforeRootHandoff,
+            "after-child-handoffs" => Self::AfterChildHandoffs,
             "reopen:fenced" => Self::ReopenFenced,
             "reopen:released" => Self::ReopenReleased,
             "reopen:carried" => Self::ReopenCarried,
@@ -98,7 +103,7 @@ impl HostCut {
 
 /// Kills this process when `at` is the selected cut.
 #[cfg(feature = "test-support")]
-pub(crate) fn cut(at: HostCut) {
+pub fn cut(at: HostCut) {
     if selected(at) {
         let _ = nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGKILL);
     }

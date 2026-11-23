@@ -17,6 +17,8 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 mod cutover;
+#[cfg(test)]
+mod tests;
 
 /// Host-layer cancellation and categorical progress; neither grants runtime authority.
 pub struct StepDrainMonitor<'a> {
@@ -31,40 +33,43 @@ struct HeldDriver {
     hold: BoundaryHold,
 }
 
-struct HeldTree {
-    pause: TreeStepPause,
-    runtime: Arc<ProductTopologyRuntime>,
-}
-
 /// Reversible freeze retained until planned release or preparation rollback.
 /// Field order reopens trees before drivers and host-owner admissions.
 pub struct HostStepDrain {
-    trees: BTreeMap<usize, HeldTree>,
+    trees: BTreeMap<String, TreeStepPause>,
     drivers: BTreeMap<DriverInstanceId, HeldDriver>,
     owners: Vec<WorkerStepPause>,
 }
 
 impl HostStepDrain {
+    /// Time reserved for the roots' cancel and release after recording children.
+    pub const ROOT_RELEASE_RESERVE: Duration = crate::runtime::HOST_CANCEL_SETTLE_TIMEOUT
+        .saturating_add(crate::runtime::HOST_RELEASE_DEADLINE);
+
     /// Records planned child release after the same-key handoff commits, while
     /// all tree admissions and drivers are still held. A root's own release
     /// need not exist or settle for its already-joined children to continue.
     ///
-    /// # Errors
-    /// Reports a failed projection/record or an exhausted release budget.
-    /// Only a child with a durable handoff record is continued.
-    pub async fn record_child_handoffs(&self, remaining: Duration) -> CliResult<()> {
-        let record = async {
-            let mut failure = None;
-            for tree in self.trees.values() {
-                if let Err(error) = crate::runtime::record_tree_handoff(&tree.runtime).await {
-                    failure = failure.or(Some(CliFailure::new(error)));
-                }
+    /// Returns each tree whose record failed or had no remaining time to start.
+    pub async fn record_child_handoffs(&self, remaining: Duration) -> Vec<(String, String)> {
+        let deadline = tokio::time::Instant::now() + remaining;
+        let mut failures = Vec::new();
+        for (id, tree) in &self.trees {
+            tree.begin_committed_handoff();
+            let record = crate::runtime::record_tree_handoff(tree.runtime());
+            let budget = "child handoff records exceeded the host release budget";
+            let result = if tokio::time::Instant::now() >= deadline {
+                Err(budget.to_owned())
+            } else {
+                tokio::time::timeout_at(deadline, record)
+                    .await
+                    .unwrap_or_else(|_| Err(budget.to_owned()))
+            };
+            if let Err(error) = result {
+                failures.push((id.clone(), error));
             }
-            failure.map_or(Ok(()), Err)
-        };
-        tokio::time::timeout(remaining, record).await.map_err(|_| {
-            CliFailure::new("child handoff records exceeded the host release budget")
-        })?
+        }
+        failures
     }
 
     async fn pause_tree(
@@ -73,7 +78,7 @@ impl HostStepDrain {
         deadline: Option<Instant>,
         monitor: &StepDrainMonitor<'_>,
     ) -> CliResult<()> {
-        let identity = Arc::as_ptr(&tree) as usize;
+        let identity = tree_id(&tree)?;
         if self.trees.contains_key(&identity) {
             return Ok(());
         }
@@ -87,13 +92,8 @@ impl HostStepDrain {
             if let Ok(result) =
                 tokio::time::timeout(Duration::from_millis(20), pausing.as_mut()).await
             {
-                self.trees.insert(
-                    identity,
-                    HeldTree {
-                        pause: result.map_err(CliFailure::new)?,
-                        runtime: Arc::clone(&tree),
-                    },
-                );
+                self.trees
+                    .insert(identity, result.map_err(CliFailure::new)?);
                 return Ok(());
             }
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -135,24 +135,22 @@ impl HostStepDrain {
             wanted.insert(agent.id());
             self.hold(agent)?;
             if let Some(tree) = boundary.tree {
-                let identity = Arc::as_ptr(&tree) as usize;
+                let identity = tree_id(&tree)?;
                 if let std::collections::btree_map::Entry::Vacant(entry) =
                     self.trees.entry(identity)
                 {
-                    entry.insert(HeldTree {
-                        pause: tree
-                            .pause_step_admissions()
+                    entry.insert(
+                        tree.pause_step_admissions()
                             .await
                             .map_err(CliFailure::new)?,
-                        runtime: tree,
-                    });
+                    );
                 }
             }
         }
         let mut agents = Vec::new();
         for tree in self.trees.values() {
-            let snapshot = tree.pause.agents().await.map_err(CliFailure::new)?;
-            joined &= !snapshot.transitioning && tree.pause.effects_joined();
+            let snapshot = tree.agents().await.map_err(CliFailure::new)?;
+            joined &= !snapshot.transitioning && tree.effects_joined();
             agents.extend(snapshot.agents);
         }
         for agent in agents {
@@ -201,6 +199,12 @@ impl HostStepDrain {
         }
         Ok(None)
     }
+}
+
+fn tree_id(runtime: &ProductTopologyRuntime) -> CliResult<String> {
+    runtime
+        .read(|tree| tree.tree_id.clone())
+        .map_err(|error| CliFailure::new(error.message))
 }
 
 impl<P> SessionHost<P>

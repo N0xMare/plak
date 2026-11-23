@@ -682,14 +682,8 @@ fn hand_off(
     stopping: Instant,
     paired: Option<&upgrade::Ready>,
 ) {
-    if let Some(ready) = paired
-        && let Err(error) =
-            runtime.block_on(ready.record_child_handoffs(handoff_remaining(stopping.elapsed())))
-    {
-        eprintln!(
-            "plakd host: child handoff not fully recorded: {}",
-            error.message()
-        );
+    if let Some(ready) = paired {
+        runtime.block_on(ready.record_child_handoffs(handoff_remaining(stopping.elapsed())));
     }
     let elapsed = stopping.elapsed();
     let deadline = handoff_remaining(elapsed);
