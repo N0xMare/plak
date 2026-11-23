@@ -1416,14 +1416,12 @@ impl SessionStore for SqliteSessionStore {
             b.require_open()?;
             let tx = b.connection.transaction().map_err(map_sqlite)?;
             require_bound_domain(&tx, b.domain)?;
-            let now = sample_clock(b.clock.as_ref(), b.domain)?;
             let id = session.session_id();
             let head = session_head(&tx, id)?.ok_or(SessionStoreError::NotFound)?;
             if head.is_archived() {
                 return Err(SessionStoreError::Archived);
             }
             retirement_head(&tx, id, session.branch_id(), checkpoint)?;
-            refuse_live_branches(&tx, id, now, false)?;
             tx.commit().map_err(map_sqlite)?;
             Ok(head.revision())
         })

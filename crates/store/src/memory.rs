@@ -1329,15 +1329,6 @@ impl SessionStore for MemorySessionStore {
                 return Err(SessionStoreError::Archived);
             }
             verify_retirement_head(&state, id, session.branch_id(), checkpoint)?;
-            let branch = row
-                .branches
-                .get(&session.branch_id())
-                .ok_or(SessionStoreError::NotFound)?;
-            if let Some(lease) = &branch.active_lease
-                && !expired(lease, self.lease_now()?)?
-            {
-                return Err(SessionStoreError::LeaseHeld);
-            }
             Ok(row.head.revision())
         })
     }
@@ -1453,6 +1444,9 @@ fn verify_retirement_head(
         .branches
         .get(&branch)
         .ok_or(SessionStoreError::NotFound)?;
+    if head.active_lease.is_some() {
+        return Err(SessionStoreError::LeaseHeld);
+    }
     if head.head.checkpoint().checkpoint_id() != checkpoint {
         return Err(SessionStoreError::Conflict);
     }

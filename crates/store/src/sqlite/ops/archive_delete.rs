@@ -37,7 +37,9 @@ pub(in super::super) fn archive(
     if session.revision() != r.expected_revision() {
         return Err(SessionStoreError::Conflict);
     }
-    refuse_live_branches(&tx, r.session_id(), now, r.abandons_jobs())?;
+    if r.retirement_head().is_none() {
+        refuse_live_branches(&tx, r.session_id(), now, r.abandons_jobs())?;
+    }
     let revision = r.expected_revision().checked_next().ok_or_else(|| {
         SessionStoreError::capacity(
             StoreCapacityBound::SessionRevision,
@@ -102,6 +104,9 @@ pub(in super::super) fn retirement_head(
 ) -> Result<(), SessionStoreError> {
     let row =
         branch_row(tx, SessionRef::new(session, branch))?.ok_or(SessionStoreError::NotFound)?;
+    if row.active.is_some() {
+        return Err(SessionStoreError::LeaseHeld);
+    }
     if row.head.checkpoint().checkpoint_id() != checkpoint {
         return Err(SessionStoreError::Conflict);
     }
@@ -145,7 +150,7 @@ pub(in super::super) fn retirement_head(
 /// Archive refuses a live lease, and a job row with no terminal evidence unless
 /// the request abandons those jobs. Both checks stay inside the archive
 /// transaction.
-pub(in super::super) fn refuse_live_branches(
+fn refuse_live_branches(
     tx: &Connection,
     session: SessionId,
     now: LeaseInstant,
