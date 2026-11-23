@@ -241,6 +241,27 @@ class EvidenceTests(GitFixture):
         self.assertEqual(after["product_revision"], before["product_revision"] + 1)
         self.assert_refused()
 
+    def test_named_revision_binds_the_referenced_sql(self):
+        path = self.root / "bin/plakd/src/store/schema.rs"
+        source = path.read_text()
+        path.write_text(
+            'const ADDED_INDEX: &str = "CREATE INDEX added ON sessions(id)";\n'
+            "const ADD_INDEX: Revision = Revision {\n"
+            "    sql: ADDED_INDEX,\n"
+            '    objects: &[("added", ADDED_INDEX)],\n'
+            "};\n"
+            + source.replace("revisions: &[],", "revisions: &[ADD_INDEX],")
+        )
+        revision = self.commit()
+        before = EVIDENCE.formats(self.root, self.base)
+        named = EVIDENCE.formats(self.root, revision)
+        self.assertEqual(named["product_revision"], before["product_revision"] + 1)
+        self.assertEqual(named["state_key"], before["state_key"])
+        path.write_text(path.read_text().replace("CREATE INDEX added", "CREATE UNIQUE INDEX added"))
+        changed = EVIDENCE.formats(self.root, self.commit())
+        self.assertEqual(changed["product_revision"], named["product_revision"])
+        self.assertNotEqual(changed["product_schema_sha256"], named["product_schema_sha256"])
+
     def test_missing_corrupt_and_nonqualifying_receipts(self):
         self.assert_refused()
         for content in (b"{\n", b"null", b"\xff"):

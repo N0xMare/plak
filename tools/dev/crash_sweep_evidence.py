@@ -65,15 +65,32 @@ def formats(root, commit):
             )
         else:
             raise ValueError(f"cannot read {path} revisions at {commit}")
-        # Schema::version() adds one for each additive revision.
+        # Schema::version() adds one for each additive revision, inline or named.
         without_comments = re.sub(r"(?m)^ *//[^\n]*", "", steps)
         remainder, count = re.subn(r"(?ms)^( *)Revision \{.*?^\1\},?[ \t]*$", "", without_comments)
-        if remainder.strip():
+        if not re.fullmatch(r"\s*(?:[A-Z][A-Z_0-9]*\s*,\s*)*(?:[A-Z][A-Z_0-9]*\s*)?", remainder):
             raise ValueError(f"cannot count {path} revisions at {commit}")
+        names = re.findall(r"[A-Z][A-Z_0-9]*", remainder)
+        definitions = [
+            one(
+                text,
+                rf"(?s)^(?:pub(?:\(\w+\))? )?const {name}: Revision = Revision \{{(.*?)^\}};",
+                f"{path} revision {name}",
+            )
+            for name in names
+        ]
         one(schema, r"^    objects: SCHEMA_OBJECTS,$", f"{path} schema object reference")
         objects = one(text, r"(?s)const SCHEMA_OBJECTS: &\[\(&str, &str\)\] = &\[(.*?)\n\];", path)
-        return generation + count, hashlib.sha256(
-            "\0".join((schema, objects, steps)).encode()
+        references = set(re.findall(r"\b[A-Z][A-Z_0-9]*\b", "\n".join((objects, steps, *definitions))))
+        sql = [
+            declaration
+            for declaration, name in re.findall(
+                r'^((?:pub(?:\(\w+\))? )?const ([A-Z][A-Z_0-9]*): &str = "[^\n]*";)$', text, re.M
+            )
+            if name in references
+        ]
+        return generation + count + len(names), hashlib.sha256(
+            "\0".join((schema, objects, steps, *definitions, *sql)).encode()
         ).hexdigest()
 
     runtime = constant("crates/store/src/sqlite.rs", "SQLITE_SCHEMA_VERSION")
