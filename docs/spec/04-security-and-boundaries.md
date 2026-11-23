@@ -871,8 +871,14 @@ residual, not a promise of descendant containment.
 
 Session scans obtain POSIX session ids from the kernel on macOS, never from
 `ps sess`; its `lstart` identity has one-second resolution. Construction probes
-the runner's session against a fresh independent PTY child and disables the
-operator capability if isolation cannot be verified. Before each group signal,
+the runner's session and group against a fresh independent PTY child that
+remains alive through the check, and disables the operator capability if
+isolation cannot be verified. The probe looks up just those two identities:
+on Linux it reads each PID's procfs `stat` record for start, session and group;
+on macOS it selects each PID with `ps -p` for its start record and checks
+membership with kernel `getsid` and `getpgid`. The probe holds the child
+unreaped for the identity checks. These lookups are not scans for cleanup.
+Before each group signal,
 one complete fresh scan must put every group member in the anchored leader's
 session; current kernel session/group membership is checked again. Each stage
 checks every live member before signaling a deduplicated group. Successful PTY
@@ -889,7 +895,14 @@ full scanned SID/start requirement and has no missing-row fallback. An anchored
 Darwin leader is not live membership evidence: live members still require fresh
 kernel getsid/getpgid verification against that SID before each group signal.
 Master EOF/hangup or the owned child's kernel disappearance may trigger cleanup,
-never replace the two complete absence scans. Cleanup
+never replace the two complete absence scans. When a complete pre-signal
+scan finds no live session member and the kernel reports the owned leader
+has exited, cleanup can reap it without spending the remaining escalation
+stages on an empty session; this scan never counts as either absence proof.
+On Linux a complete scan reads a bounded `stat` record per visible PID,
+including other groups and sessions, so it can still recognize tracked
+escapees and reject inconsistent membership. A nonempty incomplete record
+invalidates the scan. Cleanup
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
 closing shells; incomplete cleanup scans retry within the cleanup deadline,

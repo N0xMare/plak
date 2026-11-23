@@ -26,8 +26,9 @@ pub(super) fn probe_sessions() -> Result<(), &'static str> {
     let pair = native_pty_system()
         .openpty(size(TerminalDimensions::new(24, 80)?))
         .map_err(|_| "operator PTY probe unavailable")?;
-    let mut command = CommandBuilder::new("/bin/sleep");
-    command.arg("1");
+    // Keep the probe alive until we close its PTY, not for a timer that
+    // could expire while the runner is waiting to be scheduled.
+    let mut command = CommandBuilder::new("/bin/cat");
     command.env_clear();
     let mut child = pair
         .slave
@@ -43,16 +44,42 @@ pub(super) fn probe_sessions() -> Result<(), &'static str> {
             Identity::capture(pid).map_err(|()| "operator child session scan unavailable")?;
         let session =
             rustix::process::getsid(None).map_err(|_| "operator session id unavailable")?;
-        if own.session != session.as_raw_nonzero().get().to_string()
+        if own.zombie
+            || separate.zombie
+            || own.session != session.as_raw_nonzero().get().to_string()
+            || own.group
+                != rustix::process::getpgrp()
+                    .as_raw_nonzero()
+                    .get()
+                    .cast_unsigned()
             || separate.session == own.session
             || separate.session != pid.to_string()
+            || separate.group != pid
+            || child
+                .try_wait()
+                .map_err(|_| "operator PTY probe could not be checked")?
+                .is_some()
         {
             return Err("operator session scan failed isolation probe");
         }
         Ok(())
     })();
     drop(pair);
-    let _ = child.wait();
+    if child
+        .try_wait()
+        .map_err(|_| "operator PTY probe could not be reaped")?
+        .is_none()
+        && let Some(pid) = child
+            .process_id()
+            .and_then(|pid| i32::try_from(pid).ok())
+            .and_then(rustix::process::Pid::from_raw)
+    {
+        // Only the owned, unreaped probe child, never a remembered PID or group.
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
+    child
+        .wait()
+        .map_err(|_| "operator PTY probe could not be reaped")?;
     checked
 }
 

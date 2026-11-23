@@ -5,6 +5,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub(super) fn scan() -> Result<Vec<Identity>, ()> {
+    linux::scan()
+}
+
 type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
 const MAX_TRACKED_PROCESSES: usize = 4096;
 
@@ -80,30 +87,21 @@ impl Identity {
         }
     }
 
-    #[cfg(all(test, target_os = "linux"))]
-    pub(super) fn capture_fixture_pid(pid: u32) -> Result<Self, ()> {
-        let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
-        parse_stat(pid, &text)
-    }
-
-    #[cfg(all(test, not(target_os = "linux")))]
+    #[cfg(test)]
     pub(super) fn capture_fixture_pid(pid: u32) -> Result<Self, ()> {
         Self::capture(pid)
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn capture(pid: u32) -> Result<Self, ()> {
-        let deadline = Instant::now() + Duration::from_millis(500);
-        loop {
-            if let Ok(rows) = scan()
-                && let Some(row) = rows.into_iter().find(|row| row.pid == pid)
-            {
-                return Ok(row);
-            }
-            if Instant::now() >= deadline {
-                return Err(());
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        linux::capture(pid)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn capture(pid: u32) -> Result<Self, ()> {
+        let mut rows = scan_ps(Some(pid))?;
+        let row = rows.pop().ok_or(())?;
+        (rows.is_empty() && row.pid == pid).then_some(row).ok_or(())
     }
 }
 
@@ -187,18 +185,34 @@ impl SessionCleanup {
 
     pub(super) fn finish(&mut self, mut reap: impl FnMut() -> bool) -> bool {
         let observed_escape = !self.escaped.is_empty();
-        let mut certain = true;
         let deadline = Instant::now() + Duration::from_secs(3);
+        let Some(certain) = self.signal_live_groups_until(deadline) else {
+            return false;
+        };
+        self.leader.retire_anchor();
+        if !reap() {
+            return false;
+        }
+        self.prove_absence_until(deadline) && certain && !observed_escape && self.escaped.is_empty()
+    }
+
+    fn signal_live_groups_until(&mut self, deadline: Instant) -> Option<bool> {
+        let mut certain = true;
         for signal in [
             rustix::process::Signal::HUP,
             rustix::process::Signal::TERM,
             rustix::process::Signal::KILL,
         ] {
-            let Some(rows) = complete_scan(deadline) else {
-                return false;
-            };
+            let rows = complete_scan(deadline)?;
             if !self.leader_anchored(&rows) {
-                return false;
+                return None;
+            }
+            // Master hangup often already ended the shell. An empty scan
+            // permits moving on to reap, not claiming absence. The two
+            // complete post-reap scans are still required.
+            if !self.has_live_members(&rows) && child_exited(self.leader.pid) {
+                self.observe(&rows);
+                return Some(certain);
             }
             certain &= self.signal_groups(&rows, signal);
             if signal != rustix::process::Signal::KILL {
@@ -208,26 +222,22 @@ impl SessionCleanup {
         // Repeat KILL from a fresh deduplicated scan for members forked during
         // escalation. Retain the unreaped child as SID anchor through every signal.
         loop {
-            let Some(rows) = complete_scan(deadline) else {
-                return false;
-            };
-            if !rows
-                .iter()
-                .any(|r| r.session == self.leader.session && !r.zombie)
-            {
-                break;
-            }
+            let rows = complete_scan(deadline)?;
             if !self.leader_anchored(&rows) {
-                return false;
+                return None;
+            }
+            if !self.has_live_members(&rows) {
+                self.observe(&rows);
+                return Some(certain);
             }
             certain &= self.signal_groups(&rows, rustix::process::Signal::KILL);
             std::thread::sleep(Duration::from_millis(20));
         }
-        self.leader.retire_anchor();
-        if !reap() {
-            return false;
-        }
-        self.prove_absence_until(deadline) && certain && !observed_escape && self.escaped.is_empty()
+    }
+
+    fn has_live_members(&self, rows: &[Identity]) -> bool {
+        rows.iter()
+            .any(|row| row.session == self.leader.session && !row.zombie)
     }
 
     fn signal_groups(&mut self, rows: &[Identity], signal: rustix::process::Signal) -> bool {
@@ -471,64 +481,22 @@ pub(super) fn child_exited(pid: u32) -> bool {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
 pub(super) fn scan() -> Result<Vec<Identity>, ()> {
-    let deadline = Instant::now() + Duration::from_secs(1);
-    let mut rows = Vec::new();
-    for (count, entry) in std::fs::read_dir("/proc").map_err(|_| ())?.enumerate() {
-        if count > 65536 || Instant::now() > deadline {
-            return Err(());
-        }
-        let entry = entry.map_err(|_| ())?;
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        let bytes = match std::fs::read(entry.path().join("stat")) {
-            Ok(text) if text.len() <= 65536 => text,
-            Err(e)
-                if e.kind() == std::io::ErrorKind::NotFound
-                    || e.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error()) =>
-            {
-                continue;
-            }
-            _ => return Err(()),
-        };
-        // A task reaped between open and read can yield empty/truncated stat.
-        // It has vanished from this observation, not failed the entire scan.
-        if let Ok(identity) = parse_stat(pid, &String::from_utf8_lossy(&bytes)) {
-            rows.push(identity);
-        }
-    }
-    Ok(rows)
-}
-
-#[cfg(target_os = "linux")]
-fn parse_stat(pid: u32, text: &str) -> Result<Identity, ()> {
-    let (_, fields) = text.rsplit_once(") ").ok_or(())?;
-    let fields: Vec<_> = fields.split_whitespace().collect();
-    if fields.len() < 20 {
-        return Err(());
-    }
-    Ok(Identity {
-        pid,
-        parent: fields[1].parse().map_err(|_| ())?,
-        group: fields[2].parse().map_err(|_| ())?,
-        session: fields[3].into(),
-        started: fields[19].into(),
-        zombie: fields[0] == "Z",
-        anchor: None,
-    })
+    scan_ps(None)
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn scan() -> Result<Vec<Identity>, ()> {
+fn scan_ps(target: Option<u32>) -> Result<Vec<Identity>, ()> {
     use std::io::Read as _;
-    let mut child = std::process::Command::new("/bin/ps")
-        .args(["-axo", "pid=,ppid=,pgid=,state=,lstart="])
+    let mut command = std::process::Command::new("/bin/ps");
+    if let Some(pid) = target {
+        command.arg("-p").arg(pid.to_string());
+    } else {
+        command.arg("-ax");
+    }
+    let mut child = command
+        .args(["-o", "pid=,ppid=,pgid=,state=,lstart="])
         .env_clear()
         .env("LC_ALL", "C")
         .stdin(std::process::Stdio::null())
@@ -574,12 +542,21 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
                 Err(rustix::io::Errno::SRCH) => continue,
                 Err(_) => return Err(()),
             };
+            let group = f[2].parse().map_err(|_| ())?;
+            let zombie = f[3].starts_with('Z');
+            if target.is_some()
+                && !zombie
+                && !rustix::process::getpgid(Some(pid_arg))
+                    .is_ok_and(|pgid| pgid.as_raw_nonzero().get().cast_unsigned() == group)
+            {
+                return Err(());
+            }
             rows.push(Identity {
                 pid,
                 parent: f[1].parse().map_err(|_| ())?,
-                group: f[2].parse().map_err(|_| ())?,
+                group,
                 session,
-                zombie: f[3].starts_with('Z'),
+                zombie,
                 // lstart has only one-second resolution on macOS. An unreaped
                 // direct-child leader, not this timestamp alone, anchors signals.
                 started: f[4..].join(" "),
