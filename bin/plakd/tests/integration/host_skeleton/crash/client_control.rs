@@ -3,7 +3,7 @@ use super::*;
 use plakd::wire_transport::PlakExtension;
 use plakous_host_protocol::client::{self, Transport};
 pub(super) type Commit = (u64, String, u64);
-pub(super) type Signature = Vec<(String, u64, String, Vec<String>)>;
+pub(super) type Signature = Vec<(String, u64, String, Option<Vec<String>>)>;
 
 /// Keep the directory's real timestamp ordering independent of UUID ties.
 /// Only trace capture/replay uses this fixture barrier, never the client.
@@ -231,11 +231,13 @@ pub(super) fn signature(trace: &Path) -> Signature {
     let trace = std::fs::read_to_string(trace).unwrap();
     let mut commits = indexed_trace_rows(&trace)
         .map(|row| {
+            let label = row["label"].as_str().unwrap();
             (
                 row["store"].as_str().unwrap().to_owned(),
                 row["store_ordinal"].as_u64().unwrap(),
-                row["label"].as_str().unwrap().to_owned(),
-                serde_json::from_value(row["tables"].clone()).unwrap(),
+                label.to_owned(),
+                (label != "unlabelled")
+                    .then(|| serde_json::from_value(row["tables"].clone()).unwrap()),
             )
         })
         .collect::<Vec<_>>();

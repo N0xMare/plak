@@ -3000,8 +3000,13 @@ emission control or unbounded capture-variant collection replaces this rule.
 Typed face-transcript equality covers row content, order and multiplicity on
 both connections; live provisional row keys need not equal committed anchors.
 `wire_host_restart` and `wire_host_restart_switch` cover root and child twin
-pilots and every reached per-store commit cut, comparing each indexed ordinal,
-label and table set. A traced pilot waits for the completed WAL receipt of
+pilots and every reached per-store commit cut, comparing each indexed ordinal
+and label, and the table sets of labelled commits. Unlabelled entries still
+count at their exact indexed ordinals; their raw table order is diagnostic,
+not a comparison requirement. In the switched-child journey, an unlabelled
+`sessions` write and an unlabelled `host_intents` write have exchanged product
+ordinals 14 and 15. Identifying the session writer and whether the order
+matters remains open. A traced pilot waits for the completed WAL receipt of
 the exact `stop_notice` insert before killing the host; neither the stop reply,
 SQLite visibility nor another operator notice is that receipt.
 Their indexed signatures match
