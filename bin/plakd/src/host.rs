@@ -382,19 +382,9 @@ impl RunningHost {
             listeners.remove();
         }
         runtime.block_on(terminals.stop());
-        if paired
-            && let Some(ready) = &ready
-            && let Err(error) =
-                runtime.block_on(ready.record_child_handoffs(handoff_remaining(stopping.elapsed())))
-        {
-            eprintln!(
-                "plakd host: child handoff not fully recorded: {}",
-                error.message()
-            );
-        }
         // The handoff first closes the host: no session opens or is created
         // from then on.
-        hand_off(&host, stopping.elapsed());
+        hand_off(&host, &runtime, stopping, ready.as_ref().filter(|_| paired));
         receipt_recovery.join();
         let scan_result = startup.join();
         eprintln!(
@@ -687,7 +677,22 @@ fn compose_web(
     }
 }
 
-fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>, elapsed: Duration) {
+fn hand_off(
+    host: &SessionHost<crate::surface_protocol::PlakExtension>,
+    runtime: &tokio::runtime::Runtime,
+    stopping: std::time::Instant,
+    paired: Option<&upgrade::Ready>,
+) {
+    if let Some(ready) = paired
+        && let Err(error) =
+            runtime.block_on(ready.record_child_handoffs(handoff_remaining(stopping.elapsed())))
+    {
+        eprintln!(
+            "plakd host: child handoff not fully recorded: {}",
+            error.message()
+        );
+    }
+    let elapsed = stopping.elapsed();
     let deadline = handoff_remaining(elapsed);
     crate::test_hooks::host_lifecycle::record_handoff_budget(elapsed, deadline);
     for (session, failure) in host.hand_off_all(deadline) {
