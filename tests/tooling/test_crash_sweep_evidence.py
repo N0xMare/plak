@@ -249,8 +249,7 @@ class EvidenceTests(GitFixture):
             "const ADD_INDEX: Revision = Revision {\n"
             "    sql: ADDED_INDEX,\n"
             '    objects: &[("added", ADDED_INDEX)],\n'
-            "};\n"
-            + source.replace("revisions: &[],", "revisions: &[ADD_INDEX],")
+            "};\n" + source.replace("revisions: &[],", "revisions: &[ADD_INDEX],")
         )
         revision = self.commit()
         before = EVIDENCE.formats(self.root, self.base)

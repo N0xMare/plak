@@ -81,7 +81,9 @@ def formats(root, commit):
         ]
         one(schema, r"^    objects: SCHEMA_OBJECTS,$", f"{path} schema object reference")
         objects = one(text, r"(?s)const SCHEMA_OBJECTS: &\[\(&str, &str\)\] = &\[(.*?)\n\];", path)
-        references = set(re.findall(r"\b[A-Z][A-Z_0-9]*\b", "\n".join((objects, steps, *definitions))))
+        references = set(
+            re.findall(r"\b[A-Z][A-Z_0-9]*\b", "\n".join((objects, steps, *definitions)))
+        )
         sql = [
             declaration
             for declaration, name in re.findall(
