@@ -213,6 +213,7 @@ pub(crate) use account::unsent_continue_notice;
 mod handoff;
 #[cfg(test)]
 pub(in crate::runtime) use handoff::hooks as handoff_hooks;
+pub(crate) use handoff::record_tree_handoff;
 mod idle;
 mod loss_resume;
 mod open;

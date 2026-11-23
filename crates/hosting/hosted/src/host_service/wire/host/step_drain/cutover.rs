@@ -75,9 +75,7 @@ where
         let at_bound = drain_until.is_some_and(|deadline| Instant::now() >= deadline);
         let joined = async {
             let effects_joined = drain.refresh().await?;
-            if at_bound || drain_until.is_none() {
-                cutover.yield_tools(&drain).await?;
-            }
+            cutover.yield_tools(&drain).await?;
             Ok::<_, CliFailure>((effects_joined, drain.pending_boundary(at_bound)?))
         };
         let (effects_joined, pending) =

@@ -382,6 +382,16 @@ impl RunningHost {
             listeners.remove();
         }
         runtime.block_on(terminals.stop());
+        if paired
+            && let Some(ready) = &ready
+            && let Err(error) =
+                runtime.block_on(ready.record_child_handoffs(handoff_remaining(stopping.elapsed())))
+        {
+            eprintln!(
+                "plakd host: child handoff not fully recorded: {}",
+                error.message()
+            );
+        }
         // The handoff first closes the host: no session opens or is created
         // from then on.
         hand_off(&host, stopping.elapsed());
@@ -678,9 +688,7 @@ fn compose_web(
 }
 
 fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>, elapsed: Duration) {
-    let deadline = HANDOFF_DEADLINE
-        .saturating_sub(elapsed)
-        .saturating_sub(STOP_MARGIN);
+    let deadline = handoff_remaining(elapsed);
     crate::test_hooks::host_lifecycle::record_handoff_budget(elapsed, deadline);
     for (session, failure) in host.hand_off_all(deadline) {
         eprintln!(
@@ -688,6 +696,12 @@ fn hand_off(host: &SessionHost<crate::surface_protocol::PlakExtension>, elapsed:
             failure.message()
         );
     }
+}
+
+fn handoff_remaining(elapsed: Duration) -> Duration {
+    HANDOFF_DEADLINE
+        .saturating_sub(elapsed)
+        .saturating_sub(STOP_MARGIN)
 }
 
 /// This process's generation: it differs on every start.

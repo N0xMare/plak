@@ -7,6 +7,7 @@ use std::path::Path;
 use plakous_offline_crash_harness::ledger_signature::inspect_process_notices;
 
 mod durability;
+mod finite_drain;
 mod legacy_layout;
 mod qualifiers;
 mod rollback;
@@ -29,6 +30,15 @@ pub(in super::super) fn candidate_upgrade(
     image: &Path,
     environment: &[(&str, String)],
 ) -> std::process::Command {
+    candidate_upgrade_with_drain(fixture, image, environment, "0")
+}
+
+fn candidate_upgrade_with_drain(
+    fixture: &Fixture,
+    image: &Path,
+    environment: &[(&str, String)],
+    drain: &str,
+) -> std::process::Command {
     let probe = image_command(fixture, image)
         .envs(environment.iter().cloned())
         .args(["version", "--host-upgrade-probe"])
@@ -50,7 +60,7 @@ pub(in super::super) fn candidate_upgrade(
         "--expect-binary",
         facts["binary_id"].as_str().unwrap(),
         "--drain",
-        "0",
+        drain,
     ]);
     request
 }

@@ -235,6 +235,13 @@ pub(super) fn replace(
 }
 
 impl Ready {
+    pub(super) async fn record_child_handoffs(&self, remaining: Duration) -> CliResult<()> {
+        match &self.step_drain {
+            Some(drain) => drain.record_child_handoffs(remaining).await,
+            None => Ok(()),
+        }
+    }
+
     pub(super) fn same_key(&self) -> bool {
         self.key == crate::home::state::state_key()
     }

@@ -1,39 +1,38 @@
 //! A planned handoff's record (spec 03 §14.1): before the releasing host
 //! lets go, each node with work in flight is interrupted with cause
 //! `handoff`, so the next host continues it once by itself. Only the
-//! releasing host writes it, inside its own release and before any lease is
-//! released. A failed write is reported after release cleanup: an upgrade
-//! cannot surrender it, and an ordinary later open holds the loss rather
-//! than inventing automatic continuation without a durable handoff row.
+//! releasing host writes it, before giving up the corresponding lease.
+//! Without a durable handoff row, a later open holds the loss rather than
+//! inventing automatic continuation.
 
 use super::{CliFailure, CliResult, RootActor, SessionEvent, durable_tree_id, log_ev};
 use crate::runtime::root_loss::{
     RootInterruptWrite, handed_off_root_turn, loss_scan, record_root_handoff,
 };
 
+pub(crate) async fn record_tree_handoff(
+    runtime: &crate::topology_runtime::ProductTopologyRuntime,
+) -> Result<(), String> {
+    // Order each interrupt after the acceptance of the turn it covers.
+    crate::agent::project_running_children(runtime).await?;
+    runtime
+        .mutate_then_emit(false, |tree| {
+            tree.record_handoff().map_err(|error| error.message)
+        })
+        .await
+        .map(|_| ())
+}
+
 impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
     pub(super) async fn record_planned_handoff(&mut self) -> CliResult<()> {
         let mut failure = None;
         let rows = self.role.config.topology_rows();
         let tree_id = durable_tree_id(&rows, &self.role.config.session);
-        if let Some(runtime) = crate::topology_runtime::lookup(&tree_id) {
-            // A handoff covers the turn it interrupts: its fold position has
-            // to be past that turn's acceptance, or the turn reads as one
-            // admitted after the handoff and the child is held instead.
-            let recorded = async {
-                crate::agent::project_running_children(&runtime).await?;
-                runtime
-                    .mutate_then_emit(false, |tree| {
-                        tree.record_handoff().map_err(|error| error.message)
-                    })
-                    .await
-                    .map(|_| ())
-            }
-            .await;
-            if let Err(error) = recorded {
-                self.log_unrecorded_handoff("tree", &error);
-                failure = Some(CliFailure::new(error));
-            }
+        if let Some(runtime) = crate::topology_runtime::lookup(&tree_id)
+            && let Err(error) = record_tree_handoff(&runtime).await
+        {
+            self.log_unrecorded_handoff("tree", &error);
+            failure = Some(CliFailure::new(error));
         }
         // A quit that reached a running root turn: that turn is handed over.
         if self.role.handoff_root_due && self.role.config.session.store_revision != 0 {

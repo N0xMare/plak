@@ -2,7 +2,7 @@
 
 use super::SessionHost;
 use crate::runtime::step_hold::WorkerStepPause;
-use crate::topology_runtime::TreeStepPause;
+use crate::topology_runtime::{ProductTopologyRuntime, TreeStepPause};
 use crate::{CliFailure, CliResult};
 use plakous::agent::Agent;
 use plakous::agent::host_control::{
@@ -31,18 +31,45 @@ struct HeldDriver {
     hold: BoundaryHold,
 }
 
+struct HeldTree {
+    pause: TreeStepPause,
+    runtime: Arc<ProductTopologyRuntime>,
+}
+
 /// Reversible freeze retained until planned release or preparation rollback.
 /// Field order reopens trees before drivers and host-owner admissions.
 pub struct HostStepDrain {
-    trees: BTreeMap<usize, TreeStepPause>,
+    trees: BTreeMap<usize, HeldTree>,
     drivers: BTreeMap<DriverInstanceId, HeldDriver>,
     owners: Vec<WorkerStepPause>,
 }
 
 impl HostStepDrain {
+    /// Records planned child release after the same-key handoff commits, while
+    /// all tree admissions and drivers are still held. A root's own release
+    /// need not exist or settle for its already-joined children to continue.
+    ///
+    /// # Errors
+    /// Reports a failed projection/record or an exhausted release budget.
+    /// Only a child with a durable handoff record is continued.
+    pub async fn record_child_handoffs(&self, remaining: Duration) -> CliResult<()> {
+        let record = async {
+            let mut failure = None;
+            for tree in self.trees.values() {
+                if let Err(error) = crate::runtime::record_tree_handoff(&tree.runtime).await {
+                    failure = failure.or(Some(CliFailure::new(error)));
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        };
+        tokio::time::timeout(remaining, record).await.map_err(|_| {
+            CliFailure::new("child handoff records exceeded the host release budget")
+        })?
+    }
+
     async fn pause_tree(
         &mut self,
-        tree: Arc<crate::topology_runtime::ProductTopologyRuntime>,
+        tree: Arc<ProductTopologyRuntime>,
         deadline: Option<Instant>,
         monitor: &StepDrainMonitor<'_>,
     ) -> CliResult<()> {
@@ -60,8 +87,13 @@ impl HostStepDrain {
             if let Ok(result) =
                 tokio::time::timeout(Duration::from_millis(20), pausing.as_mut()).await
             {
-                self.trees
-                    .insert(identity, result.map_err(CliFailure::new)?);
+                self.trees.insert(
+                    identity,
+                    HeldTree {
+                        pause: result.map_err(CliFailure::new)?,
+                        runtime: Arc::clone(&tree),
+                    },
+                );
                 return Ok(());
             }
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -107,18 +139,20 @@ impl HostStepDrain {
                 if let std::collections::btree_map::Entry::Vacant(entry) =
                     self.trees.entry(identity)
                 {
-                    entry.insert(
-                        tree.pause_step_admissions()
+                    entry.insert(HeldTree {
+                        pause: tree
+                            .pause_step_admissions()
                             .await
                             .map_err(CliFailure::new)?,
-                    );
+                        runtime: tree,
+                    });
                 }
             }
         }
         let mut agents = Vec::new();
         for tree in self.trees.values() {
-            let snapshot = tree.agents().await.map_err(CliFailure::new)?;
-            joined &= !snapshot.transitioning && tree.effects_joined();
+            let snapshot = tree.pause.agents().await.map_err(CliFailure::new)?;
+            joined &= !snapshot.transitioning && tree.pause.effects_joined();
             agents.extend(snapshot.agents);
         }
         for agent in agents {
@@ -229,7 +263,7 @@ where
         drain_until: Option<Instant>,
         freeze_budget: Duration,
         monitor: &StepDrainMonitor<'_>,
-        trees: Vec<Arc<crate::topology_runtime::ProductTopologyRuntime>>,
+        trees: Vec<Arc<ProductTopologyRuntime>>,
     ) -> CliResult<HostStepDrain> {
         if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
             || !*self

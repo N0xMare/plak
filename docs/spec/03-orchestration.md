@@ -4240,7 +4240,7 @@ outer attempt/result projection has not finished is still a transition.
 Dropping an aborted coordinator reopens tree admission before runtime gates,
 then outer-owner admission. Deferred recovery work is retained for retry. None of those process-local guards retires a line,
 changes a runner owner, writes a handoff decision or authorizes continuation.
-Only the ordinary joined planned release below does so. A host crash before
+Only the committed planned release below does so. A host crash before
 that decision remains ordinary owner loss, with its existing hold/consent law.
 
 **A planned handoff.** A reload, host restart or admitted host upgrade
@@ -4256,7 +4256,12 @@ quit's. A turn
 that does not settle within it degrades the release into an ordinary loss:
 the handoff is disarmed and nothing is recorded, the release abandons the
 turn by lease and says so with a warning, never an error, and the next open
-holds the turn (and marks the running sub-agents `owner_lost`). Inside its own release,
+holds the turn. On a committed same-key upgrade, the releasing host records
+handoff for the children in every joined tree, before releasing its session
+owners. That includes a tree with no resident root, and a root whose own
+cancel later fails to settle. An unrecorded child still follows the ordinary
+owner-loss law; this does not change release outside a committed same-key
+upgrade. Inside the planned release,
 before any lease is released, the releasing host applies each running
 child's feed to its tail, then records an interrupt with cause `handoff` on
 each child that is running or parked and whose assignment started (a turn of

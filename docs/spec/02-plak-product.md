@@ -5887,7 +5887,7 @@ deadline and ten seconds after preparation began, including for `--drain 0`;
 that floor does not extend natural draining. `idle` uses a bounded 60-second
 verdict barrier followed by unbounded natural boundary draining. Model calls
 and paid compaction finish under their ordinary clocks; there is no absolute
-freeze deadline while they run. Observation/process waits receive Notice immediately. This is not a wait for every task or job to exit.
+freeze deadline while they run. Neither mode waits for background jobs to exit.
 Before the admission barrier the requester prints each completed qualification
 phase as `qualification phase=<phase> elapsed_ms=<integer>` from a typed
 progress reply, without throttling these phase timings. The requester prints
@@ -5910,16 +5910,17 @@ EOF or hangup cancels preparation before surrender, including the verdict
 barrier. After Ready, requester loss cannot cancel the committed transfer.
 The home and source leases never move on a hold.
 
-At a finite natural-drain bound (immediately for 0), the following policy
-applies. Idle uses the same yielding policy immediately, but never cancels a
-model call and starts surrender only after natural work reaches boundaries.
+Both modes request a yield from observation and foreground process waits as
+soon as the drain sees the admitted effect. The finite natural-drain deadline
+still gives ordinary model generation its grace; idle never cancels a model
+call and starts surrender only after natural work reaches boundaries.
 
 | Work at the cutover | Finite drain | Idle drain |
 | --- | --- | --- |
 | Ordinary model generation | Existing planned interrupt at the bound; once-only continuation is a new call | Finish naturally under normal clocks |
 | Paid compaction | Join within the global freeze allowance, otherwise abort precommit; never cancel | Finish naturally under normal clocks; never cancel |
-| Child/mail/job observation waits | Existing exact-turn Notice requests a result | Notice immediately |
-| Foreground process tools | Existing exact-turn Notice requests promotion, then join the tool result | Notice immediately, then join |
+| Child/mail/job observation waits | Immediate exact-turn Notice requests a result | Same |
+| Foreground process tools | Immediate exact-turn Notice requests promotion, then join the tool result | Same |
 | Other effectful tools, workspace/tree operations, result projection | Join within the freeze allowance or abort precommit | Join naturally; operator cancellation remains available |
 
 Notice acknowledgements are not joined results. Controls address
@@ -5935,6 +5936,8 @@ already-admitted Stop receipts before Ready; a Stop that has not settled
 within that join bound prevents surrender.
 The held phase seals admission, joins Stop, rechecks held roots, inspects
 runner inventory when required, and rechecks the image before sending Ready.
+After Ready the releasing host records planned continuation for joined
+children independently of each root owner's release (chapter 03 §14.1).
 Mandatory owner/placement rendezvous and planned-release
 acknowledgements keep bounded joins; finite modes share one natural deadline
 plus one freeze allowance, never multiplied by sessions. Idle's freeze

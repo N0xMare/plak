@@ -133,6 +133,7 @@ mod extension_tests;
 mod fork;
 mod host_loop;
 pub use host_loop::CONTINUATION_PROMPT;
+pub(crate) use host_loop::record_tree_handoff;
 mod info;
 pub(crate) mod job_events;
 mod ledger;
