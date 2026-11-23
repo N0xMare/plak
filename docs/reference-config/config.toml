@@ -129,6 +129,10 @@ max_objects = 4194304
 # type: integer · default: 4294967296 · at least 16, representable by the SQLite and platform integer ranges; home-scoped
 max_object_bytes = 4294967296
 
+# Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.
+# type: bool · default: false · true or false; home-scoped
+retire_finished_children = false
+
 # Agent Skills under .agents/skills and ~/.agents/skills.
 [skills]
 

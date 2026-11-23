@@ -25,12 +25,24 @@ pub fn project_tree_view(tree: &ProductAgentTree) -> TreeView {
 }
 
 fn project_preorder(tree: &ProductAgentTree) -> Vec<NodeView> {
+    if tree.retired_children().is_empty() {
+        return tree
+            .preorder_ids()
+            .iter()
+            .filter_map(|id| project_node(tree, id))
+            .collect();
+    }
     let mut by_parent: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
-    for node in tree
+    for mut node in tree
         .nodes()
         .values()
         .filter_map(|node| project_node(tree, &node.agent_id))
     {
+        if let Some(summary) = tree.retired_children().get(&node.agent_id)
+            && tree.conversation_collected(&node.agent_id)
+        {
+            show_retired_attempt(&mut node, summary);
+        }
         by_parent
             .entry(node.parent_agent_id.clone())
             .or_default()
@@ -54,6 +66,15 @@ fn project_preorder(tree: &ProductAgentTree) -> Vec<NodeView> {
         rows.push(row);
     }
     rows
+}
+
+fn show_retired_attempt(node: &mut NodeView, summary: &RetiredChild) {
+    node.attempt_status = Some(summary.status);
+    node.attempt_id = Some(summary.attempt.to_string());
+    node.attempt_seq = attempt_sequence(&node.agent_id, &summary.attempt);
+    node.attempts = node.attempt_seq.into_iter().collect();
+    node.description.clone_from(&summary.description);
+    node.ended_at_unix = Some(summary.ended_at / 1_000).filter(|seconds| *seconds > 0);
 }
 
 fn retired_child(id: &str, summary: &RetiredChild) -> NodeView {
@@ -104,10 +125,6 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
     let node = tree.node(id).ok()?;
     let workspace = tree.workspace(&node.workspace_id);
     let attempt = tree.attempt(id);
-    let retired = tree
-        .retired_children()
-        .get(id)
-        .filter(|_| tree.conversation_collected(id));
     Some(NodeView {
         runner: node.placement.runner_id.as_ref().map_or_else(
             plakous_host_protocol::wire::RunnerLabel::local,
@@ -120,27 +137,22 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
         parent_agent_id: node.parent_agent_id.clone(),
         depth: node.depth,
         status: node.presentation_status(tree.state),
-        attempt_status: attempt
-            .map(|attempt| attempt.status)
-            .or(retired.map(|row| row.status)),
+        attempt_status: attempt.map(|attempt| attempt.status),
         // A `followup` opens `a2` on the same node, so the sequence is what the
         // canvas shows; the full id is durable but far too wide for a box.
         attempt_seq: node
             .attempt_id
             .as_ref()
-            .or(retired.map(|row| &row.attempt))
             .and_then(|attempt_id| attempt_sequence(&node.agent_id, attempt_id)),
         attempt_id: node
             .attempt_id
             .as_ref()
-            .or(retired.map(|row| &row.attempt))
             .map(|attempt_id| attempt_id.as_str().to_owned()),
         // Earlier attempts are not deleted by a re-task, so the row can say
         // "third try" instead of implying a first one.
         attempts: node_attempt_sequences(tree, &node.agent_id),
         tier: Some(node.tier),
-        description: retired
-            .map_or_else(|| node.description.clone(), |row| row.description.clone()),
+        description: node.description.clone(),
         prompt: node.prompt.clone(),
         workspace_path: workspace
             .map(|workspace| workspace.path.display().to_string())
@@ -189,7 +201,6 @@ fn project_node(tree: &ProductAgentTree, id: &str) -> Option<NodeView> {
             .filter(|seconds| *seconds > 0),
         ended_at_unix: attempt
             .and_then(|attempt| attempt.ended_at)
-            .or(retired.map(|row| row.ended_at))
             .map(|ended_at| ended_at / 1_000)
             .filter(|seconds| *seconds > 0),
         recovery_abandoned: attempt.is_some_and(super::AttemptRecord::recovery_was_abandoned),

@@ -204,7 +204,7 @@ async fn collection_and_sibling_startup_leave_a_ready_reopened_seal_queued() {
 
     vcs.set_placement_ready(path, true);
     driver
-        .collect_dormant_children(&sessions, true, Default::default())
+        .collect_dormant_children(&sessions, true, BTreeSet::new())
         .await
         .unwrap();
     driver.reclaim_dormant_checkouts().await.unwrap();

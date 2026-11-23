@@ -84,31 +84,7 @@ impl TreeDriver {
                         continue;
                     }
                 } else {
-                    match sessions.delete_archived(locator.session_id()).await {
-                        Ok(_) => {}
-                        Err(error)
-                            if error.kind()
-                                == plakous::sessions::AgentSessionsErrorKind::InvalidInput =>
-                        {
-                            let archived = sessions.archive(locator).await.map_err(|_| TopologyError::new(
-                            TopologyErrorCode::OperationRecoveryRequired, "child session retirement refused; exact session and work refs retained"))?;
-                            sessions
-                            .delete(archived.session_id(), archived.archived_revision())
-                            .await
-                            .map_err(|_| {
-                                TopologyError::new(
-                                    TopologyErrorCode::OperationRecoveryRequired,
-                                    "child session deletion remains pending; work refs retained",
-                                )
-                            })?;
-                        }
-                        Err(_) => {
-                            return Err(TopologyError::new(
-                                TopologyErrorCode::OperationRecoveryRequired,
-                                "child session deletion remains pending; work refs retained",
-                            ));
-                        }
-                    }
+                    finish_legacy_archive(sessions, locator).await?;
                 }
             }
             let driver = self.clone();
@@ -191,5 +167,29 @@ impl TreeDriver {
             finished?;
         }
         Ok(())
+    }
+}
+
+async fn finish_legacy_archive(
+    sessions: &plakous::sessions::AgentSessions,
+    locator: plakous::sessions::SessionLocator,
+) -> Result<(), TopologyError> {
+    let refused = |_| {
+        TopologyError::new(
+            TopologyErrorCode::OperationRecoveryRequired,
+            "child session deletion remains pending; work refs retained",
+        )
+    };
+    match sessions.delete_archived(locator.session_id()).await {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == plakous::sessions::AgentSessionsErrorKind::InvalidInput => {
+            let archived = sessions.archive(locator).await.map_err(refused)?;
+            sessions
+                .delete(archived.session_id(), archived.archived_revision())
+                .await
+                .map_err(refused)?;
+            Ok(())
+        }
+        Err(error) => Err(refused(error)),
     }
 }

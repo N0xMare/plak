@@ -217,7 +217,7 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
             .prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
             .unwrap();
         if followup_wins {
-            assert!(tickets.is_empty());
+            assert_eq!(tickets, [] as [super::RetirementTicket; 0]);
             assert!(tree.retired_children().is_empty());
         } else {
             assert_eq!(tickets.len(), 1);
@@ -232,7 +232,7 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
             let row = view.nodes.iter().find(|node| node.agent_id == id).unwrap();
             assert!(row.dormancy.conversation_retired);
             assert!(!row.has_session);
-            assert!(row.prompt.is_empty());
+            assert_eq!(row.prompt, "");
             let fork = crate::tree::block_on_for_test(super::ProductAgentTree::fork_genesis(
                 &tree,
                 "summary-free-fork",
