@@ -1378,7 +1378,7 @@ impl ProductConfig {
             | ConfigField::RuntimeStoreMaxObjectBytes
             | ConfigField::RuntimeStoreMaxSessions
             | ConfigField::RuntimeStoreRetireFinishedChildren => {
-                self.assign_runtime_store(key, value)?
+                self.assign_runtime_store(key, value)?;
             }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = parse_positive(key.path, value)?;
