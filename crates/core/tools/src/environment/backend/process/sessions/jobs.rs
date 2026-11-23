@@ -526,7 +526,10 @@ impl JoinedProcessSessions {
             .active
             .iter()
             .chain(&state.finished)
-            .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
+            .filter(|(_, session)| {
+                session.promoted.load(Ordering::Acquire) == PROMOTED
+                    && !session.consumed.load(Ordering::Acquire)
+            })
             .map(|(id, session)| self.job_view(*id, session))
             .collect();
         drop(state);
@@ -596,10 +599,12 @@ impl JoinedProcessSessions {
         let state = lock(&self.inner.state);
         state
             .active
-            .keys()
-            .chain(state.finished.keys())
-            .find(|id| Self::job_number(**id) == number)
-            .copied()
+            .iter()
+            .chain(state.finished.iter())
+            .find(|(id, session)| {
+                Self::job_number(**id) == number && !session.consumed.load(Ordering::Acquire)
+            })
+            .map(|(id, _)| *id)
     }
 
     /// Resolves an already-reported job while its bounded terminal tombstone remains.
@@ -608,11 +613,24 @@ impl JoinedProcessSessions {
         &self,
         number: u32,
     ) -> Option<(JoinedProcessSessionId, JoinedProcessStatus)> {
-        lock(&self.inner.state)
+        if let Some(arm) = self.runner_arm()
+            && let Some(reported) = arm.reported_session_for_number(number)
+        {
+            return Some(reported);
+        }
+        let state = lock(&self.inner.state);
+        if let Some(reported) = state
             .tombstones
             .iter()
             .find(|(id, _)| Self::job_number(*id) == number)
-            .copied()
+        {
+            return Some(*reported);
+        }
+        let (id, session) = state.active.iter().find(|(id, session)| {
+            Self::job_number(**id) == number && session.consumed.load(Ordering::Acquire)
+        })?;
+        let status = lock(&session.shared).status;
+        status.is_terminal().then_some((*id, status))
     }
 
     pub(crate) fn runtime_owner_generation(&self) -> NonZeroU64 {

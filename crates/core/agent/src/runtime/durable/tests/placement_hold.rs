@@ -64,7 +64,7 @@ impl RunnerLink for InProcessRunner {
     }
 }
 
-fn placed_services(root: &std::path::Path) -> TestResult<RunnerServices> {
+pub(super) fn placed_services(root: &std::path::Path) -> TestResult<RunnerServices> {
     Ok(placed(root)?.0)
 }
 

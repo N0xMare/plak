@@ -44,7 +44,7 @@ impl JoinedProcessSessions {
     /// Drops snapshots only after their terminal observation has committed.
     pub(crate) fn consume_jobs(&self, numbers: &[u32]) {
         if let Some(arm) = self.runner_arm() {
-            arm.consume(numbers);
+            arm.consume(numbers, self.inner.active_limit);
         }
         let _ = self.terminal_jobs_since(0);
         {

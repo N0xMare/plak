@@ -236,6 +236,60 @@ impl Placed {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runner_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestResult {
+    for readopted in [false, true] {
+        let placed = placed(false, false)?;
+        let sessions = placed.environment.joined_process_sessions()?;
+        let port = plakous_tools::JoinedSessionsPort::runner(sessions.clone());
+        let handle = if readopted {
+            // Started on the daemon before this arm ever observed it.
+            placed
+                .runner
+                .environment
+                .adopt_joined_process_sessions(&placed.runner.sessions);
+            crate::jobs::start_notice_job(
+                &placed.runner.environment,
+                OperationContext::new(CancellationToken::new()),
+            )
+            .await?
+        } else {
+            crate::jobs::start_notice_job(&placed.environment, placed.control.clone()).await?
+        };
+        let number = u32::try_from(handle)?;
+        let daemon = &placed.runner.sessions;
+        let id = daemon.session_for_number(number).ok_or("daemon's job")?;
+        daemon.write_stdin(
+            id,
+            b"go\n",
+            plakous_tools::JoinedProcessInputDisposition::KeepOpen,
+        )?;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                port.refresh_jobs()?;
+                if port.jobs().iter().any(|job| {
+                    job.number == number && job.status == plakous_tools::JobStatus::Exited(7)
+                }) {
+                    return Ok::<(), plakous_tools::ExecutionBackendError>(());
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await??;
+        assert_eq!(sessions.session_for_number(number), Some(id));
+        plakous_tools::internal::consume_jobs(&sessions, &[number]);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !daemon.jobs().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        crate::jobs::assert_notice_wait(&placed.environment, handle).await?;
+        daemon.join_all()?;
+    }
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn placement_hold_cut_yield_deadline_does_not_promote_on_rebind() -> TestResult {
     let placed = placed(true, false)?;

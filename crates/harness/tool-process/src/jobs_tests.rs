@@ -1344,3 +1344,89 @@ async fn first_terminal_await_waits_past_an_already_reported_id() -> TestResult 
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn local_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let handle = start_notice_job(
+        &environment,
+        OperationContext::new(CancellationToken::new()),
+    )
+    .await?;
+    let sessions = environment.joined_process_sessions()?;
+    let number = u32::try_from(handle)?;
+    let id = sessions.session_for_number(number).ok_or("live job")?;
+    sessions.write_stdin(id, b"go\n", JoinedProcessInputDisposition::KeepOpen)?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !sessions
+            .jobs()
+            .iter()
+            .any(|job| job.number == number && job.status == plakous_tools::JobStatus::Exited(7))
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    assert!(sessions.active_session_ids().contains(&id));
+    plakous_tools::internal::consume_jobs(&sessions, &[number]);
+    assert!(sessions.jobs().is_empty());
+    assert_notice_wait(&environment, handle).await?;
+    sessions.join_all()?;
+    Ok(())
+}
+
+pub(super) async fn start_notice_job(
+    environment: &ExecutionEnvironment,
+    control: OperationContext,
+) -> TestResult<u64> {
+    let result = ProcessSessionTools::posix_sh()?
+        .start_canonical(
+            environment,
+            CanonicalProcessStartRequest {
+                command: "read go; printf terminal; exit 7".into(),
+                workdir: PathBuf::from("."),
+                login: false,
+                tty: false,
+                keep_stdin_open: true,
+                _model_description: None,
+                yield_time_ms: 0,
+                max_output_bytes: 4096,
+            },
+            control,
+        )
+        .await?;
+    result
+        .projection
+        .session_id
+        .ok_or_else(|| "job handle".into())
+}
+
+pub(super) async fn assert_notice_wait(
+    environment: &ExecutionEnvironment,
+    handle: u64,
+) -> TestResult {
+    let mut request = await_request(&[handle], 30_000);
+    request.wake = Some(AwaitWake::Any);
+    request.validate()?;
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        ProcessSessionTools::await_canonical(
+            environment,
+            &request,
+            &OperationContext::new(CancellationToken::new()),
+        ),
+    )
+    .await??;
+    let value: Value = serde_json::from_str(&outcome.joined_text())?;
+    assert_eq!(
+        value,
+        serde_json::json!({"tasks": [{
+            "task_id": format!("p{handle}"),
+            "status": "already_reported",
+            "output": "",
+            "exit_code": 7,
+        }]})
+    );
+    Ok(())
+}

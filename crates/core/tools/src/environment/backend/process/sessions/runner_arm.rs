@@ -3,7 +3,7 @@
 //! bookkeeping, and every process operation goes to one line's sessions on
 //! that runner (spec 01 §8.5). The local arm never reaches this module.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -23,6 +23,16 @@ const CHANGE_WAIT: Duration = Duration::from_secs(1);
 const STOP_GRACE: Duration = Duration::from_secs(2);
 /// A bounded read for the background change wait.
 const CHANGE_BYTES: usize = 64 * 1024;
+
+fn process_status(status: JobStatus) -> JoinedProcessStatus {
+    match status {
+        JobStatus::Running => JoinedProcessStatus::Running,
+        JobStatus::Exited(code) => JoinedProcessStatus::Exited(code),
+        JobStatus::Released => JoinedProcessStatus::Released,
+        JobStatus::Stopped(_) => JoinedProcessStatus::Terminated,
+        JobStatus::OutcomeUnknown => JoinedProcessStatus::OutcomeUnknown,
+    }
+}
 
 /// One session this service started on the runner.
 struct ArmSession {
@@ -55,6 +65,7 @@ struct ArmState {
     /// Job numbers the agent consumed: still listed by the runner, never
     /// reported again here.
     consumed: BTreeSet<u32>,
+    reported: VecDeque<(JoinedProcessSessionId, JoinedProcessStatus)>,
     /// Session identities of jobs already reported running to the observer.
     observed: BTreeSet<[u8; 16]>,
     /// A destructive poll's cursor per session.
@@ -218,13 +229,7 @@ impl RunnerArm {
         let mut changed = false;
         for job in jobs {
             let id = JoinedProcessSessionId(job.session_id);
-            let status = match job.status {
-                JobStatus::Running => JoinedProcessStatus::Running,
-                JobStatus::Exited(code) => JoinedProcessStatus::Exited(code),
-                JobStatus::Released => JoinedProcessStatus::Released,
-                JobStatus::Stopped(_) => JoinedProcessStatus::Terminated,
-                JobStatus::OutcomeUnknown => JoinedProcessStatus::OutcomeUnknown,
-            };
+            let status = process_status(job.status);
             {
                 let mut state = lock(&self.state);
                 if let Some(session) = state.sessions.get_mut(&id) {
@@ -317,10 +322,45 @@ impl RunnerArm {
             .collect()
     }
 
-    pub(super) fn consume(&self, numbers: &[u32]) {
-        lock(&self.state).consumed.extend(numbers.iter().copied());
+    pub(super) fn consume(&self, numbers: &[u32], reported_limit: usize) {
         if numbers.is_empty() {
             return;
+        }
+        let jobs = self.sessions.cached_jobs();
+        {
+            let mut state = lock(&self.state);
+            for &number in numbers {
+                if !state.consumed.insert(number) {
+                    continue;
+                }
+                // The ACK can remove a re-adopted job from the mirror, which
+                // may be this service's only copy of its exact terminal.
+                let known = self.known_session(&state, number);
+                let terminal = jobs
+                    .iter()
+                    .find(|job| {
+                        job.number == number
+                            && known.is_none_or(|id| job.session_id == id.0)
+                            && job.status != JobStatus::Running
+                    })
+                    .map(|job| {
+                        (
+                            JoinedProcessSessionId(job.session_id),
+                            process_status(job.status),
+                        )
+                    })
+                    .or_else(|| {
+                        let id = known?;
+                        let status = state.sessions.get(&id)?.status;
+                        status.is_terminal().then_some((id, status))
+                    });
+                if let Some(terminal) = terminal {
+                    state.reported.push_back(terminal);
+                }
+            }
+            while state.reported.len() > reported_limit {
+                state.reported.pop_front();
+            }
         }
         let sessions = Arc::clone(&self.sessions);
         let numbers = numbers.to_vec();
@@ -347,12 +387,31 @@ impl RunnerArm {
     /// A session's number is its id's, as for the local service; a job this
     /// service did not start is found through the line's job events.
     pub(super) fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
-        let known = lock(&self.state)
+        let state = lock(&self.state);
+        if state.consumed.contains(&number) {
+            return None;
+        }
+        self.known_session(&state, number)
+    }
+
+    fn known_session(&self, state: &ArmState, number: u32) -> Option<JoinedProcessSessionId> {
+        let known = state
             .sessions
             .keys()
             .find(|id| JoinedProcessSessions::job_number(**id) == number)
             .copied();
         known.or_else(|| self.sessions.session_for_number(number))
+    }
+
+    pub(super) fn reported_session_for_number(
+        &self,
+        number: u32,
+    ) -> Option<(JoinedProcessSessionId, JoinedProcessStatus)> {
+        lock(&self.state)
+            .reported
+            .iter()
+            .find(|(id, _)| JoinedProcessSessions::job_number(*id) == number)
+            .copied()
     }
 
     pub(super) fn seed_job_numbers(&self, next: u32) {

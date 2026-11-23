@@ -97,6 +97,7 @@ pub(in crate::runtime::durable) enum SessionUpdateFixtureMode {
 
 pub(super) struct SessionUpdateTool {
     pub(super) await_promoted_terminal: AtomicBool,
+    pub(super) poll_reported_terminal: AtomicBool,
     /// With `await_promoted_terminal`, leaves the terminal job unjoined, so
     /// the next boundary delivers its notice.
     pub(super) leave_terminal_unjoined: AtomicBool,
@@ -114,6 +115,7 @@ impl SessionUpdateTool {
     pub(super) fn new(mode: SessionUpdateFixtureMode) -> Self {
         Self {
             await_promoted_terminal: AtomicBool::new(false),
+            poll_reported_terminal: AtomicBool::new(false),
             leave_terminal_unjoined: AtomicBool::new(false),
             mode,
             wait_for_preempt: AtomicBool::new(false),
@@ -167,6 +169,19 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                     )
                 })?;
             if matches!(mode, SessionUpdateFixtureMode::Promoted) && dispatch > 0 {
+                if self.poll_reported_terminal.load(Ordering::Acquire) {
+                    let disposition = if sessions.session_for_number(1).is_some() {
+                        "live"
+                    } else if matches!(
+                        plakous_tools::internal::reported_process_session(&sessions, 1),
+                        Some((_, plakous_tools::JoinedProcessStatus::Exited(7)))
+                    ) {
+                        "already_reported"
+                    } else {
+                        "not_found"
+                    };
+                    return ToolOutcome::success_text(disposition);
+                }
                 let view = sessions.jobs().into_iter().next().ok_or_else(|| {
                     ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "fixture job missing")
                 })?;

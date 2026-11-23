@@ -131,6 +131,104 @@ fn notice_count(agent: &Agent) -> usize {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_wait_after_a_notice_commit_cannot_report_the_terminal_twice() -> TestResult {
+    wait_after_notice_commit(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runner_wait_after_a_notice_commit_cannot_report_the_terminal_twice() -> TestResult {
+    wait_after_notice_commit(true).await
+}
+
+async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            94_800,
+            false,
+        )
+        .with_tool_first()
+        .with_scripted_tool_calls([(2, "probe", "{}".to_owned())]),
+    );
+    let release = Arc::new(Notify::new());
+    *lock_mutex(&model.held_call_release) = Some(release.clone());
+    model.held_call.store(1, Ordering::Release);
+    let (registry, tool) = session_update_registry(SessionUpdateFixtureMode::Promoted)?;
+    tool.poll_reported_terminal.store(true, Ordering::Release);
+    let mut builder = session_update_builder(
+        Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+        model.clone(),
+        registry,
+    )?;
+    if on_runner {
+        builder =
+            builder.with_runner_services(super::placement_hold::placed_services(directory.path())?);
+    }
+    let runtime = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = runtime.create("create:wait-after-notice", builder).await?;
+    let start = agent.prompt("start the command").await?;
+    tokio::time::timeout(Duration::from_secs(30), model.held_call_started.notified()).await?;
+    let service = lock_mutex(&tool.sessions).clone().ok_or("service")?;
+    let id = service.session_for_number(1).ok_or("job handle")?;
+    service.write_stdin(
+        id,
+        b"finish\n",
+        plakous_tools::JoinedProcessInputDisposition::KeepOpen,
+    )?;
+    let port = plakous_tools::JoinedSessionsPort::runner(service.clone());
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if on_runner {
+                port.refresh_jobs()?;
+            }
+            if service
+                .jobs()
+                .iter()
+                .any(|job| job.status == plakous_tools::JobStatus::Exited(7))
+            {
+                return Ok::<(), plakous_tools::ExecutionBackendError>(());
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await??;
+    release.notify_one();
+    assert!(matches!(
+        start.result().await?.outcome(),
+        TurnResultOutcome::Completed(_)
+    ));
+    assert_eq!(notice_count(&agent), 1);
+
+    let waited = agent
+        .prompt("wait on the same command")
+        .await?
+        .result()
+        .await?;
+    assert!(matches!(waited.outcome(), TurnResultOutcome::Completed(_)));
+    assert_eq!(tool.dispatches.load(Ordering::Acquire), 2);
+    assert!(
+        model
+            .observed_request_texts()
+            .iter()
+            .flatten()
+            .any(|text| text.contains("already_reported")),
+        "explicit Wait did not see the consumed terminal: {:?}",
+        model.observed_request_texts(),
+    );
+    assert_eq!(notice_count(&agent), 1);
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery() -> TestResult {
     let fixture = NoticeFixture::with_terminal_poll(usize::MAX, &[], true).await?;
     let turn = fixture.agent.prompt("start then wait on the job").await?;
