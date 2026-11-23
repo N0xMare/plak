@@ -90,14 +90,9 @@ impl FiniteDrain {
 
     fn foreground_plan(&self, child: bool) -> serde_json::Value {
         let root = shell_words::quote(self.fixture.root.to_str().unwrap());
-        let observation = if child {
-            "printf ready > handoff-observation.txt; "
-        } else {
-            ""
-        };
         let command = format!(
             "base={root}/blocked-fg; mkfifo \"$base.release\"; exec 3<>\"$base.release\";\
-             {observation}printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; read gate <&3; exit 9"
+             printf '%s %s\\n' \"$$\" \"$PPID\" >> \"$base.marker\"; read gate <&3; exit 9"
         );
         let tool = if child {
             json!({"name": "bash", "arguments": {"command": command, "timeout": 600}})
@@ -235,7 +230,7 @@ fn child_with_pending_root(
             "version": 1, "process_tools": true,
         "steps": [
             {"gate": {"file": sut.fixture.root.join("resume-release")},
-             "output": {"tool": {"name": "read", "arguments": {"path": "handoff-observation.txt"}}},
+             "output": {"tool": {"name": "wait", "arguments": {"timeout_ms": 30_000}}},
              "finish": "tool_calls"},
             {
                 "output": {"tool": {"name": "submit_result", "arguments": {
@@ -274,7 +269,6 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let locator = child_locator(&store, child);
     sut.finish_job(child.original);
-    wait_retained_terminal(&paths.runtime_database(), locator);
     release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
     root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
@@ -287,10 +281,7 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let tree = ProductAgentTree::reopen(store.load(&child.parent.tree_id).unwrap().unwrap());
     assert_eq!(loss_resumptions(&tree), 1);
     assert_eq!(child_locator(&store, child), locator);
-    assert_eq!(
-        inspect_process_notices(&paths.runtime_database(), locator).unwrap(),
-        [1]
-    );
+    assert_one_child_terminal(&paths.runtime_database(), locator);
     let (_, turns) = plakous_offline_crash_harness::ledger_signature::inspect_root_lifecycles(
         &paths.runtime_database(),
         locator,
@@ -345,6 +336,49 @@ fn wait_retained_terminal(database: &Path, locator: plakous::sessions::SessionLo
     }
 }
 
+fn assert_one_child_terminal(database: &Path, locator: plakous::sessions::SessionLocator) {
+    use plakous::model::{ContentBlock, ConversationItem, HistorySegment, ToolResultPart};
+    let history =
+        plakous::sessions::AgentSessions::export_history_sqlite(database, locator).unwrap();
+    let notices = inspect_process_notices(database, locator).unwrap();
+    let mut delivered = 0;
+    for block in history
+        .segments()
+        .iter()
+        .flat_map(HistorySegment::items)
+        .flat_map(ConversationItem::blocks)
+    {
+        match block {
+            ContentBlock::Text(text) if text.text().contains("<process_notice id=\"p1\"") => {
+                assert!(text.text().contains("status=\"exited\" exit_code=\"9\""));
+                delivered += 1;
+            }
+            ContentBlock::ToolResult(result) => {
+                for part in result.parts() {
+                    let ToolResultPart::Text(text) = part else {
+                        continue;
+                    };
+                    let Ok(value) = serde_json::from_str::<serde_json::Value>(text.text()) else {
+                        continue;
+                    };
+                    for task in value["tasks"].as_array().into_iter().flatten() {
+                        if task["task_id"] == "p1" && task["status"] == "exited" {
+                            assert_eq!(task["exit_code"], 9);
+                            delivered += 1;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(notices.is_empty() || notices == [1], "{notices:?}");
+    assert_eq!(
+        delivered, 1,
+        "one terminal through the wait result or notice, never both"
+    );
+}
+
 fn loss_resumptions(tree: &ProductAgentTree) -> usize {
     tree.commands()
         .keys()
@@ -365,7 +399,12 @@ fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
     );
     sut.upgrade(&mut host, "0");
     let mut client = Client::connect(&host);
+    runner::remote_ready(&mut client, &sut.paired.id);
+    client.retain_observations();
     let attachment = client.attach(10, &child.parent);
+    wait_for_notice(&mut client, |text| {
+        text.contains("c1") && text.contains("nothing continues until you resume")
+    });
     let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let deadline = Instant::now() + WAIT;
@@ -395,12 +434,22 @@ fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
             Op::Intent {
                 attachment,
                 client_id: None,
-                intent: SessionIntent::ResumeLossContinuation { agent_id: Some(id) },
+                intent: SessionIntent::ResumeLossContinuation {
+                    agent_id: Some(id.clone())
+                },
                 blobs: Vec::new(),
             }
         ),
         Outcome::Ok(Answer::Accepted { duplicate: false }),
     );
+    let answer = wait_for_notice(&mut client, |text| {
+        text.contains(&id)
+            && (text.starts_with("resumed ")
+                || text.contains("is busy")
+                || text.contains("did not start")
+                || text.contains("is not held"))
+    });
+    assert_eq!(answer, format!("resumed {id}"));
     drop(client);
     finish_child(&sut, &mut host, &child);
     let events = paths
@@ -415,6 +464,34 @@ fn a_child_without_a_handoff_record_waits_for_one_explicit_resume() {
                 row["kind"] == "session.handoff_unrecorded" && row["tree"] == child.parent.tree_id
             })
     );
+}
+
+fn wait_for_notice(client: &mut Client, matches: impl Fn(&str) -> bool) -> String {
+    use plakous_host_protocol::{SessionObservation, views::transcript::TranscriptRow};
+    client.read_deadline = Some(Instant::now() + WAIT);
+    loop {
+        let HostFrame::Event { observation, .. } = client.next() else {
+            continue;
+        };
+        let rows = match observation {
+            SessionObservation::Row(row) => vec![row],
+            SessionObservation::TranscriptPatch(patch) => {
+                patch.upserts.into_iter().map(|item| item.row).collect()
+            }
+            SessionObservation::PresentationSnapshot(snapshot) => {
+                snapshot.items.into_iter().map(|item| item.row).collect()
+            }
+            _ => Vec::new(),
+        };
+        for row in rows {
+            if let TranscriptRow::Notice(notice) = row
+                && matches(&notice.text)
+            {
+                client.read_deadline = None;
+                return notice.text;
+            }
+        }
+    }
 }
 
 pub(super) fn crash_after_child_records() {
