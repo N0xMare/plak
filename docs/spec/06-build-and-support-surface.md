@@ -2299,12 +2299,11 @@ campaigns (chapter 05 §2.3). Run the Linux install groups with `just install` o
 `maintainer` argument to `just install` installs a snapshot instead of running
 the gate.
 
-The strict crash sweep runs nightly on main. For production install, check for
-a passing full strict receipt or verified shard merge on the shipped target
-for the candidate, or for an ancestor on main's first-parent history completed
-in the past 24 hours with the candidate's stored-format identities (chapter 05
-§2.3). A stored-format change or lack of qualifying evidence requires a passing
-strict sweep on the candidate before install.
+A production install also requires qualifying strict crash-sweep evidence
+(chapter 05 §2.3): a passing full or merged receipt on the shipped target for
+the candidate, or for a main first-parent ancestor completed within 24 hours
+with identical stored-format identities; otherwise a passing strict sweep on
+the candidate. Crash-sweep evidence is the only prior-tree evidence admitted.
 
 A prior tree's install evidence is not evidence for a changed tree. A
 dedicated detached Mac gate checkout with its own stable target directory
