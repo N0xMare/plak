@@ -122,6 +122,12 @@ fn operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_
         until_output(&mut worker, b"ESCAPED ");
         let escape = Escape::from_output(&worker.output);
         let escaped_pid = escape.0.pid;
+        let (observed, receipt) = sync_channel(1);
+        worker.escape_watch = Some(EscapeWatch {
+            pid: escaped_pid,
+            started: escape.0.started.clone(),
+            observed,
+        });
         let (sender, receive) = sync_channel(3);
         let closing = Arc::new(AtomicBool::new(false));
         let result = Arc::new(Mutex::new(None));
@@ -132,8 +138,10 @@ fn operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_
         let thread = std::thread::spawn(move || {
             worker.run(&receive, &close, &ended, &Mutex::new(None), &escaped);
         });
-        // A complete observation sees the live child before its parent disappears.
-        std::thread::sleep(Duration::from_millis(1200));
+        // Close only after the worker has recorded the escape while its parent is still live.
+        receipt
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|error| panic!("worker did not record the PTY escape: {error}"));
         closing.store(true, Ordering::Release);
         let deadline = Instant::now() + Duration::from_secs(5);
         while lock(&result).is_none() {

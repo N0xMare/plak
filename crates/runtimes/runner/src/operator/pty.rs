@@ -117,6 +117,15 @@ struct Worker {
     cleaned: bool,
     #[cfg(test)]
     observation_failures: usize,
+    #[cfg(test)]
+    escape_watch: Option<EscapeWatch>,
+}
+
+#[cfg(test)]
+struct EscapeWatch {
+    pid: u32,
+    started: String,
+    observed: SyncSender<()>,
 }
 
 struct RawMaster(RawFd);
@@ -207,6 +216,8 @@ impl Worker {
             cleaned: false,
             #[cfg(test)]
             observation_failures: 0,
+            #[cfg(test)]
+            escape_watch: None,
         };
         // Keep our slave reference through this bounded nonblocking drain so a
         // fast-exiting child's startup bytes survive Darwin's terminal revoke.
@@ -276,6 +287,8 @@ impl Worker {
                     && let Some(cleanup) = &mut cleanup
                 {
                     cleanup.observe(&rows);
+                    #[cfg(test)]
+                    self.publish_escape_receipt(cleanup);
                 }
                 last_scan = Instant::now();
             }
@@ -317,6 +330,18 @@ impl Worker {
         ));
         if !proven && let Some(mut cleanup) = cleanup {
             self.await_resolution(&mut cleanup, receive, result, survivors, code);
+        }
+    }
+
+    #[cfg(test)]
+    fn publish_escape_receipt(&mut self, cleanup: &SessionCleanup) {
+        if self
+            .escape_watch
+            .as_ref()
+            .is_some_and(|watch| cleanup.escaped.get(&watch.pid) == Some(&watch.started))
+            && let Some(watch) = self.escape_watch.take()
+        {
+            let _ = watch.observed.send(());
         }
     }
 
