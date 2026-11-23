@@ -257,6 +257,26 @@ class CrashSweepTests(unittest.TestCase):
 
     def test_invalid_shard_and_merge_args_are_refused_before_running_tools(self):
         cases = (
+            (
+                ["--check-evidence", "--candidate", "HEAD", "--receipts", "path"],
+                {},
+                "freshly fetched --main",
+            ),
+            (
+                [
+                    "--check-evidence",
+                    "--candidate",
+                    "HEAD",
+                    "--receipts",
+                    "path",
+                    "--main",
+                    "origin/main",
+                    "--expect-target",
+                    "wrong-target",
+                ],
+                {},
+                "uses only the shipped target",
+            ),
             (["--shard", "1/2", "--output", "path"], {}, "requires --strict"),
             (["--strict", "--shard", "0/2", "--output", "path"], {}, "1-based"),
             (["--strict", "--shard", "1/2"], {}, "require --output"),
@@ -321,7 +341,9 @@ class CrashSweepTests(unittest.TestCase):
             child.wait.return_value = 0
             self.assertEqual(SWEEP.cargo_evidence(command, {}, 16), "".join(lines))
             self.assertEqual(output.getvalue(), "".join(lines))
-            child.stdout = ["    Compiling a-fixture\n", *lines]
+            child.stdout = ["test log: Compiling a-fixture v1.2.3\n", *lines]
+            self.assertIn("test log: Compiling", SWEEP.cargo_evidence(command, {}, 16))
+            child.stdout = ["    Compiling a-fixture v1.2.3\n", *lines]
             with self.assertRaisesRegex(ValueError, "compiled after"):
                 SWEEP.cargo_evidence(command, {}, 16)
         for log, status in (("".join(lines), 101), (lines[0], 0)):
@@ -337,7 +359,9 @@ class CrashSweepTests(unittest.TestCase):
         with patch.object(
             SWEEP.subprocess,
             "run",
-            return_value=subprocess.CompletedProcess([], 0, listed, "    Compiling a-fixture\n"),
+            return_value=subprocess.CompletedProcess(
+                [], 0, listed, "    Compiling a-fixture v1.2.3\n"
+            ),
         ):
             with self.assertRaisesRegex(ValueError, "compiled after"):
                 SWEEP.list_family(name, selector, {}, check_compile=True)

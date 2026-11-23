@@ -1,6 +1,7 @@
 """Production sweep evidence and checkout custody against temporary Git repositories."""
 
 from contextlib import ExitStack
+import gzip
 import json
 from pathlib import Path
 import subprocess
@@ -19,36 +20,41 @@ SWEEP_FILES = (
 )
 FORMAT_FILES = (
     "bin/plakd/src/carry/document.rs",
+    "bin/plakd/src/carry/upgrade/receipt.rs",
     "bin/plakd/src/home/state.rs",
+    "bin/plakd/src/reload_request.rs",
     "bin/plakd/src/store/mod.rs",
     "bin/plakd/src/store/schema.rs",
+    "bin/plakd/src/telemetry_store.rs",
+    "crates/common/auth/src/api_key.rs",
+    "crates/common/auth/src/private_store.rs",
     "crates/common/gateway-protocol/src/lib.rs",
     "crates/common/runner-protocol/src/retention.rs",
     "crates/core/agent/src/checkpoint_bundle.rs",
+    "crates/core/agent/src/manifest.rs",
+    "crates/core/model/src/history.rs",
+    "crates/core/tools/src/policy.rs",
     "crates/orchestration/recursive-subagents-store/src/database.rs",
     "crates/store/src/sqlite.rs",
+    "crates/store/src/sqlite/schema.rs",
 )
-NOW = 1_800_000_000
 TARGET = "x86_64-unknown-linux-musl"
+MAIN = "refs/remotes/origin/main"
 
 
 class GitFixture(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.git("init", "-q")
-        # Use the enclosing checkout's identity even inside the isolated tooling gate.
-        name, email = (
-            EVIDENCE.git(ROOT, "log", "-1", "--format=%an%x00%ae").decode().strip().split("\0")
-        )
-        self.git("config", "user.name", name)
-        self.git("config", "user.email", email)
+        self.git("config", "user.name", "Sweep Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
         self.git("config", "commit.gpgsign", "false")
         for original in (*SWEEP_FILES, *(ROOT / path for path in FORMAT_FILES)):
             path = self.root / original.relative_to(ROOT)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(original.read_bytes())
         self.base = self.commit()
-        self.git("update-ref", "refs/remotes/origin/main", self.base)
+        self.git("update-ref", MAIN, self.base)
         with ExitStack() as mocks:
             mocks.enter_context(patch.object(SWEEP, "ROOT", self.root))
             mocks.enter_context(patch.object(SWEEP, "DRIVER", self.path(SWEEP_FILES[0])))
@@ -113,49 +119,93 @@ class EvidenceTests(GitFixture):
         super().setUp()
         self.receipts = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.receipt = self.receipts / "passing.json"
+        self.stamp = EVIDENCE.commit_time(self.root, self.base)
+        self.now = self.stamp + EVIDENCE.MAX_AGE
         (self.root / "other").touch()
         self.candidate = self.commit()
 
     def write(self, commit=None, **changes):
         commit = self.base if commit is None else commit
         fields = dict(
-            receipt_version=1,
+            receipt_version=SWEEP.shards.RECEIPT_VERSION,
             kind="full",
-            passed_at=NOW - 1,
+            passed_at=self.now - 1,
             commit=commit,
             tree=EVIDENCE.tree_id(self.root, commit),
             target=TARGET,
-            inventory="a" * 64,
             formats=EVIDENCE.formats(self.root, commit),
-            **dict.fromkeys(EVIDENCE.COUNT_KEYS, 1),
+            **SWEEP.shards.expected_summary(lambda path: self.git("show", f"{commit}:{path}")),
         )
         fields.update(changes)
         self.receipt.write_text(json.dumps(fields))
 
     def check(self):
-        return EVIDENCE.check(self.root, self.candidate, self.receipts, TARGET, now=NOW)[0]
+        return EVIDENCE.check(self.root, self.candidate, self.receipts, MAIN, now=self.now)[0]
 
     def assert_refused(self):
         with self.assertRaisesRegex(ValueError, "no passing strict sweep evidence"):
             self.check()
 
     def test_fresh_main_ancestor_and_exact_candidate(self):
-        self.write(passed_at=NOW - EVIDENCE.MAX_AGE)
+        self.write(passed_at=self.stamp)
         self.assertEqual(self.check(), self.receipt)
-        self.write(self.candidate, kind="merged", passed_at=NOW - EVIDENCE.MAX_AGE - 1)
+        self.write(self.candidate, kind="merged", passed_at=self.stamp - 1)
         self.assertEqual(self.check(), self.receipt)
 
     def test_stale_main_ancestor(self):
-        self.write(passed_at=NOW - EVIDENCE.MAX_AGE - 1)
+        self.write(passed_at=self.stamp - 1)
+        self.assert_refused()
+
+    def test_fresh_coverage_cannot_renew_an_old_main_commit(self):
+        self.write()
+        self.now += 1
+        self.assert_refused()
+
+    def test_completion_cannot_precede_ancestor_commit(self):
+        self.write(passed_at=self.stamp - 1)
+        self.now -= 1
+        self.assert_refused()
+
+    def test_missing_main_ref(self):
+        self.write()
+        self.git("update-ref", "-d", MAIN)
+        with self.assertRaisesRegex(ValueError, "main ref .* is missing; fetch origin main first"):
+            self.check()
+
+    def test_force_moved_main_ref(self):
+        self.write()
+        self.assertEqual(self.check(), self.receipt)
+        self.git("checkout", "-q", "--orphan", "replacement")
+        self.git("update-ref", MAIN, self.commit())
         self.assert_refused()
 
     def test_main_commit_that_is_not_an_ancestor(self):
         self.git("checkout", "--detach", "-q", self.base)
         (self.root / "sibling").touch()
         sibling = self.commit()
-        self.git("update-ref", "refs/remotes/origin/main", sibling)
+        self.git("update-ref", MAIN, sibling)
         self.write(sibling)
         self.assert_refused()
+
+    def test_ddl_change_without_revision(self):
+        self.write()
+        before = EVIDENCE.formats(self.root, self.base)
+        for key, name in (
+            ("product", "bin/plakd/src/store/schema.rs"),
+            ("tree", "crates/orchestration/recursive-subagents-store/src/database.rs"),
+            ("runtime", "crates/store/src/sqlite/schema.rs"),
+        ):
+            with self.subTest(schema=key):
+                self.git("checkout", "-q", "--detach", self.base)
+                path = self.root / name
+                path.write_text(
+                    path.read_text().replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                )
+                self.candidate = self.commit()
+                after = EVIDENCE.formats(self.root, self.candidate)
+                self.assertEqual(after[f"{key}_revision"], before[f"{key}_revision"])
+                self.assertNotEqual(after[f"{key}_schema_sha256"], before[f"{key}_schema_sha256"])
+                self.assert_refused()
 
     def test_ancestor_not_on_main(self):
         self.write(self.candidate)
@@ -200,8 +250,42 @@ class EvidenceTests(GitFixture):
             {"kind": "shard"},
             {"tree": "0" * 40},
             {"target": "wrong-target"},
-            {"passed_at": NOW + 1},
+            {"passed_at": self.now + 1},
             {"wire_groups": 0},
+            {"wire_groups": 31},
+            {"inventory": "a" * 64},
+            {"runners": ["not_a_runner"]},
         ):
             self.write(**change)
             self.assert_refused()
+
+    def test_ancestor_coverage_uses_its_own_inventory_and_selectors(self):
+        self.write()
+        path = self.path(SWEEP_FILES[2])
+        rows = json.loads(path.read_text())
+        rows["indexed"].pop(next(iter(rows["indexed"])))
+        path.write_text(json.dumps(rows))
+        selectors = self.path(SWEEP_FILES[1])
+        for line in selectors.read_text().splitlines():
+            if '"runner_hold_poll":' in line:
+                selectors.write_text(selectors.read_text().replace(line, ""))
+                break
+        self.candidate = self.commit()
+        self.assertEqual(self.check(), self.receipt)
+
+
+class ReceiptWriteTests(unittest.TestCase):
+    def test_full_and_shard_receipts_are_readable_and_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            for name, compressed in (("full.json", False), ("shard.json.gz", True)):
+                with self.subTest(receipt=name):
+                    path = directory / name
+                    EVIDENCE.write_receipt(path, {"passed_at": 100}, compressed=compressed)
+                    with self.assertRaises(FileExistsError):
+                        EVIDENCE.write_receipt(path, {"passed_at": 200}, compressed=compressed)
+                    data = gzip.decompress(path.read_bytes()) if compressed else path.read_bytes()
+                    self.assertEqual(json.loads(data), {"passed_at": 100})
+            self.assertEqual(
+                sorted(path.name for path in directory.iterdir()), ["full.json", "shard.json.gz"]
+            )

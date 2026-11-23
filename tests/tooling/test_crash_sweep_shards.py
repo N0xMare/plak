@@ -27,6 +27,7 @@ def receipt(i, n):
         "target": TARGET,
         "inventory": sweep.fingerprint(),
         "formats": FORMATS,
+        "passed_at": 100 + i,
         "indexed": [
             dict(
                 shape=shape,
@@ -94,6 +95,7 @@ class StrictSweepShardTests(unittest.TestCase):
             self.assertEqual(counts["runner_cases"], 12)
             self.assertEqual(counts["wire_groups"], 32)
             self.assertEqual(counts["wire_invariant_rows"], 187)
+            self.assertEqual(counts["passed_at"], 101)
             self.assertEqual(len((directory / "merged/sweep.jsonl").read_text().splitlines()), 2111)
             self.assertEqual(len((directory / "merged/wire.jsonl").read_text().splitlines()), 187)
 
@@ -111,6 +113,8 @@ class StrictSweepShardTests(unittest.TestCase):
             ),
             ([first, dict(second, inventory="stale")], "fingerprint mismatch"),
             ([first, dict(second, formats={})], "stored format identities"),
+            ([first, dict(second, passed_at=True)], "invalid shard completion time"),
+            ([first, dict(second, passed_at=10**12)], "invalid shard completion time"),
         ):
             with self.subTest(error=message), tempfile.TemporaryDirectory() as scratch:
                 with self.assertRaisesRegex(ValueError, message):

@@ -2,13 +2,13 @@
 """Run the opt-in real-product SQLite commit sweep."""
 
 import argparse
-import gzip
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 DRIVER = Path(__file__).resolve()
 ROOT = DRIVER.parents[2]
@@ -72,7 +72,7 @@ def wire_rows(name, log):
 
 
 def refuse_compile(log):
-    if "Compiling " in log:
+    if re.search(r"^[ \t]+Compiling \S+ v\d", log, re.M):
         raise ValueError("Cargo compiled after the strict sweep fixture build")
 
 
@@ -157,10 +157,9 @@ def run_shard(env, args, shard):
             receipt["runners"].append(name)
     shards.validate(receipt, names)
     require_unchanged((commit, tree))
+    receipt["passed_at"] = int(time.time())
     if shard:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(args.output, "xt", encoding="utf-8") as stream:
-            json.dump(receipt, stream, separators=(",", ":"))
+        evidence.write_receipt(args.output, receipt, compressed=True)
     else:
         evidence.write_receipt(args.output, shards.passed_report(receipt, "full", 1))
     print(f"strict {label} passed: {args.output}", flush=True)
@@ -172,7 +171,7 @@ def list_family(name, selector, env, *, check_compile=False):
         [*COMMAND, selector, "--", "--list"], cwd=ROOT, env=env, capture_output=True, text=True
     )
     if check_compile:
-        refuse_compile(listed.stdout + listed.stderr)
+        refuse_compile(f"{listed.stdout}\n{listed.stderr}")
     expected = {f"{selector}{kind}_{group}" for kind in ["root", "child"] for group in range(8)}
     found = {
         line.removesuffix(": test")
@@ -201,36 +200,44 @@ def main() -> int:
     )
     parser.add_argument("--candidate", help="candidate revision for --check-evidence")
     parser.add_argument("--receipts", type=Path, help="directory of completed strict JSON receipts")
+    parser.add_argument("--main", help="freshly fetched main ref for --check-evidence")
     parser.add_argument(
         "--output", type=Path, help="strict receipt file or merged output directory"
     )
     parser.add_argument("--expect-commit", help="revision qualified by --merge")
-    parser.add_argument(
-        "--expect-target", help="Rust target triple required by merge or evidence check"
-    )
+    parser.add_argument("--expect-target", help="Rust target triple required by --merge")
     args = parser.parse_args()
     if args.jobs < 1 or args.repeat < 1:
         parser.error("--jobs and --repeat must be positive")
     if args.output is None and (args.shard or args.merge):
         parser.error("--shard and --merge require --output")
     if args.check_evidence:
-        if not args.candidate or not args.receipts:
-            parser.error("--check-evidence requires --candidate and --receipts")
+        if not args.candidate or not args.receipts or not args.main:
+            parser.error(
+                "--check-evidence requires --candidate, --receipts and a freshly fetched --main"
+            )
+        if args.expect_target:
+            parser.error(
+                "--check-evidence uses only the shipped target; --expect-target applies to --merge"
+            )
         if args.output or args.expect_commit or args.strict or args.shapes is not None:
             parser.error("--check-evidence cannot run or merge a sweep")
         try:
-            path, receipt = evidence.check(
-                ROOT,
-                args.candidate,
-                args.receipts,
-                args.expect_target or "x86_64-unknown-linux-musl",
+            path, receipt, main_commit = evidence.check(
+                ROOT, args.candidate, args.receipts, args.main
             )
-            print(json.dumps(dict(receipt, receipt_path=str(path))))
+            print(
+                json.dumps(
+                    dict(
+                        receipt, receipt_path=str(path), main_ref=args.main, main_commit=main_commit
+                    )
+                )
+            )
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             parser.error(f"{error}; run strict on the candidate")
         return 0
-    if args.candidate or args.receipts:
-        parser.error("--candidate and --receipts apply only to --check-evidence")
+    if args.candidate or args.receipts or args.main:
+        parser.error("--candidate, --receipts and --main apply only to --check-evidence")
     if args.merge:
         if not args.expect_commit or not args.expect_target:
             parser.error("--merge requires --expect-commit and --expect-target")
@@ -247,6 +254,7 @@ def main() -> int:
                 formats=evidence.formats(ROOT, commit),
                 before_publish=lambda: require_unchanged(before),
             )
+            evidence.write_receipt(args.output / "coverage.json", result)
             print(json.dumps(result, indent=2))
         except (
             OSError,
@@ -259,7 +267,7 @@ def main() -> int:
             parser.error(str(error))
         return 0
     if args.expect_commit or args.expect_target:
-        parser.error("--expect-commit and --expect-target require merge or evidence check")
+        parser.error("--expect-commit and --expect-target require --merge")
     shard = None
     if args.output:
         mode_name = "--shard" if args.shard is not None else "--output"

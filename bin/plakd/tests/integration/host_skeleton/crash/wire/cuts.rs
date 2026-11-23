@@ -285,7 +285,10 @@ fn matrix(switching: bool, child: bool, group: usize) {
                 first.expected, second.expected,
                 "twin complete indexed signatures"
             );
-            if std::env::var("PLAK_CRASH_SWEEP_STRICT").is_ok_and(|value| value == "1") {
+            if std::env::var("PLAK_CRASH_SWEEP_STRICT").is_ok_and(|value| value == "1")
+                && std::env::var_os("PLAK_TEST_WORKING_PRUNE_MINIMUM").is_none()
+                && std::env::var_os("PLAK_TEST_WORKING_PRUNE_MARGIN").is_none()
+            {
                 assert_pilot_inventory(shape, child, &first.expected);
             }
             first

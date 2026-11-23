@@ -2132,21 +2132,36 @@ the tracked checkout stays clean and unchanged. It rejects mismatched
 inventories; missing or duplicate shard indices, cuts, runner cases or
 restart groups; and missing, failed or refused invariant rows. The checked
 inventory identifies every expected per-store ordinal; strict indexed and
-wire pilots verify the per-store counts before cutting. Changes to the registry or
+wire pilots verify the per-store counts before cutting unless the pruning knobs
+are set. Changes to the registry or
 cut inventory update that inventory against an unsharded run of the affected
 shapes, inspecting the pilot counts when they differ. A successful merge writes
 `sweep.jsonl`, `wire.jsonl` and `coverage.json` in the output directory.
 
 Run the full strict sweep nightly at the exact tip of main with
 `just dev crash-sweep --strict --output RECEIPT.json` on the shipped target.
-Full and merged receipts record completion time and stored-format identities:
-the state key, runtime/product/tree store revisions, export document version,
-runner retention protocol version and gateway protocol version.
-`just dev crash-sweep --check-evidence --candidate REV --receipts DIRECTORY`
-accepts only a passing full or merged receipt on the shipped target for the
-candidate, or for an ancestor on main's first-parent history completed in the
-past 24 hours, with identical format identities. Otherwise run strict on the
-candidate. Individual shards are not qualifying receipts.
+Every shard records its completion time; a verified merge uses the oldest
+shard completion. Full and merged receipts carry these stored-format
+identities: the state key; runtime, product and tree store revisions and the
+SHA-256 of each committed SQLite schema definition; runtime context codec
+revision; session export document, host-upgrade ownership receipt and
+telemetry schema versions; runner retention and gateway protocol versions;
+auth private store, API-key binding and reload request versions; canonical
+item prefix digest revision; and effect authorization binding version. Any
+stored-format change MUST change at least one of these identities.
+
+Fetch main, then run `just dev crash-sweep --check-evidence --candidate REV
+--receipts DIRECTORY --main REF` with the freshly fetched main ref. The check
+reports the main commit used and checks the receipt fingerprint and exact
+coverage totals against the receipt commit's tracked inventory and selectors.
+It accepts only a passing full or merged receipt on the shipped target with
+identical stored-format identities. The receipt must cover the candidate
+itself or a candidate ancestor on the fetched main's first-parent history.
+For an ancestor, both its commit time and receipt completion must be within
+the past 24 hours, and completion must not precede the commit. Otherwise
+run strict on the candidate. Individual shards are not qualifying receipts.
+Receipts are unsigned; their integrity rests on custody of the receipts
+directory.
 
 **Pilot and cut laws.** A clean post-setup seed supplies each fresh home.
 Twins must agree on each store's indexed `(store, label, tables)` sequence

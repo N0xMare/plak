@@ -1,19 +1,18 @@
 """Plan strict crash-sweep shards and verify their exact coverage."""
 
+import ast
 from collections import Counter
 import gzip
 import hashlib
 import json
 from pathlib import Path
 import re
+import time
 
-import crash_sweep_evidence as evidence
 
-
-INVENTORY = (
-    Path(__file__).resolve().parents[2]
-    / "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
-)
+INVENTORY_PATH = "bin/plakd/tests/integration/crash_sweep/shard_inventory.json"
+INVENTORY = Path(__file__).resolve().parents[2] / INVENTORY_PATH
+RECEIPT_VERSION = 2
 COVERAGE = json.loads(INVENTORY.read_text())
 INDEXED = COVERAGE["indexed"]
 WIRE = COVERAGE["wire"]
@@ -80,16 +79,17 @@ def cuts(stores):
     ]
 
 
-def expected_rows(names):
+def expected_rows(names, coverage=COVERAGE):
+    indexed_coverage, wire_coverage = coverage["indexed"], coverage["wire"]
     indexed = {
         (shape, store, ordinal)
-        for shape in names & INDEXED.keys()
-        for store, ordinal in cuts(INDEXED[shape]["stores"])
+        for shape in names & indexed_coverage.keys()
+        for store, ordinal in cuts(indexed_coverage[shape]["stores"])
     }
     groups = {
         (family, child, group): set(cuts(stores)[group::8])
-        for family in names & WIRE.keys()
-        for child, stores in enumerate(WIRE[family]["stores"])
+        for family in names & wire_coverage.keys()
+        for child, stores in enumerate(wire_coverage[family]["stores"])
         for group in range(8)
     }
     return indexed, groups
@@ -135,32 +135,58 @@ def group_key(item):
     return item["family"], item["child"], item["group"]
 
 
-def fingerprint():
-    recorded = [INDEXED, WIRE, TERMINAL_SHAPES]
+def fingerprint(coverage=COVERAGE, terminals=TERMINAL_SHAPES):
+    recorded = [coverage["indexed"], coverage["wire"], terminals]
     return hashlib.sha256(json.dumps(recorded, sort_keys=True).encode()).hexdigest()
+
+
+def expected_summary(blob):
+    coverage = json.loads(blob(INVENTORY_PATH))
+    module = ast.parse(blob("tools/dev/crash_sweep_shards.py"))
+    (terminals,) = [
+        ast.literal_eval(node.value)
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "TERMINAL_SHAPES"
+            for target in node.targets
+        )
+    ]
+    indexed, wire = expected_rows(coverage["indexed"].keys() | terminals.keys(), coverage)
+    runners = sorted(terminals.keys() - coverage["wire"].keys())
+    return dict(
+        inventory=fingerprint(coverage, terminals),
+        indexed_cuts=len(indexed),
+        indexed_shapes=len({shape for shape, _, _ in indexed}),
+        runner_cases=len(runners),
+        runners=runners,
+        wire_groups=len(wire),
+        wire_invariant_rows=sum(map(len, wire.values())),
+    )
 
 
 def passed_report(receipt, kind, shards):
     indexed, runners, wire = (receipt[key] for key in ("indexed", "runners", "wire"))
     identity = {key: receipt[key] for key in ("commit", "tree", "target", "inventory", "formats")}
-    return evidence.passed(
+    return dict(
         identity,
-        kind,
-        dict(
-            shards=shards,
-            runners=sorted(runners),
-            indexed_cuts=len(indexed),
-            indexed_shapes=len({row["shape"] for row in indexed}),
-            runner_cases=len(runners),
-            wire_groups=len(wire),
-            wire_invariant_rows=sum(len(item["rows"]) for item in wire),
-        ),
+        receipt_version=RECEIPT_VERSION,
+        kind=kind,
+        passed_at=receipt["passed_at"],
+        shards=shards,
+        runners=sorted(runners),
+        indexed_cuts=len(indexed),
+        indexed_shapes=len({row["shape"] for row in indexed}),
+        runner_cases=len(runners),
+        wire_groups=len(wire),
+        wire_invariant_rows=sum(len(item["rows"]) for item in wire),
     )
 
 
 def merge(paths, output, *, commit, tree, target, formats, before_publish):
     indexed, runners, wire = [], [], []
-    indices = []
+    indices, completions = [], []
+    now = int(time.time())
     n = len(paths)
     assignments = plan(n)
     for path in paths:
@@ -176,8 +202,12 @@ def merge(paths, output, *, commit, tree, target, formats, before_publish):
             raise ValueError(f"{path}: sweep inventory fingerprint mismatch")
         if receipt["formats"] != formats:
             raise ValueError(f"{path}: stored format identities do not match expected commit")
+        completed = receipt["passed_at"]
+        if type(completed) is not int or not 0 < completed <= now:
+            raise ValueError(f"{path}: invalid shard completion time")
         validate(receipt, assignments[i - 1])
         indices.append(i)
+        completions.append(completed)
         indexed.extend(receipt["indexed"])
         runners.extend(receipt["runners"])
         wire.extend(receipt["wire"])
@@ -200,6 +230,7 @@ def merge(paths, output, *, commit, tree, target, formats, before_publish):
             target=target,
             inventory=fingerprint(),
             formats=formats,
+            passed_at=min(completions),
             indexed=indexed,
             runners=runners,
             wire=wire,
@@ -207,7 +238,6 @@ def merge(paths, output, *, commit, tree, target, formats, before_publish):
         "merged",
         n,
     )
-    evidence.write_receipt(output / "coverage.json", report)
     return report
 
 
