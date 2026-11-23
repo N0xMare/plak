@@ -142,13 +142,23 @@ pub(crate) fn abort_child_retirement(
     child: &str,
     stdout: &mut dyn std::io::Write,
 ) -> CliResult<()> {
+    use crate::carry::upgrade::receipt;
     use plakous_hosted::agent_tree::TreeStore as _;
 
     if !paths.subagents_database().is_file() {
         return Err(CliFailure::new("no persisted agent tree store"));
     }
+    paths.ensure_private_state_home().map_err(CliFailure::new)?;
     let _host = lock::HostLock::take_home(paths, crate::build_identity::binary_id())?;
     let _writers = crate::carry::upgrade::admission(paths, true)?;
+    if receipt::all(paths)?
+        .last()
+        .is_some_and(|record| record.phase == receipt::Phase::Committed)
+    {
+        return Err(CliFailure::new(
+            "host_upgrade_pending_ack: recover the destination before aborting retirement",
+        ));
+    }
     crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
     let store = crate::store::tree::open_tree_store(paths).map_err(CliFailure::new)?;
     let mut tree = store

@@ -1495,17 +1495,79 @@ pub(crate) async fn run_child_retirement_conformance(
             "{kind}"
         );
     }
+    pinned_child_retirement_heads(store, durability).await
+}
+
+async fn pinned_child_retirement_heads(
+    store: &dyn SessionStore,
+    durability: RuntimeDurability,
+) -> TestResult {
+    use plakous_agent::internal::RecordLineJobTerminals;
+    let chain = prune_chain(store, durability, 93_000, 0, 512).await?;
+    let selector = chain.head.session();
+    let topology = chain.last.manifest().topology();
+    store
+        .record_line_job_terminals(RecordLineJobTerminals::new(
+            chain.created.lease().clone(),
+            topology.line,
+            topology.line_generation,
+            chain.ids[0],
+            vec![retirement_job_terminal()?],
+        ))
+        .await?;
+    store.release(chain.created.lease().clone()).await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, chain.ids[0]).await,
+        Err(SessionStoreError::Conflict)
+    );
+
+    let chain = prune_chain(store, durability, 94_000, 0, 512).await?;
+    let selector = chain.head.session();
+    let fork = ordinary_fork(
+        &chain,
+        ForkTarget {
+            branch: id(94_050)?,
+            checkpoint: id(94_051)?,
+            owner: id(94_052)?,
+            workflow: workflow(0xb3)?,
+            session_revision: chain.created.session().revision(),
+            source_revision: 0,
+        },
+        durability,
+    )?;
+    let receipt = store.fork(fork).await?;
+    store.release(receipt.lease().clone()).await?;
+    store.release(chain.created.lease().clone()).await?;
+    assert_eq!(
+        store.probe_child_retirement(selector, chain.ids[0]).await,
+        Err(SessionStoreError::Conflict)
+    );
     Ok(())
+}
+
+fn retirement_job_terminal() -> TestResult<plakous_agent::internal::LineJobTerminal> {
+    use plakous_agent::{JobStatus, JobView, internal::LineJobTerminal};
+    LineJobTerminal::from_view(&JobView {
+        number: 1,
+        command: "offline job fixture".to_owned(),
+        started_at: Timestamp::new(50, 0)?,
+        owner: "driver".to_owned(),
+        elapsed: std::time::Duration::ZERO,
+        status: JobStatus::Exited(Some(0)),
+        output: String::new(),
+        session_id: [1; 16],
+        owner_generation: 1,
+    })?
+    .ok_or_else(|| "a finished job carries terminal evidence".into())
 }
 
 fn quiescent_checkpoint_with_unsettled_job(
     checkpoint: &RuntimeCheckpoint,
     topology: RuntimeTopology,
 ) -> TestResult<RuntimeCheckpoint> {
-    use plakous_agent::internal::{
-        JobLedger, JobRow, ProcessSessionId, ProcessSessionOwnerGeneration,
-    };
+    use plakous_agent::internal::{JobLedger, JobRow};
     let manifest = checkpoint.manifest();
+    let identity = retirement_job_terminal()?;
     let job = JobRow {
         number: 1,
         command: "offline job fixture".to_owned(),
@@ -1517,8 +1579,8 @@ fn quiescent_checkpoint_with_unsettled_job(
             branch_id: topology.branch_id,
             fence: topology.lease_fence,
         },
-        session_id: ProcessSessionId::new([1; 16])?,
-        owner_generation: ProcessSessionOwnerGeneration::new(1)?,
+        session_id: identity.session_id,
+        owner_generation: identity.owner_generation,
         terminal: None,
     };
     Ok(RuntimeCheckpoint::new(RuntimeManifest::new(
