@@ -58,7 +58,7 @@ pub(super) fn probe_sessions() -> Result<(), &'static str> {
         {
             return Err("operator session scan failed isolation probe");
         }
-        let rows = scan().map_err(|()| "operator cleanup scan unavailable")?;
+        let rows = scan::scan().map_err(|()| "operator cleanup scan unavailable")?;
         if ![own, separate].iter().all(|target| {
             rows.iter().any(|row| {
                 row.pid == target.pid
