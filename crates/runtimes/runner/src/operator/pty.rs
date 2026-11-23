@@ -55,12 +55,24 @@ pub(super) fn probe_sessions() -> Result<(), &'static str> {
             || separate.session == own.session
             || separate.session != pid.to_string()
             || separate.group != pid
-            || child
-                .try_wait()
-                .map_err(|_| "operator PTY probe could not be checked")?
-                .is_some()
         {
             return Err("operator session scan failed isolation probe");
+        }
+        let rows = scan().map_err(|()| "operator cleanup scan unavailable")?;
+        if ![own, separate].iter().all(|target| {
+            rows.iter().any(|row| {
+                row.pid == target.pid
+                    && !row.zombie
+                    && row.started == target.started
+                    && row.session == target.session
+                    && row.group == target.group
+            })
+        }) || child
+            .try_wait()
+            .map_err(|_| "operator PTY probe could not be checked")?
+            .is_some()
+        {
+            return Err("operator cleanup scan failed isolation probe");
         }
         Ok(())
     })();

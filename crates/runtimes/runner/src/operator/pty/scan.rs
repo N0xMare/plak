@@ -113,6 +113,11 @@ pub(super) struct SessionCleanup {
     pub(super) uncertain: bool,
 }
 
+enum Escalation {
+    Signal(Vec<Identity>),
+    Reap,
+}
+
 impl SessionCleanup {
     pub(super) fn new(leader: Identity) -> Self {
         Self {
@@ -198,22 +203,16 @@ impl SessionCleanup {
 
     fn signal_live_groups_until(&mut self, deadline: Instant) -> Option<bool> {
         let mut certain = true;
+        let mut fresh = || complete_scan(deadline);
         for signal in [
             rustix::process::Signal::HUP,
             rustix::process::Signal::TERM,
             rustix::process::Signal::KILL,
         ] {
-            let rows = complete_scan(deadline)?;
-            if !self.leader_anchored(&rows) {
-                return None;
-            }
-            // Master hangup often already ended the shell. An empty scan
-            // permits moving on to reap, not claiming absence. The two
-            // complete post-reap scans are still required.
-            if !self.has_live_members(&rows) && child_exited(self.leader.pid) {
-                self.observe(&rows);
+            let Escalation::Signal(rows) = self.escalation_step(&mut fresh, child_exit_status)?
+            else {
                 return Some(certain);
-            }
+            };
             certain &= self.signal_groups(&rows, signal);
             if signal != rustix::process::Signal::KILL {
                 std::thread::sleep(Duration::from_millis(150));
@@ -222,17 +221,37 @@ impl SessionCleanup {
         // Repeat KILL from a fresh deduplicated scan for members forked during
         // escalation. Retain the unreaped child as SID anchor through every signal.
         loop {
-            let rows = complete_scan(deadline)?;
-            if !self.leader_anchored(&rows) {
-                return None;
-            }
-            if !self.has_live_members(&rows) {
-                self.observe(&rows);
+            let Escalation::Signal(rows) = self.escalation_step(&mut fresh, child_exit_status)?
+            else {
                 return Some(certain);
-            }
+            };
             certain &= self.signal_groups(&rows, rustix::process::Signal::KILL);
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    fn escalation_step(
+        &mut self,
+        mut fresh: impl FnMut() -> Option<Vec<Identity>>,
+        exit_status: impl Fn(u32) -> Result<bool, rustix::io::Errno>,
+    ) -> Option<Escalation> {
+        // A fork relay can evade one enumeration. Only two fresh empty scans
+        // of an exited, still anchored leader permit reaping without another
+        // signal. Neither scan counts toward the post-reap absence proof.
+        for _ in 0..2 {
+            let rows = fresh()?;
+            if !self.leader_anchored(&rows) {
+                return None;
+            }
+            // On Linux a matching scan row alone cannot prove ownership if
+            // waitid reports ECHILD. Do not signal or reap on that evidence.
+            let exited = exit_status(self.leader.pid).ok()?;
+            if !exited || self.has_live_members(&rows) {
+                return Some(Escalation::Signal(rows));
+            }
+            self.observe(&rows);
+        }
+        Some(Escalation::Reap)
     }
 
     fn has_live_members(&self, rows: &[Identity]) -> bool {
@@ -456,18 +475,21 @@ fn complete_scan(deadline: Instant) -> Option<Vec<Identity>> {
 }
 
 pub(super) fn child_exited(pid: u32) -> bool {
-    let Some(pid) = i32::try_from(pid)
+    child_exit_status(pid).is_ok_and(|exited| exited)
+}
+
+fn child_exit_status(pid: u32) -> Result<bool, rustix::io::Errno> {
+    let pid = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
-    else {
-        return false;
-    };
+        .ok_or(rustix::io::Errno::INVAL)?;
     #[cfg(target_os = "macos")]
     {
-        matches!(
-            rustix::process::getsid(Some(pid)),
-            Err(rustix::io::Errno::SRCH)
-        )
+        match rustix::process::getsid(Some(pid)) {
+            Ok(_) => Ok(false),
+            Err(rustix::io::Errno::SRCH) => Ok(true),
+            Err(error) => Err(error),
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -477,7 +499,7 @@ pub(super) fn child_exited(pid: u32) -> bool {
                 | rustix::process::WaitIdOptions::NOHANG
                 | rustix::process::WaitIdOptions::NOWAIT,
         )
-        .is_ok_and(|status| status.is_some())
+        .map(|status| status.is_some())
     }
 }
 
@@ -595,6 +617,61 @@ mod tests {
             zombie: false,
             anchor: None,
         }
+    }
+
+    fn zombie_anchor() -> Identity {
+        let mut leader = row(10, 1, "10");
+        leader.zombie = true;
+        leader.anchor = Some(Arc::new(AtomicBool::new(true)));
+        leader
+    }
+
+    #[test]
+    fn operator_cleanup_signals_members_found_in_either_fresh_scan() {
+        for first_empty in [false, true] {
+            let leader = zombie_anchor();
+            let live = vec![leader.clone(), row(11, 10, "10")];
+            let mut scans = [first_empty.then(|| vec![leader.clone()]), Some(live)]
+                .into_iter()
+                .flatten();
+            let mut cleanup = SessionCleanup::new(leader);
+            assert!(matches!(
+                cleanup.escalation_step(|| scans.next(), |_| Ok(true)),
+                Some(Escalation::Signal(rows)) if rows.iter().any(|row| row.pid == 11)
+            ));
+            assert!(scans.next().is_none());
+        }
+    }
+
+    #[test]
+    fn operator_cleanup_only_skips_signals_after_two_empty_scans_of_exited_leader() {
+        let leader = zombie_anchor();
+        let mut cleanup = SessionCleanup::new(leader.clone());
+        assert!(matches!(
+            cleanup.escalation_step(|| Some(vec![leader.clone()]), |_| Ok(false)),
+            Some(Escalation::Signal(_))
+        ));
+        assert!(
+            cleanup
+                .escalation_step(
+                    || Some(vec![leader.clone()]),
+                    |_| Err(rustix::io::Errno::CHILD)
+                )
+                .is_none(),
+            "ECHILD must refuse anchoring even with a matching stale scan"
+        );
+        let mut one_scan = Some(vec![leader.clone()]);
+        assert!(
+            cleanup
+                .escalation_step(|| one_scan.take(), |_| Ok(true))
+                .is_none()
+        );
+        let mut scans = [vec![leader.clone()], vec![leader]].into_iter();
+        assert!(matches!(
+            cleanup.escalation_step(|| scans.next(), |_| Ok(true)),
+            Some(Escalation::Reap)
+        ));
+        assert!(scans.next().is_none());
     }
 
     #[test]

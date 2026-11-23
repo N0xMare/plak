@@ -39,6 +39,81 @@ impl Drop for Escape {
 }
 
 #[test]
+fn operator_pty_kills_a_stubborn_member_after_the_leader_exits_on_hangup() {
+    let mut command = CommandBuilder::new("/bin/sh");
+    command.args([
+        "-c",
+        r#"/bin/sh -c 'trap "" HUP TERM; printf "MEMBER %s\n" "$$"; exec /bin/sleep 600 </dev/null >/dev/null 2>&1' &
+read -r input"#,
+    ]);
+    let mut worker = Worker::spawn_command(
+        command,
+        TerminalDimensions::new(24, 80).unwrap(),
+        Arc::default(),
+    )
+    .unwrap();
+    let member = Escape(Identity::capture(read_member_pid(&mut worker)).unwrap());
+    assert_eq!(
+        member.0.session,
+        worker.identity.as_ref().unwrap().session,
+        "the stubborn child must be in the operator session"
+    );
+    worker.io.take();
+    worker.master.take();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !worker.leader_exited() {
+        assert!(Instant::now() < deadline, "hangup did not end the leader");
+        std::thread::yield_now();
+    }
+    assert!(
+        member.current().is_some_and(|row| !row.zombie),
+        "the member must still be live after the hangup"
+    );
+
+    let (sender, receive) = sync_channel(1);
+    drop(sender);
+    let result = Mutex::new(None);
+    worker.run(
+        &receive,
+        &AtomicBool::new(true),
+        &result,
+        &Mutex::new(None),
+        &Mutex::new(Vec::new()),
+    );
+    assert_eq!(lock(&result).unwrap().0, TerminalStatus::Exited);
+    assert!(member.current().is_none_or(|row| row.zombie));
+}
+
+fn read_member_pid(worker: &mut Worker) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        worker.io_round(&mut VecDeque::new()).unwrap();
+        if let Some(pid) = std::str::from_utf8(lock(&worker.output).bytes.make_contiguous())
+            .unwrap()
+            .split_once('\n')
+            .and_then(|(line, _)| line.strip_prefix("MEMBER "))
+        {
+            return pid.trim_end().parse().unwrap();
+        }
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("the member did not report its signal dispositions");
+        let mut descriptors = [rustix::event::PollFd::new(
+            worker.io.as_ref().unwrap(),
+            rustix::event::PollFlags::IN,
+        )];
+        rustix::event::poll(
+            &mut descriptors,
+            Some(&rustix::event::Timespec {
+                tv_sec: remaining.as_secs().try_into().unwrap(),
+                tv_nsec: remaining.subsec_nanos().into(),
+            }),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_kill() {
     for acknowledge_loss in [false, true] {
         let mut worker = worker();
