@@ -317,8 +317,23 @@ fn read_rows(body: &[u8], external_kill: bool) -> Vec<Commit> {
 
 #[test]
 fn only_an_external_kill_may_leave_one_unpublished_trace_row() {
-    let row = r#"{"ordinal":1,"store":"runtime","store_index":1,"store_ordinal":1,"label":"commit","tables":[],"indexed":true}"#;
-    for tail in ["{\"ordinal\":2,", row] {
+    let encode = |index| {
+        serde_json::to_string(&Commit {
+            ordinal: index,
+            store: "runtime".into(),
+            store_index: index,
+            store_ordinal: index,
+            label: "commit".into(),
+            tables: Vec::new(),
+            indexed: true,
+            classes: Vec::new(),
+            retired: 0,
+        })
+        .unwrap()
+    };
+    let row = encode(1);
+    let second = encode(2);
+    for tail in ["{\"ordinal\":2,", &second] {
         let body = format!("{row}\n{tail}");
         assert_eq!(read_rows(body.as_bytes(), true).len(), 1);
         assert!(std::panic::catch_unwind(|| read_rows(body.as_bytes(), false)).is_err());
