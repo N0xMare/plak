@@ -186,7 +186,7 @@ impl TreeDriver {
             })
             .await;
         if !matches!(result, Ok(Ok(()))) {
-            tracing::warn!("could not record pending child retirement disposition");
+            tracing::warn!(target: "plak.topology", "could not record pending child retirement disposition");
         }
     }
 

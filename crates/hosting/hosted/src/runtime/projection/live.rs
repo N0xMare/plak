@@ -92,7 +92,7 @@ impl LiveTarget {
                 .await
                 .is_err()
             {
-                tracing::debug!("child retirement housekeeping remains unsettled");
+                tracing::debug!(target: "plak.topology", "child retirement housekeeping remains unsettled");
             }
         }
         Ok(())
