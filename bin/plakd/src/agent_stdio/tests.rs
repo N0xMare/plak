@@ -491,6 +491,8 @@ fn worker_join_uses_the_supplied_deadline() {
 
 #[test]
 fn handshake_failure_still_joins_and_preserves_release_failure() {
+    use plakous_hosted::runtime::{HostBoundary, HostWorkflow};
+
     struct FailedWriter;
     impl Write for FailedWriter {
         fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
@@ -505,8 +507,14 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
     );
     let mut config = fixture.host_config();
     config.topology_enabled = false;
-    let store = config.store.clone();
     let id = config.session.id.clone();
+    let (prepared, root_delivery) = mpsc::channel();
+    plakous_hosted::runtime::test_kit::scripted_mut(&mut config).observe =
+        std::sync::Arc::new(move |workflow, boundary| {
+            if (workflow, boundary) == (HostWorkflow::RootDelivery, HostBoundary::Prepared) {
+                prepared.send(()).unwrap();
+            }
+        });
     let executor = plakous::application::ApplicationExecutor::new().unwrap();
     let _hub = executor
         .block_on(
@@ -520,7 +528,9 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
         config,
         &mut FailedWriter,
         &mut Vec::new(),
-        std::io::Cursor::new(Vec::<u8>::new()),
+        std::io::Cursor::new(
+            "{\"v\":1,\"kind\":\"prompt\",\"id\":\"p\",\"text\":\"do not run before ready\"}\n",
+        ),
     )
     .unwrap_err();
     assert!(error.message().contains("stdout failed"), "{error:?}");
@@ -528,8 +538,10 @@ fn handshake_failure_still_joins_and_preserves_release_failure() {
         error.message().contains("injected child release refusal"),
         "{error:?}"
     );
+    // Opening or releasing the worker can save the session without admitting
+    // work. The joined worker must not have prepared delivery of the input.
     assert!(
-        store.load(&id).is_err(),
+        root_delivery.try_recv().is_err(),
         "handshake failure admits no root turn"
     );
 }

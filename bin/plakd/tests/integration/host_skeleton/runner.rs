@@ -178,6 +178,12 @@ fn an_eof_before_the_local_runner_hello_is_retried() {
         });
         let mut host = start_env(&fixture, &[], &[("PLAK_LOG", "info".into())]);
         dropped.join().unwrap();
+        // Serving the socket is not proof that the host finished binding and
+        // reconciling the replacement. Keep the peer alive through that verdict.
+        assert_eq!(
+            local_runner_status(&mut Client::connect(&host)),
+            plakous_host_protocol::wire::RunnerStatus::Ready
+        );
         stop(&mut host);
         let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap_or_default();
         assert!(
@@ -1140,13 +1146,26 @@ fn an_unattached_stop_stops_a_busy_root_and_live_children() {
     let (mut host, session, _) = start_child_job_variant(&fixture, true, &[]);
     let (pid, _) = job(&fixture);
     let mut client = Client::connect(&host);
-    let row = client
-        .rows(1)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap();
+    let Outcome::Ok(Answer::Watching { attachment }) = client.request(
+        1,
+        Op::WatchSessions {
+            include_archived: false,
+        },
+    ) else {
+        panic!("no directory watch");
+    };
+    let HostFrame::Directory {
+        snapshot: true,
+        rows,
+        ..
+    } = client.next()
+    else {
+        panic!("no directory snapshot");
+    };
+    let row = rows.into_iter().find(|row| row.session == session).unwrap();
     assert_eq!(row.activity, SessionActivity::Busy);
     assert!(row.live_work.children > 0, "the live child was not counted");
+    client.retain_observations();
     assert_eq!(
         client.request(
             2,
@@ -1158,19 +1177,33 @@ fn an_unattached_stop_stops_a_busy_root_and_live_children() {
             runner_pending: false
         })
     );
-    stopped(pid);
-    let row = client
-        .rows(3)
-        .into_iter()
-        .find(|row| row.session == session)
-        .unwrap();
-    assert_eq!(row.live_work.children, 0);
-    assert_eq!(row.live_work.held_children, 0);
     assert!(
         root_record(&fixture, &session)
             .0
             .contains(&RootInterruptCause::Stopped)
     );
+    stopped(pid);
+    // The receipt proves durable cancellation, not that the directory
+    // projection has published it. The watch may update before the receipt.
+    client.read_deadline = Some(std::time::Instant::now() + WAIT);
+    loop {
+        if let HostFrame::Directory {
+            attachment: watched,
+            rows,
+            ..
+        } = client.next()
+        {
+            assert_eq!(watched, attachment);
+            if rows.iter().any(|row| {
+                row.session == session
+                    && row.live_work.children == 0
+                    && row.live_work.held_children == 0
+            }) {
+                break;
+            }
+        }
+    }
+    client.read_deadline = None;
     assert_eq!(
         client.request(4, Op::StopSession { session }),
         Outcome::Ok(Answer::Stopped {

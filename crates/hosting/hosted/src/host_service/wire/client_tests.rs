@@ -58,14 +58,16 @@ impl Served {
     fn start() -> Self {
         let (actions, intents) = plakous_host_protocol::intent_channel::<Core>();
         let (published, events) = plakous_host_protocol::observation_channel::<Core>();
-        published
-            .send(SessionObservation::PresentationSnapshot(
-                PresentationSnapshot::empty(1),
-            ))
-            .unwrap();
         let session = WireSession::start(root_of("s1"), "s1".to_owned(), actions, events, |id| {
             Some(root_of(id))
         });
+        // Start with a kept baseline, not an observation still racing the
+        // attach on the pump. This fixture has no actor to answer repair.
+        session
+            .publisher()
+            .publish(SessionObservation::PresentationSnapshot(
+                PresentationSnapshot::empty(1),
+            ));
         Self {
             session,
             published,
