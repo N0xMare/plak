@@ -191,7 +191,7 @@ fn review_running_snapshot_counts_toward_cap_and_is_consumable() -> TestResult {
 }
 
 #[test]
-fn review_consumption_removes_active_terminal_and_missing_stopper_is_unknown() -> TestResult {
+fn review_consumption_fences_active_terminal_and_missing_stopper_is_unknown() -> TestResult {
     let directory = tempfile::tempdir()?;
     let sessions = sessions(directory.path())?;
     let id = sessions.start(
@@ -206,7 +206,11 @@ fn review_consumption_removes_active_terminal_and_missing_stopper_is_unknown() -
     assert_eq!(sessions.jobs()[0].status, JobStatus::OutcomeUnknown);
     sessions.consume_jobs(&[1]);
     assert_eq!(sessions.jobs().len(), 1, "unjoined owner must remain owned");
-    assert!(sessions.session_for_number(1).is_some());
+    assert!(sessions.session_for_number(1).is_none());
+    assert_eq!(
+        sessions.reported_session_for_number(1),
+        Some((id, JoinedProcessStatus::Terminated))
+    );
     drop(operation);
     lock(&session.owner)
         .as_mut()

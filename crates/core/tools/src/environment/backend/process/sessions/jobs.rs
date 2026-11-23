@@ -526,10 +526,7 @@ impl JoinedProcessSessions {
             .active
             .iter()
             .chain(&state.finished)
-            .filter(|(_, session)| {
-                session.promoted.load(Ordering::Acquire) == PROMOTED
-                    && !session.consumed.load(Ordering::Acquire)
-            })
+            .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
             .map(|(id, session)| self.job_view(*id, session))
             .collect();
         drop(state);
