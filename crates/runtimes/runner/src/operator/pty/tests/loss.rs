@@ -97,7 +97,7 @@ fn read_member_pid(worker: &mut Worker) -> u32 {
         }
         let remaining = deadline
             .checked_duration_since(Instant::now())
-            .expect("the member did not report its signal dispositions");
+            .unwrap_or_else(|| panic!("the member did not report its signal dispositions"));
         let mut descriptors = [rustix::event::PollFd::new(
             worker.io.as_ref().unwrap(),
             rustix::event::PollFlags::IN,
