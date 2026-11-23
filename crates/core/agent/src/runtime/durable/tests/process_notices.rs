@@ -21,6 +21,15 @@ impl NoticeFixture {
         continuations: &[usize],
         terminal_poll: bool,
     ) -> TestResult<Self> {
+        Self::with_backend(held_call, continuations, terminal_poll, false).await
+    }
+
+    async fn with_backend(
+        held_call: usize,
+        continuations: &[usize],
+        terminal_poll: bool,
+        on_runner: bool,
+    ) -> TestResult<Self> {
         let directory = tempfile::tempdir()?;
         let descriptor = durable_test_descriptor("test.route")?;
         let model = Arc::new(
@@ -47,16 +56,16 @@ impl NoticeFixture {
             RuntimeDurability::Required,
             NonZeroU64::new(30).ok_or("lease")?,
         )?;
-        let agent = sessions
-            .create(
-                "create:notice-boundary",
-                session_update_builder(
-                    Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
-                    model.clone(),
-                    registry.clone(),
-                )?,
-            )
-            .await?;
+        let mut builder = session_update_builder(
+            Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+            model.clone(),
+            registry.clone(),
+        )?;
+        if on_runner {
+            builder =
+                builder.with_runner_services(placement_hold::placed_services(directory.path())?);
+        }
+        let agent = sessions.create("create:notice-boundary", builder).await?;
         Ok(Self {
             directory,
             agent,
@@ -225,7 +234,16 @@ async fn wait_after_notice_commit(on_runner: bool) -> TestResult {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery() -> TestResult {
-    let fixture = NoticeFixture::with_terminal_poll(usize::MAX, &[], true).await?;
+    terminal_tool_result_consumes_before_boundary_delivery(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runner_terminal_tool_result_consumes_before_boundary_delivery() -> TestResult {
+    terminal_tool_result_consumes_before_boundary_delivery(true).await
+}
+
+async fn terminal_tool_result_consumes_before_boundary_delivery(on_runner: bool) -> TestResult {
+    let fixture = NoticeFixture::with_backend(usize::MAX, &[], true, on_runner).await?;
     let turn = fixture.agent.prompt("start then wait on the job").await?;
     // A liveness bound only: generous, so load never trips it.
     tokio::time::timeout(Duration::from_secs(30), async {
@@ -256,6 +274,11 @@ async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery()
     );
     assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     assert_eq!(notice_count(&fixture.agent), 0);
+    assert_eq!(service.session_for_number(1), None);
+    assert_eq!(
+        plakous_tools::internal::reported_process_session(&service, 1),
+        Some((id, plakous_tools::JoinedProcessStatus::Exited(Some(7))))
+    );
     fixture
         .agent
         .prompt("no duplicate completion")

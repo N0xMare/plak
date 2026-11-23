@@ -190,6 +190,19 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                 })?;
                 if self.await_promoted_terminal.load(Ordering::Acquire) {
                     while sessions.joined_terminal_status(id).is_none() {
+                        // The in-process runner fixture does not open a watch.
+                        if context.environment().backend().kind()
+                            == plakous_tools::ExecutionBackendKind::Runner
+                        {
+                            sessions
+                                .poll_from(
+                                    id,
+                                    plakous_tools::JoinedProcessOutputCursor::new(0),
+                                    1,
+                                    1,
+                                )
+                                .map_err(plakous_tools::backend_runtime_error)?;
+                        }
                         tokio::task::yield_now().await;
                     }
                     if self.leave_terminal_unjoined.load(Ordering::Acquire) {
