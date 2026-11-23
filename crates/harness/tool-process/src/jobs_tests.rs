@@ -1368,7 +1368,7 @@ async fn local_wait_after_a_notice_reads_only_the_terminal_tombstone() -> TestRe
     .await?;
     assert!(sessions.active_session_ids().contains(&id));
     plakous_tools::internal::consume_jobs(&sessions, &[number]);
-    assert!(sessions.jobs().is_empty());
+    assert_eq!(sessions.jobs(), [] as [plakous_tools::JobView; 0]);
     assert_notice_wait(&environment, handle).await?;
     sessions.join_all()?;
     Ok(())
@@ -1440,7 +1440,7 @@ pub(super) async fn assert_notice_wait(
         &OperationContext::new(CancellationToken::new()),
     )
     .await?;
-    assert!(poll.projection.output.is_empty());
+    assert_eq!(poll.projection.output, "");
     assert_eq!(poll.projection.exit_code, Some(7));
     assert_eq!(poll.projection.session_id, None);
     Ok(())
