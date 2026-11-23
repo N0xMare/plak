@@ -3,6 +3,8 @@
 use super::*;
 use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
+use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt as _;
 
 struct FiniteDrain {
     _cleanup: HomeHost,
@@ -110,8 +112,6 @@ impl FiniteDrain {
     fn finish_job(&self, original: (i32, i32)) {
         assert_eq!(original, self.wait_foreground());
         assert!(runner::alive(original.0), "the original job was stopped");
-        use std::fs::OpenOptions;
-        use std::os::unix::fs::OpenOptionsExt as _;
         OpenOptions::new()
             .write(true)
             .custom_flags(rustix::fs::OFlags::NONBLOCK.bits().cast_signed())
