@@ -382,8 +382,7 @@ impl RunningHost {
             listeners.remove();
         }
         runtime.block_on(terminals.stop());
-        // The handoff first closes the host: no session opens or is created
-        // from then on.
+        // Joined release closes the host to new sessions.
         hand_off(&host, &runtime, stopping, ready.as_ref().filter(|_| paired));
         receipt_recovery.join();
         let scan_result = startup.join();
@@ -680,7 +679,7 @@ fn compose_web(
 fn hand_off(
     host: &SessionHost<crate::surface_protocol::PlakExtension>,
     runtime: &tokio::runtime::Runtime,
-    stopping: std::time::Instant,
+    stopping: Instant,
     paired: Option<&upgrade::Ready>,
 ) {
     if let Some(ready) = paired
