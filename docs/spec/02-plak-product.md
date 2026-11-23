@@ -1119,7 +1119,10 @@ binding digests instead bumps the generation and uses a cross-key settled
 carry. Steps accumulate within a generation and are deleted at its next
 generation bump. A fresh store creates the frozen generation base and runs
 the same steps in order. Each step starts at the pinned source fingerprint and
-validates the exact destination shape and fingerprint.
+validates the exact destination shape and fingerprint. Tree revision 12 adds
+local finished-child summaries to generation 11 without changing the state
+key, runtime authority format or export document. The same-key drain joins
+in-flight retirement before surrender (chapter 03 §6.7).
 
 Ordinary read-only opens and inspections never upgrade: they refuse an older
 revision in range with `upgrade pending`. A revision below the generation or

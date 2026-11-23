@@ -184,7 +184,7 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
     use crate::protocol::{MessagePurpose, SendAgentMessageRequest, TopologyErrorCode};
 
     for followup_wins in [true, false] {
-        let (_tmp, mut tree) = tree();
+        let (tmp, mut tree) = tree();
         let id = tree
             .spawn_agent("root", &spawn_req(), None)
             .unwrap()
@@ -233,6 +233,16 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
             assert!(row.dormancy.conversation_retired);
             assert!(!row.has_session);
             assert!(row.prompt.is_empty());
+            let fork = crate::tree::block_on_for_test(super::ProductAgentTree::fork_genesis(
+                &tree,
+                "summary-free-fork",
+                tmp.path().to_path_buf(),
+                super::super::NodeLineId::parse("0190c3a1-5b7e-7c2d-9f00-00000000b001").unwrap(),
+                "0190c3a1-5b7e-7c2d-9f00-00000000b002".to_owned(),
+            ))
+            .unwrap();
+            assert!(fork.retired_children().is_empty());
+            assert!(fork.node(&id).is_err());
         }
     }
 }

@@ -29,9 +29,9 @@ pub struct RetiredChild {
     pub mail: Option<(String, String)>,
     /// Allocator floor, even when the removed mail was the last in the tree.
     pub(super) next_message_sequence: u64,
-    /// Original result digest and byte count, even when the result was too large to retain.
+    /// Original result digest and byte count.
     pub result: Option<(String, usize)>,
-    /// The exact submitted result when it fit the retention budget.
+    /// The exact submitted result, bounded by the submit-result contract.
     pub output: Option<String>,
     /// Short display label for the retired child.
     pub description: String,
@@ -320,6 +320,10 @@ impl ProductAgentTree {
         if self.placement_held(agent)
             || !self.placement_ready(agent)
             || self.is_parked(agent)
+            || self
+                .nodes
+                .values()
+                .any(|child| child.parent_agent_id.as_deref() == Some(agent))
             || self.recovery_owed(agent)
             || self
                 .pending_transient_resume(agent)
@@ -355,6 +359,9 @@ impl ProductAgentTree {
         // which never published results and has no witness is left alone.
         current.as_ref()?;
         let output = attempt.output_json.as_ref();
+        if output.is_some_and(|text| text.len() > crate::protocol::MAX_OUTPUT_JSON_BYTES) {
+            return None;
+        }
         Some(RetiredChild {
             parent: parent.clone(),
             depth: node.depth,
@@ -364,7 +371,7 @@ impl ProductAgentTree {
             mail: current,
             next_message_sequence: self.next_message_sequence,
             result: output.map(|text| (digest_text(text), text.len())),
-            output: output.filter(|text| text.len() <= 4096).cloned(),
+            output: output.cloned(),
             description: short_text(&node.description, 256),
         })
     }

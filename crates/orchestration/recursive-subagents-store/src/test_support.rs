@@ -47,7 +47,7 @@ pub(super) fn schema(base: Schema) -> Schema {
                 Revision {
                     sql: DDL,
                     objects: &[("subagents_revision_fixture", DDL)],
-                    fingerprint: "c5724458b476c2e24d662fb726937128f0f270c7df434b0c817bdc5ed02069fe",
+                    fingerprint: "224bf32e2847d39f9a4997f595d828f28324762888551f8cbdbfeb0bd331b3c2",
                 },
             ],
             ..base

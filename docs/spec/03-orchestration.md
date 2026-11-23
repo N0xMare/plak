@@ -2234,10 +2234,10 @@ The tree checks no remaining owner, hold, work or recovery debt, then obtains
 the runtime store's exact retirement proof. A bounded pass prepares intents
 under the tree's custody after rechecking eligibility and the same locator.
 That save closes follow-up and retains a bounded result summary: stable child,
-parent, attempt and mail identities, final status, result digest, exact small
-result where available, and a short display label. It carries no prompt,
-transcript or captures. For larger results the summary records the original
-digest and size rather than duplicating the result.
+parent, attempt and mail identities, final status, result digest, exact
+submitted result where available and a short display label. It carries no
+prompt, transcript or captures. It uses the existing 256 KiB submit-result
+bound; a delivered preview does not authorize discarding the full result.
 
 Only the facade may archive the released session at the approved branch head
 and session revision and delete its next, archived revision. The store checks

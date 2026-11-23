@@ -14,12 +14,16 @@ also keep compatibility with their immediately preceding version.
   Back up the three current SQLite stores online with verified copies and a
   SHA-256 manifest. Busy backups are retryable; pinned backup readers no longer
   block runtime-store shutdown while WAL truncation is deferred.
+- Add opt-in retirement for finished children after their results settle.
+  The local tree keeps the result and a closed summary; the runtime store
+  reclaims only objects no surviving session needs.
 
 ### Persisted formats
 
 - Permit forward-only additive revisions of product and tree stores during a
-  same-key host handoff, with a synced pre-upgrade copy. No revision is added
-  in this change; generations, schemas and the state key are unchanged.
+  same-key host handoff, with a synced pre-upgrade copy. Tree store revision
+  12 adds the retired-child summary table without changing its generation,
+  the state key or the export format.
 
 - State key `r28.e39.p39.t11` (runtime format epoch 39, product schema 39).
   Sessions under `r28.e38.p38.t11` cannot reopen exactly; carry them with

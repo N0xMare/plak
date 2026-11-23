@@ -102,8 +102,8 @@ pub(in super::super) fn retirement_head(
     branch: BranchId,
     checkpoint: CheckpointId,
 ) -> Result<(), SessionStoreError> {
-    let row =
-        branch_row(tx, SessionRef::new(session, branch))?.ok_or(SessionStoreError::NotFound)?;
+    let selector = SessionRef::new(session, branch);
+    let row = branch_row(tx, selector)?.ok_or(SessionStoreError::NotFound)?;
     if row.active.is_some() {
         return Err(SessionStoreError::LeaseHeld);
     }
@@ -115,6 +115,7 @@ pub(in super::super) fn retirement_head(
             "SELECT (SELECT count(*) FROM branches WHERE session_id=?1) <> 1
          OR EXISTS(SELECT 1 FROM runtime_move_sessions WHERE session_id=?1)
          OR EXISTS(SELECT 1 FROM runtime_move_heads WHERE session_id=?1)
+         OR EXISTS(SELECT 1 FROM branches WHERE fork_session=?1 AND session_id<>?1)
          OR EXISTS(SELECT 1 FROM lines l WHERE l.head_session=?1 AND
            (EXISTS(SELECT 1 FROM line_job_terminals j WHERE j.line_id=l.line_id)
             OR EXISTS(SELECT 1 FROM runtime_move_lines m WHERE m.line_id=l.line_id)))",
@@ -133,6 +134,8 @@ pub(in super::super) fn retirement_head(
     }
     let stored = load_checkpoint(tx, checkpoint)?;
     let manifest = stored.checkpoint().manifest();
+    let topology = manifest.topology();
+    require_line_head(tx, selector, topology.line, topology.line_generation)?;
     if !matches!(
         manifest.lifecycle(),
         plakous_agent::internal::RuntimeLifecycle::Quiescent

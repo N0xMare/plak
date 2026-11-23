@@ -20,18 +20,40 @@ pub fn project_tree_view(tree: &ProductAgentTree) -> TreeView {
         revision: tree.revision,
         state: tree.state,
         solicited: false,
-        nodes: tree
-            .preorder_ids()
-            .into_iter()
-            .filter_map(|id| project_node(tree, &id))
-            .chain(
-                tree.retired_children()
-                    .iter()
-                    .filter(|(id, _)| tree.node(id).is_err())
-                    .map(|(id, summary)| retired_child(id, summary)),
-            )
-            .collect(),
+        nodes: project_preorder(tree),
     }
+}
+
+fn project_preorder(tree: &ProductAgentTree) -> Vec<NodeView> {
+    let mut by_parent: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+    for node in tree
+        .nodes()
+        .values()
+        .filter_map(|node| project_node(tree, &node.agent_id))
+    {
+        by_parent
+            .entry(node.parent_agent_id.clone())
+            .or_default()
+            .push(node);
+    }
+    for (id, summary) in tree.retired_children() {
+        if tree.node(id).is_err() {
+            by_parent
+                .entry(Some(summary.parent.clone()))
+                .or_default()
+                .push(retired_child(id, summary));
+        }
+    }
+    let mut pending = by_parent.remove(&None).unwrap_or_default();
+    let mut rows = Vec::new();
+    while let Some(row) = pending.pop() {
+        if let Some(mut children) = by_parent.remove(&Some(row.agent_id.clone())) {
+            children.sort_by(|left, right| right.agent_id.cmp(&left.agent_id));
+            pending.extend(children);
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 fn retired_child(id: &str, summary: &RetiredChild) -> NodeView {

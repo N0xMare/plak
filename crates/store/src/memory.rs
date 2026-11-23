@@ -1455,6 +1455,13 @@ fn verify_retirement_head(
         .get(&checkpoint)
         .ok_or(SessionStoreError::corrupt())?;
     let manifest = record.checkpoint.manifest();
+    let topology = manifest.topology();
+    lines::require_head(
+        state,
+        SessionRef::new(session_id, branch),
+        topology.line,
+        topology.line_generation,
+    )?;
     let depends_on_session = |id: CheckpointId| {
         state
             .checkpoints
@@ -1477,7 +1484,7 @@ fn verify_retirement_head(
                     .is_some_and(depends_on_session)
                     || topology
                         .fork
-                        .is_some_and(|fork| depends_on_session(fork.checkpoint_id)))
+                        .is_some_and(|fork| fork.session_id == session_id))
         })
     {
         return Err(SessionStoreError::Conflict);

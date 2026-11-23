@@ -96,12 +96,12 @@ pub fn expected_schema_fingerprint() -> String {
     schema().fingerprint()
 }
 
-const RETIRED_CHILDREN: &str = "CREATE TABLE agent_retired_children(tree_id TEXT NOT NULL REFERENCES agent_trees(tree_id) ON DELETE CASCADE,agent_id TEXT NOT NULL,summary TEXT NOT NULL CHECK(json_valid(summary) AND length(CAST(summary AS BLOB))<=32768),PRIMARY KEY(tree_id,agent_id))";
+const RETIRED_CHILDREN: &str = "CREATE TABLE agent_retired_children(tree_id TEXT NOT NULL REFERENCES agent_trees(tree_id) ON DELETE CASCADE,agent_id TEXT NOT NULL,summary TEXT NOT NULL CHECK(json_valid(summary) AND length(CAST(summary AS BLOB))<=2097152),PRIMARY KEY(tree_id,agent_id))";
 
 pub(super) const RETIREMENT_REVISION: Revision = Revision {
     sql: RETIRED_CHILDREN,
     objects: &[("agent_retired_children", RETIRED_CHILDREN)],
-    fingerprint: "04cb803bb9102efd520309285f5fdd780c2e6f704b987277ebac77fc37d93297",
+    fingerprint: "e29f9e05a77854a181ac3f0ba410510ea31f60c180542689c87a528a6ddf8770",
 };
 
 /// The tree file's admission descriptors.
