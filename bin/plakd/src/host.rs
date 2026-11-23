@@ -185,9 +185,10 @@ pub(crate) fn abort_child_retirement(
     }
     tree.abort_child_retirement(child, &locator)
         .map_err(|error| CliFailure::new(error.message))?;
-    store
+    let revision = store
         .save_in_custody(&tree)
         .map_err(|error| CliFailure::new(error.to_string()))?;
+    tree.acknowledge_revision(revision);
     writeln!(stdout, "aborted retirement of {child} in tree {tree_id}")
         .map_err(|_| CliFailure::new("stdout failed"))
 }
