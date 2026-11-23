@@ -6544,6 +6544,12 @@ PATH (`$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`), the systemd runtime
 directory and user-bus address, the manager's SHELL, USER, LOGNAME and
 INVOCATION_ID, and the fixed assignment `MALLOC_ARENA_MAX=2` reach the host.
 The assignment limits glibc allocator arenas and is ignored by musl.
+A same-key exec upgrade inherits the running environment, so the assignment
+takes effect only after the unit is rewritten and the service actually restarts;
+`plakd deploy` reports the old unit as template drift. After the cutover, use a
+separately rehearsed procedure: back up and remove the old host unit, run the
+new build's `plakd host install` with the same arguments, then perform a planned
+`systemctl --user restart plakd-host.service`.
 SHELL lets the host capture the login shell's
 PATH for session tools; the curated PATH is the fallback, not a replacement
 for that capture. Paths and systemd expansions are quoted separately. No API keys,

@@ -126,6 +126,11 @@ also keep compatibility with their immediately preceding version.
 
 ### plakd
 
+- The generated Linux host unit sets `MALLOC_ARENA_MAX=2` for glibc; musl
+  ignores it. To adopt it after a cutover, rehearse the change separately:
+  back up and remove the old host unit, rerun the new build's
+  `plakd host install` with the same arguments, then perform a planned
+  `systemctl --user restart plakd-host.service`.
 - Add the private native `plakd deploy` workflow for enrolled same-key host
   upgrades from verified artifacts. Source and release installs share the
   Rust snapshot installer; staging can leave command links untouched.

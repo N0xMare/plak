@@ -76,7 +76,8 @@ the installer does not request it. If daemon-reload fails, the complete unit
 remains in place; run `systemctl --user daemon-reload` before enabling it.
 
 The host starts with a curated environment, not the installer shell's API keys,
-proxy settings or test variables. It preserves systemd's SHELL, USER and
+proxy settings or test variables. The unit sets `MALLOC_ARENA_MAX=2` to limit
+glibc allocator arenas; musl ignores it. It preserves systemd's SHELL, USER and
 LOGNAME so the host can ask the login shell for the PATH its session tools
 need, including language-toolchain directories. Its fallback PATH is
 `$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin`. The startup journal line
@@ -184,6 +185,16 @@ not cross-key carry. On Linux it replaces the image in the running process:
 the unit's `MainPID` stays the same, but the host generation changes. If you
 then replace a legacy unit, stop it and start the new unit as a separate
 operation; the new unit has a new PID.
+
+On Linux, a same-key exec upgrade inherits the running environment. The
+allocator setting in the new unit does not take effect until the unit is
+rewritten and the service actually restarts; `plakd deploy` reports the older
+unit as template drift. Rehearse this separately from the cutover. After the
+cutover, back up and remove only the installed `plakd-host.service` file,
+then run the new build's `plakd host install` with the same `--web` and `--ui`
+arguments. Once installation succeeds, perform a planned
+`systemctl --user restart plakd-host.service`.
+
 An additive product or tree store revision can advance in place without
 changing the state key. The new host revises the stores after the old host
 stops. Before any restart, point the service's stable executable link or
