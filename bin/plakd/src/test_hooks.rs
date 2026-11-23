@@ -252,8 +252,10 @@ pub(crate) fn profile_route_ready(
 pub(crate) mod client_fixtures;
 mod host;
 mod runner;
+mod stop_notice;
 mod upgrade_runner;
 pub(crate) use host::OfflineFace;
+pub(crate) use stop_notice::{commit_session, is_stop_notice};
 pub(crate) use upgrade_runner::{
     upgrade_runner_environment, upgrade_runner_protocol, upgrade_runner_revision,
 };

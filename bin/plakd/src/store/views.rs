@@ -676,7 +676,7 @@ impl ProductStore {
                 if claimed {
                     continue;
                 }
-                target.store_revision = super::commit_in_transaction(&tx, &target, 0, None)?;
+                target.store_revision = super::commit_in_transaction(&tx, &target, 0, None)?.0;
                 changed.push(target.id.clone());
                 for notice in &intents.notices {
                     if notice.anchor < successor.published_seq.get() {
@@ -1246,12 +1246,7 @@ pub(super) fn write_notices(
                 row: row.clone(),
             },
         )?;
-        // Test traces name the write, not the notice content or session.
-        wrote_stop_notice |= cfg!(feature = "test-support")
-            && row.text()
-                == Some(
-                    "stopped: the session's work ended, and nothing continues it until it is prompted again",
-                );
+        wrote_stop_notice |= crate::test_hooks::is_stop_notice(row);
         next = next.saturating_add(1);
     }
     Ok(wrote_stop_notice)

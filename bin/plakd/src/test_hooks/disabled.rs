@@ -121,6 +121,15 @@ pub(crate) fn runner_ready_result(
     _result: &Result<(), plakous::runner::PlacementFailure>,
 ) {
 }
+pub(crate) const fn is_stop_notice(_row: &plakous_hosted::sessions::TranscriptRow) -> bool {
+    false
+}
+pub(crate) fn commit_session(
+    transaction: rusqlite::Transaction<'_>,
+    _wrote_stop_notice: bool,
+) -> rusqlite::Result<()> {
+    transaction.commit()
+}
 pub(crate) fn runner_link(
     client: plakous::runner::RunnerClient,
 ) -> std::sync::Arc<dyn plakous::tools::runner::RunnerLink> {

@@ -533,8 +533,6 @@ impl ProductStore {
                 .filter(|(revision, _)| *revision == expected)
                 .map(|(_, baseline)| baseline),
         )?;
-        #[cfg(not(feature = "test-support"))]
-        let _ = wrote_stop_notice;
         if let Some(submission) = submission {
             views::insert_submission(
                 &transaction,
@@ -566,21 +564,9 @@ impl ProductStore {
                 |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
             )
             .map_err(|error| write_error(error, "could not read operator metadata"))?;
-        {
-            #[cfg(feature = "test-support")]
-            let _label = wrote_stop_notice
-                .then(|| plakous_offline_crash_harness::commit_trace::label("stop_notice"));
-            transaction.commit().map_err(|error| {
-                write_error(error, "could not durably commit product session".to_owned())
-            })?;
-        }
-        #[cfg(feature = "test-support")]
-        if wrote_stop_notice
-            && std::env::var_os(plakous_offline_crash_harness::commit_trace::TRACE_ENV).is_some()
-        {
-            // The WAL callback synced the indexed row before commit returned.
-            eprintln!("commit-trace: stop_notice");
-        }
+        crate::test_hooks::commit_session(transaction, wrote_stop_notice).map_err(|error| {
+            write_error(error, "could not durably commit product session".to_owned())
+        })?;
         session.store_revision = next;
         session.title_override = operator_fields.0;
         session.archived = operator_fields.1;
