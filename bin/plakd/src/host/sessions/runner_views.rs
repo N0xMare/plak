@@ -1,8 +1,11 @@
 //! Neutral runner facts projected into the authenticated client vocabulary.
 
 pub(super) use plakous::runner::RunnerRow;
-use plakous::runner::{PlacementFailure, ProbePhase};
+use plakous::runner::{PlacementFailure, ProbePhase, RunnerStatus as ProbeStatus};
 use plakous_host_protocol::wire;
+
+#[allow(dead_code, reason = "protocol 13 is not served yet")]
+pub(super) mod v13;
 
 pub(super) const fn phase(phase: ProbePhase) -> Option<wire::RunnerPhase> {
     Some(match phase {
@@ -145,9 +148,9 @@ pub(super) fn status(id: &str, rows: &[RunnerRow]) -> Result<wire::RunnerStatus,
         });
     };
     Ok(match &row.status {
-        plakous::runner::RunnerStatus::Unknown => wire::RunnerStatus::Unknown,
-        plakous::runner::RunnerStatus::Ready => wire::RunnerStatus::Ready,
-        plakous::runner::RunnerStatus::Blocked(failure) => wire::RunnerStatus::Blocked {
+        ProbeStatus::Unknown => wire::RunnerStatus::Unknown,
+        ProbeStatus::Ready => wire::RunnerStatus::Ready,
+        ProbeStatus::Blocked(failure) => wire::RunnerStatus::Blocked {
             reason: reason(failure.clone(), None, rows)?,
         },
     })

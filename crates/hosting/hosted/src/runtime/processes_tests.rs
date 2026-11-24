@@ -46,6 +46,22 @@ fn process_rows_are_published_when_they_change() {
     assert_eq!(published(), []);
     events.publish_processes(vec![row(ProcessStatus::Running, 1_100)]);
     assert_eq!(published(), [(1, 1)]);
+    let peer = ProcessView {
+        id: "p2".into(),
+        owner: "child".into(),
+        ..row(ProcessStatus::Running, 100)
+    };
+    let stopping = row(ProcessStatus::Stopping, 1_100);
+    events.publish_processes(vec![stopping.clone(), peer.clone()]);
+    assert_eq!(published(), [(2, 2)]);
+    events.publish_processes(vec![stopping, peer.clone()]);
+    assert_eq!(published(), []);
+    let released = ProcessView {
+        status: ProcessStatus::Released,
+        ..peer
+    };
+    events.publish_processes(vec![row(ProcessStatus::Stopped, 1_100), released]);
+    assert_eq!(published(), [(2, 0)]);
     events.publish_processes(vec![row(ProcessStatus::Exited(Some(0)), 1_100)]);
     assert_eq!(published(), [(1, 0)]);
     let _ = events.send(ContentEvent::SessionOpening);

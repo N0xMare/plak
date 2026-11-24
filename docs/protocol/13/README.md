@@ -64,6 +64,15 @@ money and unknown cost separately from measured zero. Do not retry a draft
 automatically after a lost response; a `blob_refused` is an explicit
 not-admitted outcome for the named blob, not a draft verdict.
 
+Runner reconciliation uses `phase: reconcile` with one of `store`,
+`obsolete_lines`, `terminals`, `jobs`, `stops` or `foreground` as its
+`subphase`. Progress, directory status and placement refusals share the
+same phase vocabulary. A broad reconciliation marker does not name a
+subphase on its own. Directory `live_work.children` counts pending, running
+and sealing descendants, excluding parked children. `held_children` counts
+descendants waiting for consent after host loss, not also in `children`.
+`processes` counts running and stopping process views.
+
 This checkout still serves 12, and `plakd wire schema` without the draft
 flag still reports 12. After the host implementation is complete, the
 staging build will serve 13 only. Use that exact build's normal schema

@@ -126,6 +126,24 @@ impl Cases for wire::PlacementReason {
     const REPLACED: &'static [&'static str] = &["runner_unreachable"];
 }
 
+impl TryFrom<wire::PlacementReason> for super::PlacementReason {
+    type Error = wire::PlacementReason;
+
+    fn try_from(reason: wire::PlacementReason) -> Result<Self, Self::Error> {
+        if matches!(reason, wire::PlacementReason::RunnerUnreachable { .. }) {
+            return Err(reason);
+        }
+        Ok(Self::Shared(Shared(reason)))
+    }
+}
+
+impl super::RequestRefusal {
+    #[must_use]
+    pub fn session_unavailable(detail: String) -> Self {
+        Self::Shared(Shared(wire::RequestRefusal::SessionUnavailable { detail }))
+    }
+}
+
 pub type SharedHostResponse = Shared<console::HostResponse>;
 impl Cases for console::HostResponse {
     const NAME: &'static str = "SharedHostResponse";

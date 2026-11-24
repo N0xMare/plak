@@ -4,8 +4,19 @@ use crate::agent_tree_protocol::NodeStatus;
 
 use super::{ChildNodes, NodeState};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct ChildCounts {
+    pub(super) work: usize,
+    pub(super) running: usize,
+    pub(super) held: usize,
+}
+
 pub(super) fn try_child_counts(tree_id: &str) -> Option<(usize, usize)> {
-    crate::topology_runtime::lookup(tree_id).map_or(Some((0, 0)), |runtime| {
+    try_child_work_counts(tree_id).map(|counts| (counts.work, counts.held))
+}
+
+pub(super) fn try_child_work_counts(tree_id: &str) -> Option<ChildCounts> {
+    crate::topology_runtime::lookup(tree_id).map_or(Some(ChildCounts::default()), |runtime| {
         runtime.try_read(|tree| count_children(tree, runtime.continues_after_loss()))
     })
 }
@@ -34,10 +45,9 @@ pub(super) fn lifecycle_children(tree_id: &str) -> Result<Vec<String>, ()> {
         .map_err(|_| ())
 }
 
-fn count_children(tree: &crate::agent_tree::ProductAgentTree, continues: bool) -> (usize, usize) {
+fn count_children(tree: &crate::agent_tree::ProductAgentTree, continues: bool) -> ChildCounts {
     use crate::agent_tree::{ContinuationCause, LossContinuationState};
-    let mut running = 0;
-    let mut held = 0;
+    let mut counts = ChildCounts::default();
     for (id, node) in tree.nodes() {
         if *id == tree.root_agent_id {
             continue;
@@ -48,20 +58,28 @@ fn count_children(tree: &crate::agent_tree::ProductAgentTree, continues: bool) -
                 && loss.cause == ContinuationCause::OwnerLost
                 && (!continues || loss.interrupted_continuation)
         }) {
-            held += 1;
-        } else if continuation.is_some()
-            || matches!(
-                node.status,
-                NodeStatus::Pending
-                    | NodeStatus::Running
-                    | NodeStatus::Paused
-                    | NodeStatus::Sealing
-            )
-        {
-            running += 1;
+            counts.held += 1;
+        } else if continuation.is_some() {
+            counts.work += 1;
+            counts.running += 1;
+        } else {
+            match node.status {
+                NodeStatus::Pending | NodeStatus::Sealing => {
+                    counts.work += 1;
+                    counts.running += 1;
+                }
+                NodeStatus::Running => {
+                    counts.work += 1;
+                    if tree.waiting_on(id).is_none() {
+                        counts.running += 1;
+                    }
+                }
+                NodeStatus::Paused => counts.work += 1,
+                _ => {}
+            }
         }
     }
-    (running, held)
+    counts
 }
 
 /// The children of the tree `tree_id`, as its hub holds them: a node of a

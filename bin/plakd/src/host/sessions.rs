@@ -28,6 +28,8 @@ use crate::surface_protocol::PlakExtension;
 mod archived;
 mod directory;
 #[allow(dead_code, reason = "protocol 13 is not served yet")]
+mod directory_work_v13;
+#[allow(dead_code, reason = "protocol 13 is not served yet")]
 pub(crate) mod history;
 mod lifecycle;
 mod options;
