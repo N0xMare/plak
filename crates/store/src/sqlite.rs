@@ -1169,6 +1169,7 @@ impl Backend {
         {
             return false;
         }
+        #[cfg(feature = "test-support")]
         let _settle = trace_boundary::SettleGuard;
         #[cfg(test)]
         if let Some(hook) = &mut self.job_hook {
