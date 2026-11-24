@@ -247,10 +247,19 @@ fn detached_daemon_and_piped_job_do_not_ignore_interrupt_or_quit() {
         .trim()
         .parse()
         .unwrap();
+    #[cfg(target_os = "linux")]
     let masks = [
         ("detached daemon", ignored_signals(daemon)),
         ("piped job", ignored_signals(job)),
     ];
+    // macOS exposes no ignored-signal set. A piped job inherits any ignored
+    // disposition from the daemon, so INT ending the job and QUIT ending the
+    // daemon show neither process ignores either signal.
+    #[cfg(target_os = "macos")]
+    {
+        terminates_on(job, nix::sys::signal::Signal::SIGINT, "piped job");
+        terminates_on(daemon, nix::sys::signal::Signal::SIGQUIT, "detached daemon");
+    }
     stop(&mut host);
     kill_home_local_runner(&fixture.home());
 
@@ -258,6 +267,7 @@ fn detached_daemon_and_piped_job_do_not_ignore_interrupt_or_quit() {
         parent, host_pid,
         "the host still owns the daemon's wait status"
     );
+    #[cfg(target_os = "linux")]
     for (process, mask) in masks {
         for signal in [rustix::process::Signal::INT, rustix::process::Signal::QUIT] {
             assert_eq!(
@@ -280,14 +290,16 @@ fn ignored_signals(pid: i32) -> u64 {
 }
 
 #[cfg(target_os = "macos")]
-fn ignored_signals(pid: i32) -> u64 {
-    let output = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "ignored="])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let ignored = std::str::from_utf8(&output.stdout).unwrap().trim();
-    u64::from_str_radix(ignored.trim_start_matches("0x"), 16).unwrap()
+fn terminates_on(pid: i32, signal: nix::sys::signal::Signal, process: &str) {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), signal).unwrap();
+    let deadline = std::time::Instant::now() + WAIT;
+    while alive(pid) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{process} ignores {signal:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 #[test]
