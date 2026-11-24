@@ -14,7 +14,7 @@ use crate::{CliFailure, CliResult};
 
 use super::admission::{emit_prompt_history, emit_queue_snapshot, emit_unavailable_context};
 use super::info::{emit_agent_plan_notes, send_binding, send_last_user_prompt_at};
-use super::logging::{log_ev, project_session_snapshot};
+use super::logging::log_ev;
 use super::models::native_compact_facet;
 use super::reconcile::persist;
 use super::source_release::{Settlement, SourceRelease, release_source_attachment};
@@ -148,7 +148,7 @@ pub async fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(ContentEvent::ClearView);
     // The new session's header, as a restore of it would show.
-    let _ = events.replace_transcript(project_session_snapshot(&config.session));
+    let _ = events.replace_root_session(&config.session);
     send_last_user_prompt_at(events, config, opened);
     if let Err(error) = report_context(
         opened,
@@ -496,7 +496,7 @@ pub(super) fn publish_restored_frame_before_source_release<
     // its own durable locator and reports any ambiguity without rolling the
     // active target back.
     send_binding(events, config);
-    let _ = events.replace_transcript(project_session_snapshot(&config.session));
+    let _ = events.replace_root_session(&config.session);
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
     emit_agent_plan_notes(events, config, stderr_buf);

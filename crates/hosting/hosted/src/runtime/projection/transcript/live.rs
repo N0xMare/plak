@@ -156,6 +156,10 @@ impl LiveRows {
         self.pending.get(&key)
     }
 
+    pub(super) fn pending_items(&self) -> impl Iterator<Item = (&RowKey, &TranscriptRow)> {
+        self.pending.iter()
+    }
+
     /// `None` means this observation has no transcript content; an empty
     /// result is a stream boundary, not an append or a revision publication.
     pub(super) fn observe<P: ProtocolExtension>(

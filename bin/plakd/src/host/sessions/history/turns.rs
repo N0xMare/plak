@@ -2,10 +2,10 @@ use std::{num::NonZeroUsize, path::Path};
 
 use plakd_wire_types::v13::PAGE_TARGET_BYTES;
 use plakous::model::SessionId;
-use plakous::sessions::AgentSessions;
 use plakous::sessions::feed::{
     FeedCommandKind, FeedCursor, FeedFact, FeedPage, FeedPageRequest, FeedRecord, FeedSeq,
 };
+use plakous::sessions::{AgentSessions, AgentSessionsErrorKind};
 
 use super::{History, HistoryError};
 
@@ -13,6 +13,7 @@ use super::{History, HistoryError};
 pub(super) struct Turns {
     pub(super) starts: Vec<u64>,
     pub(super) retained_from: u64,
+    pub(super) older_from: Option<u64>,
 }
 
 pub(super) struct OlderCut {
@@ -60,6 +61,7 @@ pub(super) fn turns_at(
     };
     let mut turns = Turns::default();
     let mut older = before.map(|before| OlderCut::new(before, PAGE_TARGET_BYTES as u64));
+    let mut full = false;
     let window_size = FeedPageRequest::after(FeedCursor::start(locator.session_id()))
         .max_records
         .get() as u64;
@@ -69,13 +71,17 @@ pub(super) fn turns_at(
     // indivisible.
     'windows: while upper > 0 && upper >= turns.retained_from {
         let lower = upper.saturating_sub(window_size);
-        let records = window(
+        let Some(records) = window(
             path,
             locator.session_id(),
             lower,
             upper,
             &mut turns.retained_from,
-        )?;
+        )?
+        else {
+            // The saved product transcript remains readable without its feed.
+            return Ok(Turns::default());
+        };
         for record in records.iter().rev() {
             let header = record.header();
             let seq = header.seq.get();
@@ -104,6 +110,7 @@ pub(super) fn turns_at(
                 break 'windows;
             };
             if seq < older.from && !older.include(history, seq)? {
+                full = true;
                 break 'windows;
             }
         }
@@ -111,6 +118,12 @@ pub(super) fn turns_at(
     }
     turns.starts.retain(|&start| start >= turns.retained_from);
     turns.starts.reverse();
+    if let Some(mut older) = older {
+        if !full {
+            let _ = older.include(history, 0)?;
+        }
+        turns.older_from = Some(older.from);
+    }
     Ok(turns)
 }
 
@@ -120,7 +133,7 @@ fn window(
     mut after: u64,
     upper: u64,
     retained: &mut u64,
-) -> Result<Vec<FeedRecord>, HistoryError> {
+) -> Result<Option<Vec<FeedRecord>>, HistoryError> {
     let mut out = Vec::new();
     // The feed may cap a page by bytes before it reaches the requested
     // record count. Finish the window before consuming it in reverse.
@@ -131,9 +144,12 @@ fn window(
             cursor: FeedCursor::new(session, FeedSeq::new(after)),
             max_records: limit,
         };
-        match AgentSessions::inspect_feed_sqlite(path, request)
-            .map_err(|_| HistoryError::Unavailable)?
-        {
+        let page = match AgentSessions::inspect_feed_sqlite(path, request) {
+            Err(error) if error.kind() == AgentSessionsErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(HistoryError::Unavailable),
+            Ok(page) => page,
+        };
+        match page {
             FeedPage::BehindRetention { retained_from, .. } => {
                 *retained = retained_from.get();
                 after = upper.min(retained_from.get().saturating_sub(1));
@@ -156,5 +172,5 @@ fn window(
         }
     }
     out.retain(|record| record.header().seq.get() >= *retained);
-    Ok(out)
+    Ok(Some(out))
 }

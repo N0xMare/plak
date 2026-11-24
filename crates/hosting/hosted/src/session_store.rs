@@ -701,11 +701,9 @@ mod memory {
         record
             .pending_queue
             .retain(|item| !record.queue_commands.is_consumed(item));
-        record.transcript = crate::sessions::ProductTranscript::stored(
-            views.unwrap_or(&SessionViews::empty()).transcript(&intents),
-        );
         let empty = SessionViews::empty();
         let joined = views.unwrap_or(&empty);
+        record.transcript = crate::sessions::ProductTranscript::projected(joined, &intents);
         record.child_wake_suppressed = joined.wake_suppressed(&intents);
         if joined.pause_cause(&intents).is_some() {
             record.queue_drain_state = crate::sessions::QueueDrainState::RestoredPaused;

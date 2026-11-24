@@ -18,7 +18,7 @@ use super::admission::{
     refuse_detached_recovery_action, reject_draft, reject_stale_queue_action,
     report_queue_persist_failed,
 };
-use super::logging::{log_event, project_session_snapshot};
+use super::logging::log_event;
 use super::models::oauth_provider_for_account;
 use super::resume::emit_resume_choices;
 use super::usage::{report_unavailable_context, request_subscription_usage_cached};
@@ -148,7 +148,7 @@ fn publish_shell_startup<P: plakous_host_protocol::ProtocolExtension>(
     });
     emit_shell_empty_state(events, config);
     send_shell_binding(events, config);
-    let _ = events.replace_transcript(project_session_snapshot(&config.session));
+    let _ = events.replace_root_session(&config.session);
     emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(ContentEvent::Status {
@@ -250,7 +250,7 @@ fn handle_shell_action<P: plakous_host_protocol::ProtocolExtension>(
             super::surface::leaving_session(config.surface.as_deref(), &source, &config.session.id);
             send_shell_binding(events, config);
             let _ = events.send(ContentEvent::ClearView);
-            let _ = events.replace_transcript(project_session_snapshot(&config.session));
+            let _ = events.replace_root_session(&config.session);
             emit_shell_empty_state(events, config);
             let _ = events.notice(TranscriptRow::info(
                 NoticeScope::Session,

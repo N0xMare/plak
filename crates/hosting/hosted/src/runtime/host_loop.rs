@@ -424,7 +424,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             return;
         };
         let unsaved = self.role.config.session.transcript.pending_notice_items();
-        let mut transcript = sessions::ProductTranscript::stored(views.transcript(&intents));
+        let mut transcript = sessions::ProductTranscript::projected(&views, &intents);
         transcript.restore_pending_notices(unsaved, &intents);
         self.role.config.session.transcript = transcript;
         // A terminal that suppresses wakes (a quota-exhausted root, spec 03
@@ -449,7 +449,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootActor<'_, P> {
             self.role.config.session.queue_projection_debt
                 && self.role.config.session.queue_commands.has_pending();
         let snapshot = super::logging::project_session_snapshot(&self.role.config.session);
-        let _ = self.role.events.publish_transcript(snapshot);
+        let _ = self.role.events.publish_root_projection(
+            &self.role.config.session.id,
+            views.cursor,
+            snapshot,
+        );
     }
 
     fn publish_projected_usage(&self) {

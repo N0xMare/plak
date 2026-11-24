@@ -8,6 +8,7 @@ use plakous_host_protocol::views::transcript::{
     RowKey, TranscriptItem, TranscriptRow, TranscriptScope,
 };
 use plakous_host_protocol::wire::{AttachmentId, FramedTranscriptRow, MAX_LINE_BYTES, RequestId};
+use plakous_hosted::runtime::{RootHistoryCapture, RootTranscript};
 
 use crate::store::transcript_history::{HistoryError, body_mut};
 
@@ -28,6 +29,21 @@ pub(crate) struct LiveTail {
     pub(crate) applied: Option<FeedSeq>,
     pub(crate) upserts: Vec<TranscriptItem>,
     pub(crate) lengths: BTreeMap<RowKey, u64>,
+}
+
+impl LiveTail {
+    pub(super) fn captured(capture: RootHistoryCapture) -> Self {
+        let lengths = capture
+            .items
+            .iter()
+            .filter_map(|item| RootTranscript::live_row_len(item).map(|len| (item.key, len)))
+            .collect();
+        Self {
+            applied: Some(capture.applied),
+            upserts: capture.items,
+            lengths,
+        }
+    }
 }
 
 pub(super) fn baseline(

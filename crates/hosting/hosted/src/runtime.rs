@@ -251,7 +251,7 @@ pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
 mod sender;
-pub use sender::{LiveRowReadError, LiveRowSlice, RootTranscript};
+pub use sender::{LiveRowReadError, LiveRowSlice, RootHistoryCapture, RootTranscript};
 pub(crate) mod step_hold;
 mod worker;
 pub use startup::spawn_deferred_host;
@@ -593,20 +593,28 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         &self,
         snapshot: plakous_host_protocol::views::PresentationSnapshot,
     ) -> bool {
-        self.presentations
+        let mut presentations = self
+            .presentations
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .publish(snapshot, &self.inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if snapshot.scope == plakous_host_protocol::views::transcript::TranscriptScope::Root {
+            presentations.mark_root_publication("", None);
+        }
+        presentations.publish(snapshot, &self.inner)
     }
 
     pub(crate) fn replace_transcript(
         &self,
         snapshot: plakous_host_protocol::views::PresentationSnapshot,
     ) -> bool {
-        self.presentations
+        let mut presentations = self
+            .presentations
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .snapshot(snapshot, &self.inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if snapshot.scope == plakous_host_protocol::views::transcript::TranscriptScope::Root {
+            presentations.mark_root_publication("", None);
+        }
+        presentations.snapshot(snapshot, &self.inner)
     }
 
     fn observe_agent(

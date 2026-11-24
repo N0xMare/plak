@@ -1,8 +1,9 @@
 //! One bounded, revisioned presentation publisher for root and agent scopes.
 
 use crate::surface_protocol::ContentEvent;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use plakous::sessions::feed::FeedSeq;
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::presentation::{PresentationError, row_bytes};
@@ -59,6 +60,8 @@ fn apply_bounded(state: &mut TranscriptState, patch: &mut TranscriptPatch) -> bo
 #[derive(Default)]
 pub(in crate::runtime) struct Presentations {
     keyed_root: bool,
+    root_applied: Option<(String, FeedSeq)>,
+    root_overrides: BTreeSet<RowKey>,
     // One root and at most the one agent this face serves. Revisions remain
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
@@ -82,6 +85,50 @@ impl Presentations {
 
     pub(in crate::runtime) const fn emits_keyed_root(&self) -> bool {
         self.keyed_root
+    }
+
+    pub(in crate::runtime) fn mark_root_publication(
+        &mut self,
+        session: &str,
+        applied: Option<FeedSeq>,
+    ) {
+        if self.keyed_root {
+            self.root_applied = applied.map(|applied| (session.to_owned(), applied));
+            self.root_overrides.clear();
+        }
+    }
+
+    pub(in crate::runtime) fn capture_root(
+        &self,
+        session: &str,
+    ) -> Option<super::super::RootHistoryCapture> {
+        let (_, applied) = self
+            .root_applied
+            .as_ref()
+            .filter(|(owner, _)| owner == session)?;
+        let scope = TranscriptScope::Root;
+        let state = self.states.get(&scope)?;
+        let provisional_start = RowKey::new(1 << 63, Lane::Runtime, 0);
+        let mut items: BTreeMap<_, _> = state.items().range(provisional_start..).collect();
+        items.extend(
+            self.root_overrides
+                .iter()
+                .filter_map(|key| state.items().get_key_value(key)),
+        );
+        if let Some(live) = self.live.get(&scope) {
+            items.extend(live.pending_items());
+        }
+        Some(super::super::RootHistoryCapture {
+            applied: *applied,
+            revision: state.revision(),
+            items: items
+                .into_iter()
+                .map(|(&key, row)| TranscriptItem {
+                    key,
+                    row: row.clone(),
+                })
+                .collect(),
+        })
     }
 
     pub(in crate::runtime) fn root_row_slice(
@@ -156,12 +203,12 @@ impl Presentations {
             .get(&snapshot.scope)
             .filter(|state| state.revision() == 0)
         {
-            let committed_calls: std::collections::BTreeSet<_> = snapshot
+            let committed_calls: BTreeSet<_> = snapshot
                 .items
                 .iter()
                 .filter_map(|item| item.row.call_id())
                 .collect();
-            let mut notices: std::collections::BTreeSet<_> = snapshot
+            let mut notices: BTreeSet<_> = snapshot
                 .items
                 .iter()
                 .filter_map(|item| match &item.row {
@@ -319,6 +366,7 @@ impl Presentations {
     }
 
     pub(in crate::runtime) fn clear(&mut self) {
+        self.mark_root_publication("", None);
         self.states.clear();
         self.live.clear();
         self.repairs.clear();
@@ -529,6 +577,17 @@ impl Presentations {
         };
         if !apply_bounded(state, &mut patch) {
             return false;
+        }
+        if self.keyed_root && scope == TranscriptScope::Root {
+            self.root_overrides.extend(
+                patch
+                    .upserts
+                    .iter()
+                    .filter_map(|item| (!provisional(item.key)).then_some(item.key)),
+            );
+            for key in &patch.deletes {
+                self.root_overrides.remove(key);
+            }
         }
         if !patch.deletes.is_empty() {
             self.live

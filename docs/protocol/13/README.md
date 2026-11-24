@@ -22,7 +22,8 @@ last completed page's cursor after a transport
 loss only on the same reopened scope. On `cursor_expired`, reattach for a
 new first page. A page cuts between turns, including host-woken turns that
 have no visible user prompt. If retention or import leaves older rows without
-their turn facts, that prefix pages as one unit. A single row that cannot fit
+their turn facts, that prefix pages as one unit. If the runtime session is
+gone, the saved history pages as one unit instead. A single row that cannot fit
 a frame keeps a UTF-8 prefix and reports the omitted byte count. Read an
 individual truncated row or repair its stream by
 key and UTF-8 byte offset. For replay use the exact retained token, host
@@ -37,7 +38,9 @@ The root gives each contiguous assistant or reasoning run a new provisional
 key. A patch settles preceding appends before opening another run; canonical
 rows replace provisional keys when the host publishes the settled view.
 For each live row, drop deltas wholly before the current byte length and
-repair a gap with `read_transcript_row` at the first missing byte. That answer
+apply only the suffix of an overlapping delta, starting at the client's
+current byte length, not the delta's start. Both offsets are UTF-8 scalar
+boundaries. Repair a gap with `read_transcript_row` at the first missing byte. That answer
 is addressed to the request, not a baseline or a new transcript revision.
 Its `end` is exclusive, and `last` means the slice reaches the end available
 at read time, not that the row has stopped streaming. A non-boundary or
@@ -46,7 +49,9 @@ returns `cursor_expired`. Use the settled key for omitted history after
 replacement. The live assistant preview stops at a framing-safe prefix;
 subsequent appends never move its start or skip to a later suffix.
 The row read returns a slice of the same rendered body whose bytes were
-counted; row metadata stays in the page. An attachment status report is
+counted; row metadata stays in the page. The resident and durable readers
+use different slice sizes: request the next slice at `end` until `last`,
+instead of inferring the end from how many bytes arrived. An attachment status report is
 sent every 10 seconds while its values are changing and on request.
 `seq_gaps` counts sender-visible sequence discontinuities, not losses
 detected only by the client. Queue bytes and length are current gauges;

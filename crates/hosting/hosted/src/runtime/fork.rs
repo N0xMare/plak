@@ -295,7 +295,7 @@ pub(super) async fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     send_binding(events, config);
     super::admission::emit_prompt_history(events, &config.session);
     emit_queue_snapshot(events, &config.session);
-    let _ = events.replace_transcript(super::logging::project_session_snapshot(&config.session));
+    let _ = events.replace_root_session(&config.session);
     send_last_user_prompt_at(events, config, opened);
     note_reread_instructions(events, instructions_before, opened);
     if watch.observe_now() {

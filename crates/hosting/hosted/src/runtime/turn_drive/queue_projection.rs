@@ -48,11 +48,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> RootTurn<'_, P> {
                 row: super::super::logging::session_header(self.host.session),
             },
         );
-        if self
-            .host
-            .events
-            .publish_transcript(super::super::logging::project_keyed_snapshot(items))
-        {
+        if self.host.events.publish_root_projection(
+            &self.host.session.id,
+            views.cursor,
+            super::super::logging::project_keyed_snapshot(items),
+        ) {
             self.steering_projection_due = false;
         }
     }

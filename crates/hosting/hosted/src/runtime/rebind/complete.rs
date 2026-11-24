@@ -536,9 +536,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
         send_binding(events, config);
         crate::runtime::admission::emit_prompt_history(events, &config.session);
         emit_queue_snapshot(events, &config.session);
-        let _ = events.replace_transcript(crate::runtime::logging::project_session_snapshot(
-            &config.session,
-        ));
+        let _ = events.replace_root_session(&config.session);
         send_last_user_prompt_at(events, config, opened);
         report_rebind_context(opened, events, config).await;
         // A switch's tree took its epoch before the successor opened.

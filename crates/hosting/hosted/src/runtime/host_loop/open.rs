@@ -506,9 +506,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> RootActor<'a, P> {
         }
         emit_agent_plan_notes(&events, &config, &stderr_buf);
         send_binding(&events, &config);
-        let _ = events.replace_transcript(super::super::logging::project_session_snapshot(
-            &config.session,
-        ));
+        let _ = events.replace_root_session(&config.session);
         emit_prompt_history(&events, &config.session);
         super::super::info::send_last_user_prompt_at(&events, &config, &opened);
         emit_queue_snapshot(&events, &config.session);

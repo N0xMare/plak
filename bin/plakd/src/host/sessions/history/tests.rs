@@ -21,6 +21,9 @@ use plakous_offline_crash_harness::{
 use super::*;
 use crate::store::ProductStore;
 
+mod performance;
+mod resident;
+
 fn key(anchor: u64, ordinal: u32) -> RowKey {
     RowKey::new(anchor, Lane::Runtime, ordinal)
 }
@@ -115,7 +118,7 @@ async fn a_wake_without_a_user_row_starts_a_page_and_cursor_survives_append_and_
         .await
         .unwrap();
     let views = apply_feed(&sessions, &mut store, &record, SessionViews::empty()).await;
-    let attached = attach(&paths, &record.id, 1, target(), LiveTail::default()).unwrap();
+    let attached = attach(&paths, &record.id, 1, target(), None).unwrap();
     let HostFrameV13::Snapshot(baseline) = &attached.frames[1] else {
         panic!("no baseline")
     };
@@ -130,7 +133,7 @@ async fn a_wake_without_a_user_row_starts_a_page_and_cursor_survives_append_and_
         TranscriptRow::assistant("wake answer")
     );
     let cursor = cursor_of(&attached.frames);
-    let expected = older(&paths, &attached.binding, 2, &cursor).unwrap();
+    let expected = older(&paths, &attached.binding, 2, &cursor);
     assert!(
         matches!(&expected[1], HostFrameV13::HistoryPage { items, last: true, has_older: false, .. } if items.len() == 2)
     );
@@ -147,11 +150,8 @@ async fn a_wake_without_a_user_row_starts_a_page_and_cursor_survives_append_and_
     drop(store);
     let mut store = ProductStore::open(&paths).unwrap();
     store.set_archived(&record.id, true).unwrap();
-    let attached = attach(&paths, &record.id, 1, target(), LiveTail::default()).unwrap();
-    assert_eq!(
-        older(&paths, &attached.binding, 2, &cursor).unwrap(),
-        expected
-    );
+    let attached = attach(&paths, &record.id, 1, target(), None).unwrap();
+    assert_eq!(older(&paths, &attached.binding, 2, &cursor), expected);
     let mut pruned = views.clone();
     pruned.cursor = FeedSeq::new(views.cursor.get() + 1);
     pruned.rows.pop_first();
@@ -163,21 +163,24 @@ async fn a_wake_without_a_user_row_starts_a_page_and_cursor_survives_append_and_
             &pruned.state,
         )
         .unwrap();
-    assert_expired(&older(&paths, &attached.binding, 2, &cursor).unwrap());
-    let attached = attach(&paths, &record.id, 1, target(), LiveTail::default()).unwrap();
+    assert_expired(&older(&paths, &attached.binding, 2, &cursor));
+    let attached = attach(&paths, &record.id, 1, target(), None).unwrap();
     let rebound_cursor = cursor_of(&attached.frames);
     let mut successor = SessionRecord::new(home.path().to_owned());
     successor.node = record.node.clone();
     successor.source_product_session_id = Some(record.id.clone());
     successor.source_workflow_operation_id = Some("history-fixture:rebind".into());
     store.commit(&mut successor).unwrap();
-    assert_expired(&older(&paths, &attached.binding, 2, &rebound_cursor).unwrap());
-    assert_eq!(
-        read_row(&paths, &attached.binding, 3, baseline.items[0].key, 0),
-        Err(HistoryError::UnknownRow)
-    );
-    let successor = attach(&paths, &successor.id, 1, target(), LiveTail::default()).unwrap();
-    assert_expired(&older(&paths, &successor.binding, 2, &rebound_cursor).unwrap());
+    assert_expired(&older(&paths, &attached.binding, 2, &rebound_cursor));
+    assert_expired(&[read_row(
+        &paths,
+        &attached.binding,
+        3,
+        baseline.items[0].key,
+        0,
+    )]);
+    let successor = attach(&paths, &successor.id, 1, target(), None).unwrap();
+    assert_expired(&older(&paths, &successor.binding, 2, &rebound_cursor));
 }
 
 fn assert_expired(frames: &[HostFrameV13]) {
@@ -225,6 +228,7 @@ fn an_older_page_never_splits_a_turn_even_when_one_turn_exceeds_the_budget() {
         let turns = Turns {
             starts: vec![1, 24, 89],
             retained_from: 1,
+            older_from: None,
         };
         let latest = first(&history, &turns)?;
         assert_eq!(latest.items[0].key, key(90, 3));
@@ -253,7 +257,7 @@ fn an_older_page_never_splits_a_turn_even_when_one_turn_exceeds_the_budget() {
 fn baseline_parts_keep_one_turn_order_and_merge_live_rows_by_key() {
     let fixture = Fixture::new();
     assert!(
-        matches!(&attach(&fixture.paths, &fixture.id, 1, target(), LiveTail::default()).unwrap().frames[1],
+        matches!(&attach(&fixture.paths, &fixture.id, 1, target(), None).unwrap().frames[1],
         HostFrameV13::Snapshot(baseline) if baseline.items.is_empty() && baseline.last && !baseline.has_older)
     );
     let body = "☕".repeat(52_000);
@@ -269,6 +273,7 @@ fn baseline_parts_keep_one_turn_order_and_merge_live_rows_by_key() {
         let turns = Turns {
             starts: vec![10, 100],
             retained_from: 1,
+            older_from: None,
         };
         let page = first(&history, &turns)?;
         let cursor = page.cursor.clone();
@@ -318,18 +323,8 @@ fn an_oversized_encoded_row_keeps_a_scalar_prefix_and_is_readable_by_key() {
     let body = "é\0".repeat(2_200_000);
     let row = key(42, 99);
     fixture.seed(42, [(42, 99, body.clone())]);
-    let attached = attach(
-        &fixture.paths,
-        &fixture.id,
-        1,
-        target(),
-        LiveTail::default(),
-    )
-    .unwrap();
-    assert!(
-        serde_json::to_vec(&attached.frames[1]).unwrap().len()
-            < plakous_host_protocol::wire::MAX_LINE_BYTES
-    );
+    let attached = attach(&fixture.paths, &fixture.id, 1, target(), None).unwrap();
+    assert!(serde_json::to_vec(&attached.frames[1]).unwrap().len() < wire::MAX_LINE_BYTES);
     let HostFrameV13::Snapshot(part) = &attached.frames[1] else {
         panic!("no baseline")
     };
@@ -337,7 +332,7 @@ fn an_oversized_encoded_row_keeps_a_scalar_prefix_and_is_readable_by_key() {
     let tail = item.row.0.text().unwrap().len();
     assert!(body.is_char_boundary(tail));
     assert_eq!(item.truncated_bytes, Some((body.len() - tail) as u64));
-    let reply = read_row(&fixture.paths, &attached.binding, 2, row, tail as u64).unwrap();
+    let reply = read_row(&fixture.paths, &attached.binding, 2, row, tail as u64);
     let HostFrameV13::Response {
         outcome: Outcome::Ok(answer),
         ..
@@ -354,14 +349,18 @@ fn an_oversized_encoded_row_keeps_a_scalar_prefix_and_is_readable_by_key() {
     assert_eq!(offset, tail as u64);
     assert_eq!(text, &body[tail..usize::try_from(end).unwrap()]);
     assert_ne!(text, "");
-    assert_eq!(
-        read_row(&fixture.paths, &attached.binding, 3, row, 1),
-        Err(HistoryError::InvalidOffset)
+    assert!(
+        matches!(read_row(&fixture.paths, &attached.binding, 3, row, 1),
+        HostFrameV13::Response { outcome: Outcome::Refused(reason), .. }
+          if matches!(reason.as_ref(), RequestRefusal::Shared(reason) if matches!(reason.as_inner(), wire::RequestRefusal::Malformed { .. })))
     );
-    assert_eq!(
-        read_row(&fixture.paths, &attached.binding, 4, key(42, 100), 0),
-        Err(HistoryError::UnknownRow)
-    );
+    assert_expired(&[read_row(
+        &fixture.paths,
+        &attached.binding,
+        4,
+        key(42, 100),
+        0,
+    )]);
 }
 
 #[test]
@@ -378,6 +377,7 @@ fn large_history_measurement() {
     let turns = Turns {
         starts,
         retained_from: 1,
+        older_from: None,
     };
     let start = Instant::now();
     let (page, parts) = transcript_history::read(&fixture.paths, &fixture.id, |history| {
@@ -443,13 +443,18 @@ impl Fixture {
     }
 
     fn seed(&self, applied: u64, rows: impl IntoIterator<Item = (u64, u32, String)>) {
-        let mut views = SessionViews::empty();
-        views.cursor = FeedSeq::new(applied);
-        views.rows.extend(
+        self.seed_items(
+            applied,
             rows.into_iter().map(|(anchor, ordinal, body)| {
                 (key(anchor, ordinal), TranscriptRow::assistant(body))
             }),
         );
+    }
+
+    fn seed_items(&self, applied: u64, rows: impl IntoIterator<Item = (RowKey, TranscriptRow)>) {
+        let mut views = SessionViews::empty();
+        views.cursor = FeedSeq::new(applied);
+        views.rows.extend(rows);
         ProductStore::open(&self.paths)
             .unwrap()
             .commit_projection_views(

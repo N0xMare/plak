@@ -2,12 +2,25 @@
 
 use super::projection::transcript::{self, Presentations};
 use super::{Sender, worker};
+use plakous::sessions::feed::FeedSeq;
+use plakous_host_protocol::views::PresentationSnapshot;
+use plakous_host_protocol::views::transcript::TranscriptScope;
 use plakous_host_protocol::views::transcript::{RowKey, TranscriptItem};
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// A read-only view of the keyed root transcript, with no producer authority.
 #[derive(Clone)]
 pub struct RootTranscript(Arc<Mutex<Presentations>>);
+
+/// One resident transcript revision and its uncommitted contribution to a page.
+pub struct RootHistoryCapture {
+    /// The feed sequence used to assemble the last canonical publication.
+    pub applied: FeedSeq,
+    /// Current presentation revision at the capture fence.
+    pub revision: u64,
+    /// Provisional rows and live overrides of durable rows.
+    pub items: Vec<TranscriptItem>,
+}
 
 /// The requested slice of one provisional row's rendered text.
 #[derive(Debug, Eq, PartialEq)]
@@ -32,6 +45,17 @@ pub enum LiveRowReadError {
 }
 
 impl RootTranscript {
+    /// Capture from the same producer fence as keyed appends and canonical
+    /// replacement. No capture is available until this session publishes a
+    /// known canonical prefix.
+    #[must_use]
+    pub fn capture(&self, session: &str) -> Option<RootHistoryCapture> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .capture_root(session)
+    }
+
     /// Whether this key belongs to the host's process-local row namespace.
     #[must_use]
     pub const fn is_provisional(key: RowKey) -> bool {
@@ -58,6 +82,45 @@ impl RootTranscript {
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
+    pub(crate) fn publish_root_projection(
+        &self,
+        session: &str,
+        applied: FeedSeq,
+        snapshot: PresentationSnapshot,
+    ) -> bool {
+        self.root_projection(session, Some(applied), snapshot, false)
+    }
+
+    pub(crate) fn replace_root_session(&self, session: &crate::sessions::SessionRecord) -> bool {
+        self.root_projection(
+            &session.id,
+            session.transcript.applied(),
+            super::logging::project_session_snapshot(session),
+            true,
+        )
+    }
+
+    fn root_projection(
+        &self,
+        session: &str,
+        applied: Option<FeedSeq>,
+        snapshot: PresentationSnapshot,
+        replace: bool,
+    ) -> bool {
+        debug_assert_eq!(snapshot.scope, TranscriptScope::Root);
+        let mut presentations = self
+            .presentations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let published = if replace {
+            presentations.snapshot(snapshot, &self.inner)
+        } else {
+            presentations.publish(snapshot, &self.inner)
+        };
+        presentations.mark_root_publication(session, applied.filter(|_| published));
+        published
+    }
+
     /// Wrap a bounded observation channel.
     #[must_use]
     pub fn over(inner: crate::surface_protocol::HostEventSender<P>) -> Self {

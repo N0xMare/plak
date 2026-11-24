@@ -4,11 +4,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use plakous::sessions::feed::FeedSeq;
 use plakous_host_protocol::labelled_chip;
 use plakous_host_protocol::views::presentation::row_bytes;
 use plakous_host_protocol::views::transcript::{ToolItem, TranscriptItem, TranscriptRow};
 
-use super::projector::{Lane, ProductIntents, RowKey};
+use super::projector::{Lane, ProductIntents, RowKey, SessionViews};
 use super::{MAX_THINKING_ACTIVITY_BYTES, MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES};
 
 /// Text that replaces the dropped head of a single oversized row.
@@ -97,6 +98,7 @@ pub(crate) fn with_image_chips(text: &str, chips: impl IntoIterator<Item = Strin
 /// methods here, which keep the call identities and bounds exact.
 #[derive(Clone, Debug, Default)]
 pub struct ProductTranscript {
+    applied: Option<FeedSeq>,
     lines: Vec<TranscriptRow>,
     /// Encoded size of each row, parallel to `lines`.
     sizes: Vec<usize>,
@@ -400,6 +402,18 @@ impl ProductTranscript {
                 .all(|items| items[0].key < items[1].key)
         );
         transcript
+    }
+
+    /// Restores an exact projector prefix and its in-memory publication watermark.
+    #[must_use]
+    pub fn projected(views: &SessionViews, intents: &ProductIntents) -> Self {
+        let mut transcript = Self::stored(views.transcript(intents));
+        transcript.applied = Some(views.cursor);
+        transcript
+    }
+
+    pub(crate) const fn applied(&self) -> Option<FeedSeq> {
+        self.applied
     }
 
     /// Append one row, bounding the projection. A tool row goes through

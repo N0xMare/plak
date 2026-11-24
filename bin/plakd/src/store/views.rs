@@ -1266,12 +1266,11 @@ pub(super) fn transcript_of(
     let views = views_of(connection, session_id)?;
     let queue_commands =
         plakous_hosted::sessions::QueueCommands::from_join(&intents, views.as_ref());
-    let rows = views
-        .as_ref()
-        .unwrap_or(&SessionViews::empty())
-        .transcript(&intents);
     Ok((
-        plakous_hosted::sessions::ProductTranscript::stored(rows),
+        plakous_hosted::sessions::ProductTranscript::projected(
+            views.as_ref().unwrap_or(&SessionViews::empty()),
+            &intents,
+        ),
         views,
         queue_commands,
     ))

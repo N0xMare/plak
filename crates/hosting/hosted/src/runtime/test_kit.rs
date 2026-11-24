@@ -35,6 +35,17 @@ pub fn replace_transcript<P: plakous_host_protocol::ProtocolExtension>(
     sender.replace_transcript(snapshot)
 }
 
+/// Publish a fixture's projected prefix through the resident root fence.
+#[must_use]
+pub fn publish_root_projection<P: plakous_host_protocol::ProtocolExtension>(
+    sender: &Sender<P>,
+    session: &str,
+    applied: plakous::sessions::feed::FeedSeq,
+    snapshot: plakous_host_protocol::views::PresentationSnapshot,
+) -> bool {
+    sender.publish_root_projection(session, applied, snapshot)
+}
+
 /// Republish the real reducer's current canonical and live presentation.
 #[must_use]
 pub fn resync_transcript<P: plakous_host_protocol::ProtocolExtension>(
