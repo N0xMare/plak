@@ -2,7 +2,7 @@
 
 use super::*;
 use plakd::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
-use plakous_offline_crash_harness::ledger_signature::inspect_jobs;
+use plakous_offline_crash_harness::ledger_signature::{inspect_jobs, inspect_ledger};
 use plakous_recursive_subagents::tree::{ContinuationCause, ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use std::fs::OpenOptions;
@@ -268,11 +268,13 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let before = child_locator(&store, child);
+    release_child_wait(
+        &sut.fixture,
+        &paths.runtime_database(),
+        before,
+        child.original.0,
+    );
     sut.finish_job(child.original);
-    // Either Wait or the process notice can deliver the exit. The original
-    // shell had to survive until the fixture released it, not until Wait
-    // happened to be visible in the ledger.
-    release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
     root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
     assert_eq!(
@@ -337,6 +339,41 @@ fn wait_retained_terminal(database: &Path, locator: plakous::sessions::SessionLo
             Instant::now() < deadline,
             "the original runner's terminal did not reach the resumed branch"
         );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn release_child_wait(
+    fixture: &Fixture,
+    database: &Path,
+    locator: plakous::sessions::SessionLocator,
+    child_pid: i32,
+) {
+    let operations = || inspect_ledger(database, locator, "child wait").unwrap();
+    let before = operations().iter().map(|op| op.operation).max().unwrap();
+    release_continuation(fixture);
+    let deadline = Instant::now() + WAIT;
+    loop {
+        assert!(
+            runner::alive(child_pid),
+            "the original child job stopped before the test released it"
+        );
+        // The resumed script issues Wait first. The shell stays alive until
+        // Wait has the observation, so the two terminal paths cannot race.
+        if let Some(wait) = operations()
+            .into_iter()
+            .filter(|op| op.kind == "effect" && op.operation > before)
+            .min_by_key(|op| op.operation)
+        {
+            if wait.state == "dispatched" {
+                return;
+            }
+            assert!(
+                matches!(wait.state, "prepared" | "claimed"),
+                "child Wait settled before the original job was released: {wait:?}"
+            );
+        }
+        assert!(Instant::now() < deadline, "the child did not dispatch Wait");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
