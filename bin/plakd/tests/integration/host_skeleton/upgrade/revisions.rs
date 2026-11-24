@@ -115,8 +115,8 @@ fn assert_parallel_inspection(
             .arg("--store-probe")
             .arg(stores)
             .env("PLAK_TEST_HOST_REOPEN_GATE", gate.path())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap()
     });
