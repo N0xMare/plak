@@ -89,3 +89,22 @@ fn changes_status_one_byte_over_internal_budget_is_refused_locally_and_by_codec(
     assert!(frame::encode(&value).is_ok());
     assert!(decode_changes_answer(value).is_err());
 }
+#[test]
+fn paired_changes_keeps_its_closed_refusal_vocabulary() {
+    let refusal = ChangesAnswer::Refused(ChangesRefusal::VcsUnsupportedVersion {
+        found: "2.43.0".into(),
+        required: ">=2.44".into(),
+    });
+    let encoded = encode_changes_answer(&refusal).unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::json!({"answer":"refused","value":"vcs_unavailable"})
+    );
+    assert_eq!(
+        decode_changes_answer(encoded).unwrap(),
+        ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable)
+    );
+    assert!(decode_changes_answer(serde_json::json!({
+        "answer":"refused", "value":{"vcs_unsupported_version":{"found":"2.43.0","required":">=2.44"}}
+    })).is_err());
+}

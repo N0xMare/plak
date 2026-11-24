@@ -343,9 +343,19 @@ fn wire_is_closed_and_validates_constructor_bounds() {
         )
         .is_ok()
     );
-    for value in ["git version 2.42.9", "git version 1.99.0", "not git"] {
-        assert!(!git::supported_version(value));
+    for value in ["not git", "git version 2.4x.0", "git version 2.43.9\nextra"] {
+        assert_eq!(
+            git::supported_version(value),
+            Err(ChangesRefusal::VcsUnavailable)
+        );
     }
-    assert!(!git::supported_version("git version 2.43.0"));
-    assert!(git::supported_version("git version 2.44.0"));
+    assert_eq!(
+        git::supported_version("git version 2.43.GIT (Vendor Git)"),
+        Err(ChangesRefusal::VcsUnsupportedVersion {
+            found: "2.43.GIT".into(),
+            required: ">=2.44".into()
+        })
+    );
+    assert!(git::supported_version("git version 2.44.0").is_ok());
+    assert!(git::supported_version("git version 2.45.GIT").is_ok());
 }

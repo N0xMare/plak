@@ -239,6 +239,17 @@ fn refusal(reason: execution::ChangesRefusal) -> ReadRefusal {
     failure(match reason {
         R::NotARepository => WorkspaceReadFailure::NotARepository,
         R::VcsUnavailable => WorkspaceReadFailure::VcsUnavailable,
+        R::VcsUnsupportedVersion { found, required } => {
+            return ReadRefusal::WorkspaceReadFailed {
+                cause: WorkspaceReadFailure::VcsUnavailable,
+                version: Some(
+                    plakd_wire_types::v13::ChangesRefusal::VcsUnsupportedVersion {
+                        found,
+                        required,
+                    },
+                ),
+            };
+        }
         R::VcsUnsupported => WorkspaceReadFailure::VcsUnsupported,
         R::ProtectedPath | R::UnsafeRepository => WorkspaceReadFailure::ProtectedPath,
         R::InvalidRequest => WorkspaceReadFailure::InvalidPath,
@@ -253,6 +264,26 @@ fn refusal(reason: execution::ChangesRefusal) -> ReadRefusal {
 #[allow(clippy::unwrap_used, reason = "ephemeral entry authority fixtures")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v13_projects_only_source_version_evidence() {
+        let legacy = super::super::refused(refusal(execution::ChangesRefusal::VcsUnavailable));
+        let local =
+            super::super::refused(refusal(execution::ChangesRefusal::VcsUnsupportedVersion {
+                found: "2.43.0".into(),
+                required: ">=2.44".into(),
+            }));
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::to_value(&local).unwrap()
+        );
+        assert!(crate::draft_wire::changes_refusal(5, legacy).is_none());
+        let projected = crate::draft_wire::changes_refusal(5, local).unwrap();
+        assert_eq!(
+            serde_json::to_value(projected).unwrap()["outcome"]["ok"]["response"]["reason"],
+            serde_json::json!({"reason":"vcs_unsupported_version","found":"2.43.0","required":">=2.44"}),
+        );
+    }
     use plakous::tools::runner::{
         RunnerCall, RunnerCallFuture, RunnerClass, RunnerFailure, RunnerLink, RunnerVerb,
     };

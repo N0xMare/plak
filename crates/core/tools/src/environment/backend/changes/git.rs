@@ -57,9 +57,10 @@ pub(super) async fn execute(
 
 pub(super) async fn supported(executor: &Executor, cwd: &Path) -> Result<(), ChangesRefusal> {
     let version = executor.run(cwd, None, None, &["--version"], 256).await?;
-    if !version.success || !supported_version(&text(version.bytes)?) {
+    if !version.success {
         return Err(ChangesRefusal::VcsUnavailable);
     }
+    supported_version(&text(version.bytes)?)?;
     // A known fixture proves that the build actually honors attribute-source
     // selection. No object, index or fixture is written into the user's repo.
     let fixture = blocking(|| tempfile::tempdir().map_err(|_| ChangesRefusal::Io)).await?;
@@ -162,14 +163,30 @@ async fn probe_lazy_fetch(executor: &Executor, source: &Path) -> Result<(), Chan
     Ok(())
 }
 
-pub(super) fn supported_version(version: &str) -> bool {
-    let Some(version) = version.strip_prefix("git version ") else {
-        return false;
+pub(super) fn supported_version(version: &str) -> Result<(), ChangesRefusal> {
+    const MINIMUM: (u32, u32) = (2, 44);
+    let found = version
+        .strip_prefix("git version ")
+        .filter(|value| !value.chars().any(char::is_control))
+        .and_then(|value| value.split(' ').next())
+        .ok_or(ChangesRefusal::VcsUnavailable)?;
+    let mut parts = found.split('.');
+    let mut number = || {
+        parts
+            .next()
+            .filter(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|part| part.parse::<u32>().ok())
+            .ok_or(ChangesRefusal::VcsUnavailable)
     };
-    let mut parts = version.split('.');
-    let major = parts.next().and_then(|part| part.parse::<u32>().ok());
-    let minor = parts.next().and_then(|part| part.parse::<u32>().ok());
-    matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (2, 44))
+    let version = (number()?, number()?);
+    if version < MINIMUM {
+        let (major, minor) = MINIMUM;
+        return Err(ChangesRefusal::VcsUnsupportedVersion {
+            found: found.to_owned(),
+            required: format!(">={major}.{minor}"),
+        });
+    }
+    Ok(())
 }
 
 async fn observation(repo: &Repository) -> Result<ChangesObservation, ChangesRefusal> {

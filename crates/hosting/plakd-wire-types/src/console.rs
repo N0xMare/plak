@@ -357,6 +357,9 @@ pub enum ReadRefusal {
     WorkspaceUnavailable {},
     WorkspaceReadFailed {
         cause: WorkspaceReadFailure,
+        /// Source evidence for the unserved draft projection; omitted on protocol 12.
+        #[serde(skip)]
+        version: Option<crate::v13::ChangesRefusal>,
     },
     EnvironmentOverride {
         proven_no_effect: bool,

@@ -9,7 +9,7 @@ use plakous_model::Digest;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use super::super::changes::{ChangesAnswer, ChangesRequest};
+use super::super::changes::{ChangesAnswer, ChangesRefusal, ChangesRequest};
 use super::super::{
     ExecutionBackendError, ExecutionBackendErrorKind, ExecutionWorkspace, LiteralProcessIntent,
     LiteralProcessRequest, LiteralProcessResult, RepositoryMatchCase, RepositoryQuery,
@@ -35,6 +35,13 @@ pub(super) fn encode_changes_answer(
     answer: &ChangesAnswer,
 ) -> Result<Value, ExecutionBackendError> {
     answer.validate().map_err(|_| malformed())?;
+    if matches!(
+        answer,
+        ChangesAnswer::Refused(ChangesRefusal::VcsUnsupportedVersion { .. })
+    ) {
+        // The paired Changes reply is pinned; only the local caller gets version evidence.
+        return to_value(&ChangesAnswer::Refused(ChangesRefusal::VcsUnavailable));
+    }
     to_value(answer)
 }
 

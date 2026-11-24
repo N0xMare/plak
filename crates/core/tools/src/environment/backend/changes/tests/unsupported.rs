@@ -37,7 +37,7 @@ fn inherited_git_steering_and_command_or_trace_injection_are_cleared() {
 }
 
 #[tokio::test]
-async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
+async fn only_a_successful_known_old_version_yields_version_evidence() {
     let root = tempfile::tempdir().unwrap();
     let programs = tempfile::tempdir().unwrap();
     for (name, behavior) in [
@@ -53,6 +53,7 @@ async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
             "ignored-lazy-fetch",
             "unset GIT_NO_LAZY_FETCH; exec git \"$@\"",
         ),
+        ("failed-probe", "printf 'git version 2.43.9\\n'; exit 1"),
     ] {
         let program = programs.path().join(name);
         std::fs::write(&program, format!("#!/bin/sh\n{behavior}\n")).unwrap();
@@ -63,10 +64,15 @@ async fn old_git_and_a_build_ignoring_attribute_source_are_unavailable() {
             &std::env::var_os("PATH").unwrap(),
         )
         .test_program(program);
-        assert_eq!(
-            git::supported(&executor, root.path()).await,
-            Err(ChangesRefusal::VcsUnavailable)
-        );
+        let expected = if name == "old-git" {
+            ChangesRefusal::VcsUnsupportedVersion {
+                found: "2.43.9".into(),
+                required: ">=2.44".into(),
+            }
+        } else {
+            ChangesRefusal::VcsUnavailable
+        };
+        assert_eq!(git::supported(&executor, root.path()).await, Err(expected));
     }
 }
 

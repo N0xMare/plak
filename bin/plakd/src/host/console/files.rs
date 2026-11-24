@@ -84,7 +84,10 @@ pub(in super::super) fn target(request: &HostRequest) -> Option<&WorkspaceTarget
 }
 
 pub(super) fn failure(cause: WorkspaceReadFailure) -> ReadRefusal {
-    ReadRefusal::WorkspaceReadFailed { cause }
+    ReadRefusal::WorkspaceReadFailed {
+        cause,
+        version: None,
+    }
 }
 
 impl Console {

@@ -10,11 +10,17 @@ pub const MAX_CHANGES_STATUS_BYTES: usize = 12 * 1024 * 1024;
 pub const MAX_CHANGES_OUTPUT_BYTES: usize = 256 * 1024;
 pub const MAX_CHANGES_INPUT_BYTES: u64 = 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangesRefusal {
     NotARepository,
     VcsUnavailable,
+    /// A trusted local Git version was read and does not meet the minimum.
+    #[serde(skip)]
+    VcsUnsupportedVersion {
+        found: String,
+        required: String,
+    },
     VcsUnsupported,
     ProtectedPath,
     UnsafeRepository,

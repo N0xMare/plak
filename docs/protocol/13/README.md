@@ -82,6 +82,10 @@ from an unreported cap, and its money entries do not carry the reset cadence
 or whether BYOK spend counts against the limit. Account for that display gap
 at the switch rather than inferring any of these facts from the amounts.
 
+A known Changes version mismatch carries the observed Git version and its
+minimum requirement. If the selected execution authority cannot report its
+own version evidence, the host does not substitute another machine's version.
+
 This checkout still serves 12, and `plakd wire schema` without the draft
 flag still reports 12. After the host implementation is complete, the
 staging build will serve 13 only. Use that exact build's normal schema
