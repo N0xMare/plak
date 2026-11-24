@@ -130,8 +130,10 @@ When the session opens, one warning lists everything the lost host left held
 naming the children the loss interrupted (once per run of plakd; a handed-off
 child is not named).
 With `[host] resume_after_loss = "continue"` such children continue once by
-themselves. One whose wake was still pending rejoins that wake instead. JSONL roots and roots with
-auto-continue disabled must use `wait_agent` to learn child results before
+themselves. A Resume for a child that is already due to continue, for example
+after a planned handoff, reports that it is already continuing and starts no
+extra turn. One whose wake was still pending rejoins that wake instead. JSONL
+roots and roots with auto-continue disabled must use `wait_agent` to learn child results before
 ending a turn. An idle wake
 failure pauses auto-continue, emits an error note and leaves the host attached;
 child mail remains unread until an admitted turn consumes it. A busy or

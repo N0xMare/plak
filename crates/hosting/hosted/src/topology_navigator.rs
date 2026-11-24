@@ -359,6 +359,9 @@ fn loss_resume_note(
     for (agent_id, outcome) in resumed {
         match outcome {
             LossResume::Started => started.push(short_agent(agent_id)),
+            LossResume::AlreadyContinuing => {
+                parts.push(format!("{} is already continuing", short_agent(agent_id)));
+            }
             LossResume::NotHeld if requested.is_some() => parts.push(format!(
                 "{} is not held after a lost host",
                 short_agent(agent_id)

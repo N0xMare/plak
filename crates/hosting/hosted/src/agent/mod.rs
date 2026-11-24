@@ -136,6 +136,8 @@ use children::{
 #[cfg(test)]
 pub(crate) use recovery::TREE_FEED_READ_FAILED;
 #[cfg(test)]
+pub(crate) use recovery::resume_race_hook;
+#[cfg(test)]
 pub(crate) use recovery::tests::Fixture as RecoveryFixture;
 pub(crate) use recovery::{
     TerminalExchange, TreeRecoveryStart, operator_child_recover, read_tree_feed,

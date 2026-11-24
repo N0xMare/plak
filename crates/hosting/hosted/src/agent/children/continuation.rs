@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use plakous::agent::CommandId;
 
-use crate::agent_tree::LossContinuationState;
+use crate::agent_tree::{ContinuationCause, LossContinuation, LossContinuationState};
 use crate::driver::ledger::CommandKind;
 use crate::topology_runtime::ProductTopologyRuntime;
 
@@ -23,6 +23,8 @@ use super::{
 pub(crate) enum LossResume {
     /// The continuation turn started.
     Started,
+    /// The automatic recovery pass owns the continuation, or it is running.
+    AlreadyContinuing,
     /// The child has no continuation held or pending after a loss.
     NotHeld,
     /// Another owner holds the child now; nothing was recorded.
@@ -47,8 +49,8 @@ impl LossResume {
 }
 
 /// The instruction of a continuation turn, by what stopped the node.
-fn continuation_instruction(cause: crate::agent_tree::ContinuationCause) -> String {
-    if cause == crate::agent_tree::ContinuationCause::Handoff {
+fn continuation_instruction(cause: ContinuationCause) -> String {
+    if cause == ContinuationCause::Handoff {
         crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE
     } else {
         crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
@@ -76,13 +78,23 @@ async fn resume_after_loss(
     agent_id: &str,
     automatic: bool,
 ) -> LossResume {
-    let Ok(_claim) = crate::agent::recovery::claim_child(runtime, agent_id).await else {
+    let Ok(claim) = crate::agent::recovery::claim_child(runtime, agent_id).await else {
+        if !automatic && already_continuing(runtime, agent_id).unwrap_or(false) {
+            return LossResume::AlreadyContinuing;
+        }
         return LossResume::Busy;
     };
     // A turn the open restored is settled as lost and the decision taken
     // again on it, once, in this same pass.
     for _ in 0..2 {
         match resume_claimed(parent, runtime, agent_id, automatic).await {
+            Resumed::Settled(LossResume::AlreadyContinuing) => {
+                // Recovery made the continuation due after the operator's
+                // first read. Its pass may have skipped this claim.
+                drop(claim);
+                runtime.driver().request_retirement_recovery();
+                return LossResume::AlreadyContinuing;
+            }
             Resumed::Settled(resume) => return resume,
             Resumed::Restored => {}
         }
@@ -100,36 +112,49 @@ enum Resumed {
     Restored,
 }
 
-/// The durable consent of one continuation: the command id, the child's
-/// session locator and path, and the cause. `Ok(None)` when the child holds
-/// no continuation. A refused publication rolls the decision back: nothing
-/// is dispatched on consent that is not durable.
+enum Consent {
+    None,
+    AlreadyContinuing,
+    Recorded {
+        command_id: String,
+        locator: String,
+        path: String,
+        cause: ContinuationCause,
+    },
+}
+
+/// Rechecks eligibility and records consent under the tree writer. A refused
+/// publication rolls the decision back: nothing is dispatched on consent that
+/// is not durable.
 async fn record_consent(
-    runtime: &ProductTopologyRuntime,
+    runtime: &Arc<ProductTopologyRuntime>,
     agent_id: &str,
     automatic: bool,
-) -> Result<Option<(String, String, String, crate::agent_tree::ContinuationCause)>, String> {
+) -> Result<Consent, String> {
     let decided_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
             u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
         });
     let id = agent_id.to_owned();
+    let owner = Arc::clone(runtime);
     runtime
         .mutate_then_emit(false, move |tree| {
-            let Some(cause) = tree
-                .loss_continuation(&id)
-                .filter(|continuation| match continuation.state {
-                    LossContinuationState::Running => false,
-                    LossContinuationState::Pending => true,
-                    LossContinuationState::Held => {
-                        !automatic || !continuation.interrupted_continuation
-                    }
-                })
-                .map(|continuation| continuation.cause)
-            else {
-                return Ok(None);
+            let Some(continuation) = tree.loss_continuation(&id) else {
+                return Ok(Consent::None);
             };
+            let due = due_automatically(&continuation, owner.continues_after_loss());
+            let running = continuation.state == LossContinuationState::Running;
+            if !automatic && (due || running) {
+                return Ok(Consent::AlreadyContinuing);
+            }
+            if running
+                || (automatic
+                    && continuation.state == LossContinuationState::Held
+                    && continuation.interrupted_continuation)
+            {
+                return Ok(Consent::None);
+            }
             let command_id = tree
                 .record_loss_continuation(&id, decided_at_ms)
                 .map_err(|error| error.message)?;
@@ -138,7 +163,12 @@ async fn record_consent(
                 return Err("the child has no session to continue".to_owned());
             };
             let path = node.path.display().to_string();
-            Ok(Some((command_id, locator, path, cause)))
+            Ok(Consent::Recorded {
+                command_id,
+                locator,
+                path,
+                cause: continuation.cause,
+            })
         })
         .await
 }
@@ -151,8 +181,16 @@ async fn resume_claimed(
 ) -> Resumed {
     let (command_id, locator, path, cause) =
         match record_consent(runtime, agent_id, automatic).await {
-            Ok(Some(recorded)) => recorded,
-            Ok(None) => {
+            Ok(Consent::Recorded {
+                command_id,
+                locator,
+                path,
+                cause,
+            }) => (command_id, locator, path, cause),
+            Ok(Consent::AlreadyContinuing) => {
+                return Resumed::Settled(LossResume::AlreadyContinuing);
+            }
+            Ok(Consent::None) => {
                 withdraw_ended_continuation(runtime, agent_id).await;
                 return Resumed::Settled(LossResume::NotHeld);
             }
@@ -249,6 +287,29 @@ async fn withdraw_ended_continuation(runtime: &ProductTopologyRuntime, agent_id:
     crate::agent::ledger::withdraw_ended_continuation(runtime.driver(), agent_id).await;
 }
 
+fn due_automatically(continuation: &LossContinuation, continues: bool) -> bool {
+    match continuation.state {
+        LossContinuationState::Pending => true,
+        LossContinuationState::Held => {
+            !continuation.interrupted_continuation
+                && (continues || continuation.cause == ContinuationCause::Handoff)
+        }
+        LossContinuationState::Running => false,
+    }
+}
+
+fn already_continuing(runtime: &ProductTopologyRuntime, agent_id: &str) -> Result<bool, String> {
+    runtime
+        .read(|tree| {
+            tree.loss_continuation(agent_id)
+                .is_some_and(|continuation| {
+                    due_automatically(&continuation, runtime.continues_after_loss())
+                        || continuation.state == LossContinuationState::Running
+                })
+        })
+        .map_err(|error| error.message)
+}
+
 /// The continuation pass a recovery run ends with: each recorded but
 /// unadmitted continuation is resubmitted, each one a planned handoff left
 /// is resumed by itself, and when the attached root continues after a loss
@@ -274,16 +335,7 @@ pub(in crate::agent) async fn continue_after_loss(
         return;
     };
     for (agent_id, continuation) in continuations {
-        let due = match continuation.state {
-            LossContinuationState::Pending => true,
-            LossContinuationState::Held => {
-                !continuation.interrupted_continuation
-                    && (continues
-                        || continuation.cause == crate::agent_tree::ContinuationCause::Handoff)
-            }
-            LossContinuationState::Running => false,
-        };
-        if due {
+        if due_automatically(&continuation, continues) {
             let _ = resume_after_loss(parent, runtime, &agent_id, true).await;
         }
     }
@@ -323,7 +375,13 @@ pub(crate) async fn operator_resume_after_loss(
     };
     let mut resumed = Vec::new();
     for agent_id in targets {
-        let outcome = resume_after_loss(&parent, runtime, &agent_id, false).await;
+        // The scan settles recovery before it takes automatic continuations.
+        // Don't race it for the claim, even before it reached this child.
+        let outcome = if already_continuing(runtime, &agent_id)? {
+            LossResume::AlreadyContinuing
+        } else {
+            resume_after_loss(&parent, runtime, &agent_id, false).await
+        };
         resumed.push((agent_id, outcome));
     }
     Ok(resumed)

@@ -4167,6 +4167,10 @@ If a continuation turn itself loses its owner, its new loss holds even under
 `"continue"`; only operator Resume or another explicitly authorized turn
 advances that loss. An already recorded continuation decision remains
 pending and retries under its original command id.
+Operator Resume does not take over a child continuation due to run
+automatically, including a planned handoff or a pending decision. It reports
+that the child is already continuing; the recovery pass settles the lost
+owner's work before starting the continuation.
 The attached root sets the policy on
 the tree's hub when it opens. Each run ends with that continuation pass, after
 every recovery it made, and reports the children still held in one live tree

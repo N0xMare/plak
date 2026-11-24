@@ -1405,6 +1405,8 @@ pub(crate) async fn operator_recover_tool(
 pub(crate) async fn recover_tree(tree_id: &str) -> Option<ChildRecoveryReport> {
     let runtime = crate::topology_runtime::lookup(tree_id)?;
     let parent = super::build::rejoin_parent(&runtime)?;
+    #[cfg(test)]
+    resume_race_hook::before_pass(tree_id).await;
     super::children::recover_owed_children(&parent, &runtime).await;
     let port = ParentSessionPort { parent };
     let report = recover_unresolved_children(&runtime, &port).await;
@@ -1412,6 +1414,38 @@ pub(crate) async fn recover_tree(tree_id: &str) -> Option<ChildRecoveryReport> {
     // node resumed here is one its recover_node already settled.
     super::children::continue_after_loss(&port.parent, &runtime).await;
     Some(report)
+}
+
+#[cfg(test)]
+pub(crate) mod resume_race_hook {
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::{Notify, watch};
+
+    type Gate = (String, Arc<Notify>, watch::Receiver<bool>);
+    static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+
+    pub(crate) fn install(tree: String) -> (Arc<Notify>, watch::Sender<bool>) {
+        let entered = Arc::new(Notify::new());
+        let (release, gate) = watch::channel(false);
+        *GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((tree, entered.clone(), gate));
+        (entered, release)
+    }
+
+    pub(super) async fn before_pass(tree_id: &str) {
+        let gate = GATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|(tree, _, _)| tree == tree_id)
+            .cloned();
+        if let Some((_, entered, mut release)) = gate {
+            entered.notify_one();
+            let _ = release.wait_for(|open| *open).await;
+        }
+    }
 }
 
 /// What [`start_tree_recovery`] did.
