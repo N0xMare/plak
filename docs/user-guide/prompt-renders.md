@@ -68,13 +68,12 @@ moved. That failure is the point: model-visible text changes deliberately.
 After reviewing the diff, re-pin:
 
 ```text
-just prompts pins
+just regenerate prompts
 ```
 
-That prints the new `PROMPT_RENDER_PINS` and `LIFECYCLE_RENDER_PINS` rows
-(`PLAK_PRINT_PROMPT_PINS=1`); paste them over the tables in
-`crates/hosting/hosted/tests/common/rendered_prompts.rs` and
-`crates/hosting/hosted/tests/common/rendered_lifecycle.rs`, then re-run the tests.
+This updates the route, lifecycle, and compaction-wire digest tables. Review
+the diff and re-run the tests. Use `just prompts pins` to print the rows
+without updating the tables.
 
 ## Where to change what the model sees
 

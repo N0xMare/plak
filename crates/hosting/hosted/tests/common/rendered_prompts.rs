@@ -603,6 +603,10 @@ pub(crate) mod suite {
         std::env::var("PLAK_PRINT_PROMPT_PINS").is_ok_and(|value| value == "1")
     }
 
+    pub(crate) fn print_pin_table(name: &str, rows: &[String]) {
+        println!("\n{name}:\n{}\nEND {name}", rows.join("\n"));
+    }
+
     pub(crate) fn pin_macos(text: &str) -> String {
         text.replace(
             &format!("OS: {}.", std::env::consts::OS),
@@ -2304,11 +2308,14 @@ pub(crate) mod suite {
             "included route matrix is providers×compositions×topology minus documented exclusions"
         );
         assert_eq!(excluded_routes().len(), 2);
-        assert_eq!(
-            PROMPT_RENDER_PINS.len(),
-            95,
-            "the prompt render pin table covers every included route"
-        );
+        let print_pins = print_pins_requested();
+        if !print_pins {
+            assert_eq!(
+                PROMPT_RENDER_PINS.len(),
+                95,
+                "the prompt render pin table covers every included route"
+            );
+        }
         let (_tmp, home, root, cwd) = instruction_fixture();
         let tools = occupancy_tools(&root);
         let pins = PROMPT_RENDER_PINS
@@ -2419,13 +2426,17 @@ pub(crate) mod suite {
                 &kernel_value,
             ));
             let digest = render_digest(&markdown);
-            match pins.get(spec.file_stem.as_str()) {
-                Some(pinned) if *pinned == digest => {}
-                Some(pinned) => failures.push(format!(
-                    "{}: rendered prompt changed (pinned {pinned}, rendered {digest})",
-                    spec.file_stem
-                )),
-                None => failures.push(format!("{}: route has no pinned digest", spec.file_stem)),
+            if !print_pins {
+                match pins.get(spec.file_stem.as_str()) {
+                    Some(pinned) if *pinned == digest => {}
+                    Some(pinned) => failures.push(format!(
+                        "{}: rendered prompt changed (pinned {pinned}, rendered {digest})",
+                        spec.file_stem
+                    )),
+                    None => {
+                        failures.push(format!("{}: route has no pinned digest", spec.file_stem))
+                    }
+                }
             }
             rows.push(format!("        (\"{}\", \"{digest}\"),", spec.file_stem));
             if update {
@@ -2433,8 +2444,8 @@ pub(crate) mod suite {
                 std::fs::write(&path, &markdown).expect("write rendered prompt artifact");
             }
         }
-        if print_pins_requested() {
-            println!("PROMPT_RENDER_PINS:\n{}", rows.join("\n"));
+        if print_pins {
+            print_pin_table("PROMPT_RENDER_PINS", &rows);
         }
         assert!(
             failures.is_empty(),

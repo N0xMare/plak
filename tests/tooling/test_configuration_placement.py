@@ -116,13 +116,16 @@ class ConfigurationPlacementTests(unittest.TestCase):
         )
         self.assertIn("exceeds ceiling 0", errors[0])
 
-    def test_ceiling_requires_reason_and_reductions_lower_it(self):
+    def test_ceiling_requires_reason_and_allows_reductions(self):
         source = {"src/logic.rs": 'fn a() { std::env::var("X"); }'}
         self.assertTrue(checker.validate_configuration_rules("x", source, {"env-ceiling": 1}))
         rule = {"env-ceiling": 1, "reason": "Existing debt"}
         self.assertEqual(checker.validate_configuration_rules("x", source, rule), [])
-        errors = checker.validate_configuration_rules("x", {}, rule)
-        self.assertIn("lower env-ceiling", errors[0])
+        self.assertEqual(checker.validate_configuration_rules("x", {}, rule), [])
+        errors = checker.validate_configuration_rules(
+            "x", {**source, "src/more.rs": source["src/logic.rs"]}, rule
+        )
+        self.assertIn("exceeds ceiling 1", errors[0])
 
     def test_invalid_metadata_fails_closed(self):
         for rule in (

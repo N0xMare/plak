@@ -1348,6 +1348,7 @@ pub(crate) mod suite {
         );
         let mut failures = Vec::new();
         let mut rows = Vec::new();
+        let print_pins = prompts::print_pins_requested();
         for spec in routes {
             let (turn, bound, compact) = compaction_wire(&spec, &home, &root, &cwd, &tools);
             let summary: Value = serde_json::from_slice(&compact).expect("summary body json");
@@ -1361,6 +1362,7 @@ pub(crate) mod suite {
             }
             let digest = prompts::render_digest(std::str::from_utf8(&compact).expect("utf-8 body"));
             match pins.get(spec.file_stem.as_str()) {
+                _ if print_pins => {}
                 Some(pinned) if *pinned == digest => {}
                 Some(pinned) => failures.push(format!(
                     "{}: summary request changed (pinned {pinned}, rendered {digest})",
@@ -1370,8 +1372,8 @@ pub(crate) mod suite {
             }
             rows.push(format!("        (\"{}\", \"{digest}\"),", spec.file_stem));
         }
-        if prompts::print_pins_requested() {
-            println!("COMPACTION_WIRE_PINS:\n{}", rows.join("\n"));
+        if print_pins {
+            prompts::print_pin_table("COMPACTION_WIRE_PINS", &rows);
         }
         assert!(
             failures.is_empty(),

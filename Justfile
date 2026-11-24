@@ -33,6 +33,15 @@ install-checks:
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
+[doc("lower debt ceilings to their measured counts for a cut")]
+tighten-ceilings:
+    python3 tools/gate/check_workspace.py --tighten-ceilings
+
+[positional-arguments]
+[doc("regenerate derived pins and fixtures (omit parts to regenerate all on Linux)")]
+regenerate *PARTS:
+    python3 tools/gate/regenerate.py "$@"
+
 # A pass on a clean tree records it as publication evidence.
 [doc("release candidate: every group, including archive verification and long soaks")]
 full:

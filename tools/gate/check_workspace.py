@@ -4417,7 +4417,10 @@ def _crate_pattern_matches(pattern: str, crate: str) -> bool:
 
 
 def validate_module_rules(
-    package: Package, sources: dict[str, str], rules: dict[str, dict[str, Any]]
+    package: Package,
+    sources: dict[str, str],
+    rules: dict[str, dict[str, Any]],
+    reductions: dict[str, int] | None = None,
 ) -> list[str]:
     """Apply `[workspace.metadata.plakous.modules.<package>]` per file.
 
@@ -4428,9 +4431,8 @@ def validate_module_rules(
     a `use` declares it or the code names it inline, and so is a `super::`
     chain that resolves, by the file's module and the inline `mod` blocks
     around it, to one. With a
-    `may-use-ceiling`, `may-use` lists exactly that many paths: the list
-    only shrinks, and the ceiling is lowered with it. Inactive until the
-    module directory exists.
+    `may-use-ceiling`, `may-use` lists at most that many paths. Source
+    restrictions are inactive until the module directory exists.
     """
     errors: list[str] = []
     for module, rule in sorted(rules.items()):
@@ -4449,13 +4451,15 @@ def validate_module_rules(
             )
 
         ceiling = rule.get("may-use-ceiling")
-        if ceiling is not None and len(rule["may-use"]) != ceiling:
-            direction = "over" if len(rule["may-use"]) > ceiling else "under"
-            errors.append(
-                f"{package.name}: module {module!r} may-use lists {len(rule['may-use'])} paths, "
-                f"{direction} its may-use-ceiling {ceiling}: the list only shrinks, and the "
-                "ceiling follows it down"
-            )
+        count = len(rule["may-use"])
+        if ceiling is not None:
+            if count > ceiling:
+                errors.append(
+                    f"{package.name}: module {module!r} may-use lists {count} paths, "
+                    f"over its may-use-ceiling {ceiling}"
+                )
+            elif reductions is not None and count < ceiling:
+                reductions[module] = count
 
         for path, contents in sorted(sources.items()):
             if not path.startswith(prefix):
@@ -4664,7 +4668,10 @@ def configuration_debt(
 
 
 def validate_configuration_rules(
-    package: str, sources: dict[str, str], rule: dict[str, Any]
+    package: str,
+    sources: dict[str, str],
+    rule: dict[str, Any],
+    reductions: dict[str, int] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if not isinstance(rule, dict):
@@ -4707,19 +4714,19 @@ def validate_configuration_rules(
     ).strip():
         errors.append(f"cfg.{package}: explicit boundary sites require a reviewed reason")
     for kind, sites in debt.items():
-        ceiling = rule.get(f"{kind}-ceiling", 0)
+        key = f"{kind}-ceiling"
+        ceiling = rule.get(key, 0)
         if len(sites) > ceiling:
             errors.append(
                 f"{package}: {kind} placement debt {len(sites)} exceeds ceiling {ceiling}: "
                 + "; ".join(sites)
             )
-        elif len(sites) < ceiling:
-            errors.append(f"{package}: lower {kind}-ceiling from {ceiling} to {len(sites)}")
+        elif reductions is not None and len(sites) < ceiling:
+            reductions[key] = len(sites)
     return errors
 
 
-# Lint and size ratchet: `[package.metadata.plakous-lint]` in each package's
-# own manifest, so a split edits only the package it touches.
+# Lint and size ratchet: `[package.metadata.plakous-lint]` in each package's manifest.
 RATCHET_LINTS = {
     "too_many_lines": "too-many-lines-ceiling",
     "too_many_arguments": "too-many-arguments-ceiling",
@@ -4922,8 +4929,10 @@ def declared_test_module_paths(
     }
 
 
-def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) -> list[str]:
-    """Ceilings fail above and must be lowered below, like the cfg ceilings."""
+def validate_lint_ratchet(
+    package: str, inventory: dict[str, Any], rule: Any, reductions: dict[str, int] | None = None
+) -> list[str]:
+    """Enforce upper bounds and exact crate-wide allow inventories."""
     if not isinstance(rule, dict):
         return [f"{package}: [package.metadata.plakous-lint] must be a table"]
     allowed = {
@@ -4957,7 +4966,8 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
         )
     if errors:
         return errors
-    if (any(ceilings.values()) or recorded) and not str(rule.get("reason", "")).strip():
+    reason = rule.get("reason", "")
+    if (any(ceilings.values()) or recorded) and not (isinstance(reason, str) and reason.strip()):
         errors.append(f"{package}: nonzero plakous-lint ceilings require a reviewed reason")
     counts = {RATCHET_LINTS[lint]: sites for lint, sites in inventory["items"].items()}
     counts["large-file-ceiling"] = inventory["large-files"]
@@ -4981,11 +4991,8 @@ def validate_lint_ratchet(package: str, inventory: dict[str, Any], rule: Any) ->
                 f"{remedies[key]}. Ceilings are not raised without review (spec 06 sec. 4): "
                 + "; ".join(sites)
             )
-        elif len(sites) < ceilings[key]:
-            errors.append(
-                f"{package}: {key[: -len('-ceiling')]} count {len(sites)} is below its ceiling {ceilings[key]}; "
-                f"set {key} = {len(sites)} in this package's [package.metadata.plakous-lint]"
-            )
+        elif reductions is not None and len(sites) < ceilings[key]:
+            reductions[key] = len(sites)
     for item in inventory["crate-wide"]:
         if item not in recorded:
             errors.append(
@@ -5971,6 +5978,100 @@ def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[s
     return files
 
 
+def tightened_manifest(text: str, reductions: dict[tuple[str, ...], dict[str, int]]) -> str:
+    """Change only the enrolled integers; refuse an unrecognized TOML layout."""
+    expected = tomllib.loads(text)
+    tables = re.split(r"(?m)^(\[[^\r\n]+\][ \t]*(?:#[^\r\n]*)?)$", text)
+    for path, ceilings in reductions.items():
+        if not ceilings:
+            continue
+        header = f"[{'.'.join(path)}]"
+        index = next(
+            (i for i in range(1, len(tables), 2) if tables[i].split("#", 1)[0].strip() == header),
+            None,
+        )
+        if index is None:
+            raise ValueError(f"cannot locate ceiling table {header}")
+        table = expected
+        for part in path:
+            table = table[part]
+        for key, count in ceilings.items():
+            pattern = (
+                rf"(?m)^([ \t]*{re.escape(key)}[ \t]*=[ \t]*)[0-9][0-9_]*([ \t]*(?:#[^\r\n]*)?)$"
+            )
+            tables[index + 1], matches = re.subn(
+                pattern, lambda match: f"{match[1]}{count}{match[2]}", tables[index + 1]
+            )
+            if matches != 1:
+                raise ValueError(f"cannot locate {header}.{key}")
+            table[key] = count
+    updated = "".join(tables)
+    if tomllib.loads(updated) != expected:
+        raise ValueError("tightening changed unexpected TOML values")
+    return updated
+
+
+def tighten_ceilings(workspace: Workspace) -> int:
+    """Recount with the static validators; write nothing if any ratchet fails."""
+    root = workspace.root
+    policy = workspace.policy
+    cfg = workspace.root_manifest["workspace"]["metadata"]["plakous"].get("cfg", {})
+    errors = validate_ratchet_clippy_thresholds(root)
+    errors.extend(
+        f"modules rule names unknown package {name!r}"
+        for name in sorted(policy.modules.keys() - workspace.packages.keys())
+    )
+    errors.extend(
+        f"cfg rule names unknown package {name!r}"
+        for name in sorted(cfg.keys() - workspace.packages.keys())
+    )
+    root_edits: dict[tuple[str, ...], dict[str, int]] = {}
+    edits = {root / "Cargo.toml": root_edits}
+    directories = {package.directory for package in workspace.packages.values()}
+    for name, package in sorted(workspace.packages.items()):
+        nested = {other for other in directories if other.startswith(f"{package.directory}/")}
+        files = package_rust_files(root, package, nested)
+        lint: dict[str, int] = {}
+        errors.extend(
+            validate_lint_ratchet(
+                name, package_lint_inventory(package, files, root), package_lint_rule(package), lint
+            )
+        )
+        edits.setdefault(package.manifest_path, {})["package", "metadata", "plakous-lint"] = lint
+        sources, discovery_errors = package_sources(package, root)
+        errors.extend(discovery_errors)
+        placement: dict[str, int] = {}
+        errors.extend(validate_configuration_rules(name, sources, cfg.get(name, {}), placement))
+        root_edits["workspace", "metadata", "plakous", "cfg", name] = placement
+        module_counts: dict[str, int] = {}
+        errors.extend(
+            validate_module_rules(package, sources, policy.modules.get(name, {}), module_counts)
+        )
+        for module, count in module_counts.items():
+            root_edits["workspace", "metadata", "plakous", "modules", name, module] = {
+                "may-use-ceiling": count
+            }
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        return 1
+
+    updated = {}
+    for path, reductions in edits.items():
+        if any(reductions.values()):
+            original = path.read_bytes().decode("utf-8")
+            try:
+                updated[path] = tightened_manifest(original, reductions)
+            except ValueError as error:
+                print(f"{path.relative_to(root)}: {error}", file=sys.stderr)
+                return 1
+    for path, manifest in updated.items():
+        path.write_bytes(manifest.encode("utf-8"))
+        print(f"tightened {path.relative_to(root)}")
+    if not updated:
+        print("ceilings already tight")
+    return 0
+
+
 def load_publish_shape() -> Any:
     """Import tools/release/publish_shape.py, the published plakd manifest shape."""
     import importlib.util
@@ -6637,8 +6738,14 @@ def main() -> int:
         for name in (*PORTABLE_CRATES, *PORTABLE_DEFAULT_LIBRARIES):
             print(name)
         return 0
+    if sys.argv[1:] == ["--tighten-ceilings"]:
+        with source_scan():
+            return tighten_ceilings(load_workspace(ROOT))
     if sys.argv[1:]:
-        print("usage: check_workspace.py [--portable-crates | --wasm-libraries]", file=sys.stderr)
+        print(
+            "usage: check_workspace.py [--portable-crates | --wasm-libraries | --tighten-ceilings]",
+            file=sys.stderr,
+        )
         return 2
     return check_root(ROOT)
 

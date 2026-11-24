@@ -379,10 +379,9 @@ Test-seam features (`test-support`, `test-hooks`,
 belong only on test-support module declarations in libraries and in plakd's
 `lib.rs`/`test_hooks.rs` composition root. Production control-flow seams are
 existing debt, not a precedent for new sites. The checker counts feature,
-test-seam and environment placement debt separately, with exact current
-`feature-ceiling`, `test-seam-ceiling` and `env-ceiling` inventories and a
-review reason. Missing ceilings mean zero; growth fails and reductions require
-lowering the ceiling in the same change. Test-only items and test source
+test-seam and environment placement debt separately against
+`feature-ceiling`, `test-seam-ceiling` and `env-ceiling` upper bounds.
+Missing ceilings mean zero. Test-only items and test source
 trees are excluded. A cfg predicate is test-only when it implies `test`:
 `test` itself, an `all(...)` with any test-only child, or a non-empty
 `any(...)` whose every child is test-only. Negation is not treated as proof.
@@ -390,8 +389,7 @@ trees are excluded. A cfg predicate is test-only when it implies `test`:
 Comments and literals are not configuration sites.
 
 The same checker ratchets lint and size debt through each package's own
-`[package.metadata.plakous-lint]`, so a split edits only the manifest of the
-package it touches (and `just fast` selects only that package). It reads every
+`[package.metadata.plakous-lint]`. It reads every
 tracked Rust file of the package, tests included:
 
 - `too-many-lines-ceiling` and `too-many-arguments-ceiling` bound the item-
@@ -411,9 +409,7 @@ tracked Rust file of the package, tests included:
   Only modules whose public surface is not yet documented carry these
   temporary allows, with a reason naming the remaining work. Crate-wide
   documentation suppressions are forbidden in an enrolled package, including
-  integration-test targets. Growth fails and a reduction requires lowering
-  the package's ceiling in the same change. The tooling self-test checks the
-  enrollment-removal mutation as well as exact counts.
+  integration-test targets.
   Hosted production code has no crate-wide exception for the inherited
   pedantic lint set either: remaining exceptions attach to individual items
   and state the ownership, feature-shape or fixture invariant they preserve.
@@ -432,12 +428,18 @@ tracked Rust file of the package, tests included:
   declared under an inline ancestor with a path override, or inside a macro
   definition, is not resolved and its file stays counted. A feature-gated
   support module or an example is counted.
-- The ceilings were frozen at the counts on main when the ratchet landed,
-  under the `.clippy.toml` thresholds the checker pins (`too-many-lines` 100,
-  the clippy default, and `too-many-arguments` 7). They follow the cfg rule:
-  missing means zero, growth fails, a reduction lowers the ceiling in the
-  same change, and nonzero ceilings carry a review reason. A ceiling is not
-  raised without review.
+
+The checker pins the `.clippy.toml` thresholds used to count allowances
+(`too-many-lines` 100, the clippy default, and `too-many-arguments` 7).
+Lint and size ceilings default to zero; the documentation ceiling is set
+only in enrolled packages. A module rule can cap its `may-use` list with
+`may-use-ceiling`; omitting that key leaves the list uncapped by this ratchet.
+
+Every enrolled ceiling is an upper bound: a count above it fails, and a
+reduction passes without a manifest edit. Nonzero ceilings require a reviewed
+reason and are not raised without review. At each cut, the integrator runs
+`just tighten-ceilings` to lower every enrolled ceiling to its actual count.
+The command uses the static checker's inventories and never raises a ceiling.
 
 `plakous-hosted::capabilities` owns the complete current route metadata in
 per-route modules and one ordered registry. plakd's private product registry
@@ -726,6 +728,26 @@ The facade reexports `openrouter::OPENROUTER_CHAT_PROTOCOL_ID`,
 provider-owned protocol names, enrolled in the same inventory.
 The external facade consumer pins all four `JobStatus` variants (`Running`,
 `Exited`, `Stopped`, `OutcomeUnknown`) and all five `JobStopReason` variants.
+
+### Derived pins and fixtures
+
+Run `just regenerate` on Linux with no concurrent build in the checkout.
+Pass one or more part names to update only those outputs:
+
+| Part | Output |
+| --- | --- |
+| `manifests` | `EXPECTED_SECURITY_SURFACE_DIGESTS` in `tools/gate/check_features.py` |
+| `bindings` | `crates/hosting/hosted/tests/fixtures/binding-contracts.json` |
+| `current-bindings` | `manifest.json` and `runtime.sqlite3` under `crates/hosting/hosted/tests/fixtures/current-bindings/` (Linux only; records the source revision) |
+| `nextest` | Generated offline and install blocks in `.config/nextest.toml` |
+| `prompts` | Rendered route, lifecycle and compaction-wire digest tables in `crates/hosting/hosted/tests/common/rendered_{prompts,lifecycle,wire}.rs` |
+
+Resolve conflicts only in the generated files or blocks by taking either
+side and regenerating from the merged inputs. Do not hand-merge digests.
+Regeneration does not approve security-surface changes, binding changes
+(which still require exact predecessor reopen evidence), or prompt changes.
+Historical fixtures, including the predecessor and default-account binding
+baselines, are evidence, not projections of the current tree.
 
 ### 4.1 The `maintainer` feature
 
@@ -1607,6 +1629,8 @@ test or packaged-crate input. Instruction-discovery tests use in-memory or
 temporary workspaces; prompt-render tests enroll their own fixture instructions,
 not the checkout's instructions. Its content-only changes need no new full or
 package evidence.
+Cut-time changelog edits are inert under this rule; ceiling changes to
+manifests are not.
 
 The changed instructions and documentation must still pass the tracked-file
 hygiene scan of the workspace checker, which `verify` reruns on the delta. Any
@@ -2263,8 +2287,8 @@ is the pre-tag dry run and releases nothing. The workflow checks nothing else.
 Worker branches use `just fast <packages>` plus the groups their change needs.
 A change to an install-family test or code it exercises, including crash-sweep
 shapes, requires `just steps tests-install` before handoff.
-Main advances one integration batch at a time. Before a batch lands, its tip
-tree passes the integration batch gate, with the Linux and Mac runs concurrent:
+Each reviewed branch lands on main after its candidate tree passes the
+fan-out integration batch gate, with the Linux and Mac runs concurrent:
 
 - Linux x86_64 musl runs workspace and standalone lint, the test build, and
   the rdeps-scoped parallel, core serial and core durability lanes
@@ -2292,7 +2316,10 @@ candidate and before publication; a production install builds from the source
 tree and does not require it. Only a matching cohort verification receipt
 (§6.5) may avoid repeating archive verification.
 
-Commits inside a batch are not gated individually. Main can carry an
+Commits inside a branch are not gated individually. Ordinary branches do not
+edit `CHANGELOG.md`. At a cut, the integrator writes its Unreleased entries
+from the landed commits and tightens ceilings (§4). The cut deploys the
+resulting main tip, not a separately integrated branch. Main can carry an
 install-profile failure that the install tier catches before production.
 A production install requires the batch gate **and** the install tier on the
 exact tree: the complete macOS suite (`just install-checks`), the full Linux

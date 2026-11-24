@@ -36,7 +36,7 @@ mod suite {
     use super::super::rendered_prompts::suite::{
         Occupancy, ProviderKind, RouteSpec, SYNTHETIC_CWD, SYNTHETIC_ROOT, compile_projection,
         extra_names, golden_card, golden_dir, golden_epoch, instruction_fixture, native_profile,
-        occupancy_tools, pin_macos, print_pins_requested, registry, render_digest,
+        occupancy_tools, pin_macos, print_pin_table, print_pins_requested, registry, render_digest,
         synthetic_target,
     };
     use super::super::{assignment_start_prompt, selected_harness_profile, submit_harness_prompt};
@@ -1992,6 +1992,7 @@ mod suite {
             .find(|(name, _)| *name == stem)
             .map(|(_, pin)| *pin)
         {
+            _ if print_pins_requested() => {}
             Some(pinned) if pinned == digest => {}
             Some(pinned) => failures.push(format!(
                 "{stem}: rendered lifecycle surface changed (pinned {pinned}, rendered {digest})"
@@ -2022,7 +2023,7 @@ mod suite {
             pin_or_write(stem, &rendered, &dir, update, &mut failures, &mut rows);
         }
         if print_pins_requested() {
-            println!("LIFECYCLE_RENDER_PINS:\n{}", rows.join("\n"));
+            print_pin_table("LIFECYCLE_RENDER_PINS", &rows);
         }
         assert!(
             failures.is_empty(),

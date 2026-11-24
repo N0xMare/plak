@@ -23,11 +23,21 @@ just batch                 # Linux integration gate; set PLAK_BATCH_BASE to the 
 just batch-mac             # macOS integration gate
 just nextest ARGS          # manual tests in the isolated test environment
 just steps GROUPS          # named groups; tests-install for install-family changes
+just regenerate [PART...]  # rebuild derived pins and fixtures; all parts on Linux
+just tighten-ceilings      # cut integrator only: lower debt ceilings to actual counts
 just --list                # other recipes
 ```
 
 Production install requires exact-tree batch and install evidence and
 [qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-repository-settings).
+
+Ordinary branches leave `CHANGELOG.md` and reductions to debt ceilings alone.
+At a cut, the integrator writes Unreleased entries from landed commits and
+runs `just tighten-ceilings` before gating the cut tree.
+
+For a conflict in a [derived pin or fixture](docs/spec/06-build-and-support-surface.md#derived-pins-and-fixtures),
+take either side of the generated file or block, keep both sides' source
+changes as appropriate, run `just regenerate`, review the result, and commit it.
 
 ## Where to read
 

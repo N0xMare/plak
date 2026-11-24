@@ -1714,7 +1714,7 @@ or containment descriptor is normalized.
 | Wire identity goldens (host-protocol intents, observations, views) | `crates/hosting/host-protocol/src/wire_identity_goldens.rs` | `PLAK_PRINT_WIRE_PINS=1 cargo test -p plakous-host-protocol wire_identity -- --nocapture` |
 | Durable tool-descriptor golden | `crates/harness/compose/tests/integration/durable_descriptor_identity_golden.rs` | `PLAK_PRINT_DESCRIPTOR_PINS=1 cargo test -p plakous-compose --test integration durable_descriptor_identity_golden:: -- --nocapture` |
 | Pack prompt pins (each pack's `pins()`, checked by `drifted_pins`) | `crates/core/tools/src/prompt_digest.rs`, each pack's `crates/harness/tool-{files,search,process,plan}/src/text.rs`, `crates/harness/compose/src/text.rs`, and `crates/orchestration/recursive-subagents/src/tree/text/mod.rs` | the failing assertion prints each drifted id with its new digest |
-| Rendered route, lifecycle and wire pins | `crates/hosting/hosted/tests/common/{rendered_prompts,rendered_lifecycle,rendered_wire}.rs` | `PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_ -- --nocapture` (§2.5) |
+| Rendered route, lifecycle and wire pins | `crates/hosting/hosted/tests/common/{rendered_prompts,rendered_lifecycle,rendered_wire}.rs` | `just regenerate prompts` (§2.5) |
 | Observation parity goldens (the host loop and the JSONL projection emit the same sequence) | `bin/plakd/tests/parity/*.jsonl` | `PLAK_UPDATE_GOLDENS=1 cargo test -p plakd --lib observation_parity` |
 
 ### 2.5 Prompt renders are pinned in code, not in files
@@ -1738,7 +1738,7 @@ The human-readable render is a local review artifact:
 ```text
 just prompts render  # PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_
 just prompts diff    # copy the previous render aside, re-render, diff -ru
-just prompts pins    # PLAK_PRINT_PROMPT_PINS=1: print the new pin tables
+just regenerate prompts  # replace the in-code pin tables
 ```
 
 Output goes to the git-ignored `target/prompt-renders/`, overridable with
@@ -1772,9 +1772,11 @@ tool split, and prints a table of every route's footprint whether it passes or
 not, so the cost of a wording change is read rather than re-derived.
 
 A prompt change is meant to fail the test with the list of routes whose digest
-moved. The workflow is: `just prompts diff` to read the model-visible sentence
-changes, then `just prompts pins` and paste the new rows over the tables. A
-rendered artifact is never edited — `just prompts render` overwrites it from Rust.
+moved. Review the model-visible changes with `just prompts diff`, run
+`just regenerate prompts`, and re-run the test in its normal pin-checking
+mode. `just prompts pins` prints the rows without updating the tables. Neither
+command skips the structural checks. A rendered artifact is never edited —
+`just prompts render` overwrites it from Rust.
 
 Vendor CLI captures under a gitignored local capture directory come from
 `just prompts native-compare`. Installed binaries run with isolated configuration

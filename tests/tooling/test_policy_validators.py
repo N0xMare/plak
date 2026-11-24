@@ -1173,14 +1173,13 @@ class LayerPolicyTests(unittest.TestCase):
         )
 
     def test_module_rules_hold_may_use_to_its_ceiling(self) -> None:
-        """With a ceiling, `may-use` lists exactly that many paths."""
+        """With a ceiling, `may-use` lists at most that many paths."""
         package = synthetic_package("plakd", "bin", "bin/plakd", package_class="supported")
         sources = {"src/tui/mod.rs": "use crate::tui::theme::Theme;"}
-        tail = ": the list only shrinks, and the ceiling follows it down"
         for ceiling, errors in (
             (2, []),
-            (1, [f"plakd: module 'tui' may-use lists 2 paths, over its may-use-ceiling 1{tail}"]),
-            (3, [f"plakd: module 'tui' may-use lists 2 paths, under its may-use-ceiling 3{tail}"]),
+            (1, ["plakd: module 'tui' may-use lists 2 paths, over its may-use-ceiling 1"]),
+            (3, []),
         ):
             rules = {
                 "tui": {

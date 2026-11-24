@@ -2,7 +2,10 @@
 
 import sys
 import tempfile
+import tomllib
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/gate"))
@@ -198,7 +201,7 @@ class LintRatchetValidationTests(unittest.TestCase):
     def test_exact_ceilings_pass(self):
         self.assertEqual(self.validate(self.EXACT), [])
 
-    def test_missing_docs_enrollment_is_exact_and_rejects_crate_wide_opt_outs(self):
+    def test_missing_docs_is_bounded_and_rejects_crate_wide_opt_outs(self):
         inventory = {
             **self.INVENTORY,
             "missing-docs": ["src/lib.rs:8"],
@@ -212,12 +215,7 @@ class LintRatchetValidationTests(unittest.TestCase):
                 for error in self.validate({**exact, "missing-docs-ceiling": 0}, inventory)
             )
         )
-        self.assertTrue(
-            any(
-                "set missing-docs-ceiling = 1" in error
-                for error in self.validate({**exact, "missing-docs-ceiling": 2}, inventory)
-            )
-        )
+        self.assertEqual(self.validate({**exact, "missing-docs-ceiling": 2}, inventory), [])
         self.assertTrue(
             any(
                 "must be a nonnegative integer" in error
@@ -254,21 +252,15 @@ class LintRatchetValidationTests(unittest.TestCase):
             )
         )
 
-    def test_above_a_ceiling_fails_and_below_must_be_lowered(self):
+    def test_above_a_ceiling_fails_and_below_passes(self):
         errors = self.validate({**self.EXACT, "too-many-lines-ceiling": 1, "large-file-ceiling": 2})
         self.assertIn(
             "pkg: too-many-lines count 2 exceeds its ceiling 1; split the item or remove the allow. "
             "Ceilings are not raised without review (spec 06 sec. 4): src/a.rs:1; src/b.rs:2",
             errors,
         )
-        self.assertIn(
-            "pkg: large-file count 1 is below its ceiling 2; set large-file-ceiling = 1 in this "
-            "package's [package.metadata.plakous-lint]",
-            errors,
-        )
-        errors = self.validate({**self.EXACT, "too-many-arguments-ceiling": 3})
         self.assertEqual(len(errors), 1)
-        self.assertIn("set too-many-arguments-ceiling = 0", errors[0])
+        self.assertEqual(self.validate({**self.EXACT, "too-many-arguments-ceiling": 3}), [])
 
     def test_an_unrecorded_crate_wide_allow_fails_and_a_removed_one_must_be_dropped(self):
         errors = self.validate({**self.EXACT, "crate-wide-allows": []})
@@ -324,7 +316,7 @@ class LintRatchetValidationTests(unittest.TestCase):
             errors = checker.validate_ratchet_clippy_thresholds(root)
         self.assertEqual(len(errors), 2, errors)
 
-    def test_the_workspace_ratchet_is_exact_and_lives_in_package_manifests(self):
+    def test_the_workspace_ratchet_is_bounded_and_lives_in_package_manifests(self):
         workspace = checker.load_workspace(checker.ROOT)
         self.assertIn(
             "missing-docs-ceiling",
@@ -343,6 +335,96 @@ class LintRatchetValidationTests(unittest.TestCase):
                 inventory = checker.package_lint_inventory(package, files)
                 rule = checker.package_lint_rule(package)
                 self.assertEqual(checker.validate_lint_ratchet(name, inventory, rule), [])
+
+
+class TightenCeilingsTests(unittest.TestCase):
+    def test_tighten_recounts_every_ceiling_and_never_raises_one(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch).resolve()
+            package = root / "pkg"
+            source = package / "src/lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '#[cfg(feature = "test-hooks")]\n'
+                "#[allow(clippy::too_many_lines, clippy::too_many_arguments, missing_docs)]\n"
+                'pub fn gate() { std::env::var("TEST"); }\n' + long_file(1501)
+            )
+            (root / ".clippy.toml").write_text("too-many-arguments-threshold = 7\n")
+            manifest = package / "Cargo.toml"
+            manifest.write_text(
+                '[package]\nname = "pkg"\n'
+                '[package.metadata.plakous]\nlayer = "bin"\nclass = "supported"\n'
+                '[package.metadata.plakous-lint]\n'
+                'too-many-lines-ceiling = 2\n'
+                'too-many-arguments-ceiling = 3\n'
+                'large-file-ceiling = 4\n'
+                'missing-docs-ceiling = 5 # keeps enrollment\n'
+                'reason = "Existing debt"\n'
+            )
+            root_manifest = root / "Cargo.toml"
+            root_manifest.write_text(
+                '[workspace.metadata.plakous]\nlayers = ["bin"]\n'
+                '[workspace.metadata.plakous.edges]\nbin = []\n'
+                '[workspace.metadata.plakous.layout]\nbin = []\n'
+                '[workspace.metadata.plakous.classes]\nbin = ["supported"]\n'
+                '[workspace.metadata.plakous.cfg.pkg]\n'
+                'feature-sites = []\nfeature-ceiling = 3\ntest-seam-ceiling = 3\nenv-ceiling = 3\n'
+                'reason = "Existing debt"\n'
+                '[workspace.metadata.plakous.modules.pkg.a]\n'
+                'may-use = ["crate::a"]\nmay-use-ceiling = 3\nreason = "Existing debt"\n'
+            )
+            graph = {
+                "workspace_members": ["pkg"],
+                "packages": [
+                    {
+                        "id": "pkg",
+                        "name": "pkg",
+                        "manifest_path": str(manifest),
+                        "targets": [{"kind": ["lib"], "src_path": str(source)}],
+                    }
+                ],
+            }
+
+            def tighten():
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as errors:
+                    result = checker.tighten_ceilings(checker.load_workspace(root, graph))
+                return result, errors.getvalue()
+
+            before = manifest.read_text(), root_manifest.read_text()
+            self.assertEqual(tighten(), (0, ""))
+            lint = tomllib.loads(manifest.read_text())["package"]["metadata"]["plakous-lint"]
+            self.assertEqual(
+                lint,
+                {
+                    "too-many-lines-ceiling": 1,
+                    "too-many-arguments-ceiling": 1,
+                    "large-file-ceiling": 1,
+                    "missing-docs-ceiling": 1,
+                    "reason": "Existing debt",
+                },
+            )
+            self.assertIn("missing-docs-ceiling = 1 # keeps enrollment", manifest.read_text())
+            rules = tomllib.loads(root_manifest.read_text())["workspace"]["metadata"]["plakous"]
+            self.assertEqual(
+                rules["cfg"]["pkg"],
+                {
+                    "feature-sites": [],
+                    "feature-ceiling": 1,
+                    "test-seam-ceiling": 1,
+                    "env-ceiling": 1,
+                    "reason": "Existing debt",
+                },
+            )
+            self.assertEqual(rules["modules"]["pkg"]["a"]["may-use-ceiling"], 1)
+            after = manifest.read_text(), root_manifest.read_text()
+            self.assertNotEqual(before, after)
+            self.assertEqual(tighten(), (0, ""))
+            self.assertEqual((manifest.read_text(), root_manifest.read_text()), after)
+            source.write_text(source.read_text() + 'pub fn grow() { std::env::var("TEST"); }\n')
+            result, errors = tighten()
+            self.assertEqual(result, 1)
+            self.assertIn("env placement debt 2 exceeds ceiling 1", errors)
+            self.assertEqual((manifest.read_text(), root_manifest.read_text()), after)
 
 
 if __name__ == "__main__":
