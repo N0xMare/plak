@@ -104,6 +104,14 @@ pub(super) const RETIREMENT_REVISION: Revision = Revision {
     fingerprint: "e29f9e05a77854a181ac3f0ba410510ea31f60c180542689c87a528a6ddf8770",
 };
 
+const CHILD_ARCHIVE_RECEIPTS: &str = "CREATE TABLE agent_child_archive_receipts(tree_id TEXT NOT NULL REFERENCES agent_trees(tree_id) ON DELETE CASCADE,agent_id TEXT NOT NULL,attempt_id TEXT NOT NULL,head TEXT NOT NULL,runtime_revision INTEGER NOT NULL CHECK(runtime_revision>=0),receipt_id TEXT NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(tree_id,agent_id,attempt_id,head,runtime_revision))";
+
+pub(super) const ARCHIVE_RECEIPTS_REVISION: Revision = Revision {
+    sql: CHILD_ARCHIVE_RECEIPTS,
+    objects: &[("agent_child_archive_receipts", CHILD_ARCHIVE_RECEIPTS)],
+    fingerprint: "f77974d618b3edfc3952e6a497fab6ab504a10c2214297c8bdb160e5101f952e",
+};
+
 /// The tree file's admission descriptors.
 const SCHEMA: Schema = Schema {
     noun: "tree",
@@ -112,7 +120,7 @@ const SCHEMA: Schema = Schema {
     generation: GENERATION,
     objects: SCHEMA_OBJECTS,
     base_fingerprint: "f853d767e6fb5d05a546fd1c32dbb7b160d85b35ae5caeb7fde2efade76ca23a",
-    revisions: &[RETIREMENT_REVISION],
+    revisions: &[RETIREMENT_REVISION, ARCHIVE_RECEIPTS_REVISION],
 };
 
 /// Admission descriptors used by the host's stopped-store and scratch paths.

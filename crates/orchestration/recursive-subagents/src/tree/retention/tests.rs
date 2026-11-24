@@ -193,7 +193,15 @@ fn child_retirement_abort_clears_the_ticket_and_restores_followup_for_the_attemp
     delivered(&mut tree);
     let occupied = super::super::BTreeSet::new();
     let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &occupied).remove(0);
-    let approved = super::ApprovedHeads::from([(agent, (attempt, locator, 1))]);
+    let approved = super::ApprovedHeads::from([(
+        agent,
+        super::ApprovedHead {
+            attempt,
+            locator,
+            revision: 1,
+            archive: None,
+        },
+    )]);
     let prior_status = tree.node(&id).unwrap().status;
     assert_eq!(
         tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
@@ -249,7 +257,17 @@ fn child_retirement_summary_bound_preserves_pending_and_evicts_oldest_finished()
     let approved = tree
         .child_retirement_heads(u64::MAX, &super::super::BTreeSet::new())
         .into_iter()
-        .map(|(agent, attempt, locator)| (agent, (attempt, locator, 1)))
+        .map(|(agent, attempt, locator)| {
+            (
+                agent,
+                super::ApprovedHead {
+                    attempt,
+                    locator,
+                    revision: 1,
+                    archive: None,
+                },
+            )
+        })
         .collect();
     tree.prepare_child_retention_guarded(u64::MAX, Some(&approved), |_| {})
         .unwrap();
@@ -293,7 +311,15 @@ fn child_retirement_and_followup_are_serialized_by_the_attempt() {
         );
         delivered(&mut tree);
         let (agent, attempt, locator) = tree.child_retirement_heads(u64::MAX, &excluded).remove(0);
-        let approved = super::ApprovedHeads::from([(agent, (attempt, locator, 1))]);
+        let approved = super::ApprovedHeads::from([(
+            agent,
+            super::ApprovedHead {
+                attempt,
+                locator,
+                revision: 1,
+                archive: None,
+            },
+        )]);
         let request = SendAgentMessageRequest {
             agent_id: id.clone(),
             message: "new assignment".to_owned(),

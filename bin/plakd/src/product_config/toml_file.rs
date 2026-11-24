@@ -175,6 +175,7 @@ struct RuntimeStoreSection {
     #[serde(rename = "max_object_bytes")]
     object_bytes: Entry,
     retire_finished_children: Entry,
+    retire_requires_archive_receipt: Entry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +206,26 @@ struct TemplateFile {
     on_mint: Entry,
     show_model: Entry,
     env: Option<BTreeMap<String, Spanned<toml::Value>>>,
+}
+
+impl RuntimeStoreSection {
+    fn assign(
+        &self,
+        assign: &mut impl FnMut(&'static str, &Entry) -> Result<(), String>,
+    ) -> Result<(), String> {
+        assign("runtime_store.max_sessions", &self.sessions)?;
+        assign("runtime_store.max_checkpoints", &self.checkpoints)?;
+        assign("runtime_store.max_objects", &self.objects)?;
+        assign("runtime_store.max_object_bytes", &self.object_bytes)?;
+        assign(
+            "runtime_store.retire_finished_children",
+            &self.retire_finished_children,
+        )?;
+        assign(
+            "runtime_store.retire_requires_archive_receipt",
+            &self.retire_requires_archive_receipt,
+        )
+    }
 }
 
 /// `config.toml` as the product reads it: document, then schema, then
@@ -287,14 +308,7 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign("telemetry.max_age_days", &section.max_age_days)?;
     }
     if let Some(section) = &file.runtime_store {
-        assign("runtime_store.max_sessions", &section.sessions)?;
-        assign("runtime_store.max_checkpoints", &section.checkpoints)?;
-        assign("runtime_store.max_objects", &section.objects)?;
-        assign("runtime_store.max_object_bytes", &section.object_bytes)?;
-        assign(
-            "runtime_store.retire_finished_children",
-            &section.retire_finished_children,
-        )?;
+        section.assign(&mut assign)?;
     }
     if let Some(section) = &file.mcp {
         assign(

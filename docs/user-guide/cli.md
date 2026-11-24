@@ -817,7 +817,7 @@ Safe independent entries may be removed while protected entries are kept.
 Review `kept:` reasons before manually removing anything. Export files under
 `carry/` are never selected. Implementation details live in spec 02 §2.5.
 
-### `plakd session list|rename|archive|unarchive|show|log|recover|export|trace|traces|import|reload|delete|gc`
+### `plakd session list|rename|archive|unarchive|show|log|recover|export|trace|traces|trace-receipt|import|reload|delete|gc`
 
 ```
 plakd session list [--include-archived]
@@ -831,6 +831,7 @@ plakd session recover <uuid>
 plakd session export <uuid> [--out <path>]
 plakd session trace <uuid>.cN [--out <path>]
 plakd session traces --settled [--since <RFC3339 timestamp>] --json
+plakd session trace-receipt record <uuid>.cN --attempt <id> --head <locator> --revision <n> --sha256 <hex> --archive <opaque-id>
 plakd session import <path>
 plakd session reload <uuid> --expect-binary <binary-id>
 plakd session delete <uuid> [--yes] [--abandon-children] [--abandon-jobs]
@@ -846,7 +847,7 @@ full id or an unambiguous prefix of at least
 four characters among this workspace's sessions, as the other session commands and the
 exit line print it. For `show` and `log`, append `.cN` to select child `cN` in that root session's
 agent tree, for example `plakd session log <uuid>.c1`. These are read-only child
-views; only `trace` also accepts a child selector. `log <uuid>.cN`
+views; `trace` and `trace-receipt record` also accept a child selector. `log <uuid>.cN`
 is that child's committed history, not the root event log. A committed
 compaction is a row of kind `compaction` (`compacted N earlier segments
 (<pass>)` when the checkpoint recorded the pass); the summary itself is not
@@ -860,8 +861,19 @@ canonical messages and full canonical tool results, subject to redaction;
 it cannot recover clipped or compacted material or hidden reasoning. It is
 not importable. The default directory is `~/.plak/traces/`; `--out` never
 overwrites a file. For a recurring archive, deduplicate within each source
-home by runtime session and revision. Leave child retirement off while an
-archive receipt is not enforced. See [the format contract](../spec/02-plak-product.md#settled-child-traces).
+home by runtime session and revision. See [the format contract](../spec/02-plak-product.md#settled-child-traces).
+
+After verifying the checksum of the durably published remote file, run
+`trace-receipt record` on the source home. Pass `source.child_id`,
+`source.attempt_id`, `source.head` and `source.revision` from the captured
+trace, the lowercase SHA-256 of the exact archived bytes, and an opaque
+archive ID for the file. The command is silent on success, safe to retry
+with the same receipt while that revision is current, and refuses changed
+identities or conflicting receipts. It does not check the archive itself.
+Leave retirement off until the archive and receipt backfill run cleanly.
+On an archive-managed home set `runtime_store.retire_requires_archive_receipt = true`
+before enabling `runtime_store.retire_finished_children`, then restart the
+host to apply the settings. A child without an exact receipt is deferred.
 
 `show` labels a Working checkpoint `working (live owner present)` while the
 process named by the branch's runtime holder record is still running,

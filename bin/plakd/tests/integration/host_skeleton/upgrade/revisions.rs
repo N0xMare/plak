@@ -158,7 +158,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(
         paths
             .state_dir()
-            .join("subagents.pre-revision-12.sqlite3")
+            .join("subagents.pre-revision-13.sqlite3")
             .exists()
     );
     assert!(!fixture.home().join("host/upgrades").exists());

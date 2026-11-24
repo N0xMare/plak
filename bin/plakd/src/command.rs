@@ -17,6 +17,16 @@ pub(crate) struct HostInstall {
     pub(crate) dry_run: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TraceReceiptRecord {
+    pub(crate) id: String,
+    pub(crate) attempt: String,
+    pub(crate) head: String,
+    pub(crate) revision: u64,
+    pub(crate) sha256: String,
+    pub(crate) archive: String,
+}
+
 /// `plakd host`'s arguments.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct HostCommand {
@@ -273,6 +283,7 @@ pub(crate) enum Command {
     SessionTraces {
         since: Option<time::OffsetDateTime>,
     },
+    SessionTraceReceipt(TraceReceiptRecord),
     SessionImport {
         path: PathBuf,
     },
@@ -584,6 +595,7 @@ impl Command {
             | Self::SessionExport { .. }
             | Self::SessionTrace { .. }
             | Self::SessionTraces { .. }
+            | Self::SessionTraceReceipt(_)
             | Self::SessionImport { .. }
             | Self::SessionDelete { .. }
             | Self::SessionGc { .. }

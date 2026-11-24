@@ -617,6 +617,7 @@ async fn historical_child_retirement_waits_for_the_cursor_but_not_for_a_later_wo
         driver.collect_dormant_children(
             &sessions,
             true,
+            false,
             std::collections::BTreeSet::new(),
             Some(working),
         )
@@ -709,11 +710,23 @@ async fn child_retention_runtime_archive_delete_crash_cuts() {
                 .unwrap();
         }
         driver
-            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new(), None)
+            .collect_dormant_children(
+                &sessions,
+                false,
+                false,
+                std::collections::BTreeSet::new(),
+                None,
+            )
             .await
             .unwrap();
         driver
-            .collect_dormant_children(&sessions, false, std::collections::BTreeSet::new(), None)
+            .collect_dormant_children(
+                &sessions,
+                false,
+                false,
+                std::collections::BTreeSet::new(),
+                None,
+            )
             .await
             .unwrap();
         assert!(

@@ -13,6 +13,31 @@ const RESCUE_PIN: &str = "rescue_pin";
 pub(super) const CARRIER_TERMINAL: &str = "retirement_carrier_terminal";
 const ABORTED: &str = "child_retirement_aborted";
 
+/// A shipper's attestation of a remotely verified child trace archive.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChildArchiveReceipt {
+    /// The shipper's opaque archive identifier, used as the receipt id.
+    pub id: String,
+    /// Lowercase hex SHA-256 of the verified archive artifact.
+    pub sha256: String,
+}
+
+impl ChildArchiveReceipt {
+    /// Whether both fields satisfy the bounded local receipt encoding.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        !self.id.is_empty()
+            && self.id.len() <= 512
+            && !self.id.chars().any(char::is_control)
+            && self.sha256.len() == 64
+            && self
+                .sha256
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    }
+}
+
 /// A bounded local record of a retired child, not an execution target.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +62,9 @@ pub struct RetiredChild {
     pub output: Option<String>,
     /// Short display label for the retired child.
     pub description: String,
+    /// Receipt consumed to authorize retirement, if required at preparation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ChildArchiveReceipt>,
 }
 
 pub(crate) struct PinCleanup {
@@ -51,6 +79,8 @@ pub(crate) struct RetirementTicket {
     collected: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) session_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) receipt_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     prior_status: Option<NodeStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -75,7 +105,14 @@ impl RetirementIssue {
     }
 }
 
-pub(crate) type ApprovedHeads = BTreeMap<String, (super::AttemptId, String, u64)>;
+pub(crate) struct ApprovedHead {
+    pub(crate) attempt: super::AttemptId,
+    pub(crate) locator: String,
+    pub(crate) revision: u64,
+    pub(crate) archive: Option<ChildArchiveReceipt>,
+}
+
+pub(crate) type ApprovedHeads = BTreeMap<String, ApprovedHead>;
 
 pub(crate) const MAX_RETIREMENT_BATCH: usize = 8;
 const MAX_RETIREMENT_SUMMARIES: usize = 16;
@@ -518,6 +555,7 @@ impl ProductAgentTree {
             result: output.map(|text| (digest_text(text), text.len())),
             output: output.cloned(),
             description: short_text(&self.nodes.get(agent)?.description, 256),
+            archive: None,
         })
     }
 
@@ -657,18 +695,19 @@ impl ProductAgentTree {
             let (session_revision, summary) = match approved {
                 None => (None, None),
                 Some(approved) => {
-                    let Some((attempt, locator, rev)) = approved.get(&agent) else {
+                    let Some(head) = approved.get(&agent) else {
                         continue;
                     };
-                    if Some(locator) != node.session_locator.as_ref()
-                        || Some(attempt) != node.attempt_id.as_ref()
+                    if Some(&head.locator) != node.session_locator.as_ref()
+                        || Some(&head.attempt) != node.attempt_id.as_ref()
                     {
                         continue;
                     }
-                    let Some(summary) = self.retirement_summary(&agent) else {
+                    let Some(mut summary) = self.retirement_summary(&agent) else {
                         continue;
                     };
-                    (Some(*rev), Some(summary))
+                    summary.archive.clone_from(&head.archive);
+                    (Some(head.revision), Some(summary))
                 }
             };
             let ticket = RetirementTicket {
@@ -676,6 +715,9 @@ impl ProductAgentTree {
                 locator: node.session_locator.clone(),
                 collected: false,
                 session_revision,
+                receipt_required: summary
+                    .as_ref()
+                    .is_some_and(|summary| summary.archive.is_some()),
                 prior_status: summary.as_ref().map(|_| node.status),
                 issue: None,
             };

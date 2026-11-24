@@ -295,6 +295,9 @@ pub(crate) fn write_trace(
     writeln!(stdout, "{}", path.display()).map_err(|_| CliFailure::new("stdout failed"))
 }
 
+mod receipt;
+pub(crate) use receipt::record_receipt;
+
 pub(crate) fn list_traces(
     paths: &PlakPaths,
     since: Option<OffsetDateTime>,

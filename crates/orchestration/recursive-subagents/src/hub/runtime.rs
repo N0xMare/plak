@@ -414,6 +414,7 @@ impl ProductTopologyRuntime {
         &self,
         sessions: &plakous::sessions::AgentSessions,
         enabled: bool,
+        requires_archive_receipt: bool,
         root: Option<plakous::sessions::SessionLocator>,
     ) -> Result<(), String> {
         use crate::protocol::{TopologyError, TopologyErrorCode};
@@ -450,7 +451,13 @@ impl ProductTopologyRuntime {
         let result = match inventory() {
             Ok(occupied) => {
                 self.driver()
-                    .collect_dormant_children(sessions, enabled, occupied, root)
+                    .collect_dormant_children(
+                        sessions,
+                        enabled,
+                        requires_archive_receipt,
+                        occupied,
+                        root,
+                    )
                     .await
             }
             Err(error) => Err(error),

@@ -481,7 +481,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         && !matches!(command, Command::Host(_)))
         || matches!(
             command,
-            Command::StatePruneLegacy { .. } | Command::TreeRelease { .. }
+            Command::StatePruneLegacy { .. }
+                | Command::TreeRelease { .. }
+                | Command::SessionTraceReceipt(_)
         ) {
         services
             .paths()?
@@ -491,6 +493,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
     } else {
         None
     };
+    if let Command::SessionTraceReceipt(record) = command {
+        let paths = services.paths()?;
+        store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
+        commands::session::trace::record_receipt(paths, record)?;
+        return Ok(ProcessOutcome::Success);
+    }
     // Diagnostic setup must not recreate a local daemon's deleted home.
     if matches!(
         &command,
@@ -1251,6 +1259,7 @@ fn execute_command<Backend: AccountOps>(
         | Command::WireSchema
         | Command::BuildInfo
         | Command::SessionCheckBinding { .. }
+        | Command::SessionTraceReceipt(_)
         | Command::Deploy(_)
         | Command::DeployTarget
         | Command::Snapshot(_)

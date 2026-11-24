@@ -997,6 +997,51 @@ enum TreeAction {
 }
 
 #[derive(Debug, Subcommand)]
+enum TraceReceiptAction {
+    /// Record an attestation after verifying the durable remote archive checksum.
+    Record {
+        /// Exact child address from the trace source.
+        id: String,
+        /// Attempt ID from the trace source.
+        #[arg(long)]
+        attempt: String,
+        /// Canonical head from the trace source.
+        #[arg(long)]
+        head: String,
+        /// Runtime revision from the trace source.
+        #[arg(long)]
+        revision: u64,
+        /// Lowercase hex SHA-256 of the verified archive artifact.
+        #[arg(long)]
+        sha256: String,
+        /// Opaque archive identifier (the receipt ID).
+        #[arg(long)]
+        archive: String,
+    },
+}
+
+impl TraceReceiptAction {
+    fn into_command(self) -> Command {
+        let Self::Record {
+            id,
+            attempt,
+            head,
+            revision,
+            sha256,
+            archive,
+        } = self;
+        Command::SessionTraceReceipt(crate::command::TraceReceiptRecord {
+            id,
+            attempt,
+            head,
+            revision,
+            sha256,
+            archive,
+        })
+    }
+}
+
+#[derive(Debug, Subcommand)]
 enum SessionAction {
     #[command(hide = true)]
     CheckBinding {
@@ -1073,6 +1118,9 @@ enum SessionAction {
         #[arg(long, required = true)]
         json: bool,
     },
+    /// Record a verified child trace archive receipt.
+    #[command(subcommand)]
+    TraceReceipt(TraceReceiptAction),
     /// Create a new session from an export document.
     Import { path: Option<std::path::PathBuf> },
     /// Delete a session and all of its retained history. Refused while it is
@@ -1165,6 +1213,7 @@ impl SessionAction {
                 json: true,
             } => Ok(Command::SessionTraces { since }),
             Self::Traces { .. } => Err("session traces requires --settled and --json".to_owned()),
+            Self::TraceReceipt(action) => Ok(action.into_command()),
             Self::Reload {
                 id: Some(id),
                 expect_binary: Some(expect_binary),

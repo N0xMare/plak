@@ -44,10 +44,11 @@ pub(super) fn schema(base: Schema) -> Schema {
         Schema {
             revisions: &[
                 crate::database::RETIREMENT_REVISION,
+                crate::database::ARCHIVE_RECEIPTS_REVISION,
                 Revision {
                     sql: DDL,
                     objects: &[("subagents_revision_fixture", DDL)],
-                    fingerprint: "224bf32e2847d39f9a4997f595d828f28324762888551f8cbdbfeb0bd331b3c2",
+                    fingerprint: "59d240239d55af633899945893b6dc7ef4f3e0c0f2f117a44eaae5341c388201",
                 },
             ],
             ..base

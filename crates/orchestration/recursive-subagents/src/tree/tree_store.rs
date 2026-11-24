@@ -297,6 +297,21 @@ impl ProductAgentTree {
 /// Durability for one tree. The tree knows nothing about where
 /// its rows live; this is the whole surface between them.
 pub trait TreeStore: Send + Sync {
+    /// The immutable archive attestation for one exact pre-retirement child revision.
+    ///
+    /// # Errors
+    /// Refuses to prove coverage if the durable store cannot be read.
+    fn child_archive_receipt(
+        &self,
+        _tree_id: &str,
+        _child: &str,
+        _attempt: &super::AttemptId,
+        _head: &str,
+        _revision: u64,
+    ) -> Result<Option<super::ChildArchiveReceipt>, TreeStoreError> {
+        Ok(None)
+    }
+
     /// Retry a capacity-blocked store with a minimal authoritative write,
     /// without changing tree revisions or dispatching effects.
     fn recover_storage(&self) -> Result<(), TreeStoreError> {

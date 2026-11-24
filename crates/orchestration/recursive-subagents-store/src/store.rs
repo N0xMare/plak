@@ -24,6 +24,8 @@ use crate::rows::{
     delete_agent_tree_rows, insert_agent_tree_rows, load_agent_tree, swap_agent_tree_header,
 };
 
+mod archive_receipts;
+
 /// The tree's database as a [`TreeStore`].
 pub struct SqliteTreeStore {
     writer: Arc<Mutex<Writer>>,
@@ -364,6 +366,20 @@ fn commit(tx: rusqlite::Transaction<'_>) -> Result<(), TreeStoreError> {
 }
 
 impl TreeStore for SqliteTreeStore {
+    fn child_archive_receipt(
+        &self,
+        tree_id: &str,
+        child: &str,
+        attempt: &plakous_recursive_subagents::protocol::AttemptId,
+        head: &str,
+        revision: u64,
+    ) -> Result<Option<plakous_recursive_subagents::tree::ChildArchiveReceipt>, TreeStoreError>
+    {
+        self.with_database(|db| {
+            archive_receipts::read(&db.connection, tree_id, child, attempt, head, revision)
+        })
+    }
+
     fn delete(
         &self,
         tree_id: &str,

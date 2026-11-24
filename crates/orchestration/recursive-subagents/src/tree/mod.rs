@@ -930,7 +930,7 @@ mod recovery;
 mod refresh;
 mod reopen_law;
 pub(crate) mod retention;
-pub use retention::RetiredChild;
+pub use retention::{ChildArchiveReceipt, RetiredChild};
 mod revert;
 mod stages;
 mod succession;

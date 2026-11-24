@@ -12,6 +12,8 @@ USAGE:
   plakd session export <session> [--out <path>]
   plakd session trace <session>.cN [--out <path>]
   plakd session traces --settled [--since RFC3339] --json
+  plakd session trace-receipt record <session>.cN --attempt <id> --head <locator>
+      --revision <n> --sha256 <hex> --archive <opaque-id>
   plakd session import <path>
   plakd session delete <session> [--yes] [--abandon-children] [--abandon-jobs]
   plakd session gc <session> | --all
@@ -23,6 +25,9 @@ USAGE:
   trace writes a settled child's retained canonical history as private
   plak-child-trace v1 JSON (default ~/.plak/traces/). traces lists eligible
   child revisions across the home. Neither opens a runtime or needs a host.
+  After verifying a durable remote archive, trace-receipt record attaches
+  its opaque ID and lowercase SHA-256 to the still-current trace identity.
+  Use the captured source's child_id, attempt_id, head and revision.
 
   recover reopens a session whose turn was interrupted, records once what that
   turn left unobserved, and releases it; the next prompt does the same on its own.

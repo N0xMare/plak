@@ -296,6 +296,8 @@ pub enum ConfigField {
     RuntimeStoreMaxSessions,
     /// `[runtime_store] retire_finished_children`.
     RuntimeStoreRetireFinishedChildren,
+    /// `[runtime_store] retire_requires_archive_receipt`.
+    RuntimeStoreRetireRequiresArchiveReceipt,
     /// `[telemetry] max_age_days`.
     TelemetryMaxAgeDays,
     /// `[mcp] client_id_metadata_url`.
@@ -354,6 +356,7 @@ impl ConfigField {
                 | Self::RuntimeStoreMaxObjectBytes
                 | Self::RuntimeStoreMaxSessions
                 | Self::RuntimeStoreRetireFinishedChildren
+                | Self::RuntimeStoreRetireRequiresArchiveReceipt
         )
     }
 
@@ -381,6 +384,7 @@ impl ConfigField {
                     | Self::RuntimeStoreMaxObjectBytes
                     | Self::RuntimeStoreMaxSessions
                     | Self::RuntimeStoreRetireFinishedChildren
+                    | Self::RuntimeStoreRetireRequiresArchiveReceipt
             )
     }
 }
@@ -683,6 +687,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         kind: "bool",
         constraint: "true or false; home-scoped",
         doc: "Retire settled child runtimes after their result is consumed. Serving hosts read this at startup.",
+        example: "false",
+        scope: ConfigScope::Immediate,
+    },
+    ConfigKey {
+        path: "runtime_store.retire_requires_archive_receipt",
+        field: ConfigField::RuntimeStoreRetireRequiresArchiveReceipt,
+        kind: "bool",
+        constraint: "true or false; home-scoped",
+        doc: "Require a verified archive receipt for the exact child revision before retirement. Serving hosts read this at startup.",
         example: "false",
         scope: ConfigScope::Immediate,
     },

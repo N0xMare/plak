@@ -91,6 +91,7 @@ impl LiveTarget {
                 .collect_dormant_children(
                     &self.sessions,
                     self.roots.retire_finished_children,
+                    self.roots.retire_requires_archive_receipt,
                     Some(self.followed),
                 )
                 .await;

@@ -206,7 +206,7 @@ this build requires export and import.
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **28** |
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **39**, context codec **4** |
 | Product store (`product.sqlite3`): intents and feed-derived views | plakd | generation **39**, revision **39** |
-| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **11** |
+| Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **13** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | writes **13**, imports **13** and **12**, refuses **11** and older |
 | Host-upgrade ownership receipt | plakd | version **1**, outside state keys; surrender/reconnect authority only |

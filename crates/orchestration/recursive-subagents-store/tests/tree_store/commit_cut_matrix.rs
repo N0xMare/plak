@@ -547,6 +547,7 @@ fn snapshot(tree: &ProductAgentTree) -> Value {
         [
             "agent_attempts",
             "agent_candidates",
+            "agent_child_archive_receipts",
             "agent_commands",
             "agent_feed_cursors",
             "agent_grants",

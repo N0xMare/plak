@@ -7,6 +7,11 @@ use plakous::sessions::{
 use plakous_offline_crash_harness::commit_trace::{KILL_ENV, TRACE_ENV};
 
 const COLLECT: &str = "finished-collection";
+const ARCHIVE_ID: &str = "fixture-artifact";
+
+fn artifact_digest() -> String {
+    "a".repeat(64)
+}
 
 async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
     let fixture = Fixture::new(root, COLLECT, None, false);
@@ -50,7 +55,7 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, false, None)
+        .collect_dormant_children(&sessions, true, true, None)
         .await
         .unwrap();
     assert!(
@@ -60,6 +65,22 @@ async fn seed(root: &Path) -> (String, SessionLocator, SessionLocator) {
             .unwrap()
     );
     assert!(sessions.head_is_quiescent(child_locator).await.unwrap());
+    let revision = sessions
+        .child_retirement_revision(child_locator)
+        .await
+        .unwrap();
+    SqliteTreeStore::open(&root.join("tree.sqlite3"))
+        .unwrap()
+        .record_child_archive_receipt(
+            &fixture.tree_id,
+            &child,
+            &crate::agent_tree::ChildArchiveReceipt {
+                id: ARCHIVE_ID.to_owned(),
+                sha256: artifact_digest(),
+            },
+            |_| Ok(revision),
+        )
+        .unwrap();
     crate::topology_runtime::force_release(&fixture.tree_id).await;
     (child, parent_locator, child_locator)
 }
@@ -96,7 +117,7 @@ fn collector_process() {
         }
         fixture
             .runtime
-            .collect_dormant_children(&sessions, true, None)
+            .collect_dormant_children(&sessions, true, true, None)
             .await
             .unwrap();
         sessions.reclaim().await.unwrap();
@@ -171,6 +192,47 @@ fn finished_child_retirement_sigkill_cuts_preserve_the_result_and_parent() {
     }
 }
 
+#[test]
+fn child_retirement_defers_on_an_older_archive_receipt_for_the_same_head() {
+    let scratch = tempfile::tempdir().unwrap();
+    let root = scratch.path();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let (child, _, locator) = seed(root).await;
+        let fixture = Fixture::new(root, COLLECT, None, true);
+        let sessions = fixture.parent.state_roots().runtime_sessions().unwrap();
+        let revision = sessions.child_retirement_revision(locator).await.unwrap();
+        // Advance only the revision in the fixture. A real branch fork would
+        // also pin the session and mask a broken receipt check.
+        let db = rusqlite::Connection::open(root.join("plak/runtime.sqlite3")).unwrap();
+        assert_eq!(
+            db.execute(
+                "UPDATE sessions SET revision=?1 WHERE session_id=?2",
+                rusqlite::params![
+                    (revision + 1).to_be_bytes(),
+                    locator.session_id().to_string()
+                ],
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sessions.child_retirement_revision(locator).await.unwrap(),
+            revision + 1
+        );
+        fixture
+            .runtime
+            .collect_dormant_children(&sessions, true, true, None)
+            .await
+            .unwrap();
+        assert!(sessions.head_is_quiescent(locator).await.unwrap());
+        fixture
+            .runtime
+            .read(|tree| assert!(!tree.retired_children().contains_key(&child)))
+            .unwrap();
+        crate::topology_runtime::force_release(&fixture.tree_id).await;
+    });
+}
+
 async fn assert_recovery(
     root: &Path,
     cut: usize,
@@ -191,6 +253,29 @@ async fn assert_recovery(
         })
         .unwrap();
     assert_eq!(sessions.head_is_quiescent(removed).await.is_ok(), cut < 2);
+    if cut == 1 {
+        // Simulate bad local evidence after intent publication. A previously
+        // guarded intent must not dispatch even if the setting is now off.
+        let db = rusqlite::Connection::open(root.join("tree.sqlite3")).unwrap();
+        let set_digest = |digest: &str| {
+            assert_eq!(
+                db.execute(
+                    "UPDATE agent_child_archive_receipts SET sha256=?1",
+                    [digest]
+                )
+                .unwrap(),
+                1
+            );
+        };
+        set_digest("invalid");
+        fixture
+            .runtime
+            .collect_dormant_children(&sessions, false, false, None)
+            .await
+            .unwrap();
+        assert!(sessions.head_is_quiescent(removed).await.unwrap());
+        set_digest(&artifact_digest());
+    }
     assert_eq!(
         plakous::sessions::AgentSessions::child_retirement_can_abort_sqlite(
             root.join("plak/runtime.sqlite3"),
@@ -201,12 +286,12 @@ async fn assert_recovery(
     );
     fixture
         .runtime
-        .collect_dormant_children(&sessions, true, None)
+        .collect_dormant_children(&sessions, true, true, None)
         .await
         .unwrap();
     fixture
         .runtime
-        .collect_dormant_children(&sessions, false, None)
+        .collect_dormant_children(&sessions, false, true, None)
         .await
         .unwrap();
     sessions.reclaim().await.unwrap();
@@ -217,6 +302,9 @@ async fn assert_recovery(
             let summary = &tree.retired_children()[child];
             assert_eq!(summary.output.as_deref(), Some(r#"{"ok":true}"#));
             assert!(summary.mail.is_some());
+            let archive = summary.archive.as_ref().unwrap();
+            assert_eq!(archive.id, ARCHIVE_ID);
+            assert_eq!(archive.sha256, artifact_digest());
             assert_eq!(
                 tree.pending_result_mail("root"),
                 [] as [crate::agent_tree::MailRecord; 0]

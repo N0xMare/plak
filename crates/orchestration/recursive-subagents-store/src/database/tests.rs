@@ -3,7 +3,7 @@ use super::{GENERATION, SCHEMA, SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabas
 /// Identity golden for the semantic-move cohort's durable format.
 #[test]
 fn the_tree_schema_fingerprint_is_pinned() {
-    assert_eq!(SCHEMA_VERSION, 12);
+    assert_eq!(SCHEMA_VERSION, 13);
     assert_eq!(
         (GENERATION, SCHEMA.base_fingerprint),
         (
@@ -41,12 +41,12 @@ fn a_fresh_tree_database_is_versioned_and_reopens() {
 }
 
 #[test]
-fn revision_twelve_adds_only_the_child_summary_table() {
+fn revision_thirteen_backs_up_the_child_summary_store() {
     use crate::admission::{AdmissionError, Schema, Status};
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("subagents.sqlite3");
     let previous = Schema {
-        revisions: &[],
+        revisions: &[super::RETIREMENT_REVISION],
         ..SCHEMA
     };
     let old = previous.open_writer(&path, |_| Ok(())).unwrap();
@@ -58,7 +58,7 @@ fn revision_twelve_adds_only_the_child_summary_table() {
     };
     let prior = instance(&old);
     drop(old);
-    assert_eq!(SCHEMA.inspect(&path).unwrap(), Status::Pending(11));
+    assert_eq!(SCHEMA.inspect(&path).unwrap(), Status::Pending(12));
     SCHEMA
         .lock_upgrade(&path)
         .unwrap()
@@ -69,7 +69,10 @@ fn revision_twelve_adds_only_the_child_summary_table() {
         .unwrap();
     let live = SubagentsDatabase::open(&path).unwrap();
     assert_eq!(instance(&live.connection), prior);
-    let backup_path = root.path().join("subagents.pre-revision-11.sqlite3");
+    live.connection
+        .prepare("SELECT * FROM agent_child_archive_receipts")
+        .unwrap();
+    let backup_path = root.path().join("subagents.pre-revision-12.sqlite3");
     assert_eq!(previous.inspect(&backup_path).unwrap(), Status::Current);
     assert!(matches!(
         previous.inspect(&path),
@@ -141,7 +144,9 @@ fn tree_admission_refusals_are_exact() {
         refusal("version"),
         (
             super::OpenErrorKind::UnsupportedPersistence,
-            "subagents schema 99, expected 12: this subagents.sqlite3 was created by an incompatible plakd build; move it aside to start fresh".to_owned()
+            format!(
+                "subagents schema 99, expected {SCHEMA_VERSION}: this subagents.sqlite3 was created by an incompatible plakd build; move it aside to start fresh"
+            )
         )
     );
 }
@@ -164,9 +169,9 @@ fn a_foreign_schema_version_is_refused_as_unsupported() {
         };
         assert_eq!(error.kind(), super::OpenErrorKind::UnsupportedPersistence);
         assert!(
-            error
-                .message()
-                .contains(&format!("subagents schema {foreign}, expected 12")),
+            error.message().contains(&format!(
+                "subagents schema {foreign}, expected {SCHEMA_VERSION}"
+            )),
             "{error}"
         );
     }

@@ -37,7 +37,7 @@ pub(crate) struct Services {
     /// every clone: a host resolves it at startup and never re-reads it.
     custody: Arc<OnceLock<crate::gateway::HostCustody>>,
     runtime_store_bounds: Arc<OnceLock<[std::num::NonZeroUsize; 4]>>,
-    retire_finished_children: Arc<OnceLock<bool>>,
+    child_retirement_policy: Arc<OnceLock<(bool, bool)>>,
 }
 
 #[derive(Clone)]
@@ -135,7 +135,7 @@ impl Services {
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
             runtime_store_bounds: Arc::default(),
-            retire_finished_children: Arc::default(),
+            child_retirement_policy: Arc::default(),
         }
     }
 
@@ -174,7 +174,7 @@ impl Services {
             jobs: plakous_hosted::agent::ProcessJobs::default(),
             custody: Arc::default(),
             runtime_store_bounds: Arc::default(),
-            retire_finished_children: Arc::default(),
+            child_retirement_policy: Arc::default(),
         }
     }
 
@@ -205,7 +205,7 @@ impl Clone for Services {
             jobs: self.jobs.clone(),
             custody: Arc::clone(&self.custody),
             runtime_store_bounds: Arc::clone(&self.runtime_store_bounds),
-            retire_finished_children: Arc::clone(&self.retire_finished_children),
+            child_retirement_policy: Arc::clone(&self.child_retirement_policy),
         }
     }
 }
@@ -349,6 +349,7 @@ impl Services {
         &self,
         context: &PlakPaths,
     ) -> CliResult<plakous_hosted::agent::ProductStateRoots> {
+        let (retire_finished, require_receipt) = self.child_retirement_policy()?;
         let roots = crate::commands::support::product_state_roots_from(
             context,
             self.home.state()?.to_path_buf(),
@@ -357,7 +358,7 @@ impl Services {
             &self.custody()?,
         )?
         .with_runtime_store_bounds(self.runtime_store_bounds()?)
-        .with_finished_child_retirement(self.retire_finished_children()?);
+        .with_finished_child_retirement(retire_finished, require_receipt);
         let roots = match &*self
             .local_daemon
             .read()
@@ -409,14 +410,18 @@ impl Services {
         Ok(*self.runtime_store_bounds.get_or_init(|| bounds))
     }
 
-    pub(crate) fn retire_finished_children(&self) -> CliResult<bool> {
-        if let Some(enabled) = self.retire_finished_children.get() {
-            return Ok(*enabled);
+    pub(crate) fn child_retirement_policy(&self) -> CliResult<(bool, bool)> {
+        if let Some(policy) = self.child_retirement_policy.get() {
+            return Ok(*policy);
         }
-        let enabled = crate::product_config::ProductConfig::load_home_file(self.paths()?)
-            .map_err(crate::CliFailure::new)?
-            .retire_finished_children;
-        Ok(*self.retire_finished_children.get_or_init(|| enabled))
+        let config = crate::product_config::ProductConfig::load_home_file(self.paths()?)
+            .map_err(crate::CliFailure::new)?;
+        Ok(*self.child_retirement_policy.get_or_init(|| {
+            (
+                config.retire_finished_children,
+                config.retire_requires_archive_receipt,
+            )
+        }))
     }
 
     /// The process's one job bound.

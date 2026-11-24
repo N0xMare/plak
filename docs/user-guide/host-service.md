@@ -241,14 +241,13 @@ its pre-upgrade copy under the original name, and run the older build. This
 loses writes made since the copies; it does not undo writes to other stores.
 Use a coordinated backup if later work changed more than the restored stores.
 
-A build supporting only tree revision 11 refuses revision 12. Do not start
-it against an empty replacement tree: restore
-`subagents.pre-revision-11.sqlite3` under the original name, or start the
-newer build and fix forward. If finished-child retirement already deleted
-sessions, use a coordinated backup of all three stores, not the tree copy
-alone. Remove `runtime_store.retire_finished_children` from the home
-`config.toml` before starting a build that predates that setting; the older
-parser rejects the new key even when it is false.
+A build supporting only tree revision 12 refuses revision 13. Do not start
+it against an empty replacement tree: restore the matching pre-revision
+copy under the original name, or start the newer build and fix forward.
+If finished-child retirement already deleted sessions, use a coordinated
+backup of all three stores, not the tree copy alone. Remove any
+`[runtime_store]` retirement keys the older build does not know before
+starting it; the older parser rejects new keys even when they are false.
 
 ### Back up the live stores
 

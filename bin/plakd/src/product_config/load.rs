@@ -271,6 +271,7 @@ pub struct ProductConfig {
     pub telemetry_max_bytes: u64,
     pub(crate) runtime_store_bounds: [std::num::NonZeroUsize; 4],
     pub(crate) retire_finished_children: bool,
+    pub(crate) retire_requires_archive_receipt: bool,
     pub telemetry_max_age_days: u64,
     /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
     /// MCP login may register with; home-scoped.
@@ -424,6 +425,9 @@ impl ProductConfig {
             ConfigField::RuntimeStoreRetireFinishedChildren => {
                 self.retire_finished_children = source.retire_finished_children;
             }
+            ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
+                self.retire_requires_archive_receipt = source.retire_requires_archive_receipt;
+            }
             ConfigField::TelemetryMaxBytes => {
                 self.telemetry_max_bytes = source.telemetry_max_bytes;
             }
@@ -555,6 +559,7 @@ impl ProductConfig {
             skills_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
             retire_finished_children: false,
+            retire_requires_archive_receipt: false,
             runtime_store_bounds:
                 plakous::sessions::SessionBackend::default_sqlite_retention_bounds(),
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
@@ -868,6 +873,9 @@ impl ProductConfig {
             ConfigField::CompactionEnabled => Value::from(self.compaction_enabled),
             ConfigField::RuntimeStoreRetireFinishedChildren => {
                 Value::from(self.retire_finished_children)
+            }
+            ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
+                Value::from(self.retire_requires_archive_receipt)
             }
             ConfigField::SkillsEnabled => Value::from(self.skills_enabled),
             ConfigField::RuntimeStoreMaxCheckpoints => {
@@ -1377,14 +1385,12 @@ impl ProductConfig {
             | ConfigField::RuntimeStoreMaxObjects
             | ConfigField::RuntimeStoreMaxObjectBytes
             | ConfigField::RuntimeStoreMaxSessions
-            | ConfigField::RuntimeStoreRetireFinishedChildren => {
+            | ConfigField::RuntimeStoreRetireFinishedChildren
+            | ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
                 self.assign_runtime_store(key, value)?;
             }
-            ConfigField::TelemetryMaxBytes => {
-                self.telemetry_max_bytes = parse_positive(key.path, value)?;
-            }
-            ConfigField::TelemetryMaxAgeDays => {
-                self.telemetry_max_age_days = parse_positive(key.path, value)?;
+            ConfigField::TelemetryMaxBytes | ConfigField::TelemetryMaxAgeDays => {
+                self.assign_telemetry_bound(key, value)?;
             }
             ConfigField::McpClientIdMetadataUrl => {
                 // Empty clears it from the command line, as for [root] agent.
@@ -1419,11 +1425,31 @@ impl ProductConfig {
         key: &ConfigKey,
         value: FieldValue<'_>,
     ) -> Result<(), String> {
-        if key.field == ConfigField::RuntimeStoreRetireFinishedChildren {
-            self.retire_finished_children = value.boolean()?;
+        match key.field {
+            ConfigField::RuntimeStoreRetireFinishedChildren => {
+                self.retire_finished_children = value.boolean()?;
+            }
+            ConfigField::RuntimeStoreRetireRequiresArchiveReceipt => {
+                self.retire_requires_archive_receipt = value.boolean()?;
+            }
+            _ => {
+                let (index, bound) = runtime_store_bound(key, value)?;
+                self.runtime_store_bounds[index] = bound;
+            }
+        }
+        Ok(())
+    }
+
+    fn assign_telemetry_bound(
+        &mut self,
+        key: &ConfigKey,
+        value: FieldValue<'_>,
+    ) -> Result<(), String> {
+        let bound = parse_positive(key.path, value)?;
+        if key.field == ConfigField::TelemetryMaxBytes {
+            self.telemetry_max_bytes = bound;
         } else {
-            let (index, bound) = runtime_store_bound(key, value)?;
-            self.runtime_store_bounds[index] = bound;
+            self.telemetry_max_age_days = bound;
         }
         Ok(())
     }

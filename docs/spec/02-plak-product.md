@@ -1121,8 +1121,8 @@ carry. Steps accumulate within a generation and are deleted at its next
 generation bump. A fresh store creates the frozen generation base and runs
 the same steps in order. Each step starts at the pinned source fingerprint and
 validates the exact destination shape and fingerprint. Local finished-child
-summaries are an additive tree revision, not a new state key or export
-format (chapter 03 §6.7).
+summaries and archive receipts are additive tree revisions, not a new state
+key or export format (chapter 03 §6.7).
 
 Ordinary read-only opens and inspections never upgrade: they refuse an older
 revision in range with `upgrade pending`. A revision below the generation or
@@ -1782,6 +1782,19 @@ sibling work and delivery of the selected child's result to its parent do
 not block capture. Capture rechecks the selected child, attempt, exact head
 and runtime session revision after reading; unrelated tree advances do not
 invalidate it. Retry if the selected facts moved.
+
+The same-user archive operator can run
+`plakd session trace-receipt record <child_id> --attempt <attempt_id> --head <head> --revision <revision> --sha256 <digest> --archive <id>`
+after verifying the checksum of the durably published remote artifact.
+The address and three identity options come from the captured document's
+`source`. The digest is lowercase hexadecimal SHA-256 of the archived bytes
+(for example, the gzip artifact); the opaque archive ID is the local receipt
+ID. The command refuses unless the child still satisfies the settled trace
+read contract and matches all supplied identity fields. It binds the read to
+the current tree rows while publishing the receipt, without taking tree or
+runtime ownership. Re-recording the same attestation for a still-current
+revision succeeds; a conflicting attestation never replaces it. This command
+does not read or contact the archive, start work, or expose a wire request.
 
 The independent research format is `{"format":"plak-child-trace","version":1}`,
 not a carry document and never importable. In v1:

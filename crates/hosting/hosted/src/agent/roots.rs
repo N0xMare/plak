@@ -190,6 +190,7 @@ pub struct ProductStateRoots {
     runtime_database: PathBuf,
     runtime_store_bounds: [std::num::NonZeroUsize; 4],
     pub(crate) retire_finished_children: bool,
+    pub(crate) retire_requires_archive_receipt: bool,
     /// The XDG state root the product bound, kept beside the layout root the
     /// paths below name: `SubscriptionPaths` derives the whole Plak layout
     /// from this one directory, so a hosted caller that needs the native
@@ -320,6 +321,7 @@ impl ProductStateRoots {
             runtime_database: std::fs::canonicalize(&runtime_database).unwrap_or(runtime_database),
             runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
             retire_finished_children: false,
+            retire_requires_archive_receipt: false,
             state_home,
             subscriptions: std::fs::canonicalize(&subscriptions).unwrap_or(subscriptions),
             local_daemon: None,
@@ -898,8 +900,13 @@ impl ProductStateRoots {
 
     /// Opt into retirement of settled child runtimes under the home policy.
     #[must_use]
-    pub fn with_finished_child_retirement(mut self, enabled: bool) -> Self {
+    pub fn with_finished_child_retirement(
+        mut self,
+        enabled: bool,
+        requires_archive_receipt: bool,
+    ) -> Self {
         self.retire_finished_children = enabled;
+        self.retire_requires_archive_receipt = requires_archive_receipt;
         self
     }
 
@@ -1231,6 +1238,7 @@ impl ProductStateRoots {
             runtime_database: product.join("runtime.sqlite3"),
             runtime_store_bounds: SessionBackend::default_sqlite_retention_bounds(),
             retire_finished_children: false,
+            retire_requires_archive_receipt: false,
             product,
             state_home,
             local_daemon: None,

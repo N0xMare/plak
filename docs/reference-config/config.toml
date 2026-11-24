@@ -133,6 +133,10 @@ max_object_bytes = 4294967296
 # type: bool · default: false · true or false; home-scoped
 retire_finished_children = false
 
+# Require a verified archive receipt for the exact child revision before retirement. Serving hosts read this at startup.
+# type: bool · default: false · true or false; home-scoped
+retire_requires_archive_receipt = false
+
 # Agent Skills under .agents/skills and ~/.agents/skills.
 [skills]
 

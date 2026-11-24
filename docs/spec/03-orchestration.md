@@ -2229,15 +2229,18 @@ recovery-required, unfacted-command, waited-on and unsealed children are not
 collected. Leaf children are collected before their parents. An acknowledged
 result must no longer be subject to command return or wait rollback. Terminal
 mail disposition is also accepted; an absent result witness is not evidence.
-New intents are disabled by default; already-published intents still settle
-after restart or after the policy is disabled.
+New intents are disabled by default; already-published intents are still
+considered after restart or after new intents are disabled.
 
-The read-only child trace commands (chapter 02 §2.5.1) can capture a retained,
-settled child independently of its root and siblings. They neither set nor
-check a retirement receipt and do not replace the stricter retirement proof.
-A retirement prerequisite that consumes a durable receipt for the exact
-child, attempt, head and pre-archive revision is a follow-up, not implemented.
-Leave retirement off when preserving conversations depends on the archive.
+An archive-managed home enables `runtime_store.retire_requires_archive_receipt`.
+In that home a retirement intent requires a durable local archive receipt for
+the exact tree and child, attempt, head and approved pre-archive runtime
+revision. A receipt for an older revision cannot cover a newer one. The
+read-only trace commands (chapter 02 §2.5.1) neither set nor check receipts;
+a same-user shipper records one only after verifying the durable remote
+artifact. The host does not contact the archive. Missing, stale, invalid or
+unreadable evidence defers the affected child; it never weakens the existing
+retirement proof. Explicit product session deletion is outside this guard.
 
 An accepted command carrying the selected result can still return it, even
 when its root or child recipient looks idle. Retirement requires durable
@@ -2262,7 +2265,16 @@ That save closes follow-up and retains a bounded result summary: stable child,
 parent, attempt and mail identities, final status, result digest, exact
 submitted result where available and a short display label. It carries no
 prompt, transcript or captures. A delivered preview does not authorize
-discarding the full admitted result.
+discarding the full admitted result. A guarded summary also records the
+receipt ID and verified archive digest alongside the result facts.
+
+The tree rechecks exact receipt coverage under its custody guard before it
+prepares an intent and again before dispatch, including recovery between
+archive and delete. Recovery checks the approved pre-archive revision, not
+the successor revision created by archive. A guarded intent keeps its receipt
+requirement even if configuration changes. An outstanding unguarded intent
+with a runtime to collect defers while the home requires receipts; inventory
+outstanding intents before enabling the requirement.
 
 Only the facade may archive the released session at the approved branch head
 and session revision and delete its next, archived revision. The store checks
@@ -3545,9 +3557,10 @@ Product state lives in `product.sqlite3` at **schema 39**: intents and
 feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds, a rebind request's optional filled choices, and the `last_root_turn` view a continue reads (chapter 02 §4.4.1). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at generation **11**,
-revision **12**, owned by `plakous-recursive-subagents-store`. The additive
-revision creates `agent_retired_children` without backfill. Its tree-owned
-summary survives runtime deletion, is deleted with its tree and is not a
+revision **13**, owned by `plakous-recursive-subagents-store`. The additive
+revisions create `agent_retired_children` and `agent_child_archive_receipts`
+without backfill. The bounded summary and immutable local attestations
+survive runtime deletion and are deleted with their tree. They are not
 checkpoint, binding or move authority. The domain tables and custody
 record are below; §14.3 classifies every column family as an intent, a view of
 the feed, or an external-effect record.
@@ -4903,6 +4916,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Tool, operator and cascading close | intent, joined into views | anchored `agent_operations` of kind `close`, per target attempt; captures recovery hold, terminal refusal, outstanding seal ownership, seal deferral and close stamp; only the target applier derives its rows |
 | Descendant-close reservation | external-effect record | `agent_operations` of kind `descendant_close_effect`, keyed by the terminating parent attempt; captures target ids even when empty, so a feed-derived terminal reserves the cascade once as host intents do |
 | Result-mail reservation | external-effect record | `agent_operations` of kind `result_effect`, keyed by the producing agent and attempt; fences the first eligible push, including a capacity-refused push, independently of envelope retention |
+| Verified child trace archive receipt | external-effect record | an immutable attestation keyed by tree, child, attempt, head and pre-archive runtime revision; only authorizes retirement alongside existing custody and runtime proofs (§6.7) |
 | Failed-turn rescue snapshot ownership | external-effect record | `agent_operations` of kind `rescue_pin`, keyed by rescue id and owned by its producing agent, captures pin ids before the VCS write; conversation collection transfers cleanup ownership to `candidate_unpin` (§6.7) |
 | Tool and root descendant interruption | intent, joined into views | anchored `agent_operations` of kind `interrupt`, per target attempt; captures whether live ownership or a non-ending park made the request effective, and derives only that agent's interrupted status |
 | Session bound after materialization failure | intent, joined into views | `agent_operations` of kind `session_bound_after_failure`, keyed by the exact materialization intent, ordered with the other host intents |

@@ -10,7 +10,7 @@ use plakous::sessions::{
     CreateSessionOutcome, CreateSessionRequest, PortableSessionHistory, SessionBackend,
     SessionOperationId,
 };
-use plakous_hosted::agent_tree::{AgentCommand, AgentCommandKind};
+use plakous_hosted::agent_tree::{AgentCommand, AgentCommandKind, TreeStore as _};
 use plakous_hosted::agent_tree_protocol::{SpawnAgentRequest, SubmitResultRequest};
 use plakous_offline_crash_harness::{
     BoundaryController, protocol::CrashBoundary, text_runtime_binding,
@@ -277,6 +277,80 @@ fn tree_fixture(paths: &PlakPaths, workspace: &std::path::Path) -> (String, Prod
     let tree =
         plakous_hosted::topology_runtime::test_support::bootstrap(&record.id, workspace.to_owned());
     (record.id, tree)
+}
+
+#[test]
+fn trace_receipt_cli_refuses_mismatches_and_never_replaces_an_attestation() {
+    let (_home, paths) = PlakPaths::isolated_test_home();
+    let repo = plakous_recursive_subagents::tree::vcs_fixtures::git_repo();
+    let (root, mut tree) = tree_fixture(&paths, repo.path());
+    let paths = paths.for_workspace(repo.path());
+    let locator = create_quiescent(&paths, "trace-receipt");
+    let child = completed_child(&mut tree, locator);
+    crate::store::tree::save_tree(&paths, &mut tree).unwrap();
+    let source = capture(&paths, &root, &child).unwrap().source;
+    let run = |attempt: &str, head: &str, revision: u64, sha256: &str| {
+        let crate::command::Command::SessionTraceReceipt(record) = crate::cli::parse(
+            [
+                "session",
+                "trace-receipt",
+                "record",
+                &source.child_id,
+                "--attempt",
+                attempt,
+                "--head",
+                head,
+                "--revision",
+                &revision.to_string(),
+                "--sha256",
+                sha256,
+                "--archive",
+                "fixture-artifact",
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from),
+        )
+        .unwrap() else {
+            panic!("expected receipt record command");
+        };
+        record_receipt(&paths, record)
+    };
+    let digest = "a".repeat(64);
+    let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
+    let attempt = &tree.attempt(&child).unwrap().attempt_id;
+    let lookup = || {
+        store
+            .child_archive_receipt(&root, &child, attempt, &source.head, source.revision)
+            .unwrap()
+    };
+    for (attempt, head, revision) in [
+        ("unrelated-attempt", source.head.as_str(), source.revision),
+        (
+            source.attempt_id.as_str(),
+            "unrelated-head",
+            source.revision,
+        ),
+        (
+            source.attempt_id.as_str(),
+            source.head.as_str(),
+            source.revision + 1,
+        ),
+    ] {
+        let error = run(attempt, head, revision, &digest).unwrap_err();
+        assert!(error.message().contains("does not match"), "{error}");
+        assert!(lookup().is_none());
+    }
+    let record = |digest| run(&source.attempt_id, &source.head, source.revision, digest);
+    assert!(record("not-a-digest").is_err());
+    record(&digest).unwrap();
+    record(&digest).unwrap();
+    assert!(
+        record(&"b".repeat(64))
+            .unwrap_err()
+            .message()
+            .contains("conflicting")
+    );
+    assert_eq!(lookup().unwrap().sha256, digest);
 }
 
 #[test]

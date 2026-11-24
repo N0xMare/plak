@@ -49,7 +49,7 @@ release retained capacity without positive original-instance/process-loss proof.
 
 The current state directory is `state/r28.e39.p39.t11/`: runtime SQLite
 schema 28, runtime format epoch 39, product generation 39, and tree generation 11
-(current tree store revision 12).
+(current tree store revision 13).
 These are format identities, not configuration keys. Client wire protocol 12
 and runner protocol 9 require separate exact matches, with no negotiation.
 Product schema 39 adds `sessions.account_choices`. Runtime
@@ -353,6 +353,7 @@ raised or enough data is reclaimed (spec 01 §5).
 | `runtime_store.max_objects` | integer | `4194304` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; objects, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.max_object_bytes` | integer | `4294967296` | at least 16, representable by the SQLite and platform integer ranges; home-scoped | Whole runtime-store cap; accounted object payload and edge bytes, not disk usage. Serving hosts read these limits at startup. |
 | `runtime_store.retire_finished_children` | bool | `false` | true or false; home-scoped | Retire settled child runtimes after their result is consumed. Serving hosts read this at startup. |
+| `runtime_store.retire_requires_archive_receipt` | bool | `false` | true or false; home-scoped | Require a verified archive receipt for the exact child revision before retirement. Serving hosts read this at startup. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plakd mcp login`. |
@@ -603,7 +604,8 @@ them on each command. Compaction is captured in `HostConfig` by
 | `runtime_store.max_checkpoints` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.max_objects` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
 | `runtime_store.max_object_bytes` | `host_restart` | Aggregate cap; CLI applies it on its next invocation. |
-| `runtime_store.retire_finished_children` | `host_restart` | Enables new automatic retirement intents; pending intents still settle. |
+| `runtime_store.retire_finished_children` | `host_restart` | Enables new automatic retirement intents; pending intents still settle when their proofs hold. |
+| `runtime_store.retire_requires_archive_receipt` | `host_restart` | Requires an exact verified archive receipt for new intents and pending retirement dispatch. |
 | `skills.enabled` | `new_session` | Stored construction/rebind tools. |
 | `telemetry.max_bytes` | `host_restart` | Per-home writer start; CLI per command. |
 | `telemetry.max_age_days` | `host_restart` | Per-home writer start; CLI per command. |

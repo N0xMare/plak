@@ -2,7 +2,7 @@
 
 use super::{ProductAgentTree, TopologyError, TopologyErrorCode, TreeDriver, VcsError};
 use crate::tree::retention::{
-    HistoricalCarrierBatch, MAX_RETIREMENT_BATCH, RetirementIssue, RetirementTicket,
+    ApprovedHead, HistoricalCarrierBatch, MAX_RETIREMENT_BATCH, RetirementIssue, RetirementTicket,
 };
 use plakous::sessions::{AgentSessions, AgentSessionsErrorKind, SessionLocator};
 use std::collections::BTreeMap;
@@ -80,6 +80,7 @@ impl TreeDriver {
         &self,
         sessions: &AgentSessions,
         enabled: bool,
+        requires_archive_receipt: bool,
         occupied: std::collections::BTreeSet<String>,
         root: Option<SessionLocator>,
     ) -> Result<(), TopologyError> {
@@ -91,6 +92,7 @@ impl TreeDriver {
         } else {
             Vec::new()
         };
+        let tree_id = self.read(|tree| tree.tree_id.clone())?;
         let mut approved = BTreeMap::new();
         for (agent, attempt, raw) in heads {
             if !self.retry_ready(&agent, Action::Probe, &raw) {
@@ -105,7 +107,28 @@ impl TreeDriver {
             };
             if let Some(revision) = revision {
                 self.retry_clear(&agent, Action::Probe);
-                approved.insert(agent, (attempt, raw, revision));
+                let archive = if requires_archive_receipt {
+                    let Some(receipt) = self
+                        .store
+                        .child_archive_receipt(&tree_id, &agent, &attempt, &raw, revision)
+                        .ok()
+                        .flatten()
+                    else {
+                        continue;
+                    };
+                    Some(receipt)
+                } else {
+                    None
+                };
+                approved.insert(
+                    agent,
+                    ApprovedHead {
+                        attempt,
+                        locator: raw,
+                        revision,
+                        archive,
+                    },
+                );
                 if approved.len() >= MAX_RETIREMENT_BATCH {
                     break;
                 }
@@ -114,7 +137,7 @@ impl TreeDriver {
             }
         }
         let tickets = self
-            .prepare_due_retirements(now, approved, &occupied)
+            .prepare_due_retirements(now, approved, &occupied, requires_archive_receipt)
             .await?;
         for ticket in tickets {
             let agent = &ticket.agent_id;
@@ -193,12 +216,27 @@ impl TreeDriver {
     async fn prepare_due_retirements(
         &self,
         now: u64,
-        approved: crate::tree::retention::ApprovedHeads,
+        mut approved: crate::tree::retention::ApprovedHeads,
         occupied: &std::collections::BTreeSet<String>,
+        requires_archive_receipt: bool,
     ) -> Result<Vec<RetirementTicket>, TopologyError> {
         let driver = self.clone();
         let occupied = occupied.clone();
         self.write(move |tree| {
+            if requires_archive_receipt {
+                approved.retain(|agent, head| {
+                    driver
+                        .store
+                        .child_archive_receipt(
+                            &tree.tree_id,
+                            agent,
+                            &head.attempt,
+                            &head.locator,
+                            head.revision,
+                        )
+                        .is_ok_and(|receipt| receipt.is_some() && receipt == head.archive)
+                });
+            }
             let mut snapshot = None;
             let result = tree.prepare_child_retention_guarded(now, Some(&approved), |before| {
                 snapshot = Some(before.clone());
@@ -206,6 +244,7 @@ impl TreeDriver {
             let result = result.and_then(|mut tickets| {
                 tickets.retain(|ticket| {
                     !occupied.contains(&ticket.agent_id)
+                        && driver.retirement_archive_matches(tree, ticket, requires_archive_receipt)
                         && driver.retry_ready(
                             &ticket.agent_id,
                             Action::Delete,
@@ -226,6 +265,42 @@ impl TreeDriver {
             result
         })
         .await?
+    }
+
+    // Recovered tickets must prove coverage and pass the guarded save too.
+    // Receipts are immutable and removed only with the whole tree under custody.
+    fn retirement_archive_matches(
+        &self,
+        tree: &ProductAgentTree,
+        ticket: &RetirementTicket,
+        required: bool,
+    ) -> bool {
+        let Some(head) = &ticket.locator else {
+            return true; // No runtime operation remains.
+        };
+        let summary = tree.retired_children().get(&ticket.agent_id);
+        let archive = summary.and_then(|summary| summary.archive.as_ref());
+        if !required && !ticket.receipt_required {
+            return true;
+        }
+        let (Some(summary), Some(archive), Some(revision)) =
+            (summary, archive, ticket.session_revision)
+        else {
+            return false;
+        };
+        tree.nodes().get(&ticket.agent_id).is_some_and(|node| {
+            node.attempt_id.as_ref() == Some(&summary.attempt)
+                && node.session_locator.as_deref() == Some(head)
+        }) && self
+            .store
+            .child_archive_receipt(
+                &tree.tree_id,
+                &ticket.agent_id,
+                &summary.attempt,
+                head,
+                revision,
+            )
+            .is_ok_and(|receipt| receipt.as_ref() == Some(archive))
     }
 
     fn retry_ready(&self, agent: &str, action: Action, locator: &str) -> bool {
