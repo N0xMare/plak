@@ -12,6 +12,7 @@ use super::{
 };
 
 mod scan;
+pub(crate) use scan::CLEANUP_BOUND;
 use scan::{Identity, SessionCleanup, scan};
 
 #[cfg(test)]

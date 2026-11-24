@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::operator::tests::congested_link_fixture;
+use crate::operator::tests::{congested_link_fixture, held_cleanup_fixture};
 use plakous_runner_protocol::operator::{OperatorAnswer, OperatorOperation};
 use plakous_tools::{ExecutionEnvironmentConfig, ExecutionEnvironmentScope, RunnerId};
 use tokio::io::AsyncWriteExt as _;
@@ -144,4 +144,54 @@ fn bind(service: &RunnerService) -> Bind {
         version: service.hello().version.clone(),
         inspect: false,
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn operator_shutdown_joins_cleanup_beyond_the_former_five_second_wait() {
+    let (operator, release) = held_cleanup_fixture();
+    let root = tempfile::tempdir().unwrap();
+    let service = runner(root.path(), operator.clone());
+    let deadline = tokio::time::Instant::now() + crate::operator::CLEANUP_BOUND;
+    operator.close_all();
+    let join = tokio::spawn({
+        let service = service.clone();
+        async move { service.join_operator_shutdown(deadline).await }
+    });
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(!join.is_finished());
+    release(true);
+    assert!(join.await.unwrap());
+    assert!(tokio::time::Instant::now() < deadline);
+    // The fixture's leftover reclamation lease did not hold the join.
+    assert!(operator.has_live_terminals());
+}
+
+#[tokio::test(start_paused = true)]
+async fn operator_shutdown_reports_unknown_at_the_cleanup_bound_or_an_unknown_result() {
+    let (operator, _release) = held_cleanup_fixture();
+    let root = tempfile::tempdir().unwrap();
+    let service = runner(root.path(), operator.clone());
+    let started = tokio::time::Instant::now();
+    operator.close_all();
+    assert!(
+        !service
+            .join_operator_shutdown(started + crate::operator::CLEANUP_BOUND)
+            .await
+    );
+    let waited = started.elapsed();
+    assert!(waited >= crate::operator::CLEANUP_BOUND);
+    assert!(waited < crate::operator::CLEANUP_BOUND + Duration::from_secs(1));
+
+    // An unknown result is final for the bounded cleanup: no further wait.
+    let (operator, release) = held_cleanup_fixture();
+    let service = runner(root.path(), operator.clone());
+    operator.close_all();
+    release(false);
+    let started = tokio::time::Instant::now();
+    assert!(
+        !service
+            .join_operator_shutdown(started + crate::operator::CLEANUP_BOUND)
+            .await
+    );
+    assert_eq!(started.elapsed(), Duration::ZERO);
 }

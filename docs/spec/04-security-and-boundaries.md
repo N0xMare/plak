@@ -921,6 +921,19 @@ window. Incomplete cleanup scans retry within their phase's window, then
 retain unknown. An escape observed before cleanup or an unconfirmed group
 signal retains unknown after reaping without spending the proof window; an
 escapee first seen during escalation must be absent from the proof's scans.
+The cleanup bound is both windows, one in-flight observation pass, and one
+pass that may finish after each window: about 20 s with the 2 s pass bound.
+A single stalled stat read remains unbounded. Runner shutdown closes every
+terminal and joins their cleanup results for at most that bound from the
+close, alongside its other shutdown joins. The join ends once every terminal
+has a result, so an unknown result does not extend it; when the bound passes
+first it logs that cleanup remains unknown and the process exits with
+cleanup unfinished. Only idle exit, endpoint loss and a fatal accept error
+on either listener reach this join; idle exit already requires that no
+terminal is pinned, while the other two can occur with live terminals. A
+terminating signal does not run it, and no host stop or upgrade drain waits
+for it. Host-side waits are deliberately shorter (chapter 02 §4.4): a release
+refusal there is not a cleanup result.
 Linux bounds each whole-table pass by record size and entry count, and rejects
 a pass that ends after its elapsed-time bound; it does not interrupt a stalled
 stat read. A stat

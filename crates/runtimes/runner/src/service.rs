@@ -1240,6 +1240,8 @@ impl RunnerService {
     pub(crate) async fn shutdown(&self) {
         self.inner.closing.store(true, Ordering::Release);
         self.stop_retention_maintenance();
+        // Terminal cleanup runs on its own workers alongside the joins below.
+        let cleanup_deadline = tokio::time::Instant::now() + crate::operator::CLEANUP_BOUND;
         if let Some(operator) = &self.inner.operator {
             operator.close_all();
         }
@@ -1267,7 +1269,13 @@ impl RunnerService {
             );
         }
         self.stop_owned().await;
-        self.join_operator_shutdown().await;
+        if !self.join_operator_shutdown(cleanup_deadline).await {
+            use std::io::Write as _;
+            let _ = writeln!(
+                std::io::stderr(),
+                "operator terminal cleanup remains unknown after runner shutdown"
+            );
+        }
     }
 
     async fn stop_owned(&self) {

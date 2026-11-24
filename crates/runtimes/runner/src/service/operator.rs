@@ -1,5 +1,7 @@
 use plakous_runner_protocol::operator::{OperatorAnswer, OperatorOperation, OperatorRefusal};
 
+use crate::operator::CleanupOutcome;
+
 use super::{
     Ordering, Request, RequestClass, RunnerFrame, RunnerService, RunnerVerb, ServeFailure,
     ServeFuture, Value, environment_failure, mpsc,
@@ -20,23 +22,23 @@ impl RunnerService {
             .get(&(host.to_owned(), generation.to_owned()))
             .is_some_and(|current| current.id == connection)
     }
-    pub(super) async fn join_operator_shutdown(&self) {
+    /// Waits until `deadline` for every terminal's cleanup result, ending
+    /// early once each has one; true only if every cleanup was proven. Idle
+    /// exit, endpoint loss and a fatal accept error reach it; no host stop or
+    /// upgrade drain waits for it.
+    pub(super) async fn join_operator_shutdown(&self, deadline: tokio::time::Instant) -> bool {
         let Some(operator) = &self.inner.operator else {
-            return;
+            return true;
         };
-        if tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while operator.has_live_terminals() {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        loop {
+            match operator.cleanup_outcome() {
+                CleanupOutcome::Proven => return true,
+                CleanupOutcome::Unknown => return false,
+                CleanupOutcome::Pending if tokio::time::Instant::now() >= deadline => return false,
+                CleanupOutcome::Pending => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
             }
-        })
-        .await
-        .is_err()
-        {
-            use std::io::Write as _;
-            let _ = writeln!(
-                std::io::stderr(),
-                "operator terminal cleanup remains unknown after runner shutdown"
-            );
         }
     }
     pub(super) fn serve_extension(&self, verb: RunnerVerb, payload: Value) -> ServeFuture {

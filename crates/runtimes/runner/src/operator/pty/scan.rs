@@ -29,6 +29,12 @@ const ESCALATION_BUDGET: Duration = SCAN_WATCHDOG
     .saturating_add(STAGE_SPACING.saturating_mul(2));
 // Two consecutive complete passes after reaping.
 const ABSENCE_PROOF_BUDGET: Duration = SCAN_WATCHDOG.saturating_mul(2).saturating_add(SCAN_SPACING);
+/// How long one terminal's cleanup may take to report its result after close:
+/// both phase windows, one in-flight observation pass, and one pass that may
+/// finish after each window. A single stalled stat read is still unbounded.
+pub(crate) const CLEANUP_BOUND: Duration = ESCALATION_BUDGET
+    .saturating_add(ABSENCE_PROOF_BUDGET)
+    .saturating_add(SCAN_WATCHDOG.saturating_mul(3));
 
 pub(super) fn confirm_startup(
     targets: [&Identity; 2],

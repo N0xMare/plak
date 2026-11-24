@@ -9,6 +9,7 @@ struct Fake {
     sizes: Vec<TerminalDimensions>,
     closed: usize,
     proof: bool,
+    held: bool,
     outputs: Vec<Arc<Mutex<Output>>>,
 }
 
@@ -45,6 +46,31 @@ pub(crate) fn congested_link_fixture() -> (OperatorTerminalService, u64, Vec<Str
     (fixture.service, stream, frames)
 }
 
+/// One open terminal and a reclamation lease on another workspace. The
+/// terminal's cleanup reports no result until the returned release settles it
+/// as proven (`true`) or unknown (`false`).
+pub(crate) fn held_cleanup_fixture() -> (OperatorTerminalService, impl Fn(bool)) {
+    let fixture = Fixture::new();
+    fixture.open(0);
+    assert!(matches!(
+        fixture.call(
+            1,
+            OperatorOperation::Reclaim {
+                workspace: "/elsewhere".into()
+            }
+        ),
+        OperatorAnswer::Reclamation { stream: Some(_) }
+    ));
+    lock(&fixture.fake).held = true;
+    let fake = Arc::clone(&fixture.fake);
+    let release = move |proof| {
+        let mut fake = lock(&fake);
+        fake.proof = proof;
+        fake.held = false;
+    };
+    (fixture.service, release)
+}
+
 impl Backend for FakeBackend {
     fn spawn(
         &self,
@@ -69,7 +95,8 @@ impl Process for FakeProcess {
         Ok(())
     }
     fn poll(&mut self) -> Option<(TerminalStatus, Option<u32>)> {
-        self.1.then(|| {
+        let held = lock(&self.0).held;
+        (self.1 && !held).then(|| {
             (
                 if self.2 {
                     TerminalStatus::Lost

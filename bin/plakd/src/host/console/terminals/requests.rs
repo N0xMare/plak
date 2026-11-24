@@ -308,6 +308,8 @@ impl Console {
         registry: &TerminalRegistry,
         session: &str,
     ) -> Result<HostResponse, dto::ReadRefusal> {
+        // Shorter than runner cleanup: a refusal while rows are still
+        // closing asks the client to retry (spec 02 §4.4).
         let deadline = Instant::now() + std::time::Duration::from_secs(4);
         loop {
             let rows = registry.list(context).map_err(refusal)?;

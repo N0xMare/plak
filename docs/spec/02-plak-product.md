@@ -4406,7 +4406,12 @@ Confirmed takeover revokes only that principal's previous controller. Old-genera
 ids return `terminal_lost`; runner link loss sends `suspended` while preserving the
 host connection. A changed instance is loss, never a replacement shell or permission
 to signal remembered PIDs. Unproven cleanup remains `termination_unknown` in rows;
-release refuses while proof is missing. Close can explicitly acknowledge lost
+release refuses while proof is missing. Release waits at most 4 s for its closes,
+less than the runner's cleanup bound (chapter 04 §2.9), so its
+`termination_unknown` refusal is not a cleanup result: while `terminal_list`
+still shows a row `closing`, cleanup is still resolving; retry the release
+with fresh consent. Host stop likewise waits 4 s and logs unresolved pins; the
+runner continues cleanup without the host. Close can explicitly acknowledge lost
 survivors without claiming death. `terminal_release_session` closes the caller's
 own terminals before an ordinary `release_session`; it neither kills another
 principal's terminal nor stops an agent as a side effect.

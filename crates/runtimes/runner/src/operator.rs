@@ -15,6 +15,8 @@ use plakous_runner_protocol::operator::{
 #[cfg(unix)]
 mod pty;
 #[cfg(unix)]
+pub(crate) use pty::CLEANUP_BOUND;
+#[cfg(unix)]
 pub use pty::account_launch;
 mod collection;
 mod inventory;
@@ -409,6 +411,27 @@ impl OperatorTerminalService {
                 .any(|ns| ns.terminals.values().any(Terminal::pinned))
     }
 
+    /// Where every terminal's bounded cleanup stands once all are closing.
+    pub(crate) fn cleanup_outcome(&self) -> CleanupOutcome {
+        self.tick();
+        let table = lock(&self.inner.table);
+        let mut outcome = CleanupOutcome::Proven;
+        for terminal in table
+            .namespaces
+            .values()
+            .flat_map(|ns| ns.terminals.values())
+        {
+            match terminal.status {
+                TerminalStatus::Starting | TerminalStatus::Running | TerminalStatus::Closing => {
+                    return CleanupOutcome::Pending;
+                }
+                TerminalStatus::TerminationUnknown => outcome = CleanupOutcome::Unknown,
+                TerminalStatus::Exited | TerminalStatus::Lost => {}
+            }
+        }
+        outcome
+    }
+
     /// A pin includes descendant copies and unknown termination. Call under host
     /// admission serialization before dormancy, hand-off, delete or reclamation.
     #[must_use]
@@ -455,6 +478,17 @@ impl OperatorTerminalService {
             }
         }
     }
+}
+
+/// Bounded cleanup across every terminal, for joining runner shutdown.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CleanupOutcome {
+    /// Some terminal has not reported its cleanup result yet.
+    Pending,
+    /// Every terminal is exited or lost.
+    Proven,
+    /// Every result is in and at least one is unknown termination.
+    Unknown,
 }
 
 struct ReclamationLease {
