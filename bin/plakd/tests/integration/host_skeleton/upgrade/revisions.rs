@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn revision_forward_qualification_reads_two_durable_scripted_trees() {
+    use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
+
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    fixture.write_script(&json!({
+        "version": 1,
+        "tree": true,
+        "durable_tree": true,
+        "steps": [{"output": {"text": ANSWER}}]
+    }));
+    let image = replacement_image(&fixture).canonicalize().unwrap();
+    let revision_image = "PLAK_TEST_STORE_REVISION_IMAGE";
+    let mut source = start_env(
+        &fixture,
+        &[],
+        &[(revision_image, image.to_str().unwrap().to_owned())],
+    );
+    let sessions = [(); 2].map(|()| super::super::requests::seeded(&fixture, &source).1);
+
+    let scratch = tempfile::tempdir_in(fixture.home()).unwrap();
+    let service = scratch.path().join("service.json");
+    write_private(
+        &service,
+        &json!({"arguments":["host"],"placements":[]}).to_string(),
+    );
+    let command = || {
+        let mut command = image_command(&fixture, &image);
+        command.env(revision_image, &image);
+        command
+    };
+    check_legacy_and_stage(&command, scratch.path(), &service);
+    let stores = scratch.path().join("stores");
+    let tree_store = stores.join("subagents.sqlite3");
+    assert!(has_index(&tree_store, "subagents_revision_fixture"));
+    for session in &sessions {
+        assert!(matches!(
+            SqliteTreeStore::inspect(&tree_store, session).unwrap(),
+            TreeInspection::Tree(_)
+        ));
+    }
+    assert_parallel_inspection(&command, &stores, &sessions);
+    stop(&mut source);
+}
+
+#[test]
 fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());

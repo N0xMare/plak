@@ -507,7 +507,7 @@ fn prepare_scripted_tree(
     state_roots: product_agent::ProductStateRoots,
     detached: bool,
 ) -> Result<PreparedTree, crate::CliFailure> {
-    use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree, TreeStore};
+    use plakous_hosted::agent_tree::{MemoryTreeStore, ProductAgentTree};
 
     // `plakd session show` looks the tree up by the product session id. The
     // in-memory canvas uses the hub key and can keep a private tree id; a
@@ -537,30 +537,35 @@ fn prepare_scripted_tree(
         runner_port(None)?,
         state_roots.runner_services(),
     )?;
-    let inner: Arc<dyn TreeStore> = if plan.durable_tree {
-        Arc::new(
-            crate::store::tree::open_tree_store(paths)
-                .map_err(|error| format!("offline scripted tree store: {error}"))?,
-        )
+    let store = if detached {
+        None
     } else {
-        Arc::new(MemoryTreeStore::new())
+        Some(open_scripted_tree(paths, plan)?)
     };
-    let store: Arc<dyn TreeStore> = if plan.disk_full_at_child_locator {
-        Arc::new(ChildLocatorDiskFullStore::new(inner))
-    } else {
-        inner
+    let persisted = match &store {
+        Some(store) => store.load(bootstrap_id).map_err(|error| {
+            format!(
+                "offline scripted tree could not be loaded: {}",
+                error.detail
+            )
+        })?,
+        None if plan.durable_tree => {
+            use plakous_hosted::agent::TreeStoreFactory as _;
+
+            crate::store::tree::ProductTreeStoreFactory::new(paths.clone())
+                .inspect(bootstrap_id)
+                .map_err(|error| format!("offline scripted tree store: {}", error.message()))?
+        }
+        None => None,
     };
-    if let Some(persisted) = store.load(bootstrap_id).map_err(|error| {
-        format!(
-            "offline scripted tree could not be loaded: {}",
-            error.detail
-        )
-    })? {
+    if let Some(persisted) = persisted {
         let vcs = tree.vcs_port();
         tree = ProductAgentTree::reopen(persisted);
         tree.set_vcs(runner_port(Some(&tree))?.unwrap_or(vcs));
     }
-    let runtime = if detached {
+    let runtime = if let Some(store) = store {
+        attach_scripted_tree(tree_id, tree, store)?
+    } else {
         let vcs = tree.vcs_port();
         Arc::new(
             plakous_hosted::topology_runtime::ProductTopologyRuntime::new(
@@ -570,8 +575,6 @@ fn prepare_scripted_tree(
                 None,
             ),
         )
-    } else {
-        attach_scripted_tree(tree_id, tree, store)?
     };
     let driver = runtime.driver().clone();
     let binder = Arc::new(ScriptedChildBinder {
@@ -596,6 +599,27 @@ fn prepare_scripted_tree(
         binder,
         runtime,
         product_tools: None,
+    })
+}
+
+fn open_scripted_tree(
+    paths: &product_paths::PlakPaths,
+    plan: &ScriptPlan,
+) -> Result<Arc<dyn plakous_hosted::agent_tree::TreeStore>, crate::CliFailure> {
+    use plakous_hosted::agent_tree::{MemoryTreeStore, TreeStore};
+
+    let inner: Arc<dyn TreeStore> = if plan.durable_tree {
+        Arc::new(
+            crate::store::tree::open_tree_store(paths)
+                .map_err(|error| format!("offline scripted tree store: {error}"))?,
+        )
+    } else {
+        Arc::new(MemoryTreeStore::new())
+    };
+    Ok(if plan.disk_full_at_child_locator {
+        Arc::new(ChildLocatorDiskFullStore::new(inner))
+    } else {
+        inner
     })
 }
 
