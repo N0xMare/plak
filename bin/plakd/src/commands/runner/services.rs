@@ -282,7 +282,7 @@ fn retry_remote(registry: plakous::runner::RunnerRegistry, id: String, retries: 
     if !registry.needs_connection(&id) {
         return;
     }
-    let delay = {
+    let retry_at = {
         let mut state = retries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -297,10 +297,11 @@ fn retry_remote(registry: plakous::runner::RunnerRegistry, id: String, retries: 
             _ => 15,
         };
         retry.scheduled = true;
-        retry.delay
+        // The backoff starts when the retry is scheduled, not on its first poll.
+        tokio::time::Instant::now() + std::time::Duration::from_secs(retry.delay)
     };
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        tokio::time::sleep_until(retry_at).await;
         let ready = registry.rows().iter().any(|row| {
             row.runner.runner_id == id && row.status == plakous::runner::RunnerStatus::Ready
         });

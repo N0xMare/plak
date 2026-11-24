@@ -11,6 +11,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 pub(super) mod production_fence;
@@ -139,12 +140,12 @@ fn line_stream(
 
 #[tokio::test]
 async fn a_resident_stopped_line_reopens_ready_while_its_runtime_stays_open() {
-    stopped_line_followup(false, std::time::Duration::ZERO).await;
+    stopped_line_followup(false, false).await;
 }
 
 #[tokio::test]
 async fn a_branch_hold_releases_recorded_stop_without_a_new_trigger() {
-    stopped_line_followup(true, std::time::Duration::ZERO).await;
+    stopped_line_followup(true, false).await;
 }
 
 struct StoppedLine {
@@ -376,7 +377,7 @@ impl StopHarness {
 
     async fn wait_retired(&self) {
         let mut progress = self.fixture.services.runners().progress_events();
-        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        tokio::time::timeout(Duration::from_secs(20), async {
             while !self.retries.lock().unwrap()["review"]
                 .pending_stops
                 .is_empty()
@@ -393,7 +394,7 @@ impl StopHarness {
     }
 }
 
-async fn stopped_line_followup(branch_hold: bool, held_for: std::time::Duration) {
+async fn stopped_line_followup(branch_hold: bool, check_ramp: bool) {
     let mut harness = StopHarness::new(branch_hold).await;
     let registry = harness.fixture.services.runners();
     harness.assert_admission().await;
@@ -411,37 +412,34 @@ async fn stopped_line_followup(branch_hold: bool, held_for: std::time::Duration)
         );
     }
     assert_eq!(harness.retries.lock().unwrap()["review"].delay, delay);
-    let mut progress = registry.progress_events();
-    let virtual_time = !held_for.is_zero();
-    if virtual_time {
-        tokio::time::pause();
-    }
-    let deadline = tokio::time::Instant::now() + held_for;
-    let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
-    let mut attempts = 0;
-    let budget = deadline + std::time::Duration::from_secs(30);
-    // Cross the first steady-period attempt, not only the initial ramp.
-    while tokio::time::Instant::now() < deadline || (virtual_time && attempts < 4) {
-        assert!(tokio::time::Instant::now() < budget, "stop retry stalled");
-        tokio::select! {
-            _ = poll.tick() => harness.assert_admission().await,
-            _ = progress.recv() => {
-                attempts += 1;
-                harness.assert_admission().await;
-            }
+    if check_ramp {
+        let mut progress = registry.progress_events();
+        // At 1, 3, 8 and 23 seconds, join each attempt before advancing
+        // again: the next backoff does not start until the store answers.
+        assert_eq!(delay, 1);
+        for (delay, next) in [(1, 2), (2, 5), (5, 15), (15, 15)] {
+            advance_stop_delay(delay).await;
+            let attempt = progress.recv().await.unwrap();
+            assert_eq!(attempt.runner_id, "review");
+            assert_eq!(attempt.phase, plakous::runner::ProbePhase::Reconcile);
+            assert!(attempt.row.is_none());
+            harness.assert_admission().await;
+            assert_eq!(harness.stops.load(Ordering::SeqCst), 0);
+            let retries = harness.retries.lock().unwrap();
+            let retry = &retries["review"];
+            assert_eq!(retry.pending_stops, [harness.fixture.line]);
+            assert_eq!(retry.delay, next);
+            assert!(retry.scheduled);
         }
-    }
-    if virtual_time {
-        assert_eq!(attempts, 4, "stop-only ramp spun or duplicated");
-        assert_eq!(harness.retries.lock().unwrap()["review"].delay, 15);
-        assert!(harness.retries.lock().unwrap()["review"].scheduled);
-        tokio::time::resume();
+        assert!(matches!(
+            progress.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
     }
     harness.release_holder().await;
-    if virtual_time {
-        tokio::time::pause();
+    if check_ramp {
         let delay = harness.retries.lock().unwrap()["review"].delay;
-        tokio::time::advance(std::time::Duration::from_secs(delay)).await;
+        advance_stop_delay(delay).await;
         // Let the stop settle over real I/O without advancing its watchdog.
         tokio::time::resume();
     }
@@ -455,9 +453,27 @@ async fn stopped_line_followup(branch_hold: bool, held_for: std::time::Duration)
     assert!(harness.admitted.load(Ordering::SeqCst) > 0);
 }
 
-#[tokio::test]
+async fn advance_stop_delay(seconds: u64) {
+    // Tokio can round the sleep's deadline up to the next millisecond.
+    tokio::time::advance(Duration::from_secs(seconds) + Duration::from_millis(1)).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_resident_held_for_twenty_seconds_keeps_ready_and_effect_admission() {
-    stopped_line_followup(false, std::time::Duration::from_secs(20)).await;
+    // A live blocking task prevents Tokio from spending virtual time while
+    // SQLite is still doing real I/O. The hang bound itself stays on wall time.
+    let (done, release) = std::sync::mpsc::channel::<()>();
+    let mut watchdog =
+        tokio::task::spawn_blocking(move || release.recv_timeout(Duration::from_secs(30)));
+    tokio::select! {
+        () = stopped_line_followup(false, true) => {}
+        result = &mut watchdog => panic!("stop retry stalled: {result:?}"),
+    }
+    drop(done);
+    assert_eq!(
+        watchdog.await.unwrap(),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    );
 }
 
 #[tokio::test]
@@ -526,7 +542,7 @@ async fn a_stale_stop_attempt_preserves_a_new_pending_set_and_context() {
     ));
     // Capture the old retry, then hold its lease open across the replacement.
     // A branch hold refuses an open; it does not guarantee a Pending poll.
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         tokio::select! {
             biased;
             () = &mut attempt => panic!("stop attempt completed before the lease-open hold"),

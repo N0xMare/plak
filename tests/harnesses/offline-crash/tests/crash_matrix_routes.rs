@@ -2593,15 +2593,12 @@ fn face_reopen(fixture: &FaceFixture, session: &str) -> TestResult<FaceAgent> {
     }
 }
 
-/// The recovery note the reopened face said, if any, before `ready`.
-fn face_recovery_note(agent: &FaceAgent) -> Option<String> {
-    agent.records().iter().find_map(|record| {
-        (record["kind"] == "status")
-            .then(|| record["detail"].as_str())
-            .flatten()
-            .filter(|detail| detail.contains(FACE_RECOVERY_NOTE))
-            .map(str::to_owned)
-    })
+fn face_recovery_notes(records: &[Value]) -> impl Iterator<Item = &str> {
+    records
+        .iter()
+        .filter(|record| record["kind"] == "status")
+        .filter_map(|record| record["detail"].as_str())
+        .filter(|detail| detail.contains(FACE_RECOVERY_NOTE))
 }
 
 /// What the face said and did after the reopen.
@@ -2613,9 +2610,9 @@ struct FaceOutcome {
 
 fn face_reopen_and_continue(fixture: &FaceFixture, session: &str) -> TestResult<FaceOutcome> {
     let mut agent = face_reopen(fixture, session)?;
-    // The note, when there is one, precedes `ready`.
-    let note = face_recovery_note(&agent);
     agent.send(&prompt_frame("carry on after the cut"))?;
+    // The stdio handshake sends `ready` before draining buffered startup
+    // output. Reading this turn's terminal proves that drain reached us.
     agent.wait_for("assistant_done", |record| {
         record["kind"] == "assistant_done"
     })?;
@@ -2627,13 +2624,10 @@ fn face_reopen_and_continue(fixture: &FaceFixture, session: &str) -> TestResult<
     let answered = records
         .iter()
         .any(|record| record["kind"] == "assistant" && record["text"] == "recovered and answered");
-    let notes = records
-        .iter()
-        .filter_map(|record| record["detail"].as_str())
-        .filter(|detail| detail.contains(FACE_RECOVERY_NOTE))
-        .count();
-    if notes > 1 {
-        return Err(format!("the recovery note was said {notes} times").into());
+    let mut notes = face_recovery_notes(&records);
+    let note = notes.next().map(str::to_owned);
+    if notes.next().is_some() {
+        return Err(format!("the recovery note was said {} times", notes.count() + 2).into());
     }
     Ok(FaceOutcome {
         note,
@@ -2811,7 +2805,7 @@ fn jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen() -> TestResult {
     if restored["call_id"] != call || restored["name"] != approval["name"] {
         return Err(format!("reopen changed the pending call: {approval} -> {restored}").into());
     }
-    if face_recovery_note(&agent).is_some()
+    if face_recovery_notes(&agent.records()).next().is_some()
         || read_evidence(&fixture.evidence)?
             .iter()
             .filter(|record| record.kind == EvidenceKind::ProviderDispatched)
