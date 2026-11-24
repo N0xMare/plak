@@ -239,11 +239,13 @@ impl SessionCleanup {
             return false;
         }
         // Absence scans cannot turn an observed escape or an unconfirmed
-        // signal into proof, so they do not delay the unknown result.
-        if !certain || observed_escape || !self.escaped.is_empty() {
+        // signal into proof, so they do not delay the unknown result. An
+        // escape first seen during escalation can still leave before the
+        // proof's scans, which retain only escapees that remain visible.
+        if !certain || observed_escape {
             return false;
         }
-        self.prove_absence_until(Instant::now() + ABSENCE_PROOF_BUDGET)
+        self.prove_absence_until(Instant::now() + ABSENCE_PROOF_BUDGET) && self.escaped.is_empty()
     }
 
     fn signal_live_groups_until(&mut self, deadline: Instant) -> Option<bool> {

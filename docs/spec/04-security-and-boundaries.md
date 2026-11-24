@@ -918,10 +918,12 @@ phase needs, plus its fixed spacing: five for escalation (one before each of
 HUP, TERM and KILL, two before reaping) and two for the proof. Time spent
 confirming the anchored leader and stopping groups cannot consume the proof's
 window. Incomplete cleanup scans retry within their phase's window, then
-retain unknown. An observed escape or an unconfirmed group signal retains
-unknown after reaping without spending the proof window. Linux bounds each
-whole-table pass by record size and entry count, and rejects a pass that ends
-after its elapsed-time bound; it does not interrupt a stalled stat read. A stat
+retain unknown. An escape observed before cleanup or an unconfirmed group
+signal retains unknown after reaping without spending the proof window; an
+escapee first seen during escalation must be absent from the proof's scans.
+Linux bounds each whole-table pass by record size and entry count, and rejects
+a pass that ends after its elapsed-time bound; it does not interrupt a stalled
+stat read. A stat
 read of another busy process can stall, so a loaded host can spend more than a
 second on one pass. Linux scans assume visibility of the runner user's
 processes: hidepid and privilege-changing descendants can restrict evidence,
