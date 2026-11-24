@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from dataclasses import dataclass
 import fcntl
 import os
@@ -43,23 +45,53 @@ class ProcessTable:
         self.cwd: dict[tuple[int, str], str | None] = {}
         self.warned = False
 
-    def scan(self) -> dict[int, Process]:
+    @staticmethod
+    def linux_process(entry: Path, *, classify: bool = False) -> Process | None:
+        try:
+            if entry.stat().st_uid != os.getuid():
+                return None
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            if fields[0] == "Z":
+                return None
+            kind = None
+            if classify:
+                argv = (entry / "cmdline").read_bytes().split(b"\0")
+                kind = role(" ".join(os.fsdecode(word) for word in argv))
+            return Process(int(entry.name), int(fields[1]), fields[19], kind)
+        except (OSError, UnicodeError, ValueError, IndexError):
+            return None
+
+    def linux_cwd(self, pid: int | str) -> str | None:
+        path = f"/proc/{pid}/cwd"
+        try:
+            # Credentials/dumpability can change after a process is listed.
+            if os.lstat(path).st_uid == os.getuid():
+                return os.readlink(path)
+        except (FileNotFoundError, PermissionError):
+            pass
+        except OSError as error:
+            if not self.warned:
+                print(f"test process inspection unavailable: {error}", file=sys.stderr)
+                self.warned = True
+        return None
+
+    @staticmethod
+    def cwd_in_root(cwd: str | None, root: Path) -> bool:
+        return cwd is not None and Path(cwd.removesuffix(" (deleted)")).is_relative_to(root)
+
+    def linux_fixture_pids(self, root: Path) -> Iterator[Path]:
+        # stat and cmdline can block behind work on an unrelated process.
+        # Scope discovery by the cheap cwd symlink before opening either.
+        for entry in Path("/proc").iterdir():
+            if entry.name.isdecimal() and self.cwd_in_root(self.linux_cwd(entry.name), root):
+                yield entry
+
+    def scan(self, *, classify: bool = True) -> dict[int, Process]:
         found = {}
         if sys.platform.startswith("linux"):
             for entry in Path("/proc").iterdir():
-                try:
-                    if not entry.name.isdecimal() or entry.stat().st_uid != os.getuid():
-                        continue
-                    fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
-                    if fields[0] == "Z":
-                        continue
-                    argv = (entry / "cmdline").read_bytes().split(b"\0")
-                    command = " ".join(os.fsdecode(word) for word in argv)
-                    found[int(entry.name)] = Process(
-                        int(entry.name), int(fields[1]), fields[19], role(command)
-                    )
-                except (OSError, UnicodeError, ValueError, IndexError):
-                    continue
+                if entry.name.isdecimal() and (p := self.linux_process(entry, classify=classify)):
+                    found[p.pid] = p
         else:
             rows = subprocess.check_output(
                 ["ps", "-axww", "-o", "uid=,pid=,ppid=,lstart=,stat=,command="],
@@ -81,11 +113,7 @@ class ProcessTable:
         if key not in self.cwd:
             try:
                 if sys.platform.startswith("linux"):
-                    # Credentials/dumpability can change after the process scan.
-                    # A protected proc link may belong to a different uid.
-                    if os.lstat(f"/proc/{process.pid}/cwd").st_uid != os.getuid():
-                        return False
-                    cwd = os.readlink(f"/proc/{process.pid}/cwd")
+                    cwd = self.linux_cwd(process.pid)
                 else:
                     result = subprocess.run(
                         ["lsof", "-a", "-p", str(process.pid), "-d", "cwd", "-Fn"],
@@ -112,35 +140,52 @@ class ProcessTable:
                     print(f"test process inspection unavailable: {error}", file=sys.stderr)
                     self.warned = True
                 return False
-        cwd = self.cwd.get(key)
-        return cwd is not None and Path(cwd.removesuffix(" (deleted)")).is_relative_to(root)
+        return self.cwd_in_root(self.cwd.get(key), root)
 
     def candidates(self, root: Path) -> list[Process]:
+        if sys.platform.startswith("linux"):
+            return [
+                p
+                for entry in self.linux_fixture_pids(root)
+                if (p := self.linux_process(entry, classify=True))
+                and p.kind
+                # A pid might have changed owners between the first cwd probe
+                # and reading its identity. Scope the discovered identity too.
+                and self.cwd_in_root(self.linux_cwd(p.pid), root)
+            ]
         return [p for p in self.scan().values() if p.kind and self.inside(p, root)]
 
     def occupied(self, root: Path) -> bool:
+        if sys.platform.startswith("linux"):
+            return next(self.linux_fixture_pids(root), None) is not None
         rows = self.scan()
         # Cwd can change without a new process identity; deletion needs a fresh view.
         self.cwd.clear()
-        if not sys.platform.startswith("linux"):
-            # All processes matter here, not just fixtures. Batch the cwd probe
-            # rather than running one system-wide lsof scan per process.
-            result = subprocess.run(
-                ["lsof", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fn"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            pid = None
-            for line in result.stdout.splitlines():
-                if line.startswith("p"):
-                    pid = int(line[1:])
-                elif line.startswith("n") and pid in rows:
-                    self.cwd[(pid, rows[pid].identity)] = line[1:]
+        # All processes matter here, not just fixtures. Batch the cwd probe
+        # rather than running one system-wide lsof scan per process.
+        result = subprocess.run(
+            ["lsof", "-a", "-u", str(os.getuid()), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        pid = None
+        for line in result.stdout.splitlines():
+            if line.startswith("p"):
+                pid = int(line[1:])
+            elif line.startswith("n") and pid in rows:
+                self.cwd[(pid, rows[pid].identity)] = line[1:]
         return any(self.inside(p, root) for p in rows.values())
 
+    def lookup(self, pid: int) -> Process | None:
+        if sys.platform.startswith("linux"):
+            return self.linux_process(Path(f"/proc/{pid}"))
+        return self.scan().get(pid)
+
     def kill(self, process: Process) -> None:
-        current = self.scan().get(process.pid)
+        # Keep the fresh identity check without making every signal wait on
+        # a full process table or on unrelated command lines.
+        current = self.lookup(process.pid)
         if current is None or current.identity != process.identity:
             return
         try:
@@ -152,14 +197,15 @@ class ProcessTable:
             pass
 
     def descendants(self, parent: int) -> list[Process]:
-        rows = self.scan()
+        children: dict[int, list[Process]] = {}
+        for process in self.scan(classify=False).values():
+            children.setdefault(process.parent, []).append(process)
         ordered = []
 
         def visit(pid):
-            for child in rows.values():
-                if child.parent == pid:
-                    visit(child.pid)
-                    ordered.append(child)
+            for child in children.get(pid, ()):
+                visit(child.pid)
+                ordered.append(child)
 
         visit(parent)
         return ordered

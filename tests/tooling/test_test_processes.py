@@ -5,6 +5,7 @@ import importlib.util
 import os
 import re
 from pathlib import Path
+import selectors
 import signal
 import subprocess
 import sys
@@ -118,14 +119,17 @@ class TestProcessGuardTests(unittest.TestCase):
             root.mkdir()
             (root / 'guard.lock').touch()
             table = MODULE.ProcessTable()
-            worker = MODULE.Process(410001, 1, 'worker', None)
+            pid = Path('/proc/410001')
             with (
-                patch.object(table, 'scan', return_value={worker.pid: worker}),
-                patch.object(table, 'inside', return_value=True),
+                patch.object(MODULE.sys, 'platform', 'linux'),
+                patch.object(table, 'linux_fixture_pids', side_effect=[iter(()), iter([pid])]),
             ):
                 MODULE.reap_previous(base, table)
             self.assertTrue(root.is_dir())
-            with patch.object(table, 'scan', return_value={}):
+            with (
+                patch.object(MODULE.sys, 'platform', 'linux'),
+                patch.object(table, 'linux_fixture_pids', side_effect=[iter(()), iter(())]),
+            ):
                 MODULE.reap_previous(base, table)
             self.assertFalse(root.exists())
 
@@ -408,8 +412,10 @@ class TestProcessGuardTests(unittest.TestCase):
             self.assertEqual(table.descendants(daemon.pid), [grandchild, child])
         killed = []
         with (
-            patch.object(table, "scan", side_effect=lambda: dict(rows)),
-            patch.object(table, "inside", return_value=True),
+            patch.object(table, "scan", side_effect=lambda **_kw: dict(rows)),
+            patch.object(
+                table, "candidates", side_effect=lambda _: [p for p in rows.values() if p.kind]
+            ),
             patch.object(table, "kill", side_effect=lambda p: (killed.append(p), rows.pop(p.pid))),
             patch.object(MODULE.time, "sleep"),
         ):
@@ -421,12 +427,15 @@ class TestProcessGuardTests(unittest.TestCase):
         new = MODULE.Process(old.pid, 1, 'new', 'host')
         table = MODULE.ProcessTable()
         with (
-            patch.object(table, 'scan', return_value={new.pid: new}),
+            patch.object(MODULE.sys, 'platform', 'linux'),
+            patch.object(table, 'linux_process', return_value=new) as read,
+            patch.object(table, 'scan', side_effect=AssertionError('unrelated process scan')),
             patch.object(MODULE.os, 'getpgid', return_value=new.pid),
             patch.object(MODULE.os, 'kill') as kill,
             patch.object(MODULE.os, 'killpg') as killpg,
         ):
             table.kill(old)
+        read.assert_called_once_with(Path(f'/proc/{old.pid}'))
         kill.assert_not_called()
         killpg.assert_not_called()
 
@@ -579,7 +588,7 @@ class TestProcessGuardTests(unittest.TestCase):
             (root / "host").write_text("sleep 60 & wait\n")
             (root / "runner").write_text("sleep 60 & wait\n")
             script = textwrap.dedent(f"""
-                import os, pathlib, shutil, signal, subprocess, time
+                import os, pathlib, shutil, signal, subprocess
                 run = pathlib.Path(os.environ['TMPDIR'])
                 shutil.copy({str(root / 'host')!r}, run / 'host')
                 shutil.copy({str(root / 'runner')!r}, run / 'runner')
@@ -597,8 +606,8 @@ class TestProcessGuardTests(unittest.TestCase):
                     start_new_session=True, stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-                pathlib.Path({str(root / 'ready')!r}).touch()
-                time.sleep(60)
+                print('detached host ready', flush=True)
+                signal.pause()
             """)
             guarded = subprocess.Popen(
                 [sys.executable, str(GUARD), "--", sys.executable, "-c", script],
@@ -608,16 +617,19 @@ class TestProcessGuardTests(unittest.TestCase):
                 text=True,
             )
             try:
-                deadline = time.monotonic() + 5
-                while not (root / "ready").exists():
-                    self.assertLess(time.monotonic(), deadline)
-                    time.sleep(0.01)
+                # Wait on the launcher's post-exec handshake. Neither the
+                # launch nor the cleanup has a wall-clock assertion.
+                with selectors.DefaultSelector() as ready:
+                    ready.register(guarded.stdout, selectors.EVENT_READ)
+                    self.assertTrue(ready.select(timeout=60), "fixture launch watchdog")
+                    self.assertEqual(guarded.stdout.readline().strip(), "detached host ready")
                 guarded.terminate()
-                _, errors = guarded.communicate(timeout=10)
+                _, errors = guarded.communicate(timeout=60)
                 self.assertEqual(guarded.returncode, 143, errors)
                 self.assertIn("test process leak:", errors)
                 self.assertIn("(host)", errors)
                 self.assertIn("(runner serve)", errors)
+                self.assertEqual(MODULE.ProcessTable().candidates(root), [], errors)
             finally:
                 if guarded.poll() is None:
                     guarded.kill()
