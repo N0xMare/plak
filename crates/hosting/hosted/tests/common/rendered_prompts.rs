@@ -2426,17 +2426,14 @@ pub(crate) mod suite {
                 &kernel_value,
             ));
             let digest = render_digest(&markdown);
-            if !print_pins {
-                match pins.get(spec.file_stem.as_str()) {
-                    Some(pinned) if *pinned == digest => {}
-                    Some(pinned) => failures.push(format!(
-                        "{}: rendered prompt changed (pinned {pinned}, rendered {digest})",
-                        spec.file_stem
-                    )),
-                    None => {
-                        failures.push(format!("{}: route has no pinned digest", spec.file_stem))
-                    }
-                }
+            match pins.get(spec.file_stem.as_str()) {
+                _ if print_pins => {}
+                Some(pinned) if *pinned == digest => {}
+                Some(pinned) => failures.push(format!(
+                    "{}: rendered prompt changed (pinned {pinned}, rendered {digest})",
+                    spec.file_stem
+                )),
+                None => failures.push(format!("{}: route has no pinned digest", spec.file_stem)),
             }
             rows.push(format!("        (\"{}\", \"{digest}\"),", spec.file_stem));
             if update {
