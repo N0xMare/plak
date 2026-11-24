@@ -99,6 +99,17 @@ def nextest() -> None:
     )
 
 
+def prompt_pin_rows(previous: str, rows: list[tuple[str, str]]) -> str:
+    pins = dict(rows)
+    order = dict.fromkeys(re.findall(r'\(\s*"([a-zA-Z0-9_.-]+)",', previous))
+    order |= dict.fromkeys(pins)
+    return "".join(
+        f'        (\n            "{name}",\n            "{pins[name]}",\n        ),\n'
+        for name in order
+        if name in pins
+    )
+
+
 def prompts() -> None:
     output = subprocess.check_output(
         [*HOSTED_TEST, "rendered_", "--", "--nocapture", "--test-threads=1"],
@@ -109,16 +120,12 @@ def prompts() -> None:
     updates = {}
     for table, filename in PROMPT_TABLES.items():
         rows = read_prompt_rows(output, table)
-        rendered = "".join(
-            f'        (\n            "{name}",\n            "{digest}",\n        ),\n'
-            for name, digest in rows
-        )
         path = HOSTED / "tests/common" / filename
         updates[path] = replace_block(
             path.read_text(),
             f"    const {table}: &[(&str, &str)] = &[",
             "    ];",
-            lambda _: rendered,
+            lambda previous: prompt_pin_rows(previous, rows),
         )
     for path, updated in updates.items():
         write_if_changed(path, updated)

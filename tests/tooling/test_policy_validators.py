@@ -33,6 +33,7 @@ policy_module = load_module("plakous_policy", ROOT / "tools/gate/plakous_policy.
 workspace_policy = load_module("check_workspace", ROOT / "tools/gate/check_workspace.py")
 feature_policy = load_module("check_features", ROOT / "tools/gate/check_features.py")
 density_policy = load_module("check_prod_loc", ROOT / "tools/perf/check_prod_loc.py")
+regeneration = load_module("regenerate", ROOT / "tools/gate/regenerate.py")
 
 
 class WorkspaceExclusionTests(unittest.TestCase):
@@ -2931,6 +2932,18 @@ fn render_transcript() {}
             _files, errors = workspace_policy.discover_rust_files(root, [(main, False)])
 
         self.assertTrue(any("direct string literal" in error for error in errors), errors)
+
+
+class RegenerationTests(unittest.TestCase):
+    def test_prompt_pins_keep_existing_order_and_append_new_rows(self):
+        previous = '("second", "old"),\n("removed", "old"),\n("first", "old"),\n'
+        updated = regeneration.prompt_pin_rows(
+            previous, [("first", "a" * 64), ("added", "b" * 64), ("second", "c" * 64)]
+        )
+        self.assertEqual(
+            re.findall(r'"([a-z]+)",\s*"([a-f0-9]+)"', updated),
+            [("second", "c" * 64), ("first", "a" * 64), ("added", "b" * 64)],
+        )
 
 
 class FeaturePolicyTests(unittest.TestCase):
