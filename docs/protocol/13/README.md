@@ -96,6 +96,12 @@ The startup countdown is advisory: it cannot abandon a slow inventory or
 change the requester's separate readiness wait. A bridge that cannot reach
 Welcome still uses the typed discovery refusal.
 
+Codex template writes use `{"field":"service_tier","value":"fast"}` or
+`"ultrafast"`; `null` removes the named tier for Standard. Template reads,
+template readiness and profile roles carry the same nullable `service_tier`
+instead of the legacy Fast projection. Profile differences name the exact
+session tier in `root_service_tier`. Protocol 12 keeps its existing Fast toggle.
+
 This checkout still serves 12, and `plakd wire schema` without the draft
 flag still reports 12. After the host implementation is complete, the
 staging build will serve 13 only. Use that exact build's normal schema

@@ -23,7 +23,7 @@ fn protocol_thirteen_schema_has_an_exact_build_independent_pin() {
     assert_eq!(document["wire_version"], v13::WIRE_VERSION);
     assert_eq!(
         normalized_pin(document).unwrap(),
-        "57c64dba0df2ac898699e8d401e89240d820927957c2bb0101302d891b1e4f42",
+        "7fbb3e82a5b1162e69fdc42925d3a31550fdffb051bfe861a4ef386254fec3a4",
     );
 }
 
@@ -76,6 +76,8 @@ fn the_draft_schema_is_self_contained_and_does_not_advertise_replaced_cases() {
         "reasoning_delta",
         "presentation_snapshot",
         "needs_operator",
+        "fast_mode",
+        "root_fast",
     ] {
         assert!(!text.contains(&format!("\"{absent}\"")), "{absent}");
     }
@@ -92,6 +94,8 @@ fn the_draft_schema_is_self_contained_and_does_not_advertise_replaced_cases() {
         "seconds_remaining",
         "cursor_expired",
         "vcs_unsupported_version",
+        "service_tier",
+        "ultrafast",
     ] {
         assert!(text.contains(&format!("\"{present}\"")), "{present}");
     }

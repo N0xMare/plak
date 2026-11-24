@@ -8,3 +8,5 @@
 {"frame":"request","id":7,"op":{"op":"older_history","attachment":7,"cursor":"expired-20"}}
 {"frame":"request","id":8,"op":{"op":"host","request":{"request":"changes_status","target":{"session":"session-1","node":"root"}}}}
 {"frame":"request","id":9,"op":{"op":"read_transcript_row","attachment":7,"row":{"anchor":31,"lane":"runtime","ordinal":0},"offset":2}}
+{"frame":"request","id":10,"op":{"op":"host","request":{"request":"template_put","id":"sol","if_match":"template-etag","confirmation":"fixture-confirmation","changes":[{"field":"service_tier","value":"ultrafast"}]}}}
+{"frame":"request","id":11,"op":{"op":"host","request":{"request":"template_put","id":"astra","if_match":"template-etag","confirmation":"fixture-confirmation","changes":[{"field":"service_tier","value":null}]}}}

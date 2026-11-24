@@ -6,7 +6,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::{PlakExtension, console};
+use crate::{PlakExtension, SurfaceObservation, console};
 
 // Use the same set of tags in the decoder and schema. No unchecked constructor
 // is exposed: even a typed v12 value must pass the tag check to enter v13.
@@ -34,7 +34,15 @@ pub trait Cases {
 impl<'de, T: Cases + DeserializeOwned> Deserialize<'de> for Shared<T> {
     fn deserialize<D: serde::Deserializer<'de>>(input: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(input)?;
-        if T::replaced(value.get(T::TAG).and_then(Value::as_str)) {
+        let tag = if T::TAG.is_empty() {
+            // For externally tagged variants, the object key is the tag.
+            value
+                .as_object()
+                .and_then(|fields| fields.keys().next().map(String::as_str))
+        } else {
+            value.get(T::TAG).and_then(Value::as_str)
+        };
+        if T::replaced(tag) {
             return Err(serde::de::Error::custom(
                 "not an unchanged protocol-13 case",
             ));
@@ -54,11 +62,18 @@ impl<T: Cases + JsonSchema> JsonSchema for Shared<T> {
         let mut schema = T::json_schema(generator);
         if let Some(variants) = schema.get_mut("oneOf").and_then(Value::as_array_mut) {
             variants.retain(|variant| {
-                let tag = variant
-                    .get("properties")
-                    .and_then(|properties| properties.get(T::TAG))
-                    .and_then(|tag| tag.get("const"))
-                    .and_then(Value::as_str);
+                let tag = if T::TAG.is_empty() {
+                    variant
+                        .get("required")
+                        .and_then(|required| required.get(0))
+                        .and_then(Value::as_str)
+                } else {
+                    variant
+                        .get("properties")
+                        .and_then(|properties| properties.get(T::TAG))
+                        .and_then(|tag| tag.get("const"))
+                        .and_then(Value::as_str)
+                };
                 !T::replaced(tag)
             });
         }
@@ -91,7 +106,7 @@ pub type SharedOp = Shared<wire::Op<PlakExtension>>;
 impl Cases for wire::Op<PlakExtension> {
     const NAME: &'static str = "SharedOp";
     const TAG: &'static str = "op";
-    const REPLACED: &'static [&'static str] = &["attach"];
+    const REPLACED: &'static [&'static str] = &["attach", "host"];
 }
 
 pub type SharedAnswer = Shared<wire::Answer<PlakExtension>>;
@@ -148,7 +163,35 @@ pub type SharedHostResponse = Shared<console::HostResponse>;
 impl Cases for console::HostResponse {
     const NAME: &'static str = "SharedHostResponse";
     const TAG: &'static str = "response";
-    const REPLACED: &'static [&'static str] = &["accounts_usage", "refused"];
+    const REPLACED: &'static [&'static str] = &[
+        "accounts_usage",
+        "refused",
+        "profiles_list",
+        "profiles_get",
+        "templates_list",
+        "templates_get",
+    ];
+}
+
+pub type SharedHostRequest = Shared<console::HostRequest>;
+impl Cases for console::HostRequest {
+    const NAME: &'static str = "SharedHostRequest";
+    const TAG: &'static str = "request";
+    const REPLACED: &'static [&'static str] = &["template_put"];
+}
+
+pub type SharedTemplateChange = Shared<console::TemplateChange>;
+impl Cases for console::TemplateChange {
+    const NAME: &'static str = "SharedTemplateChange";
+    const TAG: &'static str = "field";
+    const REPLACED: &'static [&'static str] = &["fast_mode"];
+}
+
+pub type SharedSurfaceObservation = Shared<SurfaceObservation>;
+impl Cases for SurfaceObservation {
+    const NAME: &'static str = "SharedSurfaceObservation";
+    const TAG: &'static str = "";
+    const REPLACED: &'static [&'static str] = &["profiles", "session_profile"];
 }
 
 pub type SharedObservation = Shared<wire::FramedObservation<PlakExtension>>;
@@ -170,5 +213,7 @@ impl Cases for wire::FramedObservation<PlakExtension> {
         "transcript_stream",
         "presentation_snapshot",
         "usage_limits",
+        "extension",
+        "template_readiness",
     ];
 }

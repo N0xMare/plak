@@ -13,6 +13,7 @@ use crate::console::{
 };
 
 use super::shared::SharedHostResponse;
+use super::{ProfileDefinition, ProfileSummary, TemplateDefinition, TemplateSummary};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -24,6 +25,27 @@ pub enum HostResponse {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "response", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostResponseV13 {
+    ProfilesList {
+        etag: String,
+        #[serde(deserialize_with = "required")]
+        #[schemars(required, schema_with = "nullable::<String>")]
+        current: Option<String>,
+        rows: Vec<ProfileSummary>,
+        diagnostics: Vec<Diagnostic>,
+        page: Page,
+    },
+    ProfilesGet {
+        profile: Box<ProfileDefinition>,
+    },
+    TemplatesList {
+        etag: String,
+        rows: Vec<TemplateSummary>,
+        diagnostics: Vec<Diagnostic>,
+        page: Page,
+    },
+    TemplatesGet {
+        template: Box<TemplateDefinition>,
+    },
     AccountsUsage {
         as_of: String,
         window: UsageWindow,

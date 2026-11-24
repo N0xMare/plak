@@ -1,4 +1,4 @@
-use plakous_host_protocol::views::{ProfileDifference, ProfilesView, ReadyCatalog, TemplateRow};
+use plakous_host_protocol::views::ReadyCatalog;
 use plakous_host_protocol::wire::{
     DiscoveredWorkspace, HostedElsewhere, KindAccounts, NodeAddress, RecentWorkspace, RunnerLabel,
     SessionActivity, SessionEnvironment, SessionResidency,
@@ -6,8 +6,8 @@ use plakous_host_protocol::wire::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::SESSION_PREVIEW_BYTES;
 use super::shared::SharedPlacementReason;
+use super::{ProfileDifference, ProfilesView, SESSION_PREVIEW_BYTES, TemplateRow};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

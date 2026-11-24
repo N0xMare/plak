@@ -12,6 +12,8 @@ use crate::lifecycle::HostLifecycleTarget;
 
 mod directory;
 pub use directory::*;
+mod service_tier;
+pub use service_tier::*;
 mod shared;
 use shared::{
     SharedAnswer, SharedClientFrame, SharedHostFrame, SharedObservation, SharedOp, SharedRefusal,
@@ -50,6 +52,9 @@ pub enum Op {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OpV13 {
+    Host {
+        request: Box<HostRequest>,
+    },
     Attach {
         node: NodeAddress,
         /// Resume only an exact retained viewport for this node in this host generation.
@@ -271,6 +276,8 @@ pub enum Observation {
     deny_unknown_fields
 )]
 pub enum ObservationV13 {
+    Extension(SurfaceObservation),
+    TemplateReadiness(Vec<TemplateRow>),
     TranscriptStream(TranscriptStream),
     TranscriptToolStream {
         scope: TranscriptScope,

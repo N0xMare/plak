@@ -3738,368 +3738,17 @@
       ]
     },
     "HostRequest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HostRequestV13"
+        },
+        {
+          "$ref": "#/$defs/SharedHostRequest"
+        }
+      ]
+    },
+    "HostRequestV13": {
       "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "confirmation": {
-              "type": "string"
-            },
-            "dimensions": {
-              "$ref": "#/$defs/TerminalDimensions"
-            },
-            "node": {
-              "type": "string"
-            },
-            "request": {
-              "const": "terminal_open",
-              "type": "string"
-            },
-            "session": {
-              "type": "string"
-            },
-            "terminal_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "session",
-            "node",
-            "terminal_id",
-            "dimensions",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "request": {
-              "const": "terminal_list",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "confirmation": {
-              "type": "string"
-            },
-            "request": {
-              "const": "terminal_release_session",
-              "type": "string"
-            },
-            "session": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "session",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "confirmation": {
-              "type": "string"
-            },
-            "cursor": {
-              "$ref": "#/$defs/TerminalCursor"
-            },
-            "request": {
-              "const": "terminal_attach",
-              "type": "string"
-            },
-            "takeover": {
-              "type": "boolean"
-            },
-            "terminal": {
-              "$ref": "#/$defs/TerminalRef"
-            }
-          },
-          "required": [
-            "request",
-            "terminal",
-            "cursor",
-            "takeover",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "dimensions": {
-              "$ref": "#/$defs/TerminalDimensions"
-            },
-            "request": {
-              "const": "terminal_resize",
-              "type": "string"
-            },
-            "stream": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "request",
-            "stream",
-            "dimensions"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "acknowledge_loss": {
-              "type": "boolean"
-            },
-            "request": {
-              "const": "terminal_close",
-              "type": "string"
-            },
-            "terminal": {
-              "$ref": "#/$defs/TerminalRef"
-            }
-          },
-          "required": [
-            "request",
-            "terminal",
-            "acknowledge_loss"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "request": {
-              "const": "terminal_detach",
-              "type": "string"
-            },
-            "stream": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "request",
-            "stream"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "bytes_b64": {
-              "type": "string"
-            },
-            "offset": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "request": {
-              "const": "terminal_input",
-              "type": "string"
-            },
-            "stream": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "request",
-            "stream",
-            "offset",
-            "bytes_b64"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "grants": {
-              "items": {
-                "$ref": "#/$defs/TerminalCredit"
-              },
-              "type": "array"
-            },
-            "request": {
-              "const": "terminal_credit_batch",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "grants"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "request": {
-              "const": "files_list",
-              "type": "string"
-            },
-            "target": {
-              "$ref": "#/$defs/WorkspaceTarget"
-            }
-          },
-          "required": [
-            "request",
-            "target",
-            "path"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "max_bytes": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "path": {
-              "type": "string"
-            },
-            "request": {
-              "const": "files_read",
-              "type": "string"
-            },
-            "target": {
-              "$ref": "#/$defs/WorkspaceTarget"
-            }
-          },
-          "required": [
-            "request",
-            "target",
-            "path"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "literal": {
-              "type": "string"
-            },
-            "match_case": {
-              "type": [
-                "boolean",
-                "null"
-              ]
-            },
-            "path": {
-              "type": "string"
-            },
-            "request": {
-              "const": "files_search",
-              "type": "string"
-            },
-            "target": {
-              "$ref": "#/$defs/WorkspaceTarget"
-            }
-          },
-          "required": [
-            "request",
-            "target",
-            "path",
-            "literal"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "request": {
-              "const": "changes_status",
-              "type": "string"
-            },
-            "target": {
-              "$ref": "#/$defs/WorkspaceTarget"
-            }
-          },
-          "required": [
-            "request",
-            "target"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "entry": {
-              "type": "string"
-            },
-            "request": {
-              "const": "changes_diff",
-              "type": "string"
-            },
-            "target": {
-              "$ref": "#/$defs/WorkspaceTarget"
-            }
-          },
-          "required": [
-            "request",
-            "target",
-            "entry"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "changes": {
-              "items": {
-                "$ref": "#/$defs/ConfigChange"
-              },
-              "type": "array"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "if_match": {
-              "type": "string"
-            },
-            "request": {
-              "const": "config_patch",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "changes",
-            "if_match",
-            "confirmation"
-          ],
-          "type": "object"
-        },
         {
           "additionalProperties": false,
           "properties": {
@@ -4131,472 +3780,6 @@
             "confirmation"
           ],
           "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "body": {
-              "$ref": "#/$defs/ProfileBody"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "if_match": {
-              "type": "string"
-            },
-            "request": {
-              "const": "profile_put",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "id",
-            "body",
-            "if_match",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_key_set",
-              "type": "string"
-            },
-            "secret": {
-              "$ref": "#/$defs/SecretInput",
-              "writeOnly": true
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "secret",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_key_clear",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "local_only": {
-              "type": "boolean"
-            },
-            "request": {
-              "const": "account_logout",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "local_only",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_refresh",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_remove",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": "string"
-            },
-            "confirmation": {
-              "type": "string"
-            },
-            "notice_revision": {
-              "type": "string"
-            },
-            "replace_newer": {
-              "type": "boolean"
-            },
-            "request": {
-              "const": "account_login_start",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "account_id",
-            "notice_revision",
-            "replace_newer",
-            "confirmation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attempt": {
-              "type": "string"
-            },
-            "pasted": {
-              "$ref": "#/$defs/SecretInput",
-              "writeOnly": true
-            },
-            "request": {
-              "const": "account_login_complete",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "attempt",
-            "pasted"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attempt": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_login_poll",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "attempt"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attempt": {
-              "type": "string"
-            },
-            "request": {
-              "const": "account_login_cancel",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "attempt"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "action": {
-              "$ref": "#/$defs/OperatorAction"
-            },
-            "request": {
-              "const": "operator_prepare",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "action"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "nonce": {
-              "type": "string"
-            },
-            "request": {
-              "const": "operator_confirm",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "nonce"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "request": {
-              "const": "profiles_list",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "request": {
-              "const": "profiles_get",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "request": {
-              "const": "templates_list",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "request": {
-              "const": "templates_get",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "request": {
-              "const": "config_get",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "request": {
-              "const": "console_metadata_get",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "request": {
-              "const": "accounts_status",
-              "type": "string"
-            }
-          },
-          "required": [
-            "request"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "account_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "cursor": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "limit": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "request": {
-              "const": "accounts_usage",
-              "type": "string"
-            },
-            "window": {
-              "$ref": "#/$defs/UsageWindow"
-            }
-          },
-          "required": [
-            "request",
-            "window"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -4612,6 +3795,117 @@
     },
     "HostResponseV13": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "current": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              },
+              "type": "array"
+            },
+            "etag": {
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/Page"
+            },
+            "response": {
+              "const": "profiles_list",
+              "type": "string"
+            },
+            "rows": {
+              "items": {
+                "$ref": "#/$defs/ProfileSummary"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "response",
+            "etag",
+            "current",
+            "rows",
+            "diagnostics",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "$ref": "#/$defs/ProfileDefinition"
+            },
+            "response": {
+              "const": "profiles_get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response",
+            "profile"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              },
+              "type": "array"
+            },
+            "etag": {
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/Page"
+            },
+            "response": {
+              "const": "templates_list",
+              "type": "string"
+            },
+            "rows": {
+              "items": {
+                "$ref": "#/$defs/TemplateSummary"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "response",
+            "etag",
+            "rows",
+            "diagnostics",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "response": {
+              "const": "templates_get",
+              "type": "string"
+            },
+            "template": {
+              "$ref": "#/$defs/TemplateDefinition"
+            }
+          },
+          "required": [
+            "response",
+            "template"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -7101,6 +6395,43 @@
           "additionalProperties": false,
           "properties": {
             "body": {
+              "$ref": "#/$defs/SurfaceObservation"
+            },
+            "kind": {
+              "const": "extension",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "items": {
+                "$ref": "#/$defs/TemplateRow"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "template_readiness",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "body"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
               "$ref": "#/$defs/TranscriptStream"
             },
             "kind": {
@@ -7175,6 +6506,23 @@
     },
     "OpV13": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "const": "host",
+              "type": "string"
+            },
+            "request": {
+              "$ref": "#/$defs/HostRequest"
+            }
+          },
+          "required": [
+            "op",
+            "request"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -7907,20 +7255,23 @@
       "type": "object"
     },
     "ProfileDifference": {
-      "description": "How a session differs from its nearest profile: the root's own values\nbeside the profile's, and card or roster names. Never card bodies or\ncredentials.",
       "oneOf": [
         {
+          "enum": [
+            "working_set",
+            "roster"
+          ],
+          "type": "string"
+        },
+        {
           "additionalProperties": false,
-          "description": "The session uses another root account.",
           "properties": {
             "root_account": {
               "properties": {
                 "profile": {
-                  "description": "Current profile account.",
                   "type": "string"
                 },
                 "session": {
-                  "description": "Frozen session account.",
                   "type": "string"
                 }
               },
@@ -7938,16 +7289,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "The session uses another root model.",
           "properties": {
             "root_model": {
               "properties": {
                 "profile": {
-                  "description": "Current profile model.",
                   "type": "string"
                 },
                 "session": {
-                  "description": "Frozen session model.",
                   "type": "string"
                 }
               },
@@ -7965,16 +7313,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "The session uses another root effort.",
           "properties": {
             "root_effort": {
               "properties": {
                 "profile": {
-                  "description": "Current profile effort.",
                   "type": "string"
                 },
                 "session": {
-                  "description": "Frozen session effort.",
                   "type": "string"
                 }
               },
@@ -7992,13 +7337,18 @@
         },
         {
           "additionalProperties": false,
-          "description": "The session uses another fast-lane selection.",
           "properties": {
-            "root_fast": {
+            "root_service_tier": {
               "properties": {
                 "session": {
-                  "description": "Frozen session fast-lane selection.",
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ServiceTier"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -8008,18 +7358,12 @@
             }
           },
           "required": [
-            "root_fast"
+            "root_service_tier"
           ],
           "type": "object"
         },
         {
-          "const": "working_set",
-          "description": "Working-set names or order differ.",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
-          "description": "A named card differs from its current profile definition.",
           "properties": {
             "card": {
               "type": "string"
@@ -8029,11 +7373,6 @@
             "card"
           ],
           "type": "object"
-        },
-        {
-          "const": "roster",
-          "description": "The frozen roster differs or could not be compared.",
-          "type": "string"
         }
       ]
     },
@@ -8106,33 +7445,33 @@
     },
     "ProfileRole": {
       "additionalProperties": false,
-      "description": "One role line in the Agents detail box.",
       "properties": {
         "account": {
-          "description": "Provider account.",
           "type": "string"
         },
         "depth": {
-          "description": "Nesting below the working set: 0 for a working-set card, 1 for a\ntemplate one of those spawns, and so on.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
         },
         "effort": {
-          "description": "Effort, or `default` when the template names none.",
           "type": "string"
         },
-        "fast": {
-          "description": "Codex fast lane.",
-          "type": "boolean"
-        },
         "label": {
-          "description": "Role (`root`, `worker`, …) or, for a user profile, the template name.",
           "type": "string"
         },
         "model": {
-          "description": "Model id.",
           "type": "string"
+        },
+        "service_tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8140,50 +7479,43 @@
         "account",
         "model",
         "effort",
-        "fast",
+        "service_tier",
         "depth"
       ],
       "type": "object"
     },
     "ProfileRow": {
       "additionalProperties": false,
-      "description": "One selectable profile.",
       "properties": {
         "account_kinds": {
-          "description": "Provider kinds this profile's root and cards name. Empty when the\nrow was built before a client asked.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "aliases": {
-          "description": "Other names `/agents <name>` accepts for this row.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "cards": {
-          "description": "Working-set cards, in order.",
           "items": {
             "$ref": "#/$defs/ProfileRole"
           },
           "type": "array"
         },
         "differences": {
-          "description": "Bounded differences from that profile; empty for an exact match.",
           "items": {
             "$ref": "#/$defs/ProfileDifference"
           },
           "type": "array"
         },
         "id": {
-          "description": "Built-in id or `~/.plak/profiles` file stem; for a session's own row,\nthe nearest profile.",
           "type": "string"
         },
         "root": {
-          "$ref": "#/$defs/ProfileRole",
-          "description": "Root template."
+          "$ref": "#/$defs/ProfileRole"
         }
       },
       "required": [
@@ -8217,24 +7549,20 @@
     },
     "ProfilesView": {
       "additionalProperties": false,
-      "description": "The product's profile list, as the Agents tab shows it.",
       "properties": {
         "current": {
-          "description": "The row the config's root and working set already point at.",
           "type": [
             "string",
             "null"
           ]
         },
         "diagnostics": {
-          "description": "One line per profile file that was left out, and why.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "rows": {
-          "description": "Built-ins first, then user profiles by name.",
           "items": {
             "$ref": "#/$defs/ProfileRow"
           },
@@ -9963,6 +9291,13 @@
     },
     "SecretInput": {
       "maxLength": 65536,
+      "type": "string"
+    },
+    "ServiceTier": {
+      "enum": [
+        "fast",
+        "ultrafast"
+      ],
       "type": "string"
     },
     "SessionActivity": {
@@ -12406,6 +11741,837 @@
         }
       ]
     },
+    "SharedHostRequest": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "confirmation": {
+              "type": "string"
+            },
+            "dimensions": {
+              "$ref": "#/$defs/TerminalDimensions"
+            },
+            "node": {
+              "type": "string"
+            },
+            "request": {
+              "const": "terminal_open",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            },
+            "terminal_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "session",
+            "node",
+            "terminal_id",
+            "dimensions",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "const": "terminal_list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "confirmation": {
+              "type": "string"
+            },
+            "request": {
+              "const": "terminal_release_session",
+              "type": "string"
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "session",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "confirmation": {
+              "type": "string"
+            },
+            "cursor": {
+              "$ref": "#/$defs/TerminalCursor"
+            },
+            "request": {
+              "const": "terminal_attach",
+              "type": "string"
+            },
+            "takeover": {
+              "type": "boolean"
+            },
+            "terminal": {
+              "$ref": "#/$defs/TerminalRef"
+            }
+          },
+          "required": [
+            "request",
+            "terminal",
+            "cursor",
+            "takeover",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dimensions": {
+              "$ref": "#/$defs/TerminalDimensions"
+            },
+            "request": {
+              "const": "terminal_resize",
+              "type": "string"
+            },
+            "stream": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "request",
+            "stream",
+            "dimensions"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "acknowledge_loss": {
+              "type": "boolean"
+            },
+            "request": {
+              "const": "terminal_close",
+              "type": "string"
+            },
+            "terminal": {
+              "$ref": "#/$defs/TerminalRef"
+            }
+          },
+          "required": [
+            "request",
+            "terminal",
+            "acknowledge_loss"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "const": "terminal_detach",
+              "type": "string"
+            },
+            "stream": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "request",
+            "stream"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes_b64": {
+              "type": "string"
+            },
+            "offset": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "request": {
+              "const": "terminal_input",
+              "type": "string"
+            },
+            "stream": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "request",
+            "stream",
+            "offset",
+            "bytes_b64"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "grants": {
+              "items": {
+                "$ref": "#/$defs/TerminalCredit"
+              },
+              "type": "array"
+            },
+            "request": {
+              "const": "terminal_credit_batch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "grants"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "request": {
+              "const": "files_list",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "request",
+            "target",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "max_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "request": {
+              "const": "files_read",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "request",
+            "target",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "literal": {
+              "type": "string"
+            },
+            "match_case": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "request": {
+              "const": "files_search",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "request",
+            "target",
+            "path",
+            "literal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "const": "changes_status",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "request",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entry": {
+              "type": "string"
+            },
+            "request": {
+              "const": "changes_diff",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WorkspaceTarget"
+            }
+          },
+          "required": [
+            "request",
+            "target",
+            "entry"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "changes": {
+              "items": {
+                "$ref": "#/$defs/ConfigChange"
+              },
+              "type": "array"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "if_match": {
+              "type": "string"
+            },
+            "request": {
+              "const": "config_patch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "changes",
+            "if_match",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "$ref": "#/$defs/ProfileBody"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "if_match": {
+              "type": "string"
+            },
+            "request": {
+              "const": "profile_put",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "id",
+            "body",
+            "if_match",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_key_set",
+              "type": "string"
+            },
+            "secret": {
+              "$ref": "#/$defs/SecretInput",
+              "writeOnly": true
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "secret",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_key_clear",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "local_only": {
+              "type": "boolean"
+            },
+            "request": {
+              "const": "account_logout",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "local_only",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_refresh",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "confirmation": {
+              "type": "string"
+            },
+            "notice_revision": {
+              "type": "string"
+            },
+            "replace_newer": {
+              "type": "boolean"
+            },
+            "request": {
+              "const": "account_login_start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "account_id",
+            "notice_revision",
+            "replace_newer",
+            "confirmation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "type": "string"
+            },
+            "pasted": {
+              "$ref": "#/$defs/SecretInput",
+              "writeOnly": true
+            },
+            "request": {
+              "const": "account_login_complete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "attempt",
+            "pasted"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_login_poll",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "type": "string"
+            },
+            "request": {
+              "const": "account_login_cancel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/OperatorAction"
+            },
+            "request": {
+              "const": "operator_prepare",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "nonce": {
+              "type": "string"
+            },
+            "request": {
+              "const": "operator_confirm",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "nonce"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "request": {
+              "const": "profiles_list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "request": {
+              "const": "profiles_get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "request": {
+              "const": "templates_list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "request": {
+              "const": "templates_get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "const": "config_get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "request": {
+              "const": "console_metadata_get",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "request": {
+              "const": "accounts_status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "account_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "request": {
+              "const": "accounts_usage",
+              "type": "string"
+            },
+            "window": {
+              "$ref": "#/$defs/UsageWindow"
+            }
+          },
+          "required": [
+            "request",
+            "window"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SharedHostResponse": {
       "oneOf": [
         {
@@ -12775,117 +12941,6 @@
             "response",
             "confirmation",
             "expires_in_ms"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "current": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "diagnostics": {
-              "items": {
-                "$ref": "#/$defs/Diagnostic"
-              },
-              "type": "array"
-            },
-            "etag": {
-              "type": "string"
-            },
-            "page": {
-              "$ref": "#/$defs/Page"
-            },
-            "response": {
-              "const": "profiles_list",
-              "type": "string"
-            },
-            "rows": {
-              "items": {
-                "$ref": "#/$defs/ProfileSummary"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "response",
-            "etag",
-            "current",
-            "rows",
-            "diagnostics",
-            "page"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "profile": {
-              "$ref": "#/$defs/ProfileDefinition"
-            },
-            "response": {
-              "const": "profiles_get",
-              "type": "string"
-            }
-          },
-          "required": [
-            "response",
-            "profile"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "diagnostics": {
-              "items": {
-                "$ref": "#/$defs/Diagnostic"
-              },
-              "type": "array"
-            },
-            "etag": {
-              "type": "string"
-            },
-            "page": {
-              "$ref": "#/$defs/Page"
-            },
-            "response": {
-              "const": "templates_list",
-              "type": "string"
-            },
-            "rows": {
-              "items": {
-                "$ref": "#/$defs/TemplateSummary"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "response",
-            "etag",
-            "rows",
-            "diagnostics",
-            "page"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "response": {
-              "const": "templates_get",
-              "type": "string"
-            },
-            "template": {
-              "$ref": "#/$defs/TemplateDefinition"
-            }
-          },
-          "required": [
-            "response",
-            "template"
           ],
           "type": "object"
         },
@@ -14327,27 +14382,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "Replace the agent-template readiness projection. Emitted at\nsession open and in answer to [`SessionIntent::RefreshTemplates`].",
-          "properties": {
-            "body": {
-              "items": {
-                "$ref": "#/$defs/TemplateRow"
-              },
-              "type": "array"
-            },
-            "kind": {
-              "const": "template_readiness",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "body"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "A shell binding was durably committed and the app may reattach.",
           "properties": {
             "kind": {
@@ -14694,49 +14728,12 @@
             "body"
           ],
           "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Product-owned traffic the protocol carries but never interprets.\n\nThe mailbox classifies it through [`ObservationExtension`](crate::intent::ObservationExtension) and nothing\nelse reads it; the JSONL projection drops it.",
-          "properties": {
-            "body": {
-              "$ref": "#/$defs/SurfaceObservation"
-            },
-            "kind": {
-              "const": "extension",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "body"
-          ],
-          "type": "object"
         }
       ]
     },
     "SharedOp": {
       "description": "One request a client sends.",
       "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "Attachment-free product operation, routed outside session admission.",
-          "properties": {
-            "op": {
-              "const": "host",
-              "type": "string"
-            },
-            "request": {
-              "$ref": "#/$defs/HostRequest",
-              "description": "Product-owned closed request vocabulary."
-            }
-          },
-          "required": [
-            "op",
-            "request"
-          ],
-          "type": "object"
-        },
         {
           "additionalProperties": false,
           "description": "Detach; the node keeps running.",
@@ -15826,6 +15823,701 @@
         }
       ]
     },
+    "SharedSurfaceObservation": {
+      "description": "Product-owned observations the protocol carries for Plak's own surfaces.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Replace and open the typed product settings pane.",
+          "properties": {
+            "settings_view": {
+              "$ref": "#/$defs/SettingsView"
+            }
+          },
+          "required": [
+            "settings_view"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Complete settings replacement was durably persisted by the product host.",
+          "properties": {
+            "settings_view_applied": {
+              "$ref": "#/$defs/SettingsView"
+            }
+          },
+          "required": [
+            "settings_view_applied"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Loading typed product settings failed and is retryable.",
+          "properties": {
+            "settings_load_failed": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "settings_load_failed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Persisting typed product settings failed; the draft remains open.",
+          "properties": {
+            "settings_save_failed": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "settings_save_failed"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "open_usage_overlay",
+          "description": "Open the honest usage overlay after preceding usage state updates.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact accounts whose offline credential posture permits refresh.",
+          "properties": {
+            "usage_refresh_accounts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "usage_refresh_accounts"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One explicit refresh settled; failures normally use recorded telemetry notes.",
+          "properties": {
+            "usage_credential_refreshed": {
+              "properties": {
+                "account": {
+                  "description": "Account whose explicit refresh settled.",
+                  "type": "string"
+                },
+                "error": {
+                  "description": "Fallback only when no recorded credential failure explains it.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "account"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "usage_credential_refreshed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Fresh product-owned workspace presentation, never session authority.",
+          "properties": {
+            "workspace_chrome": {
+              "$ref": "#/$defs/WorkspaceChrome"
+            }
+          },
+          "required": [
+            "workspace_chrome"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The read-only MCP view: configured servers and this session's tools.",
+          "properties": {
+            "mcp_overview": {
+              "$ref": "#/$defs/McpOverview"
+            }
+          },
+          "required": [
+            "mcp_overview"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A profile was applied.",
+          "properties": {
+            "profile_applied": {
+              "properties": {
+                "name": {
+                  "description": "Profile id.",
+                  "type": "string"
+                },
+                "outcome": {
+                  "$ref": "#/$defs/ProfileOutcome",
+                  "description": "How it landed."
+                }
+              },
+              "required": [
+                "name",
+                "outcome"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "profile_applied"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The session's account for every kind it holds one for: the root\nkind's is the root line head's account, the rest are stored choices.\nSent on attach and after each change.",
+          "properties": {
+            "account_choices": {
+              "properties": {
+                "choices": {
+                  "description": "One entry per kind, the root kind first.",
+                  "items": {
+                    "$ref": "#/$defs/AccountChoice"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "choices"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "account_choices"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An `ApplyProfile` or `ChooseAccount` account choice was refused;\nnothing changed.",
+          "properties": {
+            "account_choice_refused": {
+              "$ref": "#/$defs/AccountChoiceRefusal"
+            }
+          },
+          "required": [
+            "account_choice_refused"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A profile was not applied; nothing was saved.",
+          "properties": {
+            "profile_refused": {
+              "properties": {
+                "name": {
+                  "description": "Profile name as requested.",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Operator-facing reason.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "profile_refused"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every acknowledged attention occurrence of one tree, complete.",
+          "properties": {
+            "agent_acknowledgements": {
+              "properties": {
+                "attempts": {
+                  "description": "Acknowledged occurrences.",
+                  "items": {
+                    "$ref": "#/$defs/AgentAcknowledgement"
+                  },
+                  "type": "array"
+                },
+                "tree_id": {
+                  "description": "Tree the set belongs to.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tree_id",
+                "attempts"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "agent_acknowledgements"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The product could not read acknowledgements for this tree.\n\nNot an empty set: the TUI must ask again rather than treat every\nattempt as unacknowledged forever, or as acknowledged.",
+          "properties": {
+            "agent_acknowledgements_unavailable": {
+              "properties": {
+                "tree_id": {
+                  "description": "Tree the failed read was for.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tree_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "agent_acknowledgements_unavailable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Whether a newer `plakd` than the running one is installed on the host.",
+          "properties": {
+            "build_status": {
+              "properties": {
+                "newer_installed": {
+                  "description": "A newer build is installed; `/reload` would start it.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "newer_installed"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "build_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A same-user request that this session reload onto the installed\nbuild (spec 02 §5.1), offered until the face accepts it\n([`SurfaceIntent::AcceptReloadRequest`]); the face runs it at its next\nidle boundary or refuses it ([`SurfaceIntent::RefuseReloadRequest`]).",
+          "properties": {
+            "reload_requested": {
+              "$ref": "#/$defs/ReloadRequest"
+            }
+          },
+          "required": [
+            "reload_requested"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The installed build a reload would start (`None` when no `plakd` is\ninstalled), and this build's refusal of it.",
+          "properties": {
+            "reload_probed": {
+              "properties": {
+                "refusal": {
+                  "description": "Why this build refuses it, if it does.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReloadTarget"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The reload target."
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "reload_probed"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "reload_probe_failed",
+          "description": "The installed-build check could not run.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Pre-bind lookup progress the launch publishes before the session\nopens (`retrying model lookup …`); `None` once it finished.",
+          "properties": {
+            "lookup_status": {
+              "properties": {
+                "text": {
+                  "description": "The progress line.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "lookup_status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SharedTemplateChange": {
+      "description": "Typed surgical changes, never a TOML upload. Omitted fields are untouched.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "account",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "model",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "effort",
+              "type": "string"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "composition",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CompositionSelection"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "protocol",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ProtocolSelection"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "description",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "access",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/TemplateAccess"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "tools",
+              "type": "string"
+            },
+            "value": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "spawns",
+              "type": "string"
+            },
+            "value": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "may_adopt",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "delegation",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Delegation"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "cost_tier",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "max_turns",
+              "type": "string"
+            },
+            "value": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "show_model",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "field",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "const": "on_mint",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SecretInput"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One exact environment name; null removes it, omission preserves it.",
+          "properties": {
+            "field": {
+              "const": "env",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SecretInput"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "field",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SourceLink": {
       "additionalProperties": false,
       "description": "One source a web search or fetch result names.",
@@ -16199,113 +16891,19 @@
       ]
     },
     "SurfaceObservation": {
-      "description": "Product-owned observations the protocol carries for Plak's own surfaces.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SurfaceObservationV13"
+        },
+        {
+          "$ref": "#/$defs/SharedSurfaceObservation"
+        }
+      ]
+    },
+    "SurfaceObservationV13": {
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Replace and open the typed product settings pane.",
-          "properties": {
-            "settings_view": {
-              "$ref": "#/$defs/SettingsView"
-            }
-          },
-          "required": [
-            "settings_view"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Complete settings replacement was durably persisted by the product host.",
-          "properties": {
-            "settings_view_applied": {
-              "$ref": "#/$defs/SettingsView"
-            }
-          },
-          "required": [
-            "settings_view_applied"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Loading typed product settings failed and is retryable.",
-          "properties": {
-            "settings_load_failed": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "settings_load_failed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Persisting typed product settings failed; the draft remains open.",
-          "properties": {
-            "settings_save_failed": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "settings_save_failed"
-          ],
-          "type": "object"
-        },
-        {
-          "const": "open_usage_overlay",
-          "description": "Open the honest usage overlay after preceding usage state updates.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Exact accounts whose offline credential posture permits refresh.",
-          "properties": {
-            "usage_refresh_accounts": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "usage_refresh_accounts"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "One explicit refresh settled; failures normally use recorded telemetry notes.",
-          "properties": {
-            "usage_credential_refreshed": {
-              "properties": {
-                "account": {
-                  "description": "Account whose explicit refresh settled.",
-                  "type": "string"
-                },
-                "error": {
-                  "description": "Fallback only when no recorded credential failure explains it.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "account"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "usage_credential_refreshed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The current profile list.",
           "properties": {
             "profiles": {
               "$ref": "#/$defs/ProfilesView"
@@ -16318,7 +16916,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "Session identity and its own frozen cards. `id` is `custom` when no\nsaved profile matches the complete binding and frozen roster.",
           "properties": {
             "session_profile": {
               "$ref": "#/$defs/ProfileRow"
@@ -16326,271 +16923,6 @@
           },
           "required": [
             "session_profile"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Fresh product-owned workspace presentation, never session authority.",
-          "properties": {
-            "workspace_chrome": {
-              "$ref": "#/$defs/WorkspaceChrome"
-            }
-          },
-          "required": [
-            "workspace_chrome"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The read-only MCP view: configured servers and this session's tools.",
-          "properties": {
-            "mcp_overview": {
-              "$ref": "#/$defs/McpOverview"
-            }
-          },
-          "required": [
-            "mcp_overview"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A profile was applied.",
-          "properties": {
-            "profile_applied": {
-              "properties": {
-                "name": {
-                  "description": "Profile id.",
-                  "type": "string"
-                },
-                "outcome": {
-                  "$ref": "#/$defs/ProfileOutcome",
-                  "description": "How it landed."
-                }
-              },
-              "required": [
-                "name",
-                "outcome"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "profile_applied"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The session's account for every kind it holds one for: the root\nkind's is the root line head's account, the rest are stored choices.\nSent on attach and after each change.",
-          "properties": {
-            "account_choices": {
-              "properties": {
-                "choices": {
-                  "description": "One entry per kind, the root kind first.",
-                  "items": {
-                    "$ref": "#/$defs/AccountChoice"
-                  },
-                  "type": "array"
-                }
-              },
-              "required": [
-                "choices"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "account_choices"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "An `ApplyProfile` or `ChooseAccount` account choice was refused;\nnothing changed.",
-          "properties": {
-            "account_choice_refused": {
-              "$ref": "#/$defs/AccountChoiceRefusal"
-            }
-          },
-          "required": [
-            "account_choice_refused"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A profile was not applied; nothing was saved.",
-          "properties": {
-            "profile_refused": {
-              "properties": {
-                "name": {
-                  "description": "Profile name as requested.",
-                  "type": "string"
-                },
-                "reason": {
-                  "description": "Operator-facing reason.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "name",
-                "reason"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "profile_refused"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Every acknowledged attention occurrence of one tree, complete.",
-          "properties": {
-            "agent_acknowledgements": {
-              "properties": {
-                "attempts": {
-                  "description": "Acknowledged occurrences.",
-                  "items": {
-                    "$ref": "#/$defs/AgentAcknowledgement"
-                  },
-                  "type": "array"
-                },
-                "tree_id": {
-                  "description": "Tree the set belongs to.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "tree_id",
-                "attempts"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "agent_acknowledgements"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The product could not read acknowledgements for this tree.\n\nNot an empty set: the TUI must ask again rather than treat every\nattempt as unacknowledged forever, or as acknowledged.",
-          "properties": {
-            "agent_acknowledgements_unavailable": {
-              "properties": {
-                "tree_id": {
-                  "description": "Tree the failed read was for.",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "tree_id"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "agent_acknowledgements_unavailable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Whether a newer `plakd` than the running one is installed on the host.",
-          "properties": {
-            "build_status": {
-              "properties": {
-                "newer_installed": {
-                  "description": "A newer build is installed; `/reload` would start it.",
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "newer_installed"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "build_status"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A same-user request that this session reload onto the installed\nbuild (spec 02 §5.1), offered until the face accepts it\n([`SurfaceIntent::AcceptReloadRequest`]); the face runs it at its next\nidle boundary or refuses it ([`SurfaceIntent::RefuseReloadRequest`]).",
-          "properties": {
-            "reload_requested": {
-              "$ref": "#/$defs/ReloadRequest"
-            }
-          },
-          "required": [
-            "reload_requested"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The installed build a reload would start (`None` when no `plakd` is\ninstalled), and this build's refusal of it.",
-          "properties": {
-            "reload_probed": {
-              "properties": {
-                "refusal": {
-                  "description": "Why this build refuses it, if it does.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "target": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/ReloadTarget"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "The reload target."
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "reload_probed"
-          ],
-          "type": "object"
-        },
-        {
-          "const": "reload_probe_failed",
-          "description": "The installed-build check could not run.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Pre-bind lookup progress the launch publishes before the session\nopens (`retrying model lookup …`); `None` once it finished.",
-          "properties": {
-            "lookup_status": {
-              "properties": {
-                "text": {
-                  "description": "The progress line.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "lookup_status"
           ],
           "type": "object"
         }
@@ -16646,12 +16978,6 @@
           },
           "type": "array"
         },
-        "extra": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "max_tier": {
           "$ref": "#/$defs/Tier"
         },
@@ -16682,6 +17008,16 @@
             }
           ]
         },
+        "service_tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "show_model": {
           "type": "boolean"
         },
@@ -16702,7 +17038,7 @@
         "account",
         "model",
         "effort",
-        "extra",
+        "service_tier",
         "composition",
         "protocol",
         "description",
@@ -16720,330 +17056,28 @@
       "type": "object"
     },
     "TemplateChange": {
-      "description": "Typed surgical changes, never a TOML upload. Omitted fields are untouched.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TemplateChangeV13"
+        },
+        {
+          "$ref": "#/$defs/SharedTemplateChange"
+        }
+      ]
+    },
+    "TemplateChangeV13": {
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "field": {
-              "const": "account",
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "model",
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "effort",
-              "type": "string"
-            },
-            "value": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "fast_mode",
-              "type": "string"
-            },
-            "value": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "composition",
+              "const": "service_tier",
               "type": "string"
             },
             "value": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/CompositionSelection"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "protocol",
-              "type": "string"
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ProtocolSelection"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "description",
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "access",
-              "type": "string"
-            },
-            "value": {
-              "$ref": "#/$defs/TemplateAccess"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "tools",
-              "type": "string"
-            },
-            "value": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "spawns",
-              "type": "string"
-            },
-            "value": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "may_adopt",
-              "type": "string"
-            },
-            "value": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "delegation",
-              "type": "string"
-            },
-            "value": {
-              "$ref": "#/$defs/Delegation"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "cost_tier",
-              "type": "string"
-            },
-            "value": {
-              "format": "uint8",
-              "maximum": 255,
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "max_turns",
-              "type": "string"
-            },
-            "value": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "show_model",
-              "type": "string"
-            },
-            "value": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "field",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "const": "on_mint",
-              "type": "string"
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/SecretInput"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "One exact environment name; null removes it, omission preserves it.",
-          "properties": {
-            "field": {
-              "const": "env",
-              "type": "string"
-            },
-            "name": {
-              "type": "string"
-            },
-            "value": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/SecretInput"
+                  "$ref": "#/$defs/ServiceTier"
                 },
                 {
                   "type": "null"
@@ -17053,7 +17087,7 @@
           },
           "required": [
             "field",
-            "name"
+            "value"
           ],
           "type": "object"
         }
@@ -17092,37 +17126,36 @@
     },
     "TemplateRow": {
       "additionalProperties": false,
-      "description": "One agent template, as the host projected it with its readiness.\nThe host owns where templates live and which copy wins\na name collision; it computes readiness, and the client only renders it.",
       "properties": {
         "account": {
-          "description": "Account the template binds.",
           "type": "string"
         },
         "composition": {
-          "description": "Composition selector label.",
           "type": "string"
         },
         "effort": {
-          "description": "Effort label where the provider admits one.",
           "type": [
             "string",
             "null"
           ]
         },
         "model": {
-          "description": "Exact catalog model id.",
           "type": "string"
         },
         "name": {
-          "description": "Template name, the `<name>` in `agents/<name>.toml`.",
           "type": "string"
         },
-        "tier": {
-          "description": "Processing tier label (`standard` or `priority`).",
-          "type": "string"
+        "service_tier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceTier"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "unready_reason": {
-          "description": "Fail-closed reason when the template is not Ready; `None` means Ready.",
           "type": [
             "string",
             "null"
@@ -17134,7 +17167,7 @@
         "account",
         "model",
         "composition",
-        "tier"
+        "service_tier"
       ],
       "type": "object"
     },

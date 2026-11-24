@@ -99,3 +99,38 @@ fn preview_bound_counts_bytes_not_characters() {
     assert!(SessionPreview::try_from("é".repeat(81)).is_err());
     assert!(SessionPreview::try_from("two\nlines".to_owned()).is_err());
 }
+
+#[test]
+fn named_template_writes_and_profile_reads_do_not_accept_legacy_tiers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let named = CLIENT
+        .lines()
+        .find(|line| line.contains("\"value\":\"ultrafast\""))
+        .ok_or("named template write fixture")?;
+    let draft: ClientFrame = serde_json::from_str(named)?;
+    assert!(!format!("{draft:?}").contains("fixture-confirmation"));
+    assert!(serde_json::from_str::<wire::ClientFrame<PlakExtension>>(named).is_err());
+    let mut old: Value = serde_json::from_str(named)?;
+    old["op"]["request"]["changes"][0] = json!({"field":"fast_mode","value":true});
+    serde_json::from_value::<wire::ClientFrame<PlakExtension>>(old.clone())?;
+    assert!(serde_json::from_value::<ClientFrame>(old.clone()).is_err());
+    for invalid in [
+        json!({"field":"service_tier","value":"priority"}),
+        json!({"field":"service_tier"}),
+    ] {
+        old["op"]["request"]["changes"][0] = invalid;
+        assert!(serde_json::from_value::<ClientFrame>(old.clone()).is_err());
+    }
+
+    let named = HOST
+        .lines()
+        .find(|line| line.contains("\"kind\":\"extension\"") && line.contains("\"service_tier\""))
+        .ok_or("profile fixture")?;
+    let mut old: Value = serde_json::from_str(named)?;
+    old["observation"]["body"]["profiles"]["rows"][0]["root"] = json!({
+        "label":"root","account":"codex","model":"gpt-6.2-sol","effort":"low","fast":true,"depth":0
+    });
+    serde_json::from_value::<wire::HostFrame<PlakExtension>>(old.clone())?;
+    assert!(serde_json::from_value::<HostFrame>(old).is_err());
+    Ok(())
+}
