@@ -6,7 +6,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     let _cleanup = HomeHost(fixture.home());
     let image = replacement_image(&fixture).canonicalize().unwrap();
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
-    let session = seed(&fixture, 42);
+    let sessions = [seed(&fixture, 42), seed(&fixture, 43)];
     let mut source = start_env(
         &fixture,
         &[],
@@ -40,22 +40,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
             "{file}"
         );
     }
-    let probe = command()
-        .args([
-            "version",
-            "--host-upgrade-reopen",
-            "--reopen-probe",
-            &session,
-        ])
-        .arg("--store-probe")
-        .arg(stores)
-        .output()
-        .unwrap();
-    assert!(probe.status.success(), "{probe:?}");
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&probe.stdout).unwrap(),
-        json!({"verdict":"opens"})
-    );
+    assert_parallel_inspection(&command, &stores, &sessions);
     assert_eq!(
         Client::connect(&source).request(1, Op::Ping),
         Outcome::Ok(Answer::Pong)
@@ -68,12 +53,10 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
         .output()
         .unwrap();
     assert!(upgraded.status.success(), "{upgraded:?}");
-    assert!(
-        Client::connect_at(&source.socket)
-            .rows(1)
-            .iter()
-            .any(|row| row.session == session)
-    );
+    let rows = Client::connect_at(&source.socket).rows(1);
+    for session in sessions {
+        assert!(rows.iter().any(|row| row.session == session));
+    }
     assert!(has_index(
         &paths.product_database(),
         "product_revision_fixture"
@@ -97,6 +80,75 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut source);
     assert_fresh_fingerprints(&paths);
+}
+
+fn assert_parallel_inspection(
+    command: &impl Fn() -> std::process::Command,
+    stores: &std::path::Path,
+    sessions: &[String; 2],
+) {
+    let paths = ["product.sqlite3", "subagents.sqlite3"].map(|name| stores.join(name));
+    let pinned = paths.each_ref().map(|path| {
+        let copy = rusqlite::Connection::open(path).unwrap();
+        let mode = |sql| {
+            copy.query_row(sql, [], |row| row.get::<_, String>(0))
+                .unwrap()
+        };
+        assert_eq!(mode("PRAGMA journal_mode"), "wal");
+        // Give the two readers a database on which any attempt to configure
+        // WAL (rather than inspect it) must refuse, independently of timing.
+        assert_eq!(mode("PRAGMA journal_mode=DELETE"), "delete");
+        copy.execute_batch("BEGIN; SELECT name FROM sqlite_schema;")
+            .unwrap();
+        copy
+    });
+    let before = paths.each_ref().map(|path| std::fs::read(path).unwrap());
+    let gate = tempfile::tempdir_in(stores.parent().unwrap()).unwrap();
+    let probes = sessions.each_ref().map(|session| {
+        command()
+            .args([
+                "version",
+                "--host-upgrade-reopen",
+                "--reopen-probe",
+                session,
+            ])
+            .arg("--store-probe")
+            .arg(stores)
+            .env("PLAK_TEST_HOST_REOPEN_GATE", gate.path())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline
+        && !sessions
+            .iter()
+            .all(|session| gate.path().join(session).is_file())
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let met = sessions
+        .iter()
+        .all(|session| gate.path().join(session).is_file());
+    write_private(&gate.path().join("release"), "");
+    for probe in probes {
+        let output = probe.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            json!({"verdict":"opens"})
+        );
+    }
+    assert!(
+        met,
+        "both probes must reach the rendezvous before either completes"
+    );
+    assert_eq!(
+        paths.each_ref().map(|path| std::fs::read(path).unwrap()),
+        before
+    );
+    drop(pinned);
 }
 
 fn check_legacy_and_stage(

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use plakous::sessions::{AgentSessions, SessionBackend};
 
-use crate::agent_tree::TreeStore;
+use crate::agent_tree::{PersistedTree, TreeStore};
 use crate::{CliFailure, CliResult};
 
 mod recorded_sidecar;
@@ -31,6 +31,18 @@ pub trait TreeStoreFactory: Send + Sync {
     ///
     /// Returns a redaction-safe failure when the store cannot be opened.
     fn open(&self) -> CliResult<Arc<dyn TreeStore>>;
+
+    /// Inspect persisted rows without acquiring tree custody. Backends with
+    /// a separate read-only open use it here instead of opening a writer.
+    ///
+    /// # Errors
+    ///
+    /// Returns a redaction-safe failure when the rows cannot be inspected.
+    fn inspect(&self, tree_id: &str) -> CliResult<Option<PersistedTree>> {
+        self.open()?
+            .load(tree_id)
+            .map_err(|error| CliFailure::new(error.detail))
+    }
 }
 
 /// A product read of the account a spawn binds for one kind
@@ -1069,6 +1081,20 @@ impl ProductStateRoots {
         let store = self.tree_store_factory.open()?;
         *retained = Some(Arc::clone(&store));
         Ok(store)
+    }
+
+    pub(crate) fn inspect_tree(&self, tree_id: &str) -> CliResult<Option<PersistedTree>> {
+        let store = self
+            .tree_store
+            .lock()
+            .map_err(|_| CliFailure::new("plak topology store ownership is unavailable"))?
+            .clone();
+        match store {
+            Some(store) => store
+                .load(tree_id)
+                .map_err(|error| CliFailure::new(error.detail)),
+            None => self.tree_store_factory.inspect(tree_id),
+        }
     }
 
     /// Where the product installs its evaluator workers.

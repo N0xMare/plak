@@ -8,8 +8,10 @@
 
 use std::sync::Arc;
 
-use plakous_recursive_subagents::tree::{ProductAgentTree, TreeStore, TreeStoreError};
-use plakous_recursive_subagents_store::SqliteTreeStore;
+use plakous_recursive_subagents::tree::{
+    PersistedTree, ProductAgentTree, TreeStore, TreeStoreError,
+};
+use plakous_recursive_subagents_store::{SqliteTreeStore, TreeInspection};
 
 use crate::home::paths::PlakPaths;
 use plakous_hosted::runtime::TreeWriteError;
@@ -73,15 +75,13 @@ const UNBOUND_HOST_ID: &str = "local";
 
 /// The tree store for this home, opened on its own file.
 pub fn open_tree_store(paths: &PlakPaths) -> Result<SqliteTreeStore, String> {
-    if !paths.probing_stores() {
-        paths.ensure_layout()?;
-        bind_custody_host(paths)?;
+    if paths.probing_stores() {
+        return Err("the rehearsal tree store is read-only".to_owned());
     }
+    paths.ensure_layout()?;
+    bind_custody_host(paths)?;
     let store = SqliteTreeStore::open(&paths.subagents_database())
         .map_err(|error| error.message().to_owned())?;
-    if paths.probing_stores() {
-        return Ok(store);
-    }
     let paths = paths.clone();
     Ok(store.with_commit_notice(move |id, change| {
         super::directory_notice::tree(&paths, id, change);
@@ -142,6 +142,15 @@ impl ProductTreeStoreFactory {
 impl plakous_hosted::agent::TreeStoreFactory for ProductTreeStoreFactory {
     fn open(&self) -> CliResult<Arc<dyn TreeStore>> {
         tree_store(&self.paths).map_err(CliFailure::new)
+    }
+
+    fn inspect(&self, tree_id: &str) -> CliResult<Option<PersistedTree>> {
+        let tree = SqliteTreeStore::inspect(&self.paths.subagents_database(), tree_id)
+            .map_err(|error| CliFailure::new(error.message().to_owned()))?;
+        Ok(match tree {
+            TreeInspection::Tree(rows) => Some(*rows),
+            TreeInspection::TreeAbsent | TreeInspection::StoreAbsent => None,
+        })
     }
 }
 

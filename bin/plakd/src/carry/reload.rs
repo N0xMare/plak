@@ -104,10 +104,8 @@ pub(crate) fn reopen_probe(
             .paths()
             .map_err(|error| error.message().to_owned())?;
         crate::store::revisions::refuse_incompatible(paths)?;
-        let record = services
-            .session_records()
-            .map_err(|error| error.message().to_owned())?
-            .load(id)?;
+        let record = crate::store::ProductStore::inspect_session_read_only(paths, id)
+            .map_err(|error| error.to_string())?;
         let (_, recorded, _, views) =
             crate::store::ProductStore::inspect_projection_read_only(paths, &record.id)?;
         let recorded = recorded

@@ -417,13 +417,10 @@ fn inspected_topology_extensions(
         if !topology_home_stated(parent, opening_durable_session)? {
             return Ok(ProductToolExtensions::empty());
         }
-        let store = parent
+        let Some(persisted) = parent
             .state_roots()
-            .tree_store()
-            .map_err(|failure| unopened(failure.message()))?;
-        let Some(persisted) = store
-            .load(tree_id)
-            .map_err(|error| unopened(&error.detail))?
+            .inspect_tree(tree_id)
+            .map_err(|failure| unopened(failure.message()))?
         else {
             // An open never bootstraps a tree for a session it reopens.
             return Ok(ProductToolExtensions::empty());

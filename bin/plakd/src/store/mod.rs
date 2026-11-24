@@ -406,11 +406,14 @@ impl ProductStore {
     fn open_internal(paths: &PlakPaths) -> Result<Self, ProductStoreOpenError> {
         #[cfg(test)]
         open_counts::record(paths.product_database());
-        if !paths.probing_stores() {
-            paths
-                .ensure_layout()
-                .map_err(ProductStoreOpenError::unavailable)?;
+        if paths.probing_stores() {
+            return Err(ProductStoreOpenError::unavailable(
+                "the rehearsal product store is read-only",
+            ));
         }
+        paths
+            .ensure_layout()
+            .map_err(ProductStoreOpenError::unavailable)?;
         let database = product_sqlite_path(paths)?;
         #[cfg(feature = "test-support")]
         let _settle = SettleCommitTrace;
