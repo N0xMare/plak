@@ -7,6 +7,10 @@ pub(crate) const fn snapshot_fixture() -> bool {
 }
 
 #[allow(dead_code, reason = "only the optional web host stamps frames")]
+#[allow(
+    clippy::unused_self,
+    reason = "same method seam as the enabled stamp when test hooks are disabled"
+)]
 pub(crate) mod soak_stamp {
     #[derive(Clone, Copy)]
     pub(crate) struct Enabled;
