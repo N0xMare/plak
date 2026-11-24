@@ -1169,8 +1169,11 @@ impl Backend {
         {
             return false;
         }
-        #[cfg(feature = "test-support")]
-        let _settle = trace_boundary::SettleGuard;
+        trace_boundary::background_step(self);
+        true
+    }
+
+    fn advance_background(&mut self) {
         #[cfg(test)]
         if let Some(hook) = &mut self.job_hook {
             hook(ExecutedJob::Background);
@@ -1193,13 +1196,17 @@ impl Backend {
         }
         #[cfg(test)]
         self.probe_synchronous("background");
-        true
     }
 }
 
 #[cfg(feature = "test-support")]
 mod trace_boundary {
     pub(super) use crate::commit_trace::SettleGuard;
+
+    pub(super) fn background_step(backend: &mut super::Backend) {
+        let _settle = SettleGuard;
+        backend.advance_background();
+    }
 
     pub(super) fn finish(backend: &mut super::Backend, foreground: SettleGuard) {
         drop(foreground);
@@ -1212,6 +1219,10 @@ mod trace_boundary {
 #[cfg(not(feature = "test-support"))]
 mod trace_boundary {
     pub(super) struct SettleGuard;
+
+    pub(super) fn background_step(backend: &mut super::Backend) {
+        backend.advance_background();
+    }
 
     pub(super) const fn finish(_backend: &mut super::Backend, _foreground: SettleGuard) {}
 }
