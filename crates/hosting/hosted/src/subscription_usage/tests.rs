@@ -94,6 +94,27 @@ fn openrouter_usage() -> Result<VerticalObservation, Box<dyn std::error::Error>>
 }
 
 #[test]
+fn openrouter_projects_reported_fields_without_inference() -> Result<(), Box<dyn std::error::Error>>
+{
+    let usage = decode_openrouter_key_usage(
+        br#"{"data":{"limit_remaining":-0.0000005,"usage":9223372036854.775807,"usage_daily":0,"usage_weekly":5e-7}}"#,
+        Timestamp::new(1, 0)?,
+    )?;
+    let view = project_vertical(
+        openrouter_vertical(),
+        &VerticalObservation::OpenRouterKey(Box::new(usage), "fixture".into()),
+    );
+    let money = view.money.expect("typed projection").expect("within range");
+    assert_eq!(money.meters[0][0].remaining_micros, Some(-1));
+    assert_eq!(money.meters[0][0].cap_micros, None);
+    assert_eq!(money.meters[1].len(), 3);
+    assert_eq!(money.meters[1][0].used_micros, Some(i64::MAX));
+    assert_eq!(money.meters[1][1].used_micros, Some(0));
+    assert_eq!(money.meters[1][2].used_micros, Some(1));
+    Ok(())
+}
+
+#[test]
 fn all_four_verticals_are_always_listed_in_order() {
     let view = project_limits([], SessionLedgerView::default());
     assert_eq!(view.verticals.len(), 4);

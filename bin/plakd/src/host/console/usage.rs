@@ -267,6 +267,74 @@ mod tests {
     };
 
     #[test]
+    fn console_and_attachment_share_source_money_without_changing_legacy_wire() {
+        use plakous::model::{SubscriptionUsageBalance, SubscriptionUsageSnapshot};
+        let account: AccountRef = "grok/work".parse().unwrap();
+        let snapshot =
+            SubscriptionUsageSnapshot::new(Timestamp::new(1, 0).unwrap(), None, Vec::new())
+                .unwrap()
+                .with_balances(vec![
+                    SubscriptionUsageBalance::new("prepaid-credits".into(), Some(0), None, None)
+                        .unwrap(),
+                    SubscriptionUsageBalance::new(
+                        "pay-as-you-go".into(),
+                        Some(-5),
+                        Some(23),
+                        Some(100),
+                    )
+                    .unwrap(),
+                ])
+                .unwrap();
+        let observation = VerticalObservation::Native(R::Snapshot(snapshot));
+        let allowance = project(&account, observation.clone());
+        let recorded = recorded::unknown(CoverageReason::MissingMeasurements);
+        let page = HostResponse::AccountsUsage {
+            as_of: String::new(),
+            from: String::new(),
+            to: String::new(),
+            window: UsageWindow::Hours24,
+            rows: vec![AccountUsage {
+                account_id: account.to_string(),
+                recorded: recorded.clone(),
+                allowance,
+            }],
+            unattributed: Box::new(recorded),
+            diagnostics: Vec::new(),
+            page: Page {
+                next: None,
+                truncated: false,
+            },
+        };
+        let legacy = serde_json::to_value(&page).unwrap();
+        let legacy_view = &legacy["rows"][0]["allowance"]["view"];
+        assert!(legacy_view.get("money").is_none());
+        assert_eq!(legacy_view["balances"].as_array().unwrap().len(), 1);
+        let answer =
+            serde_json::to_value(crate::draft_wire::accounts_usage(7, page).unwrap()).unwrap();
+        let answer_money =
+            &answer["outcome"]["ok"]["response"]["rows"][0]["allowance"]["view"]["balances"];
+        let vertical =
+            crate::commands::usage::usage_vertical_for_account(account.as_str()).unwrap();
+        let limits = subscription_usage::project_limits(
+            [(vertical, observation)],
+            SessionLedgerView::default(),
+        );
+        let event = serde_json::to_value(crate::draft_wire::usage_limits(limits)).unwrap();
+        let attached = event["body"]["verticals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["vertical"]["account"] == account.as_str())
+            .unwrap();
+        assert_eq!(answer_money, &attached["balances"]);
+        assert_eq!(answer_money[0]["remaining_micros"], 0);
+        assert!(answer_money[0].get("used_micros").is_none());
+        assert_eq!(answer_money[1]["remaining_micros"], -50_000);
+        assert_eq!(answer_money[1]["used_micros"], 230_000);
+        assert_eq!(answer_money[1]["cap_micros"], 1_000_000);
+    }
+
+    #[test]
     fn allowance_repairs_name_the_exact_account_and_credential_action() {
         let native: AccountRef = "codex/work".parse().unwrap();
         for (reason, action) in [

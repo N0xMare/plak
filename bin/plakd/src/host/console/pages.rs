@@ -541,6 +541,7 @@ mod tests {
                         reason: "x".repeat(3_000),
                     },
                     balances: Vec::new(),
+                    money: None,
                     repair: None,
                 });
                 row

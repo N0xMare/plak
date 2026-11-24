@@ -32,7 +32,8 @@ mod openrouter_usage;
 use plakous::subscriptions::NativeProvider;
 use plakous_host_protocol::views::presentation::{
     SessionLedgerView, UsageBalanceView, UsageCostView, UsageLimitsView, UsageMeterReading,
-    UsageMeterView, UsageVertical, VerticalUsageState, VerticalUsageView,
+    UsageMeterView, UsageMoney, UsageMoneyOverflow, UsageMoneyView, UsageVertical,
+    VerticalUsageState, VerticalUsageView,
 };
 
 /// Width of the Limits bar, in cells. The fill is the floored percent *left*,
@@ -275,6 +276,7 @@ fn project_vertical(
             observed_at: None,
             state: VerticalUsageState::NotConnected,
             balances: Vec::new(),
+            money: None,
             repair: None,
         },
         VerticalObservation::Unavailable(reason) => VerticalUsageView {
@@ -286,6 +288,7 @@ fn project_vertical(
                 reason: reason.clone(),
             },
             balances: Vec::new(),
+            money: None,
             repair: None,
         },
         VerticalObservation::Native(SubscriptionUsageRead::Unavailable {
@@ -313,6 +316,7 @@ fn project_vertical(
                 observed_at: Some(format_unix_seconds(observed_at.seconds())),
                 state,
                 balances: Vec::new(),
+                money: None,
                 repair,
             }
         }
@@ -330,6 +334,7 @@ fn project_vertical(
                     .filter(|balance| report_balance(balance))
                     .map(balance_view)
                     .collect(),
+                money: Some(native_money(snapshot)),
                 repair: None,
             }
         }
@@ -342,6 +347,7 @@ fn project_vertical(
                 reason: reason.clone(),
             },
             balances: Vec::new(),
+            money: None,
             repair: Some(plakous_host_protocol::views::UsageRepair::RejectedKey(
                 *source,
             )),
@@ -350,6 +356,39 @@ fn project_vertical(
             openrouter_usage::project(vertical, usage, label)
         }
     }
+}
+
+fn native_money(
+    snapshot: &SubscriptionUsageSnapshot,
+) -> Result<UsageMoneyView, UsageMoneyOverflow> {
+    fn micros(value: Option<i64>) -> Result<Option<i64>, UsageMoneyOverflow> {
+        value
+            .map(|cents| cents.checked_mul(10_000).ok_or(UsageMoneyOverflow))
+            .transpose()
+    }
+    let mut balances = Vec::new();
+    for balance in snapshot.balances() {
+        let (remaining_micros, used_micros, cap_micros) = (
+            micros(balance.remaining_cents())?,
+            micros(balance.used_cents())?,
+            micros(balance.cap_cents())?,
+        );
+        if remaining_micros.is_none() && used_micros.is_none() && cap_micros.is_none() {
+            continue;
+        }
+        let view = balance_view(balance);
+        balances.push(UsageMoney {
+            currency: "USD",
+            remaining_micros,
+            used_micros,
+            cap_micros,
+            display: format!("{}: {}", view.label, view.value),
+        });
+    }
+    Ok(UsageMoneyView {
+        balances,
+        meters: Vec::new(),
+    })
 }
 
 fn usage_credential_state(

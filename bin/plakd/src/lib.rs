@@ -57,6 +57,8 @@ mod composition_tests;
 mod deploy;
 mod diagnostics;
 mod dispatch;
+#[doc(hidden)]
+pub mod draft_wire;
 mod environment;
 mod gateway;
 mod host_status_text;

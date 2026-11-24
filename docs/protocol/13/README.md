@@ -73,6 +73,15 @@ and sealing descendants, excluding parked children. `held_children` counts
 descendants waiting for consent after host loss, not also in `children`.
 `processes` counts running and stopping process views.
 
+Console and attached allowance views use the same provider amounts. The host
+converts reported cents exactly and rounds decimal credits to the nearest
+micro-unit, with ties away from zero. Amounts outside the signed range are
+refused, not saturated. Percentage readings are unchanged.
+The draft OpenRouter key-limit meter cannot distinguish a null cap (no cap)
+from an unreported cap, and its money entries do not carry the reset cadence
+or whether BYOK spend counts against the limit. Account for that display gap
+at the switch rather than inferring any of these facts from the amounts.
+
 This checkout still serves 12, and `plakd wire schema` without the draft
 flag still reports 12. After the host implementation is complete, the
 staging build will serve 13 only. Use that exact build's normal schema

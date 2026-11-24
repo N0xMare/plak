@@ -565,6 +565,38 @@ pub struct VerticalUsageView {
     /// when the provider reported none; a balance is never inferred from a
     /// meter, and an absent amount never renders as a zero.
     pub balances: Vec<UsageBalanceView>,
+    /// Typed source amounts for the next client projection, not part of the
+    /// existing host wire or JSONL presentation.
+    #[serde(skip)]
+    pub money: Option<Result<UsageMoneyView, UsageMoneyOverflow>>,
+}
+
+/// Source-backed monetary values, kept alongside the display-only view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct UsageMoneyView {
+    /// Provider-reported balances, including reported zero values.
+    pub balances: Vec<UsageMoney>,
+    /// Monetary readings by index in the accompanying ready meter list.
+    pub meters: Vec<Vec<UsageMoney>>,
+}
+
+/// At least one source amount cannot be represented in signed micro-units.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UsageMoneyOverflow;
+
+/// One currency balance or amount reading, with missing fields unreported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UsageMoney {
+    /// ISO currency code for the source amounts.
+    pub currency: &'static str,
+    /// Remaining units, when reported.
+    pub remaining_micros: Option<i64>,
+    /// Used units, when reported.
+    pub used_micros: Option<i64>,
+    /// Cap units, when reported.
+    pub cap_micros: Option<i64>,
+    /// Product-formatted display, never a numeric input.
+    pub display: String,
 }
 
 /// One provider-reported monetary balance line under a vertical's meters.

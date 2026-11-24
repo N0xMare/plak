@@ -41,6 +41,7 @@ pub struct OpenRouterKeyUsage {
     usage_daily: Option<f64>,
     usage_weekly: Option<f64>,
     usage_monthly: Option<f64>,
+    credit_decimals: [Option<String>; 6],
     is_free_tier: Option<bool>,
     include_byok_in_limit: Option<bool>,
 }
@@ -85,6 +86,23 @@ impl OpenRouterKeyUsage {
     #[must_use]
     pub const fn usage_monthly(&self) -> Option<f64> {
         self.usage_monthly
+    }
+    /// Exact provider numbers for the cap and remaining credits, respectively.
+    #[must_use]
+    pub fn limit_decimals(&self) -> [Option<&str>; 2] {
+        let [cap, remaining, ..] = &self.credit_decimals;
+        [cap.as_deref(), remaining.as_deref()]
+    }
+    /// Exact provider spend numbers, in all-time, daily, weekly and monthly order.
+    #[must_use]
+    pub fn usage_decimals(&self) -> [Option<&str>; 4] {
+        let [_, _, all, daily, weekly, monthly] = &self.credit_decimals;
+        [
+            all.as_deref(),
+            daily.as_deref(),
+            weekly.as_deref(),
+            monthly.as_deref(),
+        ]
     }
     /// Returns whether the provider marked this key free tier, when supplied.
     #[must_use]
@@ -148,28 +166,27 @@ struct KeyEnvelope {
 #[derive(Deserialize)]
 struct KeyData {
     #[serde(default)]
-    limit: Option<f64>,
+    limit: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
-    limit_remaining: Option<f64>,
+    limit_remaining: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
     limit_reset: Option<String>,
     #[serde(default)]
-    usage: Option<f64>,
+    usage: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
-    usage_daily: Option<f64>,
+    usage_daily: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
-    usage_weekly: Option<f64>,
+    usage_weekly: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
-    usage_monthly: Option<f64>,
+    usage_monthly: Option<Box<serde_json::value::RawValue>>,
     #[serde(default)]
     is_free_tier: Option<bool>,
     #[serde(default)]
     include_byok_in_limit: Option<bool>,
 }
 
-/// Decodes one bounded `/api/v1/key` body. Absent fields stay absent; a
-/// non-finite or negative amount fails the whole observation closed rather than
-/// presenting a number the provider did not report.
+/// Decodes one bounded `/api/v1/key` body. Absent fields stay absent. Remaining
+/// credits can be negative; caps and spend cannot, and every number must be finite.
 ///
 /// # Errors
 ///
@@ -185,30 +202,44 @@ pub fn decode_openrouter_key_usage(
     let envelope: KeyEnvelope =
         serde_json::from_slice(body).map_err(|_| OpenRouterKeyUsageError::InvalidResponse)?;
     let data = envelope.data;
-    let amounts = [
+    let credit_decimals = [
         data.limit,
         data.limit_remaining,
         data.usage,
         data.usage_daily,
         data.usage_weekly,
         data.usage_monthly,
-    ];
-    if amounts
-        .iter()
-        .flatten()
-        .any(|value| !value.is_finite() || *value < 0.0)
-    {
-        return Err(OpenRouterKeyUsageError::InvalidResponse);
+    ]
+    .map(|raw| raw.map(|raw| raw.get().to_owned()));
+    let mut amounts = [None; 6];
+    for (index, (amount, decimal)) in amounts.iter_mut().zip(&credit_decimals).enumerate() {
+        if let Some(decimal) = decimal {
+            let signed_remaining = index == 1;
+            let value = serde_json::from_str::<f64>(decimal)
+                .ok()
+                .filter(|value| value.is_finite() && (signed_remaining || *value >= 0.0))
+                .ok_or(OpenRouterKeyUsageError::InvalidResponse)?;
+            *amount = Some(value);
+        }
     }
+    let [
+        limit,
+        limit_remaining,
+        usage,
+        usage_daily,
+        usage_weekly,
+        usage_monthly,
+    ] = amounts;
     Ok(OpenRouterKeyUsage {
         observed_at,
-        limit: data.limit,
-        limit_remaining: data.limit_remaining,
+        limit,
+        limit_remaining,
         limit_reset: bounded_text(data.limit_reset),
-        usage: data.usage,
-        usage_daily: data.usage_daily,
-        usage_weekly: data.usage_weekly,
-        usage_monthly: data.usage_monthly,
+        usage,
+        usage_daily,
+        usage_weekly,
+        usage_monthly,
+        credit_decimals,
         is_free_tier: data.is_free_tier,
         include_byok_in_limit: data.include_byok_in_limit,
     })
@@ -368,12 +399,25 @@ mod tests {
     }
 
     #[test]
+    fn a_reported_negative_remaining_balance_is_not_an_invalid_read()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let usage = decode_openrouter_key_usage(
+            br#"{"data":{"limit":2,"limit_remaining":-1.25,"usage":3.25}}"#,
+            Timestamp::new(1, 0)?,
+        )?;
+        assert_eq!(usage.limit_remaining(), Some(-1.25));
+        assert_eq!(usage.limit_decimals(), [Some("2"), Some("-1.25")]);
+        Ok(())
+    }
+
+    #[test]
     fn rejects_empty_oversize_malformed_and_out_of_range_bodies()
     -> Result<(), Box<dyn std::error::Error>> {
         let observed = Timestamp::new(1, 0)?;
         for body in [
             b"".as_slice(),
             b"{}".as_slice(),
+            br#"{"data":{"limit":-1}}"#.as_slice(),
             br#"{"data":{"usage":-1}}"#.as_slice(),
             br#"{"data":{"limit":"ten"}}"#.as_slice(),
         ] {
