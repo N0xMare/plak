@@ -33,7 +33,7 @@ use tokio::sync::watch;
 
 use super::super::ResidencyHold;
 use super::slot::{OpenedSession, SessionSlot, SlotView};
-use super::{Face, WireConnection, WireSession, host_welcome, write_frame};
+use super::{BlobRefusalOutput, Face, WireConnection, WireSession, host_welcome, write_frame};
 use crate::error::{CliFailure, CliResult};
 
 /// How long `release_session` waits for its session to begin releasing.
@@ -95,6 +95,7 @@ pub struct Creation<'a> {
 }
 
 mod attach;
+mod blobs;
 mod lifecycle;
 mod product;
 mod upgrade_controls;
@@ -368,6 +369,7 @@ where
             out,
             buffered_output: false,
             snapshot_output: None,
+            blob_refusal_output: None,
             face,
             stopped: Arc::new(stopped),
             node: None,
@@ -568,6 +570,7 @@ struct Watch {
 pub struct HostConnection<P: ProtocolExtension, W: Write> {
     buffered_output: bool,
     snapshot_output: Option<super::SnapshotOutput>,
+    blob_refusal_output: Option<BlobRefusalOutput>,
     connection_id: u64,
     principal: HostPrincipal,
     principal_budget: Arc<admission::PrincipalBudget>,
@@ -635,6 +638,9 @@ where
         };
         let mut text = zeroize::Zeroizing::new(text);
         if let Some(reading) = self.preflight_host_read(&text)? {
+            if reading {
+                self.discard_blob_staging()?;
+            }
             return Ok(reading);
         }
         let frame = match decode_line::<ClientFrame<P>>(&text) {
@@ -647,14 +653,19 @@ where
             Ok(frame) => frame,
         };
         if *paused && !self.allowed_during_pause(&frame) {
-            if let ClientFrame::Request { id, .. } = frame {
-                write_frame(
-                    &mut self.out,
-                    &HostFrame::<P>::Response {
-                        id,
-                        outcome: Outcome::Refused(RequestRefusal::Backpressure),
-                    },
-                )?;
+            match frame {
+                ClientFrame::Request { id, .. } => {
+                    self.discard_blob_staging()?;
+                    write_frame(
+                        &mut self.out,
+                        &HostFrame::<P>::Response {
+                            id,
+                            outcome: Outcome::Refused(RequestRefusal::Backpressure),
+                        },
+                    )?;
+                }
+                ClientFrame::Blob(chunk) => self.discard_blob_part(chunk.id)?,
+                _ => {}
             }
             return Ok(true);
         }
@@ -664,10 +675,14 @@ where
             return if self.node.is_some() {
                 self.forward(std::mem::take(&mut *text))
             } else {
+                if let ClientFrame::Blob(chunk) = frame {
+                    self.discard_blob_part(chunk.id)?;
+                }
                 Ok(true)
             };
         };
         if self.attach_in_flight(id) {
+            self.discard_blob_staging()?;
             write_frame(
                 &mut self.out,
                 &HostFrame::<P>::Response {
@@ -678,6 +693,9 @@ where
                 },
             )?;
             return Ok(true);
+        }
+        if !matches!(op, Op::Intent { .. }) {
+            self.discard_blob_staging()?;
         }
         if matches!(
             op,
@@ -691,6 +709,7 @@ where
         }
         match self.request(id, op, &text, !*paused)? {
             Forwarded::Answered(outcome) => {
+                self.discard_blob_staging()?;
                 write_frame(&mut self.out, &HostFrame::<P>::Response { id, outcome })?;
                 Ok(true)
             }
@@ -1119,6 +1138,7 @@ where
             .connect(self.out.clone(), self.face, move || stopped())
             .with_buffered_output(self.buffered_output)
             .with_snapshot_output(self.snapshot_output.clone())
+            .with_blob_refusal_output(self.blob_refusal_output)
             .with_drafts(self.host.drafts.clone())
             .with_runner_labels(Arc::new(move |id| sessions.runner_label(id)));
         if let Some(login) = &self.login {
@@ -1258,6 +1278,7 @@ where
     /// Ends the node attachment with the host frame `detached`, and lets its
     /// session go.
     fn detach_link(&mut self) -> CliResult<()> {
+        self.discard_blob_staging()?;
         let attachment = self
             .node
             .as_ref()
@@ -1391,6 +1412,7 @@ where
             }
             link.connection.flush_pending(bulk || (detach && !paced))?;
             if !link.connection.holding() {
+                link.connection.discard_blob_staging()?;
                 self.unlink();
             } else if detach
                 && (!paced

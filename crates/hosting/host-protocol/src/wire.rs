@@ -1169,6 +1169,28 @@ pub struct BlobAssembler {
     complete: BTreeMap<String, Vec<u8>>,
 }
 
+/// Why known staged bytes cannot reach intent admission.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlobRejectionReason {
+    /// Invalid base64, offset, or a part after completion.
+    Malformed,
+    /// One blob exceeded its size bound.
+    TooLarge,
+    /// The pending count or total byte limit was exceeded.
+    PendingLimit,
+    /// Staging was cleared without transferring this blob to an intent.
+    Discarded,
+}
+
+/// An explicit not-admitted outcome for one identified blob.
+#[derive(Debug, Eq, PartialEq)]
+pub struct BlobRejection {
+    /// The id in a decoded blob part.
+    pub id: String,
+    /// The reason this blob was rejected or discarded.
+    pub reason: BlobRejectionReason,
+}
+
 impl BlobAssembler {
     /// Takes one chunk.
     ///
@@ -1177,13 +1199,33 @@ impl BlobAssembler {
     /// Refuses a chunk out of order, a part that is not base64, a blob
     /// over [`MAX_BLOB_BYTES`], or a part for a blob already complete.
     pub fn push(&mut self, chunk: BlobChunk) -> Result<(), WireError> {
+        self.push_inner(chunk, None)
+    }
+
+    /// Stages a decoded part, reporting the rejected blob and any staged siblings
+    /// destroyed by the pending bound. A malformed part invalidates its own id.
+    #[must_use]
+    pub fn push_reported(&mut self, chunk: BlobChunk) -> Vec<BlobRejection> {
+        let mut rejected = Vec::new();
+        let _ = self.push_inner(chunk, Some(&mut rejected));
+        rejected
+    }
+
+    fn push_inner(
+        &mut self,
+        chunk: BlobChunk,
+        report: Option<&mut Vec<BlobRejection>>,
+    ) -> Result<(), WireError> {
+        use BlobRejectionReason as Reason;
         use base64::Engine as _;
         if self.complete.contains_key(&chunk.id) {
+            self.reject_part(chunk.id, Reason::Malformed, report);
             return Err(WireError::Malformed("a blob part after its last".into()));
         }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&chunk.data)
-            .map_err(|_| WireError::Malformed("a blob part is not base64".into()))?;
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&chunk.data) else {
+            self.reject_part(chunk.id, Reason::Malformed, report);
+            return Err(WireError::Malformed("a blob part is not base64".into()));
+        };
         let pending: usize = self
             .partial
             .values()
@@ -1194,16 +1236,23 @@ impl BlobAssembler {
         if (new_blob && self.partial.len() + self.complete.len() >= MAX_PENDING_BLOBS)
             || pending + bytes.len() > MAX_PENDING_BLOB_BYTES
         {
-            self.discard();
+            if let Some(report) = report {
+                self.reject_part(chunk.id, Reason::PendingLimit, Some(report));
+                report.extend(self.discard_reported());
+            } else {
+                self.discard();
+            }
             return Err(WireError::BlobLimit);
         }
         let held = self.partial.entry(chunk.id.clone()).or_default();
         if u64::try_from(held.len()).ok() != Some(chunk.offset) {
             self.partial.remove(&chunk.id);
+            self.reject_part(chunk.id, Reason::Malformed, report);
             return Err(WireError::Malformed("a blob part out of order".into()));
         }
         if held.len() + bytes.len() > MAX_BLOB_BYTES {
             self.partial.remove(&chunk.id);
+            self.reject_part(chunk.id, Reason::TooLarge, report);
             return Err(WireError::BlobLimit);
         }
         held.extend_from_slice(&bytes);
@@ -1215,10 +1264,42 @@ impl BlobAssembler {
         Ok(())
     }
 
+    fn reject_part(
+        &mut self,
+        id: String,
+        reason: BlobRejectionReason,
+        report: Option<&mut Vec<BlobRejection>>,
+    ) {
+        if let Some(report) = report {
+            self.partial.remove(&id);
+            self.complete.remove(&id);
+            report.push(BlobRejection { id, reason });
+        }
+    }
+
     /// Drops every blob held: the frame they preceded named none of them.
     pub fn discard(&mut self) {
         self.partial.clear();
         self.complete.clear();
+    }
+
+    /// Drops all staged bytes for a part the dispatcher refused before assembly.
+    pub fn discard_id(&mut self, id: &str) {
+        self.partial.remove(id);
+        self.complete.remove(id);
+    }
+
+    /// Drops staged blobs and reports each discarded id exactly once.
+    #[must_use]
+    pub fn discard_reported(&mut self) -> Vec<BlobRejection> {
+        std::mem::take(&mut self.partial)
+            .into_keys()
+            .chain(std::mem::take(&mut self.complete).into_keys())
+            .map(|id| BlobRejection {
+                id,
+                reason: BlobRejectionReason::Discarded,
+            })
+            .collect()
     }
 
     fn restore(&mut self, drafts: Vec<&mut Draft>, ids: &[String]) -> Result<(), WireError> {
@@ -1259,6 +1340,33 @@ impl BlobAssembler {
         ids: &[String],
     ) -> Result<(), WireError> {
         self.restore(intent_drafts(intent), ids)
+    }
+
+    /// Transfers named blobs to an intent atomically and reports any discarded
+    /// staging. A missing id is not evidence that the host staged that blob.
+    pub fn restore_images_reported<P: ProtocolExtension>(
+        &mut self,
+        intent: &mut SessionIntent<P>,
+        ids: &[String],
+    ) -> (Result<(), WireError>, Vec<BlobRejection>) {
+        let drafts = intent_drafts(intent);
+        let image_count = drafts.iter().map(|draft| draft.images.len()).sum::<usize>();
+        let mut seen = std::collections::BTreeSet::new();
+        let restored = if image_count != ids.len() {
+            Err(WireError::Malformed(
+                "the frame names another number of blobs than it has images".into(),
+            ))
+        } else if ids
+            .iter()
+            .any(|id| !self.complete.contains_key(id) || !seen.insert(id))
+        {
+            Err(WireError::Malformed(
+                "a named blob never completed or was named twice".into(),
+            ))
+        } else {
+            self.take(drafts, ids)
+        };
+        (restored, self.discard_reported())
     }
 
     /// [`Self::restore_images`] for an observation.

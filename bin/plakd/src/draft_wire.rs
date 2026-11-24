@@ -4,7 +4,30 @@ mod usage;
 pub use usage::{accounts_usage, usage_limits};
 
 use plakd_wire_types::{console, v13};
-use plakous_host_protocol::wire::RequestId;
+use plakous_host_protocol::wire::{BlobRejection, BlobRejectionReason, RequestId};
+
+/// Writes a draft rejection only for the named blob, without an intent verdict.
+///
+/// # Errors
+///
+/// The outcome could not be encoded or written.
+pub fn write_blob_refusal(
+    out: &mut dyn std::io::Write,
+    BlobRejection { id, reason }: BlobRejection,
+) -> plakous_hosted::CliResult<()> {
+    let reason = match reason {
+        BlobRejectionReason::Malformed => v13::BlobRefusal::Malformed,
+        BlobRejectionReason::TooLarge => v13::BlobRefusal::TooLarge,
+        BlobRejectionReason::PendingLimit => v13::BlobRefusal::PendingLimit,
+        BlobRejectionReason::Discarded => v13::BlobRefusal::Discarded,
+    };
+    let frame = v13::HostFrame::Draft(Box::new(v13::HostFrameV13::BlobRefused { id, reason }));
+    let line = plakous_host_protocol::wire::encode_line(&frame)
+        .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?;
+    out.write_all(line.as_bytes())
+        .and_then(|()| out.flush())
+        .map_err(|_| plakous_hosted::CliFailure::new("stdout failed"))
+}
 
 fn host_response(id: RequestId, response: v13::HostResponseV13) -> v13::HostFrame {
     v13::HostFrame::Draft(Box::new(v13::HostFrameV13::Response {

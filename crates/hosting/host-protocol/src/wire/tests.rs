@@ -590,6 +590,70 @@ fn chunk(id: &str, len: usize) -> BlobChunk {
     }
 }
 
+#[test]
+fn reported_blob_errors_invalidate_only_the_named_blob_until_pending_overflow() {
+    use BlobRejectionReason as Reason;
+    let rejected = |id: &str, reason| BlobRejection {
+        id: id.into(),
+        reason,
+    };
+    let mut assembler = BlobAssembler::default();
+    assert_eq!(assembler.push_reported(chunk("keep", 1)), []);
+    let mut out_of_order = chunk("early", 1);
+    out_of_order.offset = 1;
+    assert_eq!(
+        assembler.push_reported(out_of_order),
+        [rejected("early", Reason::Malformed)]
+    );
+    assert_eq!(assembler.push_reported(chunk("duplicate", 1)), []);
+    assert_eq!(
+        assembler.push_reported(chunk("duplicate", 1)),
+        [rejected("duplicate", Reason::Malformed)]
+    );
+    assembler
+        .partial
+        .insert("large".into(), vec![0; MAX_BLOB_BYTES]);
+    let mut oversize = chunk("large", 1);
+    oversize.offset = MAX_BLOB_BYTES as u64;
+    assert_eq!(
+        assembler.push_reported(oversize),
+        [rejected("large", Reason::TooLarge)]
+    );
+    assert_eq!(
+        assembler.discard_reported(),
+        [rejected("keep", Reason::Discarded)]
+    );
+
+    for n in 0..MAX_PENDING_BLOBS {
+        assert_eq!(assembler.push_reported(chunk(&n.to_string(), 1)), []);
+    }
+    let mut expected = vec![rejected("overflow", Reason::PendingLimit)];
+    expected.extend((0..MAX_PENDING_BLOBS).map(|n| rejected(&n.to_string(), Reason::Discarded)));
+    assert_eq!(assembler.push_reported(chunk("overflow", 1)), expected);
+    assert_eq!(assembler.discard_reported(), []);
+}
+
+#[test]
+fn failed_restore_reports_staged_but_not_missing_ids_and_transfers_no_bytes() {
+    use BlobRejectionReason as Reason;
+    let mut assembler = BlobAssembler::default();
+    assembler.push(chunk("one", 3)).unwrap();
+    let mut intent =
+        SessionIntent::<Core>::Prompt(Draft::new("x".into(), vec![image(0), image(0)]));
+    let original = intent.clone();
+    let (result, rejected) =
+        assembler.restore_images_reported(&mut intent, &["one".into(), "missing".into()]);
+    assert!(result.is_err());
+    assert_eq!(intent, original);
+    assert_eq!(
+        rejected,
+        [BlobRejection {
+            id: "one".into(),
+            reason: Reason::Discarded
+        }]
+    );
+}
+
 /// A connection holds a bounded number and size of blobs, and the next
 /// frame drops whatever it does not name.
 #[test]
@@ -613,8 +677,9 @@ fn blobs_held_are_bounded_and_dropped_when_unnamed() {
             let mut piece = chunk(&id, BLOB_CHUNK_BYTES);
             piece.offset = part * u64::try_from(BLOB_CHUNK_BYTES).unwrap();
             piece.last = part == 4;
-            if let Err(error) = big.push(piece) {
-                refused = Some(error);
+            let rejected = big.push_reported(piece);
+            if !rejected.is_empty() {
+                refused = Some(rejected);
                 break;
             }
         }
@@ -622,7 +687,14 @@ fn blobs_held_are_bounded_and_dropped_when_unnamed() {
             break;
         }
     }
-    assert_eq!(refused, Some(WireError::BlobLimit));
+    let refused = refused.unwrap();
+    assert_eq!(refused[0].reason, BlobRejectionReason::PendingLimit);
+    assert_eq!(refused.len(), 9);
+    assert!(
+        refused[1..]
+            .iter()
+            .all(|blob| blob.reason == BlobRejectionReason::Discarded)
+    );
 
     // A frame that names no blob drops them: they cannot be named later.
     let mut intent = SessionIntent::<Core>::Interrupt;

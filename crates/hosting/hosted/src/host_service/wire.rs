@@ -24,9 +24,9 @@ use std::time::{Duration, Instant};
 use plakous_host_protocol::views::presentation::PresentationSnapshot;
 use plakous_host_protocol::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope};
 use plakous_host_protocol::wire::{
-    Answer, AttachmentId, BlobAssembler, ClientFrame, HandshakeRefusal, HostFrame, NodeAddress, Op,
-    Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WelcomeSession, WireError,
-    admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
+    Answer, AttachmentId, BlobAssembler, BlobRejection, ClientFrame, HandshakeRefusal, HostFrame,
+    NodeAddress, Op, Outcome, RequestId, RequestRefusal, WIRE_VERSION, Welcome, WelcomeSession,
+    WireError, admit_hello, decode_line, encode_line, page_snapshot, take_observation_images,
 };
 use plakous_host_protocol::{
     IntentSendError, IntentSender, ObservationReceiver, ProtocolExtension, SessionIntent,
@@ -63,6 +63,9 @@ pub const UNAVAILABLE_UNAUTHENTICATED: &str = "the session could not be opened";
 
 type SnapshotOutput =
     std::sync::Arc<dyn Fn(AttachmentId, PresentationSnapshot) -> CliResult<()> + Send + Sync>;
+
+/// Projection of an identified, definitely not-admitted blob through the sole writer.
+pub type BlobRefusalOutput = fn(&mut dyn Write, BlobRejection) -> CliResult<()>;
 
 /// Writes `frame` as one line and flushes it.
 ///
@@ -297,6 +300,8 @@ pub struct WireConnection<P: ProtocolExtension, W: Write> {
     /// this connection's next root attach.
     moved: Option<AttachmentId>,
     blobs: BlobAssembler,
+    blob_refusal_output: Option<BlobRefusalOutput>,
+    blob_rejections: Vec<BlobRejection>,
     leave: Leave,
     face: Face,
     quit_sent: bool,
@@ -532,6 +537,8 @@ where
             told,
             moved: None,
             blobs: BlobAssembler::default(),
+            blob_refusal_output: None,
+            blob_rejections: Vec::new(),
             leave,
             face: Face::Remote,
             quit_sent: false,
@@ -602,6 +609,24 @@ where
     pub const fn face(mut self, face: Face) -> Self {
         self.face = face;
         self
+    }
+
+    /// Supplies the draft blob outcome projection. Served protocol 12 leaves
+    /// this unset and retains its connection-level handling of malformed parts.
+    #[must_use]
+    pub const fn with_blob_refusal_output(mut self, output: Option<BlobRefusalOutput>) -> Self {
+        self.blob_refusal_output = output;
+        self
+    }
+
+    fn discard_blob_staging(&mut self) -> CliResult<()> {
+        if let Some(output) = self.blob_refusal_output {
+            self.blob_rejections.extend(self.blobs.discard_reported());
+            for rejection in self.blob_rejections.drain(..) {
+                output(&mut self.stdout, rejection)?;
+            }
+        }
+        Ok(())
     }
 
     /// This connection, whose first root attach asks the session for no
@@ -869,6 +894,12 @@ where
                 Ok(false)
             }
             ClientFrame::Blob(chunk) => {
+                if let Some(output) = self.blob_refusal_output {
+                    for rejection in self.blobs.push_reported(chunk) {
+                        output(&mut self.stdout, rejection)?;
+                    }
+                    return Ok(true);
+                }
                 if self.blobs.push(chunk).is_err() {
                     self.leave();
                     return Ok(false);
@@ -880,7 +911,9 @@ where
                 let outcome = self.request(id, op);
                 // Blobs precede the request that names them: any left are
                 // no one's.
-                if !named {
+                if self.blob_refusal_output.is_some() {
+                    self.discard_blob_staging()?;
+                } else if !named {
                     self.blobs.discard();
                 }
                 if let Some(outcome) = outcome {
@@ -1014,7 +1047,14 @@ where
                 row: "local_face".to_owned(),
             });
         }
-        if let Err(error) = self.blobs.restore_images(&mut intent, blobs) {
+        let restored = if self.blob_refusal_output.is_some() {
+            let (result, rejected) = self.blobs.restore_images_reported(&mut intent, blobs);
+            self.blob_rejections = rejected;
+            result
+        } else {
+            self.blobs.restore_images(&mut intent, blobs)
+        };
+        if let Err(error) = restored {
             return refused(RequestRefusal::Malformed {
                 detail: error.to_string(),
             });
