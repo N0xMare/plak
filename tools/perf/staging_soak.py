@@ -11,25 +11,46 @@ import socket
 import stat
 import sys
 import traceback
+from collections import Counter
 from pathlib import Path
 
 from host_latency_fixture import Fixture, answer, create, tool, tree_script, turn
 from host_latency_wire import LOGIN, Client
-from staging_soak_evidence import SUBSTITUTIONS, compare, digest, harness_identity, pair, policy
+from staging_soak_evidence import (
+    FAST_LATENCY_LIMITS_MS,
+    METRICS,
+    SUBSTITUTIONS,
+    classify_cycle,
+    compare,
+    digest,
+    harness_identity,
+    known_defect_pairs,
+    latency_reasons,
+    pair,
+    policy,
+)
 from staging_soak_measure import (
+    ATTACH_PERIOD_S,
     MAX_LOAD_PER_CPU,
     ROLES,
+    SLOW_ATTACH_PERIOD_S,
+    WIRE_ERRORS,
+    Browser,
     Drafts,
-    browser,
+    LoadExcursion,
     check_load,
     cpu_facts,
     drive,
+    durable_texts,
     login,
     timestamp,
 )
+from staging_soak_stream import CHUNKS, DELTA_MS, QUICK_CHUNKS, scripted_turn
 
 PARKED = 2
-WORK_ROOTS = 4
+WORK_ROOTS = 16
+WEB_CLIENTS = 33
+SLOW_CLIENTS = 3
 PROCESS_OUTPUT_BYTES = 6144
 ORDER = "ABBA"
 
@@ -104,7 +125,7 @@ async def seed(fixture, args, count):
     return heavy, extra, shape
 
 
-def work_plan(fixture, seconds):
+def work_plan(fixture, args):
     step = tool(
         "process_session_start",
         command="printf '%06143d\\n' 0",
@@ -116,7 +137,11 @@ def work_plan(fixture, seconds):
         max_output_bytes=8192,
     )
     # The same session-independent script is used on each side, including reopen.
-    plan(fixture, [step, answer("synthetic step completed")] * (2 * seconds + 20))
+    rounds = (2 * (args.seconds + args.warmup)) // args.work_roots + 6
+    plan(
+        fixture,
+        [part for turn in range(rounds) for part in scripted_turn(step, turn, args.chunks)],
+    )
 
 
 def park_plan(fixture, seconds):
@@ -128,7 +153,7 @@ def park_plan(fixture, seconds):
             tool("wait_agent", agent_ids=["c1", "c2"], timeout_ms=1200_000),
             answer("synthetic children settled"),
         ],
-        child_hold_ms=(seconds + 15) * 1000,
+        child_hold_ms=(seconds + 22) * 1000,
     )
 
 
@@ -174,12 +199,52 @@ def certify(fixture, roles, image):
     return processes
 
 
-def exact_load(window, seconds, clients):
+def exact_load(window, seconds, args):
+    fast_rotating = args.clients - args.work_roots - args.slow - 1
+    attaches = (
+        fast_rotating * seconds // ATTACH_PERIOD_S + args.slow * seconds // SLOW_ATTACH_PERIOD_S
+    )
     return (
         window["request_failed"] == window["fell_behind"] == 0
+        and window["active_reader_closes"] == 0
         and window["steps"] == window["first_event_n"] == window["scheduled_steps"] == 2 * seconds
-        and window["attach_n"] == window["scheduled_attaches"] == clients * seconds // 2
+        and window["streamed_steps"] == window["steps"]
+        and window["attach_n"] == window["scheduled_attaches"] == attaches
+        and window["ping_n"] == (args.clients - args.slow - 1) * seconds // ATTACH_PERIOD_S
+        and (args.quick or window["heavy_attach_while_streaming_n"] >= 2)
     )
+
+
+def window_reasons(window, args, *, allow_known_defect=False):
+    blocking = []
+    if not exact_load(window, args.seconds, args):
+        blocking.append("incomplete offered load")
+    if not window["warmup_clean"]:
+        blocking.append("incomplete warmup load")
+    if not args.quick and not window["stalled_reader_backpressured"]:
+        blocking.append("stalled reader never backpressured")
+    if window["persisted_successful_steps"] != window["steps"]:
+        blocking.append(
+            f"durable steps {window['persisted_successful_steps']} != wire steps {window['steps']}"
+        )
+    if window["reference_mismatches"]:
+        blocking.append(f"reference mismatches: {window['reference_mismatches']}")
+    if window["roots_with_final_text"] != args.work_roots:
+        blocking.append("missing durable text for a streaming root")
+    for metric in METRICS:
+        if window[metric] is None:
+            blocking.append(f"{metric}: no samples")
+    evidence, timing = latency_reasons(
+        window, require_stamps=args.require_candidate_send_stamps and window["side"] == "B"
+    )
+    blocking.extend(evidence)
+    pairs = 0
+    if window["reconcile_failures"]:
+        if allow_known_defect and not (blocking or timing):
+            pairs = known_defect_pairs(window)
+        if not pairs:
+            blocking.append(f"reconcile mismatches: {window['reconcile_failures']}")
+    return blocking, timing, pairs
 
 
 async def phase(fixture, roles, args, heavy, work, parked, image, which, load_limit):
@@ -187,30 +252,37 @@ async def phase(fixture, roles, args, heavy, work, parked, image, which, load_li
     generation = await fresh(fixture, image["binary_id"])
     duration = args.seconds + args.warmup
     async with contextlib.AsyncExitStack() as stack:
-        primary = await stack.enter_async_context(Client(fixture, "terminal"))
-        await primary.attach(heavy[0])
-        second = await stack.enter_async_context(Client(fixture, "terminal"))
-        await second.attach(heavy[1])
-        work_plan(fixture, duration)
+        work_plan(fixture, args)
         workload = []
         for node in work:
-            drafts = Drafts()
+            drafts = Drafts(args.chunks)
             client = await stack.enter_async_context(
                 Client(fixture, "terminal", observe=drafts.observe)
             )
             state, _ = await client.attach(node)
-            workload.append((client, state, drafts))
+            workload.append((client, state, node, drafts))
         park_plan(fixture, duration)
         parent = await stack.enter_async_context(Client(fixture, "terminal"))
         state, _ = await parent.attach(parked)
         # All reopened sessions see the common binding facts, not park's steps.
-        work_plan(fixture, duration)
+        work_plan(fixture, args)
         await parent.intent("park the synthetic children")
         await fixture.witness_wait(parked, PARKED)
-        browsers = [
-            await stack.enter_async_context(browser(fixture, i, args.slow))
-            for i in range(args.clients)
-        ]
+        browsers = []
+        for i in range(args.clients):
+            fixed = work[i] if i < len(work) else None
+            if i == args.clients - 1:
+                cohort = "stalled"
+            else:
+                cohort = "slow" if i >= args.clients - args.slow - 1 else "fast"
+            peer = Browser(fixture, i, cohort, args.chunks, fixed=fixed)
+            await stack.enter_async_context(peer.client)
+            if fixed is not None:
+                await peer.attach(fixed)
+            elif cohort == "stalled":
+                await peer.stall(heavy[0])
+            browsers.append(peer)
+        targets = [*heavy, *work[2:6]]
         pids = {role: roles[role].pid for role in ROLES}
         print(json.dumps({"window": which, "event": "warmup_started"}), flush=True)
         warm = await drive(
@@ -218,19 +290,57 @@ async def phase(fixture, roles, args, heavy, work, parked, image, which, load_li
             pids,
             args.warmup,
             browsers,
-            args.slow,
-            heavy,
+            targets,
             workload,
             load_limit,
             warmup=True,
         )
+        # A well-isolated host may already have closed the warmup's stalled
+        # socket. Re-offer the stalled attach at the measured boundary.
+        browsers[-1].client.ws.transport.abort()
+        await browsers[-1].client.close()
+        stalled = Browser(fixture, args.clients - 1, "stalled", args.chunks)
+        await stack.enter_async_context(stalled.client)
+        await stalled.stall(heavy[0])
+        browsers[-1] = stalled
         steps_before = completed_tools(fixture, work)
         print(json.dumps({"window": which, "event": "measurement_started"}), flush=True)
-        result = await drive(
-            fixture, pids, args.seconds, browsers, args.slow, heavy, workload, load_limit
-        )
+        result = await drive(fixture, pids, args.seconds, browsers, targets, workload, load_limit)
         if state.terminal or fixture.counts(parked)["active_children"] != PARKED:
             raise RuntimeError("parked children did not stay parked throughout the window")
+        durable = durable_texts(fixture, work)
+
+        async def verify_final(peer):
+            root = peer.fixed["tree_id"]
+            trace = peer.traces[peer.client.active]
+            # The driver's terminal witness can arrive ahead of the viewer's
+            # canonical patch. Drain that patch outside the timed interval.
+            try:
+                await peer.client.wait(
+                    lambda: bool(durable[root]) and trace.settled == durable[root],
+                    timeout=2,
+                )
+            except WIRE_ERRORS:
+                trace.issue(
+                    "final_root_text_mismatch",
+                    wire=len(trace.settled),
+                    durable=len(durable[root]),
+                )
+            if (
+                not trace.counts.assistant_frames
+                or not trace.counts.reasoning_frames
+                or not trace.counts.tool_upserts
+            ):
+                trace.issue("missing_workload_witness")
+
+        await asyncio.gather(*(verify_final(peer) for peer in browsers if peer.fixed is not None))
+        references = {
+            node["tree_id"]: draft.reference.checkpoints for _, _, node, draft in workload
+        }
+        attachments = [row for peer in browsers for row in peer.receipts(durable, references)]
+        reconcile_reasons = Counter()
+        for attachment in attachments:
+            reconcile_reasons.update(attachment["reconcile_reasons"])
         await parent.wait(lambda: state.terminal, timeout=45)
         # End the load before upgrading; retention of actively executing jobs
         # across a changed runner triple is not part of this same-key proof.
@@ -245,20 +355,32 @@ async def phase(fixture, roles, args, heavy, work, parked, image, which, load_li
             generation=generation,
             processes=processes,
             warmup_seconds=args.warmup,
-            warmup_clean=exact_load(warm, args.warmup, args.clients),
+            warmup_clean=exact_load(warm, args.warmup, args),
             warmup_failures=warm["request_failed"] + warm["fell_behind"],
             warmup_load_1m_max=warm["load_1m_max"],
             warmup_load_samples=warm["load_samples"],
+            attachments=attachments,
+            reconcile_failures=sum(row["mismatches"] for row in attachments),
+            reconcile_reasons=dict(reconcile_reasons),
+            roots_with_final_text=sum(bool(texts) for texts in durable.values()),
+            reference_mismatches=sum(
+                draft.reference.counts.mismatches for _, _, _, draft in workload
+            ),
         )
-        if result["persisted_successful_steps"] != result["steps"]:
-            raise RuntimeError(f"wire turns and durable successful tool steps disagree: {result}")
+        result["stalled_reader_backpressured"] = browsers[-1].client.ws.recv_messages.paused
         certify(fixture, roles, image)
         return result
 
 
 async def handoff(fixture, host, before, expected):
     requester = await fixture.spawn(
-        "host", "upgrade", "--expect-binary", expected["binary_id"], "--drain", "30s", pipes=True
+        "host",
+        "upgrade",
+        "--expect-binary",
+        expected["binary_id"],
+        "--drain",
+        "30s",
+        pipes=True,
     )
     reply, _ = await asyncio.wait_for(requester.communicate(), timeout=180)
     await fixture.stop(requester)
@@ -284,7 +406,7 @@ async def new_window(fixture, args, measured, side, load_limit):
     check_load(load_limit)
     fixture.binary = args.source
     roles = await start_auxiliaries(fixture)
-    work_plan(fixture, args.seconds + args.warmup)
+    work_plan(fixture, args)
     roles["host"] = await start_host(fixture)
     if side == "A":
         return roles, measured[0], None
@@ -317,9 +439,11 @@ async def exercise(args, verdict):
         args.aa,
     )
     cpu = cpu_facts()
-    bounds, load_limit = (
-        policy(args.policy) if args.policy else (None, MAX_LOAD_PER_CPU * cpu["cpu_count"])
+    bounds, load_limit, nightly = (
+        policy(args.policy) if args.policy else (None, MAX_LOAD_PER_CPU * cpu["cpu_count"], {})
     )
+    allow_known_defect = args.nightly and nightly.get("allow_known_late_prefix", False)
+    timing_qualified = nightly.get("timing_qualified", True)
     check_load(load_limit)
     verdict.update(
         source=shipping[0],
@@ -332,6 +456,8 @@ async def exercise(args, verdict):
         policy_sha256=digest(args.policy) if args.policy else None,
     )
     fixture = Fixture(args.scratch, args.source)
+    fixture.host_log += ",plak::test_wire=info"
+    fixture.soak_enqueue = True
     setup(fixture, args.clients)
     try:
         plan(fixture, [answer("seed")])
@@ -342,6 +468,10 @@ async def exercise(args, verdict):
             "heavy": shape,
             "web_clients": args.clients,
             "slow_clients": args.slow,
+            "stalled_clients": 1,
+            "work_roots": args.work_roots,
+            "stream_chunks": args.chunks,
+            "stream_delta_ms": DELTA_MS,
             "seconds": args.seconds,
             "warmup_seconds": args.warmup,
             "process_output_bytes": PROCESS_OUTPUT_BYTES,
@@ -349,10 +479,13 @@ async def exercise(args, verdict):
         await fixture.close()
         golden = args.scratch.with_name("golden")
         shutil.copytree(fixture.root, golden, ignore=skip_sockets, symlinks=True)
-        windows, reasons = [], []
+        windows, blocking, timing = [], [], []
+        known_pairs = 0
         verdict["windows"] = windows
         for index, side in enumerate(ORDER, 1):
             label = f"{side}{index}"
+            verdict["active_window"] = label
+            check_load(load_limit)
             shutil.rmtree(fixture.root)
             shutil.copytree(golden, fixture.root, symlinks=True)
             roles, image, transition = await new_window(fixture, args, measured, side, load_limit)
@@ -361,36 +494,72 @@ async def exercise(args, verdict):
                 roles,
                 args,
                 heavy,
-                other[:WORK_ROOTS],
-                other[WORK_ROOTS],
+                [*heavy, *other[: args.work_roots - 2]],
+                other[args.work_roots - 2],
                 image,
                 label,
                 load_limit,
             )
             result["handoff"] = transition
             windows.append(result)
-            print(json.dumps(result), flush=True)
-            if not exact_load(result, args.seconds, args.clients):
-                reasons.append(f"{label}_incomplete_load")
-            if not result["warmup_clean"]:
-                reasons.append(f"{label}_incomplete_warmup")
+            print(
+                json.dumps({k: v for k, v in result.items() if k != "attachments"}),
+                flush=True,
+            )
+            failures, regressions, pairs = window_reasons(
+                result, args, allow_known_defect=allow_known_defect
+            )
+            blocking.extend(f"{label} {reason}" for reason in failures)
+            timing.extend(f"{label} {reason}" for reason in regressions)
+            known_pairs += pairs
             await fixture.close()
             saved = args.scratch.with_name(f"logs-{label}")
             saved.mkdir()
             for path in [*fixture.root.glob("*.log"), fixture.diagnostics]:
                 shutil.copy2(path, saved / path.name)
-        if not reasons:
-            summary, deltas, regressions = compare(windows, bounds)
+        verdict.pop("active_window")
+        if all(w[key] is not None for w in windows for key in METRICS):
+            summary, deltas, regressions = compare(windows, None if args.aa else bounds)
             verdict.update(before=summary["A"], after=summary["B"], deltas=deltas)
-            reasons.extend(regressions)
+            timing.extend(regressions)
+        result, status = classify_cycle(
+            blocking,
+            timing,
+            known_pairs,
+            nightly=args.nightly,
+            timing_qualified=timing_qualified,
+            aa=args.aa,
+        )
+        reasons = blocking + timing
+        if known_pairs:
+            reasons.append(f"known late-attach prefix repairs: {known_pairs}")
         if args.quick:
             reasons.append("smoke_only")
+            result = "fail"
         verdict.update(
             reasons=reasons,
-            result="fail" if reasons else ("calibration" if args.aa else "pass"),
+            result=result,
+            timing_reasons=timing,
+            known_defect_count=known_pairs,
         )
+        return status
     finally:
         await fixture.close()
+
+
+def run_exercise(args, verdict):
+    try:
+        return asyncio.run(exercise(args, verdict))
+    except* LoadExcursion as group:
+        excursion = group.exceptions[0]
+        while isinstance(excursion, BaseExceptionGroup):
+            excursion = excursion.exceptions[0]
+        verdict.update(
+            result="inconclusive",
+            reasons=[str(excursion)],
+            load_excursion={"measured": excursion.measured, "limit": excursion.limit},
+        )
+    return 75
 
 
 def main():
@@ -413,29 +582,48 @@ def main():
     parser.add_argument("--harness-revision", required=True)
     parser.add_argument("--build-profile", choices=["maintainer"], required=True)
     parser.add_argument("--policy", type=Path)
+    parser.add_argument("--nightly", action="store_true", help="apply the separate nightly policy")
+    parser.add_argument(
+        "--require-candidate-send-stamps",
+        action="store_true",
+        help="refuse a candidate without enqueue timing for every sampled web text frame",
+    )
     args = parser.parse_args()
-    if args.aa == bool(args.policy):
-        parser.error("A/A omits --policy; A/B requires --policy")
-    args.seconds, args.clients, args.slow = (8, 4, 1) if args.quick else (180, 12, 3)
-    args.warmup = 4 if args.quick else 40
+    if (not args.aa or args.nightly) and not args.policy:
+        parser.error("A/B and nightly runs require --policy")
+    if args.aa and args.policy and not args.nightly:
+        parser.error("standalone A/A omits --policy")
+    if args.nightly and args.quick:
+        parser.error("nightly evidence requires the full workload")
+    if args.nightly:
+        args.require_candidate_send_stamps = True
+    args.seconds, args.clients, args.slow = (
+        (8, 8, 1) if args.quick else (48, WEB_CLIENTS, SLOW_CLIENTS)
+    )
+    args.warmup = 4 if args.quick else 12
+    args.work_roots, args.chunks = (4, QUICK_CHUNKS) if args.quick else (WORK_ROOTS, CHUNKS)
     args.roots, args.children = (8, 2) if args.quick else (74, 60)
     args.history_turns, args.prompt_bytes = (2, 4096) if args.quick else (48, 192 << 10)
     verdict = {
-        "schema": 2,
+        "schema": 3,
         "mode": "test_support_same_revision",
         "calibration": args.aa,
+        "nightly": args.nightly,
         "quick": args.quick,
         "result": "error",
         "started_at": timestamp(),
         "substitutions": SUBSTITUTIONS,
+        "fast_latency_limits_ms": FAST_LATENCY_LIMITS_MS,
+        "require_candidate_send_stamps": args.require_candidate_send_stamps,
     }
     os.umask(0o077)
     with args.verdict.open("x") as output:
         try:
-            asyncio.run(exercise(args, verdict))
+            status = run_exercise(args, verdict)
             verdict["finished_at"] = timestamp()
             serialized = json.dumps(verdict, indent=2, sort_keys=True, allow_nan=False)
         except BaseException as error:
+            status = 1
             verdict["result"] = "error"
             verdict["error"] = f"{type(error).__name__}: {error}"
             verdict["finished_at"] = timestamp()
@@ -443,10 +631,7 @@ def main():
             # A serialization error must not leave a partial passing document.
             serialized = json.dumps(verdict, indent=2, sort_keys=True)
         output.write(serialized + "\n")
-    ok = verdict["result"] in ("pass", "calibration") or (
-        args.quick and verdict.get("reasons") == ["smoke_only"]
-    )
-    return 0 if ok else 1
+    return status
 
 
 if __name__ == "__main__":

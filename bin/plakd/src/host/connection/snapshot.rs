@@ -11,6 +11,7 @@ use tokio::sync::{Notify, Semaphore};
 
 use super::SendError;
 use crate::surface_protocol::PlakExtension;
+use crate::test_hooks::soak_stamp::Stamp;
 
 const BYTES: usize = MAX_SNAPSHOT_BYTES + 64 * 1024; // page envelopes
 const FRAMES: usize = MAX_SNAPSHOT_PAGES as usize;
@@ -36,6 +37,7 @@ impl Job {
         snapshot: PresentationSnapshot,
         encoders: &'static Semaphore,
         ready: Arc<Notify>,
+        stamp: Stamp,
     ) -> Self {
         let result = Arc::new(Mutex::new(None));
         let output = Arc::clone(&result);
@@ -43,7 +45,7 @@ impl Job {
             let pages = match encoders.acquire().await {
                 Ok(permit) => tokio::task::spawn_blocking(move || {
                     let _permit = permit;
-                    encode(attachment, snapshot)
+                    encode(attachment, snapshot, stamp)
                 })
                 .await
                 .unwrap_or(Err(SendError::Disconnected)),
@@ -83,6 +85,7 @@ impl Drop for Job {
 pub(super) fn encode(
     attachment: AttachmentId,
     snapshot: PresentationSnapshot,
+    stamp: Stamp,
 ) -> Result<Pages, SendError> {
     let mut output = Pages::default();
     let pages = page_snapshot(snapshot, attachment).map_err(|_| SendError::Snapshot)?;
@@ -90,9 +93,10 @@ pub(super) fn encode(
         return Err(SendError::Snapshot);
     }
     for page in pages {
-        let line = encode_line(&HostFrame::<PlakExtension>::Snapshot(page))
+        let mut line = encode_line(&HostFrame::<PlakExtension>::Snapshot(page))
             .map_err(|_| SendError::Snapshot)?
             .into_bytes();
+        stamp.append(&mut line);
         output.bytes += line.len();
         if output.bytes > BYTES {
             return Err(SendError::Snapshot);

@@ -2460,6 +2460,17 @@ The smoke is in no gate tier; `just perf smoke` runs it on demand. A
 measurement on a shared machine is evidence, not a gate. The restricted comparison refuses
 to call a swing in either noisy metric a regression.
 
+**Staging load evidence.** Use isolated, same-revision test-support images,
+the same restored fixture in every window,
+and a native handoff on the candidate side. Exercise streaming root replies
+and large-session reattachments with concurrent fast, slow and stalled web
+readers. The fast clients must reconcile live root prose with the host at
+presentation boundaries and with its durable text at settlement. Reject
+incomplete load, reconciliation failures and latency outside bounds calibrated
+on the staging environment. Record the revisions, per-attachment observations
+and measured values; instrumentation gaps in a predecessor are not equivalent
+to full enqueue-to-receipt evidence.
+
 **Build-closure evidence.** The opt-in build producer emits
 `plakous.perf-build.v12`, fixture revision 12, over 18 profiles. The
 `plakd` and `plakd-lib` profiles select `web` explicitly and measure the

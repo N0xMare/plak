@@ -13,6 +13,7 @@ use tokio::sync::Notify;
 
 use super::send::{MAX_PENDING_BYTES, Progress};
 use crate::surface_protocol::PlakExtension;
+use crate::test_hooks::soak_stamp::{Enabled, Stamp};
 
 mod snapshot;
 #[cfg(test)]
@@ -98,11 +99,11 @@ impl ConnectionFlush {
 }
 
 #[derive(Clone)]
-pub(crate) struct Outbox(Arc<Shared>, Instant);
+pub(crate) struct Outbox(Arc<Shared>, Instant, Enabled);
 
 impl Default for Outbox {
     fn default() -> Self {
-        Self(Arc::default(), Instant::now())
+        Self::new(Enabled::off())
     }
 }
 
@@ -183,6 +184,10 @@ pub(crate) trait FrameWriter: Send {
 }
 
 impl Outbox {
+    pub(crate) fn new(stamp: Enabled) -> Self {
+        Self(Arc::default(), Instant::now(), stamp)
+    }
+
     pub(crate) fn overflowed(&self) -> bool {
         self.lock().overflowed
     }
@@ -231,8 +236,11 @@ impl Outbox {
         Ok(())
     }
 
-    pub(crate) fn control(&self, frame: Frame) -> io::Result<()> {
+    pub(crate) fn control(&self, mut frame: Frame) -> io::Result<()> {
         let mut queue = self.lock();
+        if let Some(line) = &mut frame {
+            self.2.now().append(line);
+        }
         self.reserve(&mut queue, frame.as_ref().map_or(0, Vec::len), 1)?;
         queue.control.push_back(frame);
         self.0.ready.notify_one();
@@ -274,6 +282,7 @@ impl Outbox {
                 snapshot,
                 encoders,
                 Arc::clone(&self.0.ready),
+                self.2.now(),
             )));
         // Preparation wakes the writer once this entry can be taken.
         Ok(())
@@ -284,7 +293,7 @@ impl Outbox {
         attachment: AttachmentId,
         snapshot: PresentationSnapshot,
     ) -> CliResult<()> {
-        let pages = snapshot::encode(attachment, snapshot).map_err(|_| {
+        let mut pages = snapshot::encode(attachment, snapshot, Stamp::off()).map_err(|_| {
             CliFailure::new("the snapshot exceeded its wire bounds or could not be encoded")
         })?;
         let mut queue = self.lock();
@@ -292,6 +301,12 @@ impl Outbox {
             .map_err(|error| CliFailure::new(error.to_string()))?;
         queue.ordered_frames += 1;
         queue.snapshots += 1;
+        let stamp = self.2.now();
+        if stamp.bytes() != 0 {
+            for line in &mut pages.lines {
+                stamp.append(line);
+            }
+        }
         queue.ordered.push_back(Ordered::Pages(pages));
         self.0.ready.notify_one();
         Ok(())
@@ -460,9 +475,12 @@ impl Write for Outbox {
             self.control(Some(line.to_vec()))?;
         } else {
             let mut queue = self.lock();
-            self.reserve(&mut queue, line.len(), 1)?;
+            let stamp = self.2.now();
+            self.reserve(&mut queue, line.len() + stamp.bytes(), 1)?;
+            let mut line = line.to_vec();
+            stamp.append(&mut line);
             queue.ordered_frames += 1;
-            queue.ordered.push_back(Ordered::Line(line.to_vec()));
+            queue.ordered.push_back(Ordered::Line(line));
             self.0.ready.notify_one();
         }
         Ok(line.len())

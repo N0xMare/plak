@@ -8,8 +8,22 @@ import statistics
 import subprocess
 from pathlib import Path
 
+from staging_soak_stream import CHECKPOINT_MISSING, LATE_PREFIX
+
 NAMES = ("plakd", "plakous-js-host", "plakous-py-host")
 METRICS = ("attach_fast_ms_p95", "cpu_total_ms_per_s", "rss_mib_per_min", "rss_end_mib")
+FAST_SEND_P50_MS = 1.0
+FAST_SEND_P99_MS = 40.0
+LEGACY_FAST_PONG_SEND_P50_MS = 1.0
+LEGACY_FAST_PONG_SEND_P99_MS = 20.0
+FAST_PING_P99_MS = 20.0
+FAST_LATENCY_LIMITS_MS = {
+    "send_frame_fast_ms_p50": FAST_SEND_P50_MS,
+    "send_frame_fast_ms_p99": FAST_SEND_P99_MS,
+    "send_pong_fast_ms_p50": LEGACY_FAST_PONG_SEND_P50_MS,
+    "send_pong_fast_ms_p99": LEGACY_FAST_PONG_SEND_P99_MS,
+    "ping_ms_p99": FAST_PING_P99_MS,
+}
 SUBSTITUTIONS = [
     "same-revision test-support artifacts",
     "scripted model",
@@ -22,6 +36,7 @@ HARNESS = (
     "staging_soak.py",
     "staging_soak_evidence.py",
     "staging_soak_measure.py",
+    "staging_soak_stream.py",
     "host_latency.py",
     "host_latency_fixture.py",
     "host_latency_wire.py",
@@ -110,8 +125,17 @@ def pair(releases, probes, profile, aa):
 
 def policy(path):
     document = json.loads(path.read_text())
-    if set(document) != {"limits", "load_1m_limit"}:
+    fields = {"limits", "load_1m_limit"}
+    if set(document) not in (fields, fields | {"nightly"}):
         raise ValueError("invalid soak policy fields")
+    nightly = document.get("nightly", {})
+    if "nightly" in document and (
+        not isinstance(nightly, dict)
+        or set(nightly)
+        not in ({"timing_qualified"}, {"allow_known_late_prefix", "timing_qualified"})
+        or any(type(value) is not bool for value in nightly.values())
+    ):
+        raise ValueError("invalid nightly soak policy")
     load = document["load_1m_limit"]
     if type(load) not in (float, int) or not math.isfinite(load) or load <= 0:
         raise ValueError("invalid soak load limit")
@@ -123,7 +147,7 @@ def policy(path):
             type(v) not in (float, int) or not math.isfinite(v) or v < 0 for v in bounds.values()
         ):
             raise ValueError("invalid soak policy bound")
-    return raw, load
+    return raw, load, nightly
 
 
 def compare(windows, bounds):
@@ -145,12 +169,80 @@ def compare(windows, bounds):
             ceiling = base * (1 + bounds[key]["relative"])
             deltas[key]["candidate_ceiling"] = ceiling
             if after > ceiling:
-                failures.append(f"regressed_{key}")
+                failures.append(f"regressed_{key}: {after:.3f} > {ceiling:.3f}")
     return summary, deltas, failures
+
+
+def latency_reasons(window, *, require_stamps):
+    failures, timing = [], []
+    frame_count = window["send_frame_fast_n"]
+    missing = window["send_frame_fast_unstamped"]
+    if require_stamps or frame_count:
+        metric = "send_frame_fast"
+        if not frame_count or missing:
+            failures.append(
+                f"fast text enqueue coverage: {frame_count} stamped, {missing} unstamped"
+            )
+    else:
+        metric = "send_pong_fast"
+        observed, expected = window["send_pong_fast_n"], window["ping_n"]
+        if observed != expected or not observed:
+            failures.append(f"fast Pong enqueue coverage: {observed} of {expected}")
+    if window["send_fast_negative"]:
+        failures.append(f"negative fast enqueue intervals: {window['send_fast_negative']}")
+    for name in (f"{metric}_ms_p50", f"{metric}_ms_p99", "ping_ms_p99"):
+        limit = FAST_LATENCY_LIMITS_MS[name]
+        value = window[name]
+        if value is None or not math.isfinite(value):
+            failures.append(f"{name}: no samples (limit {limit:g} ms)")
+        elif value > limit:
+            timing.append(f"{name}: {value:.3f} > {limit:g} ms")
+    return failures, timing
+
+
+def known_defect_pairs(window):
+    """Only forgive one specifically paired late-prefix repair per finding."""
+    if window["reference_mismatches"]:
+        return 0
+    pairs = 0
+    for attachment in window["attachments"]:
+        if attachment["revision_gaps"] or attachment["evicted_deltas"]:
+            return 0
+        count = attachment["paired_prefixes"]
+        if attachment["mismatches"]:
+            if (
+                attachment["continuous"]
+                or count <= 0
+                or attachment["mismatches"] != 2 * count
+                or attachment["reconcile_reasons"]
+                != {LATE_PREFIX: count, CHECKPOINT_MISSING: count}
+            ):
+                return 0
+            pairs += count
+        elif count or attachment["reconcile_reasons"]:
+            return 0
+    return pairs if 2 * pairs == window["reconcile_failures"] else 0
+
+
+def classify_cycle(blocking, timing, pairs, *, nightly, timing_qualified, aa):
+    if (
+        blocking
+        or (pairs and not nightly)
+        or (timing and (pairs or not nightly or timing_qualified))
+    ):
+        return "fail", 1
+    if timing:
+        return "timing_observation", 75
+    if pairs:
+        return "known_defect", 76
+    return ("calibration" if aa else "pass"), 0
 
 
 def harness_identity(revision):
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("a full harness source revision is required")
     directory = Path(__file__).parent
-    return {"revision": revision, "files": {name: digest(directory / name) for name in HARNESS}}
+    return {
+        "revision": revision,
+        "files": {name: digest(directory / name) for name in HARNESS},
+    }

@@ -15,7 +15,10 @@ TOOL_BATCH = 7
 
 
 def tool(name, **arguments):
-    return {"output": {"tool": {"name": name, "arguments": arguments}}, "finish": "tool_calls"}
+    return {
+        "output": {"tool": {"name": name, "arguments": arguments}},
+        "finish": "tool_calls",
+    }
 
 
 def answer(text):
@@ -34,6 +37,8 @@ class Fixture:
         self.diagnostics = self.home / "logs/plak.log"
         self.processes = []
         self.runner_pid = None
+        self.host_log = "plak::web=info"
+        self.soak_enqueue = False
 
     def init(self):
         if len(os.fsencode(self.root / "home/host/runner/vXX-000000000000/run/r.sock")) > 100:
@@ -43,11 +48,11 @@ class Fixture:
             (self.root / directory).mkdir(mode=0o700)
         (self.home / "config.toml").write_text(
             '[root]\nagent = "lead"\n'
-            '\n[orchestration]\nsubagents = false\n'
-            '\n[compaction]\nenabled = false\n'
+            "\n[orchestration]\nsubagents = false\n"
+            "\n[compaction]\nenabled = false\n"
             f'\n[web]\nallow = ["{LOGIN}"]\norigin = "{ORIGIN}"\n'
-            'accounts_read = true\nconfig_read = true\n'
-            f'\n[gateway]\naddress = {json.dumps(f"unix:{self.gateway}")}\n'
+            "accounts_read = true\nconfig_read = true\n"
+            f"\n[gateway]\naddress = {json.dumps(f'unix:{self.gateway}')}\n"
         )
         (self.home / "gateway.toml").write_text(f"socket = {json.dumps(str(self.gateway))}\n")
         (self.home / "agents/lead.toml").write_text(
@@ -82,8 +87,10 @@ class Fixture:
             "PLAK_TEST_SCRIPT": str(self.script),
             "PLAK_TEST_EVIDENCE": str(self.root / "model.jsonl"),
             "PLAK_TEST_FAULTS": "fault=connect",
-            "PLAK_LOG": "plak::web=info",
+            "PLAK_LOG": self.host_log,
         }
+        if self.soak_enqueue:
+            env["PLAK_TEST_SOAK_ENQUEUE"] = "1"
         devnull, pipe = asyncio.subprocess.DEVNULL, asyncio.subprocess.PIPE
         with (self.root / f"{args[0]}.log").open("ab") as log:
             child = await asyncio.create_subprocess_exec(
@@ -202,7 +209,11 @@ class Fixture:
                 if waits and counts["active_children"] and open_turns:
                     if counts["retained_children"] != minimum_children:
                         raise RuntimeError(f"wrong retained child count: {counts}")
-                    return {**counts, "open_root_turns": open_turns, "open_waits": waits}
+                    return {
+                        **counts,
+                        "open_root_turns": open_turns,
+                        "open_waits": waits,
+                    }
                 await asyncio.sleep(0.1)
 
 

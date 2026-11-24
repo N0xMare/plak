@@ -85,7 +85,16 @@ async def browser_upgrade(socket, login=LOGIN):
 
 
 class Client:
-    def __init__(self, fixture, face, *, login=LOGIN, read_delay=0, observe=None):
+    def __init__(
+        self,
+        fixture,
+        face,
+        *,
+        login=LOGIN,
+        read_delay=0,
+        observe=None,
+        observe_wire=None,
+    ):
         self.fixture = fixture
         self.face = face
         self.bridge = None
@@ -102,6 +111,7 @@ class Client:
         self.login = login
         self.read_delay = read_delay
         self.observe = observe
+        self.observe_wire = observe_wire
         self.welcome = None
 
     async def __aenter__(self):
@@ -118,7 +128,12 @@ class Client:
                     browser_upgrade(self.fixture.socket, self.login), DEADLINE
                 )
             await self.send(
-                {"frame": "hello", "proto": WIRE, "binary_id": "host-latency", "caps": []}
+                {
+                    "frame": "hello",
+                    "proto": WIRE,
+                    "binary_id": "host-latency",
+                    "caps": [],
+                }
             )
             frame, _, _ = await asyncio.wait_for(self.receive(), DEADLINE)
             if frame.get("frame") != "welcome" or frame.get("proto") != WIRE:
@@ -165,7 +180,15 @@ class Client:
             raw = await self.bridge.stdout.readline()
             if not raw:
                 raise ConnectionError("stdio bridge EOF")
-        return json.loads(raw), time.monotonic(), len(raw)
+        clock = time.monotonic_ns()
+        stamp = clock / 10**9
+        if self.observe_wire:
+            at = time.time_ns()
+            frame = json.loads(raw)
+            self.observe_wire(frame, raw, clock, at)
+        else:
+            frame = json.loads(raw)
+        return frame, stamp, len(raw)
 
     async def drain(self):
         try:

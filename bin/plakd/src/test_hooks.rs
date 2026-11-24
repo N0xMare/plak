@@ -47,6 +47,13 @@ pub(crate) fn snapshot_fixture() -> bool {
     std::env::var("PLAK_TEST_SNAPSHOT_FIXTURE").as_deref() == Ok("1")
 }
 
+#[allow(dead_code, reason = "only the optional web host stamps frames")]
+pub(crate) mod soak_stamp;
+
+fn soak_enqueue() -> bool {
+    requested() && std::env::var_os("PLAK_TEST_SOAK_ENQUEUE").is_some_and(|value| value == "1")
+}
+
 pub(crate) fn gateway_review_clock(
     subscriptions: plakous::subscriptions::NativeSubscriptions,
     provider: NativeProvider,

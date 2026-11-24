@@ -6,6 +6,41 @@ pub(crate) const fn snapshot_fixture() -> bool {
     false
 }
 
+#[allow(dead_code, reason = "only the optional web host stamps frames")]
+pub(crate) mod soak_stamp {
+    #[derive(Clone, Copy)]
+    pub(crate) struct Enabled;
+
+    #[derive(Clone, Copy)]
+    pub(crate) struct Stamp;
+
+    impl Enabled {
+        pub(crate) const fn off() -> Self {
+            Self
+        }
+
+        pub(crate) const fn web() -> Self {
+            Self
+        }
+
+        pub(crate) const fn now(self) -> Stamp {
+            Stamp
+        }
+    }
+
+    impl Stamp {
+        pub(crate) const fn off() -> Self {
+            Self
+        }
+
+        pub(crate) const fn bytes(self) -> usize {
+            0
+        }
+
+        pub(crate) fn append(self, _line: &mut Vec<u8>) {}
+    }
+}
+
 pub(crate) const fn product_store_schema(
     base: plakous_recursive_subagents_store::admission::Schema,
 ) -> plakous_recursive_subagents_store::admission::Schema {

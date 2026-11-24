@@ -301,7 +301,7 @@ impl<S: Sink<Message> + Unpin + Send> FrameWriter for WebWriter<S> {
 }
 
 async fn drive(mut socket: Socket, served: &Served, login: &str) -> Ended {
-    let outbox = Outbox::default();
+    let outbox = Outbox::new(crate::test_hooks::soak_stamp::Enabled::web());
     let reason = match admit(&mut socket, served, login, &outbox).await {
         Ok(mut connection) => attached(socket, served, &mut connection, &outbox).await,
         Err(reason) => {
