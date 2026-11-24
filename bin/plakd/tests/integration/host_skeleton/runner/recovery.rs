@@ -228,6 +228,69 @@ fn an_embedded_open_refuses_a_daemon_held_line_without_recording_a_terminal() {
 }
 
 #[test]
+fn detached_daemon_and_piped_job_do_not_ignore_interrupt_or_quit() {
+    let Some(fixture) = fixture() else { return };
+    let (mut host, _, _) = start_job_env(
+        &fixture,
+        false,
+        &[("PLAK_TEST_RUNNER_DETACHED", "1".into())],
+    );
+    let (job, daemon) = job(&fixture);
+    let host_pid = host.child.as_ref().unwrap().id();
+    let parent = std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &daemon.to_string()])
+        .output()
+        .unwrap();
+    assert!(parent.status.success());
+    let parent: u32 = std::str::from_utf8(&parent.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let masks = [
+        ("detached daemon", ignored_signals(daemon)),
+        ("piped job", ignored_signals(job)),
+    ];
+    stop(&mut host);
+    kill_home_local_runner(&fixture.home());
+
+    assert_ne!(
+        parent, host_pid,
+        "the host still owns the daemon's wait status"
+    );
+    for (process, mask) in masks {
+        for signal in [rustix::process::Signal::INT, rustix::process::Signal::QUIT] {
+            assert_eq!(
+                mask & (1 << (signal.as_raw() - 1)),
+                0,
+                "{process} ignores {signal:?}"
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ignored_signals(pid: i32) -> u64 {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    let ignored = status
+        .lines()
+        .find_map(|line| line.strip_prefix("SigIgn:"))
+        .unwrap();
+    u64::from_str_radix(ignored.trim(), 16).unwrap()
+}
+
+#[cfg(target_os = "macos")]
+fn ignored_signals(pid: i32) -> u64 {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ignored="])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let ignored = std::str::from_utf8(&output.stdout).unwrap().trim();
+    u64::from_str_radix(ignored.trim_start_matches("0x"), 16).unwrap()
+}
+
+#[test]
 fn a_slow_user_manager_is_started_once_without_a_detached_fallback() {
     for outcome in ["exit 0", "exit 1", "exec sleep 2"] {
         manager_start_case(outcome);

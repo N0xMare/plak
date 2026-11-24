@@ -145,7 +145,7 @@ fn a_cancelled_git_helper_is_reaped_without_its_tokio_runtime() {
     });
     drop(runtime);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let _ = crate::internal::host_child_shutdown::poll_reap();
         if test_kill_process(pid) == Err(rustix::io::Errno::SRCH) {

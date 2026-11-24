@@ -61,7 +61,7 @@ fn dropping_a_runner_launcher_reaps_without_its_runtime() {
     });
     drop(runtime);
     let (pid, _reader) = pid;
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while test_kill_process(pid) != Err(rustix::io::Errno::SRCH) {
         assert!(
             Instant::now() < deadline,

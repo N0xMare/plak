@@ -6451,9 +6451,12 @@ keeps its separate readiness path.
   Each dial decides that launch policy once. Only a free socket lock permits
   a start; a managed dial requests the unit at most once, and unit-exists,
   timeout or other ambiguous manager answers never authorize a detached
-  fallback. Only a proven unreachable manager does. A detached daemon's
-  waiter is independent of the host and survives its replacement. A closed
-  daemon link is redialed under the same bound,
+  fallback. Only a proven unreachable manager does. The host joins a
+  short-lived launcher, which starts an independent waiter that joins the
+  detached daemon even after host replacement. Neither launch uses a shell
+  or changes the daemon's inherited interrupt and quit dispositions. A
+  failed detached start can be retried after a bounded window if the socket
+  lock is still free. A closed daemon link is redialed under the same bound,
   reconnecting the existing client and repeating sweep, recovery, recorded stops
   and settled-foreground cleanup before readiness. Failures block that runner row,
   not the host. A prompt whose full reopen races this process's own lease-only

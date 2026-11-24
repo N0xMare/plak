@@ -3,7 +3,8 @@
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::time::{Duration, Instant};
 
-use plakous::agent::host_child_shutdown::{groups, workers};
+use plakous::agent::host_worker_shutdown as workers;
+use plakous::tools::host_child_shutdown as groups;
 
 use crate::commands::runner::dial::children::shutdown as runner;
 
@@ -25,7 +26,7 @@ pub(super) fn close() {
                     let _ = sender.send(plakous_hosted::mcp_binding::shutdown_mcp_pool(grace));
                 });
             if !matches!(receiver.recv_timeout(grace), Ok(true)) {
-                tracing::warn!("host_mcp_close_incomplete");
+                tracing::warn!(target: "plak.host", "host_mcp_close_incomplete");
             }
             groups::seal();
         },
@@ -41,8 +42,10 @@ pub(super) fn close() {
     ] {
         match report.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             Ok(0) => {}
-            Ok(unreaped) => tracing::warn!(kind, unreaped, "host_child_reap_incomplete"),
-            Err(_) => tracing::warn!(kind, "host_child_reap_incomplete"),
+            Ok(unreaped) => {
+                tracing::warn!(target: "plak.host", kind, unreaped, "host_child_reap_incomplete")
+            }
+            Err(_) => tracing::warn!(target: "plak.host", kind, "host_child_reap_incomplete"),
         }
     }
 }

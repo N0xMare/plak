@@ -15,7 +15,7 @@ use super::process::{GroupProbe, leader_exited};
 
 struct Entry {
     child: tokio::process::Child,
-    group: GroupProbe,
+    probe: Option<GroupProbe>,
     retiring: bool,
 }
 
@@ -65,7 +65,7 @@ impl OwnedChild {
             group,
             Entry {
                 child,
-                group: GroupProbe::new(group),
+                probe: Some(GroupProbe::new(group)),
                 retiring: false,
             },
         );
@@ -161,20 +161,47 @@ fn retire(group: Pid, entry: &mut Entry) {
     }
 }
 
-fn reap(entries: &mut HashMap<Pid, Entry>) {
-    entries.retain(|&group, entry| {
-        !entry.retiring
-            || !leader_exited(group)
-            || entry.group.members() != 0
-            || !matches!(entry.child.try_wait(), Ok(Some(_)))
-    });
+fn reap() {
+    let retiring: Vec<_> = children()
+        .entries
+        .iter()
+        .filter_map(|(&group, entry)| entry.retiring.then_some(group))
+        .collect();
+    for group in retiring {
+        let probe = {
+            let mut children = children();
+            children
+                .entries
+                .get_mut(&group)
+                .filter(|entry| entry.retiring && entry.probe.is_some() && leader_exited(group))
+                .and_then(|entry| entry.probe.take())
+        };
+        let Some(mut probe) = probe else {
+            continue;
+        };
+        // Only the owner of this probe can wait the retiring leader. It
+        // pins the PGID while a potentially slow snapshot runs off-lock.
+        let empty = probe.members() == 0;
+        let mut children = children();
+        if let Some(entry) = children
+            .entries
+            .get_mut(&group)
+            .filter(|entry| entry.retiring)
+        {
+            if empty && matches!(entry.child.try_wait(), Ok(Some(_))) {
+                children.entries.remove(&group);
+            } else {
+                entry.probe = Some(probe);
+            }
+        }
+    }
 }
 
 fn reap_retired() {
     loop {
         std::thread::sleep(Duration::from_millis(250));
+        reap();
         let mut children = children();
-        reap(&mut children.entries);
         if !children.entries.values().any(|entry| entry.retiring) {
             children.reaper_running = false;
             return;
@@ -191,9 +218,8 @@ fn seal() {
 }
 
 fn poll_reap() -> usize {
-    let mut children = children();
-    reap(&mut children.entries);
-    children.entries.len()
+    reap();
+    children().entries.len()
 }
 
 /// Product stop hooks. Do not call in a process that will continue serving.

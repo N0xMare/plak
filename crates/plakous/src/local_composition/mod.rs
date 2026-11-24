@@ -57,12 +57,9 @@ use plakous_tools::{
     PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_RUN_NAME_V1, PYTHON_PTC_WAIT_NAME_V1,
 };
 
-/// Unsupported child ownership hooks for final host shutdown.
+/// Unsupported evaluator ownership hooks for final host shutdown.
 #[doc(hidden)]
-pub mod host_child_shutdown {
-    pub use plakous_cell::host_worker_shutdown as workers;
-    pub use plakous_tools::internal::host_child_shutdown as groups;
-}
+pub use plakous_cell::host_worker_shutdown;
 
 const PRODUCT_JAVASCRIPT_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
 const PRODUCT_JAVASCRIPT_DEFAULT_OUTPUT_TOKENS: u64 = 10_000;

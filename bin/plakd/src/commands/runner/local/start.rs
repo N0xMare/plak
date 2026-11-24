@@ -1,20 +1,23 @@
 //! One launch policy per dial; an ambiguous manager result never falls back.
 
-use std::io::{self, Read as _};
-use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixStream;
+use std::ffi::OsString;
+use std::io;
 use std::os::unix::process::CommandExt as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::super::dial::children::{launcher_output, launcher_status};
 use super::{LocalRunnerHome, PlakPaths};
 
+const DETACHED_LAUNCH: &str = "__runner-detach";
+const DETACHED_WAIT: &str = "__runner-wait";
+const DETACHED_START_WINDOW: Duration = Duration::from_secs(1);
+
 pub(super) struct Starter {
     managed: Option<bool>,
     requested: bool,
-    detached: Option<UnixStream>,
+    detached_retry_at: Option<Instant>,
 }
 
 impl Starter {
@@ -22,7 +25,7 @@ impl Starter {
         Self {
             managed: None,
             requested: false,
-            detached: None,
+            detached_retry_at: None,
         }
     }
 
@@ -32,7 +35,9 @@ impl Starter {
         home: &LocalRunnerHome,
     ) -> io::Result<()> {
         if self.requested
-            || detached_pending(&mut self.detached)
+            || self
+                .detached_retry_at
+                .is_some_and(|retry| Instant::now() < retry)
             || !lock_free(paths.home(), &home.socket_path())?
         {
             return Ok(());
@@ -51,8 +56,8 @@ impl Starter {
             managed_start(paths).await;
             return Ok(());
         }
-        self.detached = Some(detached_start(paths, home).await?);
-        Ok(())
+        self.detached_retry_at = Some(Instant::now() + DETACHED_START_WINDOW);
+        detached_start(paths, home).await
     }
 }
 
@@ -121,7 +126,7 @@ async fn managed_start(paths: &PlakPaths) {
         manager.arg(format!("--setenv=HOME={home}"));
     }
     for (name, value) in crate::test_hooks::upgrade_runner_environment() {
-        let mut argument = std::ffi::OsString::from(format!("--setenv={name}="));
+        let mut argument = OsString::from(format!("--setenv={name}="));
         argument.push(value);
         manager.arg(argument);
     }
@@ -135,7 +140,7 @@ async fn managed_start(paths: &PlakPaths) {
     let _ = tokio::time::timeout(Duration::from_secs(1), launcher_status(&mut manager)).await;
 }
 
-async fn detached_start(paths: &PlakPaths, home: &LocalRunnerHome) -> io::Result<UnixStream> {
+async fn detached_start(paths: &PlakPaths, home: &LocalRunnerHome) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt as _;
     let executable = std::env::current_exe()?;
     let log = std::fs::OpenOptions::new()
@@ -143,63 +148,55 @@ async fn detached_start(paths: &PlakPaths, home: &LocalRunnerHome) -> io::Result
         .append(true)
         .mode(0o600)
         .open(home.root().join("serve.log"))?;
-    let mut command = detached_launcher(&executable);
+    let mut command = detached_command(&executable);
     command
-        .args(["runner", "serve", "--local"])
+        .arg(DETACHED_LAUNCH)
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("PLAK_HOME", paths.home())
         .envs(crate::test_hooks::upgrade_runner_environment())
-        .stdin(Stdio::null())
         .stderr(log);
     if let Some(home) = crate::environment::inherited_home() {
         command.env("HOME", home);
     }
-    launch_detached(&mut command).await
-}
-
-fn detached_launcher(executable: &Path) -> Command {
-    let mut command = Command::new("/bin/sh");
-    command
-        .args([
-            "-c",
-            "( \"$@\" </dev/null >/dev/null; exit \"$?\" ) &",
-            "runner-launch",
-        ])
-        .arg(executable);
-    command
-}
-
-async fn launch_detached(command: &mut Command) -> io::Result<UnixStream> {
-    // Join the launcher, not the daemon. The background shell waits on the
-    // daemon outside the host's parentage and holds a write end until exit;
-    // a dial never has to guess whether its previous attempt is still live.
-    let (read, write) = UnixStream::pair()?;
-    read.set_nonblocking(true)?;
-    command
-        .process_group(0)
-        .stdout(Stdio::from(OwnedFd::from(write)));
-    let status = launcher_status(command).await?;
+    let status = launcher_status(&mut command).await?;
     if !status.success() {
         return Err(io::Error::other("detached runner launcher failed"));
     }
-    Ok(read)
+    Ok(())
 }
 
-fn detached_pending(stream: &mut Option<UnixStream>) -> bool {
-    let pending = stream
-        .as_mut()
-        .is_some_and(|stream| match stream.read(&mut [0]) {
-            Ok(count) => count != 0,
-            Err(error) => matches!(
-                error.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ),
-        });
-    if !pending {
-        *stream = None;
-    }
-    pending
+fn detached_command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .process_group(0);
+    command
+}
+
+/// The host joins the launcher; the independently parented waiter joins the
+/// daemon. Neither step uses a shell, so asynchronous-list signal overrides
+/// never reach the daemon or its jobs.
+pub(crate) fn detached_helper(arguments: &[OsString]) -> Option<io::Result<()>> {
+    let [stage] = arguments else { return None };
+    let waiter = if stage == DETACHED_WAIT {
+        true
+    } else if stage == DETACHED_LAUNCH {
+        false
+    } else {
+        return None;
+    };
+    Some(std::env::current_exe().and_then(|executable| {
+        let mut command = detached_command(&executable);
+        if waiter {
+            command.args(["runner", "serve", "--local"]).status()?;
+        } else {
+            // The short-lived launcher surrenders the waiter to the OS.
+            drop(command.arg(DETACHED_WAIT).spawn()?);
+        }
+        Ok(())
+    }))
 }
 
 #[cfg(test)]

@@ -9120,7 +9120,9 @@ calls queue. When the last lease drops the entry stops after 300 s idle. A
 call on a server that exits is `OutcomeUnknown` and is never retried; the next
 call restarts the server once, and a second exit within 60 s fails the entry
 for 60 s, during which calls fail without dispatch. Shutdown closes each client
-and terminates its process group through `ServiceHandle::terminate`. The
+and terminates its process group through `ServiceHandle::terminate`. On final
+product host shutdown, a bounded group reap also covers local stdio children
+whose pool close does not finish (chapter 02 §4.6). The
 client advertises exactly one root, the workspace root as a `file://` URI with
 `listChanged: false`, and ignores `notifications/tools/list_changed`, the
 resource and prompt list-change notifications and
@@ -10377,6 +10379,9 @@ stop the worker inside the shutdown ladder; a generation that cannot be reaped
 reports Lost and never replays source.
 
 ### 9.5 Cell lifetime and the `CompositionChild` record
+
+Final product host shutdown also seals worker starts and attempts to reap
+workers still owned by the process (chapter 02 §4.6).
 
 Native Code Mode `wait`, JavaScript `wait_js` and Python `wait_py` default to
 10 seconds and clamp explicit whole non-negative `yield_time_ms` hints to 600,000 ms before
@@ -12849,6 +12854,10 @@ memory backend also compiles for `wasm32-unknown-unknown` (chapter 06 §7.5),
 though its lease clock refuses there. Without it the
 facade links no session store. `sessions-sqlite` implies `store` and enables
 `SessionBackend::sqlite`. `full` is all of the above.
+
+The doc-hidden final host shutdown seams are unsupported: the Unix
+`tools::host_child_shutdown` seal and reap need no feature, and
+`agent::host_worker_shutdown` is available with `composition`.
 
 The `sessions-sqlite` feature also compiles the doc-hidden
 `sessions::rehearsal` inspector, an unsupported repository-only maintainer seam,

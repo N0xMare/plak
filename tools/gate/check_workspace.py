@@ -572,7 +572,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plakd", "src/commands/runner/local/start.rs"): [
         ("Command", (("string", "systemctl"),)),
         ("Command", (("string", "systemd-run"),)),
-        ("Command", (("string", "/bin/sh"),)),
+        ("Command", (("identifier", "executable"),)),
     ],
     # The runner transport registers its strict SSH children for explicit reaping.
     ("plakd", "src/commands/runner/dial.rs"): [
@@ -1784,7 +1784,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plakd", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
     ("plakd", "src/host/child_shutdown.rs"): {
-        "agent": {"host_child_shutdown::groups", "host_child_shutdown::workers"},
+        "agent": {"host_worker_shutdown"},
+        "tools": {"host_child_shutdown"},
     },
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plakd", "src/platform_product/anthropic.rs"): {

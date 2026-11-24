@@ -1,6 +1,7 @@
 //! The host's journaled connection to its home-local process daemon.
 
 mod start;
+pub(crate) use start::detached_helper;
 
 use std::sync::Arc;
 use std::time::Duration;

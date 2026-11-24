@@ -240,6 +240,13 @@ pub fn main_from_env() -> ExitCode {
     let mut arguments = env::args_os();
     build_identity::record_launch(arguments.next().as_deref());
     let mut arguments: Vec<_> = arguments.collect();
+    if let Some(result) = commands::runner::local::detached_helper(&arguments) {
+        return run_to_exit(
+            result.map(|()| ProcessOutcome::Success).map_err(|error| {
+                CliFailure::new(format!("detached runner helper failed: {error}"))
+            }),
+        );
+    }
     let reexec = arguments.first().is_some_and(|arg| arg == HOST_REEXEC_ARG);
     if reexec {
         arguments.remove(0);

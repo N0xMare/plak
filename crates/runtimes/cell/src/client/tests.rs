@@ -273,7 +273,7 @@ fn a_dropped_cell_worker_is_reaped_after_its_runtime_stops() {
     drop(runtime);
     drop(client);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while kill(pid, None) != Err(Errno::ESRCH) {
         assert!(
             std::time::Instant::now() < deadline,

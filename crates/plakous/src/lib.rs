@@ -192,7 +192,7 @@ pub mod agent {
         LocalCompositionAttachment, LocalCompositionAttachmentBuilder, LocalCompositionContainment,
         LocalCompositionEngineArtifact, LocalCompositionLanguage, LocalCompositionProfile,
         ProductExtensionEvidence, ProductExtensionLimits, attach_local_composition,
-        host_child_shutdown,
+        host_worker_shutdown,
     };
     /// Unsupported runner selection for official hosting (spec 01 §8.5).
     #[doc(hidden)]
@@ -1416,6 +1416,10 @@ pub mod tools {
     /// Unsupported fixed Changes execution seam for official hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::changes;
+    /// Unsupported host-owned service and Changes child shutdown seam.
+    #[cfg(unix)]
+    #[doc(hidden)]
+    pub use plakous_tools::internal::host_child_shutdown;
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;
