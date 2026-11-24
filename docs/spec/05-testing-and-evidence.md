@@ -13,7 +13,9 @@ parses or a route that renders is not a support or correctness promise.
   projection and plan across native, API and OpenRouter families, root/leaf
   roles and Direct/native/JS/Python presentations. Synthetic platform, time and
   workspace authority enter through normal parsers and builders; never patch
-  digests. Repinning requires review. An unchanged executor binding must
+  digests. Registry entries are content-addressed by their canonical JSON and
+  stored with their full bodies for field-level review; a hash alone is not
+  evidence for a repin. An unchanged executor binding must
   continue accepting the structural subset described by each old schema;
   narrowing requires a binding cut. Distinguish revised and unknown executors
   from provider changes. Host-local file observations are not golden inputs.
@@ -1736,12 +1738,11 @@ all listed generators.
 
 | Part | Output |
 | --- | --- |
-| `manifests` | `EXPECTED_SECURITY_SURFACE_DIGESTS` in `tools/gate/check_features.py` |
 | `bindings` | `crates/hosting/hosted/tests/fixtures/binding-contracts.json` |
 | `nextest` | Generated offline and install blocks in `.config/nextest.toml` |
 | `prompts` | Rendered route, lifecycle and compaction-wire digest tables in `crates/hosting/hosted/tests/common/rendered_{prompts,lifecycle,wire}.rs` |
 
-Regeneration does not approve security-surface changes, binding changes
+Regeneration does not approve binding changes
 (which still require exact predecessor reopen evidence), or prompt changes.
 Do not regenerate the current SQLite binding seed to resolve a merge
 conflict; follow its [fixture instructions](../../crates/hosting/hosted/tests/fixtures/current-bindings/README.md)

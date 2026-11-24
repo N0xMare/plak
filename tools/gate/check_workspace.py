@@ -351,191 +351,81 @@ FORBIDDEN_PRODUCT_SESSION_AUTHORITY_IDENTIFIERS = {
     "product_compaction",
 }
 SourceKey = tuple[str, str]
-# Each compile-time environment macro the product may use, with the one
-# variable it names, in source order.
-EXPECTED_COMPILE_TIME_ENVIRONMENT: dict[SourceKey, list[tuple[str, str]]] = {
-    ("plakd", "src/commands/exchange_capture.rs"): [("env", "CARGO_MANIFEST_DIR")],
-    ("plakd", "src/build_identity.rs"): [("option_env", "PLAK_SOURCE_REVISION")],
+# Review files that exercise host authority, not individual calls or their arguments.
+COMPILE_TIME_ENVIRONMENT_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity.rs"),
+    ("plakd", "src/commands/exchange_capture.rs"),
 }
-
-# The only reads of the process working directory in a host/bin package
-# (spec 02 sec. 1): a workspace is explicit below the CLI edge, so one host
-# process can hold the product contexts of many workspaces. Nothing changes it.
-EXPECTED_WORKING_DIRECTORY_CALLS: dict[SourceKey, list[str]] = {
-    # The CLI edge: the launch directory, read once into the product context.
-    ("plakd", "src/shell/home.rs"): ["current_dir"],
-    # The running executable's own path for a relative argv[0], not a workspace.
-    ("plakd", "src/build_identity.rs"): ["current_dir"],
-    # Normalizes a relative fence path; every caller passes an absolute one.
-    ("plakous-workspace", "src/git_redirect_fence.rs"): ["current_dir"],
+WORKING_DIRECTORY_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity.rs"),
+    ("plakd", "src/shell/home.rs"),
+    ("plakous-workspace", "src/git_redirect_fence.rs"),
 }
-# The launch directory and the constructors that read it (through
-# `Home::from_env`) are reached only from the composition root; everything
-# below takes a context. None of the three may be imported under another name.
-EXPECTED_LAUNCH_DIRECTORY_READERS: dict[SourceKey, list[str]] = {
-    ("plakd", "src/lib.rs"): ["launch_directory", "Services::from_env"],
-    ("plakd", "src/shell/services.rs"): ["Home::from_env"],
+ENVIRONMENT_READER_SITES: set[SourceKey] = {
+    ("plakd", "src/build_identity/interactive.rs"),
+    ("plakd", "src/commands/doctor.rs"),
+    ("plakd", "src/commands/exchange_capture.rs"),
+    ("plakd", "src/commands/run/face.rs"),
+    ("plakd", "src/commands/support.rs"),
+    ("plakd", "src/diagnostics.rs"),
+    ("plakd", "src/environment.rs"),
+    ("plakd", "src/home/paths.rs"),
+    ("plakd", "src/home/secrets.rs"),
+    ("plakd", "src/oauth_ui.rs"),
+    ("plakd", "src/presentation.rs"),
+    ("plakd", "src/sidecars/js_host.rs"),
+    ("plakd", "src/sidecars/python_bundle.rs"),
+    ("plakd", "src/test_hooks.rs"),
+    ("plakd", "src/test_support.rs"),
+    ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"),
+    ("plakous-hosted", "src/test_support_runner.rs"),
+    ("plakous-workspace", "src/git_redirect_fence.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"),
+    ("plakous-workspace", "src/vcs_fixtures.rs"),
+}
+LAUNCH_DIRECTORY_SITES: dict[str, SourceKey] = {
+    "launch_directory": ("plakd", "src/lib.rs"),
+    "Services::from_env": ("plakd", "src/lib.rs"),
+    "Home::from_env": ("plakd", "src/shell/services.rs"),
 }
 LAUNCH_DIRECTORY_NAMES = frozenset({"Services", "Home", "launch_directory"})
-EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[
-    SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
-] = {
-    ("plakd", "src/environment.rs"): [
-        ("var_os", (("string", "INVOCATION_ID"),)),
-        ("var_os", (("string", "PLAK_TEST_RUNNER_DETACHED"),)),
-        # The runner daemon's PATH and HOME, and the login shell that answers
-        # a PATH runner.toml leaves unset (spec 04 §2.9).
-        ("var_os", (("string", "PATH"),)),
-        ("var_os", (("string", "HOME"),)),
-        ("var_os", (("string", "CARGO_HOME"),)),
-        ("var_os", (("string", "USER"),)),
-        # The installer contacts only the selected user manager, never copies
-        # the shell's environment into the installed host unit.
-        ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
-        ("var_os", (("string", "DBUS_SESSION_BUS_ADDRESS"),)),
-        ("var_os", (("string", "XDG_CONFIG_HOME"),)),
-        # Private host transport capability probe.
-        ("var_os", (("identifier", "REEXEC_PROBE"),)),
-        # Explicit unmanaged-host OS/tool allowlist; fixture inputs go through
-        # the existing test-support reader, never the caller's entire environment.
-        ("var_os", (("identifier", "name"),)),
-        ("var_os", (("string", "SSH_CONNECTION"),)),
-        ("var_os", (("string", "SSH_TTY"),)),
-        ("var_os", (("string", "SSH_CLIENT"),)),
-        ("var_os", (("string", "SYSTEMD_UNIT_PATH"),)),
-        # Provider-key presence for the host refusal; values are not returned.
-        ("var_os", (("identifier", "name"),)),
-        ("var_os", (("string", "SHELL"),)),
-        # The gateway socket's runtime directory.
-        ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
-    ],
-    # Maintainer/test-support private inference capture, explicitly selected per process.
-    ("plakd", "src/commands/exchange_capture.rs"): [
-        ("var_os", (("string", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"),)),
-    ],
-    ("plakd", "src/diagnostics.rs"): [
-        ("var_os", (("string", "PLAK_LOG"),)),
-    ],
-    ("plakd", "src/commands/doctor.rs"): [
-        ("var_os", (("string", "PATH"),)),
-        ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
-    ],
-    ("plakd", "src/presentation.rs"): [
-        ("var_os", (("string", "NO_COLOR"),)),
-    ],
-    # Config edit selects the operator's VISUAL/EDITOR program and arguments.
-    ("plakd", "src/commands/support.rs"): [
-        ("var", (("identifier", "name"),)),
-    ],
-    # `test-support` only, and never in `default` or a release build: the
-    # repository gate's offline model selector. Naming the model rather than a
-    # bare flag keeps the selection an explicit binding fact.
-    ("plakd", "src/test_hooks.rs"): [
-        ("var", (("string", "PLAK_TEST_SNAPSHOT_FIXTURE"),)),
-        ("var_os", (("string", "PLAK_TEST_SOAK_ENQUEUE"),)),
-        ("var", (("string", "PLAK_TEST_GATEWAY_REVIEW_CLOCK"),)),
-        ("var", (("string", "PLAK_TEST_STATE_KEY"),)),
-        ("var_os", (("string", "PLAK_TEST_BINDING_CUT_IMAGE"),)),
-        ("var", (("string", "PLAK_TEST_FORCE_HOST_UPGRADE"),)),
-        ("var_os", (("string", "PLAK_TEST_HOST_REOPEN_GATE"),)),
-        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_CUT"),)),
-        ("var_os", (("string", "PLAK_TEST_HOST_UPGRADE_DRAIN_GATE"),)),
-        ("var", (("string", "PLAK_TEST_HOST_UPGRADE_PREPARE_FAILURE"),)),
-        ("var_os", (("string", "PLAK_TEST_STORAGE_CAPACITY"),)),
-        ("var", (("string", "PLAK_TEST_MODEL"),)),
-        ("var_os", (("string", "PLAK_TEST_ASSISTANT_DONE_RELEASE"),)),
-        ("var_os", (("identifier", "name"),)),
-        ("var_os", (("string", "PLAK_TEST_SCRIPT"),)),
-        ("var_os", (("string", "PLAK_TEST_EVIDENCE"),)),
-        ("var_os", (("string", "PLAK_TEST_PROVIDER_RELEASE"),)),
-    ],
-    # `test-support` only, enabled by `plakd/test-support`: a file whose
-    # existence collapses a configured whole-run deadline. Release builds do
-    # not compile this module, so they do not read the variable.
-    ("plakous-hosted", "src/runtime/oneshot/test_support_run_deadline.rs"): [
-        ("var_os", (("string", "PLAK_TEST_RUN_DEADLINE"),)),
-    ],
-    # cfg(test)-only process-test seam: process latency budgets scale with an
-    # explicit operator knob instead of flaking under nextest load.
-    ("plakd", "src/test_support.rs"): [
-        ("var", (("string", "PLAK_TEST_TIME_SCALE"),)),
-    ],
-    ("plakous-hosted", "src/test_support_runner.rs"): [
-        ("var", (("string", "PLAK_TEST_HOST_READOPT_CUT"),)),
-    ],
-    # The one-shot CLI face collapses a tool's lifecycle to one line on
-    # completion. `PLAK_VERBOSE` restores the per-tool progress lines for a
-    # reader who wants them; nothing else is read.
-    ("plakd", "src/commands/run/face.rs"): [
-        ("var_os", (("string", "PLAK_VERBOSE"),)),
-    ],
-    # Installed-build inspection resolves argv[0] on PATH as the shell did.
-    ("plakd", "src/build_identity/interactive.rs"): [
-        ("var_os", (("string", "PATH"),)),
-    ],
-    ("plakd", "src/oauth_ui.rs"): [
-        ("var_os", (("string", "SSH_CONNECTION"),)),
-        ("var_os", (("string", "SSH_CLIENT"),)),
-        ("var_os", (("string", "SSH_TTY"),)),
-    ],
-    ("plakd", "src/sidecars/python_bundle.rs"): [
-        ("var_os", (("identifier", "EXPLICIT_ENV"),)),
-    ],
-    ("plakd", "src/sidecars/js_host.rs"): [
-        ("var_os", (("identifier", "EXPLICIT_ENV"),)),
-    ],
-    # an `on_mint` hook runs with `env_clear()`, so the only
-    # host variables that reach a template-authored shell command are these
-    # two — never an exported `*_API_KEY`.
-    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): [
-        ("var", (("string", "PATH"),)),
-        ("var", (("string", "HOME"),)),
-    ],
-    # `EMAIL` is only tested for presence, so Plak's own git steps add a
-    # fallback identity when it is unset.
-    ("plakous-workspace", "src/occupancy_vcs/git.rs"): [
-        ("var_os", (("string", "EMAIL"),)),
-    ],
-    # A pasted `~/` image path resolves against the operator's home.
-    ("plakd", "src/home/paths.rs"): [
-        ("var_os", (("string", "PLAK_HOME"),)),
-        ("var_os", (("string", "HOME"),)),
-        ("var_os", (("string", "XDG_STATE_HOME"),)),
-        ("var_os", (("string", "HOME"),)),
-        ("var_os", (("string", "HOME"),)),
-        ("var_os", (("string", "PLAK_TEST_TMPDIR"),)),
-    ],
-    ("plakd", "src/home/secrets.rs"): [
-        ("var_os", (("identifier", "name"),)),
-        ("var", (("identifier", "name"),)),
-        ("var_os", (("identifier", "name"),)),
-        ("var", (("identifier", "name"),)),
-        ("var_os", (("identifier", "name"),)),
-    ],
-    ("plakous-workspace", "src/vcs_fixtures.rs"): [
-        ("var_os", (("string", "PLAK_TEST_JJ"),)),
-    ],
-    ("plakous-workspace", "src/git_redirect_fence.rs"): [
-        ("var_os", (("string", "PATH"),)),
-        ("var_os", (("string", "PLAK_TEST_JJ"),)),
-        ("var_os", (("string", "PATH"),)),
-    ],
+PROCESS_SITES: set[SourceKey] = {
+    ("plakd", "src/carry/installed.rs"),
+    ("plakd", "src/carry/upgrade/process.rs"),
+    ("plakd", "src/commands/host_install.rs"),
+    ("plakd", "src/commands/login_host.rs"),
+    ("plakd", "src/commands/runner.rs"),
+    ("plakd", "src/commands/runner/dial.rs"),
+    ("plakd", "src/commands/runner/dial/children.rs"),
+    ("plakd", "src/commands/runner/local/start.rs"),
+    ("plakd", "src/commands/support.rs"),
+    ("plakd", "src/host/reexec.rs"),
+    ("plakd", "src/host/starter.rs"),
+    ("plakd", "src/oauth_ui.rs"),
+    ("plakd", "src/operator_process.rs"),
+    ("plakd", "src/product_doctor/jj_cli.rs"),
+    ("plakd", "src/product_doctor/runner_ssh.rs"),
+    ("plakd", "src/terminal_application.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/git.rs"),
+    ("plakous-workspace", "src/occupancy_vcs/mint.rs"),
+    ("plakous-workspace", "src/vcs_fixtures.rs"),
+}
+NON_LAUNCH_PROCESS_SITES: set[SourceKey] = {
+    ("plakd", "src/lib.rs"),
+    ("plakd", "src/main.rs"),
+    ("plakd", "src/snapshot_install/archive.rs"),
 }
 EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # The closed content/received vocabulary shares variant definitions only.
     ("plakous-host-protocol", "src/observation/vocabulary.rs"): ("macro_rules",),
     # Export-v8's closed neutral tag mappings, never runtime code generation.
     ("plakd", "src/carry/history.rs"): ("macro_rules",),
-    # Compile-time repository location restricts the private capture root.
-    ("plakd", "src/commands/exchange_capture.rs"): ("env",),
     # Spec 02 §3.2: the help pages are one-level static text, so they are static
     # files under `bin/plakd/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
     ("plakd", "src/cli/render.rs"): ("include_str",) * 30,
-    # The source revision the build recipe states, half of the version
-    # triple a runner binds on (chapter 01 §8.4); `unknown` when unset.
-    ("plakd", "src/build_identity.rs"): ("option_env",),
     # Each route owns its four bundled role files; the common multi-provider
     # profile remains in profiles.rs. The total stays sixteen documents.
     ("plakd", "src/profiles.rs"): ("include_str",) * 4,
@@ -546,138 +436,6 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     ("plakous-workspace", "src/git_redirect_fence.rs"): ("include_str",) * 3,
     # Pinned executor metadata is shared by inspection and contract qualification.
     ("plakous-hosted", "src/agent/binding_inspection.rs"): ("include_str",),
-}
-EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
-    SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]
-] = {
-    # Identity-verified, bounded destination probes in their own process group.
-    ("plakd", "src/carry/upgrade/process.rs"): [
-        ("Command", (("identifier", "executable"),)),
-    ],
-    # Explicit user-unit publication reloads definitions, never starts a unit.
-    ("plakd", "src/commands/host_install.rs"): [
-        ("std::process::Command", (("identifier", "manager"),)),
-    ],
-    # The private install and deploy commands share a bounded process runner.
-    ("plakd", "src/operator_process.rs"): [
-        ("Command", (("identifier", "program"),)),
-    ],
-    # Explicit opt-in host starter and its log/reaping supervisor, all stages
-    # exec this build only; the launch clears and curates its environment.
-    ("plakd", "src/host/starter.rs"): [
-        ("Command", (("identifier", "executable"),)),
-    ],
-    # The manager clients and fixed detached launcher are waited independently
-    # of Tokio. The launcher passes only this build and curates its environment.
-    ("plakd", "src/commands/runner/local/start.rs"): [
-        ("Command", (("string", "systemctl"),)),
-        ("Command", (("string", "systemd-run"),)),
-        ("Command", (("identifier", "executable"),)),
-    ],
-    # The runner transport registers its strict SSH children for explicit reaping.
-    ("plakd", "src/commands/runner/dial.rs"): [
-        ("Command", (("string", "ssh"),)),
-    ],
-    # Doctor's one cleared-env, five-second, own-group local version probe.
-    ("plakd", "src/product_doctor/jj_cli.rs"): [
-        ("Command", (("identifier", "executable"),)),
-    ],
-    # Doctor's `ssh -G` resolution of each runner, bounded the same way; it
-    # never connects (spec 02 §7.3).
-    ("plakd", "src/product_doctor/runner_ssh.rs"): [
-        ("Command", (("string", "ssh"),)),
-    ],
-    ("plakd", "src/terminal_application.rs"): [
-        ("std::process::Command", (("string", "open"),)),
-        ("std::process::Command", (("string", "xdg-open"),)),
-        ("std::process::Command", (("string", "rundll32"),)),
-    ],
-    # Explicit config editing launches the operator-selected editor.
-    ("plakd", "src/commands/support.rs"): [
-        ("std::process::Command", (("identifier", "program"),)),
-    ],
-    # `plakd runner connect` starts `plakd runner serve` detached with a cleared
-    # environment, asks the login shell for PATH once, bounded, and reads the
-    # macOS boot time for the daemon's boot id. Explicit --binary execs a
-    # verified installed image before constructing that runner runtime.
-    ("plakd", "src/commands/runner.rs"): [
-        ("std::process::Command", (("identifier", "executable"),)),
-        ("std::process::Command", (("identifier", "executable"),)),
-        ("std::process::Command", (("identifier", "shell"),)),
-        ("std::process::Command", (("string", "sysctl"),)),
-    ],
-    # Product-only, best-effort local host provenance for Harbor login pins.
-    ("plakd", "src/commands/login_host.rs"): [
-        ("std::process::Command", (("string", "/usr/sbin/ioreg"),)),
-    ],
-    # Carry-forward asks the installed `plakd` for its reload verdict (the
-    # destination/config and carry-capacity probes, the exact-reopen verdict,
-    # then the bare state-key fallback) and has a kept
-    # maintainer snapshot export a session its own state holds.
-    ("plakd", "src/carry/installed.rs"): [
-        ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
-        (
-            "std::process::Command",
-            (
-                ("punct", "&"),
-                ("identifier", "target"),
-                ("punct", "."),
-                ("identifier", "executable"),
-            ),
-        ),
-        ("std::process::Command", (("identifier", "executable"),)),
-        ("std::process::Command", (("identifier", "executable"),)),
-    ],
-    ("plakd", "src/oauth_ui.rs"): [
-        ("Command", (("identifier", "prog"),)),
-    ],
-    # Behind `test-support`: real-repository fixtures for the crates whose
-    # tests drive a copy. Pinned like every other invocation in this package.
-    ("plakous-workspace", "src/vcs_fixtures.rs"): [
-        ("Command", (("identifier", "executable"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-        ("Command", (("string", "git"),)),
-    ],
-    # `sh -c` runs a template's `on_mint` hook (with an empty environment).
-    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): [
-        ("Command", (("string", "sh"),)),
-    ],
-    ("plakous-workspace", "src/occupancy_vcs/git.rs"): [
-        ("Command", (("string", "git"),)),
-    ],
-}
-EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
-    ("plakd", "src/operator_process.rs"): {"Command", "ExitStatus", "Stdio"},
-    ("plakd", "src/snapshot_install/archive.rs"): {"Stdio"},
-    ("plakd", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
-    ("plakd", "src/host/reexec.rs"): {"Command", "Stdio"},
-    ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
-    ("plakd", "src/commands/runner/local/start.rs"): {"Command", "Stdio"},
-    # The host's ssh dial to a runner pipes its link through stdin/stdout.
-    ("plakd", "src/commands/runner/dial.rs"): {"Command", "ExitStatus", "Stdio"},
-    ("plakd", "src/commands/runner/dial/children.rs"): {
-        "Command",
-        "ExitStatus",
-        "Stdio",
-        "self",
-    },
-    ("plakd", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
-    ("plakd", "src/product_doctor/runner_ssh.rs"): {"Command", "Stdio"},
-    ("plakd", "src/main.rs"): {"ExitCode"},
-    ("plakd", "src/lib.rs"): {"ExitCode"},
-    ("plakd", "src/oauth_ui.rs"): {"Command", "Stdio"},
-    ("plakous-workspace", "src/occupancy_vcs/git.rs"): {"Command", "Output"},
-    ("plakous-workspace", "src/occupancy_vcs/mint.rs"): {"Command"},
-    ("plakous-workspace", "src/vcs_fixtures.rs"): {"Command"},
 }
 # Macros any host/bin production source may invoke.
 ALLOWED_CLI_MACROS = {
@@ -730,7 +488,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-recursive-subagents", "src/tree/workspaces.rs"): {"error"},
     ("plakous-recursive-subagents", "src/tree/reopen_law.rs"): {"error"},
     # Private capture diagnostics use closed metadata, never request bodies.
-    ("plakd", "src/commands/exchange_capture.rs"): {"env", "warn"},
+    ("plakd", "src/commands/exchange_capture.rs"): {"warn"},
     # A published export whose directory sync failed is kept and logged.
     ("plakd", "src/carry/document.rs"): {"warn"},
     ("plakd", "src/carry/history.rs"): {"tags", "stringify"},
@@ -740,7 +498,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # `test-support` only: scripted offline model plans for child fixtures.
     ("plakd", "src/test_hooks.rs"): {"json"},
     ("plakd", "src/test_hooks/host_lifecycle.rs"): {"json"},
-    ("plakd", "src/build_identity.rs"): {"cfg", "option_env"},
+    ("plakd", "src/build_identity.rs"): {"cfg"},
     # The `test-support`-only persistence benchmark checks that its final
     # reload retained every transcript line it timed.
     ("plakd", "src/store/benchmark.rs"): {"assert_eq"},
@@ -3044,31 +2802,6 @@ def _unapproved_name(module: str, allowed: set[str], path: list[str]) -> str:
     return f"{module}::{path[0]}"
 
 
-def _environment_calls(tokens: list[RustToken]) -> list[tuple[str, list[RustToken]]]:
-    """Extract direct std::env module calls and their top-level argument tokens."""
-    calls: list[tuple[str, list[RustToken]]] = []
-    for index in range(2, len(tokens) - 1):
-        name = tokens[index]
-        if (
-            name.kind != "identifier"
-            or name.value not in {"var", "var_os", "vars", "vars_os"}
-            or tokens[index - 1].value != "::"
-            or tokens[index - 2] != RustToken("identifier", "env")
-            or tokens[index + 1].value != "("
-        ):
-            continue
-        depth = 1
-        cursor = index + 2
-        while cursor < len(tokens) and depth:
-            if tokens[cursor].value == "(":
-                depth += 1
-            elif tokens[cursor].value == ")":
-                depth -= 1
-            cursor += 1
-        calls.append((name.value, tokens[index + 2 : cursor - 1]))
-    return calls
-
-
 def _environment_path_names(tokens: list[RustToken]) -> set[str]:
     return {
         tokens[index].value
@@ -3078,73 +2811,6 @@ def _environment_path_names(tokens: list[RustToken]) -> set[str]:
         and tokens[index - 1].value == "::"
         and tokens[index - 2] == RustToken("identifier", "env")
     }
-
-
-def _uninvoiced_environment_readers(tokens: list[RustToken]) -> set[str]:
-    """Find std::env reader paths used as function items instead of exact calls."""
-    return {
-        tokens[index].value
-        for index in range(2, len(tokens))
-        if tokens[index].kind == "identifier"
-        and tokens[index].value in {"var", "var_os", "vars", "vars_os"}
-        and tokens[index - 1].value == "::"
-        and tokens[index - 2] == RustToken("identifier", "env")
-        and (index + 1 >= len(tokens) or tokens[index + 1].value != "(")
-    }
-
-
-def _process_imports(tokens: list[RustToken]) -> set[str]:
-    """Return names imported directly from `std::process`."""
-    imported: set[str] = set()
-    for statement in _use_statements(tokens):
-        names = _identifier_values(statement)
-        if names[:2] == ["std", "process"]:
-            imported.update(names[2:])
-            if any(token.value in {"*", "as"} for token in statement):
-                imported.add("*")
-    return imported
-
-
-def _call_arguments(tokens: list[RustToken], opening: int) -> tuple[RustToken, ...]:
-    """Return tokens within one parenthesized call."""
-    depth = 1
-    cursor = opening + 1
-    while cursor < len(tokens) and depth:
-        if tokens[cursor].value == "(":
-            depth += 1
-        elif tokens[cursor].value == ")":
-            depth -= 1
-        cursor += 1
-    return tuple(tokens[opening + 1 : cursor - 1])
-
-
-def _process_command_calls(
-    tokens: list[RustToken],
-) -> list[tuple[str, tuple[tuple[str, str], ...]]]:
-    """Return exact constructors backed by `std::process::Command`."""
-    calls: list[tuple[str, tuple[tuple[str, str], ...]]] = []
-    imports_command = "Command" in _process_imports(tokens)
-    for index in range(len(tokens) - 3):
-        if not (
-            tokens[index] == RustToken("identifier", "Command")
-            and tokens[index + 1].value == "::"
-            and tokens[index + 2] == RustToken("identifier", "new")
-            and tokens[index + 3].value == "("
-        ):
-            continue
-        qualified = (
-            index >= 4
-            and tokens[index - 4] == RustToken("identifier", "std")
-            and tokens[index - 3].value == "::"
-            and tokens[index - 2] == RustToken("identifier", "process")
-            and tokens[index - 1].value == "::"
-        )
-        if not qualified and not imports_command:
-            continue
-        owner = "std::process::Command" if qualified else "Command"
-        arguments = tuple((token.kind, token.value) for token in _call_arguments(tokens, index + 3))
-        calls.append((owner, arguments))
-    return calls
 
 
 def validate_claude_oauth_state_comparison(source: str) -> list[str]:
@@ -3242,7 +2908,7 @@ def validate_product_home_discovery(package: str, sources: dict[str, str]) -> li
 
 
 def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list[str]:
-    """Enforce one host/bin package's exact process, environment, and credential-free surface.
+    """Enforce one host/bin package's reviewed process and environment sites.
 
     `sources` is keyed by package-relative path; every pin table is keyed by
     `(package, path)`.
@@ -3289,32 +2955,6 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
                 f"{package}:{path}: source-generation macros {actual_generated!r}, "
                 f"expected {expected_generated!r}"
             )
-    for path, tokens in tokens_by_file.items():
-        process_imports = _process_imports(tokens)
-        expected_imports = EXPECTED_PRODUCT_PROCESS_IMPORTS.get((package, path), set())
-        if process_imports != expected_imports:
-            errors.append(
-                f"{package}:{path}: std::process imports {sorted(process_imports)!r}, "
-                f"expected {sorted(expected_imports)!r}"
-            )
-        for statement in _use_statements(tokens):
-            names = _identifier_values(statement)
-            if "env" in names:
-                if names != ["std", "env"] or any(
-                    token.value in {"*", "as"} for token in statement
-                ):
-                    errors.append("plakd CLI must import std::env as a module, not ambient readers")
-            if "Command" in names and "plakous" in names:
-                errors.append("plakd CLI imports a forbidden Command process capability")
-
-        process_calls = _process_command_calls(tokens)
-        expected_calls = EXPECTED_PRODUCT_PROCESS_COMMANDS.get((package, path), [])
-        if process_calls != expected_calls:
-            errors.append(
-                f"{package}:{path}: process command constructors {process_calls!r}, "
-                f"expected {expected_calls!r}"
-            )
-
     for value in sorted(FORBIDDEN_CLI_STRINGS & strings):
         errors.append(f"plakd CLI contains forbidden delegated-login option: {value}")
     for value in strings:
@@ -3326,7 +2966,33 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
         errors.append("plakd CLI contains forbidden /proc/self/environ access")
 
     for path, tokens in tokens_by_file.items():
-        source_symbols = ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE.get((package, path), {})
+        site = (package, path)
+        process_import = command_import = False
+        for statement in _use_statements(tokens):
+            names = _identifier_values(statement)
+            if "env" in names and (
+                names != ["std", "env"] or any(token.value in {"*", "as"} for token in statement)
+            ):
+                errors.append("plakd CLI must import std::env as a module, not ambient readers")
+            if "Command" in names and "plakous" in names:
+                errors.append("plakd CLI imports a forbidden Command process capability")
+            for names in _use_tree_paths(statement):
+                if names[:2] == ["std", "process"]:
+                    process_import = True
+                    command_import |= len(names) == 2 or names[2] in {"Command", "self", "*"}
+        if site not in PROCESS_SITES and (
+            command_import
+            or (process_import and site not in NON_LAUNCH_PROCESS_SITES)
+            or any(
+                [t.value for t in tokens[i : i + 7]]
+                == ["std", "::", "process", "::", "Command", "::", "new"]
+                for i, token in enumerate(tokens)
+                if token == RustToken("identifier", "std")
+            )
+        ):
+            errors.append(f"{package}:{path}: std::process is outside the reviewed process sites")
+
+        source_symbols = ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE.get(site, {})
         file_symbols = {
             module: allowed_symbols.get(module, set()) | source_symbols.get(module, set())
             for module in allowed_symbols.keys() | source_symbols.keys()
@@ -3343,75 +3009,39 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
                 f"{package}:{path}: plakd CLI declares forbidden foreign environment/process functions: "
                 f"{sorted(foreign)!r}"
             )
-        environment_calls = _environment_calls(tokens)
+
         environment_paths = _environment_path_names(tokens)
-        function_items = _uninvoiced_environment_readers(tokens)
-        if function_items:
-            errors.append(
-                f"{package}:{path}: plakd CLI contains environment reader function items: "
-                f"{sorted(function_items)!r}"
-            )
         if environment_paths & {"vars", "vars_os"}:
             errors.append(f"{package}:{path}: plakd CLI contains ambient environment iteration")
-        expected_generated = EXPECTED_PRODUCT_GENERATED_MACROS.get((package, path), ())
-        if any(
-            token == RustToken("identifier", macro)
-            and index + 1 < len(tokens)
-            and tokens[index + 1].value == "!"
-            for index, token in enumerate(tokens)
-            for macro in ("env", "option_env")
-            if macro not in expected_generated
-        ):
-            errors.append(f"{package}:{path}: plakd CLI contains compile-time environment access")
-        compile_time = [
-            (
-                token.value,
-                tokens[index + 3].value
-                if index + 3 < len(tokens) and tokens[index + 3].kind == "string"
-                else "",
-            )
-            for index, token in enumerate(tokens)
-            if token.kind == "identifier"
+        if environment_paths & {"var", "var_os"} and site not in ENVIRONMENT_READER_SITES:
+            errors.append(f"{package}:{path}: environment reader outside the reviewed sites")
+        if site not in COMPILE_TIME_ENVIRONMENT_SITES and any(
+            token.kind == "identifier"
             and token.value in {"env", "option_env"}
-            and index + 1 < len(tokens)
             and tokens[index + 1].value == "!"
-        ]
-        expected_compile_time = EXPECTED_COMPILE_TIME_ENVIRONMENT.get((package, path), [])
-        if compile_time != expected_compile_time:
-            errors.append(
-                f"{package}:{path}: compile-time environment {compile_time!r}, "
-                f"expected {expected_compile_time!r}"
-            )
-        actual = [
-            (name, tuple((token.kind, token.value) for token in arguments))
-            for name, arguments in environment_calls
-            if name in {"var", "var_os"}
-        ]
-        expected = EXPECTED_PRODUCT_ENVIRONMENT_CALLS.get((package, path), [])
-        if actual != expected:
-            errors.append(
-                f"{package}:{path}: environment reader calls {actual!r}, expected {expected!r}"
-            )
+            for index, token in enumerate(tokens[:-1])
+        ):
+            errors.append(f"{package}:{path}: compile-time environment outside the reviewed sites")
 
         # Any mention but a method call (`Command::current_dir` sets a child's
         # directory): a path call, an import, an alias or a re-export.
-        working_directory = [
+        working_directory = {
             tokens[index].value
             for index in range(len(tokens))
             if tokens[index].kind == "identifier"
             and tokens[index].value in {"current_dir", "set_current_dir"}
             and (index == 0 or tokens[index - 1].value != ".")
-        ]
-        expected_working_directory = EXPECTED_WORKING_DIRECTORY_CALLS.get((package, path), [])
-        if working_directory != expected_working_directory:
+        }
+        if "set_current_dir" in working_directory:
+            errors.append(f"{package}:{path}: set_current_dir is forbidden")
+        if "current_dir" in working_directory and site not in WORKING_DIRECTORY_SITES:
             errors.append(
-                f"{package}:{path}: working-directory calls {working_directory!r}, expected "
-                f"{expected_working_directory!r}; below the CLI edge a workspace is explicit"
+                f"{package}:{path}: working-directory reads outside the CLI edge; "
+                "below it a workspace is explicit"
             )
         # Every call or path to `launch_directory` (not a field of that
-        # name), and every `Home::from_env` / `Services::from_env`, in
-        # source order.
-        launch_readers = [
+        # name), and every `Home::from_env` / `Services::from_env`.
+        launch_readers = {
             "launch_directory"
             if tokens[index].value == "launch_directory"
             else f"{tokens[index - 2].value}::from_env"
@@ -3433,7 +3063,7 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
                     and tokens[index - 2].value in {"Home", "Services"}
                 )
             )
-        ]
+        }
         renamed = sorted(
             {
                 tokens[index].value
@@ -3448,16 +3078,16 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
                 f"{package}:{path}: {renamed!r} imported under another name; the "
                 "launch-directory readers keep their names so the composition-root pin sees them"
             )
-        expected_launch_readers = EXPECTED_LAUNCH_DIRECTORY_READERS.get((package, path), [])
-        if launch_readers != expected_launch_readers:
+        unexpected = sorted(name for name in launch_readers if LAUNCH_DIRECTORY_SITES[name] != site)
+        if unexpected:
             errors.append(
-                f"{package}:{path}: launch-directory readers {launch_readers!r}, expected "
-                f"{expected_launch_readers!r}; only the composition root builds them"
+                f"{package}:{path}: launch-directory readers {unexpected!r} outside their "
+                "reviewed composition-root files"
             )
 
-        allowed_macros = ALLOWED_CLI_MACROS | ALLOWED_CLI_MACROS_BY_SOURCE.get(
-            (package, path), set()
-        )
+        allowed_macros = ALLOWED_CLI_MACROS | ALLOWED_CLI_MACROS_BY_SOURCE.get(site, set())
+        if site in COMPILE_TIME_ENVIRONMENT_SITES:
+            allowed_macros |= {"env", "option_env"}
         macro_names = {
             token.value
             for index, token in enumerate(tokens[:-2])

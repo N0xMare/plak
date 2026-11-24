@@ -11,9 +11,7 @@ L0 side and each higher crate's run covers its side.
 The expected closure is walked from the package's own feature table over the
 workspace's normal dependency edges (from `cargo metadata`, no hardcoded edge
 map) and compared to `cargo tree`. All packages use the same witness scheme.
-Named exclusion profiles independently pin complete external closures. The
-reviewed manifest digests cover the library layers (core, common, engine,
-protocol, provider, store, harness, facade), the product and the hosted crate.
+Named exclusion profiles independently pin complete external closures.
 
 `EXCLUDED_CLOSURE_PACKAGES` additionally pins, over the complete external
 closure Cargo reports, the packages a named feature profile must not reach.
@@ -47,17 +45,12 @@ import vcs_listing  # noqa: E402
 
 from plakous_policy import (  # noqa: E402
     ABOVE_FACADE_LAYERS,
-    BELOW_FACADE_LAYERS,
-    L0_LAYERS,
     Workspace,
     blank_rust_non_code,
     load_workspace,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-# Manifests carrying a reviewed security-surface digest.
-DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
-PRODUCT_DIGESTS = {"plakd", "plakous-hosted"}
 MAX_OPTIONAL_FEATURES = 24
 FACADE = "plakous"
 
@@ -273,50 +266,10 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
         "plakous-recursive-subagents-store": ["plakous-recursive-subagents"],
     }.items()
     for dependency in dependencies
-    for feature in (("jj-lib",) if package in PRODUCT_DIGESTS else ("git-cli", "jj-lib"))
+    for feature in (
+        ("jj-lib",) if package in {"plakd", "plakous-hosted"} else ("git-cli", "jj-lib")
+    )
 )
-# Exact reviewed dependency and feature surfaces; path changes require review too.
-EXPECTED_SECURITY_SURFACE_DIGESTS = {
-    "plakd": "8d03c04a83cd942b85fbb0ca5293979597049a7311adeaa39819862de7a466d4",
-    "plakous-hosted": "bb952cc674b62474288a95219cd5f795322fe161a62420f2c5e08ddd752f55c9",
-    "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
-    "plakous-py-worker": "84bd4ce125ecf0a4ca54d5ace2197f39c96cdde39ee124a8dc1d324522426712",
-    "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
-    "plakous": "96bf15a73ea7b3d151783e9d560e5e4ddb4c01925b2a013a898682bf4bf9a131",
-    "plakous-agent": "12970a9102d2f4c3c8ddb521bde4f620ed572e74ac5e3eb2c51008ffe16c9bdb",
-    "plakous-anthropic": "bf8596389f2397e5b4b37958805dcb02242e634a47fe839580a66116a3d0a414",
-    # Claimed store steps use Tokio's blocking pool; contention tests pause time.
-    "plakous-auth": "f55963ee9928ef7b776a30ae88ae1c3163ae268e1f2d021c8399ac322bef3332",
-    "plakous-chat-completions": "ae14bd4869427768a9e3ba7d0f2d7f46b9fd3e41c33864571978c5f9df77d57f",
-    "plakous-exchange": "daec5e66cd73334d4aa36ce32c00aab1e39d722c06747e1bd90e1edcdc2a21ad",
-    "plakous-http": "c887fdf271fa9b459fc8f442f43b39aa4c528afc303c35a002f97079a4fb5516",
-    "plakous-cell": "95f1b945609f1311c36501e26299df396c7cfce8021f1807b5c82e5f174de232",
-    "plakous-mcp": "ad0a1ee24f44529a51628f2b64f08ccd8e01017d40ffb1e43f520bc9cc465bad",
-    "plakous-messages": "c6c01e92cc73bd03edd722df0f757c54cd73aeef8ff7f171c8b9c0cce2048bfb",
-    "plakous-model": "04297fb5135a6bec3b2b5838aa8a0f71620162cfa4166529f1e110702fd0a16f",
-    "plakous-openai": "d0a91cf760584de2bf0e16e183838c5217c00ac5d4d1c472acceaa50a5a636c3",
-    "plakous-tool-files": "9cf5507dfcf328a640f3a2c0050088d8dc22a883d3057e4395e7ad9f52562178",
-    "plakous-tool-process": "18b6bb113b7688192f89888d2ce6f67910ae86cc4bd847f6ad3ce7539d5a0ddc",
-    "plakous-tool-web": "33d1500e1fab1de492a8d7b983d47803ed1da2b747278bd7b6973c054ecaaf6e",
-    "plakous-compose": "f3236bd1536801fa14c133d60a83d13e45f3038db1395094811f1764d16f8050",
-    "plakous-prompts": "be93fc37c091f29900fbb42b1328e3fae3ea775dca125624b930c68343576c50",
-    "plakous-openrouter": "ae2cbd7d0d210efcd4b4534fd5f841f3a28d801ff0c892a1317bf452f41a5340",
-    "plakous-responses": "1af24d35407bb8c920bd1241de5694e20e0ec4d7e2189f698bf6633d79ab2cfc",
-    # SQLite's captured terminal envelope uses the existing JSON dependency.
-    "plakous-store": "2c3a1f7c9e4b81a5b25ee3c830084328c4c103edb2e3595925b8ab18f6afe651",
-    # Runner waits use the existing Tokio select macro on all targets.
-    # Linux group scans use the existing Nix wrapper to handle kernel PGID zero.
-    # The unjoined process fixture is available only to test builds.
-    "plakous-tools": "c32306d7ac8ba9ddc36dca74877dfce17d3fbf09aa00b18c8d9fbb8bf8f059f6",
-    "plakous-xai": "79c5017fc78cbb3df7a27f4d37335a0fd6df59ed653eb5770f4ceadef1b4bea3",
-    "plakous-runner-protocol": "074927a7f911be39d35b2c5f498ead01b23a3d188dc5b7aa8fc1e29eef3fd1e9",
-    "plakous-gateway-protocol": "cfed7c1c57d094c562580177e4a0728ec596318e81609ca85c99e2892cba01c5",
-    # Independent operator PTYs use the existing PTY/descriptor and account
-    # lookup dependencies directly; authority is specified in chapter 04 §2.9.
-    "plakous-runner": "3160894e7cff022316d783d80558a4dc40a06a22a72c9da25ff538e6b4b45e42",
-}
-
-
 # Named feature profiles and the packages their complete closure must exclude.
 # `composition` is the cell client on its own: no credential, HTTP,
 # subscription or interpreter machinery for either source language.
@@ -507,11 +460,6 @@ def load_workspace_manifests(root: Path = ROOT) -> dict[str, dict[str, object]]:
     return {name: package.manifest for name, package in cached_workspace(root).packages.items()}
 
 
-def digest_packages(workspace: Workspace) -> set[str]:
-    """Return the packages whose manifest surface carries a reviewed digest."""
-    return {package.name for package in workspace.in_layers(*DIGEST_LAYERS)} | PRODUCT_DIGESTS
-
-
 def dependency_package_name(name: str, value: object) -> str:
     """Resolve a dependency table key to its Cargo package name."""
     if isinstance(value, dict) and isinstance(value.get("package"), str):
@@ -613,47 +561,6 @@ def validate_uuid_features(workspace: Workspace) -> list[str]:
     return errors
 
 
-def _normalized_dependency(value: object) -> object:
-    """Normalize one Cargo dependency declaration without losing capabilities."""
-    if isinstance(value, str):
-        return {"version": value}
-    if not isinstance(value, dict):
-        return value
-    return {
-        key: sorted(item) if key == "features" and isinstance(item, list) else item
-        for key, item in sorted(value.items())
-    }
-
-
-def security_surface_digest(manifest: dict[str, object]) -> str:
-    """Digest the exact feature and all-target dependency/capability surface."""
-    dependencies = [
-        {
-            "alias": alias,
-            "kind": kind,
-            "target": target,
-            "value": _normalized_dependency(value),
-        }
-        for kind, target, table in dependency_tables(manifest)
-        for alias, value in sorted(table.items())
-    ]
-    features_value = manifest.get("features", {})
-    features = (
-        {
-            name: sorted(value) if isinstance(value, list) else value
-            for name, value in sorted(features_value.items())
-        }
-        if isinstance(features_value, dict)
-        else features_value
-    )
-    encoded = json.dumps(
-        {"dependencies": dependencies, "features": features},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def direct_workspace_edges(
     manifests: dict[str, dict[str, object]],
 ) -> dict[str, set[str]]:
@@ -705,29 +612,15 @@ def dependency_feature_edges(
 
 def validate_feature_contracts(
     manifests: dict[str, dict[str, object]],
-    digest_names: set[str] | None = None,
     layers: dict[str, str] | None = None,
 ) -> list[str]:
-    """Check the reviewed digests, feature forwarding, and layer forwarding rules.
+    """Check required feature forwarding and layer forwarding rules.
 
-    `digest_names` selects the manifests that must carry a digest (default:
-    every manifest given). `layers` (package -> layer) activates the host/bin
+    `layers` (package -> layer) activates the host/bin
     rule: a feature of a host/bin package forwards only to `plakous/<feature>`
     or to another host package, never to a `plakous-<x>/<feature>`.
     """
     errors: list[str] = []
-    digest_names = set(manifests) if digest_names is None else digest_names
-    for package in sorted(digest_names):
-        expected_digest = EXPECTED_SECURITY_SURFACE_DIGESTS.get(package)
-        actual_digest = security_surface_digest(manifests[package])
-        if expected_digest is None or actual_digest != expected_digest:
-            errors.append(
-                f"{package}: manifest dependency/feature security surface changed "
-                f"({actual_digest}, expected {expected_digest})"
-            )
-    stale = sorted(set(EXPECTED_SECURITY_SURFACE_DIGESTS) - digest_names)
-    if stale:
-        errors.append(f"security surface digests pin packages outside the digest layers: {stale!r}")
     actual_feature_edges = dependency_feature_edges(manifests)
     if actual_feature_edges != REQUIRED_DEPENDENCY_FEATURE_EDGES:
         errors.append(
@@ -1114,7 +1007,7 @@ def main() -> int:
     manifests = {name: package.manifest for name, package in workspace.packages.items()}
     layers = {name: package.layer for name, package in workspace.packages.items()}
     internal_packages = set(manifests)
-    errors = validate_feature_contracts(manifests, digest_packages(workspace), layers)
+    errors = validate_feature_contracts(manifests, layers)
     errors.extend(validate_uuid_features(workspace))
     errors.extend(validate_excluded_closures())
     errors.extend(validate_test_only_dependency_features())

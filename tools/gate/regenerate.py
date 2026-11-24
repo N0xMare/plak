@@ -9,10 +9,9 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-import check_features
 import nextest_layout
 
-ROOT = check_features.ROOT
+ROOT = Path(__file__).resolve().parents[2]
 HOSTED = ROOT / "crates/hosting/hosted"
 HOSTED_TEST = ["cargo", "test", "--locked", "--offline", "-p", "plakous-hosted", "--lib"]
 PROMPT_TABLES = {
@@ -44,38 +43,6 @@ def replace_block(source: str, begin: str, end: str, render: Callable[[str], str
 def write_if_changed(path: Path, updated: str) -> None:
     if updated != path.read_text():
         path.write_text(updated)
-
-
-def manifest_digest_rows(rows: str, digests: dict[str, str]) -> str:
-    pending = dict(digests)
-    pattern = r'(?m)^((?:    # [^\n]*\n)*)    "([a-z0-9-]+)": "[0-9a-f]{64}",\n'
-
-    def update(match: re.Match[str]) -> str:
-        if match[2] not in pending:
-            return ""
-        return f'{match[1]}    "{match[2]}": "{pending.pop(match[2])}",\n'
-
-    updated = re.sub(pattern, update, rows)
-    return updated + "".join(
-        f'    "{name}": "{digest}",\n' for name, digest in sorted(pending.items())
-    )
-
-
-def manifests() -> None:
-    workspace = check_features.load_workspace(ROOT)
-    digests = {
-        name: check_features.security_surface_digest(workspace.packages[name].manifest)
-        for name in check_features.digest_packages(workspace)
-    }
-    path = ROOT / "tools/gate/check_features.py"
-    source = path.read_text()
-    updated = replace_block(
-        source,
-        "EXPECTED_SECURITY_SURFACE_DIGESTS = {",
-        "}",
-        lambda rows: manifest_digest_rows(rows, digests),
-    )
-    write_if_changed(path, updated)
 
 
 def bindings() -> None:
@@ -128,7 +95,6 @@ def prompts() -> None:
 
 def main() -> None:
     generators = {
-        "manifests": manifests,
         "bindings": bindings,
         "nextest": nextest,
         "prompts": prompts,

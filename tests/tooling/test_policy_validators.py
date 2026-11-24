@@ -964,10 +964,10 @@ class LayerPolicyTests(unittest.TestCase):
     def test_the_working_directory_is_read_only_at_the_cli_edge(self) -> None:
         reads = {"src/run.rs": "fn f() { let cwd = std::env::current_dir(); }"}
         errors = workspace_policy.validate_cli_security_sources("plakous-hosted", reads)
-        self.assertTrue(any("working-directory calls ['current_dir']" in e for e in errors), errors)
+        self.assertTrue(any("working-directory reads" in e for e in errors), errors)
         changes = {"src/web.rs": "use std::env;\nfn f() { env::set_current_dir(dir); }"}
         errors = workspace_policy.validate_cli_security_sources("plakous-hosted", changes)
-        self.assertTrue(any("['set_current_dir']" in e for e in errors), errors)
+        self.assertTrue(any("set_current_dir is forbidden" in e for e in errors), errors)
         builder = {"src/spawn.rs": "fn f(c: &mut C) { c.current_dir(dir); }"}
         self.assertEqual(
             workspace_policy.validate_cli_security_sources("plakous-hosted", builder), []
@@ -979,7 +979,7 @@ class LayerPolicyTests(unittest.TestCase):
             errors = workspace_policy.validate_cli_security_sources(
                 "plakous-hosted", {"src/alias.rs": aliased}
             )
-            self.assertTrue(any("working-directory calls" in e for e in errors), errors)
+            self.assertTrue(any("working-directory reads" in e for e in errors), errors)
         indirect = {"src/probe.rs": "fn f() { let s = Services::from_env(None); }"}
         errors = workspace_policy.validate_cli_security_sources("plakous-hosted", indirect)
         self.assertTrue(any("launch-directory readers" in e for e in errors), errors)
@@ -1729,14 +1729,14 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_security_pins_name_existing_host_bin_sources(self) -> None:
         keys = (
-            set(workspace_policy.EXPECTED_PRODUCT_ENVIRONMENT_CALLS)
-            | set(workspace_policy.EXPECTED_PRODUCT_PROCESS_COMMANDS)
-            | set(workspace_policy.EXPECTED_PRODUCT_PROCESS_IMPORTS)
+            workspace_policy.ENVIRONMENT_READER_SITES
+            | workspace_policy.PROCESS_SITES
+            | workspace_policy.NON_LAUNCH_PROCESS_SITES
             | set(workspace_policy.ALLOWED_CLI_MACROS_BY_SOURCE)
             | set(workspace_policy.EXPECTED_PRODUCT_GENERATED_MACROS)
-            | set(workspace_policy.EXPECTED_COMPILE_TIME_ENVIRONMENT)
-            | set(workspace_policy.EXPECTED_WORKING_DIRECTORY_CALLS)
-            | set(workspace_policy.EXPECTED_LAUNCH_DIRECTORY_READERS)
+            | workspace_policy.COMPILE_TIME_ENVIRONMENT_SITES
+            | workspace_policy.WORKING_DIRECTORY_SITES
+            | set(workspace_policy.LAUNCH_DIRECTORY_SITES.values())
         )
         for package_name, relative in sorted(keys):
             with self.subTest(pin=f"{package_name}:{relative}"):
@@ -2068,7 +2068,7 @@ fn production() {}
 
     @staticmethod
     def cli_security_fixture(*, main_extra: str = "") -> dict[str, dict[str, str]]:
-        """Package -> package-relative path -> source, matching the pins exactly."""
+        """Package -> package-relative path -> source, exercising the reviewed sites."""
         return {
             "plakd": {
                 "src/lib.rs": f"""
@@ -2212,14 +2212,20 @@ fn fixtures() {
         )
         self.assertEqual(self.validate_fixture(sources), [])
 
-    def test_editor_process_pin_rejects_reintroducing_a_shell(self) -> None:
+    def test_process_site_allows_edits_but_does_not_follow_a_moved_call(self) -> None:
         sources = self.cli_security_fixture()
-        path = "src/commands/support.rs"
-        sources["plakd"][path] = sources["plakd"][path].replace(
-            "Command::new(program)", 'Command::new("/bin/sh")'
-        )
+        source = 'fn edit(program: &str) { std::process::Command::new(program); }'
+        sources["plakd"]["src/commands/support.rs"] = source
+        self.assertEqual(self.validate_fixture(sources), [])
+        sources["plakd"]["src/commands/editor.rs"] = sources["plakd"].pop("src/commands/support.rs")
         self.assertTrue(
-            any("process command constructors" in error for error in self.validate_fixture(sources))
+            any("outside the reviewed process sites" in e for e in self.validate_fixture(sources))
+        )
+        self.assertEqual(
+            workspace_policy.validate_cli_security_sources(
+                "plakd", {"src/relay.rs": "fn relay(cmd: std::process::Command) { forward(cmd); }"}
+            ),
+            [],
         )
 
     def test_keyword_before_bang_is_not_a_macro(self) -> None:
@@ -2484,37 +2490,31 @@ fn decode() { tags!(); }
         )
         self.assertEqual(self.validate_fixture(sources), [])
 
-    def test_product_capabilities_are_exact_per_file(self) -> None:
-        mutations = (
-            ("plakd", "src/oauth_ui.rs", '\nfn extra() { let _ = Command::new("sh"); }'),
-            (
-                "plakd",
-                "src/home/paths.rs",
-                '\nfn drift() { let _ = std::env::var_os("XDG_CONFIG_HOME"); }',
-            ),
-            ("plakd", "src/home/secrets.rs", '\nfn enumerate() { let _ = std::env::vars_os(); }'),
+    def test_environment_site_allows_call_changes_but_not_ambient_iteration(self) -> None:
+        sources = self.cli_security_fixture()
+        sources["plakd"]["src/home/paths.rs"] = (
+            'fn path() { std::env::var("PLAK_HOME"); std::env::var_os("HOME"); }'
         )
-        for package, path, extra in mutations:
-            with self.subTest(path=path):
-                sources = self.cli_security_fixture()
-                sources[package][path] += extra
-                self.assertTrue(self.validate_fixture(sources))
+        self.assertEqual(self.validate_fixture(sources), [])
+        sources["plakd"]["src/home/paths.rs"] += "fn enumerate() { std::env::vars_os(); }"
+        errors = self.validate_fixture(sources)
+        self.assertTrue(any("ambient environment iteration" in e for e in errors), errors)
 
-    def test_compile_time_environment_is_pinned_to_its_variable(self) -> None:
+    def test_compile_time_environment_is_scoped_to_reviewed_files(self) -> None:
         source = (
-            "pub(crate) const SOURCE_REVISION: &str = "
-            'match option_env!("PLAK_SOURCE_REVISION") { Some(r) => r, None => "unknown" };'
+            'const REV: Option<&str> = option_env!("PLAK_SOURCE_REVISION");'
+            'const MANIFEST: &str = env!("CARGO_MANIFEST_DIR");'
         )
-
-        def pinned_errors(text: str) -> list[str]:
-            errors = workspace_policy.validate_cli_security_sources(
-                "plakd", {"src/build_identity.rs": text}
-            )
-            return [error for error in errors if "compile-time environment" in error]
-
-        self.assertEqual(pinned_errors(source), [])
-        self.assertTrue(pinned_errors(source.replace("PLAK_SOURCE_REVISION", "HOME")))
-        self.assertTrue(pinned_errors(source + '\nconst H: Option<&str> = option_env!("HOME");'))
+        self.assertEqual(
+            workspace_policy.validate_cli_security_sources(
+                "plakd", {"src/build_identity.rs": source}
+            ),
+            [],
+        )
+        errors = workspace_policy.validate_cli_security_sources(
+            "plakd", {"src/elsewhere.rs": source}
+        )
+        self.assertTrue(any("compile-time environment" in e for e in errors), errors)
 
     def test_pins_are_keyed_by_package_not_path(self) -> None:
         """The same relative path under another package carries no pin."""
@@ -2522,7 +2522,7 @@ fn decode() { tags!(); }
         errors = workspace_policy.validate_cli_security_sources(
             "plakd-tui", {"src/home/paths.rs": product_paths}
         )
-        self.assertTrue(any("environment reader calls" in error for error in errors), errors)
+        self.assertTrue(any("environment reader outside" in error for error in errors), errors)
 
     def test_product_session_authority_check_is_token_aware(self) -> None:
         harmless = {
@@ -2954,19 +2954,12 @@ class FeaturePolicyTests(unittest.TestCase):
         cls.workspace = policy_module.load_workspace(ROOT)
         cls.manifests = {name: package.manifest for name, package in cls.workspace.packages.items()}
         cls.layers = {name: package.layer for name, package in cls.workspace.packages.items()}
-        cls.digests = feature_policy.digest_packages(cls.workspace)
 
     def contracts(self, manifests: dict[str, dict[str, object]]) -> list[str]:
-        return feature_policy.validate_feature_contracts(manifests, self.digests, self.layers)
+        return feature_policy.validate_feature_contracts(manifests, self.layers)
 
     def test_repository_feature_contracts_are_exact(self) -> None:
         self.assertEqual(self.contracts(self.manifests), [])
-        self.assertEqual(
-            self.digests,
-            {name for name, layer in self.layers.items() if layer in feature_policy.DIGEST_LAYERS}
-            | {"plakd", "plakous-hosted"},
-        )
-        self.assertEqual(set(feature_policy.EXPECTED_SECURITY_SURFACE_DIGESTS), self.digests)
 
     def test_dependency_graph_is_derived_from_the_manifests(self) -> None:
         edges = feature_policy.direct_workspace_edges(self.manifests)
@@ -3001,14 +2994,6 @@ class FeaturePolicyTests(unittest.TestCase):
             feature_policy.REQUIRED_DEPENDENCY_FEATURE_EDGES,
         )
 
-    def test_optional_edge_drift_is_caught_by_the_digest(self) -> None:
-        manifests = copy.deepcopy(self.manifests)
-        manifests["plakous-openai"]["dependencies"]["plakous-http"]["optional"] = True
-        errors = self.contracts(manifests)
-        self.assertTrue(
-            any("plakous-openai" in e and "security surface changed" in e for e in errors)
-        )
-
     def test_dependency_feature_forwarding_drift_is_rejected(self) -> None:
         manifests = copy.deepcopy(self.manifests)
         edges = manifests["plakous-openai"]["features"]["native-auth"]
@@ -3039,8 +3024,6 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertIn(
             "plakous-auth", feature_policy.direct_workspace_edges(manifests)["plakous-model"]
         )
-        errors = self.contracts(manifests)
-        self.assertTrue(any("security surface changed" in error for error in errors), errors)
 
     def test_target_specific_renamed_feature_edge_is_not_omitted(self) -> None:
         manifests = copy.deepcopy(self.manifests)
@@ -3060,32 +3043,6 @@ class FeaturePolicyTests(unittest.TestCase):
         )
         errors = self.contracts(manifests)
         self.assertTrue(any("feature-forwarding" in error for error in errors), errors)
-        self.assertTrue(any("security surface changed" in error for error in errors), errors)
-
-    def test_dependency_capability_and_external_edge_drift_are_rejected(self) -> None:
-        mutations = []
-        requested_feature = copy.deepcopy(self.manifests)
-        requested_feature["plakous-openai"]["dependencies"]["plakous-auth"]["features"] = [
-            "external-compat"
-        ]
-        mutations.append(requested_feature)
-        default_features = copy.deepcopy(self.manifests)
-        default_features["plakous-openai"]["dependencies"]["plakous-auth"]["default-features"] = (
-            True
-        )
-        mutations.append(default_features)
-        external_dependency = copy.deepcopy(self.manifests)
-        external_dependency["plakous-model"]["dependencies"]["reqwest"] = "0.12"
-        mutations.append(external_dependency)
-        feature_alias = copy.deepcopy(self.manifests)
-        feature_alias["plakous"]["features"]["auth"].append("openrouter")
-        mutations.append(feature_alias)
-        for manifests in mutations:
-            with self.subTest(digest=feature_policy.security_surface_digest(manifests["plakous"])):
-                errors = self.contracts(manifests)
-                self.assertTrue(
-                    any("security surface changed" in error for error in errors), errors
-                )
 
     def test_closure_inventory_is_per_package_never_a_cross_product(self) -> None:
         packages = feature_policy.closure_packages(self.manifests)

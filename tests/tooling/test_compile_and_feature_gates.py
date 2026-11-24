@@ -153,7 +153,6 @@ class FeatureClosureCacheTests(unittest.TestCase):
                 mock.patch.object(
                     feature_gate, "cached_workspace", return_value=mock.Mock(packages={})
                 ),
-                mock.patch.object(feature_gate, "digest_packages", return_value=set()),
                 mock.patch.object(feature_gate, "validate_feature_contracts", return_value=[]),
                 mock.patch.object(feature_gate, "validate_excluded_closures", return_value=[]),
                 mock.patch.object(

@@ -362,17 +362,14 @@ override accepts 1 through 30 000 milliseconds and no more.
 Those three seams on the facade, cell and agent are hidden from the 2n+3
 closure witnesses, the same way `test-clock` is. `plakd/test-support` and
 `plakous-py-worker/test-hooks` stay in their package witnesses.
-Imported environment readers, including aliases and
-function items, are inventoried as well as direct calls. The process working
-directory is pinned the same way: `std::env::current_dir` is read only at
-the CLI edge (`shell/home.rs`, where the launch directory becomes the product
-context, and `build_identity.rs`, for a relative `argv[0]`) and in
-`plakous-workspace`'s fence-path normalization, and `set_current_dir` is never
-called in a host/bin package (chapter 02 §2.1). Any mention of either that is
-not a method call counts, so an import, an alias or a braced rename is pinned
-too, and the constructors that read the launch directory are pinned to the
-composition root: `Services::from_env` is called only in `lib.rs` and
-`Home::from_env` only by `Services`.
+The host/bin authority check uses package-relative file lists for runtime and
+compile-time environment reads, process imports and construction, working-directory
+reads and launch-directory constructors. It does not match call counts, order
+or arguments. Ambient environment iteration and changing the process working
+directory remain forbidden. The CLI edge reads the launch directory; the
+build-identity check and workspace fence may read the working directory for
+path resolution. Only the composition root calls `Services::from_env`, and
+only `Services` calls `Home::from_env`.
 
 Test-seam features (`test-support`, `test-hooks`,
 `fault-injection`, `scripted-code-mode-enrolment`)
@@ -2188,8 +2185,7 @@ compile unless `js`, `rng-getrandom` or `rng-rand` is enabled. `plakous-model`
 enables `uuid`'s `js` feature only as a target dependency for that cfg. `js`
 is uuid's WebCrypto backend and does not use `getrandom` there, so the tree
 sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
-not link `wasm-bindgen`. The target-dependency table is part of the reviewed
-manifest security-surface digest.
+not link `wasm-bindgen`.
 
 `plakous-gateway-protocol` is a published-internal common crate with empty
 defaults, no I/O and no product caller yet. Its normal closure is `base64`,
@@ -2389,13 +2385,8 @@ the spec or user guide.
 Credentials, authorization headers, private session data, and unsanitized
 provider fixtures are never committed.
 
-The feature-security digests in `tools/gate/check_features.py` are reviewed
-manifest-surface pins, not values to refresh mechanically. After an intentional
-Cargo feature or dependency change: run the checker, review the exact manifest
-diff, the internal edges, the feature forwarding, and the facade exposure, then
-update only the reported changed digest entries and rerun the checker with its
-structure unit tests. A digest change is never by itself evidence that the new
-surface is acceptable.
+Review feature and dependency changes against the manifest diff, internal
+edges, feature forwarding and facade exposure; run the structure checks.
 
 The public product is server/operator-only; no application client is packaged,
 installed or published. Neutral protocol libraries remain published-internal,

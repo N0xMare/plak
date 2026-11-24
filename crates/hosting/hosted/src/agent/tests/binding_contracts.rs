@@ -126,12 +126,23 @@ fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
     // block without changing its sharing does not move it in the fixture.
     let names = rows.keys().cloned().collect::<BTreeSet<_>>();
     let mut fixture = json!({});
+    let mut registry_entries = serde_json::Map::new();
     for field in INTERNED_FIELDS {
         let mut table = serde_json::Map::new();
         let mut keys_by_block = BTreeMap::<_, String>::new();
         for name in &names {
             let row = rows.get_mut(name).unwrap();
-            let block = row[field].take();
+            let mut block = row[field].take();
+            if field == "registry" {
+                for entry in block.as_array_mut().ok_or("expected registry entries")? {
+                    let key = plakous::model::sha256_hex(&[&serde_json::to_vec(entry)?]);
+                    let body = std::mem::replace(entry, Value::String(key.clone()));
+                    let stored = registry_entries.entry(key).or_insert_with(|| body.clone());
+                    if *stored != body {
+                        return Err("different registry entries claim the same content key".into());
+                    }
+                }
+            }
             let key = match keys_by_block.entry(serde_json::to_vec(&block)?) {
                 Entry::Occupied(entry) => entry.get().clone(),
                 Entry::Vacant(entry) => {
@@ -148,6 +159,7 @@ fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
         }
         fixture[field] = Value::Object(table);
     }
+    fixture["registry_entries"] = Value::Object(registry_entries);
     fixture["rows"] = matrix;
     Ok(fixture)
 }
@@ -157,6 +169,9 @@ fn expand_fixture(mut fixture: Value) -> TestResult<Value> {
     let rows = matrix
         .as_object_mut()
         .ok_or("missing binding fixture rows")?;
+    let registry_entries = fixture["registry_entries"]
+        .as_object()
+        .ok_or("missing binding fixture registry entries")?;
     for field in INTERNED_FIELDS {
         let table = fixture[field]
             .as_object()
@@ -171,6 +186,15 @@ fn expand_fixture(mut fixture: Value) -> TestResult<Value> {
                 .ok_or_else(|| format!("{name}: unknown {field} fixture key {key}"))?;
             unused.remove(key);
             row[field] = block.clone();
+            if field == "registry" {
+                for reference in row[field].as_array_mut().ok_or("expected registry keys")? {
+                    let entry_key = reference.as_str().ok_or("expected a registry key")?;
+                    *reference = registry_entries
+                        .get(entry_key)
+                        .ok_or_else(|| format!("{name}: unknown registry entry {entry_key}"))?
+                        .clone();
+                }
+            }
         }
         if !unused.is_empty() {
             return Err(format!("unused {field} fixture keys: {unused:?}").into());
