@@ -216,8 +216,11 @@ impl SessionCleanup {
                         .entry(row.pid)
                         .or_insert_with(|| row.started.clone());
                 }
+                // Darwin cannot read a zombie's SID, so its row is no setsid
+                // evidence. Linux reports a zombie's real SID.
                 if self.seen.get(&row.pid) == Some(&row.started)
                     && row.session != self.leader.session
+                    && !(row.zombie && row.session.is_empty())
                 {
                     self.escaped.insert(row.pid, row.started.clone());
                 }
@@ -800,6 +803,23 @@ mod tests {
         cleanup.observe(&[row(10, 1, "10"), row(11, 10, "10")]);
         cleanup.observe(&[row(10, 1, "10"), row(11, 10, "11")]);
         assert!(!cleanup.escaped.is_empty());
+    }
+
+    #[test]
+    fn operator_cleanup_zombie_without_a_session_is_not_an_escape() {
+        let mut cleanup = SessionCleanup::new(row(10, 1, "10"));
+        cleanup.observe(&[row(10, 1, "10"), row(11, 10, "10")]);
+        let mut leader = row(10, 1, "");
+        leader.zombie = true;
+        let mut job = row(11, 10, "");
+        job.zombie = true;
+        cleanup.observe(&[leader, job]);
+        assert!(cleanup.escaped.is_empty());
+        // A zombie whose scan reports a foreign SID is still an observed escape.
+        let mut escaped = row(11, 10, "11");
+        escaped.zombie = true;
+        cleanup.observe(&[row(10, 1, "10"), escaped]);
+        assert!(cleanup.escaped.contains_key(&11));
     }
 
     #[test]
