@@ -643,7 +643,10 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
         (ModelErrorKind::Policy, false),
         (ModelErrorKind::Protocol, true),
     ] {
-        for close_first in [false, true] {
+        for (close_first, committed_handoff) in [(false, false), (true, false), (false, true)] {
+            if committed_handoff && !publication_fails {
+                continue;
+            }
             let root = tempfile::tempdir().unwrap();
             let runtime = runtime(root.path());
             let evidence = root.path().join("evidence.jsonl");
@@ -866,6 +869,37 @@ async fn submitted_child_uses_authoritative_failed_terminal_instead_of_channel_s
                     .await
                     .is_ok()
             );
+            if committed_handoff {
+                let pause = runtime.pause_step_admissions().await.unwrap();
+                pause.begin_committed_handoff();
+                super::waiter::turn_watch(
+                    TurnWaiterRegistration::register(runtime.driver(), &child)
+                        .await
+                        .unwrap(),
+                    runtime.live.clone(),
+                    None,
+                    Some(feed),
+                    handle,
+                )
+                .await;
+                // An unpublished terminal during committed release belongs
+                // to the successor, even without a durable handoff row.
+                assert_eq!(service.jobs()[0].status, plakous::tools::JobStatus::Running);
+                assert!(runtime.live.lock().await.contains_key(&child));
+                runtime
+                    .read(|tree| {
+                        let attempt = tree.attempt(&child).unwrap();
+                        assert_eq!(attempt.status, AttemptStatus::Submitted);
+                        assert!(attempt.failure.is_none());
+                        assert!(tree.loss_continuation(&child).is_none());
+                    })
+                    .unwrap();
+                service
+                    .stop(job, plakous::tools::JobStopReason::SessionExit)
+                    .unwrap();
+                retire_live_child(runtime.driver(), &runtime.live, &child, turn).await;
+                continue;
+            }
             watcher.watch(
                 TurnWaiterRegistration::register(runtime.driver(), &child)
                     .await

@@ -36,7 +36,6 @@ impl ProductTopologyRuntime {
             driver,
             closed: AtomicBool::new(false),
             step_paused: AtomicBool::new(false),
-            step_handoff_committed: AtomicBool::new(false),
             step_released: tokio::sync::Notify::new(),
             step_recovery_due: AtomicBool::new(false),
             recycling: Mutex::new(HashSet::new()),

@@ -2,6 +2,7 @@
 
 use super::step_activity;
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One tree with its store and its VCS port: the engine every tree mutation
 /// runs on. [`Self::mutate`] queues one writer and applies; the effects the
@@ -52,6 +53,8 @@ pub struct TreeDriver {
     root_agent_id: Arc<str>,
     /// The shutdown of the host that attached this tree last.
     host_shutdown: Arc<Mutex<Option<HostShutdown>>>,
+    /// Shared with waiters that can outlive the hub's tree registration.
+    step_handoff_committed: Arc<AtomicBool>,
     /// This driver's custody of the tree in its store: every save presents
     /// its claim, which the store proves in the write's own transaction. It
     /// is released when the last clone of this driver drops, so every writer
@@ -163,12 +166,25 @@ impl TreeDriver {
             storage_parking: Arc::default(),
             root_agent_id,
             host_shutdown: Arc::default(),
+            step_handoff_committed: Arc::default(),
             custody: Arc::new(custody),
             publication_owner: None,
             capacity_retry_interval: std::time::Duration::from_secs(5),
             checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
             loss_noticed: Arc::default(),
         }
+    }
+
+    /// Whether the source is releasing this held tree after a committed
+    /// same-key upgrade, independently of its hub registration.
+    #[must_use]
+    pub fn step_handoff_committed(&self) -> bool {
+        self.step_handoff_committed.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_step_handoff_committed(&self, committed: bool) {
+        self.step_handoff_committed
+            .store(committed, Ordering::Release);
     }
 
     /// Reclaims only acknowledged, settled dormant copies. Size probes run on

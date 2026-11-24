@@ -254,8 +254,8 @@ async fn interrupt_root(tree_id: &str, stop: ChildStop) -> Result<usize, String>
         }
         ChildStop::Signal | ChildStop::Join => crate::agent_tree::InterruptCause::Stopped,
     };
-    let preserve_handoffs =
-        matches!(stop, ChildStop::HandoffCancelCascade) && runtime.step_handoff_committed();
+    let preserve_handoffs = matches!(stop, ChildStop::HandoffCancelCascade)
+        && runtime.driver().step_handoff_committed();
     let mut interrupted = runtime
         .mutate_then_emit(false, move |tree| {
             let interrupted = if preserve_handoffs {

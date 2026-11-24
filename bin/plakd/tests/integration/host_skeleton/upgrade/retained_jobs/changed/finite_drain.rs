@@ -2,7 +2,7 @@
 
 use super::*;
 use plakd::store::session_records::{SessionRecordStore as _, SqliteSessionStore};
-use plakous_offline_crash_harness::ledger_signature::{inspect_jobs, inspect_ledger};
+use plakous_offline_crash_harness::ledger_signature::inspect_jobs;
 use plakous_recursive_subagents::tree::{ContinuationCause, ProductAgentTree, TreeStore as _};
 use plakous_recursive_subagents_store::SqliteTreeStore;
 use std::fs::OpenOptions;
@@ -268,11 +268,11 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let paths = plakd::home::paths::PlakPaths::explicit(sut.fixture.home());
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let before = child_locator(&store, child);
-    release_continuation(&sut.fixture);
-    // The only dispatched effect of the resumed turn is Wait. Give it
-    // ownership of the observation before letting the shell exit.
-    wait_for_child_effect(&paths.runtime_database(), before);
     sut.finish_job(child.original);
+    // Wait can return immediately if a process notice already consumed the
+    // terminal. Use the retained terminal, not a transient dispatch state.
+    wait_retained_terminal(&paths.runtime_database(), before);
+    release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
     root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
     assert_eq!(
@@ -336,24 +336,6 @@ fn wait_retained_terminal(database: &Path, locator: plakous::sessions::SessionLo
         assert!(
             Instant::now() < deadline,
             "the original runner's terminal did not reach the resumed branch"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn wait_for_child_effect(database: &Path, locator: plakous::sessions::SessionLocator) {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if inspect_ledger(database, locator, "child wait")
-            .unwrap()
-            .iter()
-            .any(|op| op.kind == "effect" && op.state == "dispatched")
-        {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the child did not dispatch its wait"
         );
         std::thread::sleep(Duration::from_millis(10));
     }

@@ -4355,6 +4355,11 @@ with its turn still running; the next host continues it once`) and exits
 cleanly. A plain quit that cuts a child short reports the release as failed.
 The next open follows any durable child handoff already recorded at the
 same-key upgrade point; otherwise it reads that child as a loss.
+During a committed same-key release, a joined child's old waiter that receives
+`RecoveryRequired` leaves recovery to the next owner. The source does not
+recycle the child or stop its promoted jobs as attempt-end work, whether or
+not its handoff row was saved. Ordinary child recovery outside the committed
+release still stops attempt-owned jobs.
 Only the releasing host writes handoff records; the face never touches
 the stores. The next host continues each handed-off node once by itself,
 under either policy: a child through the continuation pass of its first

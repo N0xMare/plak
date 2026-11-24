@@ -292,6 +292,14 @@ impl crate::node::TurnRole<()> for ChildTurns {
         if let Ok(result) = &terminal
             && let TurnResultOutcome::RecoveryRequired(error) = result.outcome()
         {
+            if driver.step_handoff_committed() {
+                // Release owns the already-joined child's lease. Revoking it
+                // can defeat terminal publication; that does not end the
+                // attempt or authorize stopping the daemon's promoted jobs.
+                tracing::info!(target: "plak.topology", %agent_id, %completed_turn,
+                    error_kind = ?error.kind(), "child recovery left to the committed handoff");
+                return AfterTerminal::Settled(());
+            }
             warn_recovery_required(&agent_id, attempt, completed_turn, error.kind());
             project_turn_end(&driver, feed.as_ref(), &agent_id, completed_turn).await;
             if driver
