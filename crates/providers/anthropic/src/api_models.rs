@@ -375,47 +375,6 @@ async fn get_page(
         .map_err(|error| list_error(&error.to_string()))
 }
 
-/// Hosted features the reviewed table records per model, from the docs'
-/// `featureMetadata.supportedModels` (and the Models API for web search).
-/// Recorded for later use; no request reads them and no session binds them.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "one independent documented flag per hosted feature"
-)]
-pub(crate) struct AnthropicHostedFeatures {
-    /// Provider-side compaction (`compact_20260112`).
-    pub(crate) compaction: bool,
-    /// Hosted programmatic tool calling.
-    pub(crate) hosted_ptc: bool,
-    /// Server tool search.
-    pub(crate) tool_search: bool,
-    /// Server web search.
-    pub(crate) web_search: bool,
-    /// Server web fetch.
-    pub(crate) web_fetch: bool,
-    /// Server code execution.
-    pub(crate) code_execution: bool,
-}
-
-impl AnthropicHostedFeatures {
-    fn from_names(names: &[String]) -> Result<Self, AnthropicError> {
-        let mut features = Self::default();
-        for name in names {
-            match name.as_str() {
-                "compaction" => features.compaction = true,
-                "hosted_ptc" => features.hosted_ptc = true,
-                "tool_search" => features.tool_search = true,
-                "web_search" => features.web_search = true,
-                "web_fetch" => features.web_fetch = true,
-                "code_execution" => features.code_execution = true,
-                _ => return Err(table_error()),
-            }
-        }
-        Ok(features)
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BundledTable {
@@ -451,10 +410,22 @@ fn table_error() -> AnthropicError {
     )
 }
 
+fn parse_bundled_table(json: &str) -> Result<BundledTable, AnthropicError> {
+    let table: BundledTable = serde_json::from_str(json).map_err(|_| table_error())?;
+    for name in table.models.iter().flat_map(|row| &row.hosted_features) {
+        match name.as_str() {
+            "compaction" | "hosted_ptc" | "tool_search" | "web_search" | "web_fetch"
+            | "code_execution" => {}
+            _ => return Err(table_error()),
+        }
+    }
+    Ok(table)
+}
+
 fn bundled_table() -> Result<&'static BundledTable, AnthropicError> {
     static TABLE: std::sync::OnceLock<Option<BundledTable>> = std::sync::OnceLock::new();
     TABLE
-        .get_or_init(|| serde_json::from_str(BUNDLED_TABLE).ok())
+        .get_or_init(|| parse_bundled_table(BUNDLED_TABLE).ok())
         .as_ref()
         .ok_or_else(table_error)
 }
@@ -552,11 +523,6 @@ pub struct AnthropicApiModel {
     max_input_tokens: u64,
     max_tokens: u32,
     price_threshold_input_tokens: Option<u64>,
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "recorded for later use; only tests read it")
-    )]
-    hosted_features: AnthropicHostedFeatures,
     deprecation: Option<String>,
 }
 
@@ -597,11 +563,6 @@ impl AnthropicApiModel {
     pub const fn price_threshold_input_tokens(&self) -> Option<u64> {
         self.price_threshold_input_tokens
     }
-    /// Recorded hosted-feature support.
-    #[cfg(test)]
-    pub(crate) const fn hosted_features(&self) -> AnthropicHostedFeatures {
-        self.hosted_features
-    }
     /// A deprecation notice from the lifecycle fields, when any.
     #[must_use]
     pub fn deprecation(&self) -> Option<&str> {
@@ -611,7 +572,7 @@ impl AnthropicApiModel {
     /// Canonical facts that bind a session: what it would send (model,
     /// family, effort ladder, output limit). The input window a session runs
     /// under is bound separately as the window it chose; pricing thresholds
-    /// and hosted-feature records change nothing a session sends.
+    /// change nothing a session sends.
     #[must_use]
     pub fn facts_digest(&self) -> String {
         let efforts = self
@@ -698,7 +659,7 @@ pub fn anthropic_api_models(
         &table.models,
         |row| &row.id,
         |row| &row.id,
-        |row, reviewed| classify(row, reviewed, now_unix_seconds),
+        |row, reviewed| Ok(classify(row, reviewed, now_unix_seconds)),
     )
 }
 
@@ -710,7 +671,7 @@ fn classify(
     listed: &AnthropicListedModel,
     reviewed: Option<&BundledRow>,
     now: u64,
-) -> Result<AnthropicApiModel, AnthropicError> {
+) -> AnthropicApiModel {
     let rule = family_rule(&listed.id);
     let efforts = listed
         .efforts
@@ -801,7 +762,7 @@ fn classify(
         FamilyRule::Adaptive { family } => Some(family),
         FamilyRule::NotReviewed(_) => None,
     };
-    Ok(AnthropicApiModel {
+    AnthropicApiModel {
         id: listed.id.clone(),
         family,
         status,
@@ -809,12 +770,8 @@ fn classify(
         max_input_tokens,
         max_tokens,
         price_threshold_input_tokens: reviewed.and_then(|row| row.price_threshold_input_tokens),
-        hosted_features: reviewed
-            .map(|row| AnthropicHostedFeatures::from_names(&row.hosted_features))
-            .transpose()?
-            .unwrap_or_default(),
         deprecation,
-    })
+    }
 }
 
 fn live_exceeds(listed: &AnthropicListedModel, reviewed: &BundledRow) -> bool {

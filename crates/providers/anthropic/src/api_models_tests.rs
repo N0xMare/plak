@@ -137,13 +137,31 @@ fn effort_ladders_are_the_published_levels() -> TestResult {
 }
 
 #[test]
-fn hosted_feature_flags_follow_the_reviewed_docs() -> TestResult {
-    let models = live()?;
-    let sonnet5 = find(&models, "claude-sonnet-5").hosted_features();
-    assert!(sonnet5.compaction && sonnet5.hosted_ptc && sonnet5.tool_search);
-    let haiku45 = find(&models, "claude-haiku-4-5-20251001").hosted_features();
-    assert!(!haiku45.compaction && !haiku45.hosted_ptc && haiku45.code_execution);
-    assert!(models.iter().all(|model| model.hosted_features().web_fetch));
+fn bundled_hosted_features_follow_the_reviewed_docs() -> TestResult {
+    let table = bundled_table()?;
+    let has =
+        |row: &BundledRow, name: &str| row.hosted_features.iter().any(|feature| feature == name);
+    let model_has = |id: &str, name: &str| {
+        table
+            .models
+            .iter()
+            .any(|row| row.id == id && has(row, name))
+    };
+    let sonnet5 = |name: &str| model_has("claude-sonnet-5", name);
+    assert!(sonnet5("compaction") && sonnet5("hosted_ptc") && sonnet5("tool_search"));
+    let haiku45 = |name: &str| model_has("claude-haiku-4-5-20251001", name);
+    assert!(!haiku45("compaction") && !haiku45("hosted_ptc") && haiku45("code_execution"));
+    assert!(table.models.iter().all(|row| has(row, "web_fetch")));
+    Ok(())
+}
+
+#[test]
+fn bundled_table_rejects_unknown_hosted_features() -> TestResult {
+    let malformed = BUNDLED_TABLE.replacen("\"web_fetch\"", "\"unknown_capability\"", 1);
+    let error = parse_bundled_table(&malformed)
+        .err()
+        .ok_or("unknown feature accepted")?;
+    assert_eq!(error.kind(), AnthropicErrorKind::InvalidConfiguration);
     Ok(())
 }
 
