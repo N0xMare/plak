@@ -167,12 +167,16 @@ enum ResumeScenario {
     Retry,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "one ordered handoff fixture exercises the control, overtaking, and retry schedules"
-)]
-fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
-    let retry = scenario == ResumeScenario::Retry;
+struct HandoffFixture {
+    home: tempfile::TempDir,
+    lost: Lost,
+    trees: Arc<dyn TreeStore>,
+    child_evidence: std::path::PathBuf,
+    executor: tokio::runtime::Runtime,
+    child: String,
+}
+
+fn release_source(hold_child: bool) -> HandoffFixture {
     let home = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host_with(
         home.path(),
@@ -203,7 +207,7 @@ fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
     wait_for(&events, &mut seen, "first host idle after the turn", idle);
     let child = executor.block_on(park_child(&runtime, &lost.state_roots, &*first));
     assert!(runtime.read(|tree| tree.is_parked(&child)).unwrap());
-    if retry {
+    if hold_child {
         let child = child.clone();
         executor
             .block_on(runtime.mutate_then_emit(false, move |tree| {
@@ -216,6 +220,55 @@ fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
     worker.join().unwrap().unwrap();
     drop(runtime);
 
+    HandoffFixture {
+        home,
+        lost,
+        trees,
+        child_evidence,
+        executor,
+        child,
+    }
+}
+
+fn retry_deferred(
+    runtime: &ProductTopologyRuntime,
+    child: &str,
+    events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+    seen: &mut Vec<crate::surface_protocol::HostEvent<TestExtension>>,
+    resume: impl Fn(),
+) -> String {
+    resume();
+    wait_for(events, seen, "deferred Resume", |event| {
+        notice_tone(std::slice::from_ref(event), "injected child reopen refusal").is_some()
+    });
+    let command = runtime
+        .read(|tree| {
+            tree.loss_continuation(child)
+                .filter(|loss| loss.state == crate::agent_tree::LossContinuationState::Pending)
+                .and_then(|loss| loss.command_id)
+        })
+        .unwrap()
+        .expect("the refused reopen kept its consent");
+    resume();
+    wait_for(
+        events,
+        seen,
+        "the retry answers already continuing",
+        |event| notice_tone(std::slice::from_ref(event), "already continuing").is_some(),
+    );
+    command
+}
+
+fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
+    let retry = scenario == ResumeScenario::Retry;
+    let HandoffFixture {
+        home,
+        lost,
+        trees,
+        child_evidence,
+        executor,
+        child,
+    } = release_source(retry);
     let mut next = next_host(home.path(), &lost, &json!([]), lost.store.clone());
     next.resume_after_loss = if retry {
         crate::runtime::ResumeAfterLoss::Hold
@@ -281,30 +334,7 @@ fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
         });
     }
     release.send(true).unwrap();
-    let deferred = if retry {
-        resume();
-        wait_for(&events, &mut seen, "deferred Resume", |event| {
-            notice_tone(std::slice::from_ref(event), "injected child reopen refusal").is_some()
-        });
-        let command = runtime
-            .read(|tree| {
-                tree.loss_continuation(&child)
-                    .filter(|loss| loss.state == crate::agent_tree::LossContinuationState::Pending)
-                    .and_then(|loss| loss.command_id)
-            })
-            .unwrap()
-            .expect("the refused reopen kept its consent");
-        resume();
-        wait_for(
-            &events,
-            &mut seen,
-            "the retry answers already continuing",
-            |event| notice_tone(std::slice::from_ref(event), "already continuing").is_some(),
-        );
-        Some(command)
-    } else {
-        None
-    };
+    let deferred = retry.then(|| retry_deferred(&runtime, &child, &events, &mut seen, resume));
     executor.block_on(async {
         wait_until(&runtime, &child, "continuation admission", |tree| {
             continuation_commands(tree).any(|command| command.fact == Some(CommandFact::Accepted))
