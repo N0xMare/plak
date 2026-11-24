@@ -96,25 +96,14 @@ pub struct Creation<'a> {
 
 mod attach;
 mod blobs;
+mod directory;
 mod lifecycle;
 mod product;
 mod upgrade_controls;
 mod verdicts;
+pub use directory::DirectorySlot;
 pub use lifecycle::{LifecycleOutput, LifecycleState};
 pub use product::HostSessions;
-
-/// Host-owned overlay of one session, independent of a wire version.
-pub struct DirectorySlot {
-    /// Where the current service is in its open or release cycle.
-    pub residency: SessionResidency,
-    /// Open failed and the host is not automatically retrying.
-    pub open_failed: bool,
-    /// Live workload and typed attention, only while resident.
-    pub resident: Option<(
-        super::super::KeptActivity,
-        super::super::KeptDirectoryAttention,
-    )>,
-}
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
@@ -225,40 +214,6 @@ where
     /// The stores cannot be read.
     pub fn directory(&self) -> Result<Arc<Vec<SessionRow>>, String> {
         self.directory_with_archived(false)
-    }
-
-    /// Snapshot the current slots for the draft directory, without opening a session.
-    #[must_use]
-    pub fn directory_slots(&self) -> BTreeMap<String, DirectorySlot> {
-        self.slots()
-            .iter()
-            .map(|slot| {
-                use SessionResidency::{Dormant, Opening, Releasing, Resident};
-                let (id, residency, resident) = match slot.peek() {
-                    SlotView::Dormant(id) => (id, Dormant, None),
-                    SlotView::Opening(id) => (id, Opening, None),
-                    SlotView::Releasing(id) => (id, Releasing, None),
-                    SlotView::Resident(service) => {
-                        let (id, facts) = service.directory_resident();
-                        (id, Resident, Some(facts))
-                    }
-                };
-                (
-                    id,
-                    DirectorySlot {
-                        residency,
-                        resident,
-                        open_failed: slot.open_failure().is_some() && !slot.startup_retrying(),
-                    },
-                )
-            })
-            .collect()
-    }
-
-    /// Notify a draft directory watch of changes to the host overlay.
-    #[must_use]
-    pub fn directory_slot_changes(&self) -> watch::Receiver<u64> {
-        self.changes.subscribe()
     }
 
     fn directory_with_archived(
