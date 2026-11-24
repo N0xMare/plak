@@ -67,9 +67,38 @@ enum Answer {
     Abandoned {
         mappings: Vec<abandon::Abandoned>,
     },
-    Refused {
-        detail: String,
-    },
+    Refused(Refusal),
+}
+
+#[derive(Deserialize, Serialize)]
+struct Refusal {
+    detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<RefusalReason>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RefusalReason {
+    MissingDescriptorHandoff,
+}
+
+impl Refusal {
+    fn missing_descriptor_handoff() -> Self {
+        Self {
+            detail: "host_upgrade_missing_descriptor_handoff: the destination does not support descriptor handoff; upgrade through a supported intermediate or stop the source and cold-start the destination".into(),
+            reason: Some(RefusalReason::MissingDescriptorHandoff),
+        }
+    }
+}
+
+impl From<CliFailure> for Refusal {
+    fn from(failure: CliFailure) -> Self {
+        Self {
+            detail: failure.message().to_owned(),
+            reason: None,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -115,7 +144,6 @@ pub(super) struct Ready {
     pub(super) key: String,
     pub(super) binary: String,
     image: process::VerifiedImage,
-    inherit_transport: bool,
     leases: Leases,
     pause: AdmissionPause,
     _standalone: std::fs::File,
@@ -266,10 +294,6 @@ impl Ready {
 
     pub(super) fn same_key(&self) -> bool {
         self.key == crate::home::state::state_key()
-    }
-
-    pub(super) fn inherits_transport(&self) -> bool {
-        self.inherit_transport
     }
 
     pub(super) fn paired_command(
@@ -507,7 +531,7 @@ fn finish_request(
             Answer::Abandoned { .. } => {
                 return Err(CliFailure::new("unexpected abandon reply to upgrade"));
             }
-            Answer::Refused { detail } => return Err(CliFailure::new(detail)),
+            Answer::Refused(refusal) => return Err(CliFailure::new(refusal.detail)),
             Answer::Ready { receipt } => {
                 if let Some(id) = receipt {
                     wait_ack(paths, id)?;
@@ -836,9 +860,7 @@ fn handle(
                 host.changed();
                 Answer::Abandoned { mappings }
             }
-            Err(failure) => Answer::Refused {
-                detail: failure.message().to_owned(),
-            },
+            Err(failure) => Answer::Refused(failure.into()),
         };
         return write(&mut stream, &answer);
     }
@@ -896,15 +918,10 @@ fn handle(
             publish_ready(pending, ready, host);
             write(&mut stream, &Answer::Ready { receipt })
         }
-        Err(failure) => {
+        Err(refusal) => {
             resume_rollback(host, services, runtime, control);
             super::lifecycle::running(host);
-            write(
-                &mut stream,
-                &Answer::Refused {
-                    detail: failure.message().to_owned(),
-                },
-            )
+            write(&mut stream, &Answer::Refused(refusal))
         }
     }
 }
@@ -979,7 +996,7 @@ fn prepare(
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
     report: &progress::Report<'_>,
-) -> CliResult<(Ready, Option<uuid::Uuid>)> {
+) -> Result<(Ready, Option<uuid::Uuid>), Refusal> {
     let progress = |detail: &str| report(progress::Event::Waiting(detail));
     let paths = services.paths()?;
     check_cancel(cancelled)?;
@@ -989,7 +1006,7 @@ fn prepare(
     {
         return Err(CliFailure::new(
             "host_upgrade_pending_ack: finish the recorded destination's pending successors before another upgrade",
-        ));
+        ).into());
     }
     let (destination, image, reopen) =
         qualification::qualify_destination(services, &request, arguments, report)?;
@@ -1006,7 +1023,7 @@ fn prepare(
             Ok(roots) => progress::timed(report, progress::Phase::CarryCapacity, || {
                 preflight_capacities(services, &request, &roots)
             })?,
-            Err(error) if request.wait_seconds == 0 => return Err(error),
+            Err(error) if request.wait_seconds == 0 => return Err(error.into()),
             Err(_) => {}
         }
     }
@@ -1027,7 +1044,7 @@ fn prepare(
                     preflight_capacities(services, &request, &roots)?;
                     break;
                 }
-                Err(error) if Instant::now() >= deadline => return Err(error),
+                Err(error) if Instant::now() >= deadline => return Err(error.into()),
                 Err(_) => std::thread::sleep(Duration::from_millis(100)),
             }
         }
@@ -1039,7 +1056,6 @@ fn prepare(
         key: request.destination_key.clone(),
         binary: request.expected_binary.clone(),
         image,
-        inherit_transport: !cross_key && destination.accepts_reexec,
         pause,
         leases: Leases::new()?,
         _standalone: standalone,
@@ -1072,12 +1088,14 @@ fn prepare(
     if !failures.is_empty() {
         return Err(CliFailure::new(
             "host_upgrade_drain_failed: source residents did not finish their planned release; no source surrendered",
-        ));
+        ).into());
     }
     // An intent accepted immediately before the pause may have reached its
     // mailbox after the first check. The joined release persists it first.
     let documents = settled_roots(services)?;
-    carry_settled(services, request, ready, documents, cancelled, arguments)
+    Ok(carry_settled(
+        services, request, ready, documents, cancelled, arguments,
+    )?)
 }
 
 fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> CliResult<Receipt> {

@@ -66,7 +66,7 @@ pub(in crate::host) fn request(services: &Services, target: &str) -> CliResult<P
             }
             Ok(ProcessOutcome::Success)
         }
-        Answer::Refused { detail } => Err(CliFailure::new(detail)),
+        Answer::Refused(refusal) => Err(CliFailure::new(refusal.detail)),
         Answer::Ready { .. } | Answer::Progress { .. } => {
             Err(CliFailure::new("unexpected upgrade reply to abandon"))
         }

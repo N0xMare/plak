@@ -91,17 +91,13 @@ fn wait_exit(child: &mut Child) -> std::process::ExitStatus {
     }
 }
 
-fn start_gated(fixture: &Fixture, gate: &Path, legacy: bool) -> Web {
+fn start_gated(fixture: &Fixture, gate: &Path) -> Web {
     std::fs::write(gate, []).unwrap();
-    let mut env = vec![("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", gate.to_str().unwrap())];
-    if legacy {
-        env.push(("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1"));
-    }
     let (web, started) = launch_on_with_env(
         fixture,
         &socket_dir(fixture).join("plak.sock"),
         &[],
-        &env,
+        &[("PLAK_TEST_HOST_BEFORE_PAIRED_EXEC", gate.to_str().unwrap())],
         CSP,
     );
     assert!(started, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
@@ -275,22 +271,13 @@ fn successor_serves_the_new_home_web_policy_on_the_inherited_listener() {
 
 #[test]
 fn changed_image_rolls_back_with_the_same_pid_and_listeners() {
-    assert_changed_image_rollback(false);
-}
-
-#[test]
-fn changed_legacy_image_rolls_back_by_rebinding_in_the_same_pid() {
-    assert_changed_image_rollback(true);
-}
-
-fn assert_changed_image_rollback(legacy: bool) {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
     let binary = identify(&mut fixture.command());
     let candidate = replacement_image(&fixture).canonicalize().unwrap();
     let destination = identify(&mut image_command(&fixture, &candidate));
     assert_ne!(binary, destination);
     let gate = fixture.root.join("exec-gate");
-    let mut web = start_gated(&fixture, &gate, legacy);
+    let mut web = start_gated(&fixture, &gate);
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let control_path = paths.host_socket();
     let sockets = [inode(&control_path), inode(&web.socket)];
@@ -301,10 +288,6 @@ fn assert_changed_image_rollback(legacy: bool) {
     let mut control = prepare(&fixture, &candidate, &destination);
     ready(&mut control);
     wait_line(&web, "waiting at paired exec gate");
-    if legacy {
-        assert!(!control_path.exists());
-        assert!(!web.socket.exists());
-    }
     OpenOptions::new()
         .append(true)
         .open(candidate)
@@ -328,20 +311,13 @@ fn assert_changed_image_rollback(legacy: bool) {
 
     std::fs::remove_file(gate).unwrap();
     wait_line(&web, "qualified image changed");
-    if legacy {
-        wait_line(&web, "plakd host: web on ");
-    }
     let mut successor = upgrade(&web, &login);
     let restored = directory(&mut successor);
     assert_ne!(restored["host_generation"], old["host_generation"]);
     let holder = std::fs::read_to_string(paths.host_lock()).unwrap();
-    if legacy {
-        assert_eq!(holder.split_whitespace().next(), Some(pid.as_str()));
-    } else {
-        assert_eq!(restored["binary_id"], binary);
-        assert_eq!([inode(&control_path), inode(&web.socket)], sockets);
-        assert_eq!(holder.trim(), format!("{pid} {binary}"));
-    }
+    assert_eq!(restored["binary_id"], binary);
+    assert_eq!([inode(&control_path), inode(&web.socket)], sockets);
+    assert_eq!(holder.trim(), format!("{pid} {binary}"));
     assert!(web.child.as_mut().unwrap().try_wait().unwrap().is_none());
     assert_eq!(read_control(&mut coordinator(&fixture))["binary"], binary);
     let _new_session = create(&mut successor);
@@ -349,41 +325,49 @@ fn assert_changed_image_rollback(legacy: bool) {
 }
 
 #[test]
-fn destination_without_handoff_capability_rebinds_and_keeps_the_session() {
+fn destination_without_handoff_capability_refuses_before_drain() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
-    let gate = fixture.root.join("exec-gate");
-    let mut web = start_gated(&fixture, &gate, true);
-    let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
+    let (mut web, started) = launch_on_with_env(
+        &fixture,
+        &socket_dir(&fixture).join("plak.sock"),
+        &[],
+        &[("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1")],
+        CSP,
+    );
+    assert!(started);
     let login = cookie(&web);
     let mut source = upgrade(&web, &login);
     let old = directory(&mut source);
     let root = create(&mut source);
-    attach(&mut source, &root, 1);
     let candidate = replacement_image(&fixture).canonicalize().unwrap();
     let binary = identify(&mut image_command(&fixture, &candidate));
-    assert_ne!(identify(&mut fixture.command()), binary);
+    assert_ne!(old["binary_id"], binary);
     let mut control = prepare(&fixture, &candidate, &binary);
-    ready(&mut control);
-    wait_line(&web, "waiting at paired exec gate");
-    for path in [&web.socket, &paths.host_socket()] {
-        assert!(matches!(
-            UnixStream::connect(path).unwrap_err().kind(),
-            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-        ));
-    }
-    for lock in locks(&fixture) {
-        assert!(matches!(lock.try_lock(), Err(TryLockError::WouldBlock)));
-    }
+    let answer = prepare_answer(&mut control);
+    assert_eq!(answer["status"], "refused", "{answer}");
+    assert_eq!(answer["reason"], "missing_descriptor_handoff", "{answer}");
+    let detail = answer["detail"].as_str().unwrap();
+    assert!(detail.contains("supported intermediate") && detail.contains("cold-start"));
 
-    std::fs::remove_file(gate).unwrap();
-    wait_line(&web, "plakd host: web on ");
-    let mut successor = upgrade(&web, &login);
-    let welcome = directory(&mut successor);
-    assert_ne!(welcome["host_generation"], old["host_generation"]);
-    assert_eq!(welcome["state_key"], old["state_key"]);
-    // Legacy Welcome can precede the cold image hash. The coordinator waits for it.
-    assert_eq!(read_control(&mut coordinator(&fixture))["binary"], binary);
-    attach(&mut successor, &root, 2);
+    send(
+        &mut source,
+        &ClientFrame::Request {
+            id: 2,
+            op: Op::Attach { node: root },
+        },
+    );
+    loop {
+        let frame = next_frame(&mut source);
+        if frame["frame"] == "host_lifecycle" {
+            assert_eq!(frame["phase"], "running", "{frame}");
+        }
+        if frame["frame"] == "response" && frame["id"] == 2 {
+            assert_eq!(frame["outcome"]["ok"]["answer"], "attached", "{frame}");
+            break;
+        }
+    }
+    let welcome = directory(&mut upgrade(&web, &login));
+    assert_eq!(welcome["host_generation"], old["host_generation"]);
     interrupt_and_wait(&mut web);
 }
 
@@ -391,7 +375,7 @@ fn destination_without_handoff_capability_rebinds_and_keeps_the_session() {
 fn successor_with_a_bad_socket_releases_both_locks_for_cold_start() {
     let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
     let gate = fixture.root.join("exec-gate");
-    let mut web = start_gated(&fixture, &gate, false);
+    let mut web = start_gated(&fixture, &gate);
     let paths = plakd::home::paths::PlakPaths::explicit(fixture.home());
     let candidate = Path::new(env!("CARGO_BIN_EXE_plakd"))
         .canonicalize()

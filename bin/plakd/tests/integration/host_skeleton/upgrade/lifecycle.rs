@@ -383,15 +383,11 @@ fn host_lifecycle_same_key_paired_upgrade_names_the_new_binary_before_eof() {
 }
 
 #[test]
-fn host_lifecycle_same_key_legacy_upgrade_preserves_the_saved_session_and_queue() {
+fn host_lifecycle_same_key_upgrade_preserves_the_saved_session_and_queue() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());
     let session = seed(&fixture, 83);
-    let mut host = start_env(
-        &fixture,
-        &[],
-        &[("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC", "1".into())],
-    );
+    let mut host = start(&fixture);
     let mut source = Client::connect(&host);
     let root = source
         .rows(1)
@@ -426,7 +422,7 @@ fn host_lifecycle_same_key_legacy_upgrade_preserves_the_saved_session_and_queue(
     assert_eq!(restarting.target.as_ref().unwrap().binary_id, id);
     let (_, next_generation) = observe(&host);
     assert_ne!(next_generation, generation);
-    let document = export(&fixture, &session, false, "legacy-export.json");
+    let document = export(&fixture, &session, false, "handoff-export.json");
     assert_eq!(document["queue"], json!(["paused input 83"]));
     assert_eq!(document["named_state"], json!({"answer":83}));
     Client::connect(&host).attach(2, &root);

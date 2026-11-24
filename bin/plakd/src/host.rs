@@ -433,11 +433,7 @@ impl RunningHost {
         // The socket goes first, so no client reaches a host that is handing
         // its sessions off, and before the lock: a host that takes the lock
         // next finds no socket of this one.
-        if !paired
-            || !ready
-                .as_ref()
-                .is_some_and(upgrade::Ready::inherits_transport)
-        {
+        if !paired {
             listeners.remove();
         }
         runtime.block_on(terminals.stop());

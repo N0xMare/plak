@@ -5911,7 +5911,7 @@ and the existing durable handoff decision and continuation command ids are reuse
 This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
-On every host stop, including inherited and legacy same-key handoff,
+On every host stop, including same-key handoff,
 cross-key replacement and plain shutdown, the host closes its MCP pool and
 stops spawning source-owned SSH transports, runner launcher helpers, evaluator
 sidecars and Changes helpers. It tries to stop and reap the children it owns,
@@ -5924,11 +5924,19 @@ The runner daemon itself is not a launcher helper: detached and managed
 daemons, and the jobs they own, do not stop with the source.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
-It re-execs the source PID. When the destination advertises support for
-the source's private descriptor-handoff marker during qualification, the
-source retains the control and web listeners and the home-wide and per-key
-locks. The exec temporarily carries the control listener on stdout and the
-optional web listener on stderr. These listeners are inherited directly:
+The supported source floor is the v4 descriptor-handoff build
+`46ca03d0e15ec003294409890424dd09ddbac754`; the source must speak that handoff
+protocol, in addition to satisfying the other upgrade checks. The destination
+must answer the source's v4 capability probe. A same-key destination that does
+not answer it with support is refused as `missing_descriptor_handoff` before
+admissions pause or sessions drain. Use a supported intermediate that can
+hand off to the destination, or stop the source and cold-start the destination.
+This capability is not required for cold start or cross-key replacement.
+
+The upgrade re-execs the source PID and retains the control and web listeners
+and the home-wide and per-key locks. The exec temporarily carries the control
+listener on stdout and the optional web listener on stderr. These listeners are
+inherited directly:
 on macOS a Unix listener transferred by `SCM_RIGHTS` can make newly accepted
 connections report a false EOF. Stdin carries the receiver of a private Unix
 socketpair message containing the ownership locks, the original standard
@@ -5939,21 +5947,14 @@ Nothing travels through the environment inherited by child processes.
 Neither listener is unlinked or rebound. New connections can
 wait in the existing kernel backlogs; old client streams end rather than
 moving into the new generation. The private upgrade coordinator is rebound.
-If the source does not support descriptor handoff or the destination does not
-answer the source's marker, the upgrade uses the legacy path: the source
-closes and unlinks its listeners and holds its locks
-until exec closes them. The successor takes the locks and binds normally.
-Reconnects can be refused in that gap; the same sessions and admission
-verdicts still carry over.
 The source rechecks the qualified image's filesystem identity before exec
-instead of hashing the image again. The inherited path also passes the verified
+instead of hashing the image again. The handoff also passes the verified
 binary identity and captured tool PATH and HOME. If the last check or the exec
-fails, the source re-execs its own image: with the retained listeners and
-locks on the inherited path, or by ordinary startup on the legacy path.
+fails, the source re-execs its own image with the retained listeners and locks.
 A successor that refuses inherited transport exits without keeping ownership;
 an ordinary start can then acquire the locks and replace stale socket paths.
 The destination still checks gateway availability and stores before serving.
-On the inherited path it answers Welcome and the in-memory directory while
+It answers Welcome and the in-memory directory while
 it finds and loads owed sessions; startup admission remains paused until the
 continuation inventory is captured.
 When its destination needs a higher store revision, pre-drain qualification

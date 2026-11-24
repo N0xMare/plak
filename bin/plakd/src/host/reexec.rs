@@ -98,18 +98,12 @@ pub(super) fn replace(
     ownership: &super::HostOwnership,
     listeners: super::HostListeners,
 ) -> CliResult<crate::ProcessOutcome> {
-    let listeners = ready.inherits_transport().then_some(listeners);
     crate::test_hooks::host_lifecycle::before_paired_exec();
     let destination = ready.paired_command(home);
     let target = ready.binary.clone();
     // Release store and session holds before the successor starts.
     drop(ready);
-    let replace = |mut command: Command, binary: &str| {
-        let Some(listeners) = &listeners else {
-            // The listeners are closed. The source still holds both locks;
-            // exec closes them so a legacy successor can take them normally.
-            return failed(command.args(arguments).exec());
-        };
+    let replace = |command: Command, binary: &str| {
         let descriptors = [
             ownership.home.as_fd(),
             ownership.state.as_fd(),

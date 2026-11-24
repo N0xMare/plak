@@ -1,7 +1,8 @@
 //! Pre-pause capability and same-key qualification, and the held-head recheck.
 
 use super::{
-    PROBE_BOUND, Request, bindings, check_cancel, io_failure, process, progress, receipt, reopen,
+    PROBE_BOUND, Refusal, Request, bindings, check_cancel, io_failure, process, progress, receipt,
+    reopen,
 };
 use crate::{
     CliFailure, CliResult, carry::upgrade::DestinationProbe, home::paths::PlakPaths,
@@ -13,11 +14,14 @@ pub(super) fn qualify_destination(
     request: &Request,
     arguments: &[String],
     report: &progress::Report<'_>,
-) -> CliResult<(
-    DestinationProbe,
-    process::VerifiedImage,
-    Option<reopen::Preflight>,
-)> {
+) -> Result<
+    (
+        DestinationProbe,
+        process::VerifiedImage,
+        Option<reopen::Preflight>,
+    ),
+    Refusal,
+> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
@@ -29,7 +33,8 @@ pub(super) fn qualify_destination(
     {
         return Err(CliFailure::new(
             "host_upgrade_stale_source: source instance or state key changed",
-        ));
+        )
+        .into());
     }
     let image = progress::timed(report, progress::Phase::Image, || {
         process::verify_image(
@@ -48,6 +53,9 @@ pub(super) fn qualify_destination(
         let probe = service_probe(paths, request, arguments, &scratch)?;
         Ok((probe, before_rehearsal))
     })?;
+    if request.source_key == request.destination_key && !probe.accepts_reexec {
+        return Err(Refusal::missing_descriptor_handoff());
+    }
     let reopen = before_rehearsal
         .map(|roots| {
             let stores = scratch.stores();
