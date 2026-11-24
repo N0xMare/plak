@@ -296,7 +296,7 @@ impl crate::node::TurnRole<()> for ChildTurns {
                 // Release owns the already-joined child's lease. Revoking it
                 // can defeat terminal publication; that does not end the
                 // attempt or authorize stopping the daemon's promoted jobs.
-                tracing::info!(target: "plak.topology", %agent_id, %completed_turn,
+                tracing::warn!(target: "plak.topology", %agent_id, %completed_turn,
                     error_kind = ?error.kind(), "child recovery left to the committed handoff");
                 return AfterTerminal::Settled(());
             }
