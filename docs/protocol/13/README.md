@@ -40,8 +40,9 @@ rows replace provisional keys when the host publishes the settled view.
 For each live row, drop deltas wholly before the current byte length and
 apply only the suffix of an overlapping delta, starting at the client's
 current byte length, not the delta's start. Both offsets are UTF-8 scalar
-boundaries. Repair a gap with `read_transcript_row` at the first missing byte. That answer
-is addressed to the request, not a baseline or a new transcript revision.
+boundaries. Repair a gap with `read_transcript_row` at the first missing
+byte. That answer is addressed to the request, not a baseline or a new
+transcript revision.
 Its `end` is exclusive, and `last` means the slice reaches the end available
 at read time, not that the row has stopped streaming. A non-boundary or
 out-of-range offset is malformed; a provisional row no longer in the scope
@@ -49,10 +50,11 @@ returns `cursor_expired`. Use the settled key for omitted history after
 replacement. The live assistant preview stops at a framing-safe prefix;
 subsequent appends never move its start or skip to a later suffix.
 The row read returns a slice of the same rendered body whose bytes were
-counted; row metadata stays in the page. The resident and durable readers
-use different slice sizes: request the next slice at `end` until `last`,
-instead of inferring the end from how many bytes arrived. An attachment status report is
-sent every 10 seconds while its values are changing and on request.
+counted; row metadata stays in the page. The resident reader caps body
+slices at 64 KiB; the durable reader budgets the encoded response at
+256 KiB. Request the next slice at `end` until `last` instead of inferring
+the end from how many bytes arrived. An attachment status report is sent
+every 10 seconds while its values are changing and on request.
 `seq_gaps` counts sender-visible sequence discontinuities, not losses
 detected only by the client. Queue bytes and length are current gauges;
 the other four fields are cumulative for the attachment.

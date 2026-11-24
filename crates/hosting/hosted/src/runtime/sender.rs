@@ -107,7 +107,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
         snapshot: PresentationSnapshot,
         replace: bool,
     ) -> bool {
-        debug_assert_eq!(snapshot.scope, TranscriptScope::Root);
+        if snapshot.scope != TranscriptScope::Root {
+            return false;
+        }
         let mut presentations = self
             .presentations
             .lock()

@@ -48,36 +48,40 @@ fn heavy_history_measurement() {
         }),
     );
     let first_start = Instant::now();
-    let (cursor, first, total) = transcript_history::read(&fixture.paths, &fixture.id, |history| {
-        let page = first(&history, &turns)?;
-        assert_eq!(page.older.rows, 9_980);
-        let total = page.older.bytes;
-        let cursor = page.cursor.clone().unwrap();
-        Ok((
-            cursor,
-            framing::baseline(page, target(), LiveTail::default())?,
-            total,
-        ))
-    })
-    .unwrap();
+    let reader = HistoryReader::open(&fixture.paths, &fixture.id).unwrap();
+    let (cursor, first, total) = reader
+        .read(&fixture.paths, |history| {
+            let page = first(&history, &turns)?;
+            assert_eq!(page.older.rows, 9_980);
+            assert_eq!(page.older.bytes, 9_181_600);
+            let total = page.older.bytes;
+            let cursor = page.cursor.clone().unwrap();
+            Ok((
+                cursor,
+                framing::baseline(page, target(), LiveTail::default())?,
+                total,
+            ))
+        })
+        .unwrap();
     let first_bytes = wire_bytes(&first);
     let first_time = first_start.elapsed();
     let older_start = Instant::now();
-    let older = transcript_history::read(&fixture.paths, &fixture.id, |history| {
-        let (_, _, retention, before) = decode_cursor(&cursor)?;
-        framing::history(
-            older_page(
-                &history,
-                &turns,
-                retention,
-                before,
-                PAGE_TARGET_BYTES as u64,
-            )?,
-            7,
-            2,
-        )
-    })
-    .unwrap();
+    let older = reader
+        .read(&fixture.paths, |history| {
+            let (_, _, retention, before) = decode_cursor(&cursor)?;
+            framing::history(
+                older_page(
+                    &history,
+                    &turns,
+                    retention,
+                    before,
+                    PAGE_TARGET_BYTES as u64,
+                )?,
+                7,
+                2,
+            )
+        })
+        .unwrap();
     let older_bytes = wire_bytes(&older);
     let older_time = older_start.elapsed();
     eprintln!(

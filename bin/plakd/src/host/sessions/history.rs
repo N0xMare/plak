@@ -12,7 +12,9 @@ use plakous_host_protocol::wire::{self, AttachmentId, RequestId};
 use plakous_hosted::runtime::RootTranscript;
 
 use crate::home::paths::PlakPaths;
-use crate::store::transcript_history::{self, History, HistoryError, Line, Prune, Totals};
+use crate::store::transcript_history::{
+    self, History, HistoryError, HistoryReader, Line, Prune, Totals,
+};
 
 mod framing;
 pub(crate) use framing::BaselineTarget;
@@ -30,6 +32,7 @@ struct Page {
 pub(crate) struct HistoryAttachment {
     line: Line,
     attachment: AttachmentId,
+    reader: HistoryReader,
 }
 
 pub(crate) struct AttachedHistory {
@@ -60,18 +63,20 @@ pub(crate) fn attach(
             LiveTail::captured(capture)
         }
     };
-    let (captured_line, page) = transcript_history::read(paths, session, |history| {
-        if live
-            .applied
-            .is_some_and(|applied| applied != history.applied)
-        {
-            return Err(HistoryError::StaleCapture);
-        }
-        let turns = turns_at(&paths.runtime_database(), &history, None)?;
-        let page = first(&history, &turns)?;
-        Ok((history.line, page))
-    })
-    .map_err(refusal)?;
+    let reader = HistoryReader::open(paths, session).map_err(refusal)?;
+    let (captured_line, page) = reader
+        .read(paths, |history| {
+            if live
+                .applied
+                .is_some_and(|applied| applied != history.applied)
+            {
+                return Err(HistoryError::StaleCapture);
+            }
+            let turns = turns_at(&paths.runtime_database(), &history, None)?;
+            let page = first(&history, &turns)?;
+            Ok((history.line, page))
+        })
+        .map_err(refusal)?;
     let attachment = target.attachment;
     let parts = framing::baseline(page, target, live).map_err(refusal)?;
     let frames = prepend(
@@ -88,6 +93,7 @@ pub(crate) fn attach(
         binding: HistoryAttachment {
             line: captured_line,
             attachment,
+            reader,
         },
         frames,
     })
@@ -99,26 +105,27 @@ pub(crate) fn older(
     id: RequestId,
     cursor: &HistoryCursor,
 ) -> Vec<HostFrameV13> {
-    let page = transcript_history::read(paths, binding.line.session(), |history| {
-        let (line, prune, retained_from, before) = decode_cursor(cursor)?;
-        if line != history.line
-            || line != binding.line
-            || prune != history.prune
-            || before > history.applied.get()
-        {
-            return Err(HistoryError::CursorExpired);
-        }
-        let turns = turns_at(&paths.runtime_database(), &history, Some(before))?;
-        let page = older_page(
-            &history,
-            &turns,
-            retained_from,
-            before,
-            PAGE_TARGET_BYTES as u64,
-        )?;
-        Ok(page)
-    })
-    .and_then(|page| framing::history(page, binding.attachment, id));
+    let page = binding
+        .reader
+        .read(paths, |history| {
+            let (line, prune, retained_from, before) = decode_cursor(cursor)?;
+            if line != history.line
+                || line != binding.line
+                || prune != history.prune
+                || before > history.applied.get()
+            {
+                return Err(HistoryError::CursorExpired);
+            }
+            let turns = turns_at(&paths.runtime_database(), &history, Some(before))?;
+            older_page(
+                &history,
+                &turns,
+                retained_from,
+                before,
+                PAGE_TARGET_BYTES as u64,
+            )
+        })
+        .and_then(|page| framing::history(page, binding.attachment, id));
     match page {
         Ok(parts) => prepend(answer(id, AnswerV13::HistoryStarted), parts),
         Err(error) => vec![bound_refusal(id, error)],
@@ -132,20 +139,22 @@ pub(crate) fn read_row(
     row: RowKey,
     offset: u64,
 ) -> HostFrameV13 {
-    let answer = transcript_history::read(paths, binding.line.session(), |history| {
-        if history.line != binding.line {
-            return Err(HistoryError::CursorExpired);
-        }
-        history.row(row)
-    })
-    .and_then(|mut value| {
-        framing::row_slice(
-            id,
-            row,
-            transcript_history::body_mut(&mut value).map_or("", |text| text.as_str()),
-            offset,
-        )
-    });
+    let answer = binding
+        .reader
+        .read(paths, |history| {
+            if history.line != binding.line {
+                return Err(HistoryError::CursorExpired);
+            }
+            history.row(row)
+        })
+        .and_then(|mut value| {
+            framing::row_slice(
+                id,
+                row,
+                transcript_history::body_mut(&mut value).map_or("", |text| text.as_str()),
+                offset,
+            )
+        });
     answer.unwrap_or_else(|error| bound_refusal(id, error))
 }
 

@@ -390,10 +390,9 @@ impl ProductTranscript {
             transcript.push_marker();
         }
         for (key, row) in rows {
-            if !is_line(&row) {
-                continue;
+            if let Some(row) = Self::render_stored_line(row) {
+                transcript.push_row(row, key);
             }
-            transcript.push_row(bound_row(row), key);
         }
         debug_assert!(
             transcript
@@ -402,6 +401,20 @@ impl ProductTranscript {
                 .all(|items| items[0].key < items[1].key)
         );
         transcript
+    }
+
+    /// Render one stored row with the restore path's visibility and bounds,
+    /// without allocating or applying a transcript window.
+    #[must_use]
+    pub fn render_stored_line(row: TranscriptRow) -> Option<TranscriptRow> {
+        is_line(&row).then(|| bound_row(row))
+    }
+
+    /// Byte length of a stored tool's rendered body, without rendering its
+    /// subject or other metadata.
+    #[must_use]
+    pub fn rendered_tool_detail_len(detail: &str) -> usize {
+        super::bound_tool_detail(detail).len()
     }
 
     /// Restores an exact projector prefix and its in-memory publication watermark.

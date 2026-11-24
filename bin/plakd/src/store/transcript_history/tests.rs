@@ -82,3 +82,39 @@ fn an_archived_product_child_reads_only_its_own_rows() {
     })
     .unwrap();
 }
+
+#[test]
+fn derived_prefix_is_discarded_when_a_projector_commit_changes_its_rows() {
+    let home = PlakPaths::isolated_tempdir();
+    let paths = PlakPaths::explicit(home.path().join("home"));
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut record = SessionRecord::new(home.path().to_owned());
+    store.commit(&mut record).unwrap();
+    let mut old = SessionViews::empty();
+    old.cursor = FeedSeq::new(1);
+    let key = RowKey::new(1, Lane::Runtime, 0);
+    old.rows.insert(key, TranscriptRow::assistant("é"));
+    store
+        .commit_projection_views(
+            &record.id,
+            &ViewWrites::between(&SessionViews::empty(), &old),
+            &old.state,
+        )
+        .unwrap();
+    let reader = HistoryReader::open(&paths, &record.id).unwrap();
+    let totals = |history: History<'_>| history.totals(0, Some(2));
+    assert_eq!(
+        reader.read(&paths, totals).unwrap(),
+        Totals { rows: 1, bytes: 2 }
+    );
+    let mut new = old.clone();
+    new.cursor = FeedSeq::new(2);
+    new.rows.insert(key, TranscriptRow::assistant("é☕"));
+    store
+        .commit_projection_views(&record.id, &ViewWrites::between(&old, &new), &new.state)
+        .unwrap();
+    assert_eq!(
+        reader.read(&paths, totals).unwrap(),
+        Totals { rows: 1, bytes: 5 }
+    );
+}

@@ -1,13 +1,20 @@
 //! Indexed reads of the durable part of a transcript, under one product snapshot.
 
+use std::collections::HashMap;
+
 use plakous::sessions::{SessionLocator, feed::FeedSeq};
 use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptRow};
-use plakous_hosted::sessions::{ProductTranscript, projector::LineageStep};
+use plakous_hosted::sessions::{
+    MAX_TOOL_ACTIVITY_DETAIL_BYTES, ProductTranscript, projector::LineageStep,
+};
 use rusqlite::{Connection, OptionalExtension as _, types::ValueRef};
 use serde::{Deserialize, Serialize};
 
 use super::{ProductStore, from_i64};
 use crate::home::paths::PlakPaths;
+
+mod index;
+pub(crate) use index::HistoryReader;
 
 const MARKER: RowKey = RowKey::new(0, Lane::Runtime, 1);
 
@@ -47,6 +54,7 @@ pub(crate) struct Prune {
 
 pub(crate) struct History<'a> {
     connection: &'a Connection,
+    prefix: Option<&'a std::cell::RefCell<Option<index::Prefix>>>,
     pub(crate) line: Line,
     pub(crate) prune: Prune,
     pub(crate) applied: FeedSeq,
@@ -54,7 +62,7 @@ pub(crate) struct History<'a> {
     pub(crate) lineage: Vec<LineageStep>,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Totals {
     pub(crate) rows: u64,
     pub(crate) bytes: u64,
@@ -64,7 +72,8 @@ pub(crate) struct Totals {
 // previews may need rendering again are returned to Rust as JSON.
 const BODY_SQL: &str = "coalesce(length(CAST(coalesce(json_extract(row,'$.text'),
     json_extract(row,'$.cause')) AS BLOB)),0)";
-const REBOUND_SQL: &str = "json_extract(row,'$.kind') IN ('tool','process','thinking')";
+const TOOL_SQL: &str = "json_extract(row,'$.kind')='tool'";
+const REBOUND_SQL: &str = "json_extract(row,'$.kind') IN ('process','thinking')";
 
 const RANGE_SQL: &str = "SELECT anchor,lane,ordinal,row FROM transcript_rows
     WHERE session_id=?1 AND anchor BETWEEN ?2 AND ?5
@@ -156,6 +165,7 @@ impl<'a> History<'a> {
         };
         Ok(Self {
             connection,
+            prefix: None,
             line: Line {
                 instance,
                 session: session.to_owned(),
@@ -200,13 +210,25 @@ impl<'a> History<'a> {
         if to.is_some_and(|to| to <= from) {
             return Ok(Totals::default());
         }
+        if let (Some(prefix), Some(to)) = (self.prefix, to)
+            && let Some(total) = prefix
+                .borrow()
+                .as_ref()
+                .and_then(|prefix| prefix.range(from, to))
+        {
+            return Ok(total);
+        }
+        let mut build = match (self.prefix, from, to) {
+            (Some(_), 0, Some(to)) => Some(index::Prefix::new(to)),
+            _ => None,
+        };
         let (anchor, lane, ordinal, upper) = self.range(from, to)?;
         let mut query = self
             .connection
             .prepare(&format!(
-                "SELECT CASE WHEN {REBOUND_SQL} THEN row END,
-                        CASE WHEN {REBOUND_SQL} THEN 0 ELSE {BODY_SQL} END
-                 FROM ({RANGE_SQL}) WHERE {VISIBLE_SQL}"
+                "SELECT anchor, CASE WHEN {REBOUND_SQL} THEN row END, {BODY_SQL},
+                        {TOOL_SQL}, CASE WHEN {TOOL_SQL} THEN json_extract(row,'$.detail') END
+                 FROM ({RANGE_SQL}) WHERE {VISIBLE_SQL} ORDER BY anchor,lane,ordinal"
             ))
             .map_err(unavailable)?;
         let mut rows = query
@@ -216,14 +238,21 @@ impl<'a> History<'a> {
             rows: u64::from(from == 0 && self.prune.truncated),
             bytes: 0,
         };
+        let mut detail_lengths = HashMap::new();
         while let Some(row) = rows.next().map_err(unavailable)? {
-            if matches!(row.get_ref(0).map_err(unavailable)?, ValueRef::Null) {
+            if let Some(bytes) = counted_body(row, &mut detail_lengths)? {
                 totals.rows += 1;
-                totals.bytes += from_i64(row.get(1).map_err(unavailable)?).map_err(unavailable)?;
-            } else if let Some(mut row) = render(decode_row(row, 0).map_err(unavailable)?) {
-                totals.rows += 1;
-                totals.bytes += body_mut(&mut row).map_or(0, |body| body.len() as u64);
+                totals.bytes += bytes;
             }
+            if let Some(prefix) = &mut build {
+                prefix.push(
+                    from_i64(row.get(0).map_err(unavailable)?).map_err(unavailable)?,
+                    totals,
+                );
+            }
+        }
+        if let (Some(cache), Some(prefix)) = (self.prefix, build) {
+            *cache.borrow_mut() = Some(prefix.with_marker(self.prune.truncated));
         }
         Ok(totals)
     }
@@ -296,6 +325,36 @@ impl<'a> History<'a> {
     }
 }
 
+fn counted_body(
+    row: &rusqlite::Row<'_>,
+    detail_lengths: &mut HashMap<String, u64>,
+) -> Result<Option<u64>, HistoryError> {
+    if row.get::<_, bool>(3).map_err(unavailable)? {
+        let value = row.get_ref(4).map_err(unavailable)?;
+        if matches!(value, ValueRef::Null) {
+            return Ok(Some(0));
+        }
+        let detail = value.as_str().map_err(unavailable)?;
+        if let Some(&len) = detail_lengths.get(detail) {
+            return Ok(Some(len));
+        }
+        let len = ProductTranscript::rendered_tool_detail_len(detail) as u64;
+        // Repeated tool results need one normalization per cached body.
+        // Keep only a small memo within this query, never raw text in the index.
+        if detail_lengths.len() < 64 && detail.len() <= MAX_TOOL_ACTIVITY_DETAIL_BYTES {
+            detail_lengths.insert(detail.to_owned(), len);
+        }
+        return Ok(Some(len));
+    }
+    if matches!(row.get_ref(1).map_err(unavailable)?, ValueRef::Null) {
+        return Ok(Some(
+            from_i64(row.get(2).map_err(unavailable)?).map_err(unavailable)?,
+        ));
+    }
+    Ok(render(decode_row(row, 1).map_err(unavailable)?)
+        .map(|mut row| body_mut(&mut row).map_or(0, |body| body.len() as u64)))
+}
+
 fn key_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<RowKey> {
     Ok(RowKey::new(
         from_i64(row.get(0)?)?,
@@ -319,10 +378,7 @@ fn render(row: TranscriptRow) -> Option<TranscriptRow> {
         row,
         TranscriptRow::Tool(_) | TranscriptRow::Process(_) | TranscriptRow::Thinking(_)
     ) {
-        return ProductTranscript::stored(vec![(RowKey::TRUNCATION, row)])
-            .items()
-            .pop()
-            .map(|item| item.row);
+        return ProductTranscript::render_stored_line(row);
     }
     Some(row)
 }

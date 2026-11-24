@@ -59,7 +59,7 @@ fn capture_refuses_store_ahead_then_replaces_provisional_rows_without_duplicates
     };
     assert_eq!(baseline.items.len(), 1);
     assert_eq!(baseline.items[0].key, canon);
-    assert!(baseline.live_rows.is_empty());
+    assert_eq!(baseline.live_rows, [] as [LiveRowLength; 0]);
     assert!(root.read(provisional, 0).is_err());
 }
 
