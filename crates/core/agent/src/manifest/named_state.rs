@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::checkpoint_bundle::{RuntimeObjectAddress, RuntimeObjectKind, object_address};
+use crate::checkpoint_bundle::{
+    RUNTIME_FORMAT_EPOCH, RuntimeObjectAddress, RuntimeObjectKind, object_address_at,
+};
 
 use super::RuntimeManifestError;
 
@@ -123,7 +125,7 @@ impl NamedState {
         validate_state_value(&bytes)?;
         let mut values = self.values.clone();
         values.insert(key, bytes.into());
-        Self::validated_values(values)
+        Self::validated_values(values, RUNTIME_FORMAT_EPOCH)
     }
 
     /// Removes a key without modifying this snapshot.
@@ -135,13 +137,35 @@ impl NamedState {
         Ok(state)
     }
 
-    pub(crate) fn from_values(
-        values: BTreeMap<String, Arc<[u8]>>,
-    ) -> Result<Self, RuntimeManifestError> {
-        Self::validated_values(values).map_err(Into::into)
+    #[cfg(test)]
+    fn from_values(values: BTreeMap<String, Arc<[u8]>>) -> Result<Self, RuntimeManifestError> {
+        Self::from_values_at(values, RUNTIME_FORMAT_EPOCH)
     }
 
-    fn validated_values(values: BTreeMap<String, Arc<[u8]>>) -> Result<Self, StateError> {
+    pub(crate) fn from_values_at(
+        values: BTreeMap<String, Arc<[u8]>>,
+        epoch: u32,
+    ) -> Result<Self, RuntimeManifestError> {
+        Self::validated_values(values, epoch).map_err(Into::into)
+    }
+
+    pub(crate) fn into_encoding_epoch(self, epoch: u32) -> Result<Self, RuntimeManifestError> {
+        if self
+            .addresses
+            .values()
+            .next()
+            .is_none_or(|address| address.codec_revision() == epoch)
+        {
+            Ok(self)
+        } else {
+            Self::from_values_at(self.values, epoch)
+        }
+    }
+
+    fn validated_values(
+        values: BTreeMap<String, Arc<[u8]>>,
+        epoch: u32,
+    ) -> Result<Self, StateError> {
         if values.len() > MAX_STATE_KEYS {
             return Err(StateError::TooManyKeys);
         }
@@ -155,7 +179,7 @@ impl NamedState {
             validate_state_value(bytes)?;
             addresses.insert(
                 key.clone(),
-                object_address(RuntimeObjectKind::NamedStateValue, bytes)
+                object_address_at(RuntimeObjectKind::NamedStateValue, bytes, epoch)
                     .map_err(StateError::Address)?,
             );
         }

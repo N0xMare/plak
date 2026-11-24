@@ -908,6 +908,69 @@ fn v39_graph_goldens_pin_quiescent_and_working_closures() -> TestResult {
 }
 
 #[test]
+fn preceding_working_closure_verifies_and_advances_without_old_graph_edges() -> TestResult {
+    let current = compaction_working_fixture(5)?;
+    let previous =
+        RuntimeCheckpoint::new_at(current.manifest().clone(), PREVIOUS_RUNTIME_FORMAT_EPOCH)?;
+    let written = RuntimeCheckpointCodec::bundle_full(&previous)?;
+    let objects = written
+        .objects()
+        .iter()
+        .map(|object| {
+            RuntimeObject::from_store(
+                object.address(),
+                object.canonical_bytes().to_vec(),
+                object.children().to_vec(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let read = CheckpointObjectBundle::from_store(
+        written.checkpoint_id(),
+        written.checkpoint_integrity(),
+        written.root(),
+        objects,
+    )?;
+    assert_eq!(read.validated_checkpoint()?.as_ref(), &previous);
+    let inspection = RuntimeCheckpointCodec::inspect_metadata(
+        read.checkpoint_id(),
+        read.checkpoint_integrity(),
+        read.root(),
+        |address| {
+            read.lookup(address)
+                .cloned()
+                .ok_or(CheckpointBundleError::MissingObject)
+        },
+        |error| error,
+    )?;
+    assert_eq!(inspection.requests.len(), 1);
+    for (operation_id, request) in inspection.requests {
+        assert_eq!(
+            previous
+                .manifest()
+                .ledger()
+                .operation(operation_id)
+                .map(|record| record.request().integrity()),
+            Some(request),
+        );
+    }
+    assert_ne!(previous.integrity(), current.integrity());
+    assert_eq!(
+        previous.checkpoint_commit_identity(),
+        current.checkpoint_commit_identity(),
+    );
+    let publication = RuntimeCheckpointCodec::advance(&current, &read)?;
+    assert_eq!(publication.base_root(), Some(read.root()));
+    assert_eq!(publication.stats().reused_object_count(), 0);
+    assert!(publication.objects().iter().all(|object| {
+        std::iter::once(object.address())
+            .chain(object.children().iter().copied())
+            .all(|address| address.codec_revision() == RUNTIME_FORMAT_EPOCH)
+    }));
+    assert_eq!(RuntimeCheckpointCodec::materialize(&publication)?, current);
+    Ok(())
+}
+
+#[test]
 fn store_reassembly_is_complete_and_fail_closed() -> TestResult {
     let checkpoint = fixture(4, 4, false)?;
     let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
@@ -2294,6 +2357,7 @@ fn live_multi_operation_advance_preserves_root_and_forgets_pruned_objects() -> T
     let mut raw = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: RUNTIME_FORMAT_EPOCH,
     };
     let built = raw.advance(
         &live,
@@ -2506,6 +2570,7 @@ fn trusted_builder_validates_only_new_history_segment_payloads() -> TestResult {
     let mut builder = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: RUNTIME_FORMAT_EPOCH,
     };
     assert!(
         builder
@@ -2542,6 +2607,7 @@ fn trusted_publication_refuses_a_lossy_segment_roundtrip() -> TestResult {
     let mut builder = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: RUNTIME_FORMAT_EPOCH,
     };
     assert!(matches!(
         builder.segment(&segment),
@@ -2556,6 +2622,7 @@ fn builder_just_addressed_segment_is_roundtripped_without_rehashing() -> TestRes
     let mut builder = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: RUNTIME_FORMAT_EPOCH,
     };
     OBJECT_HASHES.set(0);
     ADDRESS_VALIDATIONS.set(0);

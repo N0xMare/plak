@@ -26,13 +26,15 @@ use crate::manifest::{
     encode_bundle_provider_configuration, encode_bundle_stable_prefix, encode_bundle_tools,
 };
 
+#[cfg(test)]
+use super::RUNTIME_FORMAT_EPOCH;
 use super::wire::{
     parse_canonical, parse_checkpoint_root, parse_ledger, parse_manifest_root,
     parse_operation_node, parse_sequence_node, parse_working,
 };
 use super::{
-    CheckpointBundleError, OBJECT_ADDRESS_BYTES, OBJECT_ADDRESS_DOMAIN, RUNTIME_FORMAT_EPOCH,
-    RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind,
+    CheckpointBundleError, OBJECT_ADDRESS_BYTES, OBJECT_ADDRESS_DOMAIN, RuntimeObject,
+    RuntimeObjectAddress, RuntimeObjectKind, reads_checkpoint_epoch,
 };
 
 impl RuntimeObjectKind {
@@ -69,21 +71,22 @@ impl RuntimeObjectKind {
 }
 
 impl RuntimeObjectAddress {
-    /// Reconstructs and validates one address read from normalized backend columns.
+    /// Reconstructs one address read from normalized backend columns. A sealed
+    /// historical reference need not still have a readable object payload.
     ///
     /// # Errors
     ///
-    /// Returns an error unless the codec revision and digest algorithm, domain,
-    /// and version are exactly those of this fresh object format.
+    /// Refuses a malformed address. Payload admission is checked by
+    /// [`RuntimeObject::from_store`].
     pub fn from_store_parts(
         kind: RuntimeObjectKind,
         codec_revision: u32,
         digest: Digest,
     ) -> Result<Self, CheckpointBundleError> {
-        if codec_revision != RUNTIME_FORMAT_EPOCH
+        if codec_revision == 0
             || digest.algorithm() != DigestAlgorithm::Sha256
             || digest.domain() != DigestDomain::Blob
-            || digest.version() != RUNTIME_FORMAT_EPOCH
+            || digest.version() != codec_revision
         {
             return Err(CheckpointBundleError::UnsupportedRevision);
         }
@@ -191,7 +194,12 @@ impl RuntimeObject {
         )?;
         #[cfg(test)]
         ADDRESS_VALIDATIONS.update(|count| count + 1);
-        if object_address(address.kind, &canonical_bytes)? != address {
+        if !reads_checkpoint_epoch(address.codec_revision) {
+            return Err(CheckpointBundleError::UnsupportedEpoch(
+                address.codec_revision,
+            ));
+        }
+        if object_address_at(address.kind, &canonical_bytes, address.codec_revision)? != address {
             return Err(CheckpointBundleError::InvalidAddress);
         }
         let decoded_segment = if address.kind == RuntimeObjectKind::HistorySegment {
@@ -202,7 +210,7 @@ impl RuntimeObject {
         let expected_children = if decoded_segment.is_some() {
             Vec::new()
         } else {
-            canonical_child_specs(address.kind, &canonical_bytes)?
+            canonical_child_specs(address, &canonical_bytes)?
         }
         .into_iter()
         .map(|(child, _)| child)
@@ -258,9 +266,18 @@ impl fmt::Debug for RuntimeObject {
     }
 }
 
-pub(crate) fn object_address(
+#[cfg(test)]
+pub(super) fn object_address(
     kind: RuntimeObjectKind,
     canonical_bytes: &[u8],
+) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
+    object_address_at(kind, canonical_bytes, RUNTIME_FORMAT_EPOCH)
+}
+
+pub(crate) fn object_address_at(
+    kind: RuntimeObjectKind,
+    canonical_bytes: &[u8],
+    codec_revision: u32,
 ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
     #[cfg(test)]
     {
@@ -269,7 +286,6 @@ pub(crate) fn object_address(
             SEGMENT_HASHES.update(|count| count + 1);
         }
     }
-    let codec_revision = RUNTIME_FORMAT_EPOCH;
     let digest = Digest::sha256(
         DigestDomain::Blob,
         codec_revision,
@@ -293,16 +309,17 @@ pub(crate) fn object_address(
     reason = "The canonical object graph enumerates every manifest child in stable role and ordinal order"
 )]
 pub(super) fn canonical_child_specs(
-    kind: RuntimeObjectKind,
+    address: RuntimeObjectAddress,
     canonical_bytes: &[u8],
 ) -> Result<Vec<(RuntimeObjectAddress, RuntimeObjectKind)>, CheckpointBundleError> {
-    let children = match kind {
+    let epoch = address.codec_revision;
+    let children = match address.kind {
         RuntimeObjectKind::CheckpointRoot => {
-            let (_, _, manifest) = parse_checkpoint_root(canonical_bytes)?;
+            let (_, _, manifest) = parse_checkpoint_root(canonical_bytes, epoch)?;
             vec![(manifest, RuntimeObjectKind::ManifestRoot)]
         }
         RuntimeObjectKind::ManifestRoot => {
-            let root = parse_manifest_root(canonical_bytes)?;
+            let root = parse_manifest_root(canonical_bytes, epoch)?;
             let mut children = vec![
                 (root.metadata, RuntimeObjectKind::ManifestMetadata),
                 (root.harness, RuntimeObjectKind::ReconstructiveComponent),
@@ -344,7 +361,7 @@ pub(super) fn canonical_child_specs(
             Vec::new()
         }
         RuntimeObjectKind::HistoryNode => {
-            let node = parse_sequence_node(canonical_bytes)?;
+            let node = parse_sequence_node(canonical_bytes, epoch)?;
             let mut children = Vec::with_capacity(2);
             children.extend(
                 node.previous
@@ -353,7 +370,7 @@ pub(super) fn canonical_child_specs(
             children.push((node.value, RuntimeObjectKind::HistorySegment));
             children
         }
-        RuntimeObjectKind::WorkingProjection => parse_working(canonical_bytes)?
+        RuntimeObjectKind::WorkingProjection => parse_working(canonical_bytes, epoch)?
             .segments
             .into_iter()
             .map(|address| (address, RuntimeObjectKind::HistorySegment))
@@ -371,7 +388,7 @@ pub(super) fn canonical_child_specs(
             Vec::new()
         }
         RuntimeObjectKind::CanonicalState => {
-            let canonical = parse_canonical(canonical_bytes)?;
+            let canonical = parse_canonical(canonical_bytes, epoch)?;
             let mut children = vec![(canonical.prefix, RuntimeObjectKind::StablePrefix)];
             children.extend(
                 canonical
@@ -389,7 +406,7 @@ pub(super) fn canonical_child_specs(
             [binding.descriptor(), binding.admission().evidence()]
                 .into_iter()
                 .map(|component| {
-                    component_address(component)
+                    component_address(component, epoch)
                         .map(|address| (address, RuntimeObjectKind::ReconstructiveComponent))
                 })
                 .collect::<Result<Vec<_>, _>>()?
@@ -404,7 +421,7 @@ pub(super) fn canonical_child_specs(
             ]
             .into_iter()
             .map(|component| {
-                component_address(component)
+                component_address(component, epoch)
                     .map(|address| (address, RuntimeObjectKind::ReconstructiveComponent))
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -412,12 +429,12 @@ pub(super) fn canonical_child_specs(
         RuntimeObjectKind::CommandRecord => {
             let record = canonical_command(canonical_bytes)?;
             vec![(
-                component_address(record.command_component())?,
+                component_address(record.command_component(), epoch)?,
                 RuntimeObjectKind::ReconstructiveComponent,
             )]
         }
         RuntimeObjectKind::CommandNode => {
-            let node = parse_sequence_node(canonical_bytes)?;
+            let node = parse_sequence_node(canonical_bytes, epoch)?;
             let mut children = Vec::with_capacity(2);
             children.extend(
                 node.previous
@@ -430,12 +447,12 @@ pub(super) fn canonical_child_specs(
             .component_digests()
             .into_iter()
             .map(|digest| {
-                component_object_address(digest)
+                component_object_address(digest, epoch)
                     .map(|address| (address, RuntimeObjectKind::ReconstructiveComponent))
             })
             .collect::<Result<Vec<_>, _>>()?,
         RuntimeObjectKind::OperationNode => {
-            let node = parse_operation_node(canonical_bytes)?;
+            let node = parse_operation_node(canonical_bytes, epoch)?;
             let mut children = Vec::with_capacity(3);
             children.extend(
                 node.left
@@ -449,7 +466,7 @@ pub(super) fn canonical_child_specs(
             children
         }
         RuntimeObjectKind::OperationLedger => {
-            let ledger = parse_ledger(canonical_bytes)?;
+            let ledger = parse_ledger(canonical_bytes, epoch)?;
             let mut children = Vec::with_capacity(2);
             children.extend(
                 ledger
@@ -466,7 +483,7 @@ pub(super) fn canonical_child_specs(
         RuntimeObjectKind::FamilyArtifact => {
             let artifact = canonical_family_artifact(canonical_bytes)?;
             vec![(
-                component_address(artifact.binding_component())?,
+                component_address(artifact.binding_component(), epoch)?,
                 RuntimeObjectKind::ReconstructiveComponent,
             )]
         }
@@ -476,19 +493,29 @@ pub(super) fn canonical_child_specs(
 
 fn component_address(
     component: &ReconstructiveComponent,
+    epoch: u32,
 ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
-    object_address(
+    object_address_at(
         RuntimeObjectKind::ReconstructiveComponent,
         &encode_bundle_component(component)?,
+        epoch,
     )
 }
 
 /// Content digest of the reconstructive-component object holding `component`;
 /// an operation record names its components by this digest.
+#[cfg(test)]
 pub(crate) fn component_object_digest(
     component: &ReconstructiveComponent,
 ) -> Result<Digest, RuntimeManifestError> {
-    component_address(component)
+    component_object_digest_at(component, RUNTIME_FORMAT_EPOCH)
+}
+
+pub(crate) fn component_object_digest_at(
+    component: &ReconstructiveComponent,
+    epoch: u32,
+) -> Result<Digest, RuntimeManifestError> {
+    component_address(component, epoch)
         .map(|address| address.digest)
         .map_err(|error| match error {
             CheckpointBundleError::Manifest(error) => error,
@@ -498,10 +525,11 @@ pub(crate) fn component_object_digest(
 
 pub(super) fn component_object_address(
     digest: Digest,
+    epoch: u32,
 ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
     RuntimeObjectAddress::from_store_parts(
         RuntimeObjectKind::ReconstructiveComponent,
-        RUNTIME_FORMAT_EPOCH,
+        epoch,
         digest,
     )
 }

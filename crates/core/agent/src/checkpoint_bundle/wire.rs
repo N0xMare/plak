@@ -2,8 +2,8 @@
 
 use super::{
     CheckpointBundleError, CheckpointId, Digest, DigestDomain, MAX_RUNTIME_CHECKPOINT_BYTES,
-    MAX_RUNTIME_RECORDS, RUNTIME_FORMAT_EPOCH, RuntimeObjectAddress, RuntimeObjectKind,
-    WorkingProjectionLimits, decode_bundle_digest, encode_bundle_digest,
+    MAX_RUNTIME_RECORDS, RuntimeObjectAddress, RuntimeObjectKind, WorkingProjectionLimits,
+    decode_bundle_digest, encode_bundle_digest,
 };
 
 #[derive(Default)]
@@ -77,10 +77,6 @@ struct BundleReader<'a> {
 }
 
 impl<'a> BundleReader<'a> {
-    const fn new(bytes: &'a [u8]) -> Self {
-        Self::new_at(bytes, RUNTIME_FORMAT_EPOCH)
-    }
-
     const fn new_at(bytes: &'a [u8], codec_revision: u32) -> Self {
         Self {
             bytes,
@@ -192,8 +188,9 @@ impl<'a> BundleReader<'a> {
 
 pub(super) fn parse_checkpoint_root(
     bytes: &[u8],
+    epoch: u32,
 ) -> Result<(CheckpointId, Digest, RuntimeObjectAddress), CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let checkpoint_id =
         CheckpointId::try_from(reader.uuid()?).map_err(|_| CheckpointBundleError::Malformed)?;
     let integrity = reader.digest()?;
@@ -214,8 +211,11 @@ pub(super) struct ManifestRootSpec {
     pub(super) named_state: std::collections::BTreeMap<String, RuntimeObjectAddress>,
 }
 
-pub(super) fn parse_manifest_root(bytes: &[u8]) -> Result<ManifestRootSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+pub(super) fn parse_manifest_root(
+    bytes: &[u8],
+    epoch: u32,
+) -> Result<ManifestRootSpec, CheckpointBundleError> {
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let value = ManifestRootSpec {
         metadata: reader.address()?,
         harness: reader.address()?,
@@ -262,8 +262,11 @@ pub(super) struct SequenceNodeSpec {
     pub(super) value: RuntimeObjectAddress,
 }
 
-pub(super) fn parse_sequence_node(bytes: &[u8]) -> Result<SequenceNodeSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+pub(super) fn parse_sequence_node(
+    bytes: &[u8],
+    epoch: u32,
+) -> Result<SequenceNodeSpec, CheckpointBundleError> {
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let value = SequenceNodeSpec {
         count: reader.count()?,
         previous: reader.optional_address()?,
@@ -288,8 +291,9 @@ pub(super) struct OperationNodeSpec {
 
 pub(super) fn parse_operation_node(
     bytes: &[u8],
+    epoch: u32,
 ) -> Result<OperationNodeSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let value = OperationNodeSpec {
         key: reader.u64()?,
         count: reader.count()?,
@@ -310,8 +314,11 @@ pub(super) struct WorkingSpec {
     pub(super) segments: Vec<RuntimeObjectAddress>,
 }
 
-pub(super) fn parse_working(bytes: &[u8]) -> Result<WorkingSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+pub(super) fn parse_working(
+    bytes: &[u8],
+    epoch: u32,
+) -> Result<WorkingSpec, CheckpointBundleError> {
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let limits = WorkingProjectionLimits::new(reader.usize()?, reader.usize()?, reader.usize()?)
         .map_err(|_| CheckpointBundleError::InvalidTopology)?;
     let count = reader.count()?;
@@ -332,8 +339,11 @@ pub(super) struct CanonicalSpec {
     pub(super) context: RuntimeObjectAddress,
 }
 
-pub(super) fn parse_canonical(bytes: &[u8]) -> Result<CanonicalSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+pub(super) fn parse_canonical(
+    bytes: &[u8],
+    epoch: u32,
+) -> Result<CanonicalSpec, CheckpointBundleError> {
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let value = CanonicalSpec {
         prefix: reader.address()?,
         history_count: reader.count()?,
@@ -359,15 +369,15 @@ pub(super) struct LedgerSpec {
     pub(super) retired_local_tool_attempts: Option<(plakous_model::TurnId, u64)>,
 }
 
-pub(super) fn parse_ledger(bytes: &[u8]) -> Result<LedgerSpec, CheckpointBundleError> {
-    let mut reader = BundleReader::new(bytes);
+pub(super) fn parse_ledger(bytes: &[u8], epoch: u32) -> Result<LedgerSpec, CheckpointBundleError> {
+    let mut reader = BundleReader::new_at(bytes, epoch);
     let value = LedgerSpec {
         command_count: reader.count()?,
         command_head: reader.optional_address()?,
         operation_count: reader.count()?,
         operation_head: reader.optional_address()?,
         retired_local_tool_attempts: {
-            let mut counter = BundleReader::new(reader.raw()?);
+            let mut counter = BundleReader::new_at(reader.raw()?, epoch);
             let value = match counter.u8()? {
                 0 => None,
                 1 => Some((

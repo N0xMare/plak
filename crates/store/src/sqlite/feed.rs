@@ -5,15 +5,15 @@
 use std::num::NonZeroUsize;
 
 use plakous_agent::internal::{
-    BranchHead, CheckpointId, FeedChange, FeedFact, FeedHeadKind, FeedHeader, FeedPage, FeedRecord,
-    FeedSeq, FeedTail, MAX_FEED_PAGE_BYTES, RuntimeCheckpointKind, SessionId, SessionRef,
-    SessionStoreError, StoreCapacityBound,
+    BranchHead, CheckpointId, FeedChange, FeedCodecError, FeedFact, FeedHeadKind, FeedHeader,
+    FeedPage, FeedRecord, FeedSeq, FeedTail, MAX_FEED_PAGE_BYTES, RuntimeCheckpointKind, SessionId,
+    SessionRef, SessionStoreError, StoreCapacityBound,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use super::{
     Backend, branch_row, exactly_one, i64n, id, map_sqlite, nonnegative, parse, receipt_integrity,
-    require_bound_domain, text_bytes, u64n,
+    require_bound_domain, require_writer_epoch, text_bytes, u64n,
 };
 use crate::memory_feed;
 
@@ -185,7 +185,7 @@ fn decode_row(
     if seal(selector, seq, tag, checkpoint, bytes)? != integrity {
         return Err(SessionStoreError::corrupt());
     }
-    let record = FeedRecord::decode(bytes).map_err(|_| SessionStoreError::corrupt())?;
+    let record = FeedRecord::decode(bytes).map_err(codec_error)?;
     let header = record.header();
     if header.session_id != session_id
         || header.seq.get() != seq
@@ -196,6 +196,37 @@ fn decode_row(
         return Err(SessionStoreError::corrupt());
     }
     Ok(record)
+}
+
+fn codec_error(error: FeedCodecError) -> SessionStoreError {
+    match error {
+        FeedCodecError::UnsupportedVersion(version) => {
+            SessionStoreError::UnsupportedFeedVersion(version)
+        }
+        _ => SessionStoreError::corrupt(),
+    }
+}
+
+/// Both readable checkpoint epochs use the same in-band feed version.
+/// Ordinary admission checks framing only; reads authenticate the whole row.
+pub(super) fn require_readable_versions(c: &Connection) -> Result<(), SessionStoreError> {
+    const V1_HEADER: &[u8] = b"{\"version\":1,";
+    c.query_row(
+        "SELECT record FROM session_feed WHERE substr(record,1,length(?1))<>?1 LIMIT 1",
+        [V1_HEADER],
+        |row| {
+            let rusqlite::types::ValueRef::Blob(bytes) = row.get_ref(0)? else {
+                return Ok(Err(SessionStoreError::corrupt()));
+            };
+            Ok(match FeedRecord::encoding_version(bytes) {
+                Ok(1) | Err(_) => Err(SessionStoreError::corrupt()),
+                Ok(version) => Err(SessionStoreError::UnsupportedFeedVersion(version)),
+            })
+        },
+    )
+    .optional()
+    .map_err(map_sqlite)?
+    .unwrap_or(Ok(()))
 }
 
 fn heads(c: &Connection, session_id: SessionId) -> Result<Vec<BranchHead>, SessionStoreError> {
@@ -342,6 +373,7 @@ fn trim_batches(b: &mut Backend, session_id: SessionId) -> Result<(), SessionSto
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(map_sqlite)?;
+        require_writer_epoch(&tx)?;
         require_bound_domain(&tx, b.domain)?;
         let Some(window) = load_window(&tx, session_id)? else {
             return Ok(());

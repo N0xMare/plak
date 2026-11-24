@@ -9,9 +9,9 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
 use super::{
-    SCHEMA, SessionStoreError, SqliteSessionStore, classify_bootstrap_connection,
-    initialize_writer_epoch, map_io, map_sqlite, validate_counts, verify_contents,
-    verify_exact_schema, verify_sqlite_runtime,
+    SCHEMA, SessionStoreError, SqlitePersistenceShape, SqliteSessionStore, admit_readable_records,
+    classify_bootstrap_connection, initialize_writer_epoch, map_io, map_sqlite, validate_counts,
+    verify_contents, verify_exact_schema, verify_sqlite_runtime,
 };
 
 impl SqliteSessionStore {
@@ -25,7 +25,11 @@ impl SqliteSessionStore {
             return Ok(false);
         };
         let snapshot = reader.unchecked_transaction().map_err(map_sqlite)?;
-        Ok(classify_bootstrap_connection(&snapshot)?.1)
+        let (shape, pending) = classify_bootstrap_connection(&snapshot)?;
+        if shape == SqlitePersistenceShape::Current {
+            admit_readable_records(&snapshot, pending)?;
+        }
+        Ok(pending)
     }
 
     /// Qualify the stopped-store transition on a detached copy of a live source.
@@ -72,6 +76,9 @@ pub(super) fn run(path: &Path, cut: impl Fn(&str)) -> Result<(), SessionStoreErr
         .transaction_with_behavior(TransactionBehavior::Exclusive)
         .map_err(bootstrap_lock_error)?;
     let (_, pending) = classify_bootstrap_connection(&lock)?;
+    if pending {
+        admit_readable_records(&lock, true)?;
+    }
     lock.commit().map_err(bootstrap_lock_error)?;
     if !pending {
         return Ok(());

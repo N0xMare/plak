@@ -297,7 +297,7 @@ fn sqlite_limits(
 pub enum SessionPersistenceShape {
     /// No runtime database exists, or its private file has no `SQLite` objects.
     MissingOrFresh,
-    /// Current bounded shape; full authoritative open is still required.
+    /// Exact readable shape, possibly requiring bootstrap on authoritative open.
     Current,
 }
 

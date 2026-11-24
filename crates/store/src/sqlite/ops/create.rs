@@ -24,6 +24,7 @@ pub(in super::super) fn create(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     let expires = expiry(now, r.lease_seconds())?;

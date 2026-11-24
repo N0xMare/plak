@@ -52,6 +52,7 @@ fn commit_impl(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, backend.domain)?;
     let now = sample_clock(backend.clock.as_ref(), backend.domain)?;
     if let Some(old) = load_commit_receipt(&tx, reference.checkpoint_id())? {

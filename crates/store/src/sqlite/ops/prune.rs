@@ -35,6 +35,7 @@ pub(in super::super) fn prune(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, selector.session_id())?;
@@ -188,15 +189,21 @@ pub(in super::super) fn prune(
 /// Returns up to `pages` free pages to the file system. The pragma frees one
 /// page per result row, so every row must be stepped.
 pub(in super::super) fn incremental_vacuum(
-    c: &Connection,
+    c: &mut Connection,
     pages: u32,
 ) -> Result<(), SessionStoreError> {
-    let mut statement = c
-        .prepare(&format!("PRAGMA incremental_vacuum({pages})"))
+    let tx = c
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
-    let mut rows = statement.query([]).map_err(map_sqlite)?;
-    while rows.next().map_err(map_sqlite)?.is_some() {}
-    Ok(())
+    require_writer_epoch(&tx)?;
+    {
+        let mut statement = tx
+            .prepare(&format!("PRAGMA incremental_vacuum({pages})"))
+            .map_err(map_sqlite)?;
+        let mut rows = statement.query([]).map_err(map_sqlite)?;
+        while rows.next().map_err(map_sqlite)?.is_some() {}
+    }
+    tx.commit().map_err(map_sqlite)
 }
 
 fn checkpoint_at_revision(

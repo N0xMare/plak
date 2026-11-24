@@ -322,6 +322,16 @@ pub(super) fn store_error(error: SessionStoreError) -> AgentSessionsError {
     if error == SessionStoreError::BootstrapBusy {
         return AgentSessionsError::new(AgentSessionsErrorKind::StorageBusy, error.to_string());
     }
+    if matches!(
+        error,
+        SessionStoreError::UnsupportedRuntimeEpoch(_)
+            | SessionStoreError::UnsupportedFeedVersion(_)
+    ) {
+        return AgentSessionsError::new(
+            AgentSessionsErrorKind::IncompatibleBuild,
+            error.to_string(),
+        );
+    }
     store_origin_error(session_store_origin(error))
 }
 

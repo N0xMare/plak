@@ -16,6 +16,7 @@ pub(in super::super) fn acquire(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, r.session().session_id())?;
@@ -94,6 +95,7 @@ pub(in super::super) fn renew(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;
@@ -144,6 +146,7 @@ pub(in super::super) fn revive(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;
@@ -184,6 +187,7 @@ pub(in super::super) fn release_many(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     let mut changed = false;
@@ -253,6 +257,7 @@ pub(in super::super) fn release(b: &mut Backend, l: &BranchLease) -> Result<(), 
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;

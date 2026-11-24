@@ -200,7 +200,7 @@ impl BundleBuilder {
         if object.address.kind != RuntimeObjectKind::OperationNode {
             return Err(CheckpointBundleError::WrongKind);
         }
-        parse_operation_node(&object.canonical_bytes)
+        parse_operation_node(&object.canonical_bytes, object.address.codec_revision())
     }
 }
 
@@ -219,7 +219,7 @@ pub(super) fn materialize_operation_tree<'a>(
     let mut stack = vec![(root, false)];
     while let Some((address, expanded)) = stack.pop() {
         let object = index.object(address, RuntimeObjectKind::OperationNode)?;
-        let node = parse_operation_node(&object.canonical_bytes)?;
+        let node = parse_operation_node(&object.canonical_bytes, object.address.codec_revision())?;
         if !expanded {
             stack.push((address, true));
             if let Some(right) = node.right {
@@ -292,6 +292,7 @@ pub(super) fn materialize_operation_tree<'a>(
                 &index
                     .object(address, RuntimeObjectKind::OperationNode)?
                     .canonical_bytes,
+                address.codec_revision(),
             )?
             .left;
         }
@@ -300,6 +301,7 @@ pub(super) fn materialize_operation_tree<'a>(
             &index
                 .object(address, RuntimeObjectKind::OperationNode)?
                 .canonical_bytes,
+            address.codec_revision(),
         )?;
         records.push(index.object(node.record, RuntimeObjectKind::OperationRecord)?);
         current = node.right;

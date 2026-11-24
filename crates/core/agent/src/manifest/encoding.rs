@@ -367,10 +367,21 @@ pub(crate) fn decode_bundle_command_record(
 }
 
 /// Encodes the persisted record, naming each component by its object digest.
+#[cfg(test)]
 pub(crate) fn encode_bundle_operation_record(
     record: &DurableOperationRecord,
 ) -> Result<Vec<u8>, RuntimeManifestError> {
-    OperationRecordWire::new(record, crate::checkpoint_bundle::component_object_digest)?.encode()
+    encode_bundle_operation_record_at(record, crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH)
+}
+
+pub(super) fn encode_bundle_operation_record_at(
+    record: &DurableOperationRecord,
+    epoch: u32,
+) -> Result<Vec<u8>, RuntimeManifestError> {
+    OperationRecordWire::new(record, |component| {
+        crate::checkpoint_bundle::component_object_digest_at(component, epoch)
+    })?
+    .encode()
 }
 
 pub(super) fn encode_command_record_body(

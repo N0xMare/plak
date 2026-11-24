@@ -45,8 +45,11 @@ pub(super) struct AuthenticatedOperationRecord {
 }
 
 impl AuthenticatedOperationRecord {
-    pub(super) fn new(record: DurableOperationRecord) -> Result<Self, RuntimeManifestError> {
-        let bytes = encode_bundle_operation_record(&record)?;
+    pub(super) fn new(
+        record: DurableOperationRecord,
+        epoch: u32,
+    ) -> Result<Self, RuntimeManifestError> {
+        let bytes = encode_bundle_operation_record_at(&record, epoch)?;
         let identity = Digest::sha256(
             DigestDomain::Blob,
             1,
@@ -113,6 +116,7 @@ impl<'a> OperationLedgerMutationRef<'a> {
 /// Exact command and physical-operation ledger.
 #[derive(Clone, Debug)]
 pub struct RuntimeOperationLedger {
+    encoding_epoch: u32,
     pub(super) command_tail: Option<Arc<LedgerNode<DurableCommandRecord>>>,
     pub(super) command_ids: Option<Arc<CommandIdNode>>,
     pub(super) operation_root: Option<Arc<OperationMapNode>>,
@@ -139,8 +143,20 @@ pub(crate) enum RetentionAnchor {
 impl RuntimeOperationLedger {
     /// Creates a canonically ordered exact ledger for cold decode/import.
     pub fn new(
+        commands: Vec<DurableCommandRecord>,
+        operations: Vec<DurableOperationRecord>,
+    ) -> Result<Self, RuntimeManifestError> {
+        Self::new_at(
+            commands,
+            operations,
+            crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH,
+        )
+    }
+
+    pub(crate) fn new_at(
         mut commands: Vec<DurableCommandRecord>,
         mut operations: Vec<DurableOperationRecord>,
+        encoding_epoch: u32,
     ) -> Result<Self, RuntimeManifestError> {
         if commands.len() > MAX_RUNTIME_RECORDS || operations.len() > MAX_RUNTIME_RECORDS {
             return Err(RuntimeManifestError::RecordLimit);
@@ -162,6 +178,7 @@ impl RuntimeOperationLedger {
             return Err(RuntimeManifestError::InvalidLedger);
         }
         let mut ledger = Self {
+            encoding_epoch,
             command_tail: None,
             command_ids: None,
             operation_root: None,
@@ -178,6 +195,22 @@ impl RuntimeOperationLedger {
             ledger = ledger.append_operation(record)?;
         }
         Ok(ledger)
+    }
+
+    pub(crate) const fn encoding_epoch(&self) -> u32 {
+        self.encoding_epoch
+    }
+
+    pub(crate) fn into_encoding_epoch(self, epoch: u32) -> Result<Self, RuntimeManifestError> {
+        if epoch == self.encoding_epoch {
+            return Ok(self);
+        }
+        Self::new_at(
+            self.commands().into_iter().cloned().collect(),
+            self.operations().into_iter().cloned().collect(),
+            epoch,
+        )?
+        .with_retired_attempts(self.retired_local_tool_attempts)
     }
 
     /// Returns ordered command records for cold encoding/inspection.
@@ -330,6 +363,7 @@ impl RuntimeOperationLedger {
             &encode_command_record_body(&record)?,
         )?;
         Ok(Self {
+            encoding_epoch: self.encoding_epoch,
             command_tail: Some(Arc::new(LedgerNode {
                 record,
                 previous: self.command_tail.clone(),
@@ -364,13 +398,14 @@ impl RuntimeOperationLedger {
         {
             return Err(RuntimeManifestError::InvalidLedger);
         }
-        let entry = AuthenticatedOperationRecord::new(record)?;
+        let entry = AuthenticatedOperationRecord::new(record, self.encoding_epoch)?;
         let operation_root = operation_map_insert(self.operation_root.as_ref(), entry.clone())?;
         let operation_count = self
             .operation_count
             .checked_add(1)
             .ok_or(RuntimeManifestError::RecordLimit)?;
         Ok(Self {
+            encoding_epoch: self.encoding_epoch,
             command_tail: self.command_tail.clone(),
             command_ids: self.command_ids.clone(),
             operation_version: Some(Arc::new(OperationLedgerMutation {
@@ -404,7 +439,7 @@ impl RuntimeOperationLedger {
         {
             return Err(RuntimeManifestError::InvalidLedger);
         }
-        let entry = AuthenticatedOperationRecord::new(record)?;
+        let entry = AuthenticatedOperationRecord::new(record, self.encoding_epoch)?;
         let operation_root = operation_map_replace(
             self.operation_root
                 .as_ref()
@@ -412,6 +447,7 @@ impl RuntimeOperationLedger {
             entry.clone(),
         )?;
         Ok(Self {
+            encoding_epoch: self.encoding_epoch,
             command_tail: self.command_tail.clone(),
             command_ids: self.command_ids.clone(),
             operation_version: Some(Arc::new(OperationLedgerMutation {
@@ -493,7 +529,7 @@ impl RuntimeOperationLedger {
             }
         }
         operations.extend(new_record);
-        let mut retained = Self::new(commands, operations)?;
+        let mut retained = Self::new_at(commands, operations, self.encoding_epoch)?;
         retained.retired_local_tool_attempts = self.retired_local_tool_attempts;
         retained
             .retirement_source

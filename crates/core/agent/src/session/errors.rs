@@ -475,6 +475,12 @@ pub enum SessionStoreError {
     /// Persistent semantic/object bytes use an unsupported codec.
     #[error("session store codec is unsupported")]
     UnsupportedCodec,
+    /// The readable window excludes a retained runtime object payload.
+    #[error("runtime checkpoint encoding epoch {0} is unsupported; offline migration is required")]
+    UnsupportedRuntimeEpoch(u32),
+    /// The readable window excludes a retained feed record.
+    #[error("session feed version {0} is unsupported; offline migration is required")]
+    UnsupportedFeedVersion(u32),
     /// The store has entered its terminal shutdown state.
     #[error("session store is shut down")]
     Shutdown,

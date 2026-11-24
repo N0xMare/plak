@@ -81,6 +81,10 @@ pub(super) fn insert_candidate(
     limits: MemoryStoreLimits,
     admission: StoreAdmission,
 ) -> Result<InsertEvidence, SessionStoreError> {
+    let epoch = x.reference.root().codec_revision();
+    if epoch != WRITER_EPOCH {
+        return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
+    }
     if checkpoint_row(tx, x.reference.checkpoint_id())?.is_some() {
         return Err(SessionStoreError::IdentityConflict);
     }

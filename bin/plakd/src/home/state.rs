@@ -61,7 +61,7 @@ fn ensure_usable_state_with_notice(
         && error.kind() == AgentSessionsErrorKind::IncompatibleBuild
     {
         return Err(format!(
-            "{} was created by an incompatible plakd build; move it aside to start fresh",
+            "{} was created by an incompatible plakd build: {error}",
             paths.runtime_database().display()
         ));
     }

@@ -13,8 +13,8 @@ use super::object::{canonical_child_specs, canonical_history_segment};
 use super::{
     CasNode, CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle,
     MAX_CHECKPOINT_OBJECT_BYTES, MAX_CHECKPOINT_OBJECTS, MAX_LAYER_DEPTH, ObjectIndex, ObjectLayer,
-    RUNTIME_FORMAT_EPOCH, RuntimeCheckpointCodec, RuntimeObject, RuntimeObjectAddress,
-    RuntimeObjectKind,
+    RuntimeCheckpointCodec, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind,
+    reads_checkpoint_epoch,
 };
 
 impl CheckpointBundleStats {
@@ -448,6 +448,11 @@ impl<'a> ObjectIndex<'a> {
     pub(super) fn validate(
         bundle: &'a CheckpointObjectBundle,
     ) -> Result<Self, CheckpointBundleError> {
+        if !reads_checkpoint_epoch(bundle.root.codec_revision) {
+            return Err(CheckpointBundleError::UnsupportedEpoch(
+                bundle.root.codec_revision,
+            ));
+        }
         if bundle.objects.is_empty() || bundle.objects.len() > MAX_CHECKPOINT_OBJECTS {
             return Err(CheckpointBundleError::BoundExceeded);
         }
@@ -467,10 +472,10 @@ impl<'a> ObjectIndex<'a> {
                 if total > MAX_CHECKPOINT_OBJECT_BYTES {
                     return Err(CheckpointBundleError::BoundExceeded);
                 }
-                if object.address.codec_revision != RUNTIME_FORMAT_EPOCH
+                if object.address.codec_revision != bundle.root.codec_revision
                     || object.address.digest.algorithm() != DigestAlgorithm::Sha256
                     || object.address.digest.domain() != DigestDomain::Blob
-                    || object.address.digest.version() != RUNTIME_FORMAT_EPOCH
+                    || object.address.digest.version() != bundle.root.codec_revision
                 {
                     return Err(CheckpointBundleError::UnsupportedRevision);
                 }
@@ -548,7 +553,7 @@ impl<'a> ObjectIndex<'a> {
         if self.decoded.contains_key(&object.address) {
             return Ok(Vec::new());
         }
-        let child_specs = canonical_child_specs(object.address.kind, &object.canonical_bytes)?;
+        let child_specs = canonical_child_specs(object.address, &object.canonical_bytes)?;
         for (address, kind) in &child_specs {
             self.object(*address, *kind)?;
         }

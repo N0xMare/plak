@@ -207,7 +207,7 @@ pub struct SqliteStoreStats {
 pub enum SqlitePersistenceShape {
     /// No database exists, or an existing private file has no `SQLite` objects.
     MissingOrFresh,
-    /// The bounded header, runtime, pragma, and exact-DDL checks match current.
+    /// The bounded checks admit the exact current or bootstrappable legacy shape.
     Current,
 }
 
@@ -962,6 +962,7 @@ impl Backend {
         }
         sample_clock(clock.as_ref(), domain)?;
         bind_domain(&admission, domain)?;
+        activate_writer_epoch(&admission)?;
         admission.commit().map_err(map_sqlite)?;
         let vacuum_pending = connection
             .pragma_query_value(None, "freelist_count", |row| row.get::<_, i64>(0))
@@ -1208,7 +1209,7 @@ impl Backend {
             self.wal_pending = false;
             let _ = checkpoint_wal(&self.connection, false);
         } else {
-            let result = incremental_vacuum(&self.connection, BACKGROUND_VACUUM_PAGES);
+            let result = incremental_vacuum(&mut self.connection, BACKGROUND_VACUUM_PAGES);
             self.vacuum_pending = result.is_ok()
                 && self
                     .connection

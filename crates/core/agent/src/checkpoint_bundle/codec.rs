@@ -30,8 +30,8 @@ use super::wire::{
 use super::{
     BundleBuilder, CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle,
     MAX_CHECKPOINT_OBJECT_BYTES, MAX_CHECKPOINT_OBJECTS, ObjectIndex, ObjectLayer,
-    RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress,
-    RuntimeObjectKind,
+    RUNTIME_FORMAT_EPOCH, RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject,
+    RuntimeObjectAddress, RuntimeObjectKind, reads_checkpoint_epoch,
 };
 
 impl RuntimeCheckpointCodec {
@@ -48,9 +48,16 @@ impl RuntimeCheckpointCodec {
         mut load: impl FnMut(RuntimeObjectAddress) -> Result<RuntimeObject, E>,
         error: impl Fn(CheckpointBundleError) -> E,
     ) -> Result<RuntimeCheckpointInspection, E> {
+        let epoch = root.codec_revision();
+        if !reads_checkpoint_epoch(epoch) {
+            return Err(error(CheckpointBundleError::UnsupportedEpoch(epoch)));
+        }
         let mut inspected = BTreeMap::<RuntimeObjectAddress, RuntimeObject>::new();
         let mut retained_bytes = 0_usize;
         let mut read = |address: RuntimeObjectAddress, kind| {
+            if address.codec_revision() != epoch {
+                return Err(error(CheckpointBundleError::UnsupportedRevision));
+            }
             if address.kind() != kind {
                 return Err(error(CheckpointBundleError::WrongKind));
             }
@@ -73,12 +80,12 @@ impl RuntimeCheckpointCodec {
         };
         let object = read(root, RuntimeObjectKind::CheckpointRoot)?;
         let (stored_id, stored_integrity, manifest) =
-            parse_checkpoint_root(object.canonical_bytes()).map_err(&error)?;
+            parse_checkpoint_root(object.canonical_bytes(), epoch).map_err(&error)?;
         if stored_id != checkpoint_id || stored_integrity != integrity {
             return Err(error(CheckpointBundleError::SemanticDisagreement));
         }
         let object = read(manifest, RuntimeObjectKind::ManifestRoot)?;
-        let manifest = parse_manifest_root(object.canonical_bytes()).map_err(&error)?;
+        let manifest = parse_manifest_root(object.canonical_bytes(), epoch).map_err(&error)?;
         let object = read(manifest.metadata, RuntimeObjectKind::ManifestMetadata)?;
         let metadata =
             decode_bundle_metadata(object.canonical_bytes()).map_err(|e| error(e.into()))?;
@@ -86,7 +93,7 @@ impl RuntimeCheckpointCodec {
         if let crate::manifest::RuntimeLifecycle::Working { obligations, .. } = &metadata.lifecycle
         {
             let object = read(manifest.ledger, RuntimeObjectKind::OperationLedger)?;
-            let ledger = parse_ledger(object.canonical_bytes()).map_err(&error)?;
+            let ledger = parse_ledger(object.canonical_bytes(), epoch).map_err(&error)?;
             for obligation in obligations {
                 let mut current = ledger.operation_head;
                 let mut visited = BTreeSet::new();
@@ -97,7 +104,8 @@ impl RuntimeCheckpointCodec {
                         return Err(error(CheckpointBundleError::InvalidTopology));
                     }
                     let object = read(address, RuntimeObjectKind::OperationNode)?;
-                    let node = parse_operation_node(object.canonical_bytes()).map_err(&error)?;
+                    let node =
+                        parse_operation_node(object.canonical_bytes(), epoch).map_err(&error)?;
                     match obligation.operation_id().cmp(&node.key) {
                         Ordering::Less => current = node.left,
                         Ordering::Greater => current = node.right,
@@ -109,7 +117,8 @@ impl RuntimeCheckpointCodec {
                                 return Err(error(CheckpointBundleError::InvalidTopology));
                             }
                             let digest = wire.request_component_digest();
-                            let address = component_object_address(digest).map_err(&error)?;
+                            let address =
+                                component_object_address(digest, epoch).map_err(&error)?;
                             let object = read(address, RuntimeObjectKind::ReconstructiveComponent)?;
                             let request =
                                 canonical_component(object.canonical_bytes()).map_err(&error)?;
@@ -149,12 +158,20 @@ impl RuntimeCheckpointCodec {
         checkpoint: &RuntimeCheckpoint,
         prior: Option<&CheckpointObjectBundle>,
     ) -> Result<CheckpointObjectBundle, CheckpointBundleError> {
+        require_writer_checkpoint(checkpoint)?;
         if let Some(prior) = prior {
             return Self::advance(checkpoint, prior);
         }
+        Self::bundle_full(checkpoint)
+    }
+
+    pub(super) fn bundle_full(
+        checkpoint: &RuntimeCheckpoint,
+    ) -> Result<CheckpointObjectBundle, CheckpointBundleError> {
         let mut builder = BundleBuilder {
             objects: BTreeMap::new(),
             visited: 0,
+            epoch: checkpoint.encoding_epoch(),
         };
         let built = builder.checkpoint(checkpoint)?;
         let root = built.root;
@@ -215,7 +232,21 @@ impl RuntimeCheckpointCodec {
         checkpoint: &RuntimeCheckpoint,
         prior: &CheckpointObjectBundle,
     ) -> Result<CheckpointObjectBundle, CheckpointBundleError> {
+        require_writer_checkpoint(checkpoint)?;
         let prior_checkpoint = prior.validated_checkpoint()?;
+        if prior.root.codec_revision() != RUNTIME_FORMAT_EPOCH {
+            if !checkpoint
+                .manifest()
+                .ledger()
+                .is_retained_successor_of(prior_checkpoint.manifest().ledger())
+            {
+                return Err(CheckpointBundleError::IncrementalBaseMismatch);
+            }
+            let mut publication = Self::bundle(checkpoint, None)?;
+            // The base is a relational proof, not an edge in the new graph.
+            publication.base_root = Some(prior.root);
+            return Ok(publication);
+        }
         let prior_reuse = prior
             .reuse
             .as_deref()
@@ -223,6 +254,7 @@ impl RuntimeCheckpointCodec {
         let mut builder = BundleBuilder {
             objects: BTreeMap::new(),
             visited: 0,
+            epoch: RUNTIME_FORMAT_EPOCH,
         };
         let built = builder.advance(checkpoint, &prior_checkpoint, prior, prior_reuse)?;
         builder.retain_candidate_closure(built.root, Some(prior))?;
@@ -297,19 +329,29 @@ impl RuntimeCheckpointCodec {
     }
 }
 
+fn require_writer_checkpoint(checkpoint: &RuntimeCheckpoint) -> Result<(), CheckpointBundleError> {
+    if checkpoint.encoding_epoch() != RUNTIME_FORMAT_EPOCH {
+        return Err(CheckpointBundleError::UnsupportedRevision);
+    }
+    Ok(())
+}
+
 fn materialize_checkpoint(
     bundle: &CheckpointObjectBundle,
     index: &ObjectIndex<'_>,
 ) -> Result<RuntimeCheckpoint, CheckpointBundleError> {
     let root = index.object(bundle.root, RuntimeObjectKind::CheckpointRoot)?;
     let (checkpoint_id, checkpoint_integrity, manifest_address) =
-        parse_checkpoint_root(&root.canonical_bytes)?;
+        parse_checkpoint_root(&root.canonical_bytes, root.address.codec_revision())?;
     if checkpoint_id != bundle.checkpoint_id || checkpoint_integrity != bundle.checkpoint_integrity
     {
         return Err(CheckpointBundleError::SemanticDisagreement);
     }
     let manifest_root = index.object(manifest_address, RuntimeObjectKind::ManifestRoot)?;
-    let root = parse_manifest_root(&manifest_root.canonical_bytes)?;
+    let root = parse_manifest_root(
+        &manifest_root.canonical_bytes,
+        manifest_root.address.codec_revision(),
+    )?;
     let metadata_object = index.object(root.metadata, RuntimeObjectKind::ManifestMetadata)?;
     let metadata = decode_bundle_metadata(&metadata_object.canonical_bytes)?;
     let harness = materialize_component(index, root.harness)?;
@@ -341,7 +383,7 @@ fn materialize_checkpoint(
         tools,
         ledger,
         family_artifact,
-        crate::manifest::NamedState::from_values(
+        crate::manifest::NamedState::from_values_at(
             root.named_state
                 .into_iter()
                 .map(|(key, address)| {
@@ -349,12 +391,13 @@ fn materialize_checkpoint(
                     Ok((key, object.canonical_bytes.clone()))
                 })
                 .collect::<Result<_, CheckpointBundleError>>()?,
+            bundle.root.codec_revision(),
         )?,
     )?;
     if manifest.topology().checkpoint_id != checkpoint_id {
         return Err(CheckpointBundleError::SemanticDisagreement);
     }
-    let checkpoint = RuntimeCheckpoint::new(manifest)?;
+    let checkpoint = RuntimeCheckpoint::from_decoded_manifest(manifest)?;
     if checkpoint.integrity() != checkpoint_integrity {
         return Err(CheckpointBundleError::SemanticDisagreement);
     }
@@ -366,7 +409,7 @@ fn materialize_canonical(
     address: RuntimeObjectAddress,
 ) -> Result<RuntimeCanonicalState, CheckpointBundleError> {
     let object = index.object(address, RuntimeObjectKind::CanonicalState)?;
-    let spec = parse_canonical(&object.canonical_bytes)?;
+    let spec = parse_canonical(&object.canonical_bytes, object.address.codec_revision())?;
     let prefix_object = index.object(spec.prefix, RuntimeObjectKind::StablePrefix)?;
     let prefix = canonical_stable_prefix(&prefix_object.canonical_bytes)?;
     let history = materialize_history(index, spec.history_count, spec.history_head)?;
@@ -390,7 +433,7 @@ fn materialize_history(
     let mut expected = count;
     while let Some(address) = head {
         let object = index.object(address, RuntimeObjectKind::HistoryNode)?;
-        let node = parse_sequence_node(&object.canonical_bytes)?;
+        let node = parse_sequence_node(&object.canonical_bytes, object.address.codec_revision())?;
         if node.count != expected || expected == 0 {
             return Err(CheckpointBundleError::InvalidTopology);
         }
@@ -416,7 +459,7 @@ fn materialize_working(
     address: RuntimeObjectAddress,
 ) -> Result<WorkingProjection, CheckpointBundleError> {
     let object = index.object(address, RuntimeObjectKind::WorkingProjection)?;
-    let spec = parse_working(&object.canonical_bytes)?;
+    let spec = parse_working(&object.canonical_bytes, object.address.codec_revision())?;
     let segments = spec
         .segments
         .into_iter()
@@ -453,7 +496,7 @@ fn materialize_ledger(
     address: RuntimeObjectAddress,
 ) -> Result<RuntimeOperationLedger, CheckpointBundleError> {
     let object = index.object(address, RuntimeObjectKind::OperationLedger)?;
-    let spec = parse_ledger(&object.canonical_bytes)?;
+    let spec = parse_ledger(&object.canonical_bytes, object.address.codec_revision())?;
     let commands = materialize_sequence(
         index,
         spec.command_count,
@@ -480,7 +523,7 @@ fn materialize_ledger(
     {
         return Err(CheckpointBundleError::InvalidTopology);
     }
-    RuntimeOperationLedger::new(commands, operations)?
+    RuntimeOperationLedger::new_at(commands, operations, address.codec_revision())?
         .with_retired_attempts(spec.retired_local_tool_attempts)
         .map_err(Into::into)
 }
@@ -499,7 +542,10 @@ fn materialize_sequence<'a>(
     let mut expected = count;
     while let Some(address) = head {
         let node_object = index.object(address, node_kind)?;
-        let node = parse_sequence_node(&node_object.canonical_bytes)?;
+        let node = parse_sequence_node(
+            &node_object.canonical_bytes,
+            node_object.address.codec_revision(),
+        )?;
         if node.count != expected || expected == 0 {
             return Err(CheckpointBundleError::InvalidTopology);
         }
@@ -520,6 +566,10 @@ fn materialize_operation(
     index: &ObjectIndex<'_>,
     object: &RuntimeObject,
 ) -> Result<DurableOperationRecord, CheckpointBundleError> {
-    canonical_operation_wire(&object.canonical_bytes)?
-        .resolve(|digest| materialize_component(index, component_object_address(digest)?))
+    canonical_operation_wire(&object.canonical_bytes)?.resolve(|digest| {
+        materialize_component(
+            index,
+            component_object_address(digest, object.address.codec_revision())?,
+        )
+    })
 }

@@ -16,18 +16,24 @@ mod object;
 mod operation_tree;
 mod wire;
 
-pub(crate) use object::{component_object_digest, object_address};
+#[cfg(test)]
+pub(crate) use object::component_object_digest;
+pub(crate) use object::{component_object_digest_at, object_address_at};
 
-/// Format epoch of the complete persisted checkpoint object graph. Every
-/// object address carries it and nothing from another epoch decodes. Any
-/// pre-release change to a persisted runtime encoding bumps this one number;
-/// component revisions change only with an explicit semantic format cut.
-/// Epoch 39 drops the credential-store path from Codex and `SuperGrok`
-/// credential-authority digests. Checkpoint fields are unchanged; every
-/// object address still carries this epoch, so an epoch-38 checkpoint does
-/// not decode.
-/// Epoch 38 adds context-codec-4 imported compaction selections without old grants.
+/// Encoding epoch of newly published checkpoint object graphs.
+/// This is independent of the product's offline runtime format cut.
 pub const RUNTIME_FORMAT_EPOCH: u32 = 39;
+
+/// The single preceding checkpoint epoch this decoder retains.
+pub const PREVIOUS_RUNTIME_FORMAT_EPOCH: u32 = 38;
+
+/// Whether a retained checkpoint object payload has an implemented decoder.
+#[must_use]
+pub const fn reads_checkpoint_epoch(epoch: u32) -> bool {
+    // Both decoders share the frozen leaf grammar. Address framing and all
+    // derived proofs use the closure's epoch, not the active writer's epoch.
+    matches!(epoch, RUNTIME_FORMAT_EPOCH | PREVIOUS_RUNTIME_FORMAT_EPOCH)
+}
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize =
@@ -220,6 +226,9 @@ pub enum CheckpointBundleError {
     /// An object or address uses a codec revision this codec does not implement.
     #[error("checkpoint object revision is unsupported")]
     UnsupportedRevision,
+    /// No decoder exists for this retained object payload.
+    #[error("runtime checkpoint encoding epoch {0} is unsupported; offline migration is required")]
+    UnsupportedEpoch(u32),
     /// An address does not match its exact kind, revision, and canonical bytes.
     #[error("checkpoint object content address is invalid")]
     InvalidAddress,
@@ -261,6 +270,7 @@ pub enum CheckpointBundleError {
 struct BundleBuilder {
     objects: BTreeMap<RuntimeObjectAddress, RuntimeObject>,
     visited: usize,
+    epoch: u32,
 }
 
 struct BuiltCheckpoint {

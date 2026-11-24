@@ -762,7 +762,9 @@ impl DurableSessionStoreError {
             SessionStoreError::Corrupt(reason) => Self::Corrupt(reason),
             SessionStoreError::StorageFull => Self::StorageFull,
             SessionStoreError::UnsupportedSchema => Self::UnsupportedSchema,
-            SessionStoreError::UnsupportedCodec => Self::UnsupportedCodec,
+            SessionStoreError::UnsupportedCodec
+            | SessionStoreError::UnsupportedRuntimeEpoch(_)
+            | SessionStoreError::UnsupportedFeedVersion(_) => Self::UnsupportedCodec,
             SessionStoreError::Shutdown => Self::Shutdown,
             SessionStoreError::Pruned => Self::Pruned,
         }

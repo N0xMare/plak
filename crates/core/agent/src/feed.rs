@@ -643,8 +643,12 @@ impl FeedRecord {
     ///
     /// Returns [`FeedCodecError::RecordTooLarge`] above the bound.
     pub fn encode(&self) -> Result<Vec<u8>, FeedCodecError> {
+        self.encode_at(FEED_RECORD_CODEC_VERSION)
+    }
+
+    fn encode_at(&self, version: u32) -> Result<Vec<u8>, FeedCodecError> {
         let bytes = serde_json::to_vec(&FeedRecordEnvelope {
-            version: FEED_RECORD_CODEC_VERSION,
+            version,
             record: self,
         })
         .map_err(|_| FeedCodecError::Malformed)?;
@@ -660,15 +664,30 @@ impl FeedRecord {
     ///
     /// Refuses another codec version, malformed or non-canonical bytes.
     pub fn decode(bytes: &[u8]) -> Result<Self, FeedCodecError> {
+        match Self::encoding_version(bytes)? {
+            1 => Self::decode_v1(bytes),
+            other => Err(FeedCodecError::UnsupportedVersion(other)),
+        }
+    }
+
+    /// Identifies the in-band version before interpreting any record fields.
+    ///
+    /// # Errors
+    /// Refuses a malformed or oversized record envelope.
+    #[doc(hidden)]
+    pub fn encoding_version(bytes: &[u8]) -> Result<u32, FeedCodecError> {
         if bytes.len() > MAX_FEED_RECORD_BYTES {
             return Err(FeedCodecError::RecordTooLarge { bytes: bytes.len() });
         }
+        let envelope: FeedRecordEnvelope<serde::de::IgnoredAny> =
+            serde_json::from_slice(bytes).map_err(|_| FeedCodecError::Malformed)?;
+        Ok(envelope.version)
+    }
+
+    fn decode_v1(bytes: &[u8]) -> Result<Self, FeedCodecError> {
         let envelope: FeedRecordEnvelope<Self> =
             serde_json::from_slice(bytes).map_err(|_| FeedCodecError::Malformed)?;
-        if envelope.version != FEED_RECORD_CODEC_VERSION {
-            return Err(FeedCodecError::UnsupportedVersion(envelope.version));
-        }
-        if envelope.record.encode()? != bytes {
+        if envelope.record.encode_at(1)? != bytes {
             return Err(FeedCodecError::Noncanonical);
         }
         if !envelope.record.within_writer_bounds() {
@@ -734,7 +753,7 @@ pub enum FeedCodecError {
     #[error("feed record encoding is not canonical")]
     Noncanonical,
     /// Another codec version.
-    #[error("feed record codec version {0} is unsupported")]
+    #[error("feed record codec version {0} is unsupported; offline migration is required")]
     UnsupportedVersion(u32),
 }
 

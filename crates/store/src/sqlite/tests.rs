@@ -68,20 +68,19 @@ fn missing_publication_base_or_root_leaves_sqlite_state_unchanged() -> TestResul
     Ok(())
 }
 
-/// An object address from another format epoch never decodes: the store
-/// reports it as an unsupported codec, which the facade surfaces as an
-/// incompatible build, not as corruption.
+/// Sealed references can outlive the decoder for their old payload.
 #[test]
-fn an_object_from_another_format_epoch_is_an_unsupported_codec() {
+fn historical_address_decodes_without_a_payload_decoder() -> TestResult {
     let kind = i64::from(super::kind_tag(super::RuntimeObjectKind::CheckpointRoot));
-    let epoch = i64::from(plakous_agent::internal::RUNTIME_FORMAT_EPOCH);
-    for other in [epoch - 1, epoch + 1] {
-        assert_eq!(
-            super::decode_address(kind, other, vec![0; 32]).err(),
-            Some(SessionStoreError::UnsupportedCodec),
-            "epoch {other}"
-        );
-    }
+    let epoch = plakous_agent::internal::RUNTIME_FORMAT_EPOCH - 2;
+    let address = super::decode_address(kind, i64::from(epoch), vec![0; 32])?;
+    assert_eq!(
+        super::RuntimeObject::from_store(address, Vec::new(), Vec::new())
+            .map_err(super::bundle_error)
+            .err(),
+        Some(SessionStoreError::UnsupportedRuntimeEpoch(epoch)),
+    );
+    Ok(())
 }
 
 #[test]
@@ -422,6 +421,8 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     // rusqlite validates each of the five shape PRAGMAs through pragma_list,
     // adding two traced statements per PRAGMA, independent of history size.
     const PRAGMA_VALIDATION_QUERIES: u64 = 2 * 5;
+    // One marker probe and one retained-window probe per payload codec.
+    const CODEC_ADMISSION_QUERIES: u64 = 3;
     let database = CrashDatabase::new()?;
     let seed = crash_seed(81_000)?;
     let store = SqliteSessionStore::open(&database.path)?;
@@ -476,7 +477,7 @@ async fn cold_start_query_count_is_constant_for_large_authoritative_history() ->
     connection.trace_v2(TraceEventCodes::empty(), None::<fn(TraceEvent<'_>)>)?;
     let query_count = STARTUP_QUERY_COUNT.load(Ordering::Relaxed);
     assert!(
-        query_count <= 32 + PRAGMA_VALIDATION_QUERIES,
+        query_count <= 32 + PRAGMA_VALIDATION_QUERIES + CODEC_ADMISSION_QUERIES,
         "cold-start authority validation executed {query_count} statements for {COMMITS} commits"
     );
     assert_eq!(head.revision().get(), COMMITS);

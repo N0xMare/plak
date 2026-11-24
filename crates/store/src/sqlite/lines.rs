@@ -320,6 +320,7 @@ pub(in super::super) fn record_line_job_terminals(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     let head = r.lease().session();

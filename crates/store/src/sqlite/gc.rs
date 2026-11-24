@@ -1,6 +1,6 @@
 use super::{
     Connection, OptionalExtension, SessionStoreError, StoreReclaimReport, TransactionBehavior,
-    exactly_one, i64n, map_sqlite, nonnegative, params,
+    exactly_one, i64n, map_sqlite, nonnegative, params, require_writer_epoch,
 };
 #[cfg(test)]
 use super::{CrashCut, test_crash_cut};
@@ -20,6 +20,7 @@ pub(super) fn step(
     let tx = c
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     let mut objects = 0_u64;
     let mut bytes = 0_u64;
     for _ in 0..object_budget {

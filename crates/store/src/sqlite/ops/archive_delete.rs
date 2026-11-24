@@ -17,6 +17,7 @@ pub(in super::super) fn archive(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     if let Some((branch, checkpoint)) = r.retirement_head() {
@@ -267,6 +268,7 @@ pub(in super::super) fn delete(
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sqlite)?;
+    require_writer_epoch(&tx)?;
     require_bound_domain(&tx, b.domain)?;
     if deletion_exists(&tx, r.session_id())? {
         let receipt = load_delete(&tx, r)?;

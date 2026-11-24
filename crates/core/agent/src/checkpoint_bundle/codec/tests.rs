@@ -17,6 +17,7 @@ fn an_operation_reference_to_non_operation_evidence_fails_closed() -> TestResult
     let mut builder = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH,
     };
     let foreign = builder.component(&component(
         RuntimeComponentKind::Command,
@@ -70,6 +71,7 @@ fn history_and_working_materializers_share_the_decoded_segment() -> TestResult {
     let mut builder = BundleBuilder {
         objects: BTreeMap::new(),
         visited: 0,
+        epoch: crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH,
     };
     let working_address = builder.working(&working)?;
     SEGMENT_DECODES.set(0);

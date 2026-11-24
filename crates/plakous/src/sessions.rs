@@ -85,8 +85,8 @@ use plakous_tools::{ToolExecutorId, ToolOutcome};
 pub const RUNTIME_STORE_SCHEMA_VERSION: i64 = plakous_store::SQLITE_SCHEMA_VERSION;
 /// Last declared runtime format cut; encoding-epoch bumps do not move it.
 pub const RUNTIME_FORMAT_CUT: u32 = 39;
-/// Format epoch of the persisted runtime checkpoint graph. Any change to a
-/// persisted runtime encoding bumps it; nothing older decodes.
+/// Encoding epoch of newly published runtime checkpoint graphs. The reader
+/// also accepts the immediately preceding encoding.
 pub const RUNTIME_FORMAT_EPOCH: u32 = plakous_agent::internal::RUNTIME_FORMAT_EPOCH;
 
 mod attached;

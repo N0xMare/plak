@@ -108,7 +108,7 @@ pub(super) fn classify_bootstrap_connection(
         .map_err(map_sqlite)?;
     let objects: i64 = c
         .query_row(
-            "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            "SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
             [],
             |row| row.get(0),
         )
@@ -223,6 +223,7 @@ pub(super) fn admit_existing_header(
     let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
     let (shape, legacy) = classify_bootstrap_connection(&snapshot)?;
     if shape == SqlitePersistenceShape::Current {
+        admit_readable_records(&snapshot, legacy)?;
         let bound = bound_domain(&snapshot)?;
         if bound.epoch() == domain.epoch() && bound != domain {
             return Err(SessionStoreError::LeaseDomainMismatch);

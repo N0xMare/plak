@@ -14,7 +14,7 @@ use crate::manifest::{
     encode_bundle_tools,
 };
 
-use super::object::{canonical_history_segment, object_address};
+use super::object::{canonical_history_segment, object_address_at};
 use super::wire::{
     BundleWriter, parse_canonical, parse_checkpoint_root, parse_ledger, parse_manifest_root,
     parse_sequence_node,
@@ -103,7 +103,7 @@ impl BundleBuilder {
         prior: RuntimeObjectAddress,
     ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
         self.visited = self.visited.saturating_add(1);
-        let address = object_address(kind, &bytes)?;
+        let address = object_address_at(kind, &bytes, self.epoch)?;
         if address == prior {
             Ok(prior)
         } else {
@@ -122,7 +122,7 @@ impl BundleBuilder {
         F: FnOnce(&mut Self) -> Result<RuntimeObjectAddress, CheckpointBundleError>,
     {
         self.visited = self.visited.saturating_add(1);
-        if object_address(kind, bytes)? == prior {
+        if object_address_at(kind, bytes, self.epoch)? == prior {
             Ok(prior)
         } else {
             build(self)
@@ -203,6 +203,7 @@ impl BundleBuilder {
                 .get(&canonical)
                 .ok_or(CheckpointBundleError::MissingObject)?
                 .canonical_bytes,
+            canonical.codec_revision(),
         )?;
         let ledger_spec = parse_ledger(
             &self
@@ -210,6 +211,7 @@ impl BundleBuilder {
                 .get(&ledger)
                 .ok_or(CheckpointBundleError::MissingObject)?
                 .canonical_bytes,
+            ledger.codec_revision(),
         )?;
         Ok(BuiltCheckpoint {
             root,
@@ -451,7 +453,13 @@ impl BundleBuilder {
                 let head = prior
                     .history_head
                     .and_then(|head| prior_bundle.lookup(head))
-                    .and_then(|object| parse_sequence_node(&object.canonical_bytes).ok());
+                    .and_then(|object| {
+                        parse_sequence_node(
+                            &object.canonical_bytes,
+                            object.address.codec_revision(),
+                        )
+                        .ok()
+                    });
                 match (head, canonical.history().append_delta_since(&prefix)) {
                     (Some(head), Some(delta)) => (head.previous, prefix.segments().len(), delta),
                     _ => (None, 0, canonical.history().segments().to_vec()),
@@ -493,13 +501,14 @@ impl BundleBuilder {
         children.extend(history_head);
         children.extend([working, context]);
         let bytes = writer.finish();
-        let address =
-            if object_address(RuntimeObjectKind::CanonicalState, &bytes)? == prior.canonical {
-                self.visited = self.visited.saturating_add(1);
-                prior.canonical
-            } else {
-                self.insert(RuntimeObjectKind::CanonicalState, bytes, children)?
-            };
+        let address = if object_address_at(RuntimeObjectKind::CanonicalState, &bytes, self.epoch)?
+            == prior.canonical
+        {
+            self.visited = self.visited.saturating_add(1);
+            prior.canonical
+        } else {
+            self.insert(RuntimeObjectKind::CanonicalState, bytes, children)?
+        };
         Ok(BuiltCanonical {
             address,
             prefix,
@@ -564,7 +573,8 @@ impl BundleBuilder {
         children.extend(command_head);
         children.extend(operation_head);
         let bytes = writer.finish();
-        let address = if object_address(RuntimeObjectKind::OperationLedger, &bytes)? == prior.ledger
+        let address = if object_address_at(RuntimeObjectKind::OperationLedger, &bytes, self.epoch)?
+            == prior.ledger
         {
             self.visited = self.visited.saturating_add(1);
             prior.ledger
@@ -782,7 +792,7 @@ impl BundleBuilder {
         children: Vec<RuntimeObjectAddress>,
     ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
         self.visited = self.visited.saturating_add(1);
-        let address = object_address(kind, &canonical_bytes)?;
+        let address = object_address_at(kind, &canonical_bytes, self.epoch)?;
         let mut candidate = RuntimeObject::new_trusted(address, canonical_bytes, children);
         if let Some(existing) = self.objects.get(&address) {
             if existing != &candidate {
@@ -815,28 +825,38 @@ pub(super) fn reuse_from_bundle(
     if root.address.kind != RuntimeObjectKind::CheckpointRoot {
         return Err(CheckpointBundleError::WrongKind);
     }
-    let (_, _, manifest_address) = parse_checkpoint_root(&root.canonical_bytes)?;
+    let (_, _, manifest_address) =
+        parse_checkpoint_root(&root.canonical_bytes, root.address.codec_revision())?;
     let manifest_object = bundle
         .lookup(manifest_address)
         .ok_or(CheckpointBundleError::MissingObject)?;
     if manifest_object.address.kind != RuntimeObjectKind::ManifestRoot {
         return Err(CheckpointBundleError::WrongKind);
     }
-    let manifest = parse_manifest_root(&manifest_object.canonical_bytes)?;
+    let manifest = parse_manifest_root(
+        &manifest_object.canonical_bytes,
+        manifest_object.address.codec_revision(),
+    )?;
     let canonical_object = bundle
         .lookup(manifest.canonical)
         .ok_or(CheckpointBundleError::MissingObject)?;
     if canonical_object.address.kind != RuntimeObjectKind::CanonicalState {
         return Err(CheckpointBundleError::WrongKind);
     }
-    let canonical = parse_canonical(&canonical_object.canonical_bytes)?;
+    let canonical = parse_canonical(
+        &canonical_object.canonical_bytes,
+        canonical_object.address.codec_revision(),
+    )?;
     let ledger_object = bundle
         .lookup(manifest.ledger)
         .ok_or(CheckpointBundleError::MissingObject)?;
     if ledger_object.address.kind != RuntimeObjectKind::OperationLedger {
         return Err(CheckpointBundleError::WrongKind);
     }
-    let ledger = parse_ledger(&ledger_object.canonical_bytes)?;
+    let ledger = parse_ledger(
+        &ledger_object.canonical_bytes,
+        ledger_object.address.codec_revision(),
+    )?;
     Ok(BundleReuse {
         canonical: manifest.canonical,
         harness: manifest.harness,

@@ -14,6 +14,8 @@ pub(super) const fn startup_error_category(error: SessionStoreError) -> &'static
         SessionStoreError::BackendUnavailable => "backend_unavailable",
         SessionStoreError::UnsupportedSchema => "unsupported_schema",
         SessionStoreError::UnsupportedCodec => "unsupported_codec",
+        SessionStoreError::UnsupportedRuntimeEpoch(_) => "unsupported_runtime_epoch",
+        SessionStoreError::UnsupportedFeedVersion(_) => "unsupported_feed_version",
         SessionStoreError::Corrupt(_) => "corrupt",
         SessionStoreError::Invalid(_) => "invalid",
         SessionStoreError::Capacity(_) => "capacity",
@@ -26,10 +28,12 @@ pub(super) const fn startup_error_category(error: SessionStoreError) -> &'static
     reason = "map_err supplies the owned bundle failure"
 )]
 pub(super) fn bundle_error(e: CheckpointBundleError) -> SessionStoreError {
-    if e == CheckpointBundleError::UnsupportedRevision {
-        SessionStoreError::UnsupportedCodec
-    } else {
-        SessionStoreError::corrupt()
+    match e {
+        CheckpointBundleError::UnsupportedRevision => SessionStoreError::UnsupportedCodec,
+        CheckpointBundleError::UnsupportedEpoch(epoch) => {
+            SessionStoreError::UnsupportedRuntimeEpoch(epoch)
+        }
+        _ => SessionStoreError::corrupt(),
     }
 }
 

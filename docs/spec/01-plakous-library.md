@@ -1377,8 +1377,8 @@ or canonical opaque block duplicates the aggregate artifact.
 
 ### 4.1 Recovery scope
 
-Reopen requires the current format epoch; a checkpoint from another epoch does
-not decode and is refused as an incompatible build (§5.4). A working checkpoint
+Reopen decodes a supported checkpoint under its recorded encoding epoch (§5.2)
+and still requires exact binding and recovery evidence. A working checkpoint
 additionally requires its recovery phase and exact set of (obligation kind,
 action) pairs to be a row of the release's recovery-scope table
 (`recovery_scope.rs`), or its unfinished turn to be one the recovery verdict
@@ -2233,10 +2233,27 @@ refuse the new shape. A library embedder MUST close its store before a build
 with the new shape opens it. If another handle holds the database, bootstrap
 returns a typed busy refusal. The paired product upgrade rehearses the same
 transition on a detached copy before draining the live owner (chapter 06 §6.3).
-Unknown schema versions are `UnsupportedSchema`; unsupported codecs are
-`UnsupportedCodec`. A change to persisted runtime encoding bumps its epoch,
-not the state key. `ReplayOmissionV1` uses provenance tag 4 and offline placeholder
-record version 2.
+Unknown schema versions are `UnsupportedSchema`. A runtime store reads the
+current and immediately preceding checkpoint encodings, and writes only the
+current encoding. Read-only admission refuses retained payloads outside that
+window with a typed offline-migration error. A sealed historical address
+without a retained payload does not require an object decoder. Change-feed
+decoding dispatches on the record's own version; the same version may span
+checkpoint epochs. A read authenticates the bytes and checks the relational
+header. A change to persisted runtime encoding bumps its epoch only when
+the bytes change; it does not move the state key.
+
+Every object and embedded reference in a closure uses its root's epoch,
+including derived addresses and named-state and operation-ledger proofs.
+Recovery verifies the recorded commit identities under the same rules.
+The first advance or fork from a preceding-epoch checkpoint validates its
+base and publishes a complete current-epoch closure in one transaction
+with its relational base reference and feed record. It does not link to
+preceding-epoch objects, mutate old receipts, or waive retention limits.
+Writers fence mutations against the persisted writer epoch; decoders do not
+use it to choose the grammar.
+
+`ReplayOmissionV1` uses provenance tag 4 and offline placeholder record version 2.
 Offline placeholder and replay-omission passes preserve cache affinity and
 its epoch.
 Existing unsupported runtime database and WAL files remain at their paths with
@@ -2248,7 +2265,7 @@ permission changes. A wrong application identity, malformed file, or damaged
 current schema is an integrity refusal, never permission to replace state.
 A product keeps each build's store in its own versioned directory (chapter 02
 §2.5), so an unsupported schema there means a damaged or hand-placed file. The
-facade exposes `RUNTIME_STORE_SCHEMA_VERSION` and `RUNTIME_FORMAT_EPOCH` for
+facade exposes `RUNTIME_STORE_SCHEMA_VERSION` and `RUNTIME_FORMAT_CUT` for
 that key. The bundled SQLite is 3.54.0 with reviewed
 compile options including `DEFAULT_FOREIGN_KEYS`, `ENABLE_API_ARMOR`,
 `THREADSAFE=1`, and `USE_URI`.
@@ -2324,12 +2341,11 @@ Endpoint additions, removals and ordering changes preserve exact resume only
 when the complete admission projection is equal. Fresh discovery still supplies
 the full candidate set; a changed projected fact refuses before inference.
 
-A session another build wrote is refused with one typed error,
-`AgentSessionsErrorKind::IncompatibleBuild`, whose message names the session
-and says to start a new one. It covers two cases: the stored state does not
-decode under this build (an unsupported store schema, a checkpoint object from
-another format epoch, a terminal record this build re-encodes differently), or
-it decodes but this build rebuilds different semantics from it (a different
+A session another build wrote can refuse with
+`AgentSessionsErrorKind::IncompatibleBuild`. An unsupported retained record
+epoch directs the caller to offline migration (§5.2). This error also covers a
+session whose schema or terminal record the build does not decode, or one that
+decodes but this build rebuilds with different semantics (a different
 stable request prefix, harness plan, tool presentation, or tool, environment or
 effect-policy identity). Drift is a typed refusal, not a revalidation failure:
 an account, profile, model-binding or admission mismatch stays `Revalidation`,
@@ -2668,9 +2684,9 @@ keeps the original checkpoint and conversation bindings and dispatches nothing;
 a different canonical input under the same command identity remains refused.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 39 (chapter 00). An earlier-epoch checkpoint
-does not decode and is refused as an incompatible build (§5.4); sessions cross
-the bump only through the export document.
+runtime checkpoint encodings (chapter 00). Reopen uses the readable
+checkpoint window (§5.2), not a substitution of current semantics for old
+canonical bytes.
 
 The recovered-turn handle exposes a single-take `Turn` capability, shared across
 handle clones, with its bounded event receiver registered before the restored
@@ -13181,8 +13197,8 @@ an admission class also records that class and the configured limit (an
 `admission` member of the terminal record's capacity fact), so a turn's
 published failure keeps its typed storage pressure across reopen. The
 `StoragePressure` control error and these capacity facts belong to the current
-runtime format epoch (section 5.2); a checkpoint or store from another epoch
-or schema is refused as an incompatible build.
+runtime encoding (§5.2); an unsupported schema or record epoch is refused as
+an incompatible build.
 
 The version-2 terminal error codec represents every built-in tool error category,
 including `UnsupportedCapability` under that exact spelling. Unknown tool category strings remain

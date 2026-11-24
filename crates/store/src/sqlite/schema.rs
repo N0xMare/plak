@@ -6,6 +6,7 @@
 )]
 
 use super::*;
+use plakous_agent::internal::{PREVIOUS_RUNTIME_FORMAT_EPOCH, reads_checkpoint_epoch};
 
 pub(super) const APPLICATION_ID: i64 = 0x504c_4b35;
 
@@ -86,7 +87,7 @@ pub(super) fn initialize_schema(
         .map_err(map_sqlite)?;
     let tables: i64 = c
         .query_row(
-            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT GLOB 'sqlite_*'",
             [],
             |r| r.get(0),
         )
@@ -317,6 +318,61 @@ pub(super) fn initialize_writer_epoch(c: &Connection) -> Result<(), SessionStore
     Ok(())
 }
 
+fn writer_epoch(c: &Connection) -> Result<u32, SessionStoreError> {
+    c.query_row("SELECT epoch FROM runtime_writer WHERE id=1", [], |row| {
+        row.get(0)
+    })
+    .map_err(map_sqlite)
+}
+
+pub(super) fn activate_writer_epoch(c: &Transaction<'_>) -> Result<(), SessionStoreError> {
+    match writer_epoch(c)? {
+        WRITER_EPOCH => Ok(()),
+        PREVIOUS_RUNTIME_FORMAT_EPOCH => exactly_one(
+            c.execute(
+                "UPDATE runtime_writer SET epoch=?1 WHERE id=1",
+                [WRITER_EPOCH],
+            )
+            .map_err(map_sqlite)?,
+        ),
+        epoch => Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch)),
+    }
+}
+
+pub(super) fn require_writer_epoch(c: &Connection) -> Result<(), SessionStoreError> {
+    let epoch = writer_epoch(c)?;
+    if epoch == WRITER_EPOCH {
+        Ok(())
+    } else {
+        Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch))
+    }
+}
+
+pub(super) fn admit_readable_records(
+    c: &Connection,
+    legacy: bool,
+) -> Result<(), SessionStoreError> {
+    if !legacy {
+        let epoch = writer_epoch(c)?;
+        if !reads_checkpoint_epoch(epoch) {
+            return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
+        }
+    }
+    // Check actual present objects, not address-only references in sealed receipts.
+    let unsupported = c
+        .query_row(
+            "SELECT codec FROM runtime_objects WHERE codec NOT IN (?1,?2) LIMIT 1",
+            params![WRITER_EPOCH, PREVIOUS_RUNTIME_FORMAT_EPOCH],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite)?;
+    if let Some(epoch) = unsupported {
+        return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
+    }
+    feed::require_readable_versions(c)
+}
+
 /// Admits shape, schema, domain and counter integrity. Retained state over
 /// the configured bounds is not a refusal: an over-limit store still opens so
 /// settlement, recovery and deletion can run; its writes are held to their
@@ -324,6 +380,7 @@ pub(super) fn initialize_writer_epoch(c: &Connection) -> Result<(), SessionStore
 pub(super) fn admit_open(c: &Connection) -> Result<(), SessionStoreError> {
     verify_shape_pragmas(c)?;
     verify_exact_schema(c)?;
+    admit_readable_records(c, false)?;
     bound_domain(c)?;
     validate_counts(c)
 }
@@ -460,8 +517,8 @@ pub(super) fn bootstrap_epoch(c: &Connection) -> Result<Option<u32>, SessionStor
     if actual != expected {
         return Err(SessionStoreError::corrupt());
     }
-    if epoch != 39 {
-        return Err(SessionStoreError::UnsupportedCodec);
+    if !matches!(epoch, 38 | 39) || !reads_checkpoint_epoch(epoch) {
+        return Err(SessionStoreError::UnsupportedRuntimeEpoch(epoch));
     }
     Ok(Some(epoch))
 }
@@ -472,7 +529,7 @@ fn schema_objects(
     let mut statement = c
         .prepare(
             "SELECT type,name,tbl_name,sql FROM sqlite_schema
-             WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+             WHERE name NOT GLOB 'sqlite_*' AND sql IS NOT NULL
              ORDER BY type,name,tbl_name,sql",
         )
         .map_err(map_sqlite)?;

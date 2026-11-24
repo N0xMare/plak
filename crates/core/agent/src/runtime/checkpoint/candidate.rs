@@ -47,6 +47,13 @@ pub(in crate::runtime) fn successor_candidate(
     } = facts;
     let prior = checkpoint.manifest();
     let ledger = validate_successor_ledger(prior, ledger, &lifecycle)?;
+    let epoch = crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH;
+    let ledger = ledger
+        .into_encoding_epoch(epoch)
+        .map_err(runtime_manifest_error)?;
+    let named_state = named_state
+        .into_encoding_epoch(epoch)
+        .map_err(runtime_manifest_error)?;
     let topology = prior.topology();
     let branch_revision = topology.branch_revision.checked_add(1).ok_or_else(|| {
         AgentError::new(

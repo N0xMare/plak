@@ -3,8 +3,8 @@ use crate::checkpoint_bundle::tests::{
     EVERY_STATE_EVIDENCE, TestResult, component, contains, every_state_checkpoint, replace_supplied,
 };
 use crate::checkpoint_bundle::{
-    CheckpointBundleError, CheckpointObjectBundle, RuntimeCheckpointCodec, RuntimeObject,
-    RuntimeObjectKind,
+    CheckpointBundleError, CheckpointObjectBundle, RUNTIME_FORMAT_EPOCH, RuntimeCheckpointCodec,
+    RuntimeObject, RuntimeObjectKind,
 };
 use crate::manifest::{RuntimeComponentKind, encode_bundle_component};
 
@@ -34,7 +34,10 @@ fn operation_records_reference_every_state_component_and_reopen_exactly() -> Tes
         }
     }
     for evidence in EVERY_STATE_EVIDENCE {
-        let address = component_address(&component(RuntimeComponentKind::Operation, 1, evidence)?)?;
+        let address = component_address(
+            &component(RuntimeComponentKind::Operation, 1, evidence)?,
+            RUNTIME_FORMAT_EPOCH,
+        )?;
         assert!(
             records
                 .iter()
@@ -58,11 +61,10 @@ fn operation_records_reference_every_state_component_and_reopen_exactly() -> Tes
 fn a_missing_or_tampered_referenced_component_fails_closed() -> TestResult {
     let checkpoint = every_state_checkpoint()?;
     let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
-    let claim = component_address(&component(
-        RuntimeComponentKind::Operation,
-        1,
-        b"effect-claim",
-    )?)?;
+    let claim = component_address(
+        &component(RuntimeComponentKind::Operation, 1, b"effect-claim")?,
+        RUNTIME_FORMAT_EPOCH,
+    )?;
     let position = bundle
         .objects()
         .iter()
@@ -117,11 +119,10 @@ fn a_missing_or_tampered_referenced_component_fails_closed() -> TestResult {
     let mut redirected = record.children().to_vec();
     for child in &mut redirected {
         if *child == claim {
-            *child = component_address(&component(
-                RuntimeComponentKind::Operation,
-                1,
-                b"effect-unknown",
-            )?)?;
+            *child = component_address(
+                &component(RuntimeComponentKind::Operation, 1, b"effect-unknown")?,
+                RUNTIME_FORMAT_EPOCH,
+            )?;
         }
     }
     assert_eq!(

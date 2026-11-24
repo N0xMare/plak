@@ -370,7 +370,7 @@ fn rewrite_as_build(db: &Database, version: i64, epoch: u32) -> TestResult {
 /// A runtime database a previous build wrote is an incompatible build, never
 /// damage: the previous schema at the previous epoch refuses as
 /// `UnsupportedSchema`, and this schema at another epoch as
-/// `UnsupportedCodec`, through every open and read-only inspection, without
+/// `UnsupportedRuntimeEpoch`, through every open and read-only inspection, without
 /// changing its bytes.
 #[tokio::test]
 async fn sqlite_previous_build_stores_refuse_as_incompatible_builds() -> TestResult {
@@ -382,13 +382,13 @@ async fn sqlite_previous_build_stores_refuse_as_incompatible_builds() -> TestRes
         ),
         (
             SQLITE_SCHEMA_VERSION,
-            RUNTIME_FORMAT_EPOCH - 1,
-            SessionStoreError::UnsupportedCodec,
+            RUNTIME_FORMAT_EPOCH - 2,
+            SessionStoreError::UnsupportedRuntimeEpoch(RUNTIME_FORMAT_EPOCH - 2),
         ),
         (
             SQLITE_SCHEMA_VERSION,
             RUNTIME_FORMAT_EPOCH + 1,
-            SessionStoreError::UnsupportedCodec,
+            SessionStoreError::UnsupportedRuntimeEpoch(RUNTIME_FORMAT_EPOCH + 1),
         ),
     ] {
         let db = Database::new()?;

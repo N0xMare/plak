@@ -361,6 +361,10 @@ fn decoding_refuses_another_version_and_noncanonical_bytes() -> TestResult {
         FeedRecord::decode(other.as_bytes()),
         Err(FeedCodecError::UnsupportedVersion(2))
     );
+    assert_eq!(
+        FeedRecord::decode(br#"{"version":2,"record":{"new_grammar":true}}"#),
+        Err(FeedCodecError::UnsupportedVersion(2))
+    );
     let spaced = bytes.replacen(':', ": ", 1);
     assert_eq!(
         FeedRecord::decode(spaced.as_bytes()),

@@ -27,6 +27,8 @@ pub use context_state::{
     RuntimeCompactionStrategy, RuntimeContextState, RuntimeContextTransition,
     RuntimeContextTransitionKind, SemanticCompactionPublication,
 };
+#[cfg(test)]
+pub(crate) use encoding::encode_bundle_operation_record;
 #[allow(
     clippy::wildcard_imports,
     reason = "the encoding split shares the manifest vocabulary"
@@ -39,8 +41,8 @@ pub(crate) use encoding::{
     decode_bundle_stable_prefix, decode_bundle_tools, encode_bundle_binding,
     encode_bundle_command_record, encode_bundle_component, encode_bundle_digest,
     encode_bundle_family_artifact, encode_bundle_history_segment, encode_bundle_metadata,
-    encode_bundle_metadata_value, encode_bundle_operation_record,
-    encode_bundle_provider_configuration, encode_bundle_stable_prefix, encode_bundle_tools,
+    encode_bundle_metadata_value, encode_bundle_provider_configuration,
+    encode_bundle_stable_prefix, encode_bundle_tools,
 };
 pub(crate) use jobs::MAX_JOB_ROWS;
 #[cfg(test)]
@@ -892,11 +894,30 @@ pub struct RuntimeCheckpoint {
 impl RuntimeCheckpoint {
     /// Creates a checkpoint around one complete manifest.
     pub fn new(manifest: RuntimeManifest) -> Result<Self, RuntimeManifestError> {
+        Self::new_at(manifest, crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH)
+    }
+
+    pub(crate) fn new_at(
+        mut manifest: RuntimeManifest,
+        epoch: u32,
+    ) -> Result<Self, RuntimeManifestError> {
+        manifest.ledger = manifest.ledger.into_encoding_epoch(epoch)?;
+        manifest.named_state = manifest.named_state.into_encoding_epoch(epoch)?;
+        Self::from_decoded_manifest(manifest)
+    }
+
+    pub(crate) fn from_decoded_manifest(
+        manifest: RuntimeManifest,
+    ) -> Result<Self, RuntimeManifestError> {
         let integrity = checkpoint_compositional_integrity(&manifest)?;
         Ok(Self {
             manifest: Arc::new(manifest),
             integrity,
         })
+    }
+
+    pub(crate) fn encoding_epoch(&self) -> u32 {
+        self.manifest.ledger.encoding_epoch()
     }
 
     /// Returns the complete manifest.

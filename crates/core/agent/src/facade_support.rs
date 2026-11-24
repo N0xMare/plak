@@ -279,7 +279,10 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
             SessionStoreOrigin::Unavailable
         }
         SessionStoreError::Invalid(reason) => SessionStoreOrigin::InvalidInput(reason),
-        SessionStoreError::UnsupportedSchema | SessionStoreError::UnsupportedCodec => {
+        SessionStoreError::UnsupportedSchema
+        | SessionStoreError::UnsupportedCodec
+        | SessionStoreError::UnsupportedRuntimeEpoch(_)
+        | SessionStoreError::UnsupportedFeedVersion(_) => {
             SessionStoreOrigin::UnsupportedPersistence
         }
         SessionStoreError::Corrupt(_) => SessionStoreOrigin::Integrity,

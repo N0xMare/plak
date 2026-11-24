@@ -61,7 +61,7 @@ fn million_command_links_drop_on_a_small_stack() -> TestResult {
 
 #[test]
 fn million_operation_mutations_drop_on_a_small_stack() -> TestResult {
-    let entry = AuthenticatedOperationRecord::new(prepared_operation(1)?)?;
+    let entry = AuthenticatedOperationRecord::new(prepared_operation(1)?, RUNTIME_FORMAT_EPOCH)?;
     std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(move || {

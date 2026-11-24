@@ -131,7 +131,11 @@ pub(super) fn runtime_manifest_error(error: crate::RuntimeManifestError) -> Agen
     reason = "map_err supplies the owned semantic validation failure"
 )]
 pub(super) fn checkpoint_bundle_error(error: crate::CheckpointBundleError) -> AgentError {
-    let kind = if error == crate::CheckpointBundleError::UnsupportedRevision {
+    let kind = if matches!(
+        error,
+        crate::CheckpointBundleError::UnsupportedRevision
+            | crate::CheckpointBundleError::UnsupportedEpoch(_)
+    ) {
         AgentErrorKind::IncompatibleSession
     } else {
         AgentErrorKind::Session
