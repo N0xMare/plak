@@ -67,7 +67,7 @@ pub(crate) fn print(out: &mut dyn Write) -> CliResult<ProcessOutcome> {
         },
         host_upgrade: HostUpgrade {
             coordinator: carry::upgrade::PROTOCOL,
-            receipt: carry::upgrade::receipt::VERSION,
+            receipt: carry::upgrade::RECEIPT_VERSION,
         },
         omitted_features: &[],
         product_version: plakous::VERSION,

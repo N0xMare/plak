@@ -104,9 +104,7 @@ fn discover(paths: &PlakPaths, auto_start: bool) -> DiscoveryResult {
         } else {
             discovery_window
         };
-    let key =
-        crate::carry::upgrade::receipt::successor_key(paths, &crate::home::state::state_key())
-            .map_err(verify)?;
+    let key = crate::home::state::state_key();
     let socket = paths.host_run_dir().join(format!("{key}.sock"));
     let mut started = false;
     let mut waiting_for_restart = false;

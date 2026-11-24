@@ -9,7 +9,6 @@ type Files = BTreeMap<PathBuf, Option<Fingerprint>>;
 
 pub(super) struct Inputs {
     global: Files,
-    receipts: Files,
     workspaces: BTreeMap<PathBuf, Files>,
 }
 
@@ -17,17 +16,12 @@ impl Inputs {
     pub(super) fn new(paths: &PlakPaths) -> Self {
         Self {
             global: global(paths),
-            receipts: receipts(paths),
             workspaces: BTreeMap::new(),
         }
     }
 
     pub(super) fn global_changed(&mut self, paths: &PlakPaths) -> bool {
         replace(&mut self.global, global(paths))
-    }
-
-    pub(super) fn receipts_changed(&mut self, paths: &PlakPaths) -> bool {
-        replace(&mut self.receipts, receipts(paths))
     }
 
     pub(super) fn remember_workspace(&mut self, paths: &PlakPaths, workspace: Option<&Path>) {
@@ -100,15 +94,5 @@ fn project(paths: &PlakPaths, workspace: &Path) -> Files {
     if let Some(agents) = paths.project_agents_dir() {
         directory(&mut files, agents, "toml");
     }
-    files
-}
-
-fn receipts(paths: &PlakPaths) -> Files {
-    let mut files = BTreeMap::new();
-    directory(
-        &mut files,
-        crate::carry::upgrade::receipt::root(paths),
-        "json",
-    );
     files
 }

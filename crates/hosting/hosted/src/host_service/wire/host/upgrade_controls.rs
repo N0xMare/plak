@@ -64,12 +64,6 @@ where
         match &*controls {
             super::admission::PausedControls::Refuse => false,
             super::admission::PausedControls::Allow => allowed,
-            super::admission::PausedControls::Cancel(cancelled) => {
-                if allowed {
-                    cancelled.store(true, Ordering::Release);
-                }
-                allowed
-            }
         }
     }
 }

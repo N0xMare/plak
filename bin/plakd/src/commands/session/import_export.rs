@@ -1,6 +1,6 @@
 //! Export and import a session.
 
-use super::lookup::load_exact_product_session;
+use super::lookup::load_export_product_session;
 use crate::product_config;
 use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliResult};
@@ -18,7 +18,14 @@ pub(crate) fn export_session(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let paths = services.paths()?;
-    let record = load_exact_product_session(paths, services.session_records()?.as_ref(), id)?;
+    let record = load_export_product_session(paths, services.session_records()?.as_ref(), id)?;
+    let remote;
+    let paths = if record.runner.is_some() {
+        remote = paths.for_remote_workspace(&record.workspace_root);
+        &remote
+    } else {
+        paths
+    };
     let document = crate::carry::export_session(paths, &record).map_err(|refusal| {
         CliFailure::new(format!(
             "session {} cannot be exported: {refusal}",
@@ -73,7 +80,6 @@ pub(crate) fn import_session(
 }
 
 pub(crate) struct PreparedImport {
-    pub(crate) upgrade_successor: Option<String>,
     pub(super) carried: crate::carry::CarriedImport,
     pub(super) estimated_tokens: u64,
     pub(super) messages: usize,
@@ -110,7 +116,6 @@ impl PreparedImport {
             .map_err(|e| CliFailure::new(e.to_string()))?;
         crate::admission::admit_session(&carried.record)?;
         Ok(Self {
-            upgrade_successor: None,
             carried,
             estimated_tokens,
             messages,
@@ -165,7 +170,6 @@ pub(super) fn import_prepared_with_fallback(
     root_fallback: Option<&product_config::ProductConfig>,
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let PreparedImport {
-        upgrade_successor,
         carried,
         estimated_tokens,
         messages,
@@ -178,27 +182,18 @@ pub(super) fn import_prepared_with_fallback(
         mut note,
         profile: document_profile,
     } = carried;
-    let placement = if upgrade_successor.is_some() {
-        super::import_placement::ImportPlacement::passive_upgrade(services)?
-    } else {
-        super::import_placement::ImportPlacement::prepare(
-            services,
-            record
-                .runner
-                .as_ref()
-                .map_or("local", |runner| runner.runner_id.as_str()),
-            &record.workspace_root,
-        )?
-    };
+    let placement = super::import_placement::ImportPlacement::prepare(
+        services,
+        record
+            .runner
+            .as_ref()
+            .map_or("local", |runner| runner.runner_id.as_str()),
+        &record.workspace_root,
+    )?;
     let services = &placement.services;
     let resumed = carry.as_ref().and_then(|carry| carry.resume.as_ref());
     if let Some(intent) = resumed {
         resume_identity(&mut record, &mut note, intent);
-    }
-    if let Some(successor) = &upgrade_successor
-        && let Some(saved) = upgrade_identity(services, &mut record, &mut note, successor)?
-    {
-        return Ok((saved, note));
     }
     let paths = super::attached::session_paths(services, &record)?;
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
@@ -206,9 +201,7 @@ pub(super) fn import_prepared_with_fallback(
         .carried_forward_from()
         .ok_or_else(|| CliFailure::new("missing carry lineage"))?;
     let (source_id, source_key) = (source_id.to_owned(), source_key.to_owned());
-    if upgrade_successor.is_none() {
-        refuse_carried_twice(services, &record, &source_id, &source_key, resumed)?;
-    }
+    refuse_carried_twice(services, &record, &source_id, &source_key, resumed)?;
     record.validate_for_store().map_err(CliFailure::new)?;
     let profile = profile.or(document_profile);
     fill_imported_accounts(
@@ -217,29 +210,14 @@ pub(super) fn import_prepared_with_fallback(
         profile.as_ref(),
         &mut record,
     );
-    if upgrade_successor.is_some() {
-        let (_, selected) = successor_profile(&paths, profile.as_ref()).map_err(CliFailure::new)?;
-        record.root_profile = Some(plakous_hosted::sessions::RootProfile {
-            root_template: selected.root.clone(),
-            working_set: selected.working_set.clone(),
-        });
-    }
     let mut config = import_host_config(services, record, root_fallback, &mut history, &mut note)?;
-    if upgrade_successor.is_none() {
-        keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
-    }
+    keep_source_profile(&paths, &mut config, profile.as_ref(), &mut note);
     config.seed_history = Some(history);
     let line = seed_line(services, carry.is_some(), &source_id, &source_key);
     if let (Some(carry), plakous_hosted::agent::SeededLine::Continue(source)) = (&carry, &line) {
         write_ahead(&mut config, carry, *source)?;
     }
     config.seed_line = Some(line);
-    if upgrade_successor.is_some() {
-        config
-            .store
-            .save(&mut config.session)
-            .map_err(CliFailure::new)?;
-    }
     let created = product_host::create_seeded_session_with_preflight(config, move |window| {
         import_capacity(window, estimated_tokens, messages)
     })?;
@@ -288,35 +266,6 @@ fn import_capacity(
         .map_err(|_| CliFailure::new("stderr failed"))?;
     }
     Ok(())
-}
-
-fn upgrade_identity(
-    services: &crate::shell::services::Services,
-    record: &mut product_sessions::SessionRecord,
-    note: &mut String,
-    successor: &str,
-) -> CliResult<Option<product_sessions::SessionRecord>> {
-    let old_id = record.id.clone();
-    record.id = successor.to_owned();
-    record.node = product_sessions::SessionNode::genesis(successor);
-    record.create_operation_id = format!("plak:create:{successor}");
-    *note = note.replace(&old_id, successor);
-    match services.session_records()?.load(successor) {
-        Ok(saved) => {
-            if saved.carried_forward_from() != record.carried_forward_from() {
-                return Err(CliFailure::new(
-                    "host upgrade successor identity conflicts with an existing record",
-                ));
-            }
-            if saved.plakous_locator.is_some() {
-                return Ok(Some(saved));
-            }
-            *record = saved;
-        }
-        Err(error) if error == "session not found" => {}
-        Err(error) => return Err(CliFailure::new(error)),
-    }
-    Ok(None)
 }
 
 fn project_imported_session(

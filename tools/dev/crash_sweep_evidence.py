@@ -128,9 +128,6 @@ def formats(root, commit):
             "crates/core/agent/src/manifest.rs", "RUNTIME_CONTEXT_STATE_CODEC_REVISION"
         ),
         "export_version": constant("bin/plakd/src/carry/document.rs", "VERSION"),
-        "host_upgrade_receipt_version": constant(
-            "bin/plakd/src/carry/upgrade/receipt.rs", "VERSION"
-        ),
         "telemetry_schema_version": constant(
             "bin/plakd/src/telemetry_store.rs", "TELEMETRY_SCHEMA_VERSION"
         ),

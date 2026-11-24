@@ -124,7 +124,6 @@ pub(super) enum PausedControls {
     #[default]
     Refuse,
     Allow,
-    Cancel(Arc<std::sync::atomic::AtomicBool>),
 }
 
 impl AdmissionPause {
@@ -166,22 +165,16 @@ where
         self.pause(Arc::default(), PausedControls::Refuse)
     }
 
-    /// Pauses ingress with the coordinator's cancellation flag. Stop/interrupt
-    /// controls cancel reversible preparation only for cross-key carry.
+    /// Pauses ingress with the coordinator's cancellation flag while still
+    /// admitting Stop and Interrupt until the pause is sealed.
     ///
     /// # Errors
     /// Another pause exists or the host is stopping.
     pub fn pause_admissions_for_upgrade(
         &self,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
-        cross_key: bool,
     ) -> CliResult<AdmissionPause> {
-        let controls = if cross_key {
-            PausedControls::Cancel(Arc::clone(&cancelled))
-        } else {
-            PausedControls::Allow
-        };
-        self.pause(cancelled, controls)
+        self.pause(cancelled, PausedControls::Allow)
     }
 
     /// Joins Stop receipts after sealing ingress and before publishing Ready.
@@ -251,30 +244,6 @@ where
         // Closed first, so the slots below are every session this host holds.
         self.close();
         self.hand_off_residents(deadline)
-    }
-
-    /// Drains already accepted mailboxes and releases residents under an
-    /// upgrade pause, without permanently closing the session directory.
-    /// Failed preparation can drop the pause and open the old sessions again.
-    ///
-    /// # Errors
-    /// The permit belongs to another host or admissions are not paused.
-    pub fn hand_off_paused(
-        &self,
-        pause: &AdmissionPause,
-        deadline: Duration,
-    ) -> CliResult<Vec<(String, CliFailure)>> {
-        if !Arc::ptr_eq(&pause.gate, &self.upgrade_admission)
-            || !*self
-                .upgrade_admission
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-        {
-            return Err(CliFailure::new(
-                "host handoff requires its own upgrade admission pause",
-            ));
-        }
-        Ok(self.hand_off_residents(deadline))
     }
 
     fn hand_off_residents(&self, deadline: Duration) -> Vec<(String, CliFailure)> {

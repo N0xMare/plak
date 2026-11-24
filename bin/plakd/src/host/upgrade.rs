@@ -1,17 +1,12 @@
-//! Same-user, instance-bound upgrade coordination; the export is the only data carrier.
+//! Same-user, instance-bound coordination for same-key host handoff.
 
-mod abandon;
 mod bindings;
-mod preparation;
 mod progress;
 mod qualification;
 mod reopen;
 mod requester;
 mod runner_carry;
-mod startup;
 mod step_drain;
-pub(super) use abandon::request as abandon;
-pub(super) use startup::{Recovery, prepare_host, start_retry};
 
 use std::io::{BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
@@ -22,10 +17,7 @@ use std::time::{Duration, Instant};
 use plakous_hosted::host_service::wire::{AdmissionPause, SessionHost};
 use serde::{Deserialize, Serialize};
 
-use crate::carry::upgrade::{
-    process,
-    receipt::{self, Phase, Receipt},
-};
+use crate::carry::upgrade::{OFFLINE_MIGRATION_REQUIRED, process};
 use crate::deploy::{DeployRunnerInspection, DeployRunnerVerdict};
 use crate::home::paths::PlakPaths;
 use crate::shell::services::Services;
@@ -65,9 +57,15 @@ enum Answer {
         receipt: Option<uuid::Uuid>,
     },
     Abandoned {
-        mappings: Vec<abandon::Abandoned>,
+        mappings: Vec<Abandoned>,
     },
     Refused(Refusal),
+}
+
+#[derive(Deserialize, Serialize)]
+struct Abandoned {
+    successor: String,
+    export: PathBuf,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -84,6 +82,13 @@ enum RefusalReason {
 }
 
 impl Refusal {
+    fn offline_migration_required() -> Self {
+        Self {
+            detail: OFFLINE_MIGRATION_REQUIRED.into(),
+            reason: None,
+        }
+    }
+
     fn missing_descriptor_handoff() -> Self {
         Self {
             detail: "host_upgrade_missing_descriptor_handoff: the destination does not support descriptor handoff; upgrade through a supported intermediate or stop the source and cold-start the destination".into(),
@@ -101,51 +106,14 @@ impl From<CliFailure> for Refusal {
     }
 }
 
-#[derive(Serialize)]
-struct Blocker {
-    session: String,
-    kind: BlockerKind,
-    detail: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum BlockerKind {
-    RunningTurn,
-    LiveChild,
-    DaemonJobs,
-    HeldWork,
-    UnsettledInput,
-    UnboundRoot,
-    Unavailable,
-}
-
-impl From<&crate::carry::ExportRefusal> for BlockerKind {
-    fn from(refusal: &crate::carry::ExportRefusal) -> Self {
-        use crate::carry::ExportRefusal;
-        match refusal {
-            ExportRefusal::NoRuntime => Self::UnboundRoot,
-            ExportRefusal::UnsettledIntent => Self::UnsettledInput,
-            ExportRefusal::SubagentRunning { .. } => Self::LiveChild,
-            ExportRefusal::TurnUnfinished => Self::RunningTurn,
-            ExportRefusal::BackgroundProcesses => Self::DaemonJobs,
-            ExportRefusal::TreeUnreadable(_)
-            | ExportRefusal::RecordBehindHead
-            | ExportRefusal::Runtime(_)
-            | ExportRefusal::ProfileMissing => Self::Unavailable,
-        }
-    }
-}
-
 pub(super) struct Ready {
-    step_drain: Option<step_drain::PreparedDrain>,
+    step_drain: step_drain::PreparedDrain,
     session_home: plakous_hosted::session_home::SessionHome,
     pub(super) executable: PathBuf,
     pub(super) key: String,
     pub(super) binary: String,
     image: process::VerifiedImage,
-    leases: Leases,
-    pause: AdmissionPause,
+    _pause: AdmissionPause,
     _standalone: std::fs::File,
 }
 
@@ -241,35 +209,11 @@ pub(super) fn has_ready(pending: &Pending) -> bool {
         .is_some()
 }
 
-pub(super) fn replace(
-    ready: Option<Ready>,
-    services: &Services,
-    stop: crate::web::StopProbe,
-    arguments: &[String],
-    home_lock: super::lock::HostLock,
-) -> CliResult<ProcessOutcome> {
-    use std::os::unix::process::CommandExt as _;
-    let Some(ready) = ready.filter(|_| !stop.stopped()) else {
-        return Ok(ProcessOutcome::Success);
-    };
-    process::verify_image(&ready.executable, &ready.binary)?;
-    let mut replacement = process::command(&ready.executable, services.paths()?.home(), &ready.key);
-    replacement.args(arguments);
-    drop(ready);
-    let failure = replacement.exec();
-    drop(home_lock);
-    Err(CliFailure::new(format!(
-        "host upgrade committed but destination could not start: {failure}; retry using its recorded executable"
-    )))
-}
-
 impl Ready {
     pub(super) async fn record_child_handoffs(&self, remaining: Duration) {
         use plakous_hosted::host_service::wire::HostStepDrain;
         use plakous_hosted::session_log::{SessionEvent, SessionLog};
-        let Some(prepared) = &self.step_drain else {
-            return;
-        };
+        let prepared = &self.step_drain;
         let budget = if crate::test_hooks::upgrade_preparation_refused("child-handoff-no-budget") {
             Duration::ZERO
         } else {
@@ -290,10 +234,6 @@ impl Ready {
             }
         }
         crate::test_hooks::host_lifecycle::after_child_handoffs();
-    }
-
-    pub(super) fn same_key(&self) -> bool {
-        self.key == crate::home::state::state_key()
     }
 
     pub(super) fn paired_command(
@@ -330,92 +270,6 @@ pub(super) fn host_argv(command: &crate::command::HostCommand) -> CliResult<Vec<
     Ok(arguments)
 }
 
-pub(super) struct StartupReplacement {
-    pub(super) executable: PathBuf,
-    pub(super) key: String,
-    pub(super) binary: String,
-    pub(super) argv: Vec<String>,
-}
-
-impl StartupReplacement {
-    pub(super) fn exec(self, paths: &PlakPaths) -> CliResult<ProcessOutcome> {
-        use std::os::unix::process::CommandExt as _;
-        process::verify_image(&self.executable, &self.binary)?;
-        let failure = process::command(&self.executable, paths.home(), &self.key)
-            .args(&self.argv)
-            .exec();
-        Err(CliFailure::new(format!(
-            "host upgrade owner recovery could not start: {failure}"
-        )))
-    }
-}
-
-/// Called only under the home guard: a prepared transfer's previous host
-/// is gone, so it is withdrawn; a committed source never becomes owner again.
-pub(super) fn startup_replacement(services: &Services) -> CliResult<Option<StartupReplacement>> {
-    let paths = services.paths()?;
-    let own = crate::home::state::state_key();
-    let mut receipts = receipt::all(paths)?;
-    for receipt in &mut receipts {
-        if receipt.phase == Phase::Aborted
-            && receipt.source_key == own
-            && receipt.source_archival_pending
-        {
-            preparation::withdraw(paths, receipt)?;
-        }
-    }
-    let Some(mut receipt) = receipts.pop() else {
-        return Ok(None);
-    };
-    let unresolved = matches!(receipt.phase, Phase::Prepared | Phase::Committed);
-    if receipt.phase == Phase::Aborted {
-        return Ok(None);
-    }
-    if !unresolved && receipt.source_key != own && receipt.destination_key != own {
-        return Ok(None);
-    }
-    if receipt.phase == Phase::Prepared {
-        if receipt.source_key == own {
-            preparation::withdraw(paths, &mut receipt)?;
-            return Ok(None);
-        }
-        if process::verify_image(&receipt.source_executable, &receipt.source_binary).is_err() {
-            receipt.phase = Phase::Aborted;
-            receipt.save(paths)?;
-            return Ok(None);
-        }
-        return Ok(Some(StartupReplacement {
-            executable: receipt.source_executable,
-            key: receipt.source_key,
-            binary: receipt.source_binary,
-            argv: receipt.host_argv,
-        }));
-    }
-    let (executable, key, binary) = if receipt.phase == Phase::Aborted {
-        (
-            receipt.source_executable,
-            receipt.source_key,
-            receipt.source_binary,
-        )
-    } else {
-        (
-            receipt.destination,
-            receipt.destination_key,
-            receipt.destination_binary,
-        )
-    };
-    if key == own && (!unresolved || binary == crate::build_identity::binary_id()) {
-        return Ok(None);
-    }
-    process::verify_image(&executable, &binary)?;
-    Ok(Some(StartupReplacement {
-        executable,
-        key,
-        binary,
-        argv: receipt.host_argv,
-    }))
-}
-
 fn socket(paths: &PlakPaths) -> PathBuf {
     paths.home().join("host/upgrade.sock")
 }
@@ -423,7 +277,6 @@ fn socket(paths: &PlakPaths) -> PathBuf {
 pub(super) fn request(
     services: &Services,
     expected: &str,
-    wait: Duration,
     drain: crate::command::HostDrain,
     inspection: Option<DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
@@ -436,14 +289,14 @@ pub(super) fn request(
     }
     let paths = services.paths()?;
     let live = crate::wire_transport::hosts::live(paths)?;
-    if live.is_empty() && inspection.is_none() {
-        return recover(paths, expected);
-    }
     let [source] = live.as_slice() else {
         return Err(CliFailure::new(
             "host_upgrade_source_unavailable: exactly one running source host is required; no host was stopped",
         ));
     };
+    if source.key != crate::home::state::state_key() {
+        return Err(CliFailure::new(OFFLINE_MIGRATION_REQUIRED));
+    }
     if let Some(inspection) = &inspection {
         requester::prove_deploy_source(paths, inspection)?;
     }
@@ -453,7 +306,7 @@ pub(super) fn request(
         .set_read_timeout(
             drain
                 .duration()
-                .map(|duration| wait + duration + Duration::from_secs(600)),
+                .map(|duration| duration + Duration::from_secs(600)),
         )
         .map_err(io_failure)?;
     stream
@@ -480,14 +333,6 @@ pub(super) fn request(
         && identity.key == crate::home::state::state_key()
         && !crate::test_hooks::force_host_upgrade()
     {
-        if let Some(receipt) = receipt::all(paths)?.into_iter().rev().find(|receipt| {
-            receipt.destination_binary == expected
-                && receipt.destination_key == identity.key
-                && matches!(receipt.phase, Phase::Committed | Phase::Acknowledged)
-        }) {
-            wait_ack(paths, receipt.id)?;
-            print_mappings(&receipt)?;
-        }
         return Ok(ProcessOutcome::Success);
     }
     let destination =
@@ -502,7 +347,7 @@ pub(super) fn request(
             destination,
             destination_key: crate::home::state::state_key(),
             expected_binary: expected.to_owned(),
-            wait_seconds: wait.as_secs(),
+            wait_seconds: 0,
             drain,
             abandon: None,
             inspect_runners: inspection
@@ -528,118 +373,19 @@ fn finish_request(
                 let detail = qualification.map_or(detail, |timing| timing.detail());
                 eprintln!("host upgrade: {detail}");
             }
-            Answer::Abandoned { .. } => {
-                return Err(CliFailure::new("unexpected abandon reply to upgrade"));
+            Answer::Abandoned { .. } | Answer::Ready { receipt: Some(_) } => {
+                return Err(CliFailure::new(OFFLINE_MIGRATION_REQUIRED));
             }
             Answer::Refused(refusal) => return Err(CliFailure::new(refusal.detail)),
-            Answer::Ready { receipt } => {
-                if let Some(id) = receipt {
-                    wait_ack(paths, id)?;
-                    let record = receipt::read(
-                        &receipt::root(paths)
-                            .join(id.to_string())
-                            .join("receipt.json"),
-                    )?;
-                    print_mappings(&record)?;
-                } else {
-                    wait_host(
-                        paths,
-                        &crate::home::state::state_key(),
-                        expected,
-                        Some(prior_instance),
-                        "start the destination build",
-                    )?;
-                }
+            Answer::Ready { receipt: None } => {
+                wait_host(paths, expected, prior_instance)?;
                 return Ok(ProcessOutcome::Success);
             }
         }
     }
 }
 
-fn print_mappings(receipt: &Receipt) -> CliResult<()> {
-    let mut stdout = std::io::stdout().lock();
-    for mapping in &receipt.mappings {
-        if mapping.abandoned {
-            writeln!(stdout, "{} -> abandoned (reserved successor {}; import a copy of the retained export onto another placement)", mapping.source, mapping.successor)
-                .map_err(|_| CliFailure::new("stdout failed"))?;
-            continue;
-        }
-        writeln!(
-            stdout,
-            "{} -> {} ({})",
-            mapping.source, mapping.successor, receipt.destination_key
-        )
-        .map_err(|_| CliFailure::new("stdout failed"))?;
-    }
-    Ok(())
-}
-
-fn wait_ack(paths: &PlakPaths, id: uuid::Uuid) -> CliResult<()> {
-    let path = receipt::root(paths)
-        .join(id.to_string())
-        .join("receipt.json");
-    let mut deadline = Instant::now() + Duration::from_secs(90);
-    let mut missing_since = None;
-    let mut completed = 0;
-    loop {
-        let receipt = receipt::read(&path)?;
-        if receipt.phase == Phase::Acknowledged {
-            return Ok(());
-        }
-        if receipt.phase == Phase::Aborted {
-            return Err(CliFailure::new(
-                "host_upgrade_aborted: preparation was withdrawn without surrender; recover the source key before retrying",
-            ));
-        }
-        let progress = receipt
-            .mappings
-            .iter()
-            .filter(|mapping| mapping.ready)
-            .count();
-        if progress > completed {
-            completed = progress;
-            deadline = Instant::now() + Duration::from_secs(90);
-        }
-        if home_is_held(paths)? {
-            missing_since = None;
-            if !coordinator_is_ready(paths) {
-                deadline = Instant::now() + Duration::from_secs(90);
-            }
-        } else if missing_since.get_or_insert_with(Instant::now).elapsed() >= Duration::from_secs(3)
-        {
-            return Err(CliFailure::new(
-                "host_upgrade_outcome_unknown: no host holds the home; retry the recorded destination to recover its receipts",
-            ));
-        }
-        if Instant::now() >= deadline {
-            return Err(CliFailure::new(format!(
-                "host_upgrade_outcome_unknown: retry the same destination upgrade to recover receipt {id}; do not reopen the source"
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-}
-
-fn home_is_held(paths: &PlakPaths) -> CliResult<bool> {
-    crate::wire_transport::hosts::lock_holder(&crate::wire_transport::hosts::home_lock(paths))
-        .map(|holder| holder.is_some())
-}
-
-fn coordinator_is_ready(paths: &PlakPaths) -> bool {
-    let Ok(stream) = UnixStream::connect(socket(paths)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-    read::<Identity>(&stream).is_ok()
-}
-
-fn wait_host(
-    paths: &PlakPaths,
-    key: &str,
-    binary: &str,
-    prior_instance: Option<&str>,
-    remedy: &'static str,
-) -> CliResult<()> {
+fn wait_host(paths: &PlakPaths, binary: &str, prior_instance: &str) -> CliResult<()> {
     let deadline = Instant::now() + Duration::from_secs(90);
     while Instant::now() < deadline {
         if let Ok(stream) = crate::wire_transport::hosts::socket_until(
@@ -647,90 +393,16 @@ fn wait_host(
             Instant::now() + Duration::from_millis(100),
         ) {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-            if matches!(read::<Identity>(&stream), Ok(identity) if identity.key == key && identity.binary == binary && prior_instance.is_none_or(|prior| identity.instance != prior))
+            if matches!(read::<Identity>(&stream), Ok(identity) if identity.key == crate::home::state::state_key() && identity.binary == binary && identity.instance != prior_instance)
             {
                 return Ok(());
             }
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    Err(CliFailure::new(format!(
-        "host_upgrade_outcome_unknown: expected host has not acknowledged readiness; if it stopped, {remedy}"
-    )))
-}
-
-fn recover(paths: &PlakPaths, expected: &str) -> CliResult<ProcessOutcome> {
-    use std::os::unix::fs::OpenOptionsExt as _;
-    use std::os::unix::process::CommandExt as _;
-    let receipt = receipt::all(paths)?.pop().ok_or_else(|| {
-        CliFailure::new("host_upgrade_source_unavailable: no running source or recoverable receipt")
-    })?;
-    if receipt.destination_binary != expected
-        || receipt.destination_key != crate::home::state::state_key()
-    {
-        return Err(CliFailure::new(
-            "host upgrade recovery belongs to another destination; use the receipt's exact executable",
-        ));
-    }
-    let admission = crate::carry::upgrade::admission(paths, true)?;
-    let home_lock =
-        super::lock::HostLock::take(&crate::wire_transport::hosts::home_lock(paths), expected)?;
-    if !crate::wire_transport::hosts::live(paths)?.is_empty() {
-        return Err(CliFailure::new(
-            "host started during upgrade recovery; retry against its identity",
-        ));
-    }
-    let restore_source = matches!(receipt.phase, Phase::Prepared | Phase::Aborted);
-    let (executable, key, binary) = if restore_source {
-        (
-            &receipt.source_executable,
-            &receipt.source_key,
-            &receipt.source_binary,
-        )
-    } else {
-        (
-            &receipt.destination,
-            &receipt.destination_key,
-            &receipt.destination_binary,
-        )
-    };
-    process::verify_image(executable, binary)?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(receipt.path(paths).with_file_name("recovery.log"))
-        .map_err(io_failure)?;
-    // The home guard still excludes competing hosts until spawn. The
-    // replacement needs to acquire standalone exclusion itself to revise.
-    drop(admission);
-    let mut child = process::command(executable, paths.home(), key)
-        .args(&receipt.host_argv)
-        .process_group(0)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(log)
-        .spawn()
-        .map_err(io_failure)?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    drop(home_lock);
-    let remedy = if restore_source {
-        "start the recorded source build"
-    } else {
-        "start the destination build"
-    };
-    wait_host(paths, key, binary, None, remedy)?;
-    if restore_source {
-        Err(CliFailure::new(
-            "host_upgrade_aborted: the interrupted preparation was withdrawn and the old host is usable; retry the upgrade",
-        ))
-    } else {
-        wait_ack(paths, receipt.id)?;
-        print_mappings(&receipt)?;
-        Ok(ProcessOutcome::Success)
-    }
+    Err(CliFailure::new(
+        "host_upgrade_outcome_unknown: expected host has not acknowledged readiness; if it stopped, start the destination build",
+    ))
 }
 
 pub(super) fn bind(paths: &PlakPaths) -> CliResult<tokio::net::UnixListener> {
@@ -769,7 +441,7 @@ pub(super) async fn serve(
             continue;
         };
         // One coordinator at a time; a disconnected caller does not cancel an
-        // already committed transfer. Subsequent callers use the receipt.
+        // already committed handoff.
         let host = Arc::clone(&host);
         let services = services.clone();
         let pending = Arc::clone(&pending);
@@ -817,7 +489,7 @@ fn next_upgrade(
             key: crate::home::state::state_key(),
             instance: identity.instance.to_string(),
             binary: crate::build_identity::binary_id().to_owned(),
-            deploy_idle: deploy_idle(services, pending)?,
+            deploy_idle: Some(!has_ready(pending)),
         },
     )?;
     match read(stream)? {
@@ -826,7 +498,7 @@ fn next_upgrade(
             let verdict = runner_carry::deploy_verdict(
                 &request,
                 &identity.instance.to_string(),
-                deploy_idle(services, pending)? == Some(true),
+                !has_ready(pending),
                 |runners| {
                     runner_carry::inspect(
                         services,
@@ -854,15 +526,14 @@ fn handle(
     let Some(request) = next_upgrade(&mut stream, services, pending, runtime)? else {
         return Ok(());
     };
-    if request.abandon.is_some() {
-        let answer = match abandon::apply(services, &request) {
-            Ok(mappings) => {
-                host.changed();
-                Answer::Abandoned { mappings }
-            }
-            Err(failure) => Answer::Refused(failure.into()),
-        };
-        return write(&mut stream, &answer);
+    if request.destination_key != crate::home::state::state_key()
+        || request.wait_seconds != 0
+        || request.abandon.is_some()
+    {
+        return write(
+            &mut stream,
+            &Answer::Refused(Refusal::offline_migration_required()),
+        );
     }
     let caller = requester::Caller::watch(&stream, Arc::clone(&control.cancelled))?;
     stream
@@ -911,12 +582,12 @@ fn handle(
         &progress,
     );
     match result {
-        Ok((ready, receipt)) => {
+        Ok(ready) => {
             runtime.block_on(super::lifecycle::restarting(host));
             caller.ready();
             crate::carry::upgrade::crash_cut("before-answer");
             publish_ready(pending, ready, host);
-            write(&mut stream, &Answer::Ready { receipt })
+            write(&mut stream, &Answer::Ready { receipt: None })
         }
         Err(refusal) => {
             resume_rollback(host, services, runtime, control);
@@ -928,15 +599,6 @@ fn handle(
 
 // The accept loop joins the prior worker before greeting. A Ready transfer
 // remains owned until replacement, even after that worker exits.
-fn deploy_idle(services: &Services, pending: &Pending) -> CliResult<Option<bool>> {
-    Ok(receipt::all(services.paths()?).ok().map(|receipts| {
-        !has_ready(pending)
-            && !receipts
-                .iter()
-                .any(|receipt| matches!(receipt.phase, Phase::Prepared | Phase::Committed))
-    }))
-}
-
 fn publish_ready(pending: &Pending, ready: Ready, host: &SessionHost<PlakExtension>) {
     let mut pending = pending
         .lock()
@@ -996,21 +658,12 @@ fn prepare(
     arguments: &[String],
     runtime: &tokio::runtime::Handle,
     report: &progress::Report<'_>,
-) -> Result<(Ready, Option<uuid::Uuid>), Refusal> {
+) -> Result<Ready, Refusal> {
     let progress = |detail: &str| report(progress::Event::Waiting(detail));
     let paths = services.paths()?;
     check_cancel(cancelled)?;
-    if receipt::all(paths)?
-        .iter()
-        .any(|receipt| receipt.phase == Phase::Committed)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_pending_ack: finish the recorded destination's pending successors before another upgrade",
-        ).into());
-    }
     let (destination, image, reopen) =
         qualification::qualify_destination(services, &request, arguments, report)?;
-    let cross_key = request.source_key != request.destination_key;
     let inspect_runner = runner_carry::before_drain(
         &request,
         services,
@@ -1018,158 +671,37 @@ fn prepare(
         runtime,
         report,
     )?;
-    if cross_key {
-        match settled_roots(services) {
-            Ok(roots) => progress::timed(report, progress::Phase::CarryCapacity, || {
-                preflight_capacities(services, &request, &roots)
-            })?,
-            Err(error) if request.wait_seconds == 0 => return Err(error.into()),
-            Err(_) => {}
-        }
-    }
     let standalone = progress::timed(report, progress::Phase::StandaloneAdmission, || {
         crate::carry::upgrade::admission(paths, true)
     })?;
-    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled), cross_key)?;
+    let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
     super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
     let budget = step_drain::Budget::new(request.drain)?;
     progress("resolving earlier admission verdicts")?;
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;
-    let deadline = budget.start + Duration::from_secs(request.wait_seconds);
-    if cross_key {
-        loop {
-            check_cancel(cancelled)?;
-            match settled_roots(services) {
-                Ok(roots) => {
-                    preflight_capacities(services, &request, &roots)?;
-                    break;
-                }
-                Err(error) if Instant::now() >= deadline => return Err(error.into()),
-                Err(_) => std::thread::sleep(Duration::from_millis(100)),
-            }
-        }
-    }
-    let ready = Ready {
-        step_drain: None,
-        session_home: paths.session_home(),
-        executable: request.destination.clone(),
-        key: request.destination_key.clone(),
-        binary: request.expected_binary.clone(),
-        image,
-        pause,
-        leases: Leases::new()?,
-        _standalone: standalone,
-    };
-    if let Some(reopen) = reopen {
-        let mut ready = ready;
-        ready.step_drain = Some(step_drain::prepare(
-            host,
-            services,
-            &ready.pause,
-            budget,
-            cancelled,
-            runtime,
-            &progress,
-        )?);
-        ready.pause.commit()?;
-        host.join_paused_stops(&ready.pause, Instant::now() + Duration::from_secs(10))?;
-        qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
-        if inspect_runner {
-            runner_carry::held(&request, services, runtime)?;
-        }
-        ready.image.recheck(&ready.executable)?;
-        check_cancel(cancelled)?;
-        return Ok((ready, None));
-    }
-    let failures = host.hand_off_paused(
-        &ready.pause,
-        super::HANDOFF_DEADLINE.saturating_sub(super::STOP_MARGIN),
+    let step_drain = step_drain::prepare(
+        host, services, &pause, budget, cancelled, runtime, &progress,
     )?;
-    if !failures.is_empty() {
-        return Err(CliFailure::new(
-            "host_upgrade_drain_failed: source residents did not finish their planned release; no source surrendered",
-        ).into());
+    pause.commit()?;
+    host.join_paused_stops(&pause, Instant::now() + Duration::from_secs(10))?;
+    qualification::recheck_held(services, &request, arguments, &reopen, cancelled)?;
+    if inspect_runner {
+        runner_carry::held(&request, services, runtime)?;
     }
-    // An intent accepted immediately before the pause may have reached its
-    // mailbox after the first check. The joined release persists it first.
-    let documents = settled_roots(services)?;
-    Ok(carry_settled(
-        services, request, ready, documents, cancelled, arguments,
-    )?)
-}
-
-fn new_receipt(services: &Services, request: Request, arguments: &[String]) -> CliResult<Receipt> {
-    let paths = services.paths()?;
-    let identity = plakous_recursive_subagents::tree::custody_host();
-    Ok(Receipt {
-        version: receipt::VERSION,
-        id: uuid::Uuid::new_v4(),
-        sequence: receipt::all(paths)?
-            .last()
-            .map_or(Some(1), |receipt| receipt.sequence.checked_add(1))
-            .ok_or_else(|| CliFailure::new("host upgrade receipt sequence exhausted"))?,
-        source_key: request.source_key,
-        source_instance: identity.instance.to_string(),
-        source_binary: crate::build_identity::binary_id().to_owned(),
-        source_executable: std::env::current_exe().map_err(io_failure)?,
-        host_argv: arguments.to_vec(),
-        destination_key: request.destination_key,
-        destination_binary: request.expected_binary,
-        destination: request.destination,
-        phase: Phase::Prepared,
-        source_archival_pending: false,
-        mappings: Vec::new(),
+    image.recheck(&request.destination)?;
+    check_cancel(cancelled)?;
+    Ok(Ready {
+        step_drain,
+        session_home: paths.session_home(),
+        executable: request.destination,
+        key: request.destination_key,
+        binary: request.expected_binary,
+        image,
+        _pause: pause,
+        _standalone: standalone,
     })
 }
 
-fn carry_settled(
-    services: &Services,
-    request: Request,
-    ready: Ready,
-    documents: Vec<crate::store::sessions::SessionRecord>,
-    cancelled: &std::sync::atomic::AtomicBool,
-    arguments: &[String],
-) -> CliResult<(Ready, Option<uuid::Uuid>)> {
-    let paths = services.paths()?;
-    let mut receipt = new_receipt(services, request, arguments)?;
-    let directory = receipt
-        .path(paths)
-        .parent()
-        .ok_or_else(|| CliFailure::new("upgrade has no directory"))?
-        .to_path_buf();
-    for directory in [
-        paths.home().join("host"),
-        receipt::root(paths),
-        directory.clone(),
-    ] {
-        crate::commands::runner::private_directory(&directory)?;
-    }
-    process::verify_image(&receipt.source_executable, &receipt.source_binary)?;
-    if let Err(failure) = receipt.save(paths) {
-        let _ = preparation::withdraw(paths, &mut receipt);
-        return Err(failure);
-    }
-    crate::carry::upgrade::crash_cut("after-receipt");
-    if let Err(failure) = preparation::exports(services, &ready, &mut receipt, documents, cancelled)
-        .and_then(|()| ready.pause.commit())
-    {
-        if let Err(cleanup) = preparation::withdraw(paths, &mut receipt) {
-            eprintln!(
-                "host upgrade preparation cleanup needs recovery: {}",
-                cleanup.message()
-            );
-        }
-        return Err(failure);
-    }
-    receipt.phase = Phase::Committed;
-    receipt.source_archival_pending = false;
-    // From this point a failed fsync is outcome-unknown, never an abort.
-    if let Err(failure) = receipt.save(paths) {
-        eprintln!("host upgrade commit needs recovery: {}", failure.message());
-    }
-    crate::carry::upgrade::crash_cut("after-commit");
-    Ok((ready, Some(receipt.id)))
-}
 fn check_cancel(cancelled: &std::sync::atomic::AtomicBool) -> CliResult<()> {
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         Err(CliFailure::new(
@@ -1177,196 +709,6 @@ fn check_cancel(cancelled: &std::sync::atomic::AtomicBool) -> CliResult<()> {
         ))
     } else {
         Ok(())
-    }
-}
-
-fn preflight_capacities(
-    services: &Services,
-    request: &Request,
-    roots: &[crate::store::sessions::SessionRecord],
-) -> CliResult<()> {
-    let paths = services.paths()?;
-    let directory = tempfile::tempdir_in(paths.home()).map_err(io_failure)?;
-    for record in roots {
-        let file = directory.path().join(format!("{}.json", record.id));
-        let document = crate::carry::export_session(&source_paths(paths, record), record)
-            .map_err(|error| CliFailure::new(format!("host_upgrade_blocked: {error}")))?;
-        crate::carry::write_document(&file, &document).map_err(CliFailure::new)?;
-        let mut command =
-            process::command(&request.destination, paths.home(), &request.destination_key);
-        command
-            .args(["version", "--host-upgrade-capacity"])
-            .arg(file);
-        process::run(command, PROBE_BOUND)?;
-    }
-    Ok(())
-}
-
-fn source_paths(paths: &PlakPaths, record: &crate::store::sessions::SessionRecord) -> PlakPaths {
-    if record.runner.is_some() {
-        paths.for_remote_workspace(&record.workspace_root)
-    } else {
-        paths.for_workspace(&record.workspace_root)
-    }
-}
-
-fn settled_roots(services: &Services) -> CliResult<Vec<crate::store::sessions::SessionRecord>> {
-    let paths = services.paths()?;
-    let roots =
-        crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
-    let withheld = receipt::withheld_targets(paths)?;
-    if roots
-        .iter()
-        .filter(|record| !withheld.contains(&record.id))
-        .count()
-        > 4096
-    {
-        return Err(CliFailure::new(
-            "too many carried roots for one host upgrade",
-        ));
-    }
-    let mut documents = Vec::new();
-    let mut blockers = Vec::new();
-    for record in roots {
-        if withheld.contains(&record.id) {
-            continue;
-        }
-        receipt::ensure_open(paths, &record)?;
-        let standing = plakous_hosted::runtime::root_standing(
-            services.session_records()?.as_ref(),
-            &record.id,
-        )
-        .map_err(CliFailure::new)?;
-        if standing.is_continuing() {
-            blockers.push(Blocker {
-                session: record.id.clone(),
-                kind: BlockerKind::HeldWork,
-                detail: "a root continuation remains held or pending".into(),
-            });
-            continue;
-        }
-        if held_topology(paths, &record)? {
-            blockers.push(Blocker {
-                session: record.id.clone(),
-                kind: BlockerKind::HeldWork,
-                detail: "a child continuation or workspace operation is not settled".into(),
-            });
-            continue;
-        }
-        match crate::carry::export_session(&source_paths(paths, &record), &record) {
-            Ok(_) => documents.push(record),
-            Err(refusal) => blockers.push(Blocker {
-                session: record.id.clone(),
-                kind: BlockerKind::from(&refusal),
-                detail: refusal.to_string(),
-            }),
-        }
-    }
-    if blockers.is_empty() {
-        Ok(documents)
-    } else {
-        Err(CliFailure::new(format!(
-            "host_upgrade_blocked: {}",
-            serde_json::to_string(&blockers).map_err(|error| CliFailure::new(error.to_string()))?
-        )))
-    }
-}
-
-fn held_topology(
-    paths: &PlakPaths,
-    record: &crate::store::sessions::SessionRecord,
-) -> CliResult<bool> {
-    let (_, observed) = crate::topology_product::inspect_session_tree(paths, record)?;
-    let plakous_recursive_subagents_store::TreeInspection::Tree(tree) = observed else {
-        return Ok(false);
-    };
-    let rows = tree.rows();
-    Ok(rows.nodes().values().any(|node| {
-        node.parent_agent_id.is_some() && rows.loss_continuation(&node.agent_id).is_some()
-    }) || rows
-        .workspaces()
-        .values()
-        .any(|workspace| workspace.status.is_in_flight()))
-}
-
-struct Leases {
-    sender: std::sync::mpsc::Sender<Option<plakous::sessions::BranchHold>>,
-    worker: Option<std::thread::JoinHandle<()>>,
-    valid: Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl Leases {
-    fn new() -> CliResult<Self> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let valid = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let health = Arc::clone(&valid);
-        let executor = plakous::application::ApplicationExecutor::new()
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        let worker = std::thread::spawn(move || {
-            let mut held: Vec<plakous::sessions::BranchHold> = Vec::new();
-            loop {
-                match receiver.recv_timeout(Duration::from_secs(1)) {
-                    Ok(Some(lease)) => held.push(lease),
-                    Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                }
-                for lease in &mut held {
-                    if !matches!(executor.block_on(lease.renew()), Ok(Ok(()))) {
-                        health.store(false, std::sync::atomic::Ordering::Release);
-                    }
-                }
-            }
-            for lease in held {
-                let _ = executor.block_on(lease.release());
-            }
-        });
-        Ok(Self {
-            sender,
-            worker: Some(worker),
-            valid,
-        })
-    }
-
-    fn hold(
-        &self,
-        services: &Services,
-        record: &crate::store::sessions::SessionRecord,
-    ) -> CliResult<()> {
-        let sessions = services.state_roots()?.runtime_sessions()?;
-        let executor = plakous::application::ApplicationExecutor::new()
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        let locator = record
-            .plakous_locator
-            .ok_or_else(|| CliFailure::new("host upgrade source has no runtime"))?;
-        let operation =
-            plakous::sessions::SessionOperationId::new(format!("plak:host-upgrade:{}", record.id))
-                .map_err(|error| CliFailure::new(error.to_string()))?;
-        let lease = executor
-            .block_on(sessions.hold_branch(&operation, locator))
-            .map_err(|error| CliFailure::new(error.to_string()))?
-            .map_err(|error| CliFailure::new(error.to_string()))?;
-        self.sender
-            .send(Some(lease))
-            .map_err(|_| CliFailure::new("host upgrade lease keeper ended"))
-    }
-
-    fn check(&self) -> CliResult<()> {
-        if self.valid.load(std::sync::atomic::Ordering::Acquire) {
-            Ok(())
-        } else {
-            Err(CliFailure::new(
-                "host upgrade source lease was lost before commit",
-            ))
-        }
-    }
-}
-
-impl Drop for Leases {
-    fn drop(&mut self) {
-        let _ = self.sender.send(None);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
     }
 }
 

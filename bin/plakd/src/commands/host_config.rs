@@ -112,9 +112,6 @@ pub(crate) fn build_host_config(
     native_models: &[HostLaunchNativeModelFact],
     custody: &crate::gateway::HostCustody,
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure> {
-    if session.plakous_locator.is_some() {
-        crate::carry::upgrade::receipt::ensure_open(paths, &session)?;
-    }
     let mut policy = product_config::SessionPolicy::load(paths)?;
     if let Some(profile) = &session.root_profile {
         let config = product_config::ProductConfig::load(paths).map_err(crate::CliFailure::new)?;

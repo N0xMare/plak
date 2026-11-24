@@ -176,10 +176,9 @@ pub(super) fn qualify(
         stage != Stage::Staging || !observed.production_history,
         "target has production history; use an isolated staging host",
     )?;
-    check(
-        observed.facts.state_key == want.state_key,
-        "cross-key: use the settled host upgrade runbook",
-    )?;
+    if observed.facts.state_key != want.state_key {
+        return Err(Halt::offline_migration_required());
+    }
     let triple = &observed.facts.runner_triple;
     let placements: BTreeMap<_, _> = configuration
         .runners

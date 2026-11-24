@@ -63,10 +63,8 @@ impl Directory {
             retry_revisions: BTreeSet::new(),
             trees: BTreeMap::new(),
             profiles: BTreeMap::new(),
-            withheld: BTreeSet::new(),
             omitted: BTreeSet::new(),
             retry_rows: BTreeSet::new(),
-            retry_visibility: false,
             holders: BTreeMap::new(),
             #[cfg(test)]
             runtime_inspections: Arc::default(),
@@ -274,7 +272,6 @@ fn external_notice(bytes: &[u8]) -> Option<Notice> {
         "tree" => Some(Notice::InspectTree(id.into())),
         "custody" => Some(Notice::Custody(id.into())),
         "config" => Some(Notice::Configuration),
-        "visibility" => Some(Notice::Visibility),
         _ => None,
     }
 }
@@ -299,10 +296,8 @@ struct Source {
     retry_revisions: BTreeSet<String>,
     trees: BTreeMap<String, Result<Option<Box<TreeFacts>>, ()>>,
     profiles: BTreeMap<Option<PathBuf>, Option<Profiles>>,
-    withheld: BTreeSet<String>,
     omitted: BTreeSet<String>,
     retry_rows: BTreeSet<String>,
-    retry_visibility: bool,
     holders: BTreeMap<String, Holder>,
     #[cfg(test)]
     runtime_inspections: Arc<std::sync::atomic::AtomicUsize>,
@@ -378,7 +373,6 @@ impl Source {
             }
         }
         batch.configuration |= self.files.global_changed(&self.paths);
-        batch.visibility |= self.files.receipts_changed(&self.paths) || self.retry_visibility;
         self.profiles.retain(|workspace, profile| {
             if profile.is_some()
                 && !self
@@ -403,19 +397,6 @@ impl Source {
             self.profiles.clear();
             affected.extend(self.metadata.values().map(|row| row.node.tree_id.clone()));
         }
-        if batch.visibility {
-            if let Ok(withheld) = crate::carry::upgrade::receipt::withheld_targets(&self.paths) {
-                for id in withheld.symmetric_difference(&self.withheld) {
-                    if let Some(row) = self.metadata.get(id) {
-                        affected.insert(row.node.tree_id.clone());
-                    }
-                }
-                self.withheld = withheld;
-                self.retry_visibility = false;
-            } else {
-                self.retry_visibility = true;
-            }
-        }
         self.update(
             std::mem::take(&mut batch.records),
             std::mem::take(&mut batch.trees),
@@ -425,9 +406,6 @@ impl Source {
 
     fn rebuild(&mut self) -> Result<Rows, String> {
         let ids = self.store.session_ids()?.into_iter().collect();
-        self.withheld = crate::carry::upgrade::receipt::withheld_targets(&self.paths)
-            .map_err(|error| error.message().to_owned())?;
-        self.retry_visibility = false;
         self.metadata.clear();
         self.revisions.clear();
         self.retry_revisions.clear();
@@ -566,34 +544,29 @@ impl Source {
                 self.files.remember_workspace(&self.paths, key.as_deref());
                 load_profiles(&self.paths, key.as_deref())
             });
-            let summary = (!self.withheld.contains(id))
-                .then(|| {
-                    summarize(
-                        &self.paths,
-                        &self.tree,
-                        &mut self.store,
-                        id,
-                        meta,
-                        Projection {
-                            head: head.as_deref() == Some(id.as_str()),
-                            tree: tree.as_ref().ok().and_then(|facts| facts.as_deref()),
-                            degraded_tree: tree.is_err(),
-                            profiles: profiles.as_ref(),
-                            revision,
-                        },
-                    )
-                })
-                .transpose();
+            let summary = summarize(
+                &self.paths,
+                &self.tree,
+                &mut self.store,
+                id,
+                meta,
+                Projection {
+                    head: head.as_deref() == Some(id.as_str()),
+                    tree: tree.as_ref().ok().and_then(|facts| facts.as_deref()),
+                    degraded_tree: tree.is_err(),
+                    profiles: profiles.as_ref(),
+                    revision,
+                },
+            );
             self.holders.remove(id);
             self.retry_rows.remove(id);
             let summary = match summary {
-                Ok(Some((summary, holder))) => {
+                Ok((summary, holder)) => {
                     if let Some(holder) = holder {
                         self.holders.insert(id.clone(), holder);
                     }
                     Some(summary)
                 }
-                Ok(None) => None,
                 Err(reason) => {
                     diagnostic(&mut self.omitted, id, reason);
                     self.retry_rows.insert(id.clone());

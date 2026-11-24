@@ -45,7 +45,6 @@ struct UpgradePlacement {
     id: String,
     workspace: std::path::PathBuf,
     runner: plakous::runner::RunnerServices,
-    client: Option<plakous::runner::RunnerClient>,
 }
 
 impl Services {
@@ -56,21 +55,18 @@ impl Services {
         Ok(self)
     }
 
-    /// Scoped only to qualification or host-owned dormant creation, never
-    /// driver admission or publication of registry Ready.
+    /// Scoped to read-only qualification, never driver admission or registry Ready.
     pub(crate) fn with_upgrade_runner(
         &self,
         id: &str,
         workspace: &std::path::Path,
         runner: plakous::runner::RunnerServices,
-        client: Option<plakous::runner::RunnerClient>,
     ) -> Self {
         let mut services = self.clone();
         services.upgrade_placement = Some(UpgradePlacement {
             id: id.to_owned(),
             workspace: workspace.to_owned(),
             runner,
-            client,
         });
         services
     }
@@ -270,11 +266,7 @@ impl Services {
                     "upgrade placement services belong to a different workspace",
                 ));
             }
-            let roots = roots.with_runner_services(placement.runner.clone());
-            return Ok(match &placement.client {
-                Some(client) => roots.with_runner_client(client.clone()),
-                None => roots,
-            });
+            return Ok(roots.with_runner_services(placement.runner.clone()));
         }
         if runner_id == "local" && self.runners.rows().is_empty() {
             return Ok(roots);

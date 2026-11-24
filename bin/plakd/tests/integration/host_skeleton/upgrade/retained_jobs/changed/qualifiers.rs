@@ -32,28 +32,6 @@ fn changed_native_protocol_refuses_without_stopping_the_job() {
 }
 
 #[test]
-fn cross_key_refuses_a_settled_root_with_a_running_job() {
-    let Some(fixture) = fixture() else { return };
-    let _cleanup = HomeHost(fixture.home());
-    let (mut host, session, _) = runner::start_job(&fixture, false);
-    let (pid, daemon) = runner::job(&fixture);
-    let mut client = Client::connect(&host);
-    profiles::wait_idle(&mut client, &session);
-    let result = upgrade(&fixture, &binary(&fixture));
-    assert!(!result.status.success(), "{result:?}");
-    let refusal = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&result.stderr),
-        String::from_utf8_lossy(&result.stdout)
-    );
-    assert!(refusal.contains("job"), "{refusal}");
-    assert_eq!(runner::job(&fixture), (pid, daemon));
-    assert!(runner::alive(pid));
-    stop_job(&mut client, session, pid);
-    stop(&mut host);
-}
-
-#[test]
 fn third_build_stops_the_job_on_its_original_daemon() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());

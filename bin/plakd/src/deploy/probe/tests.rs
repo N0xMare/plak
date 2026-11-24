@@ -224,7 +224,7 @@ fn deploy_target_qualifies_the_actual_unit_and_serving_facts() {
         target::check_handoff_image(&target, &cross, KEY)
             .unwrap_err()
             .message()
-            .contains("cross-key")
+            .contains("host_upgrade_offline_migration_required")
     );
     assert!(!host.product_home.join("surrendered").exists());
     manager(&home, &unit, &source, "");

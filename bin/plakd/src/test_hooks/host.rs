@@ -47,9 +47,6 @@ impl OfflineSelection {
         custody: &crate::gateway::HostCustody,
     ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, crate::CliFailure>
     {
-        if face != OfflineFace::Verify && session.plakous_locator.is_some() {
-            crate::carry::upgrade::receipt::ensure_open(paths, &session)?;
-        }
         let controller = if let Some(release) = provider_release() {
             BoundaryController::quiet_gated_from_evidence_path(
                 CrashBoundary::ProviderDispatchOne,

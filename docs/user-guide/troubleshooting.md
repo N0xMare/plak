@@ -464,33 +464,19 @@ If a child still reads recovery-required:
   copy ends `discarded`; in a Git checkout, a copy you already deleted by hand
   (directory and worktree registration) counts as removed.
 
-## `session ... was created by an incompatible plakd build (state ...); carry it forward ...`
+## `session ... was created by an incompatible plakd build (state ...); for offline migration ...`
 
-The session was written by a plakd build whose stored format this build does not
-read. plakd never opens another build's state. 0.0.2 wrote export version 8,
-which this build refuses, so a 0.0.2 session cannot be carried in: finish it
-on 0.0.2, or start a new one. 0.0.2 state is left untouched for the 0.0.2
-binary. When the other build's export version is one this build imports (13
-or 12), run that build with `plakd session export <id>` (an installed snapshot
-under `~/.local/lib/plak/release/` or `~/.local/lib/plak/maintainer/`, or an
-older checkout), then run `plakd session import <file>` with this build: you
-get a new session carried forward from the old one, with its full history.
-`plakd run --session <id> -- '<followup>'` does this when a kept installed snapshot for
-that state key exists and the export is importable; resuming a session already
-carried forward opens the carried session instead of importing it again.
-Otherwise start a new session; the old one is left untouched.
+The session belongs to another state key. `plakd run --session` does not
+export it, import it, or redirect to a successor. Follow the
+[offline migration procedure](host-service.md#offline-migration-at-a-format-cut):
+stop the host, export with the source build, and import with this build.
+Use the new session ID printed by import. A duplicate import names its
+existing successor. Fix any configuration refusal and retry the import
+with the existing file.
 
-If a carry fails after the export was written (for example, import was refused), the export file is kept under
-`~/.plak/carry/` and named in the error. `plakd doctor` lists kept files under
-`carry_files`; import each with `plakd session import <file>`, or delete it.
-
-Installed-build probes check configuration before a host upgrade. Repair the
-named file and retry the explicit host upgrade operation. If a successor already
-exists, use its reported ID rather than importing the original again.
-Foreign run-session resume checks configuration before exporting from the old
-snapshot. For a configuration refusal, repair it and retry the same command.
-For a version refusal, inspect this workspace's carried successors with
-`plakd session list`.
+This build imports export versions 12 and 13. Release 0.0.2 wrote version
+8; finish those sessions on 0.0.2 or start new ones. The old state remains
+untouched.
 
 ## A service stopped after the turn
 
@@ -744,12 +730,9 @@ build can still use its own directory. Your `config.toml`, templates, logs,
 telemetry and OAuth credentials live outside `state/` and are shared.
 
 Inspect paths with `plakd doctor` and use `plakd state prune-legacy` only when you
-no longer need the sessions in those older or newer builds. An explicit resume of
-one of those sessions says it was created by an incompatible plakd build and
-names `plakd session export` / `plakd session import`, the way to carry it into
-this build when that build's export version is one this build imports (13 or
-12). Export versions 11 and older are refused. Finish a 0.0.2 session on 0.0.2,
-or start a new one. 0.0.2 state is left untouched for the 0.0.2 binary.
+no longer need the sessions in those older or newer builds. To move eligible
+sessions to another key, use
+[offline migration](host-service.md#offline-migration-at-a-format-cut).
 
 ## `... was created by an incompatible plakd build; move it aside to start fresh`
 

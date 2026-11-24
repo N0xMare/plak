@@ -17,6 +17,7 @@ pub(crate) mod connection;
 mod console;
 mod gateway_startup;
 mod idle;
+mod legacy_upgrade;
 pub(crate) mod lifecycle;
 mod lock;
 pub(crate) mod reexec;
@@ -42,6 +43,7 @@ pub(crate) fn preflight_upgrade_service(
     probe: &std::path::Path,
 ) -> CliResult<()> {
     let paths = services.paths()?;
+    legacy_upgrade::refuse_unresolved(paths)?;
     crate::product_config::ProductConfig::load_user(paths).map_err(CliFailure::new)?;
     if let Some(web) = &command.web {
         crate::web::preflight(services, web)?;
@@ -78,22 +80,11 @@ pub(crate) fn connect_stdio(services: &Services, auto_start: bool) -> CliResult<
 
 pub(crate) fn upgrade(
     services: &Services,
-    expect_binary: Option<&str>,
-    wait: Duration,
+    expect_binary: &str,
     drain: crate::command::HostDrain,
-    abandon: Option<&str>,
     inspection: Option<crate::deploy::DeployRunnerInspection>,
 ) -> CliResult<ProcessOutcome> {
-    if let Some(target) = abandon {
-        return upgrade::abandon(services, target);
-    }
-    upgrade::request(
-        services,
-        expect_binary.ok_or_else(|| CliFailure::new("expected binary is required"))?,
-        wait,
-        drain,
-        inspection,
-    )
+    upgrade::request(services, expect_binary, drain, inspection)
 }
 
 fn startup_runtime() -> CliResult<(
@@ -143,7 +134,6 @@ pub(crate) fn abort_child_retirement(
     child: &str,
     stdout: &mut dyn std::io::Write,
 ) -> CliResult<()> {
-    use crate::carry::upgrade::receipt;
     use plakous_hosted::agent_tree::TreeStore as _;
 
     if !paths.subagents_database().is_file() {
@@ -152,14 +142,6 @@ pub(crate) fn abort_child_retirement(
     paths.ensure_private_state_home().map_err(CliFailure::new)?;
     let _host = lock::HostLock::take_home(paths, crate::build_identity::binary_id())?;
     let _writers = crate::carry::upgrade::admission(paths, true)?;
-    if receipt::all(paths)?
-        .last()
-        .is_some_and(|record| record.phase == receipt::Phase::Committed)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_pending_ack: recover the destination before aborting retirement",
-        ));
-    }
     crate::store::revisions::refuse_incompatible(paths).map_err(CliFailure::new)?;
     let store = crate::store::tree::open_tree_store(paths).map_err(CliFailure::new)?;
     let mut tree = store
@@ -213,13 +195,9 @@ fn serve_host(
     paths.ensure_layout().map_err(CliFailure::new)?;
     let binary = crate::build_identity::known_binary_id().unwrap_or_else(|| "unknown".into());
     let (ownership, inherited) = HostOwnership::take(paths, &binary, inherited)?;
+    legacy_upgrade::refuse_unresolved(paths)?;
     let paired_start = inherited.is_some();
     let stores_pending = crate::store::revisions::host::pending(paths)?;
-    if let Some(replacement) = upgrade::startup_replacement(services)? {
-        drop(ownership);
-        runtime.shutdown_timeout(Duration::from_secs(1));
-        return replacement.exec(paths);
-    }
     let web_policy = command
         .web
         .as_ref()
@@ -385,8 +363,7 @@ impl RunningHost {
         } = opened;
         let paths = services.paths()?;
         let scanning = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (receipt_recovery, mut startup) =
-            startup_scan(&services, &host, &runtime, stop, inventory, &scanning)?;
+        let mut startup = startup_scan(&services, &host, &runtime, stop, inventory, &scanning)?;
         let reload_requests = runtime.spawn(requested_reload::serve(
             Arc::clone(&host),
             paths.clone(),
@@ -424,9 +401,8 @@ impl RunningHost {
                 let _ = ownership.home.stopping(restarting);
             },
         ));
-        receipt_recovery.cancel();
         let ready = upgrades.stop(&runtime, paths);
-        let paired = !stop.stopped() && ready.as_ref().is_some_and(upgrade::Ready::same_key);
+        let paired = !stop.stopped() && ready.is_some();
         lifecycle::stopping(&host);
         runtime.block_on(host.wait_lifecycle_delivery(Duration::from_secs(1)));
         stop_listeners(&runtime, reload_requests, web, idle_reload, ready.is_some());
@@ -439,7 +415,6 @@ impl RunningHost {
         runtime.block_on(terminals.stop());
         // Joined release closes the host to new sessions.
         hand_off(&host, &runtime, stopping, ready.as_ref().filter(|_| paired));
-        receipt_recovery.join();
         let scan_result = startup.join();
         eprintln!(
             "plakd host: stopped in {} ms",
@@ -462,9 +437,7 @@ impl RunningHost {
                 listeners,
             );
         }
-        drop(listeners);
-        drop(ownership.state);
-        upgrade::replace(ready, &services, stop, &host_arguments, ownership.home)
+        Ok(ProcessOutcome::Success)
     }
 }
 
@@ -495,7 +468,7 @@ fn open_host(
     let paths = services.paths()?;
     crate::store::tree::bind_custody_host(paths).map_err(CliFailure::new)?;
     let (services, terminals) = terminals::TerminalRegistry::compose(services, host_generation())?;
-    let (services, local) = upgrade::prepare_host(&services)?;
+    let (services, local) = runner::host::prepare(&services, None)?;
     let session_runtime = Some(runtime.handle().clone());
     let mut sessions = match &web {
         Some((policy, _)) => sessions::ProductSessions::with_switches(
@@ -549,10 +522,9 @@ fn startup_scan(
     stop: crate::web::StopProbe,
     inventory: StartupInventory,
     scanning: &Arc<std::sync::atomic::AtomicUsize>,
-) -> CliResult<(upgrade::Recovery, StartupScan)> {
+) -> CliResult<StartupScan> {
     use std::sync::atomic::{AtomicBool, Ordering};
     let failed = Arc::new(AtomicBool::new(false));
-    let recovery = upgrade::start_retry(services, host, runtime.handle());
     let product = match inventory {
         StartupInventory::Known(owed) => {
             scan(
@@ -563,14 +535,11 @@ fn startup_scan(
                 runtime.handle(),
                 Arc::clone(scanning),
             );
-            return Ok((
-                recovery,
-                StartupScan {
-                    worker: None,
-                    failed,
-                    ready: None,
-                },
-            ));
+            return Ok(StartupScan {
+                worker: None,
+                failed,
+                ready: None,
+            });
         }
         StartupInventory::Discover(product) => product,
     };
@@ -610,14 +579,11 @@ fn startup_scan(
             (finished, hold)
         })
         .map_err(|error| CliFailure::new(error.to_string()))?;
-    Ok((
-        recovery,
-        StartupScan {
-            worker: Some(worker),
-            failed,
-            ready: Some(ready),
-        },
-    ))
+    Ok(StartupScan {
+        worker: Some(worker),
+        failed,
+        ready: Some(ready),
+    })
 }
 
 enum StartupInventory {
@@ -894,11 +860,6 @@ fn placement_ready(services: &Services, session: &str) -> bool {
     let Ok(paths) = services.paths() else {
         return false;
     };
-    if !crate::carry::upgrade::receipt::withheld_targets(paths)
-        .is_ok_and(|withheld| !withheld.contains(session))
-    {
-        return false;
-    }
     let Ok(mut product) = crate::store::ProductStore::open(paths) else {
         return false;
     };

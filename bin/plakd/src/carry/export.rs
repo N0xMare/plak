@@ -198,7 +198,6 @@ fn export_projected(
         },
     };
     Ok(CarryDocument {
-        local_digest: None,
         format: FORMAT.to_owned(),
         version: VERSION,
         kind: Some(super::document::DocumentKind::PortableSession),

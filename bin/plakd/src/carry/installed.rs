@@ -11,6 +11,13 @@ use std::time::{Duration, Instant};
 
 impl ReloadTarget {
     pub(crate) fn refusal(&self, running_key: &str) -> Option<String> {
+        if self
+            .state_key
+            .as_deref()
+            .is_some_and(|key| key != running_key)
+        {
+            return Some(super::upgrade::OFFLINE_MIGRATION_REQUIRED.to_owned());
+        }
         if let Some(error) = &self.capacity_error {
             return Some(error.clone());
         }
@@ -20,11 +27,6 @@ impl ReloadTarget {
                 "reload kept this session open: {error}; fix the named file and retry the host upgrade"
             ));
         }
-        if probe.state_key != running_key && !probe.export_versions.contains(&VERSION) {
-            return Some(format!(
-                "reload kept this session open: the new build cannot import this build's version {VERSION} export; install a build that imports it and retry the host upgrade"
-            ));
-        }
         if let Some(ReopenProbe::Refused { reason }) = self.reopen.as_deref() {
             return Some(format!(
                 "reload kept this session open: the installed build would not reopen it: {}",
@@ -32,15 +34,6 @@ impl ReloadTarget {
             ));
         }
         None
-    }
-
-    /// Whether a reload onto this build carries into a new session (another
-    /// state key, or a binding the build derives differently) rather than
-    /// resuming this one.
-    pub(crate) fn carries(&self, running_key: &str) -> bool {
-        self.state_key
-            .as_deref()
-            .is_some_and(|key| key != running_key || self.binding_change().is_some())
     }
 
     /// The frozen binding input the installed build derives differently, when
@@ -125,12 +118,9 @@ pub(crate) fn reload_target_for_session(
     let Some(id) = session_id else {
         return Some(target);
     };
-    if target.state_key.as_deref() == Some(running_key.as_str()) {
-        target.reopen = reopen_verdict(&target.executable, workspace, id).map(Box::new);
-        // Only a carry needs the destination's capacity inspection.
-        if target.binding_change().is_none() {
-            return Some(target);
-        }
+    target.reopen = reopen_verdict(&target.executable, workspace, id).map(Box::new);
+    if target.binding_change().is_none() {
+        return Some(target);
     }
     let inspect = || -> Result<CarryCapacityProbe, String> {
         let record = crate::store::ProductStore::open(paths)
@@ -184,7 +174,8 @@ pub(crate) fn reload_refusal(
 ) -> Option<String> {
     target.refusal(running_key).or_else(|| {
         target
-            .carries(running_key)
+            .binding_change()
+            .is_some()
             .then_some(in_flight)
             .flatten()
             .map(str::to_owned)

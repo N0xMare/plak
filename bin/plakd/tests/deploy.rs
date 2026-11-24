@@ -340,7 +340,7 @@ fn deploy_fake_fleet_refuses_without_mutation() {
         (
             "/host/facts/state_key",
             json!("r29.e39.p39.t11"),
-            "cross-key",
+            "host_upgrade_offline_migration_required",
         ),
         (
             "/host/paired",
@@ -370,7 +370,16 @@ fn deploy_fake_fleet_refuses_without_mutation() {
     ] {
         f.reset();
         f.change(|d| *d.pointer_mut(pointer).unwrap() = value);
-        f.staging("plan", "blocked", reason);
+        let report = f.staging("plan", "blocked", reason);
+        if pointer == "/host/facts/state_key" {
+            assert_eq!(report["reason_code"], reason);
+            assert!(
+                report["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("stop the source host")
+            );
+        }
         assert!(!f.path("staging.jsonl").exists());
         assert_eq!(f.events(), NO_EVENTS);
     }

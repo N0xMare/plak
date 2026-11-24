@@ -608,25 +608,18 @@ enum GatewayCallerAction {
 
 #[derive(Debug, clap::Subcommand)]
 enum HostAction {
-    /// Upgrade the running host; cross-key carry requires settled work.
+    /// Upgrade the running host within its current state key.
     Upgrade {
-        #[arg(long, required_unless_present = "abandon", conflicts_with = "abandon")]
+        #[arg(long, required_unless_present_any = ["abandon", "wait"])]
         expect_binary: Option<String>,
-        /// Permanently abandon pending remote successors selected by UUID or runner ID.
-        #[arg(long, conflicts_with_all = ["wait", "drain"])]
+        #[arg(long, hide = true)]
         abandon: Option<String>,
-        /// Wait for settled work for this many seconds (at most 3600).
-        #[arg(long, default_value = "0", value_parser = clap::value_parser!(u64).range(0..=3600))]
-        wait: u64,
+        #[arg(long, hide = true)]
+        wait: Option<String>,
         /// Same-key boundary drain: default 60s; 0, integer ms/s/m/h, or idle.
-        #[arg(long, conflicts_with = "wait")]
+        #[arg(long)]
         drain: Option<crate::command::HostDrain>,
-        #[arg(
-            long,
-            hide = true,
-            requires = "inspect_source",
-            conflicts_with = "abandon"
-        )]
+        #[arg(long, hide = true, requires = "inspect_source")]
         inspect_runner: Vec<String>,
         #[arg(long, hide = true, requires = "inspect_runner")]
         inspect_source: Option<String>,

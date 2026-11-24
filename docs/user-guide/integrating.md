@@ -96,11 +96,13 @@ not replaying requests or inferring lost model/tool outcomes.
 
 An admitted planned restart or upgrade may send `host_lifecycle` before closing.
 Its phase is `draining`, `restarting`, `stopping`, or `running` (an aborted
-drain), with reason `paired_upgrade`, `cross_key_upgrade`, or `shutdown`. Optional `target` names the binary id and state key; optional
+drain), with reason `paired_upgrade`, `cross_key_upgrade`, or `shutdown`.
+`cross_key_upgrade` remains in the wire format but is no longer emitted.
+Optional `target` names the binary id and state key; optional
 `retry_after_ms` is at most 30000. Treat these as advisory only: reconnect and
 attach afresh, and never replay a prompt because of a notice or a lost reply.
-Notices can be missed or repeated. Cross-key carried roots still redirect via
-the existing `moved` refusal once the destination is ready.
+Notices can be missed or repeated. A state-key cut is offline: reconnect to
+the new host and attach using the IDs printed by import.
 
 During an admission pause, the host drops non-request payload frames such as
 blobs without acknowledging them. Hold unsent drafts and their blobs in the

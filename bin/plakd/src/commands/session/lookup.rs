@@ -7,6 +7,7 @@ use std::path::Path;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum LookupMode {
     Runtime,
+    Export,
     Work,
     Metadata,
 }
@@ -25,6 +26,14 @@ pub fn load_exact_product_session(
     session_id: &str,
 ) -> CliResult<product_sessions::SessionRecord> {
     load_product_session(paths, store, session_id, |_| Ok(()), LookupMode::Runtime)
+}
+
+pub(super) fn load_export_product_session(
+    paths: &crate::home::paths::PlakPaths,
+    store: &dyn crate::store::session_records::SessionRecordStore,
+    session_id: &str,
+) -> CliResult<product_sessions::SessionRecord> {
+    load_product_session(paths, store, session_id, |_| Ok(()), LookupMode::Export)
 }
 
 pub(crate) fn load_admitted_product_session(
@@ -70,20 +79,25 @@ fn load_product_session(
             "session_archived: unarchive this session before admitting work",
         ));
     }
-    let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
-    let recorded = std::fs::canonicalize(&record.workspace_root)
-        .unwrap_or_else(|_| record.workspace_root.clone());
-    if requested != recorded {
-        return Err(CliFailure::new(format!(
-            "session {session_id} belongs to workspace {}; run this command from there",
-            recorded.display()
-        )));
+    // A paired export reads the host's stores, not the runner's checkout.
+    // Prefix resolution above is still scoped to the caller's workspace.
+    if mode != LookupMode::Export || record.runner.is_none() {
+        let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+        let recorded = std::fs::canonicalize(&record.workspace_root)
+            .unwrap_or_else(|_| record.workspace_root.clone());
+        if requested != recorded {
+            return Err(CliFailure::new(format!(
+                "session {session_id} belongs to workspace {}; run this command from there",
+                recorded.display()
+            )));
+        }
     }
     // A face that works on the session settles an interrupted carry's
     // record first (spec 02 §2.6), and creates the runtime session of one
     // no face has opened yet (`plakd host`'s `new_session`); a read names
     // the exact record only.
-    if record.plakous_locator.is_none() && mode == LookupMode::Runtime {
+    if record.plakous_locator.is_none() && matches!(mode, LookupMode::Runtime | LookupMode::Export)
+    {
         return Err(CliFailure::new(
             "session has no exact canonical Plakous locator",
         ));

@@ -20,7 +20,6 @@ SWEEP_FILES = (
 )
 FORMAT_FILES = (
     "bin/plakd/src/carry/document.rs",
-    "bin/plakd/src/carry/upgrade/receipt.rs",
     "bin/plakd/src/home/state.rs",
     "bin/plakd/src/reload_request.rs",
     "bin/plakd/src/store/mod.rs",

@@ -24,8 +24,6 @@ pub(crate) use document::{
 };
 pub(crate) use history::{TraceHistory, redact_payload};
 
-#[cfg(feature = "web")]
-pub(crate) use export::ExportRefusal;
 pub(crate) use export::{export_session, new_carry_file};
 pub(crate) use reload::{
     CarryCapacityProbe, REOPEN_HEAD_ADVANCED, ReloadProbe, ReloadTarget, ReopenProbe, reload_probe,

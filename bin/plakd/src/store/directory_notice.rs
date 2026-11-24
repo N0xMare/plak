@@ -101,7 +101,6 @@ pub(crate) mod local {
         InspectTree(String),
         Custody(String),
         Configuration,
-        Visibility,
         Revalidate,
         Gap,
         #[cfg(test)]
@@ -121,7 +120,6 @@ pub(crate) mod local {
         pub(crate) revalidate: bool,
         pub(crate) gap: bool,
         pub(crate) configuration: bool,
-        pub(crate) visibility: bool,
         #[cfg(test)]
         pub(crate) barriers: Vec<std::sync::mpsc::SyncSender<()>>,
     }
@@ -142,7 +140,6 @@ pub(crate) mod local {
                     self.custody.insert(id);
                 }
                 Notice::Configuration => self.configuration = true,
-                Notice::Visibility => self.visibility = true,
                 Notice::Revalidate => self.revalidate = true,
                 Notice::Gap => self.gap = true,
                 #[cfg(test)]
@@ -265,7 +262,6 @@ pub(crate) mod local {
                     TreeChange::Custody => Notice::Custody((*id).to_owned()),
                 },
                 Change::Input("config") => Notice::Configuration,
-                Change::Input("visibility") => Notice::Visibility,
                 Change::Input(_) => Notice::Revalidate,
             });
             true

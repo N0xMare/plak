@@ -111,14 +111,6 @@ pub(crate) fn product_store_schema(
     }
 }
 
-pub(crate) fn upgrade_input_limit() -> Option<String> {
-    std::env::var("PLAK_TEST_HOST_UPGRADE_INPUT_LIMIT").ok()
-}
-
-pub(crate) fn upgrade_import_refused() -> bool {
-    std::env::var("PLAK_TEST_HOST_UPGRADE_IMPORT_REFUSAL").as_deref() == Ok("1")
-}
-
 pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
     hook_environment("PLAK_TEST_HOST_UPGRADE_OMIT_REEXEC").is_some()
 }

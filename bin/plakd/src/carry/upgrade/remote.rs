@@ -1,4 +1,4 @@
-//! Scoped qualification and host-owned seeding never publish runner Ready.
+//! Scoped read-only qualification never publishes runner Ready.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -10,63 +10,13 @@ use crate::{CliFailure, CliResult};
 
 pub(crate) struct Placement {
     pub(crate) services: Services,
-    // The client and its executor outlive configuration construction and seeding.
+    // The client and its executor outlive configuration construction.
     _dialed: Option<dial::Dialed>,
     _runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl Placement {
     pub(crate) fn prepare(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
-        Self::qualify(services, id, workspace)
-    }
-
-    #[cfg(feature = "web")]
-    pub(crate) fn for_import(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
-        if services
-            .runner_ownership()
-            .is_none_or(crate::commands::runner::ownership::RunnerOwnership::is_standalone)
-        {
-            return Err(CliFailure::new(
-                "passive runner binding requires destination host custody",
-            ));
-        }
-        if id == "local" {
-            return Ok(Self {
-                services: services.clone(),
-                _dialed: None,
-                _runtime: None,
-            });
-        }
-        let runner = services
-            .runners()
-            .services(id)
-            .map_err(refused)?
-            .ok_or_else(|| CliFailure::new("remote import requires a Ready registry connection"))?;
-        let client = services
-            .runners()
-            .client(id)
-            .ok_or_else(|| CliFailure::new("remote import requires the registry owned client"))?;
-        let path = workspace
-            .to_str()
-            .ok_or_else(|| CliFailure::new("runner workspace is not UTF-8"))?;
-        runner.runtime().block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(25),
-                client.workspace_validate(path, true),
-            )
-            .await
-            .map_err(|_| CliFailure::new("remote import workspace validation timed out"))?
-            .map_err(|error| CliFailure::new(format!("runner validation failed: {error:?}")))?
-            .map_err(|error| CliFailure::new(format!("runner workspace refused: {error:?}")))
-        })?;
-        Ok(Self {
-            services: services.with_upgrade_runner(id, workspace, runner, Some(client)),
-            _dialed: None,
-            _runtime: None,
-        })
-    }
-
-    fn qualify(services: &Services, id: &str, workspace: &Path) -> CliResult<Self> {
         if id == "local" {
             return Ok(Self {
                 services: services.clone(),
@@ -110,7 +60,7 @@ impl Placement {
         let runner =
             plakous::runner::RunnerServices::new(Arc::new(backend), runtime.handle().clone());
         Ok(Self {
-            services: services.with_upgrade_runner(id, workspace, runner, None),
+            services: services.with_upgrade_runner(id, workspace, runner),
             _dialed: Some(dialed),
             _runtime: Some(runtime),
         })

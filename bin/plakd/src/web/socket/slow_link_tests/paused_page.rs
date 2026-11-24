@@ -90,7 +90,7 @@ async fn web_upgrade_pause_keeps_a_resident_baseline_and_control_responsive() {
         paced::wait_for_snapshot(&outbox, 1).await;
         let pause = context
             .host
-            .pause_admissions_for_upgrade(Arc::default(), true)
+            .pause_admissions_for_upgrade(Arc::default())
             .unwrap();
         let draft_id = ClientDraftId::new();
         let prompt = |id| {

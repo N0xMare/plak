@@ -2,100 +2,6 @@ use super::*;
 use std::sync::atomic::AtomicBool;
 
 #[test]
-fn host_step_drain_only_an_exact_attached_interrupt_can_withdraw_preparation() {
-    let (host, _) = host(&["s1"]);
-    let out = Out::default();
-    let mut connection = host.connect(
-        out.clone(),
-        Face::Remote,
-        HostPrincipal::Socket(501),
-        || false,
-    );
-    request(&mut connection, 1, Op::Attach { node: node("s1") });
-    let attachment = attached(&out.take(), 1);
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
-        .unwrap();
-    for observed in [attachment + 1, attachment] {
-        request(
-            &mut connection,
-            2 + observed,
-            Op::Intent {
-                attachment: observed,
-                intent: SessionIntent::Interrupt,
-                client_id: None,
-                blobs: Vec::new(),
-            },
-        );
-        assert_eq!(cancelled.load(Ordering::Acquire), observed == attachment);
-    }
-    assert!(pause.commit().is_err());
-}
-
-#[test]
-fn host_step_drain_stop_withdraws_preparation_but_never_crosses_commit() {
-    let (host, fake) = host(&["s1"]);
-    let out = Out::default();
-    let mut connection = host.connect(
-        out.clone(),
-        Face::Remote,
-        HostPrincipal::Socket(501),
-        || false,
-    );
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
-        .unwrap();
-    request(
-        &mut connection,
-        1,
-        Op::StopSession {
-            session: "absent".into(),
-        },
-    );
-    assert!(!cancelled.load(Ordering::Acquire));
-    request(
-        &mut connection,
-        2,
-        Op::StopSession {
-            session: "s1".into(),
-        },
-    );
-    assert!(cancelled.load(Ordering::Acquire));
-    assert!(pause.commit().is_err());
-    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
-    drop(pause);
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled), true)
-        .unwrap();
-    pause.commit().unwrap();
-    request(
-        &mut connection,
-        3,
-        Op::StopSession {
-            session: "s1".into(),
-        },
-    );
-    assert!(!cancelled.load(Ordering::Acquire));
-    assert!(matches!(
-        outcome(&out.take(), 3),
-        Outcome::Refused(RequestRefusal::Backpressure)
-    ));
-    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 1);
-    drop(pause);
-    request(
-        &mut connection,
-        4,
-        Op::StopSession {
-            session: "s1".into(),
-        },
-    );
-    assert_eq!(fake.0.dormant_stops.load(Ordering::SeqCst), 2);
-}
-
-#[test]
 fn same_key_stop_and_interrupt_act_without_withdrawing_preparation() {
     let (host, fake) = host(&["s1", "s2"]);
     let out = Out::default();
@@ -109,7 +15,7 @@ fn same_key_stop_and_interrupt_act_without_withdrawing_preparation() {
     let attachment = attached(&out.take(), 1);
     let cancelled = Arc::new(AtomicBool::new(false));
     let pause = host
-        .pause_admissions_for_upgrade(Arc::clone(&cancelled), false)
+        .pause_admissions_for_upgrade(Arc::clone(&cancelled))
         .unwrap();
     request(
         &mut connection,

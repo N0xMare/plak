@@ -3,7 +3,9 @@
 The hidden `plakd deploy` command is for a generated Linux systemd user host
 or Apple Silicon macOS LaunchAgent, with a co-resident gateway and
 optional paired runners and exact-match clients. It does not migrate
-custody, move state across keys, or write service units. Run it from an
+custody, move state across keys, or write service units. A changed key refuses
+before drain with `host_upgrade_offline_migration_required`; follow the
+[offline procedure](host-service.md#offline-migration-at-a-format-cut). Run it from an
 independent machine with Git and OpenSSH; the remote login needs a working
 user service manager and an enrolled SSH host key. No Python interpreter is
 needed. Name a resolvable SSH host and login; deploy uses an empty SSH config,

@@ -1,4 +1,4 @@
-//! Joined step boundaries shared by same-key handoff and guarded cross-key cuts.
+//! Joined step boundaries for same-key handoff.
 
 use crate::command::HostDrain;
 use crate::shell::services::Services;
@@ -12,7 +12,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 use std::time::{Duration, Instant};
 
 pub(super) struct Budget {
-    pub(super) start: Instant,
+    #[cfg(test)]
+    start: Instant,
     pub(super) barrier_deadline: Instant,
     deadline: Option<Instant>,
 }
@@ -34,6 +35,7 @@ impl Budget {
             })
             .transpose()?;
         Ok(Self {
+            #[cfg(test)]
             start,
             barrier_deadline: deadline.map_or(start + Duration::from_secs(60), |deadline| {
                 deadline.max(start + Duration::from_secs(10))

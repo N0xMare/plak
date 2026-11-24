@@ -1386,7 +1386,7 @@ fn another_builds_state_is_named_once_left_untouched_and_its_sessions_refused() 
     assert!(
         refusal.contains(&format!(
             "session {old_session} was created by an incompatible plakd build (state r1.e1.p1.t1); \
-             carry it forward with that build's `plakd session export {old_session}` and then \
+             for offline migration stop the host, use that build's `plakd session export {old_session}`, then use this build's \
              `plakd session import <file>`, or start a new session"
         )),
         "{refusal}"

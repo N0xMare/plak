@@ -75,6 +75,10 @@ impl Halt {
         }
     }
 
+    fn offline_migration_required() -> Self {
+        Self::blocked(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED)
+    }
+
     fn reconcile(message: &str) -> Self {
         Self {
             result: "needs_reconcile",
@@ -151,6 +155,12 @@ pub(crate) fn run(action: Action) -> CliResult<ProcessOutcome> {
     if let Err(error) = &result {
         report.put("result", &error.result)?;
         report.put("reason", &error.message)?;
+        if error.message == crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED {
+            report.put(
+                "reason_code",
+                &crate::carry::upgrade::OFFLINE_MIGRATION_REASON,
+            )?;
+        }
     }
     stdio::stdout()
         .lock()

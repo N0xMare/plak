@@ -345,7 +345,7 @@ pub(super) fn check_handoff_image(target: &Target<'_>, binary: &Path, key: &str)
     let found = target.product(binary, ["version", "--state-key"], timing::PROBE)?;
     check(
         probe::line(&found)? == key,
-        "cross-key: staged binary does not match the serving state key; use the settled host upgrade runbook",
+        crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED,
     )
 }
 

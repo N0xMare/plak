@@ -306,7 +306,6 @@ fn log_command_start(command: &Command) {
     match command {
         Command::StateKey
         | Command::HostUpgradeProbe { .. }
-        | Command::HostUpgradeCapacity { .. }
         | Command::ReloadProbe
         | Command::ReopenProbe { .. }
         | Command::WriteBinaryManifest { .. }
@@ -436,19 +435,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
             &mut io::stdout().lock(),
         );
     }
-    if matches!(
-        command,
-        Command::HostUpgradeProbe { .. } | Command::HostUpgradeCapacity { .. }
-    ) {
-        let capacity = match &command {
-            Command::HostUpgradeCapacity { path } => Some(path.as_path()),
-            _ => None,
-        };
-        let service = match &command {
-            Command::HostUpgradeProbe { service } => service.as_deref(),
-            _ => None,
-        };
-        return carry::upgrade::print_probe(&services, capacity, service, &mut io::stdout().lock());
+    if let Command::HostUpgradeProbe { service } = &command {
+        return carry::upgrade::print_probe(
+            &services,
+            service.as_deref(),
+            &mut io::stdout().lock(),
+        );
     }
     if let Command::HostInstall(install) = &command {
         return commands::host_install::run(install, services.paths(), &mut io::stdout().lock());
@@ -584,17 +576,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         Command::HostConnect { auto_start } => return host::connect_stdio(&services, auto_start),
         Command::HostUpgrade {
             expect_binary,
-            abandon,
-            wait,
             drain,
             inspection,
         } => {
             return host::upgrade(
                 &services,
-                expect_binary.as_deref(),
-                wait,
+                &expect_binary,
                 drain.unwrap_or_default(),
-                abandon.as_deref(),
                 inspection,
             );
         }
@@ -685,8 +673,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>, reexec: bool) -> CliResult
         }
         Command::BuildInfo
         | Command::WriteBinaryManifest { .. }
-        | Command::HostUpgradeProbe { .. }
-        | Command::HostUpgradeCapacity { .. } => {
+        | Command::HostUpgradeProbe { .. } => {
             Err(CliFailure::new("internal command dispatch error"))
         }
         Command::StateKey => {
@@ -1276,7 +1263,6 @@ fn execute_command<Backend: AccountOps>(
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
         | Command::HostUpgradeProbe { .. }
-        | Command::HostUpgradeCapacity { .. }
         | Command::ReopenProbe { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion

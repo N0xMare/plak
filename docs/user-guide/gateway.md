@@ -96,8 +96,9 @@ existing environment and flags. Run `systemctl --user daemon-reload` without
 restarting the host.
 This keeps a crash during the upgrade window from relaunching the old build.
 Run `plakd host upgrade` while the old definition is still in place. A
-same-key handoff keeps the running host PID; a cross-key carry moves settled
-sessions to new successors.
+same-key handoff keeps the running host PID. For a changed key, stop the
+legacy host and follow [offline migration](host-service.md#offline-migration-at-a-format-cut)
+instead of invoking host upgrade.
 After the upgrade commits, run `systemctl --user disable --now plak-host.service`
 for the legacy unit. Confirm it is inactive with `Result=success` and
 `MainPID=0`, then back up and remove its file and `plak-host.service.d/`
@@ -109,7 +110,7 @@ web/UI flags, reload as needed, and run
 unit launches a new process with a new PID. Do not run two host units for the
 same home.
 
-On macOS upgrade first, boot out the old host plist (including
+On macOS perform any same-key handoff first, boot out the old host plist (including
 `com.plak.host.plist` if used) before backing it up and removing it, advance
 the host link, then install and bootstrap the new plist. Local macOS commands
 against a local product home also need a local gateway: run
@@ -117,10 +118,10 @@ against a local product home also need a local gateway: run
 
 ## Upgrade with the host
 
-For 0.0.5, follow the [cross-key upgrade order](host-service.md#upgrade-reload-and-logs):
+For 0.0.5, follow the [offline migration order](host-service.md#offline-migration-at-a-format-cut):
 rewrite named account references in templates to kinds, settle turns, live
 children and daemon jobs, then upgrade paired runners and advance their
-dedicated links. Upgrade the gateway **before** carrying the host:
+dedicated links. Upgrade the gateway **before** importing sessions:
 
 1. Run `plakd gateway drain` on the gateway machine and wait for the old
    process to exit.

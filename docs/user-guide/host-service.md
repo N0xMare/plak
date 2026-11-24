@@ -134,32 +134,9 @@ unmanaged host; load the intended service yourself.
 
 ## Upgrade, reload and logs
 
-For the 0.0.5 cross-key cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`):
-
-1. Rewrite named account references in templates to provider kinds (for
-   example, `account = "codex/work"` becomes `account = "codex"`).
-2. Settle work: finish or stop running turns, live children and non-terminal
-   daemon jobs.
-3. Upgrade each paired runner to the matching snapshot and advance its
-   dedicated executable link.
-4. Drain and [upgrade the gateway](gateway.md#upgrade-with-the-host) by
-   flipping its dedicated link, starting it, and running `plakd gateway check`.
-5. From the destination snapshot, run
-   `plakd host upgrade --expect-binary <id>` to carry settled sessions.
-6. Re-pin clients to host wire protocol 12. A protocol-11 client receives a
-   typed `VersionMismatch`.
-
-Once the carry commits, recovery is fix-forward only; do not restart the old
-host as a rollback.
-If you still have pinned units, follow the [one-time migration](gateway.md#migrate-an-existing-service-once)
-instead. It moves paired runners first (they do not need a gateway), then the
-gateway while the old host keeps running, then upgrades the host before replacing
-its old unit and drop-ins. Before the upgrade on Linux, repoint the active
-`ExecStart` drop-in to the destination snapshot and daemon-reload without
-restarting. After the upgrade commits, disable and stop the legacy
-`plak-host.service` before removing it and its drop-ins and enabling
-`plakd-host.service`, so two units do not contend for the home lock.
-Codex and SuperGrok refuse while the running host is still using protocol 1.
+Use `host upgrade` only when the new build has the same state key. If a
+declared format cut changes the key, follow the
+[offline migration procedure](#offline-migration-at-a-format-cut) instead.
 
 Install a tested matching snapshot. For a host already supporting the upgrade
 coordinator, invoke the destination build with its binary ID (shown by
@@ -338,13 +315,9 @@ disconnection cannot cancel the transfer. An explicit session stop takes
 precedence and is never converted into a continuation. The admission-verdict
 barrier joins a delivery attempt, not receipt by a disconnected client.
 
-Promoted jobs continue only with an unchanged exact runner revision/flavor/protocol
-triple. On paired runners, this includes jobs of quiescent sessions through
-graceful host restart and same-key upgrade; an explicit session stop still ends
-them. Runner retention v1 exists, but `host upgrade` does not carry jobs across
-changed runner triples. It still refuses changed-triple requests with live
-foreground/background processes or unknown runner state before drain; settle
-and drain them using the old build, then retry. Source process
+Same-key upgrades can keep promoted jobs when the runner revision or flavor
+changes, using retention v1. A native runner protocol change still refuses
+live handoff. Source process
 inspection needs a live source-compatible native connection, not just a cached
 picker **Ready** row. For a cold source or a paired runner with no native backend user,
 reconnect a settled root on that runner read-only using the old client and keep
@@ -358,95 +331,73 @@ after five seconds, check runner reachability and load, wait and retry; a slow
 response alone does not call for a link change or root attachment. No source restart
 is needed. Same-key upgrade checks source-owned runner clients again before
 surrender, without another bind or custody transfer, including child placements.
-Cross-key settled carry checks once, before pausing admissions. On the same-key
-path a process started during preparation can already have been promoted by
-Notice when the final check refuses; it keeps
-running on the source and can be stopped or drained there. Cross-key carry still
-requires settled jobs and trees.
-`--drain` cannot be combined with `--wait` or `--abandon`.
+A process started during preparation can already have been promoted by Notice
+when the final check refuses. It keeps running on the source and can be
+stopped or drained there.
 
-Cross-key upgrade supports **settled roots**, locally or on paired runners.
-It creates settled successors; it does not transfer a live tree or its jobs.
-Let turns, children, workspace operations and daemon jobs finish; resolve held
-work first. `--wait 60` closes admissions while waiting up to 60 seconds and
-restores them on timeout. Unsupported destination/configuration/capacity
-refusals leave the old owner authoritative. A source build without the
-coordinator is refused, never silently stopped.
-Only unarchived roots are checked, carried and counted against the 4096-root
-limit. Archived roots stay under the old key; their work or workers are outside
-this operation and are not promised to transfer.
+## Offline migration at a format cut
 
-For paired runners, install the matching snapshot and advance each runner's
-dedicated command link **before** invoking host upgrade. Revision, flavor and
-runner protocol must all match the destination exactly. The host checks that
-command, pairing, roots, configuration and capacity through read-only runner
-qualification before draining; it takes no runner custody during this check.
-Normal maintainer installation must not move the dedicated link. On a mismatch,
-fix the link first; keep the old build available to inspect and drain old
-workers. A smaller destination or changed binding/configuration that cannot
-admit the carried history refuses rather than surrendering it.
+Compare the retained source and destination executables with
+`plakd version --state-key`. When the keys differ, neither `host upgrade` nor
+`deploy` will drain the current host. Settle the selected sessions first:
+finish or stop turns and live children, resolve held work and workspace
+operations, and settle jobs. Use the source build to deliver any outstanding
+process results before exporting. Record the full root IDs you want to move.
+For local sessions, run the source build's `plakd session list` from each
+workspace. Add `--include-archived` to see archived roots, which stay behind.
+For paired sessions, record the IDs from the source host's directory before
+stopping it. Leave unselected sessions in the old key.
 
-The command prints source-to-successor session IDs. Cross-key successors are
-new agent lines with committed named state, conversation, generated title and
-paused queued text. Explicit title overrides and queued images do not survive.
-Children, candidates and live jobs are not moved; source children remain inert
-references and cannot be revived in the new root. Workspace files stay in place.
-The retained source export documents contain those inert facts; the successor
-does not reconstruct the old topology.
-No historical prompt or tool is replayed.
+1. Keep both installed snapshots and their sidecars. If the cut requires a
+   gateway protocol change, [upgrade the gateway first](gateway.md#upgrade-with-the-host).
+2. Stop the source service with `systemctl --user stop plakd-host.service` on
+   Linux or `launchctl bootout "gui/$(id -u)/com.plakd.host"` on macOS. If
+   you started the host in a terminal, stop it there and wait for exit. Close
+   standalone writers. Keep both hosts stopped until import completes.
+3. With the same `PLAK_HOME`, use the retained source snapshot's executable
+   to run `plakd session export <full-root-id> --out <new-private-file>` for
+   each selected session. Run each local export from that session's
+   workspace. For a paired root use its full ID from any directory on the
+   source host machine. This build uses the saved runner workspace and does
+   not connect to the runner for export. Older source builds can require the
+   same absolute workspace path to exist on the source host. If that path
+   is not available, use an existing source export or a source build with
+   the paired export fix for that state key. Keep the original exports and
+   stores.
+4. Prepare the destination configuration and advance paired runners'
+   dedicated links to matching snapshots. Use the destination executable to
+   run `plakd session import <file>` for each export. Record the new session
+   IDs it prints. If interrupted, retry only the missing imports; importing
+   the same document into the same placement names its existing successor.
+5. Point the service link at the destination. Start the Linux service with
+   `systemctl --user start plakd-host.service` or bootstrap the macOS
+   LaunchAgent as shown above. Reconnect clients using the destination's wire
+   version and attach with the new session IDs. There is no redirect.
 
-If interrupted, retry the same destination command and expected binary ID.
-Before surrender, recovery withdraws the preparation and restores the retained
-old host; retry then starts a new attempt. Plain `plakd host` startup does the
-same withdrawal. An Aborted attempt never sends a later destination start back
-to the old key. If the retained source executable is unavailable, startup marks
-the preparation Aborted and can start under its own key; restoring the source
-build later completes any source archival cleanup. After surrender, the old records
-cannot reopen: repair the destination if needed and recover only through its
-receipts. The source exits before the destination imports under its own host
-custody. Each successor is imported and freshly reconciled before its own Ready
-receipt. A runner outage or changed credentials/configuration after surrender
-leaves only the affected successors withheld and retried; ready local roots
-still serve. Remote imports reuse the host registry's Ready connection, never a
-second connection that could interrupt work on an already-Ready successor.
-Retries wake on runner status changes, with exponential backoff capped at three
-minutes otherwise. Fix the destination/runner and retry the same command. Imported
-successors are not re-probed or re-created; post-surrender capacity changes
-produce an ordinary import warning, not another strict preflight. The command
-reports an unknown outcome early if no host holds the home, and extends its
-wait as import/readiness makes progress. A lost success answer reports the existing successors, not another
-import. Do not delete or edit `host/upgrades` to force an old owner to resume.
-Client reload remains separate and never performs this operation or resends
-ambiguously accepted input.
+Imports preserve portable history, committed named state and paused queued
+text. They do not transfer live jobs or job registries, live or held
+children, tree topology, candidates or seal outcomes, effect or call
+journals, workspace-operation authority, explicit title overrides, queued
+images, or provider replay. Any source facts in the document are references
+only. No historical tool or prompt is replayed.
 
-If a runner is permanently lost, invoke the serving destination executable:
+An export may catch up the source projection, but it never changes source
+authority. The import never writes to the source key. If you abort the
+migration before starting the destination, restart the source with its own
+build and matching runner links. Any imported successors are independent
+sessions; they do not merge back into the source. Do not alternate between
+keys after accepting new work.
 
-```sh
-plakd host upgrade --abandon <successor-uuid-or-runner-id>
-```
+For the 0.0.5 cut (`r28.e38.p38.t11` → `r28.e39.p39.t11`), rewrite named
+account references in templates to provider kinds (for example,
+`account = "codex/work"` becomes `account = "codex"`). Upgrade the gateway
+before importing Codex or SuperGrok sessions, and use protocol-12 clients.
+If startup reports `host_upgrade_legacy_receipt_pending`, inspect the old
+coordinated upgrade using its original builds. This host refuses pending
+upgrades and acknowledged upgrades with abandoned mappings. Do not delete
+the receipt.
 
-An exact successor UUID abandons one pending remote successor; a runner ID
-abandons that runner's pending successors. Ready successors and local roots
-cannot be abandoned. This is irreversible: the reserved successor never opens,
-even if the runner returns. Repeating the command is safe. The source remains
-surrendered. Once all successors are Ready or abandoned, later upgrades and
-ordinary standalone session commands are no longer blocked by this operation.
-
-The command prints the retained export paths. To recover on another placement,
-copy the desired export, edit only the copy's `runner` and `workspace_root`
-fields to select the destination, then run `plakd session import <copy>`. For
-local recovery set `runner` to `{"name":"local","runner_id":"local"}` and
-`workspace_root` to an absolute local directory. Do not edit the retained
-original. Normal import admission still applies; stop the host before standalone remote import, and pair/admit the new
-runner normally. The import creates a new line and session ID, not the
-abandoned reservation. Remove obsolete runner configuration after retiring it.
-
-After success, receipt-aware old-key host starts and old source addresses follow
-the recorded destination. Source records remain archived as well as fenced:
-older builds without receipt readers honour the ordinary archived-session
-refusal. Do not explicitly unarchive surrendered roots or edit their stores
-using an old build; those actions can bypass that legacy protection. Keep the
-source snapshots and state for reference until every successor is acknowledged.
+## UI reload and runner protocols
 
 For a UI-only deployment, replace the UI files and use
 `systemctl --user reload plakd-host.service`. Reload sends SIGUSR1 and keeps
@@ -476,8 +427,7 @@ cannot restore native control. An incompatible endpoint requires its matching
 build to settle the original jobs; if the original process is proved lost,
 follow the reported lost-job remedy rather than starting or replaying it.
 Retention endpoint 1, native runner protocol 9, host wire 12 and JSONL 1 are
-independent versions. Retention support does not remove `host upgrade`'s
-settled-job restriction across changed triples.
+independent versions. Retention cannot transfer jobs across a state-key cut.
 
 The Linux unit leaves WorkingDirectory unset, using systemd's user-service
 default of `$HOME`; the LaunchAgent sets it to HOME explicitly. Neither chooses

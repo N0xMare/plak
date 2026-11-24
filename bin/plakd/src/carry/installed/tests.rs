@@ -50,7 +50,7 @@ fn a_snapshot_that_hangs_is_killed_and_reads_as_unknown() {
 }
 
 #[test]
-fn reload_probe_checks_config_and_carry_versions_before_handoff() {
+fn reload_probe_checks_config_and_requires_offline_migration_for_changed_keys() {
     use std::os::unix::fs::PermissionsExt as _;
     let root = tempfile::tempdir().unwrap();
     let executable = root.path().join("plakd");
@@ -72,20 +72,16 @@ fn reload_probe_checks_config_and_carry_versions_before_handoff() {
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
     let mut target = probe_reload_target(executable, root.path());
     assert_eq!(target.state_key.as_deref(), Some(key.as_str()));
-    for running in [&key, "different-key"] {
-        let refusal = target.refusal(running).unwrap();
-        assert!(refusal.contains("plakd config edit"));
-        assert!(refusal.contains("retry the host upgrade"));
-    }
+    let refusal = target.refusal(&key).unwrap();
+    assert!(refusal.contains("plakd config edit"));
+    assert!(refusal.contains("retry the host upgrade"));
     target.probe.as_mut().unwrap().config_error = None;
     assert!(target.refusal(&key).is_none());
     target.probe.as_mut().unwrap().export_versions = vec![VERSION + 1];
     assert!(target.refusal(&key).is_none());
-    assert!(
-        target
-            .refusal("different-key")
-            .unwrap()
-            .contains("cannot import")
+    assert_eq!(
+        target.refusal("different-key").as_deref(),
+        Some(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED)
     );
 }
 
@@ -123,13 +119,13 @@ fn a_failed_carry_probe_names_this_builds_export_version_or_the_route_refusal() 
 /// into another session; a reload resuming this session hands it off.
 #[test]
 fn work_in_flight_refuses_only_a_carrying_reload() {
-    let target = |state_key: &str| ReloadTarget {
+    let target = |state_key: &str, binding_change: Option<ReopenProbe>| ReloadTarget {
         executable: PathBuf::from("new-installed-plakd"),
         capacity: None,
         capacity_error: None,
         state_key: Some(state_key.to_owned()),
         probe: None,
-        reopen: None,
+        reopen: binding_change.map(Box::new),
         request: None,
     };
     let running = "r27.e35.p36.t10";
@@ -138,16 +134,26 @@ fn work_in_flight_refuses_only_a_carrying_reload() {
         crate::carry::CARRY_REFUSED_CHILDREN,
     ] {
         assert_eq!(
-            reload_refusal(&target(running), running, Some(in_flight)),
+            reload_refusal(&target(running, None), running, Some(in_flight)),
             None
         );
         assert_eq!(
-            reload_refusal(&target("r99.e99.p99.t99"), running, Some(in_flight)).as_deref(),
+            reload_refusal(
+                &target(
+                    running,
+                    Some(ReopenProbe::BindingChanged {
+                        change: "model".into()
+                    })
+                ),
+                running,
+                Some(in_flight)
+            )
+            .as_deref(),
             Some(in_flight)
         );
     }
     assert_eq!(
-        reload_refusal(&target("r99.e99.p99.t99"), running, None),
-        None
+        reload_refusal(&target("r99.e99.p99.t99", None), running, None).as_deref(),
+        Some(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED)
     );
 }

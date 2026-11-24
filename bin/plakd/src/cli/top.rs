@@ -455,25 +455,36 @@ impl TopCommand {
                 action:
                     Some(HostAction::Upgrade {
                         expect_binary,
-                        wait,
-                        abandon,
                         drain,
                         inspect_runner,
                         inspect_source,
+                        wait,
+                        abandon,
                     }),
                 ..
-            } => Ok(Command::HostUpgrade {
-                expect_binary,
-                abandon,
-                wait: std::time::Duration::from_secs(wait),
-                drain,
-                inspection: inspect_source.map(|source_instance| {
-                    crate::deploy::DeployRunnerInspection {
-                        source_instance,
-                        deploy_inspect_runners: inspect_runner,
-                    }
-                }),
-            }),
+            } => {
+                if let Some(flag) = abandon
+                    .as_ref()
+                    .map(|_| "--abandon")
+                    .or(wait.as_ref().map(|_| "--wait"))
+                {
+                    return Err(format!(
+                        "flag removed: {flag}; {}",
+                        crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
+                    ));
+                }
+                Ok(Command::HostUpgrade {
+                    expect_binary: expect_binary
+                        .ok_or_else(|| "expected binary is required".to_owned())?,
+                    drain,
+                    inspection: inspect_source.map(|source_instance| {
+                        crate::deploy::DeployRunnerInspection {
+                            source_instance,
+                            deploy_inspect_runners: inspect_runner,
+                        }
+                    }),
+                })
+            }
             Self::Host {
                 action: None,
                 web,
@@ -506,9 +517,9 @@ impl TopCommand {
                 service: host_upgrade_service,
             }),
             Self::Version {
-                host_upgrade_capacity: Some(path),
+                host_upgrade_capacity: Some(_),
                 ..
-            } => Ok(Command::HostUpgradeCapacity { path }),
+            } => Err(crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED.to_owned()),
             Self::Version {
                 write_binary_manifest: Some(directory),
                 ..

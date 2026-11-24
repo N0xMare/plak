@@ -13,7 +13,7 @@ pub(crate) fn prepare(
     Ok((services, prepared.local))
 }
 
-pub(crate) fn custody(services: &Services) -> CliResult<Services> {
+fn custody(services: &Services) -> CliResult<Services> {
     if let Some(owner) = services.runner_ownership() {
         if owner.is_standalone() {
             return Err(crate::CliFailure::new(

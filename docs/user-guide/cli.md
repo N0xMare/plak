@@ -79,20 +79,13 @@ Linux installation reloads the user manager; macOS installation never invokes
 `launchctl`. Neither enables or starts the service. Follow the printed
 commands; see [service setup](host-service.md#install).
 
-`plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]`
-runs from the destination build. Same-key upgrades drain roots and children at
-joined runtime boundaries before handing off, with a 60-second natural-drain
-budget by default; `--drain` changes that budget. Cross-key upgrades carry
-settled roots into new successor sessions. The separate settling wait defaults
-to 0 and accepts at most 3600 seconds; explicit `--drain` and `--wait` cannot
-be combined. Before surrender, a refusal leaves the old owner
-authoritative. After a cross-key surrender, retry the same destination command
-to recover through its receipts. After a same-key store revision commits, start
-the destination if it is no longer running; the older build refuses that store.
-`plakd host upgrade --abandon <successor-uuid-or-runner-id>`
-irreversibly abandons pending remote successors only. Read
-[upgrade, reload and logs](host-service.md#upgrade-reload-and-logs) before
-changing a host or its paired runners.
+`plakd host upgrade --expect-binary <id> [--drain <duration|idle>]` runs
+from the destination build and only upgrades within the same state key. It
+drains roots and children at joined runtime boundaries, using a 60-second
+natural-drain budget by default. A changed key refuses before drain; use
+[offline migration](host-service.md#offline-migration-at-a-format-cut).
+After a same-key store revision commits, start the destination if it is no
+longer running; the older build refuses that store.
 
 ## Exit codes
 

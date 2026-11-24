@@ -43,7 +43,7 @@ pub(super) struct AttachRequest {
 
 pub(super) struct PendingAttach<P: ProtocolExtension> {
     request: AttachRequest,
-    result: oneshot::Receiver<CliResult<Target<P>>>,
+    result: oneshot::Receiver<Target<P>>,
     runtime: tokio::runtime::Handle,
     retry: bool,
 }
@@ -56,31 +56,24 @@ where
     HostFrame<P>: Serialize,
     ClientFrame<P>: DeserializeOwned,
 {
-    fn prepare_attach(&self, node: &NodeAddress, allow_open: bool) -> CliResult<Target<P>> {
-        if let Some(successor) = self
-            .sessions
-            .successor_node(node)
-            .map_err(CliFailure::new)?
-        {
-            return Ok(Target::Refused(RequestRefusal::Moved { node: successor }));
-        }
+    fn prepare_attach(&self, node: &NodeAddress, allow_open: bool) -> Target<P> {
         if self.closed() {
-            return Ok(Target::Refused(stopping()));
+            return Target::Refused(stopping());
         }
         let slot = match self.resolve(node) {
             Ok(slot) => slot,
-            Err(refusal) => return Ok(Target::Refused(refusal)),
+            Err(refusal) => return Target::Refused(refusal),
         };
         // Archiving releases the live slot before publishing the archive
         // flag. A held resident cannot have an archived transcript.
         if let Some(resident) = slot.try_hold_resident() {
-            return Ok(Target::Resident(Undelivered {
+            return Target::Resident(Undelivered {
                 held: Some(resident),
                 from_open: false,
-            }));
+            });
         }
         if !allow_open {
-            return Ok(Target::Refused(RequestRefusal::Backpressure));
+            return Target::Refused(RequestRefusal::Backpressure);
         }
         let id = match slot.peek() {
             super::SlotView::Resident(session) => session.session_id(),
@@ -93,7 +86,7 @@ where
             .then(|| slot.open_failure())
             .flatten();
         if let Some(target) = self.stored_target(node, &id, cached.as_ref()) {
-            return Ok(target);
+            return target;
         }
         match slot.resident_at_handoff() {
             Ok((resident, from_open)) => {
@@ -102,13 +95,13 @@ where
                     from_open,
                 };
                 if self.closed() {
-                    return Ok(Target::Refused(stopping()));
+                    return Target::Refused(stopping());
                 }
-                Ok(Target::Resident(opened))
+                Target::Resident(opened)
             }
-            Err(failure) => Ok(self
+            Err(failure) => self
                 .stored_target(node, &id, Some(&failure))
-                .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &failure)))),
+                .unwrap_or_else(|| Target::Refused(self.sessions.refusal(&id, &failure))),
         }
     }
 
@@ -200,11 +193,11 @@ where
             .ok()
             .filter(|_| self.buffered_output)
         else {
-            let target = self.host.prepare_attach(&node, allow_open)?;
+            let target = self.host.prepare_attach(&node, allow_open);
             if let Some(done) = self.finish_attach(target, text, true)? {
                 return Ok(done);
             }
-            let target = self.host.prepare_attach(&node, allow_open)?;
+            let target = self.host.prepare_attach(&node, allow_open);
             let Some(done) = self.finish_attach(target, text, false)? else {
                 unreachable!("the second preparation answers");
             };
@@ -262,7 +255,7 @@ where
             return Ok(());
         };
         let target = match attach.result.try_recv() {
-            Ok(result) => result?,
+            Ok(result) => result,
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Closed) => return Err(CliFailure::new("attach worker ended")),
         };

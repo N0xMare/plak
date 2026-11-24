@@ -29,8 +29,6 @@ const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CarryDocument {
-    #[serde(skip)]
-    pub(super) local_digest: Option<String>,
     pub(super) format: String,
     pub(super) version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,7 +401,6 @@ pub(crate) fn read_document(path: &Path) -> Result<CarryDocument, ImportError> {
         .iter_mut()
         .for_each(crate::store::normalize_exposed_name);
     document.validate()?;
-    document.local_digest = Some(plakous::model::sha256_hex(&[&bytes]));
     Ok(document)
 }
 
@@ -470,7 +467,6 @@ pub(crate) fn private_dir(dir: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 pub(super) fn sample_document() -> CarryDocument {
     CarryDocument {
-        local_digest: None,
         format: FORMAT.to_owned(),
         version: VERSION,
         kind: Some(DocumentKind::PortableSession),

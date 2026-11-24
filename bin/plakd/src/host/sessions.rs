@@ -334,18 +334,6 @@ pub(super) fn continuation_owed(services: &Services, id: &str) -> CliResult<bool
     if record.archived {
         return Ok(false);
     }
-    if crate::carry::upgrade::receipt::all(paths)?
-        .iter()
-        .any(|receipt| {
-            receipt.destination_key == crate::home::state::state_key()
-                && receipt
-                    .mappings
-                    .iter()
-                    .any(|mapping| mapping.successor == id && mapping.abandoned)
-        })
-    {
-        return Ok(false);
-    }
     let continue_losses = crate::product_config::ProductConfig::load(paths)
         .map_err(CliFailure::new)?
         .resume_after_loss
@@ -579,16 +567,6 @@ impl HostSessions<PlakExtension> for ProductSessions {
 
     fn session_of(&self, node: &NodeAddress) -> Result<Option<String>, String> {
         self.with_product(|store| store.head_of_tree(&node.tree_id))
-    }
-
-    fn successor_node(&self, node: &NodeAddress) -> Result<Option<NodeAddress>, String> {
-        crate::carry::upgrade::receipt::successor_node(
-            self.services
-                .paths()
-                .map_err(|error| error.message().to_owned())?,
-            node,
-        )
-        .map_err(|error| error.message().to_owned())
     }
 
     fn open(&self, session: &str) -> CliResult<OpenedSession<PlakExtension>> {

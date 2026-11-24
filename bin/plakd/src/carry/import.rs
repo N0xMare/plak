@@ -142,12 +142,9 @@ pub(crate) fn already_carried(
     let paths = services
         .paths()
         .map_err(|failure| failure.message().to_owned())?;
-    let record = crate::store::ProductStore::open(paths)
+    crate::store::ProductStore::open(paths)
         .map_err(|error| error.to_string())?
-        .carried_forward(workspace, runner_id, source_id, source_key)?;
-    let withheld = super::upgrade::receipt::withheld_targets(paths)
-        .map_err(|error| error.message().to_owned())?;
-    Ok(record.filter(|record| !withheld.contains(&record.id)))
+        .carried_forward(workspace, runner_id, source_id, source_key)
 }
 
 /// The link a carried-forward record shows in listings and external clients.

@@ -1,4 +1,4 @@
-//! Read-only destination admission for host-owned upgrades, separate from client reload.
+//! Read-only destination qualification and standalone admission for host handoff.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,10 @@ pub(crate) mod process;
 pub(crate) mod remote;
 
 pub(crate) const PROTOCOL: u32 = 3;
+pub(crate) const RECEIPT_VERSION: u32 = 1;
+
+pub(crate) const OFFLINE_MIGRATION_REASON: &str = "host_upgrade_offline_migration_required";
+pub(crate) const OFFLINE_MIGRATION_REQUIRED: &str = "host_upgrade_offline_migration_required: a state-key change requires offline migration; settle work and stop the source host, use the source build to export sessions and the destination build to import them, then start the destination host";
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -63,44 +67,18 @@ pub(crate) fn admission(
         file.try_lock_shared()
     };
     result.map_err(|_| CliFailure::new("host_upgrade_admission_busy: an embedded writer or another upgrade owns this home; settle it first"))?;
-    if !exclusive
-        && receipt::all(paths)?
-            .last()
-            .is_some_and(|receipt| receipt.phase == receipt::Phase::Committed)
-    {
-        return Err(CliFailure::new(
-            "host_upgrade_pending_ack: recover the destination before admitting standalone work or pruning source state",
-        ));
-    }
     Ok(file)
 }
-pub(crate) mod receipt;
-
 pub(crate) fn print_probe(
     services: &Services,
-    capacity: Option<&std::path::Path>,
     service: Option<&std::path::Path>,
     out: &mut dyn std::io::Write,
 ) -> CliResult<crate::ProcessOutcome> {
     if let Some(service) = service {
         probe_service(services, service)?;
     }
-    print_settled_probe(services, capacity, out)
-}
-
-fn print_settled_probe(
-    services: &Services,
-    capacity: Option<&std::path::Path>,
-    out: &mut dyn std::io::Write,
-) -> CliResult<crate::ProcessOutcome> {
-    match capacity {
-        Some(path) => serde_json::to_writer(
-            &mut *out,
-            &crate::commands::session::probe_upgrade_capacity(services, path)?,
-        ),
-        None => serde_json::to_writer(&mut *out, &destination_probe(services)?),
-    }
-    .map_err(|_| CliFailure::new("stdout failed"))?;
+    serde_json::to_writer(&mut *out, &destination_probe(services)?)
+        .map_err(|_| CliFailure::new("stdout failed"))?;
     writeln!(out).map_err(|_| CliFailure::new("stdout failed"))?;
     Ok(crate::ProcessOutcome::Success)
 }
@@ -136,9 +114,6 @@ fn probe_service(services: &Services, path: &std::path::Path) -> CliResult<()> {
     }
     Ok(())
 }
-
-#[cfg(feature = "web")]
-pub(crate) mod importing;
 
 pub(crate) fn binary_id_valid(value: &str) -> bool {
     value.len() == 12
@@ -188,19 +163,13 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
         .map_err(CliFailure::new)
         .and_then(|config| crate::admission::admit_config(&config));
     let policy = crate::product_config::SessionPolicy::load(paths).map_err(CliFailure::new);
-    let export_versions = super::IMPORTABLE_VERSIONS.to_vec();
-    let export_versions = if crate::test_hooks::upgrade_import_refused() {
-        Vec::new()
-    } else {
-        export_versions
-    };
     let runner_version = crate::commands::runner::version();
     Ok(DestinationProbe {
         protocol: PROTOCOL,
-        receipt_version: receipt::VERSION,
+        receipt_version: RECEIPT_VERSION,
         binary_id: crate::build_identity::binary_id().to_owned(),
         state_key: crate::home::state::state_key(),
-        export_versions,
+        export_versions: super::IMPORTABLE_VERSIONS.to_vec(),
         host_available: crate::host::AVAILABLE,
         runner_protocol: crate::commands::runner::version().protocol,
         runner_version,
@@ -214,19 +183,6 @@ pub(crate) fn destination_probe(services: &Services) -> CliResult<DestinationPro
     })
 }
 
-pub(crate) fn require_capacity(capacity: &super::CarryCapacityProbe) -> CliResult<()> {
-    match capacity.admitted_input {
-        None => Err(CliFailure::new(
-            "host_upgrade_capacity_unknown: destination input capacity is unknown; source remains authoritative",
-        )),
-        Some(input) if capacity.estimated_tokens > input => Err(CliFailure::new(format!(
-            "host_upgrade_capacity_exceeded: estimated history {} exceeds destination input capacity {input}; source remains authoritative",
-            capacity.estimated_tokens,
-        ))),
-        Some(_) => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,21 +194,5 @@ mod tests {
         let mut encoded = serde_json::to_vec(&probe).unwrap();
         encoded.push(b'\n');
         assert_eq!(encoded, bytes);
-    }
-
-    #[test]
-    fn host_upgrade_refuses_unknown_or_smaller_capacity_instead_of_carrying_a_warning() {
-        let mut capacity = crate::carry::CarryCapacityProbe {
-            route: "fixture".to_owned(),
-            total_window: Some(8192),
-            admitted_input: None,
-            estimated_tokens: 1024,
-            messages: 2,
-        };
-        assert!(require_capacity(&capacity).is_err());
-        capacity.admitted_input = Some(1023);
-        assert!(require_capacity(&capacity).is_err());
-        capacity.admitted_input = Some(1024);
-        assert!(require_capacity(&capacity).is_ok());
     }
 }

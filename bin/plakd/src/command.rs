@@ -93,7 +93,6 @@ impl Command {
             Self::HostUpgradeProbe { service } => Self::HostUpgradeProbe {
                 service: service.map(at),
             },
-            Self::HostUpgradeCapacity { path } => Self::HostUpgradeCapacity { path: at(path) },
             Self::Host(mut host) => {
                 if let Some(web) = &mut host.web {
                     web.ui = web.ui.take().map(at);
@@ -312,9 +311,6 @@ pub(crate) enum Command {
     HostUpgradeProbe {
         service: Option<PathBuf>,
     },
-    HostUpgradeCapacity {
-        path: PathBuf,
-    },
     /// Hidden `plakd version --reopen-probe <id>`.
     ReopenProbe {
         session: String,
@@ -437,9 +433,7 @@ pub(crate) enum Command {
     Host(HostCommand),
     HostInstall(HostInstall),
     HostUpgrade {
-        expect_binary: Option<String>,
-        abandon: Option<String>,
-        wait: std::time::Duration,
+        expect_binary: String,
         drain: Option<HostDrain>,
         inspection: Option<crate::deploy::DeployRunnerInspection>,
     },
@@ -555,7 +549,6 @@ impl Command {
             | Self::BuildInfo
             | Self::ReloadProbe
             | Self::HostUpgradeProbe { .. }
-            | Self::HostUpgradeCapacity { .. }
             | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ReopenProbe { .. }

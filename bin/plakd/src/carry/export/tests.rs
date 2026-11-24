@@ -63,7 +63,7 @@ fn settled_export_matches_the_writable_projector_path() {
     export_after_projection(&paths, &record).unwrap();
     let record = records.load(&record.id).unwrap();
     assert!(current_projection(&paths, &record).unwrap().is_some());
-    let mut read_only = export_session(&paths, &record).unwrap();
+    let read_only = export_session(&paths, &record).unwrap();
     // Lifecycle metadata is home-local: neither overrides nor archival may
     // alter a v12 document, even a single serialized byte.
     let original_bytes = serde_json::to_vec(&read_only).unwrap();
@@ -85,9 +85,7 @@ fn settled_export_matches_the_writable_projector_path() {
         .record;
     assert_eq!(imported.title_override, None);
     assert!(!imported.archived);
-    let mut writable = export_after_projection(&paths, &record).unwrap();
-    read_only.local_digest = None;
-    writable.local_digest = None;
+    let writable = export_after_projection(&paths, &record).unwrap();
     assert_eq!(
         serde_json::to_value(read_only).unwrap(),
         serde_json::to_value(writable).unwrap()

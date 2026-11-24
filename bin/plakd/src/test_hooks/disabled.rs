@@ -77,12 +77,6 @@ pub(crate) const fn binding_executor_cut() -> bool {
 pub(crate) fn upgrade_state_key() -> Option<String> {
     None
 }
-pub(crate) fn upgrade_input_limit() -> Option<String> {
-    None
-}
-pub(crate) const fn upgrade_import_refused() -> bool {
-    false
-}
 
 pub(crate) const fn upgrade_runner_revision() -> Option<String> {
     None

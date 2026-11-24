@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) enum Check {
     BeforeDrain,
     Held,
-    CrossKey,
 }
 
 pub(super) fn before_drain(
@@ -21,22 +20,17 @@ pub(super) fn before_drain(
     runtime: &tokio::runtime::Handle,
     report: &progress::Report<'_>,
 ) -> CliResult<bool> {
-    let cross_key = request.source_key != request.destination_key;
-    if cross_key && !request.inspect_runners.is_empty() {
-        return Err(deploy_refusal(
-            "deploy runner inspection requires a same-key upgrade",
-        ));
-    }
     let needed =
         destination != &crate::commands::runner::version() || !request.inspect_runners.is_empty();
     progress::timed(report, progress::Phase::RunnerProcess, || {
         if needed {
-            let check = if cross_key {
-                Check::CrossKey
-            } else {
-                Check::BeforeDrain
-            };
-            inspect(services, &request.inspect_runners, check, runtime).map(drop)
+            inspect(
+                services,
+                &request.inspect_runners,
+                Check::BeforeDrain,
+                runtime,
+            )
+            .map(drop)
         } else {
             Ok(())
         }
@@ -115,7 +109,7 @@ pub(super) fn inspect(
         let lines =
             match result {
                 Some(Ok(Ok(lines))) => lines,
-                _ if id != "local" && !referenced && check != Check::CrossKey => {
+                _ if id != "local" && !referenced => {
                     warnings.extend(aliases.into_iter().map(|runner| {
                         DeployRunnerWarning::UnreferencedRunnerUnavailable { runner }
                     }));
@@ -134,9 +128,6 @@ pub(super) fn inspect(
 }
 
 fn check_line(id: &str, line: &LineStatus, check: Check) -> CliResult<()> {
-    if check == Check::CrossKey && !line.adopted && line.owner.is_none() {
-        return Err(inspection_incomplete(id));
-    }
     if line.foreground && check != Check::BeforeDrain {
         return Err(blocked(&format!(
             "runner {id} line {} still has unpromoted foreground work; let it finish or promote it using the source build, then retry",
@@ -148,12 +139,6 @@ fn check_line(id: &str, line: &LineStatus, check: Check) -> CliResult<()> {
         .ok_or_else(|| inspection_incomplete(id))?;
     for job in jobs {
         match job["status"]["status"].as_str() {
-            Some("running") if check == Check::CrossKey => {
-                return Err(blocked(&format!(
-                    "runner {id} line {} has a running job; cross-key carry requires settled roots; settle and drain using the source build",
-                    line.line
-                )));
-            }
             Some("running" | "exited" | "stopped" | "released" | "outcome_unknown") => {}
             _ => return Err(inspection_incomplete(id)),
         }
@@ -230,7 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn carry_accepts_joined_jobs_but_not_held_foreground_or_cross_key_jobs() {
+    fn carry_accepts_joined_jobs_but_not_held_foreground() {
         let mut line = LineStatus {
             host_id: "host".into(),
             line: "line".into(),
@@ -243,7 +228,6 @@ mod tests {
         assert!(check_line("local", &line, Check::Held).is_err());
         line.foreground = false;
         assert!(check_line("local", &line, Check::Held).is_ok());
-        assert!(check_line("local", &line, Check::CrossKey).is_err());
         line.jobs = serde_json::json!({"jobs":[{"status":{"status":"outcome_unknown"}}]});
         assert!(check_line("local", &line, Check::Held).is_ok());
     }

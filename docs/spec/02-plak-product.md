@@ -1414,8 +1414,10 @@ Installed-build inspection remains a host product service. The reload probe
 reports the destination state key, accepted export versions and configuration
 verdict for the session workspace. Exact-reopen and carry-capacity probes
 perform bounded inspection without creating a session or dispatching inference.
-A timed-out probe does not trigger another probe. Host upgrade authority
-and preflight are specified in section 4.6, not delegated to a client.
+A known different key points to offline migration without probing the
+session's history. A timed-out probe does not trigger another probe. Host
+upgrade authority and preflight are specified in section 4.6, not delegated
+to a client.
 
 Import discovers the nearest project root from the document's workspace and
 validates its effective configuration before creating any successor; the

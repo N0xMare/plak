@@ -78,7 +78,7 @@ fn host_step_drain_accepts_bounded_and_idle_without_settlement_or_abandon_flags(
 }
 
 #[test]
-fn host_upgrade_runner_inspection_requires_both_flags_and_conflicts_with_abandon() {
+fn host_upgrade_runner_inspection_requires_both_flags() {
     let source = "100-0000000000000001";
     let ordinary = ["host", "upgrade", "--expect-binary", "0123456789ab"];
     assert!(matches!(
@@ -104,15 +104,44 @@ fn host_upgrade_runner_inspection_requires_both_flags_and_conflicts_with_abandon
     for incomplete in [["--inspect-runner", "desk"], ["--inspect-source", source]] {
         assert!(parse(args(&[ordinary.as_slice(), &incomplete].concat())).is_err());
     }
-    let abandon = ["host", "upgrade", "--abandon", "desk"];
-    assert!(matches!(
-        parse(args(&abandon)),
-        Ok(Command::HostUpgrade {
-            inspection: None,
-            ..
-        })
-    ));
-    assert!(parse(args(&[abandon.as_slice(), &paired].concat())).is_err());
+}
+
+#[test]
+fn legacy_host_upgrade_flags_name_the_offline_procedure() {
+    for (flag, command) in [
+        ("--abandon", &["host", "upgrade", "--abandon", "desk"][..]),
+        ("--wait", &["host", "upgrade", "--wait", "0"][..]),
+        (
+            "--wait",
+            &[
+                "host",
+                "upgrade",
+                "--expect-binary",
+                "0123456789ab",
+                "--drain",
+                "0",
+                "--wait",
+                "60",
+            ][..],
+        ),
+    ] {
+        assert_eq!(
+            parse(args(command)).unwrap_err(),
+            format!(
+                "flag removed: {flag}; {}",
+                crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
+            )
+        );
+    }
+    assert_eq!(
+        parse(args(&[
+            "version",
+            "--host-upgrade-capacity",
+            "missing.json"
+        ]))
+        .unwrap_err(),
+        crate::carry::upgrade::OFFLINE_MIGRATION_REQUIRED
+    );
 }
 
 #[test]

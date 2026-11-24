@@ -9,7 +9,6 @@ mod forward;
 mod keepalive;
 
 pub(crate) fn archive_offline(services: &Services, id: &str) -> Result<(), LifecycleError> {
-    crate::carry::upgrade::receipt::ensure_metadata_available(services.paths()?, id)?;
     fences::archive(services, id, false)
 }
 
@@ -289,7 +288,6 @@ pub(crate) fn rename_session(
 ) -> Result<Option<String>, LifecycleError> {
     validate_title(title)?;
     let paths = services.paths()?;
-    crate::carry::upgrade::receipt::ensure_metadata_available(paths, id)?;
     let mut store = crate::store::ProductStore::open(paths)
         .map_err(|error| CliFailure::new(error.to_string()))?;
     store.set_title_override(id, title)
@@ -303,7 +301,6 @@ pub(crate) fn set_archived(
     id: &str,
     archived: bool,
 ) -> Result<(), LifecycleError> {
-    crate::carry::upgrade::receipt::ensure_metadata_available(services.paths()?, id)?;
     if archived {
         return fences::archive(services, id, true);
     }

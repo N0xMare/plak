@@ -1,8 +1,7 @@
 //! Pre-pause capability and same-key qualification, and the held-head recheck.
 
 use super::{
-    PROBE_BOUND, Refusal, Request, bindings, check_cancel, io_failure, process, progress, receipt,
-    reopen,
+    PROBE_BOUND, Refusal, Request, bindings, check_cancel, io_failure, process, progress, reopen,
 };
 use crate::{
     CliFailure, CliResult, carry::upgrade::DestinationProbe, home::paths::PlakPaths,
@@ -14,21 +13,12 @@ pub(super) fn qualify_destination(
     request: &Request,
     arguments: &[String],
     report: &progress::Report<'_>,
-) -> Result<
-    (
-        DestinationProbe,
-        process::VerifiedImage,
-        Option<reopen::Preflight>,
-    ),
-    Refusal,
-> {
+) -> Result<(DestinationProbe, process::VerifiedImage, reopen::Preflight), Refusal> {
     let paths = services.paths()?;
     let identity = plakous_recursive_subagents::tree::custody_host();
     if request.source_instance != identity.instance.to_string()
         || request.source_key != crate::home::state::state_key()
         || !request.destination.is_absolute()
-        || !crate::carry::upgrade::state_key_valid(&request.destination_key)
-        || request.wait_seconds > 3600
         || !request.drain.valid()
     {
         return Err(CliFailure::new(
@@ -43,35 +33,29 @@ pub(super) fn qualify_destination(
         )?;
         process::verify_image(&request.destination, &request.expected_binary)
     })?;
-    let scratch = Workspace::new(paths, request)?;
+    let scratch = Workspace::new(paths)?;
     let (probe, before_rehearsal) = progress::timed(report, progress::Phase::Capability, || {
         // Rehearsal copies product and tree stores during the capability call.
         // A reusable verdict for those copies must not be stamped by newer live rows.
-        let before_rehearsal = (request.source_key == request.destination_key)
-            .then(|| reopen::snapshot(paths))
-            .transpose()?;
+        let before_rehearsal = reopen::snapshot(paths)?;
         let probe = service_probe(paths, request, arguments, &scratch)?;
         Ok((probe, before_rehearsal))
     })?;
-    if request.source_key == request.destination_key && !probe.accepts_reexec {
+    if !probe.accepts_reexec {
         return Err(Refusal::missing_descriptor_handoff());
     }
-    let reopen = before_rehearsal
-        .map(|roots| {
-            let stores = scratch.stores();
-            let stores = stores.is_dir().then_some(stores.as_path());
-            bindings::preflight(
-                paths,
-                &request.destination,
-                &request.destination_key,
-                stores,
-                report,
-            )?;
-            progress::timed(report, progress::Phase::ExactReopen, || {
-                reopen::preflight(paths, request, stores, roots)
-            })
-        })
-        .transpose()?;
+    let stores = scratch.stores();
+    let stores = stores.is_dir().then_some(stores.as_path());
+    bindings::preflight(
+        paths,
+        &request.destination,
+        &request.destination_key,
+        stores,
+        report,
+    )?;
+    let reopen = progress::timed(report, progress::Phase::ExactReopen, || {
+        reopen::preflight(paths, request, stores, before_rehearsal)
+    })?;
     Ok((probe, image, reopen))
 }
 
@@ -93,7 +77,7 @@ pub(super) fn recheck_held(
         .then(|| {
             // The old copy does not contain product/tree commits made while
             // admissions were open. Rehearse on a new copy of the held state.
-            let scratch = Workspace::new(paths, request)?;
+            let scratch = Workspace::new(paths)?;
             service_probe(paths, request, arguments, &scratch)?;
             if !scratch.stores().is_dir() {
                 return Err(CliFailure::new(
@@ -109,15 +93,13 @@ pub(super) fn recheck_held(
 
 struct Workspace {
     directory: tempfile::TempDir,
-    _rehearsal: Option<std::fs::File>,
+    _rehearsal: std::fs::File,
 }
 
 impl Workspace {
-    fn new(paths: &PlakPaths, request: &Request) -> CliResult<Self> {
+    fn new(paths: &PlakPaths) -> CliResult<Self> {
         let directory = tempfile::tempdir_in(paths.home()).map_err(io_failure)?;
-        let rehearsal = (request.source_key == request.destination_key)
-            .then(|| super::super::store_revisions::request_rehearsal(directory.path()))
-            .transpose()?;
+        let rehearsal = super::super::store_revisions::request_rehearsal(directory.path())?;
         Ok(Self {
             directory,
             _rehearsal: rehearsal,
@@ -157,34 +139,28 @@ fn service_probe(
     probe_command
         .args(["version", "--host-upgrade-probe", "--host-upgrade-service"])
         .arg(service_file);
-    if request.source_key == request.destination_key {
-        probe_command.env(crate::environment::REEXEC_PROBE, "1");
-    }
+    probe_command.env(crate::environment::REEXEC_PROBE, "1");
     let probe: DestinationProbe = serde_json::from_slice(
         &process::run(probe_command, PROBE_BOUND)?.stdout,
     )
     .map_err(|_| CliFailure::new("host upgrade destination did not answer its capability probe"))?;
     if probe.protocol != crate::carry::upgrade::PROTOCOL
         || probe.runner_protocol != probe.runner_version.protocol
-        || probe.receipt_version != receipt::VERSION
+        || probe.receipt_version != crate::carry::upgrade::RECEIPT_VERSION
         || !probe.host_available
         || probe.binary_id != request.expected_binary
         || probe.state_key != request.destination_key
         || probe.config_error.is_some()
-        || probe.state_key != request.source_key
-            && !probe.export_versions.contains(&crate::carry::VERSION)
     {
         return Err(CliFailure::new(format!(
             "host_upgrade_destination_unsupported: {}",
             probe
                 .config_error
                 .as_deref()
-                .unwrap_or("identity, import version or host capability does not match")
+                .unwrap_or("identity or host capability does not match")
         )));
     }
-    if request.source_key == request.destination_key
-        && probe.runner_protocol != crate::commands::runner::version().protocol
-    {
+    if probe.runner_protocol != crate::commands::runner::version().protocol {
         return Err(CliFailure::new(
             "host_upgrade_runner_protocol: settle and drain the old build's daemon before changing runner protocols",
         ));
@@ -193,14 +169,10 @@ fn service_probe(
 }
 
 fn probe_placements(paths: &PlakPaths) -> CliResult<Vec<crate::carry::upgrade::PlacementProbe>> {
-    let withheld = receipt::withheld_targets(paths)?;
     let mut seen = std::collections::BTreeSet::new();
     let records =
         crate::store::ProductStore::inspect_upgrade_roots(paths).map_err(CliFailure::new)?;
-    for record in records
-        .iter()
-        .filter(|record| !record.archived && !withheld.contains(&record.id))
-    {
+    for record in records.iter().filter(|record| !record.archived) {
         if let Some(runner) = &record.runner {
             seen.insert((runner.runner_id.clone(), record.workspace_root.clone()));
         }
