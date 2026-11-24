@@ -263,6 +263,87 @@ fn host_lifecycle_same_key_restart_precedes_eof_and_changes_generation() {
 }
 
 #[test]
+fn an_idle_stdio_mcp_child_is_reaped_before_same_key_exec() {
+    use rustix::process::{Pid, test_kill_process};
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let Some(fixture) = fixture() else { return };
+    let _cleanup = HomeHost(fixture.home());
+    let spawns = fixture.root.join("mcp-pids");
+    let script = fixture.root.join("start-mcp");
+    let server = std::env::var_os("PLAK_MCP_SERVER").expect("offline MCP server");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s\\n' \"$$\" >> \"$1\"\nexec \"$2\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let config = fixture.home().join("config.toml");
+    let body = std::fs::read_to_string(&config).unwrap();
+    write_private(
+        &config,
+        &format!(
+            "{body}\n[mcp_servers.fake]\ntransport = \"stdio\"\ncommand = {script:?}\nargs = [{spawns:?}, {server:?}]\n"
+        ),
+    );
+    let lead = fixture.home().join("agents/lead.toml");
+    let body = std::fs::read_to_string(&lead).unwrap();
+    write_private(&lead, &format!("{body}\ntools = [\"mcp:fake\"]\n"));
+
+    let mut host = start(&fixture);
+    runner::wait_local_runner_ready(&host);
+    let (reader, generation) = observe(&host);
+    let mut source = Client::connect(&host);
+    let Outcome::Ok(Answer::Created { node, .. }) =
+        source.request(1, new_session(&fixture.workspace()))
+    else {
+        panic!("MCP session creation refused");
+    };
+    source.attach(2, &node);
+    drop(source);
+    let pids = std::fs::read_to_string(&spawns).unwrap();
+    let pid = Pid::from_raw(pids.trim().parse().unwrap()).unwrap();
+    assert_eq!(test_kill_process(pid), Ok(()));
+
+    let result = fixture
+        .command()
+        .args([
+            "host",
+            "upgrade",
+            "--expect-binary",
+            &binary(&fixture),
+            "--drain",
+            "0",
+        ])
+        .env("PLAK_TEST_FORCE_HOST_UPGRADE", "1")
+        .output()
+        .unwrap();
+    require_upgrade(&fixture, &host, "stdio MCP child reap", &result);
+    notices_to_eof(reader, generation);
+    let (_, next_generation) = observe(&host);
+    assert_ne!(next_generation, generation);
+    assert_eq!(
+        test_kill_process(pid),
+        Err(rustix::io::Errno::SRCH),
+        "source MCP child remained live or unreaped after exec"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&spawns).unwrap(),
+        pids,
+        "qualification or startup restarted an idle server"
+    );
+
+    runner::wait_local_runner_ready(&host);
+    Client::connect(&host).attach(2, &node);
+    assert_eq!(
+        std::fs::read_to_string(&spawns).unwrap().lines().count(),
+        2,
+        "the successor must lease a fresh server when the root opens"
+    );
+    stop(&mut host);
+}
+
+#[test]
 fn host_lifecycle_same_key_paired_upgrade_names_the_new_binary_before_eof() {
     let Some(fixture) = fixture() else { return };
     let _cleanup = HomeHost(fixture.home());

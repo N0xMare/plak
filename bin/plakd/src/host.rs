@@ -12,6 +12,7 @@
 //! session off and ends the process within [`HANDOFF_DEADLINE`].
 
 mod bridge;
+mod child_shutdown;
 pub(crate) mod connection;
 mod console;
 mod gateway_startup;
@@ -684,7 +685,7 @@ fn announce_host(
 
 fn shutdown_runtime(runtime: tokio::runtime::Runtime) {
     runtime.shutdown_timeout(Duration::from_secs(1));
-    crate::commands::runner::dial::children::shutdown::close();
+    child_shutdown::close();
 }
 
 fn stop_listeners(

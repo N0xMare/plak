@@ -192,6 +192,7 @@ pub mod agent {
         LocalCompositionAttachment, LocalCompositionAttachmentBuilder, LocalCompositionContainment,
         LocalCompositionEngineArtifact, LocalCompositionLanguage, LocalCompositionProfile,
         ProductExtensionEvidence, ProductExtensionLimits, attach_local_composition,
+        host_child_shutdown,
     };
     /// Unsupported runner selection for official hosting (spec 01 §8.5).
     #[doc(hidden)]

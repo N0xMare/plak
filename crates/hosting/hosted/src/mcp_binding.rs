@@ -190,9 +190,10 @@ impl ServerSite {
 /// The process's MCP pool and the executor its servers run on. Sessions bind
 /// and call from executors that may end before a server should; the pool's
 /// own outlives them all.
+static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), crate::CliFailure>> =
+    OnceLock::new();
+
 fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), crate::CliFailure> {
-    static POOL: OnceLock<Result<(McpPool, tokio::runtime::Runtime), crate::CliFailure>> =
-        OnceLock::new();
     let pool = POOL.get_or_init(|| {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -205,6 +206,18 @@ fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), crate:
     pool.as_ref()
         .map(|(pool, runtime)| (pool, runtime))
         .map_err(Clone::clone)
+}
+
+/// Close the host's MCP pool without creating it on an unused host. Returns
+/// false if graceful close did not finish within the budget.
+#[doc(hidden)]
+#[must_use]
+pub fn shutdown_mcp_pool(bound: Duration) -> bool {
+    POOL.get()
+        .and_then(|pool| pool.as_ref().ok())
+        .is_none_or(|(pool, runtime)| {
+            runtime.block_on(async { tokio::time::timeout(bound, pool.shutdown()).await.is_ok() })
+        })
 }
 
 /// Starts or leases every server `selection` names in `workspace_root` and

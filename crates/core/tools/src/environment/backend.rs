@@ -56,6 +56,8 @@ pub use job_output_types::{
 #[cfg(unix)]
 mod host;
 #[cfg(unix)]
+pub(crate) mod owned_child;
+#[cfg(unix)]
 pub use host::HostExecutionBackend;
 #[cfg(unix)]
 pub(super) use host::host_execution_backend;

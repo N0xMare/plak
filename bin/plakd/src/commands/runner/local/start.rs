@@ -1,16 +1,20 @@
 //! One launch policy per dial; an ambiguous manager result never falls back.
 
+use std::io::{self, Read as _};
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use super::super::dial::children::{launcher_output, launcher_status};
 use super::{LocalRunnerHome, PlakPaths};
 
 pub(super) struct Starter {
     managed: Option<bool>,
     requested: bool,
-    child: Arc<AtomicBool>,
+    detached: Option<UnixStream>,
 }
 
 impl Starter {
@@ -18,7 +22,7 @@ impl Starter {
         Self {
             managed: None,
             requested: false,
-            child: Arc::default(),
+            detached: None,
         }
     }
 
@@ -26,9 +30,9 @@ impl Starter {
         &mut self,
         paths: &PlakPaths,
         home: &LocalRunnerHome,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         if self.requested
-            || self.child.load(Ordering::Acquire)
+            || detached_pending(&mut self.detached)
             || !lock_free(paths.home(), &home.socket_path())?
         {
             return Ok(());
@@ -47,19 +51,20 @@ impl Starter {
             managed_start(paths).await;
             return Ok(());
         }
-        detached_start(paths, home, &self.child)
+        self.detached = Some(detached_start(paths, home).await?);
+        Ok(())
     }
 }
 
-fn lock_free(home: &Path, socket: &Path) -> std::io::Result<bool> {
+fn lock_free(home: &Path, socket: &Path) -> io::Result<bool> {
     use std::os::unix::fs::OpenOptionsExt as _;
     super::super::home::private_below(
         home,
         socket
             .parent()
-            .ok_or_else(|| std::io::Error::other("runner socket has no directory"))?,
+            .ok_or_else(|| io::Error::other("runner socket has no directory"))?,
     )
-    .map_err(|error| std::io::Error::other(error.to_string()))?;
+    .map_err(|error| io::Error::other(error.to_string()))?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -74,12 +79,15 @@ fn lock_free(home: &Path, socket: &Path) -> std::io::Result<bool> {
 }
 
 async fn manager_reachable() -> bool {
-    let mut probe = tokio::process::Command::new("systemctl");
+    let mut probe = Command::new("systemctl");
     probe
         .args(["--user", "is-system-running"])
-        .kill_on_drop(true);
-    if let Ok(Ok(output)) = tokio::time::timeout(Duration::from_secs(1), probe.output()).await {
-        String::from_utf8_lossy(&output.stdout).trim() != "offline"
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    if let Ok(Ok(output)) =
+        tokio::time::timeout(Duration::from_secs(1), launcher_output(&mut probe)).await
+    {
+        String::from_utf8_lossy(&output).trim() != "offline"
     } else {
         // An ambiguous probe cannot authorize a start inside the host unit.
         true
@@ -98,7 +106,7 @@ async fn managed_start(paths: &PlakPaths) {
     let Ok(executable) = std::env::current_exe() else {
         return;
     };
-    let mut manager = tokio::process::Command::new("systemd-run");
+    let mut manager = Command::new("systemd-run");
     manager
         .args([
             "--user",
@@ -121,18 +129,13 @@ async fn managed_start(paths: &PlakPaths) {
         .arg("--")
         .arg(executable)
         .args(["runner", "serve", "--local"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let _ = tokio::time::timeout(Duration::from_secs(1), manager.status()).await;
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = tokio::time::timeout(Duration::from_secs(1), launcher_status(&mut manager)).await;
 }
 
-fn detached_start(
-    paths: &PlakPaths,
-    home: &LocalRunnerHome,
-    pending: &Arc<AtomicBool>,
-) -> std::io::Result<()> {
+async fn detached_start(paths: &PlakPaths, home: &LocalRunnerHome) -> io::Result<UnixStream> {
     use std::os::unix::fs::OpenOptionsExt as _;
     let executable = std::env::current_exe()?;
     let log = std::fs::OpenOptions::new()
@@ -140,32 +143,63 @@ fn detached_start(
         .append(true)
         .mode(0o600)
         .open(home.root().join("serve.log"))?;
-    let mut command = std::process::Command::new(&executable);
+    let mut command = detached_launcher(&executable);
     command
         .args(["runner", "serve", "--local"])
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("PLAK_HOME", paths.home())
         .envs(crate::test_hooks::upgrade_runner_environment())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdin(Stdio::null())
         .stderr(log);
     if let Some(home) = crate::environment::inherited_home() {
         command.env("HOME", home);
     }
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let child = command.spawn()?;
-    reap(child, pending);
-    Ok(())
+    launch_detached(&mut command).await
 }
 
-fn reap(mut child: std::process::Child, pending: &Arc<AtomicBool>) {
-    pending.store(true, Ordering::Release);
-    let pending = Arc::clone(pending);
-    std::thread::spawn(move || {
-        let _ = child.wait();
-        pending.store(false, Ordering::Release);
-    });
+fn detached_launcher(executable: &Path) -> Command {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            "( \"$@\" </dev/null >/dev/null; exit \"$?\" ) &",
+            "runner-launch",
+        ])
+        .arg(executable);
+    command
+}
+
+async fn launch_detached(command: &mut Command) -> io::Result<UnixStream> {
+    // Join the launcher, not the daemon. The background shell waits on the
+    // daemon outside the host's parentage and holds a write end until exit;
+    // a dial never has to guess whether its previous attempt is still live.
+    let (read, write) = UnixStream::pair()?;
+    read.set_nonblocking(true)?;
+    command
+        .process_group(0)
+        .stdout(Stdio::from(OwnedFd::from(write)));
+    let status = launcher_status(command).await?;
+    if !status.success() {
+        return Err(io::Error::other("detached runner launcher failed"));
+    }
+    Ok(read)
+}
+
+fn detached_pending(stream: &mut Option<UnixStream>) -> bool {
+    let pending = stream
+        .as_mut()
+        .is_some_and(|stream| match stream.read(&mut [0]) {
+            Ok(count) => count != 0,
+            Err(error) => matches!(
+                error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+            ),
+        });
+    if !pending {
+        *stream = None;
+    }
+    pending
 }
 
 #[cfg(test)]

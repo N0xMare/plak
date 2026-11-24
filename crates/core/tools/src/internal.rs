@@ -13,6 +13,9 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+#[cfg(unix)]
+pub use crate::environment::backend::owned_child::shutdown as host_child_shutdown;
+
 /// Fixed operator Changes reads through the frozen execution backend.
 #[doc(hidden)]
 pub mod changes {

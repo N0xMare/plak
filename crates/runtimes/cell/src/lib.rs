@@ -12,6 +12,8 @@ mod protocol;
 mod session;
 mod startup;
 mod stored;
+#[doc(hidden)]
+pub use client::children::shutdown as host_worker_shutdown;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;
 #[cfg(not(feature = "test-hooks"))]

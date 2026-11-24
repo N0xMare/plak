@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 
 use tokio::io::AsyncReadExt as _;
 
+use super::super::owned_child::{OwnedChild, Spawned};
 use super::super::process::{
     GroupProbe, HostProcessContext, host_process_home, host_process_path, leader_exited,
-    reap_when_group_empty, resolve_host_process_program,
+    resolve_host_process_program,
 };
 use super::super::workspace::verified_workspace_root;
 use super::super::{
@@ -26,23 +27,17 @@ const SERVICE_PROCESS_JOIN_POLL: Duration = Duration::from_millis(5);
 
 pub(in crate::environment::backend) struct HostService {
     private_cwd: Option<PrivateCwd>,
-    /// Taken only by `Drop`, which hands an unjoined leader to the reaper.
-    child: Option<tokio::process::Child>,
-    process_group: rustix::process::Pid,
+    child: OwnedChild,
     stderr_reader: Option<tokio::task::JoinHandle<()>>,
     joined: bool,
 }
 
 impl HostService {
     pub(super) async fn terminate(mut self, grace: Duration) -> Result<(), ExecutionBackendError> {
-        let _ =
-            rustix::process::kill_process_group(self.process_group, rustix::process::Signal::TERM);
+        self.child.signal(rustix::process::Signal::TERM);
         let mut joined = self.join_until(Instant::now() + grace).await?;
         if !joined {
-            let _ = rustix::process::kill_process_group(
-                self.process_group,
-                rustix::process::Signal::KILL,
-            );
+            self.child.signal(rustix::process::Signal::KILL);
             joined = self
                 .join_until(Instant::now() + SERVICE_PROCESS_JOIN_BOUND)
                 .await?;
@@ -69,12 +64,13 @@ impl HostService {
     /// leader pins the PGID, so the TERM and KILL that precede and follow this
     /// wait, and `Drop`'s KILL, never reach a reused group.
     async fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
-        let mut group = GroupProbe::new(self.process_group);
+        let pid = self.child.group();
+        let mut group = GroupProbe::new(pid);
         loop {
-            if leader_exited(self.process_group)
+            if leader_exited(pid)
                 && group.members() == 0
-                && let Some(child) = self.child.as_mut()
-                && child
+                && self
+                    .child
                     .try_wait()
                     .map_err(|_| io_error("service process wait failed"))?
                     .is_some()
@@ -97,14 +93,7 @@ impl Drop for HostService {
             if let Some(directory) = self.private_cwd.take() {
                 std::mem::forget(directory);
             }
-            let _ = rustix::process::kill_process_group(
-                self.process_group,
-                rustix::process::Signal::KILL,
-            );
-            // Still unreaped, so the PGID stays pinned until the group empties.
-            if let Some(child) = self.child.take() {
-                reap_when_group_empty(self.process_group, Box::new(child));
-            }
+            // The child guard kills and retains the group until it is joined.
         }
         if let Some(reader) = self.stderr_reader.take() {
             reader.abort();
@@ -148,9 +137,7 @@ pub(in crate::environment::backend) fn spawn_host_service(
             .env_clear()
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
+            .stderr(std::process::Stdio::piped());
         for (name, value) in &environment {
             if name.as_str() != "PATH" {
                 command.env(name.as_str(), value.0.as_ref());
@@ -166,28 +153,21 @@ pub(in crate::environment::backend) fn spawn_host_service(
         if let Some(ceiling) = &process.discovery_ceiling {
             command.env("GIT_CEILING_DIRECTORIES", ceiling);
         }
-        let mut child = command.spawn().map_err(|_| {
+        let Spawned {
+            child,
+            stdin,
+            stdout,
+            stderr,
+        } = OwnedChild::spawn(&mut command).map_err(|_| {
             backend_error(
                 ExecutionBackendErrorKind::InvalidRequest,
                 "service process spawn failed",
             )
         })?;
-        let Some(process_group) = child
-            .id()
-            .and_then(|id| i32::try_from(id).ok())
-            .and_then(rustix::process::Pid::from_raw)
-        else {
-            let _ = child.start_kill();
-            return Err(io_error("service process has no process group"));
-        };
         let stderr_tail = Arc::new(ServiceStderrTail::new(request.request.stderr_tail_bytes));
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
         let mut host = HostService {
             private_cwd,
-            child: Some(child),
-            process_group,
+            child,
             stderr_reader: None,
             joined: false,
         };

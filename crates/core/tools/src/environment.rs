@@ -17,7 +17,7 @@ use plakous_model::{DigestDomain, RunId};
 
 use crate::WorkspacePolicy;
 
-mod backend;
+pub(crate) mod backend;
 pub(crate) use backend::changes;
 mod config;
 mod identity;

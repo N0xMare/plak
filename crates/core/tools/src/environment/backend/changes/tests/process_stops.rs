@@ -107,6 +107,58 @@ async fn dropping_a_request_kills_its_group() {
     terminated(root.path()).await;
 }
 
+#[test]
+fn a_cancelled_git_helper_is_reaped_without_its_tokio_runtime() {
+    use rustix::process::{Pid, test_kill_process};
+
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let pid = runtime.block_on(async {
+        let cancellation = CancellationToken::new();
+        let executor = Executor::new(
+            Instant::now() + Duration::from_secs(5),
+            cancellation.clone(),
+            "/usr/bin:/bin".as_ref(),
+        );
+        let (answer, pid) =
+            tokio::join!(executor.output(shell(root.path(), "wait"), 1024), async {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let pid = loop {
+                    if let Ok(text) = std::fs::read_to_string(root.path().join("leader"))
+                        && let Ok(pid) = text.trim().parse()
+                        && let Some(pid) = Pid::from_raw(pid)
+                        && root.path().join("member").is_file()
+                    {
+                        break pid;
+                    }
+                    assert!(Instant::now() < deadline, "Git helper never started");
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                };
+                cancellation.cancel();
+                pid
+            },);
+        assert_eq!(answer.err(), Some(ChangesRefusal::Cancelled));
+        pid
+    });
+    drop(runtime);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let _ = crate::internal::host_child_shutdown::poll_reap();
+        if test_kill_process(pid) == Err(rustix::io::Errno::SRCH) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "cancelled leader still live or a zombie"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 #[tokio::test]
 async fn a_stalled_filesystem_open_is_killed_at_the_request_deadline() {
     let root = checkout();

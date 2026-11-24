@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::Path, process::Stdio, sync::Arc, time::Dur
 
 use tokio::{
     io::AsyncWriteExt,
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{ChildStdin, ChildStdout, Command},
     sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch},
     task::JoinHandle,
 };
@@ -15,6 +15,9 @@ use crate::protocol::{
     CELL_PROTOCOL_REVISION, CellOutcome, CellPrelude, CellValue, DeliveryVerdict, EngineConfig,
     HostFrame, LossClass, OutputItem, WorkerFrame, WorkerIdentity,
 };
+use children::{Spawned, WorkerChild};
+
+pub(crate) mod children;
 
 /// Content-free child-process usage returned when a worker exits.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -197,7 +200,7 @@ impl From<DeliveryVerdict> for NestedDeliveryOutcome {
 
 /// One owned worker process with cancelable, bounded I/O tasks.
 pub struct CellClient {
-    child: Mutex<Child>,
+    child: WorkerChild,
     termination_loss: Mutex<Option<String>>,
     stopped_receipt: Mutex<Option<WorkerStop>>,
     pid: u32,
@@ -236,29 +239,25 @@ impl CellClient {
         // Check the task owner before creating a process; construction never
         // hands off a child without its I/O supervision.
         let runtime = tokio::runtime::Handle::try_current().map_err(|e| failure(e.to_string()))?;
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .kill_on_drop(true)
-            .spawn()
+            .env("PATH", "/usr/bin:/bin");
+        let Spawned {
+            child,
+            pid,
+            stdin,
+            stdout,
+        } = WorkerChild::spawn(&mut command)
             .map_err(|e| failure(format!("failed to spawn cell worker: {e}")))?;
-        let pid = child
-            .id()
-            .ok_or_else(|| failure("cell worker pid missing".into()))?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| failure("cell worker stdin missing".into()))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| failure("cell worker stdout missing".into()))?;
+        let mut stdin = stdin.ok_or_else(|| failure("cell worker stdin missing".into()))?;
+        let mut stdout = stdout.ok_or_else(|| failure("cell worker stdout missing".into()))?;
         if let Err(error) = handshake(&mut stdin, &mut stdout, expected, engine, hello_bound).await
         {
-            return Err(refuse(&mut child, error).await);
+            return Err(refuse(&child, error).await);
         }
         let (commands, mut command_rx) = mpsc::channel::<Vec<u8>>(COMMAND_QUEUE_ITEMS);
         let (event_tx, events) = mpsc::channel(QUEUE_ITEMS);
@@ -300,7 +299,7 @@ impl CellClient {
             Arc::clone(&loss_class),
         ));
         Ok(Self {
-            child: Mutex::new(child),
+            child,
             pid,
             commands,
             events: Mutex::new(events),
@@ -484,7 +483,7 @@ impl CellClient {
     pub async fn stop(&self) -> Result<WorkerStop, String> {
         self.result_acks.lock().await.clear();
         let before = crate::sample_children_rusage();
-        let mut child = self.child.lock().await;
+        let mut child = self.child.child.lock().await;
         let mut previous_loss = self.termination_loss.lock().await;
         if let Some(loss) = previous_loss.as_ref() {
             return Err(loss.clone());
@@ -495,17 +494,22 @@ impl CellClient {
         let _ = self.send(&HostFrame::Shutdown);
         let voluntary = tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await;
         let (forced, mut loss) = match voluntary {
-            Ok(Ok(_)) => (false, None),
+            Ok(Ok(_)) => {
+                self.child.joined();
+                (false, None)
+            }
             Ok(Err(error)) => (true, Some(format!("cell worker wait failed: {error}"))),
             Err(_) => (true, None),
         };
         self.stop.send_replace(true);
         if forced {
             let _ = child.start_kill();
-            if !matches!(
+            if matches!(
                 tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await,
                 Ok(Ok(_))
             ) {
+                self.child.joined();
+            } else {
                 loss = Some("cell worker remained unreaped after kill deadline".into());
             }
         }
@@ -537,7 +541,7 @@ impl CellClient {
     /// its sticky loss; a later [`Self::terminate`] reports it.
     pub async fn kill(&self, reason: &str) {
         self.result_acks.lock().await.clear();
-        let mut child = self.child.lock().await;
+        let mut child = self.child.child.lock().await;
         let mut previous_loss = self.termination_loss.lock().await;
         if previous_loss.is_some() {
             return;
@@ -547,6 +551,9 @@ impl CellClient {
             tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await,
             Ok(Ok(_))
         );
+        if reaped {
+            self.child.joined();
+        }
         self.stop.send_replace(true);
         for task in self.tasks.lock().await.drain(..) {
             task.abort();
@@ -578,7 +585,7 @@ impl Drop for CellClient {
                 task.abort();
             }
         }
-        // Child's kill_on_drop owns fallback reaping; no destructor writes to a pipe.
+        // The worker guard retains wait ownership; no destructor writes to a pipe.
     }
 }
 
@@ -622,10 +629,14 @@ async fn handshake(
 
 /// Kills a worker refused before it was configured, and reaps it within the
 /// settle bound.
-async fn refuse(child: &mut Child, error: CellStartupError) -> CellStartupError {
+async fn refuse(worker: &WorkerChild, error: CellStartupError) -> CellStartupError {
+    let mut child = worker.child.lock().await;
     let _ = child.start_kill();
     match tokio::time::timeout(WORKER_SHUTDOWN_SETTLE_TIMEOUT, child.wait()).await {
-        Ok(Ok(_)) => error,
+        Ok(Ok(_)) => {
+            worker.joined();
+            error
+        }
         _ => error.unreaped(),
     }
 }

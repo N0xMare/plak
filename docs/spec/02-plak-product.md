@@ -5819,11 +5819,16 @@ This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
 On every host stop, including inherited and legacy same-key handoff,
-cross-key replacement and plain shutdown, the host stops opening paired-runner
-SSH transports and tries to stop and reap the SSH children it owns within a
-bound. It logs failed or incomplete cleanup and continues shutdown or
-replacement. A successor opens fresh transports; runner daemons and their
-jobs do not stop with the source transports.
+cross-key replacement and plain shutdown, the host closes its MCP pool and
+stops spawning source-owned SSH transports, runner launcher helpers, evaluator
+sidecars and Changes helpers. It tries to stop and reap the children it owns,
+including idle local stdio MCP servers, within one shared cleanup bound.
+It logs incomplete cleanup and continues shutdown or replacement, without
+waiting on unrelated children. A successor opens fresh transports and leases
+MCP servers as it opens sessions, following chapter 01 §8.5 and the frozen
+session bindings; idle pool entries and MCP connections do not carry.
+The runner daemon itself is not a launcher helper: detached and managed
+daemons, and the jobs they own, do not stop with the source.
 
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
 It re-execs the source PID. When the destination advertises support for
@@ -6446,8 +6451,9 @@ keeps its separate readiness path.
   Each dial decides that launch policy once. Only a free socket lock permits
   a start; a managed dial requests the unit at most once, and unit-exists,
   timeout or other ambiguous manager answers never authorize a detached
-  fallback. Only a proven unreachable manager does. Detached children are
-  reaped by a waiter. A closed daemon link is redialed under the same bound,
+  fallback. Only a proven unreachable manager does. A detached daemon's
+  waiter is independent of the host and survives its replacement. A closed
+  daemon link is redialed under the same bound,
   reconnecting the existing client and repeating sweep, recovery, recorded stops
   and settled-foreground cleanup before readiness. Failures block that runner row,
   not the host. A prompt whose full reopen races this process's own lease-only

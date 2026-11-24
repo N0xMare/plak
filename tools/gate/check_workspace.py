@@ -567,9 +567,12 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plakd", "src/host/starter.rs"): [
         ("Command", (("identifier", "executable"),)),
     ],
-    # A separate process group survives host loss; the daemon clears its environment.
+    # The manager clients and fixed detached launcher are waited independently
+    # of Tokio. The launcher passes only this build and curates its environment.
     ("plakd", "src/commands/runner/local/start.rs"): [
-        ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
+        ("Command", (("string", "systemctl"),)),
+        ("Command", (("string", "systemd-run"),)),
+        ("Command", (("string", "/bin/sh"),)),
     ],
     # The runner transport registers its strict SSH children for explicit reaping.
     ("plakd", "src/commands/runner/dial.rs"): [
@@ -658,6 +661,7 @@ EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
     ("plakd", "src/carry/upgrade/process.rs"): {"Command", "Output", "Stdio"},
     ("plakd", "src/host/reexec.rs"): {"Command", "Stdio"},
     ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
+    ("plakd", "src/commands/runner/local/start.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
     ("plakd", "src/commands/runner/dial.rs"): {"Command", "ExitStatus", "Stdio"},
     ("plakd", "src/commands/runner/dial/children.rs"): {
@@ -696,6 +700,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/commands/runner/local.rs"): {"warn"},
     ("plakd", "src/commands/runner/dial/children.rs"): {"warn"},
     ("plakd", "src/host.rs"): {"select"},
+    ("plakd", "src/host/child_shutdown.rs"): {"warn"},
     ("plakd", "src/host/send.rs"): {"pin", "select"},
     ("plakd", "src/host/upgrade/startup.rs"): {"select"},
     ("plakd", "src/host/sessions/options.rs"): {"pin", "select"},
@@ -1778,6 +1783,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "runner": {"protocol", "LineStatus", "VersionTriple"}
     },
     ("plakd", "src/host/sessions.rs"): {"runner": {"RunnerRow"}},
+    ("plakd", "src/host/child_shutdown.rs"): {
+        "agent": {"host_child_shutdown::groups", "host_child_shutdown::workers"},
+    },
     ("plakous-hosted", "src/jobs.rs"): {"tools": {"LineOwner"}},
     ("plakd", "src/platform_product/anthropic.rs"): {
         "anthropic": {"ANTHROPIC_PLATFORM_ORIGIN"},

@@ -8,6 +8,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::time::Instant;
 
+use super::super::owned_child::{OwnedChild, Spawned};
 use super::ChangesRefusal;
 
 pub(super) struct Output {
@@ -143,21 +144,18 @@ impl Executor {
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
-        let mut child = command
-            .spawn()
-            .map_err(|_| ChangesRefusal::VcsUnavailable)?;
-        let mut group = Group(
-            child
-                .id()
-                .and_then(|pid| i32::try_from(pid).ok())
-                .and_then(rustix::process::Pid::from_raw),
-        );
-        let stdout = child.stdout.take().ok_or(ChangesRefusal::Io)?;
-        let stderr = child.stderr.take().ok_or(ChangesRefusal::Io)?;
-        let result = tokio::select! {
+            .stderr(Stdio::piped());
+        let Spawned {
+            mut child,
+            stdout,
+            stderr,
+            ..
+        } = OwnedChild::spawn(&mut command).map_err(|_| ChangesRefusal::VcsUnavailable)?;
+        let stdout = stdout.ok_or(ChangesRefusal::Io)?;
+        let stderr = stderr.ok_or(ChangesRefusal::Io)?;
+        // The child guard kills the group on all incomplete exits and
+        // keeps wait ownership without extending the request budget.
+        tokio::select! {
             biased;
             () = self.cancellation.cancelled() => Err(ChangesRefusal::Cancelled),
             () = tokio::time::sleep_until(self.deadline) => Err(ChangesRefusal::Deadline),
@@ -169,25 +167,8 @@ impl Executor {
                     Box::pin(drain(stderr, 8 * 1024)),
                 )?;
                 let status = child.wait().await.map_err(|_| ChangesRefusal::Io)?;
-                group.0 = None;
                 Ok(Output { success: status.success(), bytes })
             } => output,
-        };
-        // Group owns all exits, including a descendant holding a pipe open.
-        // Dropping the future also kills the group without awaiting a pipe.
-        drop(group);
-        // kill_on_drop reaps through Tokio; never wait past the request budget
-        // for a process stuck in an uninterruptible filesystem syscall.
-        result
-    }
-}
-
-struct Group(Option<rustix::process::Pid>);
-
-impl Drop for Group {
-    fn drop(&mut self) {
-        if let Some(group) = self.0 {
-            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
     }
 }
@@ -233,8 +214,6 @@ pub(super) fn command(program: &Path, cwd: &Path, path: &std::ffi::OsStr) -> Com
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0)
         .arg("--no-pager")
         .arg("--no-optional-locks");
     for setting in [

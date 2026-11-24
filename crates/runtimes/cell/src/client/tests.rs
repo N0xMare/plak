@@ -235,6 +235,7 @@ async fn unreaped_worker_never_certifies_joined_shutdown() {
     // establish a receipt. No successful join may be invented from ECHILD.
     client
         .child
+        .child
         .lock()
         .await
         .start_kill()
@@ -243,4 +244,41 @@ async fn unreaped_worker_never_certifies_joined_shutdown() {
     nix::sys::wait::waitpid(pid, None).expect("consume status");
     assert!(client.stop().await.is_err());
     assert!(client.terminate().await.is_err());
+}
+
+#[test]
+fn a_dropped_cell_worker_is_reaped_after_its_runtime_stops() {
+    use nix::{errno::Errno, sys::signal::kill, unistd::Pid};
+
+    let directory = tempfile::tempdir().expect("directory");
+    let opening = hello(
+        CELL_PROTOCOL_REVISION,
+        QUICKJS_WORKER.engine,
+        QUICKJS_WORKER.adapter,
+    );
+    let program = worker(directory.path(), &opening);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let client = runtime
+        .block_on(CellClient::spawn(
+            &program,
+            QUICKJS_WORKER,
+            EngineConfig::QUICKJS,
+        ))
+        .expect("worker");
+    let pid = Pid::from_raw(client.pid.cast_signed());
+    assert_eq!(kill(pid, None), Ok(()));
+    drop(runtime);
+    drop(client);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while kill(pid, None) != Err(Errno::ESRCH) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "dropped worker still live or a zombie"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
