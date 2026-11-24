@@ -810,11 +810,7 @@ async fn late_job_attachment_does_not_wake_a_tree_wait_with_a_consumed_terminal(
     preempt.send_replace(plakous::tools::ToolPreempt::Steer);
     let outcome = outcome_json(&wait.await.unwrap());
     assert_eq!(outcome["woke_by"], "steer");
-    assert!(
-        !outcome["processes"]
-            .as_array()
-            .is_some_and(|jobs| !jobs.is_empty())
-    );
+    assert_eq!(outcome["processes"].as_array().map_or(0, Vec::len), 0);
     let named = AwaitRequest {
         agents: AwaitAgents::Unwatched,
         processes: vec!["p1".to_owned()],

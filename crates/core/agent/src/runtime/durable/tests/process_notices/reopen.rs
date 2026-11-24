@@ -13,11 +13,9 @@ async fn a_refreshed_terminal_is_observed_once_after_reopen() -> TestResult {
     wait_after_reopen(true, false).await
 }
 
-async fn wait_after_reopen(on_runner: bool, recorded: bool) -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+fn wait_after_reopen_model() -> TestResult<Arc<ArtifactModel>> {
     let descriptor = durable_test_descriptor("test.route")?;
-    let model = Arc::new(
+    Ok(Arc::new(
         ArtifactModel::new(
             descriptor.clone(),
             artifact_authority(&descriptor, 1)?,
@@ -27,7 +25,13 @@ async fn wait_after_reopen(on_runner: bool, recorded: bool) -> TestResult {
         )
         .with_tool_first()
         .with_scripted_tool_calls([(2, "probe", "{}".to_owned())]),
-    );
+    ))
+}
+
+async fn wait_after_reopen(on_runner: bool, recorded: bool) -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let model = wait_after_reopen_model()?;
     let (registry, tool) = session_update_registry(SessionUpdateFixtureMode::Promoted)?;
     tool.await_first_job.store(true, Ordering::Release);
     let store = Arc::new(TestCreateStore::default());
@@ -83,24 +87,7 @@ async fn wait_after_reopen(on_runner: bool, recorded: bool) -> TestResult {
         return Err("the job prevented reopen".into());
     };
     let fresh = &agent.inner.job_sessions;
-    assert_eq!(
-        agent.jobs()[0].status,
-        if recorded {
-            JobStatus::Exited(Some(7))
-        } else {
-            JobStatus::Running
-        }
-    );
-    if recorded {
-        assert!(lock_mutex(&store.line_terminals).is_empty());
-        assert_eq!(
-            agent.checkpoint().manifest().jobs().rows()[0]
-                .terminal
-                .as_ref()
-                .and_then(|fact| fact.exit_code),
-            Some(7)
-        );
-    }
+    assert_open_terminal(&agent, &store, recorded);
     let turn = agent
         .start_instruction(
             CommandId::new("continue:wait")?,
@@ -123,14 +110,25 @@ async fn wait_after_reopen(on_runner: bool, recorded: bool) -> TestResult {
         result.outcome()
     );
     assert_eq!(tool.dispatches.load(Ordering::Acquire), 2);
-    assert_terminal_once(&agent, &result, on_runner, recorded)?;
-    assert!(fresh.terminal_jobs_since(0).is_empty());
-    assert!(matches!(
-        plakous_tools::internal::reported_process_session(fresh, row.number),
-        Some((_, plakous_tools::JoinedProcessStatus::Exited(Some(7))))
-    ));
+    assert_terminal_once(&agent, &result, on_runner, recorded, row.number)?;
     agent.shutdown().await?;
     Ok(())
+}
+
+fn assert_open_terminal(agent: &Agent, store: &TestCreateStore, recorded: bool) {
+    let expected = if recorded {
+        JobStatus::Exited(Some(7))
+    } else {
+        JobStatus::Running
+    };
+    assert_eq!(agent.jobs()[0].status, expected);
+    assert_eq!(*lock_mutex(&store.line_terminals), []);
+    let checkpoint = agent.checkpoint();
+    let exit_code = checkpoint.manifest().jobs().rows()[0]
+        .terminal
+        .as_ref()
+        .and_then(|terminal| terminal.exit_code);
+    assert_eq!(exit_code, recorded.then_some(7));
 }
 
 fn assert_terminal_once(
@@ -138,6 +136,7 @@ fn assert_terminal_once(
     result: &TurnResult,
     on_runner: bool,
     recorded: bool,
+    number: u32,
 ) -> TestResult {
     let wait = result
         .conversation()
@@ -165,7 +164,13 @@ fn assert_terminal_once(
     if let Some(code) = wait["tasks"][0]["exit_code"].as_i64() {
         assert_eq!(code, 7);
     }
-    assert!(agent.checkpoint().manifest().jobs().rows().is_empty());
+    assert_eq!(agent.checkpoint().manifest().jobs().rows(), []);
+    let service = &agent.inner.job_sessions;
+    assert_eq!(service.terminal_jobs_since(0), Vec::<String>::new());
+    assert!(matches!(
+        plakous_tools::internal::reported_process_session(service, number),
+        Some((_, plakous_tools::JoinedProcessStatus::Exited(Some(7))))
+    ));
     Ok(())
 }
 

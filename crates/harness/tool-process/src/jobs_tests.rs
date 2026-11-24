@@ -620,7 +620,10 @@ async fn process_terminal_generation_is_edge_triggered_and_survives_consumption(
         sessions.terminal_jobs_since(generation),
         Vec::<String>::new()
     );
-    assert!(sessions.terminal_jobs_since(admission).is_empty());
+    assert_eq!(
+        sessions.terminal_jobs_since(admission),
+        Vec::<String>::new()
+    );
     assert_eq!(sessions.job_terminal_generation(), generation);
     Ok(())
 }
