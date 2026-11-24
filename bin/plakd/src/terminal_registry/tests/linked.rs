@@ -246,7 +246,7 @@ async fn operator_host_renewal_keeps_controller_and_unreachable_close_keeps_pin(
     }
     drop(controller);
     service.operator_terminals().unwrap().close_all();
-    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     while service.operator_terminals().unwrap().has_live_terminals() {
         assert!(tokio::time::Instant::now() < until);
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -321,7 +321,7 @@ async fn operator_host_inventory_import_ignores_receipt_fence_exhaustion() {
     );
     assert_eq!(client.lines().await.unwrap(), Vec::new());
     service.operator_terminals().unwrap().close_all();
-    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     while service.operator_terminals().unwrap().has_live_terminals() {
         assert!(tokio::time::Instant::now() < until);
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -409,7 +409,7 @@ async fn operator_host_runner_restart_retains_surviving_memory_pins_without_glob
         "no kill or death inference on acknowledged loss"
     );
     old.operator_terminals().unwrap().close_all();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     while old.operator_terminals().unwrap().has_live_terminals() {
         assert!(tokio::time::Instant::now() < deadline);
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

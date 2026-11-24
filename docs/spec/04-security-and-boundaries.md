@@ -912,10 +912,19 @@ escapees and reject inconsistent membership. A nonempty incomplete record
 invalidates the scan. Cleanup
 deduplicates groups. KILL repeats for newly forked members before reaping the
 leader and proving absence twice. Live observation failures retry without
-closing shells; incomplete cleanup scans retry within the cleanup deadline,
-then retain unknown. Linux scans assume visibility of the runner user's
-processes: hidepid and privilege-changing descendants can restrict evidence,
-not establish containment or grant kill authority over invisible processes.
+closing shells. Escalation and the post-reap absence proof have separate
+windows. Each allows one whole-table pass bound for every complete scan the
+phase needs, plus its fixed spacing: five for escalation (one before each of
+HUP, TERM and KILL, two before reaping) and two for the proof. Time spent
+confirming the anchored leader and stopping groups cannot consume the proof's
+window. Incomplete cleanup scans retry within their phase's window, then
+retain unknown. An observed escape or an unconfirmed group signal retains
+unknown after reaping without spending the proof window. Linux bounds each
+whole-table pass by record size, entry count and elapsed time; a stat read of
+another busy process can stall, so a loaded host can spend most of a second on
+one pass. Linux scans assume visibility of the runner user's processes:
+hidepid and privilege-changing descendants can restrict evidence, not
+establish containment or grant kill authority over invisible processes.
 
 Unknown cleanup is not an unrecoverable pin: close requests a fresh two-scan
 absence proof of the old session and tracked escaped `(pid,start)` identities,

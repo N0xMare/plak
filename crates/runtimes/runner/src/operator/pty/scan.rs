@@ -15,6 +15,19 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
 type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
 const MAX_TRACKED_PROCESSES: usize = 4096;
 const STARTUP_SCAN_ATTEMPTS: usize = 3;
+// Bounds one Linux whole-table pass. A stat read of another busy process can
+// stall, so a loaded host can spend most of a second on one complete pass.
+// Each cleanup phase is allotted this bound for every complete pass it needs,
+// plus its fixed spacing.
+const SCAN_WATCHDOG: Duration = Duration::from_secs(2);
+const STAGE_SPACING: Duration = Duration::from_millis(150);
+const SCAN_SPACING: Duration = Duration::from_millis(20);
+// One pre-signal pass for each of HUP, TERM and KILL, then two before reaping.
+const ESCALATION_BUDGET: Duration = SCAN_WATCHDOG
+    .saturating_mul(5)
+    .saturating_add(STAGE_SPACING.saturating_mul(2));
+// Two consecutive complete passes after reaping.
+const ABSENCE_PROOF_BUDGET: Duration = SCAN_WATCHDOG.saturating_mul(2).saturating_add(SCAN_SPACING);
 
 pub(super) fn confirm_startup(
     targets: [&Identity; 2],
@@ -216,15 +229,20 @@ impl SessionCleanup {
 
     pub(super) fn finish(&mut self, mut reap: impl FnMut() -> bool) -> bool {
         let observed_escape = !self.escaped.is_empty();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let Some(certain) = self.signal_live_groups_until(deadline) else {
+        let Some(certain) = self.signal_live_groups_until(Instant::now() + ESCALATION_BUDGET)
+        else {
             return false;
         };
         self.leader.retire_anchor();
         if !reap() {
             return false;
         }
-        self.prove_absence_until(deadline) && certain && !observed_escape && self.escaped.is_empty()
+        // Absence scans cannot turn an observed escape or an unconfirmed
+        // signal into proof, so they do not delay the unknown result.
+        if !certain || observed_escape || !self.escaped.is_empty() {
+            return false;
+        }
+        self.prove_absence_until(Instant::now() + ABSENCE_PROOF_BUDGET)
     }
 
     fn signal_live_groups_until(&mut self, deadline: Instant) -> Option<bool> {
@@ -241,7 +259,7 @@ impl SessionCleanup {
             };
             certain &= self.signal_groups(&rows, signal);
             if signal != rustix::process::Signal::KILL {
-                std::thread::sleep(Duration::from_millis(150));
+                std::thread::sleep(STAGE_SPACING);
             }
         }
         // Repeat KILL from a fresh deduplicated scan for members forked during
@@ -252,7 +270,7 @@ impl SessionCleanup {
                 return Some(certain);
             };
             certain &= self.signal_groups(&rows, rustix::process::Signal::KILL);
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(SCAN_SPACING);
         }
     }
 
@@ -473,7 +491,7 @@ impl SessionCleanup {
         while Instant::now() < deadline {
             let Ok(rows) = scan() else {
                 absent = 0;
-                std::thread::sleep(Duration::from_millis(20));
+                std::thread::sleep(SCAN_SPACING);
                 continue;
             };
             if self.absent_in(&rows) {
@@ -484,9 +502,25 @@ impl SessionCleanup {
             if absent == 2 {
                 return !self.uncertain;
             }
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(SCAN_SPACING);
         }
         false
+    }
+}
+
+/// Retries incomplete passes within the tests' liveness bound.
+#[cfg(test)]
+pub(super) fn complete_scan_for_test() -> Vec<Identity> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Ok(rows) = scan() {
+            return rows;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no complete process-table scan within the liveness bound"
+        );
+        std::thread::sleep(SCAN_SPACING);
     }
 }
 
@@ -774,7 +808,7 @@ mod tests {
         command.arg("5");
         let mut child = pair.slave.spawn_command(command).unwrap();
         let leader = Identity::capture_child(child.process_id().unwrap()).unwrap();
-        let snapshot = scan().unwrap();
+        let snapshot = complete_scan_for_test();
         let live_leader = snapshot
             .iter()
             .find(|r| r.pid == leader.pid)

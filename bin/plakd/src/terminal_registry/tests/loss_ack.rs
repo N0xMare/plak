@@ -3,7 +3,7 @@ use super::*;
 
 async fn cleanup(service: &plakous::runner::RunnerService) {
     service.operator_terminals().unwrap().close_all();
-    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     while service.operator_terminals().unwrap().has_live_terminals() {
         assert!(tokio::time::Instant::now() < until);
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

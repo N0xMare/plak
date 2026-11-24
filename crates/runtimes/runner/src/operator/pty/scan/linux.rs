@@ -1,6 +1,6 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::Identity;
 
@@ -14,7 +14,7 @@ pub(super) fn capture(pid: u32) -> Result<Identity, ()> {
 }
 
 pub(super) fn scan() -> Result<Vec<Identity>, ()> {
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = Instant::now() + super::SCAN_WATCHDOG;
     let mut path = PathBuf::from("/proc");
     let mut buffer = stat_buffer();
     let mut rows = Vec::new();

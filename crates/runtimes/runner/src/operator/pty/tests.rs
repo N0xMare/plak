@@ -1,6 +1,7 @@
 use super::super::{
     OperatorAnswer, OperatorId, OperatorNamespace, OperatorTerminalService, TerminalKey,
 };
+use super::scan::complete_scan_for_test;
 use super::*;
 mod loss;
 
@@ -125,7 +126,7 @@ fn worker() -> Worker {
 fn operator_pty_platform_scan_distinguishes_runner_and_child_sessions() {
     probe_sessions().unwrap();
     let worker = worker();
-    let rows = scan().unwrap();
+    let rows = complete_scan_for_test();
     let own = rows
         .iter()
         .find(|row| row.pid == std::process::id())
@@ -353,7 +354,11 @@ fn operator_pty_interactive_binary_echo_resize_and_two_absence_scans() {
     let mut cleanup = SessionCleanup::new(identity.clone());
     assert!(cleanup.finish(|| worker.child.try_wait().ok().flatten().is_some()));
     worker.cleaned = true;
-    assert!(!scan().unwrap().iter().any(|r| r.pid == identity.pid));
+    assert!(
+        !complete_scan_for_test()
+            .iter()
+            .any(|r| r.pid == identity.pid)
+    );
 }
 
 #[test]
@@ -383,7 +388,7 @@ fn operator_pty_close_kills_background_stopped_and_foreground_job_groups() {
     until_output(&mut worker, b"GROUPS-READY\r\n");
     until_output(&mut worker, b"\x1b[?1049hPTY-READY\n");
     let identity = worker.identity.clone().unwrap();
-    let rows = scan().unwrap();
+    let rows = complete_scan_for_test();
     let groups: std::collections::BTreeSet<_> = rows
         .iter()
         .filter(|r| r.session == identity.session)
@@ -408,7 +413,11 @@ fn operator_pty_close_kills_background_stopped_and_foreground_job_groups() {
         TerminalStatus::Exited,
         "closing flag, master hangup and whole-session cleanup must join"
     );
-    assert!(!scan().unwrap().iter().any(|r| r.pid == identity.pid));
+    assert!(
+        !complete_scan_for_test()
+            .iter()
+            .any(|r| r.pid == identity.pid)
+    );
 }
 
 #[test]
@@ -419,7 +428,7 @@ fn operator_pty_setsid_escape_is_termination_unknown_even_after_master_hangup() 
     until_output(&mut worker, b"ESCAPED ");
     let _escape = loss::Escape::from_output(&worker.output);
     let mut cleanup = SessionCleanup::new(worker.identity.clone().unwrap());
-    cleanup.observe(&scan().unwrap());
+    cleanup.observe(&complete_scan_for_test());
     assert!(
         !cleanup.escaped.is_empty(),
         "different-session descendant is not cleanup proof"
@@ -481,7 +490,7 @@ fn operator_pty_namespace_expiry_is_enforced_without_a_host_or_poll() {
         matches!(opened,OperatorAnswer::Terminal {terminal,..} if terminal.status==TerminalStatus::Running)
     );
     *lock(&clock) += Duration::from_secs(90);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let done = lock(&service.inner.table)
             .namespaces
@@ -547,8 +556,7 @@ fn operator_runner_loss_sigkill_does_not_recover_or_recreate_shell() {
     // The new runner has no process authority from a former instance's bare PID.
     // A normal-HUP deterministic child should die when the killed runner loses
     // its master; this observation is test teardown, not recovery authority.
-    while scan()
-        .unwrap()
+    while complete_scan_for_test()
         .iter()
         .any(|row| row.pid == pid && !row.zombie)
     {

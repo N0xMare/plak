@@ -143,7 +143,7 @@ fn operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_
             .recv_timeout(Duration::from_secs(5))
             .unwrap_or_else(|error| panic!("worker did not record the PTY escape: {error}"));
         closing.store(true, Ordering::Release);
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while lock(&result).is_none() {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(10));
