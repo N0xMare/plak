@@ -97,10 +97,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                 ):
                     self.assertEqual(
                         any(
-                            s[0].endswith(checker)
-                            and '--portable-crates' not in s
-                            and '--wasm-libraries' not in s
-                            for s in scripts
+                            s[0].endswith(checker) and '--wasm-libraries' not in s for s in scripts
                         ),
                         tier != ('--install',),
                     )

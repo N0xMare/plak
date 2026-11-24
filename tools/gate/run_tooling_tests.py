@@ -42,7 +42,6 @@ TREE_READERS = {
     "test_nextest_lanes",
     "test_pinned_callback_ports",
     "test_policy_validators",
-    "test_portability_fence",
     "test_review_expiry",
     "test_uuid_features",
 }

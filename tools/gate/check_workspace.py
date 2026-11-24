@@ -15,7 +15,7 @@ process commands and imports, macro allowlists, forbidden identifiers), the
 approved `plakous::` symbols per host/bin package, the neutral-core provider
 name exemptions, the retired-source pins, the consumer fixture inventories, the
 rquickjs / tracing linkage pins, the tracked-file hygiene patterns, and the
-portable-crate set with its native-only denylist (spec 06 section 7.5).
+portable-crate set with its native-only denylist.
 `PORTABLE_CRATES` is the only list of crates that must stay portable; it grows
 one crate at a time. Every path-bearing pin is keyed by package
 name plus a package-relative path, so a package move never edits them.
@@ -4432,7 +4432,7 @@ def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str
 
 # The only portable-crate list. Grow it one crate at a time, in the same change
 # that makes that crate's normal closure portable and its library check clean
-# for wasm32-unknown-unknown (spec 06 section 7.5). `--portable-crates` prints it.
+# for wasm32-unknown-unknown.
 PORTABLE_CRATES = (
     "plakous-model",
     "plakous-runner-protocol",
@@ -6162,10 +6162,6 @@ def check_root(root: Path, *, full: bool = False) -> int:
 
 def main() -> int:
     """Run the workspace checks, skipping them when the recorded reads are unchanged."""
-    if sys.argv[1:] == ["--portable-crates"]:
-        for name in PORTABLE_CRATES:
-            print(name)
-        return 0
     if sys.argv[1:] == ["--wasm-libraries"]:
         for name in (*PORTABLE_CRATES, *PORTABLE_DEFAULT_LIBRARIES):
             print(name)
@@ -6177,7 +6173,7 @@ def main() -> int:
         return check_root(ROOT, full=True)
     if sys.argv[1:]:
         print(
-            "usage: check_workspace.py [--portable-crates | --wasm-libraries | --tighten-ceilings | --full-scan]",
+            "usage: check_workspace.py [--wasm-libraries | --tighten-ceilings | --full-scan]",
             file=sys.stderr,
         )
         return 2

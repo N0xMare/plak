@@ -287,7 +287,7 @@ implementations: `TokioRuntime`, on the Tokio runtime the caller runs on, and,
 with any HTTP-capable feature, `http::NativeHttpTransport`, over one bounded
 `plakous-http` client for absolute `https` URLs. `TokioRuntime` is defined in
 `plakous-agent` (native targets only) and `spawn_blocking` runs on Tokio's
-blocking pool. The interfaces are in the portable crate set (chapter 06 §7.5);
+blocking pool. The interfaces compile for `wasm32-unknown-unknown`;
 the native implementations are not portable.
 
 An agent runs on one `Runtime`. `AgentBuilder::runtime` supplies the host's;
@@ -12919,7 +12919,7 @@ Configuration parsing, named-secret storage, the credential store's location
 and operator views stay with the product.
 `store` compiles `plakous::sessions` (the session workflows, the feed, portable
 histories and `SessionBackend::memory`) and links `plakous-store`, whose
-memory backend also compiles for `wasm32-unknown-unknown` (chapter 06 §7.5),
+memory backend also compiles for `wasm32-unknown-unknown`,
 though its lease clock refuses there. Without it the
 facade links no session store. `sessions-sqlite` implies `store` and enables
 `SessionBackend::sqlite`. `full` is all of the above.

@@ -259,7 +259,7 @@ install-profile failure that the install tier catches before production.
 
 Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
 `test_pinned_callback_ports`, `test_configuration_placement`,
-`test_uuid_features`, `test_portability_fence`, `test_policy_validators`,
+`test_uuid_features`, `test_policy_validators`,
 `test_agent_kind_docs`, `test_artifact_linkage`, `test_review_expiry`,
 `test_live_jobs` and `test_check_prod_loc`.
 Changing anything below `tools/`, `tests/tooling/`, `tests/live/`, `eval/`,
@@ -281,10 +281,8 @@ The workspace test build uses `--workspace --all-features` and supplies the
 real worker and host artifacts; nextest reuses that feature resolution.
 Standalone lints default closures without workspace feature unification.
 The install builds cover code generation and linkage that clippy cannot
-prove. The portable target is checked by standalone; the structural
-dependency fence for that target still runs in `static`. The preloaded musl
-qualification container may skip the wasm compile if its rustc target is
-absent, but the native musl gate cannot skip it (chapter 06 §7.5).
+prove. Standalone checks the portable target; only the preloaded musl
+qualification container may skip it if its rustc target is absent.
 
 `-D warnings` is appended to the rustflags Cargo will actually pass. Cargo
 keeps one source, in order: `CARGO_ENCODED_RUSTFLAGS`, `RUSTFLAGS`, then all
@@ -314,7 +312,7 @@ container before publication (chapter 06 §6.1). Both musl scripts set
 explicit `--target` to every compile and nextest invocation, and subprocess
 Cargo checks inherit that target. The portable-crate wasm library check is
 the exception: it sets `CARGO_BUILD_TARGET` and `--target` to
-`wasm32-unknown-unknown` for that command only (chapter 06 §7.5). A GNU-host
+`wasm32-unknown-unknown` for that command only. A GNU-host
 gate does not qualify the supported musl platform.
 
 `tools/gate/test-env.sh` is the one test environment. It exports `TMPDIR` from
@@ -385,11 +383,11 @@ exports all four for the test process.
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. Warnings are errors; documentation lint scope and workspace exceptions are in chapter 06 §5 |
 | Standalone compilation and archives | `just steps standalone` | The publishable crates lint in their own default resolution, portable libraries compile for wasm, and the staged tree can form the cohort archives |
 | Install builds | `just steps builds` | The release and maintainer resolutions of plakd and their sidecars link with the expected native-library split; warnings in these builds are errors |
-| Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown` (chapter 06 §7.5). Currently that set is `plakous-model`, `plakous-runner-protocol`, `plakous-tools` and `plakous-agent`, whose default features are portable, and the list adds the default library of `plakous-store`, whose `sqlite` feature keeps it off the fenced set. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
+| Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown`. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
 | Docs | `just steps rustdoc` at install; `just steps rustdoc,rustdoc-alone` at RC | Broken and private intra-doc links are errors in the externally consumed libraries (chapter 06 §5); bare URLs are errors throughout. Standalone docs build each supported package in its own default resolution |
 | Offline tests | `just steps tests-parallel,tests-durability,tests-serial,tests-install` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
-| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. The same checker fences `PORTABLE_CRATES` (chapter 06 section 7.5): each listed crate's normal closure, at default features and at `--all-features`, must not carry a reviewed native-only crate (including `libc`) or Tokio feature, resolved for `wasm32-unknown-unknown` rather than the host, and a failure names the crate, the dependency and the path that pulls it in |
+| Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. |
 | Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of thirteen standalone library profiles (eleven facade profiles, including API-only and standalone provider and tool profiles; hosted without optional features and with all features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers. Up to four `python3 -m unittest` processes run at once; the mock gate-driver module is divided by test case, and other selected modules run whole |
 

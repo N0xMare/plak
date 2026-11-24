@@ -4,7 +4,7 @@
 #                            --batch | --batch-mac | --install | --install-checks | --full | --soak |
 #                            --steps GROUP[,GROUP...]]
 # --steps selects named groups in order; PLAK_BATCH_BASE enables batch scoping.
-# --qual-container is passed only by tools/musl/musl-check.sh (spec 06 section 7.5).
+# --qual-container is passed only by tools/musl/musl-check.sh.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
@@ -523,7 +523,7 @@ run_weighted_lane() {
   run_lane "$profile" --config-file "$config" --test-threads="$threads" "$@"
 }
 
-# The rustc target for the portable-crate library check (spec 06 section 7.5).
+# The rustc target for the portable-crate library check.
 # Not inherited from CARGO_BUILD_TARGET: a musl lane must not redirect it.
 wasm_portability_target=wasm32-unknown-unknown
 

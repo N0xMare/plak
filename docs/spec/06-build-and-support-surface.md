@@ -55,7 +55,7 @@ after a printable character. These are toolchain behavior changes, not wire or
 persisted-format changes.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
 `rust-toolchain.toml` lists no extra targets. `wasm32-unknown-unknown` is
-installed by `just dev-tools install` (section 7.5), not by that file: listing
+installed by `just dev-tools install`, not by that file: listing
 it there would make rustup try to download it on every toolchain entry,
 including the offline musl qualification image.
 
@@ -792,7 +792,7 @@ cargo-nextest, cargo-deny and ruff into the repository-local `.dev-tools/bin`,
 which the gate puts first on `PATH`; it builds them with `cargo install --locked`
 and keeps a prefix binary that already reports its pinned version, because
 cargo refuses to replace a binary it did not install. It also adds the
-`wasm32-unknown-unknown` rustc target for the pinned toolchain (section 7.5)
+`wasm32-unknown-unknown` rustc target for the pinned toolchain
 and does not put that target in `rust-toolchain.toml`. `just nextest` and
 `tools/dev/coverage.sh` prepend that same prefix and run
 `dev-tools.sh check-nextest` before cargo nextest. That check does not require
@@ -2073,166 +2073,7 @@ micro-monty at `=0.0.3`.
 
 ### 7.5 Portable crates
 
-`PORTABLE_CRATES` in `tools/gate/check_workspace.py` is the only portable-crate
-list: `plakous-model` and `plakous-runner-protocol` (closure `serde` and
-`serde_json`), `plakous-gateway-protocol`, `plakous-image`, `plakous-tools`
-and `plakous-agent`. All six have portable defaults. `plakous-image`'s default `normalize` closure is the
-pure-Rust `image` crate with its png, jpeg, gif and webp codecs; it is checked
-for the target with those defaults, and `plakous-tools` reaches it without
-features. A crate joins that tuple only in the change that makes its normal dependency
-closure pass the fence below and its library
-check clean for `wasm32-unknown-unknown`. Joining is not a supported-platform
-claim: `wasm32-unknown-unknown` stays an unsupported product target (section 2).
-`check_workspace.py --portable-crates` prints the list, one name per line, and
-does nothing else.
-
-`plakous-tools` declares its host process and descriptor dependencies
-(`filedescriptor`, `portable-pty`, `rustix` and Tokio's `process` feature) as
-`cfg(unix)` target dependencies. Its library refuses to compile on any target
-that is neither unix nor `wasm32-unknown-unknown`. On `wasm32-unknown-unknown`
-the crate keeps its public paths except `HostExecutionBackend`, which is
-unix-only, and has no host. Constructing a host environment refuses: there is
-no workspace filesystem to canonicalize, and host process capture refuses.
-Workspace operations of the deterministic backend return `Unsupported` with no
-effect, and `JobOutputRoot::open` returns `Unsupported`. Joined process
-sessions run only on a runner there. The unix code is unchanged: the split
-moves host items into `cfg(unix)` modules and puts uninhabited or refusing
-stand-ins beside them for the other target.
-
-`plakous-store` is not listed: its `sqlite` feature links `rusqlite`, so its
-`--all-features` closure is native. It is on the second list,
-`PORTABLE_DEFAULT_LIBRARIES`, whose default library the builds group checks
-for the target beside the portable set (`check_workspace.py --wasm-libraries`
-prints both lists, portable set first) without the fence. Its default
-(memory) library is portable: `nix` and `rustix` are `cfg(unix)` target dependencies,
-and on a target that is neither Linux nor macOS the system lease clock refuses
-with `BackendUnavailable`, so a host supplies its own `LeaseClock`.
-
-The `static` group runs the fence inside `check_workspace.py`. For each listed
-crate it runs `cargo tree --offline --locked --target wasm32-unknown-unknown`
-over the normal closure (`-e normal`) twice: the crate's default features, then
-`--all-features`. The fence resolves that target, never the host: a dependency
-behind `cfg(not(target_arch = "wasm32"))` is outside the closure and allowed,
-and one behind `cfg(target_arch = "wasm32")` is inside it and checked. Cargo
-resolves the target without the rustc target being installed, so the fence
-needs no `just dev-tools install`. Dev-dependencies and build-dependencies are
-outside the normal closure, so a dev-only native crate does not fail the
-fence. A proc-macro and its own dependencies run on the host and are skipped.
-A hit names the portable crate, the resolution, the offending dependency and
-the path that pulls it in, for example
-`plakous-model [default]: nix v0.28.0 via plakous-model -> helper -> nix`.
-An unparsed tree line or a tree that does not start at the crate fails closed.
-The same dependency is reported once per resolution.
-
-The ban is this reviewed list, not a scan of `Cargo.lock`:
-
-- Tokio features `fs`, `net`, `process`, `rt-multi-thread` and `signal`. Tokio
-  with any other feature set is allowed.
-- The crates `errno`, `filedescriptor`, `hyper`, `hyper-util`, `libc`,
-  `linux-raw-sys`, `mio`, `nix`, `notify`, `portable-pty`, `redox_syscall`,
-  `reqwest`, `rusqlite`, `rustix`, `serial2` and `socket2`.
-
-`libc` is banned. `wasm32-unknown-unknown` has no C library, and nothing in the
-wasm resolution needs it: `getrandom` and `cpufeatures` pull it only on native
-hosts, and those edges are outside the target closure. `notify` is banned
-before it is a dependency. Extending the ban amends this section and the
-constants together.
-
-The library check is in the `standalone` group, not `static`. It compiles with
-rustc warnings denied, runs in Linux batch and full/RC on both platforms, and
-does not repeat in Mac batch. After standalone clippy, it checks each listed
-crate and each `PORTABLE_DEFAULT_LIBRARIES` entry:
-
-```text
-cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown
-```
-
-`-D warnings` is applied by the same helper as the install builds.
-The command sets `CARGO_BUILD_TARGET` to `wasm32-unknown-unknown` for itself
-only, so a musl lane's target does not redirect it and the command does not
-leave that target set. A crate whose default features are portable is checked
-with those defaults. `plakous-model` defaults are empty, so its check passes
-no `--no-default-features`. A crate whose defaults are not portable is checked
-without them, and that choice is recorded in this section when it joins the
-list.
-
-The check proves that the listed libraries compile for the target, and nothing
-more: no test, binary or `wasm-bindgen` glue runs there. These runtime hazards
-are known and accepted for now; their APIs do not change with this check:
-
-- `std::time::SystemTime::now` and `std::time::Instant::now` panic on
-  `wasm32-unknown-unknown`. In `plakous-model`, `now_unix_secs`,
-  `now_unix_millis` and `SystemClock` (`identity.rs`) read `SystemTime`, and
-  `SystemSubscriptionGateClock` (`subscription_limit.rs`) reads `Instant`. A
-  wasm host injects its own `Clock` and `SubscriptionGateClock`.
-- `ReachabilityProbe` takes a `std::time::Instant` deadline in its signature,
-  so a wasm caller cannot construct one without a substitute clock.
-- `plakous-tools` reads `std::time::Instant` and `SystemTime` for deadlines,
-  timestamps and supervision, and runs its blocking lane on
-  `tokio::task::spawn_blocking`; neither works on `wasm32-unknown-unknown`
-  without a host-supplied substitute. `plakous-agent` routes its tasks,
-  sleeps and monotonic time through the `Runtime` a host supplies with
-  `AgentBuilder::runtime` (chapter 01 §2.5), and has no native default on that
-  target, but its tool runtime still defaults to a Tokio timer and task owner
-  and reads `std::time::Instant` for tool deadlines.
-- `uuid`'s `js` feature calls `globalThis.crypto.getRandomValues` through
-  `wasm-bindgen`. A v7 identifier generated in a host without the generated
-  JavaScript glue or without `globalThis.crypto` fails at run time.
-
-`uuid` 1.28 with the `v7` feature links `getrandom` on every target except
-`cfg(all(target_arch = "wasm32", target_os = "unknown"))`, where it refuses to
-compile unless `js`, `rng-getrandom` or `rng-rand` is enabled. `plakous-model`
-enables `uuid`'s `js` feature only as a target dependency for that cfg. `js`
-is uuid's WebCrypto backend and does not use `getrandom` there, so the tree
-sets no `getrandom_backend` cfg. Native resolutions do not enable `js` and do
-not link `wasm-bindgen`.
-
-`plakous-gateway-protocol` is a published-internal common crate with empty
-defaults, no I/O and no product caller yet. Its normal closure is `base64`,
-`serde`, `serde_json` and `zeroize`; it draws no randomness (a gateway mints
-caller-key secrets itself) and validates addresses with `core::net` alone.
-
-`plakous-agent` calls `getrandom` 0.4 directly for spawn salts, bootstrap
-nonces and checkpoint entropy. That version has no default backend on
-`cfg(all(target_arch = "wasm32", target_os = "unknown"))` and refuses to
-compile there, so `plakous-agent` enables `getrandom`'s `wasm_js` feature as a
-target dependency for that cfg only. In 0.4 the feature alone selects the
-WebCrypto backend; no `getrandom_backend` cfg is set. Native resolutions do not
-enable it. A call fails at run time in a host without `globalThis.crypto`, and
-each caller already handles that failure.
-
-The target is not listed in `rust-toolchain.toml`. Listing it would make rustup
-try to download it whenever the toolchain is selected, including inside the
-offline musl image. `just dev-tools install` runs
-`rustup target add wasm32-unknown-unknown` for the pinned toolchain. A gate
-whose rustc lacks the target fails and names that install, with one exception.
-The gate probes the target as the directory
-`$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown/lib`, so it needs
-no `rustup` on `PATH`. The pinned qualification image
-`plak-qual-base:86ab9e67` has no network and includes the target; an earlier
-image without it may still run the gate. `tools/musl/musl-check.sh` passes the
-leading gate argument `--qual-container`, which nothing else passes; an
-environment variable cannot select it. With that argument and the target
-absent (an image without it), the builds group prints
-
-```text
-skip wasm32-unknown-unknown: the preloaded musl qualification image does not include this rustc target (spec 06 section 7.5)
-```
-
-and continues. The skip is carried to the end of the run: the final summary,
-pass or fail, repeats it as
-
-```text
-== skipped: wasm32-unknown-unknown portable check (spec 06 §7.5) ==
-```
-
-and a run with a skip writes neither `gate-evidence/full` nor
-`gate-evidence/package` (section 6.5), even on a clean git tree; it prints
-`== no evidence: a check was skipped ==` instead. The container mounts an
-export without `.git`, so it records no evidence in any case. With the
-argument and the target present, the check runs. The native musl platform
-tier does not pass the argument, so it runs the check. The skip is that one
-missing rustc target, not a waiver of the fence or of the supported platforms.
+`wasm32-unknown-unknown` is a planned target for the portable crates; `PORTABLE_CRATES` and `PORTABLE_DEFAULT_LIBRARIES` in `tools/gate/check_workspace.py` list them, the standalone group checks them and static fences their closures.
 
 ## 8. Repository settings
 
