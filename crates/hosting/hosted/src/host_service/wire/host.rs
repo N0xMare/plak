@@ -100,6 +100,7 @@ mod lifecycle;
 mod product;
 mod upgrade_controls;
 mod verdicts;
+pub use lifecycle::{LifecycleOutput, LifecycleState};
 pub use product::HostSessions;
 
 /// Host-owned overlay of one session, independent of a wire version.
@@ -117,9 +118,8 @@ pub struct DirectorySlot {
 
 /// The sessions one host serves.
 pub struct SessionHost<P: ProtocolExtension> {
-    lifecycle:
-        Mutex<BTreeMap<u64, lifecycle::Delivery<plakous_host_protocol::wire::HostLifecycle<P>>>>,
-    lifecycle_latest: Mutex<Option<plakous_host_protocol::wire::HostLifecycle<P>>>,
+    lifecycle: Mutex<BTreeMap<u64, lifecycle::Delivery<lifecycle::Notice<P>>>>,
+    lifecycle_latest: Mutex<Option<lifecycle::Notice<P>>>,
     upgrade_admission: Arc<std::sync::RwLock<bool>>,
     upgrade_controls: Mutex<admission::PausedControls>,
     upgrade_committed: Arc<std::sync::atomic::AtomicBool>,
@@ -370,6 +370,7 @@ where
             buffered_output: false,
             snapshot_output: None,
             blob_refusal_output: None,
+            lifecycle_output: None,
             face,
             stopped: Arc::new(stopped),
             node: None,
@@ -571,6 +572,7 @@ pub struct HostConnection<P: ProtocolExtension, W: Write> {
     buffered_output: bool,
     snapshot_output: Option<super::SnapshotOutput>,
     blob_refusal_output: Option<BlobRefusalOutput>,
+    lifecycle_output: Option<LifecycleOutput<P>>,
     connection_id: u64,
     principal: HostPrincipal,
     principal_budget: Arc<admission::PrincipalBudget>,

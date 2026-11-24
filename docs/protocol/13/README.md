@@ -86,6 +86,16 @@ A known Changes version mismatch carries the observed Git version and its
 minimum requirement. If the selected execution authority cannot report its
 own version evidence, the host does not substitute another machine's version.
 
+The bounded drain countdown uses the natural-drain deadline, not the
+verdict-barrier floor; an idle drain has no countdown. A paired successor
+that already sent Welcome can report `starting` while recovering its
+startup inventory. Its countdown starts in the replacement image and does
+not inherit the source's drain deadline. Round remaining time up to whole
+seconds, so zero means the deadline elapsed or there is no countdown.
+The startup countdown is advisory: it cannot abandon a slow inventory or
+change the requester's separate readiness wait. A bridge that cannot reach
+Welcome still uses the typed discovery refusal.
+
 This checkout still serves 12, and `plakd wire schema` without the draft
 flag still reports 12. After the host implementation is complete, the
 staging build will serve 13 only. Use that exact build's normal schema

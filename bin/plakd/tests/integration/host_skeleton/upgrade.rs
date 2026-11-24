@@ -222,6 +222,7 @@ fn v3_host_coordinator_refuses_stale_source_and_removed_carry_before_drain() {
     let Some(fixture) = fixture() else { return };
     let source = seed(&fixture, 9);
     let mut host = start(&fixture);
+    let (mut observer, _) = lifecycle::observe(&host);
     let mut client = Client::connect(&host);
     let row = client
         .rows(1)
@@ -287,6 +288,27 @@ fn v3_host_coordinator_refuses_stale_source_and_removed_carry_before_drain() {
     assert_eq!(
         client.request(3, Op::Detach { attachment }),
         Outcome::Ok(Answer::Detached)
+    );
+    observer
+        .get_mut()
+        .write_all(
+            encode_line(&ClientFrame::<PlakExtension>::Request {
+                id: 1,
+                op: Op::Ping,
+            })
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut line = String::new();
+    observer.read_line(&mut line).unwrap();
+    assert_eq!(
+        decode_line::<HostFrame<PlakExtension>>(&line).unwrap(),
+        HostFrame::Response {
+            id: 1,
+            outcome: Outcome::Ok(Answer::Pong)
+        },
+        "a refused cross-key upgrade must not publish a drain before continuing to serve",
     );
     assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut host);

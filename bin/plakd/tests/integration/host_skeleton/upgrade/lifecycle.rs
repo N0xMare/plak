@@ -4,7 +4,7 @@ use super::*;
 use plakd_wire_types::lifecycle::{HostLifecycle, HostLifecyclePhase, HostLifecycleReason};
 use std::io::Read as _;
 
-fn observe(host: &Host) -> (BufReader<UnixStream>, u64) {
+pub(super) fn observe(host: &Host) -> (BufReader<UnixStream>, u64) {
     let mut stream = UnixStream::connect(&host.socket).unwrap();
     stream.set_read_timeout(Some(WAIT)).unwrap();
     stream

@@ -170,6 +170,79 @@ fn lifecycle_notice(phase: u8) -> plakous_host_protocol::wire::HostLifecycle<Rea
     }
 }
 
+fn draft_lifecycle_output(
+    out: &mut dyn Write,
+    phase: LifecycleState<Reads>,
+    remaining: u64,
+) -> CliResult<()> {
+    let (generation, phase) = match phase {
+        LifecycleState::Starting { host_generation } => (host_generation, 0),
+        LifecycleState::Started { host_generation } => (host_generation, 3),
+        LifecycleState::Transition(notice) => (notice.host_generation, notice.phase),
+    };
+    writeln!(out, "{generation} {phase} {remaining}")
+        .map_err(|error| CliFailure::new(error.to_string()))
+}
+
+#[test]
+fn draft_lifecycle_samples_each_monotonic_deadline_at_write_and_clears_it_on_cancel() {
+    let (host, _) = fixture(limits());
+    let epoch = Instant::now();
+    let deadline = epoch + Duration::from_secs(15);
+    let mut connection = host
+        .connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
+            false
+        })
+        .with_lifecycle_output(draft_lifecycle_output);
+    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
+    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
+    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
+    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
+    host.publish_lifecycle_until(lifecycle_notice(1), Some(deadline));
+    host.publish_lifecycle(lifecycle_notice(3));
+    let mut write_times = [2250, 11_400, 14_999, 15_000, 17_000, 18_000].into_iter();
+    connection
+        .flush_lifecycle_at(|| epoch + Duration::from_millis(write_times.next().unwrap()))
+        .unwrap();
+    assert_eq!(
+        connection.out,
+        b"1 1 13\n1 1 4\n1 1 1\n1 1 0\n1 1 0\n1 3 0\n"
+    );
+}
+
+#[test]
+fn draft_successor_start_and_readiness_are_local_to_the_new_generation() {
+    let (source, state) = fixture(limits());
+    let epoch = Instant::now();
+    source.publish_lifecycle_until(lifecycle_notice(1), Some(epoch + Duration::from_secs(35)));
+    let successor = SessionHost::new(
+        Stores {
+            state,
+            limits: limits(),
+        },
+        "successor",
+        2,
+    );
+    let mut legacy =
+        successor.connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
+            false
+        });
+    successor.publish_starting(epoch + Duration::from_secs(10));
+    let mut draft = successor
+        .connect(Vec::new(), Face::Remote, HostPrincipal::Socket(501), || {
+            false
+        })
+        .with_lifecycle_output(draft_lifecycle_output);
+    let now = || epoch + Duration::from_secs(7);
+    draft.flush_lifecycle_at(now).unwrap();
+    assert_eq!(draft.out, b"2 0 3\n");
+    successor.publish_started();
+    draft.flush_lifecycle_at(now).unwrap();
+    legacy.flush_lifecycle_at(now).unwrap();
+    assert_eq!(draft.out, b"2 0 3\n2 3 0\n");
+    assert_eq!(legacy.out, [] as [u8; 0]);
+}
+
 #[test]
 fn a_mid_drain_directory_connection_gets_the_current_phase_before_later_notices() {
     let (host, _) = fixture(limits());

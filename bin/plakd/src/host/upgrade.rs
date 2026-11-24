@@ -903,8 +903,14 @@ fn prepare(
         crate::carry::upgrade::admission(paths, true)
     })?;
     let pause = host.pause_admissions_for_upgrade(Arc::clone(cancelled))?;
-    super::lifecycle::draining(host, &request.expected_binary, &request.destination_key);
-    let budget = step_drain::Budget::new(request.drain)?;
+    let budget = step_drain::Budget::new(request.drain);
+    super::lifecycle::draining(
+        host,
+        &request.expected_binary,
+        &request.destination_key,
+        budget.as_ref().ok().and_then(|budget| budget.deadline),
+    );
+    let budget = budget?;
     report(progress::Event::Barrier(progress::Barrier::Started))?;
     let barrier = Instant::now();
     host.resolve_paused_drafts(&pause, budget.barrier_deadline, cancelled)?;

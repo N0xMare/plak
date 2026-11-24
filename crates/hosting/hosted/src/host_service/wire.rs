@@ -1551,8 +1551,8 @@ mod slot;
 
 pub use host::{
     AdmissionPause, Created, Creation, DirectorySlot, HostConnection, HostPrincipal,
-    HostReadLimits, HostReadTask, HostRequestContext, HostSessions, HostStepDrain, PickerProgress,
-    SessionHost, StepDrainMonitor, StoredSessionView,
+    HostReadLimits, HostReadTask, HostRequestContext, HostSessions, HostStepDrain, LifecycleOutput,
+    LifecycleState, PickerProgress, SessionHost, StepDrainMonitor, StoredSessionView,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;

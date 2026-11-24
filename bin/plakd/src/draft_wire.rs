@@ -5,6 +5,10 @@ pub use usage::{accounts_usage, usage_limits};
 
 use plakd_wire_types::{console, v13};
 use plakous_host_protocol::wire::{BlobRejection, BlobRejectionReason, RequestId};
+use plakous_hosted::host_service::wire::LifecycleState;
+
+mod lifecycle;
+pub use lifecycle::write_lifecycle;
 
 /// Writes a draft rejection only for the named blob, without an intent verdict.
 ///
@@ -21,7 +25,14 @@ pub fn write_blob_refusal(
         BlobRejectionReason::PendingLimit => v13::BlobRefusal::PendingLimit,
         BlobRejectionReason::Discarded => v13::BlobRefusal::Discarded,
     };
-    let frame = v13::HostFrame::Draft(Box::new(v13::HostFrameV13::BlobRefused { id, reason }));
+    write_frame(out, v13::HostFrameV13::BlobRefused { id, reason })
+}
+
+fn write_frame(
+    out: &mut dyn std::io::Write,
+    frame: v13::HostFrameV13,
+) -> plakous_hosted::CliResult<()> {
+    let frame = v13::HostFrame::Draft(Box::new(frame));
     let line = plakous_host_protocol::wire::encode_line(&frame)
         .map_err(|error| plakous_hosted::CliFailure::new(error.to_string()))?;
     out.write_all(line.as_bytes())

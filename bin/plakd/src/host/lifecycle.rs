@@ -4,20 +4,29 @@ use plakd_wire_types::lifecycle::{
     HostLifecycle, HostLifecyclePhase, HostLifecycleReason, HostLifecycleTarget,
 };
 use plakous_hosted::host_service::wire::SessionHost;
+use std::time::Instant;
 
 use crate::surface_protocol::PlakExtension;
 
-pub(super) fn draining(host: &SessionHost<PlakExtension>, binary: &str, key: &str) {
-    host.publish_lifecycle(HostLifecycle {
-        host_generation: host.generation(),
-        phase: HostLifecyclePhase::Draining,
-        reason: HostLifecycleReason::PairedUpgrade,
-        target: Some(HostLifecycleTarget {
-            binary_id: binary.to_owned(),
-            state_key: key.to_owned(),
-        }),
-        retry_after_ms: Some(250),
-    });
+pub(super) fn draining(
+    host: &SessionHost<PlakExtension>,
+    binary: &str,
+    key: &str,
+    deadline: Option<Instant>,
+) {
+    host.publish_lifecycle_until(
+        HostLifecycle {
+            host_generation: host.generation(),
+            phase: HostLifecyclePhase::Draining,
+            reason: HostLifecycleReason::PairedUpgrade,
+            target: Some(HostLifecycleTarget {
+                binary_id: binary.to_owned(),
+                state_key: key.to_owned(),
+            }),
+            retry_after_ms: Some(250),
+        },
+        deadline,
+    );
 }
 
 pub(super) async fn restarting(host: &SessionHost<PlakExtension>) {

@@ -15,7 +15,7 @@ pub(super) struct Budget {
     #[cfg(test)]
     start: Instant,
     pub(super) barrier_deadline: Instant,
-    deadline: Option<Instant>,
+    pub(super) deadline: Option<Instant>,
 }
 
 pub(super) struct PreparedDrain {
