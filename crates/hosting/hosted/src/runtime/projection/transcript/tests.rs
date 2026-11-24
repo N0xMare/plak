@@ -6,6 +6,8 @@ use plakous_host_protocol::limits::OBSERVATION_QUEUE_CAPACITY;
 use plakous_host_protocol::views::transcript::{Lane, NoticeScope, RowKey, TranscriptRow};
 use plakous_host_protocol::{Core, observation_channel};
 
+mod keyed;
+
 fn snapshot(scope: TranscriptScope, rows: &[(u64, &str)]) -> PresentationSnapshot {
     PresentationSnapshot {
         scope,

@@ -33,6 +33,18 @@ Stream offsets, baseline live lengths, omitted row bytes and older body
 totals use UTF-8 bytes, not JavaScript string length or JSON wire size.
 Assistant and reasoning deltas have the same shape; the row's type comes
 from its baseline or opening patch, before the host streams that row.
+The root gives each contiguous assistant or reasoning run a new provisional
+key. A patch settles preceding appends before opening another run; canonical
+rows replace provisional keys when the host publishes the settled view.
+For each live row, drop deltas wholly before the current byte length and
+repair a gap with `read_transcript_row` at the first missing byte. That answer
+is addressed to the request, not a baseline or a new transcript revision.
+Its `end` is exclusive, and `last` means the slice reaches the end available
+at read time, not that the row has stopped streaming. A non-boundary or
+out-of-range offset is malformed; a provisional row no longer in the scope
+returns `cursor_expired`. Use the settled key for omitted history after
+replacement. The live assistant preview stops at a framing-safe prefix;
+subsequent appends never move its start or skip to a later suffix.
 The row read returns a slice of the same rendered body whose bytes were
 counted; row metadata stays in the page. An attachment status report is
 sent every 10 seconds while its values are changing and on request.

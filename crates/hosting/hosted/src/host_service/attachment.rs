@@ -1,6 +1,7 @@
 //! Attachment correlation tags and attach/replay classification.
 
 use plakous_host_protocol::observation::Delivery;
+use plakous_host_protocol::views::transcript::TranscriptStreamDelta;
 
 use super::queue::MAX_QUEUE_BYTES;
 use super::{
@@ -37,6 +38,7 @@ pub(super) fn attachment_of(correlation: &str) -> Option<(AttachmentId, Option<S
 /// replay must not send it again.
 pub(super) fn kept_for_attach<P: ProtocolExtension>(observation: &SessionObservation<P>) -> bool {
     observation.class() == ObservationClass::State
+        || keyed_append_scope(observation).is_some()
         || matches!(
             observation,
             SessionObservation::ApprovalRequired { .. }
@@ -55,6 +57,18 @@ pub(super) fn kept_for_attach<P: ProtocolExtension>(observation: &SessionObserva
             observation,
             SessionObservation::TranscriptPatch(patch) if patch.scope == TranscriptScope::Root
         )
+}
+
+pub(super) const fn keyed_append_scope<P: ProtocolExtension>(
+    observation: &SessionObservation<P>,
+) -> Option<&TranscriptScope> {
+    match observation {
+        SessionObservation::TranscriptStream {
+            scope,
+            delta: TranscriptStreamDelta::Keyed { .. },
+        } => Some(scope),
+        _ => None,
+    }
 }
 
 impl<P: ProtocolExtension> Attachment<P> {
@@ -129,6 +143,13 @@ impl<P: ProtocolExtension> Attachment<P> {
         if self.fence_root_preview && observation.is_root_preview() {
             // An attaching viewer cannot use a suffix before the first baseline
             // that will cover it. Do not number observations it was never owed.
+            return;
+        }
+        if let Payload::Other(event) = &observation
+            && let Some(scope) = keyed_append_scope(event)
+            && (!self.keyed.contains(scope) || self.fresh.contains(scope))
+        {
+            // A delta cannot open a row or bridge a missing revision.
             return;
         }
         let scope = payload_scope(&observation);
@@ -249,6 +270,10 @@ fn payload_scope<P: ProtocolExtension>(payload: &Payload<P>) -> Option<&Transcri
 
 fn queued_scope<P: ProtocolExtension>(item: &Pending<P>) -> Option<&TranscriptScope> {
     match item {
+        Pending::Event {
+            observation: Payload::Other(event),
+            ..
+        } => keyed_append_scope(event),
         Pending::Event { observation, .. } => payload_scope(observation),
         _ => None,
     }

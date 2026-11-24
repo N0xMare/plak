@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use plakous_host_protocol::ProtocolExtension;
 use plakous_host_protocol::views::transcript::{
-    Lane, RowKey, ThinkingRow, ToolItem, TranscriptItem, TranscriptRow,
+    Lane, RowKey, ThinkingRow, ToolItem, TranscriptItem, TranscriptRow, TranscriptStreamDelta,
 };
 
 use crate::surface_protocol::HostEvent;
@@ -16,6 +16,8 @@ pub(super) struct LiveRows {
     pub(super) copied_rows: usize,
     pending: BTreeMap<RowKey, TranscriptRow>,
     assistant: Option<RowKey>,
+    /// The current keyed run and whether a scalar has crossed its byte cap.
+    keyed_tail: Option<(RowKey, bool)>,
     /// Call id to its live-updatable row: a runtime-lane row or a live
     /// (provisional) one. A committed product-lane row, an operator notice or
     /// an imported row, is never updated by call id.
@@ -41,6 +43,7 @@ impl LiveRows {
     pub(super) fn reset(&mut self, rows: &BTreeMap<RowKey, TranscriptRow>) {
         self.pending.clear();
         self.assistant = None;
+        self.keyed_tail = None;
         self.thinking.clear();
         self.request_floor = None;
         self.calls.clear();
@@ -70,6 +73,87 @@ impl LiveRows {
         });
         self.thinking.retain(|_, (key, _)| rows.contains_key(key));
         self.assistant = self.assistant.filter(|key| rows.contains_key(key));
+        self.keyed_tail = self.keyed_tail.filter(|(key, _)| rows.contains_key(key));
+    }
+
+    pub(super) fn open_keyed_run(
+        &mut self,
+        location: Option<&str>,
+    ) -> (RowKey, Option<LiveChange>) {
+        let active = match location {
+            None => self.assistant,
+            Some(location) => self.thinking.get(location).map(|(key, _)| *key),
+        };
+        if let Some((key, _)) = self.keyed_tail
+            && active == Some(key)
+        {
+            return (key, None);
+        }
+        let key = self.key();
+        self.assistant = location.is_none().then_some(key);
+        self.keyed_tail = Some((key, false));
+        let row = if let Some(location) = location {
+            self.thinking
+                .insert(location.to_owned(), (key, Instant::now()));
+            TranscriptRow::Thinking(ThinkingRow {
+                location_key: location.to_owned(),
+                text: String::new(),
+                elapsed_ms: None,
+            })
+        } else {
+            TranscriptRow::assistant("")
+        };
+        self.pending.insert(key, row);
+        // Publish the row's type before its first bytes, along with every
+        // earlier append so this patch can reconcile all preceding streams.
+        (
+            key,
+            Some(LiveChange {
+                upserts: self.drain_pending(),
+                deletes: Vec::new(),
+            }),
+        )
+    }
+
+    pub(super) fn append_keyed(
+        &mut self,
+        key: RowKey,
+        delta: &str,
+        rows: &BTreeMap<RowKey, TranscriptRow>,
+    ) -> Option<TranscriptStreamDelta> {
+        let (_, capped) = self.keyed_tail.as_mut()?;
+        if *capped {
+            return None;
+        }
+        let row = match self.pending.entry(key) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(rows.get(&key)?.clone())
+            }
+        };
+        let (text, limit) = match row {
+            TranscriptRow::Assistant { text } => (text, super::repair::MAX_LIVE_ASSISTANT_BYTES),
+            TranscriptRow::Thinking(thinking) => (
+                &mut thinking.text,
+                crate::sessions::MAX_THINKING_ACTIVITY_BYTES,
+            ),
+            _ => return None,
+        };
+        let offset = text.len() as u64;
+        let accepted = delta.floor_char_boundary(limit.saturating_sub(text.len()));
+        *capped = accepted < delta.len();
+        let text_delta = delta.get(..accepted).filter(|text| !text.is_empty())?;
+        text.push_str(text_delta);
+        Some(TranscriptStreamDelta::Keyed {
+            row: key,
+            offset,
+            end: text.len() as u64,
+            text: text_delta.to_owned(),
+        })
+    }
+
+    pub(super) fn pending_row(&self, key: RowKey) -> Option<&TranscriptRow> {
+        self.pending.get(&key)
     }
 
     /// `None` means this observation has no transcript content; an empty

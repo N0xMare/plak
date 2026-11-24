@@ -1,6 +1,7 @@
 //! Reuse only the unchanged cases of tagged v12 DTOs during the draft.
 
 use plakous_host_protocol::wire;
+use plakous_host_protocol::{SessionObservation, views::transcript::TranscriptPatch};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -107,6 +108,17 @@ impl Cases for wire::RequestRefusal {
     const REPLACED: &'static [&'static str] = &["placement_refused"];
 }
 
+impl TryFrom<wire::RequestRefusal> for super::RequestRefusal {
+    type Error = wire::RequestRefusal;
+
+    fn try_from(refusal: wire::RequestRefusal) -> Result<Self, Self::Error> {
+        if matches!(refusal, wire::RequestRefusal::PlacementRefused { .. }) {
+            return Err(refusal);
+        }
+        Ok(Self::Shared(Shared(refusal)))
+    }
+}
+
 pub type SharedPlacementReason = Shared<wire::PlacementReason>;
 impl Cases for wire::PlacementReason {
     const NAME: &'static str = "SharedPlacementReason";
@@ -122,6 +134,15 @@ impl Cases for console::HostResponse {
 }
 
 pub type SharedObservation = Shared<wire::FramedObservation<PlakExtension>>;
+
+impl From<TranscriptPatch> for super::Observation {
+    fn from(patch: TranscriptPatch) -> Self {
+        Self::Shared(Box::new(Shared(wire::FramedObservation(
+            SessionObservation::TranscriptPatch(patch),
+        ))))
+    }
+}
+
 impl Cases for wire::FramedObservation<PlakExtension> {
     const NAME: &'static str = "SharedObservation";
     const TAG: &'static str = "kind";

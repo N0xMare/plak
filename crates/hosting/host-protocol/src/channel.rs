@@ -32,6 +32,7 @@ use crate::views::transcript::{NoticeTone, TranscriptRow, TranscriptScope, Trans
 
 mod replay;
 mod stops;
+use replay::keyed_append_scope;
 
 const AGENT_OBSERVATION_SHARE: usize = OBSERVATION_QUEUE_CAPACITY / 4;
 
@@ -71,7 +72,7 @@ fn coalesce_stream(pending: &mut TranscriptStreamDelta, delta: &TranscriptStream
             pending.clone_from(tool);
             true
         }
-        _ => false,
+        (pending, delta) => replay::coalesce_keyed(pending, delta),
     }
 }
 
@@ -1328,7 +1329,7 @@ impl<P: ProtocolExtension> ObservationSender<P> {
     }
 
     fn note_transcript_gap(&self, event: &SessionObservation<P>) {
-        if !transcript_observation(event) {
+        if !transcript_observation(event) || keyed_append_scope(event).is_some() {
             return;
         }
         let scope = match event {
@@ -1386,6 +1387,11 @@ impl<P: ProtocolExtension> ObservationSender<P> {
         mut event: SessionObservation<P>,
         queue: &mut VecDeque<SessionObservation<P>>,
     ) -> Result<(), SessionObservation<P>> {
+        if keyed_append_scope(&event)
+            .is_some_and(|scope| self.transcript_resnapshot_required_for(scope))
+        {
+            return Err(event);
+        }
         if coalesce_delta(queue.back_mut(), &event) {
             return Ok(());
         }
@@ -1453,6 +1459,10 @@ impl<P: ProtocolExtension> ObservationSender<P> {
             };
             if let Some(evicted) = queue.remove(index) {
                 self.note_transcript_gap(&evicted);
+                if let SessionObservation::TranscriptPatch(patch) = &evicted {
+                    // The evicted patch could have opened one of these rows.
+                    queue.retain(|queued| keyed_append_scope(queued) != Some(&patch.scope));
+                }
                 if correlation_receipt(&evicted) {
                     self.0.correlation_gap.store(true, Ordering::Release);
                 }

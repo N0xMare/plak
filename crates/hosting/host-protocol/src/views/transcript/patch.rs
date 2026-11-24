@@ -24,6 +24,20 @@ pub enum TranscriptStreamDelta {
     },
     /// The latest live tool presentation.
     Tool(Box<ToolItem>),
+    /// Internal keyed append for the product's draft transcript projection.
+    /// Neither the v12 framed wire nor JSONL encodes it.
+    #[serde(skip_deserializing)]
+    #[schemars(skip)]
+    Keyed {
+        /// The provisional assistant or thinking row.
+        row: RowKey,
+        /// Byte offset before this append.
+        offset: u64,
+        /// Byte offset after this append.
+        end: u64,
+        /// The appended UTF-8 at scalar boundaries.
+        text: String,
+    },
 }
 use crate::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, PresentationError, PresentationSnapshot, row_bytes,

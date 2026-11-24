@@ -2,10 +2,52 @@
 
 use super::{
     IntentDelivery, IntentSendError, IntentSender, OBSERVATION_QUEUE_CAPACITY, ObservationSender,
-    ProtocolExtension, QueuedIntent, SessionIntent, SessionObservation, TranscriptScope, VecDeque,
+    ProtocolExtension, QueuedIntent, SessionIntent, SessionObservation, TranscriptScope,
+    TranscriptStreamDelta, VecDeque, append_delta,
 };
 
 const ROOT_ATTACHMENT_REPAIR: &str = "root-attachment-repair";
+
+pub(super) fn keyed_append_scope<P: ProtocolExtension>(
+    event: &SessionObservation<P>,
+) -> Option<&TranscriptScope> {
+    match event {
+        SessionObservation::TranscriptStream {
+            scope,
+            delta: TranscriptStreamDelta::Keyed { .. },
+        } => Some(scope),
+        _ => None,
+    }
+}
+
+pub(super) fn coalesce_keyed(
+    pending: &mut TranscriptStreamDelta,
+    delta: &TranscriptStreamDelta,
+) -> bool {
+    match (pending, delta) {
+        (
+            TranscriptStreamDelta::Keyed {
+                row: pending_row,
+                end: pending_end,
+                text: pending_text,
+                ..
+            },
+            TranscriptStreamDelta::Keyed {
+                row,
+                offset,
+                end,
+                text,
+            },
+        ) if pending_row == row && pending_end == offset => {
+            if !append_delta(pending_text, text) {
+                return false;
+            }
+            *pending_end = *end;
+            true
+        }
+        _ => false,
+    }
+}
 
 impl<P: ProtocolExtension> IntentDelivery<P> {
     /// This repair was requested by the attachment service, not the wire peer.

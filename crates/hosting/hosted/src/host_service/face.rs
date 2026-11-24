@@ -166,7 +166,7 @@ impl<P: ProtocolExtension> HostService<P> {
     ) -> (FaceSender<P>, FaceReceiver<P>) {
         let attachment = {
             let mut state = self.lock();
-            let (id, attachment, _) = self.admission(&mut state, None, Face::Local);
+            let (id, attachment, _) = self.admission(&mut state, None, Face::Local, false);
             state.insert_face(id, attachment);
             id
         };
@@ -262,7 +262,7 @@ impl<P: ProtocolExtension> FaceReceiver<P> {
         let service = HostService::serving(None, unnamed(), usize::MAX);
         let attachment = {
             let mut state = service.lock();
-            let (id, attachment, _) = service.admission(&mut state, None, Face::Local);
+            let (id, attachment, _) = service.admission(&mut state, None, Face::Local, false);
             state.insert_face(id, attachment);
             id
         };

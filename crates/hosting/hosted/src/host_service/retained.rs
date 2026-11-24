@@ -8,7 +8,7 @@ use plakous_host_protocol::views::{PresentationSnapshot, transcript::TranscriptP
 use super::queue::MAX_QUEUE_BYTES;
 use super::{
     Face, ObservationClass, ProtocolExtension, SessionObservation, Snapshot, TranscriptScope,
-    same_kind,
+    attachment::keyed_append_scope, same_kind,
 };
 
 const MAX_PATCHES: usize = 64;
@@ -57,13 +57,14 @@ impl<P: ProtocolExtension> Payload<P> {
         }
     }
 
-    pub(super) const fn is_root_preview(&self) -> bool {
-        matches!(
-            self,
+    pub(super) fn is_root_preview(&self) -> bool {
+        match self {
             Self::Other(
-                SessionObservation::AssistantDelta(_) | SessionObservation::ReasoningDelta { .. }
-            )
-        )
+                SessionObservation::AssistantDelta(_) | SessionObservation::ReasoningDelta { .. },
+            ) => true,
+            Self::Other(event) => keyed_append_scope(event) == Some(&TranscriptScope::Root),
+            _ => false,
+        }
     }
 
     pub(super) fn received_by(&self, face: Face) -> bool {

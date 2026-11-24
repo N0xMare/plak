@@ -44,6 +44,15 @@ pub fn resync_transcript<P: plakous_host_protocol::ProtocolExtension>(
     sender.resync_transcript(scope)
 }
 
+/// Run a root attachment repair intent through the real publisher.
+#[must_use]
+pub fn repair_root_attachment<P: plakous_host_protocol::ProtocolExtension>(
+    sender: &Sender<P>,
+    delivery: &plakous_host_protocol::IntentDelivery<P>,
+) -> bool {
+    sender.repair_attachment(delivery)
+}
+
 /// A surface that answers every product intent by recording it.
 #[derive(Debug, Default)]
 pub struct RecordingSurface {

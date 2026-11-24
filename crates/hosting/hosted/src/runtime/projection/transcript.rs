@@ -10,10 +10,12 @@ use plakous_host_protocol::views::transcript::{
     Lane, RowKey, TranscriptItem, TranscriptPatch, TranscriptRow, TranscriptScope, TranscriptState,
 };
 
+use crate::runtime::{LiveRowReadError, LiveRowSlice};
 use crate::surface_protocol::{HostEvent, HostEventSender};
 
 mod live;
 mod repair;
+pub(in crate::runtime) use repair::provisional;
 
 fn truncation_key(scope: &TranscriptScope) -> RowKey {
     match scope {
@@ -56,6 +58,7 @@ fn apply_bounded(state: &mut TranscriptState, patch: &mut TranscriptPatch) -> bo
 
 #[derive(Default)]
 pub(in crate::runtime) struct Presentations {
+    keyed_root: bool,
     // One root and at most the one agent this face serves. Revisions remain
     // monotonic across replacements, so a retired serve cannot share a baseline.
     states: BTreeMap<TranscriptScope, TranscriptState>,
@@ -70,6 +73,33 @@ pub(in crate::runtime) struct Presentations {
 }
 
 impl Presentations {
+    pub(in crate::runtime) fn keyed_root() -> Self {
+        Self {
+            keyed_root: true,
+            ..Self::default()
+        }
+    }
+
+    pub(in crate::runtime) const fn emits_keyed_root(&self) -> bool {
+        self.keyed_root
+    }
+
+    pub(in crate::runtime) fn root_row_slice(
+        &self,
+        key: RowKey,
+        offset: u64,
+    ) -> Result<LiveRowSlice, LiveRowReadError> {
+        let root = TranscriptScope::Root;
+        let body = self
+            .live
+            .get(&root)
+            .and_then(|live| live.pending_row(key))
+            .or_else(|| self.states.get(&root)?.items().get(&key))
+            .and_then(|row| repair::live_body(key, row))
+            .ok_or(LiveRowReadError::RowGone)?;
+        repair::row_slice(body, offset)
+    }
+
     pub(in crate::runtime) fn replay_root<P: ProtocolExtension>(
         &mut self,
         sink: &HostEventSender<P>,
@@ -395,6 +425,15 @@ impl Presentations {
         if !attached && !matches!(event, HostEvent::Row(_)) {
             return true;
         }
+        if self.keyed_root && scope == TranscriptScope::Root {
+            match event {
+                HostEvent::AssistantDelta(text) => return self.stream_root(None, text, sink),
+                HostEvent::ReasoningDelta { location_key, text } => {
+                    return self.stream_root(Some(location_key), text, sink);
+                }
+                _ => {}
+            }
+        }
         let Some(changes) = self
             .live
             .entry(scope.clone())
@@ -422,6 +461,37 @@ impl Presentations {
             return true;
         };
         self.apply_live_change(scope, changes, sink)
+    }
+
+    fn stream_root<P: ProtocolExtension>(
+        &mut self,
+        location: Option<&str>,
+        text: &str,
+        sink: &HostEventSender<P>,
+    ) -> bool {
+        if text.is_empty() {
+            return true;
+        }
+        let scope = TranscriptScope::Root;
+        let (key, opening) = self
+            .live
+            .entry(scope.clone())
+            .or_default()
+            .open_keyed_run(location);
+        if let Some(opening) = opening
+            && !self.apply_live_change(scope.clone(), opening, sink)
+        {
+            return false;
+        }
+        let Some(delta) = self
+            .live
+            .get_mut(&scope)
+            .and_then(|live| live.append_keyed(key, text, self.states.get(&scope)?.items()))
+        else {
+            return true;
+        };
+        sink.send(ContentEvent::TranscriptStream { scope, delta })
+            .is_ok()
     }
 
     fn apply_live_change<P: ProtocolExtension>(
@@ -504,6 +574,10 @@ impl Presentations {
             self.resync(&scope, sink);
         }
     }
+}
+
+pub(in crate::runtime) fn live_row_len(item: &TranscriptItem) -> Option<u64> {
+    repair::live_body(item.key, &item.row).map(|body| body.len() as u64)
 }
 
 /// The top product-lane ordinals of every anchor are the repair notices', one

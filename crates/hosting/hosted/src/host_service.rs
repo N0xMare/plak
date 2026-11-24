@@ -916,6 +916,33 @@ impl<P: ProtocolExtension> HostService<P> {
         face: Face,
         ask: bool,
     ) -> Result<AttachmentId, RequestRefusal> {
+        self.attach_projected(node, face, ask, false)
+    }
+
+    /// Attach a keyed root viewer at a fresh publication fence, rather than
+    /// reusing an older baseline plus its patch chain. Replay is a separate
+    /// product decision.
+    ///
+    /// # Errors
+    /// As [`Self::attach`]; an address outside this root is also refused.
+    pub fn attach_keyed_root(
+        &self,
+        node: &NodeAddress,
+        face: Face,
+    ) -> Result<AttachmentId, RequestRefusal> {
+        if node != &self.root {
+            return Err(RequestRefusal::UnknownNode);
+        }
+        self.attach_projected(node, face, true, true)
+    }
+
+    fn attach_projected(
+        &self,
+        node: &NodeAddress,
+        face: Face,
+        ask: bool,
+        keyed_root: bool,
+    ) -> Result<AttachmentId, RequestRefusal> {
         if node.tree_id != self.root.tree_id {
             return Err(RequestRefusal::UnknownNode);
         }
@@ -928,7 +955,8 @@ impl<P: ProtocolExtension> HostService<P> {
         let (id, asked) = {
             let mut state = self.lock();
             let now = std::time::Instant::now();
-            let (id, mut attachment, asked) = self.admission(&mut state, Some(mailbox), face);
+            let (id, mut attachment, asked) =
+                self.admission(&mut state, Some(mailbox), face, keyed_root);
             if asked.is_some() {
                 attachment.await_baseline(&TranscriptScope::Root, now);
             }
@@ -962,6 +990,7 @@ impl<P: ProtocolExtension> HostService<P> {
         state: &mut State<P>,
         mailbox: Option<IntentSender<P>>,
         face: Face,
+        keyed_root: bool,
     ) -> (AttachmentId, Attachment<P>, Option<IntentSender<P>>) {
         let id = state.next_attachment;
         state.next_attachment += 1;
@@ -973,7 +1002,8 @@ impl<P: ProtocolExtension> HostService<P> {
             .cloned()
             .map(|(event, size)| (Payload::Other(event), size))
             .collect();
-        let fence_root_preview = mailbox.is_some() && !waiting && snapshot.root_preview_pending;
+        let fence_root_preview =
+            mailbox.is_some() && !waiting && (keyed_root || snapshot.root_preview_pending);
         let needs_baseline = !waiting && (snapshot.baseline.is_none() || fence_root_preview);
         if !needs_baseline && let Some(baseline) = &snapshot.baseline {
             items.extend(baseline.observations());

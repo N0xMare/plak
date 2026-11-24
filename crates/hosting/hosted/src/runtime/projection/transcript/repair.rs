@@ -6,7 +6,52 @@ use plakous_host_protocol::views::PresentationSnapshot;
 use plakous_host_protocol::views::presentation::{
     MAX_PRESENTATION_BYTES, MAX_SNAPSHOT_ROWS, row_bytes,
 };
-use plakous_host_protocol::views::transcript::{TranscriptItem, TranscriptRow};
+use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptRow};
+use plakous_host_protocol::wire::{MAX_LINE_BYTES, MAX_SNAPSHOT_ROW_BYTES};
+
+use crate::runtime::{LiveRowReadError, LiveRowSlice};
+
+// JSON can spend six bytes per body byte. Leave room for the frame envelope
+// and other upserts at a live boundary, including a sealed reasoning row, and
+// keep the encoded row within a snapshot page so a baseline never cuts it.
+pub(super) const MAX_LIVE_ASSISTANT_BYTES: usize = min(
+    MAX_LINE_BYTES / 6 - 128 * 1024,
+    (MAX_SNAPSHOT_ROW_BYTES - 128 * 1024) / 6,
+);
+
+const fn min(left: usize, right: usize) -> usize {
+    if left < right { left } else { right }
+}
+const ROW_SLICE_BYTES: usize = 64 * 1024;
+
+pub(super) fn live_body(key: RowKey, row: &TranscriptRow) -> Option<&str> {
+    if !provisional(key) {
+        return None;
+    }
+    match row {
+        TranscriptRow::Assistant { text } => Some(text),
+        TranscriptRow::Thinking(thinking) => Some(&thinking.text),
+        _ => None,
+    }
+}
+
+pub(in crate::runtime) const fn provisional(key: RowKey) -> bool {
+    key.anchor >= 1_u64 << 63 && matches!(key.lane, Lane::Product)
+}
+
+pub(super) fn row_slice(body: &str, offset: u64) -> Result<LiveRowSlice, LiveRowReadError> {
+    let start = usize::try_from(offset)
+        .ok()
+        .filter(|&start| body.is_char_boundary(start))
+        .ok_or(LiveRowReadError::InvalidOffset)?;
+    let end = body.floor_char_boundary(start.saturating_add(ROW_SLICE_BYTES));
+    Ok(LiveRowSlice {
+        offset,
+        end: end as u64,
+        text: body[start..end].to_owned(),
+        last: end == body.len(),
+    })
+}
 
 pub(super) fn snapshot(snapshot: PresentationSnapshot) -> PresentationSnapshot {
     let mut rows: BTreeMap<_, _> = snapshot

@@ -5,6 +5,8 @@
 
 #[cfg(test)]
 mod principal_tests;
+#[cfg(test)]
+mod protocol_13_tests;
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;

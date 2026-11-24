@@ -251,6 +251,7 @@ pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
 mod sender;
+pub use sender::{LiveRowReadError, LiveRowSlice, RootTranscript};
 pub(crate) mod step_hold;
 mod worker;
 pub use startup::spawn_deferred_host;
@@ -552,11 +553,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> Sender<P> {
             value,
             HostEvent::AssistantDelta(_) | HostEvent::ReasoningDelta { .. }
         ) {
-            let _ = presentations.observe(
+            let observed = presentations.observe(
                 plakous_host_protocol::views::transcript::TranscriptScope::Root,
                 &value,
                 &self.inner,
             );
+            if presentations.emits_keyed_root() {
+                return observed;
+            }
             return self.inner.send(value).is_ok();
         }
         let sent = self.inner.send(value.clone()).is_ok();

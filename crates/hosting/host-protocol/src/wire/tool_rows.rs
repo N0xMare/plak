@@ -192,6 +192,17 @@ where
     P::Intent: Serialize,
     P::Observation: Serialize,
 {
+    if matches!(
+        value,
+        SessionObservation::TranscriptStream {
+            delta: TranscriptStreamDelta::Keyed { .. },
+            ..
+        }
+    ) {
+        return Err(serde::ser::Error::custom(
+            "internal keyed transcript stream",
+        ));
+    }
     let mut encoded = serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
     let project = |encoded: &mut Value| -> Result<(), serde_json::Error> {
         match value {
