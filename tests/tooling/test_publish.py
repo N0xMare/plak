@@ -137,6 +137,7 @@ class PublishScriptTests(unittest.TestCase):
             "tools/gate/vcs_listing.py",
             "tools/gate/check_workspace.py",
             "tools/gate/plakous_policy.py",
+            "tools/gate/workspace_receipts.py",
         ):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)

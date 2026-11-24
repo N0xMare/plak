@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -699,6 +699,136 @@ class WorkspaceCheckCache(unittest.TestCase):
         self.assertEqual(self.drive(lambda: None, code=1), 1)
         self.assertEqual(self.calls, 1)
         self.assertFalse(checker.workspace_cache_path(self.root).exists())
+
+    def test_incremental_policy_matches_full_on_a_corpus_of_edits(self) -> None:
+        rules = {}
+        first = self.root / "src" / "lib.rs"
+        second = self.root / "src" / "other.rs"
+        first.parent.mkdir()
+        clean = "pub fn plain() {}\n"
+        first.write_text(clean)
+        second.write_text(clean)
+
+        def policy() -> int:
+            sources = {
+                f"src/{path.name}": path.read_text() for path in sorted(first.parent.glob("*.rs"))
+            }
+            errors = [
+                *checker.validate_tracked_hygiene(self.root),
+                *checker.validate_rust_file_policies("demo", sources),
+                *checker.validate_configuration_rules("demo", sources, rules),
+                *checker.validate_package_file_lints("demo", sources, {"src/lib.rs"}, {}),
+            ]
+            if errors:
+                print("\n".join(errors), file=sys.stderr)
+                return 1
+            checker._success_line = LINE
+            print(LINE)
+            return 0
+
+        def run(*, full: bool = False) -> tuple[int, str, str]:
+            out, err = StringIO(), StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = checker.check_root(self.root, full=full)
+            return code, out.getvalue(), err.getvalue()
+
+        with (
+            patch.object(checker, "_check_workspace", side_effect=policy),
+            patch.object(
+                checker, "validate_fixture_loops", wraps=checker.validate_fixture_loops
+            ) as loops,
+        ):
+            # Keep the check's invariant identifier, not the mock's identity.
+            loops.__name__ = "validate_fixture_loops"
+            self.assertEqual(run()[0], 0)
+            loops.reset_mock()
+            first.write_text(clean + "// innocuous edit\n")
+            incremental = run()
+            self.assertEqual(loops.call_count, 1)
+            self.assertEqual(set(loops.call_args.args[1]), {"src/lib.rs"})
+            self.assertEqual(incremental, run(full=True))
+
+            for contents, finding in (
+                ('const X: &str = include_str!("../../other");\n', "outside the package"),
+                ('const X: &str = "while true; do sleep 1; done";\n', "unbounded shell loop"),
+                ('fn f() { let _ = std::env::var("DEMO"); }\n', "placement debt"),
+                ("#[allow(clippy::too_many_lines)]\nfn f() {}\n", "exceeds its ceiling"),
+            ):
+                with self.subTest(finding=finding):
+                    second.write_text(contents)
+                    incremental = run()
+                    self.assertIn(finding, incremental[2])
+                    self.assertEqual(incremental, run(full=True))
+            rules.update({"env-sites": ["src/other.rs"], "reason": "fixture"})
+            second.write_text('fn f() { let _ = std::env::var("DEMO"); }\n')
+            self.assertEqual(run(), run(full=True))
+            self.assertEqual(run()[0], 0)
+            # The policy value is a fixture input, not a read by the real
+            # checker. Drop the whole-run hit to exercise its per-file key.
+            checker.workspace_cache_path(self.root).unlink()
+            rules.clear()
+            self.assertEqual(run(), run(full=True))
+            self.assertEqual(run()[0], 1)
+            second.rename(second.with_name("tests.rs"))
+            self.assertEqual(run(), run(full=True))
+            second.with_name("tests.rs").unlink()
+            receipt = self.target / "workspace-policy-receipts.json"
+            receipt.write_text("{")
+            loops.reset_mock()
+            self.assertEqual(run()[0], 0)
+            self.assertEqual(loops.call_count, 1)
+            self.assertEqual(run(), run(full=True))
+
+    def test_unstable_reads_after_reuse_rerun_full_and_write_nothing(self) -> None:
+        volatile = self.root / "volatile.txt"
+        volatile.write_text("prime")
+        workspace_receipt = checker.workspace_cache_path(self.root)
+        rule_receipt = workspace_receipt.with_name("workspace-policy-receipts.json")
+        runs: list[bool | None] = []
+        checked = 0
+
+        def rule() -> list[str]:
+            nonlocal checked
+            checked += 1
+            return []
+
+        def scan(*, unstable: bool = False) -> int:
+            volatile.read_bytes()
+            checker.source_check("fixture-rule", {"src/lib.rs": "fn f() {}"}, rule)
+            receipts = checker._source_scan.receipts
+            reused = None if receipts is None else receipts.reused
+            runs.append(reused)
+            if unstable and reused:
+                with open(volatile, "w", encoding="utf-8") as stream:
+                    stream.write("changed during the incremental scan")
+                volatile.read_bytes()
+                print("discarded partial output")
+                print("discarded partial diagnostic", file=sys.stderr)
+            checker._success_line = LINE
+            print(LINE)
+            return 0
+
+        self.assertEqual(self.drive(scan), 0)
+        before = {path: path.read_bytes() for path in (workspace_receipt, rule_receipt)}
+        volatile.write_text("miss the exact-run receipt")
+        out, err = StringIO(), StringIO()
+        with (
+            patch.object(checker, "_check_workspace", side_effect=lambda: scan(unstable=True)),
+            patch.object(
+                checker, "write_cached_success", wraps=checker.write_cached_success
+            ) as whole_write,
+            patch.object(checker.Receipts, "write", autospec=True) as rule_write,
+            redirect_stdout(out),
+            redirect_stderr(err),
+        ):
+            self.assertEqual(checker.check_root(self.root), 0)
+        whole_write.assert_not_called()
+        rule_write.assert_not_called()
+        self.assertEqual(runs, [False, True, None])
+        self.assertEqual(checked, 2)  # Prime and full rerun, not the attempt that reused.
+        self.assertEqual(out.getvalue(), LINE + "\n")
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_doubt_recomputes_instead_of_reading_a_receipt(self) -> None:
         digest = self.digest()

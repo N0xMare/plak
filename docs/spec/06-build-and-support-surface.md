@@ -637,6 +637,25 @@ stated. No run is recorded when the global digest or any observed path changed
 before the run finished, when one path was observed with two identities during
 the run, or when a walk could not read a directory.
 
+On an exact-run miss, the checker can still skip pure rules whose inputs
+are unchanged. A separate receipt,
+`${CARGO_TARGET_DIR:-$ROOT/target}/workspace-policy-receipts.json`, holds the
+same global digest, a checksum and a set of successful rule-input hashes.
+Each key includes the rule name, the applicable file or package identities,
+the paths and SHA-256 digests of the source bytes or text supplied to the rule,
+and any explicit policy inputs, such as allowances or ceilings. A
+package-wide rule includes all sources it receives. Only a rule with no
+findings adds a key; the receipt stores neither source text nor diagnostics.
+Discovery, filesystem checks and external commands still run on an exact-run
+miss. Missing, malformed or mismatched rule receipts authorize no skips.
+
+The checker writes either receipt only after a successful run with a stable
+global digest and observation. If a run reuses any rule receipt and cannot
+confirm stability, it discards that attempt's checker output and reruns the
+entire check without reading or writing receipts. Use
+`tools/gate/check_workspace.py --full-scan` to request that uncached check
+explicitly.
+
 The global digest is a SHA-256 over: `cargo --version`; `rustc -vV`; the
 absolute workspace root; every `CARGO_*` environment variable except
 `CARGO_TERM_COLOR`, `CARGO_TERM_PROGRESS_WHEN`, `CARGO_TERM_PROGRESS_WIDTH`,
@@ -644,7 +663,8 @@ absolute workspace root; every `CARGO_*` environment variable except
 `CREDENTIAL`, `SECRET` or `PASSWORD`, such as `CARGO_REGISTRY_TOKEN`), plus
 `RUSTC`, `RUSTFLAGS` and `RUSTUP_TOOLCHAIN` (an unset variable is the empty
 string); the bytes of `tools/gate/check_workspace.py`, `plakous_policy.py`,
-`vcs_listing.py` and `cargo_key.py`; the identity of `llvm-nm` and of `nm` on
+`vcs_listing.py`, `cargo_key.py` and `workspace_receipts.py`; the identity of `llvm-nm`
+and of `nm` on
 `PATH`, or absence; the identity of `$CARGO_HOME/config.toml` and
 `$CARGO_HOME/config` (`~/.cargo` when `CARGO_HOME` is unset) together with
 every ancestor `.cargo/config.toml` and `.cargo/config` from the workspace root

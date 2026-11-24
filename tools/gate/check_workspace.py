@@ -35,8 +35,8 @@ import stat
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from functools import lru_cache
 from pathlib import Path
 
@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cargo_key  # noqa: E402
 import vcs_listing  # noqa: E402
+from workspace_receipts import Receipts  # noqa: E402
 
 from plakous_policy import (  # noqa: E402
     ABOVE_FACADE_LAYERS,
@@ -3466,7 +3467,8 @@ def validate_cli_security_sources(package: str, sources: dict[str, str]) -> list
 class _SourceScan:
     """Filesystem snapshots belong to one checker invocation, never a later run."""
 
-    def __init__(self) -> None:
+    def __init__(self, receipts: Receipts | None) -> None:
+        self.receipts = receipts
         self.bytes: dict[Path, bytes] = {}
         self.text: dict[Path, str] = {}
         self.discoveries: dict[
@@ -3479,10 +3481,10 @@ _source_scan: _SourceScan | None = None
 
 
 @contextmanager
-def source_scan() -> Iterator[None]:
+def source_scan(receipts: Receipts | None = None) -> Iterator[None]:
     global _source_scan
     previous = _source_scan
-    _source_scan = _SourceScan()
+    _source_scan = _SourceScan(receipts)
     try:
         yield
     finally:
@@ -3496,6 +3498,35 @@ def source_scan() -> Iterator[None]:
             _cached_test_module_files,
         ):
             cached.cache_clear()
+
+
+def source_check(
+    rule: str, sources: dict[str, str], check: Callable[[], list[str]], *policy: object
+) -> list[str]:
+    receipts = _source_scan.receipts if _source_scan is not None else None
+    if receipts is None:
+        return check()
+    return receipts.check(
+        check, rule, [(path, receipts.source(data)) for path, data in sources.items()], *policy
+    )
+
+
+def each_source(
+    validator: Callable[..., list[str]],
+    package: str,
+    sources: dict[str, str],
+    *policy: Any,
+) -> list[str]:
+    # Only use this for validators whose file results are independent.
+    errors: list[str] = []
+    for path, data in sources.items():
+        one = {path: data}
+        errors.extend(
+            source_check(
+                validator.__name__, one, lambda: validator(package, one, *policy), package, *policy
+            )
+        )
+    return errors
 
 
 def _read_rust_bytes(path: Path) -> bytes:
@@ -4699,7 +4730,19 @@ def validate_configuration_rules(
             errors.append(f"cfg.{package}.{kind}-ceiling: expected nonnegative integer")
     if errors:
         return errors
-    debt = configuration_debt(package, sources, rule)
+    debt: dict[str, list[str]] = {"feature": [], "test-seam": [], "env": []}
+    for path, data in sorted(sources.items()):
+        one = {path: data}
+
+        def sites() -> list[str]:
+            found = configuration_debt(package, one, rule)
+            for kind, labels in found.items():
+                debt[kind].extend(labels)
+            # Only the empty result is reusable. Recount real debt, preserving
+            # its diagnostic detail and the package-wide ceiling.
+            return [label for labels in found.values() for label in labels]
+
+        source_check("configuration-sites", one, sites, package, rule)
     if (
         any(rule.get(f"{kind}-ceiling", 0) for kind in debt)
         and not str(rule.get("reason", "")).strip()
@@ -5011,12 +5054,28 @@ def package_lint_rule(package: Package) -> Any:
 def package_lint_inventory(
     package: Package, files: dict[str, str], repository: Path = ROOT
 ) -> dict[str, Any]:
+    return lint_ratchet_inventory(files, package_crate_roots(package, repository))
+
+
+def validate_package_file_lints(
+    name: str, files: dict[str, str], crate_roots: set[str], rule: Any
+) -> list[str]:
+    return source_check(
+        "lint-ratchet",
+        files,
+        lambda: validate_lint_ratchet(name, lint_ratchet_inventory(files, crate_roots), rule),
+        name,
+        sorted(crate_roots),
+        rule,
+    )
+
+
+def package_crate_roots(package: Package, repository: Path) -> set[str]:
     base = (repository / package.directory).resolve()
-    crate_roots = {
+    return {
         Path(os.path.relpath(Path(target["src_path"]).resolve(), base)).as_posix()
         for target in package.metadata.get("targets", [])
     }
-    return lint_ratchet_inventory(files, crate_roots)
 
 
 def validate_ratchet_clippy_thresholds(root: Path = ROOT) -> list[str]:
@@ -5692,16 +5751,34 @@ def hygiene_candidate_files(root: Path) -> list[str]:
 def validate_tracked_hygiene(
     root: Path = ROOT,
     private_names: frozenset[bytes] | None = None,
+    *,
+    listed: list[str] | None = None,
 ) -> list[str]:
     if private_names is None:
         private_names = load_hygiene_private_names(root)
     errors: list[str] = []
-    for relative in hygiene_candidate_files(root):
+    for relative in hygiene_candidate_files(root) if listed is None else listed:
         path = root / relative
         if path.is_symlink() or not path.is_file():
             continue
         data = _read_rust_bytes(path) if path.suffix == ".rs" else path.read_bytes()
-        for finding in hygiene_findings(relative, data, private_names):
+
+        def check() -> list[str]:
+            return hygiene_findings(relative, data, private_names)
+
+        receipts = _source_scan.receipts if _source_scan is not None else None
+        findings = (
+            receipts.check(
+                check,
+                "tracked-hygiene",
+                relative,
+                receipts.source(data),
+                [receipts.source(name) for name in sorted(private_names)],
+            )
+            if receipts is not None
+            else check()
+        )
+        for finding in findings:
             errors.append(f"{finding}: tracked files must not carry owner-specific content")
     return errors
 
@@ -5894,6 +5971,14 @@ def validate_package_local_includes(
     return errors
 
 
+def validate_rust_file_policies(package: str, sources: dict[str, str]) -> list[str]:
+    ordered = dict(sorted(sources.items()))
+    return [
+        *each_source(validate_package_local_includes, package, ordered),
+        *each_source(validate_fixture_loops, package, ordered),
+    ]
+
+
 def validate_publication(
     name: str,
     package_class: str,
@@ -5954,20 +6039,21 @@ def validate_publication(
     return errors
 
 
-def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[str, str]:
+def package_rust_files(
+    root: Path, package: Package, nested: set[str], *, listed: list[str] | None = None
+) -> dict[str, str]:
     """Tracked Rust files of one package, excluding nested package roots.
 
     Outside a git checkout (the musl container's source export holds exactly
     the tracked and nonignored untracked files) every `*.rs` file under the
     package directory except build output counts as tracked.
     """
-    listed = [
-        path
-        for path in vcs_listing.listed_files(root)
-        if path.startswith(f"{package.directory}/") and path.endswith(".rs")
-    ]
+    if listed is None:
+        listed = vcs_listing.listed_files(root)
     files: dict[str, str] = {}
-    for path in filter(None, listed):
+    for path in listed:
+        if not path.startswith(f"{package.directory}/") or not path.endswith(".rs"):
+            continue
         if any(path.startswith(f"{other}/") for other in nested):
             continue
         files[os.path.relpath(path, package.directory)] = read_rust_source(root / path)
@@ -6115,7 +6201,8 @@ def _check_workspace() -> int:
     supported_fixture_paths = {f"tests/fixtures/{fixture_name}" for fixture_name in fixtures}
     errors.extend(validate_workspace_excludes(root_workspace, supported_fixture_paths))
 
-    errors.extend(validate_tracked_hygiene(ROOT))
+    listed = hygiene_candidate_files(ROOT)
+    errors.extend(validate_tracked_hygiene(ROOT, listed=listed))
     errors.extend(validate_local_production_lints(workspace_manifest_tables(workspace)))
     errors.extend(validate_commit_trace_edge(workspace_manifest_tables(workspace)))
     publish_shape = load_publish_shape()
@@ -6133,7 +6220,7 @@ def _check_workspace() -> int:
     for name in COMMIT_TRACE_SOURCE_PREFIXES:
         sources, discovery_errors = package_sources(packages[name], ROOT)
         errors.extend(discovery_errors)
-        errors.extend(validate_commit_trace_sql(name, sources))
+        errors.extend(each_source(validate_commit_trace_sql, name, dict(sorted(sources.items()))))
 
     sources, discovery_errors = package_sources(packages["plakous-anthropic"], ROOT)
     errors.extend(discovery_errors)
@@ -6147,12 +6234,11 @@ def _check_workspace() -> int:
             for other in directories
             if other != package.directory and other.startswith(f"{package.directory}/")
         }
-        rust_files = package_rust_files(ROOT, package, nested)
-        errors.extend(validate_package_local_includes(name, rust_files))
-        errors.extend(validate_fixture_loops(name, rust_files))
+        rust_files = package_rust_files(ROOT, package, nested, listed=listed)
+        errors.extend(validate_rust_file_policies(name, rust_files))
         errors.extend(
-            validate_lint_ratchet(
-                name, package_lint_inventory(package, rust_files), package_lint_rule(package)
+            validate_package_file_lints(
+                name, rust_files, package_crate_roots(package, ROOT), package_lint_rule(package)
             )
         )
 
@@ -6282,17 +6368,44 @@ def _check_workspace() -> int:
     for package in workspace.in_layers(*ABOVE_FACADE_LAYERS):
         sources, discovery_errors = package_sources(package, ROOT)
         errors.extend(discovery_errors)
-        errors.extend(validate_product_session_authority_sources(package.name, sources))
-        if package.name == "plakd":
-            errors.extend(validate_product_update_hook_sources(sources))
-        errors.extend(validate_product_home_discovery(package.name, sources))
-        errors.extend(validate_cli_security_sources(package.name, sources))
         errors.extend(
-            validate_facade_only_sources(
-                package.name, sources, policy.edge_exceptions.get(package.name, ())
+            each_source(validate_product_session_authority_sources, package.name, sources)
+        )
+        if package.name == "plakd":
+            errors.extend(
+                source_check(
+                    "product-update-hooks",
+                    sources,
+                    lambda: validate_product_update_hook_sources(sources),
+                )
+            )
+        errors.extend(each_source(validate_product_home_discovery, package.name, sources))
+        errors.extend(
+            source_check(
+                "cli-security",
+                sources,
+                lambda: validate_cli_security_sources(package.name, sources),
+                package.name,
             )
         )
-        errors.extend(validate_module_rules(package, sources, policy.modules.get(package.name, {})))
+        errors.extend(
+            each_source(
+                validate_facade_only_sources,
+                package.name,
+                dict(sorted(sources.items())),
+                sorted(policy.edge_exceptions.get(package.name, ())),
+            )
+        )
+        module_rules = policy.modules.get(package.name, {})
+        errors.extend(
+            source_check(
+                "module-rules",
+                sources,
+                lambda: validate_module_rules(package, sources, module_rules),
+                package.name,
+                module_rules,
+            )
+        )
     for name in sorted(policy.modules):
         if name not in packages:
             errors.append(f"modules rule names unknown package {name!r}")
@@ -6315,7 +6428,9 @@ def _check_workspace() -> int:
             continue
         sources, discovery_errors = package_sources(package, ROOT)
         errors.extend(discovery_errors)
-        errors.extend(validate_neutral_sources(package.name, sources))
+        errors.extend(
+            each_source(validate_neutral_sources, package.name, dict(sorted(sources.items())))
+        )
     for name, path in NEUTRAL_PROVIDER_NAME_EXEMPTIONS:
         package = packages.get(name)
         if package is None or not package.neutral:
@@ -6332,17 +6447,14 @@ def _check_workspace() -> int:
 
     errors.extend(supported_target_atomic_polyfill_errors(ROOT))
 
-    def package_tree_linked(package: str, needle: str) -> bool:
+    for neutral in TRACING_FREE_PACKAGES:
         output = cargo_tree_output(
             ROOT,
-            ["-p", package, "-e", "normal"],
+            ["-p", neutral, "-e", "normal"],
             errors,
         )
-        return output is not None and needle in output
-
-    for neutral in TRACING_FREE_PACKAGES:
         for forbidden in ("tracing", "opentelemetry"):
-            if package_tree_linked(neutral, forbidden):
+            if output is not None and forbidden in output:
                 errors.append(f"{neutral} must not link {forbidden}")
     adjacency: dict[str, set[str]] = {
         name: package.dependency_names() & set(packages) for name, package in packages.items()
@@ -6391,6 +6503,7 @@ _CHECKER_SOURCES = (
     Path(__file__).resolve().parent / "plakous_policy.py",
     Path(__file__).resolve().parent / "vcs_listing.py",
     Path(__file__).resolve().parent / "cargo_key.py",
+    Path(__file__).resolve().parent / "workspace_receipts.py",
 )
 
 
@@ -6699,10 +6812,13 @@ def write_cached_success(
         return
 
 
-def check_root(root: Path) -> int:
+def check_root(root: Path, *, full: bool = False) -> int:
     """Run the checks at `root`, skipping them when the recorded reads are unchanged."""
     global _success_line
     _success_line = None
+    if full:
+        with source_scan():
+            return _check_workspace()
     try:
         digest = global_cache_digest(root)
     except _CacheDoubt:
@@ -6710,19 +6826,32 @@ def check_root(root: Path) -> int:
     if digest is not None and (cached := read_cached_success(root, digest)) is not None:
         print(cached)
         return 0
-    with recording_reads() as log:
-        with source_scan():
+    receipts = (
+        Receipts(workspace_cache_path(root).with_name("workspace-policy-receipts.json"), digest)
+        if digest is not None
+        else None
+    )
+    out, err = io.StringIO(), io.StringIO()
+    with recording_reads() as log, redirect_stdout(out), redirect_stderr(err):
+        with source_scan(receipts):
             code = _check_workspace()
         observed = _observation(log)
-    if code == 0 and digest is not None and _success_line is not None and not log.doubt:
+    stable = False
+    if digest is not None and not log.doubt:
         try:
-            if (
+            stable = (
                 global_cache_digest(root) == digest
                 and replay_observation(observed, root) == observed
-            ):
-                write_cached_success(root, digest, observed, _success_line)
+            )
         except _CacheDoubt:
             pass
+    if receipts is not None and receipts.reused and not stable:
+        return check_root(root, full=True)
+    sys.stdout.write(out.getvalue())
+    sys.stderr.write(err.getvalue())
+    if code == 0 and stable and receipts is not None and _success_line is not None:
+        receipts.write()
+        write_cached_success(root, receipts.identity, observed, _success_line)
     return code
 
 
@@ -6739,9 +6868,11 @@ def main() -> int:
     if sys.argv[1:] == ["--tighten-ceilings"]:
         with source_scan():
             return tighten_ceilings(load_workspace(ROOT))
+    if sys.argv[1:] == ["--full-scan"]:
+        return check_root(ROOT, full=True)
     if sys.argv[1:]:
         print(
-            "usage: check_workspace.py [--portable-crates | --wasm-libraries | --tighten-ceilings]",
+            "usage: check_workspace.py [--portable-crates | --wasm-libraries | --tighten-ceilings | --full-scan]",
             file=sys.stderr,
         )
         return 2
