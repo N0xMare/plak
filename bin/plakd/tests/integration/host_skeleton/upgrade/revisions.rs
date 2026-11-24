@@ -12,6 +12,7 @@ fn revision_forward_qualification_reads_two_durable_scripted_trees() {
         "durable_tree": true,
         "steps": [{"output": {"text": ANSWER}}]
     }));
+    let sessions = [(); 2].map(|()| seed_scripted_tree(&fixture));
     let image = replacement_image(&fixture).canonicalize().unwrap();
     let revision_image = "PLAK_TEST_STORE_REVISION_IMAGE";
     let mut source = start_env(
@@ -19,8 +20,6 @@ fn revision_forward_qualification_reads_two_durable_scripted_trees() {
         &[],
         &[(revision_image, image.to_str().unwrap().to_owned())],
     );
-    let sessions = [(); 2].map(|()| super::super::requests::seeded(&fixture, &source).1);
-
     let scratch = tempfile::tempdir_in(fixture.home()).unwrap();
     let service = scratch.path().join("service.json");
     write_private(
@@ -44,6 +43,35 @@ fn revision_forward_qualification_reads_two_durable_scripted_trees() {
     }
     assert_parallel_inspection(&command, &stores, &sessions);
     stop(&mut source);
+}
+
+fn seed_scripted_tree(fixture: &Fixture) -> String {
+    let consent = fixture.root.join("tree-seed-consent");
+    write_private(&consent, "y\n");
+    let run = fixture
+        .command()
+        .args([
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--effort",
+            "medium",
+            "--print-session-id",
+            "--",
+            "answer once",
+        ])
+        .stdin(std::fs::File::open(consent).unwrap())
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{run:?}");
+    String::from_utf8(run.stdout)
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("session_id="))
+        .unwrap()
+        .to_owned()
 }
 
 #[test]
