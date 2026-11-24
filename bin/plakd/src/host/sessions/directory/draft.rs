@@ -395,7 +395,7 @@ fn draft_row(
 }
 
 pub(super) fn preview(raw: String) -> Option<v13::SessionPreview> {
-    let redacted = plakous::tools::preview_redaction::text(&raw);
+    let redacted = plakous_hosted::sessions::redact_directory_text(&raw);
     let mut plain = String::new();
     let mut rest: &str = &redacted;
     while let Some(ch) = rest.chars().next() {
@@ -430,7 +430,7 @@ pub(super) fn preview(raw: String) -> Option<v13::SessionPreview> {
             _ => plain.push(ch),
         }
     }
-    let text = plakous::tools::preview_redaction::text(&plain)
+    let text = plakous_hosted::sessions::redact_directory_text(&plain)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");

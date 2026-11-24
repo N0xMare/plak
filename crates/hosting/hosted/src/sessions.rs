@@ -79,6 +79,12 @@ pub(crate) fn bound_subject(value: &str) -> String {
     bound_subject_to(value, 240)
 }
 
+/// Redact a directory preview before the product folds and byte-bounds it.
+#[must_use]
+pub fn redact_directory_text(text: &str) -> String {
+    plakous::tools::preview_redaction::text(text)
+}
+
 /// A tool or process subject as the live path stores it: redact, then bound
 /// to one line (spec 04 §5). The result is a fixed point of this function, so
 /// import runs the same function rather than a second copy.

@@ -6,7 +6,7 @@ use std::time::Duration;
 use plakd_wire_types::v13::{Cost, TreeCost};
 use plakous::model::{BranchId, SessionId};
 use plakous::sessions::SessionLocator;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags};
 
 use crate::home::paths::PlakPaths;
 
@@ -202,11 +202,7 @@ impl Scan {
         (session, branch): (SessionId, BranchId),
     ) -> rusqlite::Result<()> {
         let branch = branch.to_string();
-        let mut rows = query.query(params![
-            session.to_string(),
-            self.after,
-            TERMINALS_PER_READ + 1
-        ])?;
+        let mut rows = query.query((session.to_string(), self.after, TERMINALS_PER_READ + 1))?;
         for _ in 0..TERMINALS_PER_READ {
             let Some(row) = rows.next()? else {
                 self.complete = true;

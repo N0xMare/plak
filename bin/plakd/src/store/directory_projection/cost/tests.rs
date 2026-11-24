@@ -20,7 +20,7 @@ fn terminal(writer: &Connection, turn: &str, member: Member, reporting: u64, cos
     let loc = member.locator.unwrap();
     writer.execute(
         "INSERT OR IGNORE INTO recorded_terminals VALUES(?1,?2,?3,100,'openai/work','0','0','0','0','0','1',?4,?5)",
-        params![turn, loc.session_id().to_string(), loc.branch_id().to_string(), reporting.to_string(), cost],
+        (turn, loc.session_id().to_string(), loc.branch_id().to_string(), reporting.to_string(), cost),
     ).unwrap();
 }
 
@@ -109,7 +109,7 @@ fn indexed_reads_resume_without_resumming_and_checked_overflow_is_unknown() {
     let plan: String = connection
         .query_row(
             &format!("EXPLAIN QUERY PLAN {TERMINALS}"),
-            params!["fixture", 0, TERMINALS_PER_READ],
+            ("fixture", 0, TERMINALS_PER_READ),
             |row| row.get(3),
         )
         .unwrap();
