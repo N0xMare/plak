@@ -322,7 +322,7 @@ another session's jobs.
     r28.e39.p39.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 39
-      product.sqlite3             plakd intents and feed-derived views, generation 39, revision 40
+      product.sqlite3             plakd intents and feed-derived views, generation 39, revision 41
       subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       host.lock                   held by this build's `plakd host` for its life, naming its pid and binary (section 4.6); not state
@@ -626,11 +626,18 @@ remaining view state as one JSON document),
 `session_open_turn_views` (admitted roots keyed by session and turn id),
 `session_process_views` (process bookkeeping keyed by session and process
 operation id), and `transcript_rows` (lane 0 rows by `(anchor, lane, ordinal)`,
-with the unique call-id index). The three bookkeeping maps are not embedded
+with a unique call-id index and a partial speaker index for bounded newest
+assistant and user text lookups by session). The three bookkeeping maps are not embedded
 in `session_views.state`. Each projector commit upserts or deletes only their
 changed keys, in the same cursor-CAS transaction as the transcript and session
 state. Only the projector's commit writes these view tables; deleting all of
 them for a session is the rebuild. All keyed views cascade with the session.
+
+Product revision 41 adds the partial speaker index and admits the optional
+`directory_attention` field in `session_views.state` (§2.6). Revision-40
+readers refuse `PRAGMA user_version = 41` before decoding view JSON; accepting
+the additional field relies on this revision gate, not on older readers
+ignoring unknown fields. Opening revision 41 does not change the state key.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
@@ -2120,6 +2127,7 @@ view, and nothing is both.
 | Workflow requests: compact (with reason), fork, rebind (with selection), new (a new-session operation; recorded as `clear` before product 36), switch (with its selection: the rebind selection, the profile name, its root template and working set, the frozen roster's digest and, for a root whose tree has no rows, the frozen pending snapshot's exact bytes, which must decode as a snapshot under that digest; written by Switch now, section 4.4) | intent | workflow operation id; source locator | written immediately before submission; a definite synchronous no-commit answer permits live discard after the tail pass under the session CAS only if no fact exists, terminalizing the binding with no notice (rule 4); open withdraws a remaining request without a fact with one notice, never resubmits it (section 4.2 step 3) |
 | Workflow completion | view | `WorkflowAdmitted`, `WorkflowSettled` with the request's operation id; for new, the successor session's `SessionCreated` with the derived create operation id | admitted without settlement belongs to the runtime; settled ends the request; neither means never admitted |
 | Pause causes | intent-backed view | the facts that pause (a context-capacity or `RecoveryRequired` `TurnTerminal`, a session-wide `CommandRejected`, a `WorkflowSettled` of a scheduled pass that did not compact) and `pause_cause` intents the host writes for causes no fact carries (an unrecorded session-wide refusal, a failed wake preflight); a workflow fact joins its request by the request's operation id, never by the derived workflow identity | the newest applied cause, by anchor, for the restored note; drain itself is process-local and never stored |
+| Directory attention timestamps (`SessionViewState.directory_attention`, optional in `session_views.state`) | view | host-stamped feed commit time of a context-capacity, recovery-required, or quota-refused turn terminal | a pause timestamp applies only to the matching active pause anchor; a quota timestamp applies only on its own branch and clears when another root command is accepted. Missing timestamps do not change pause or recovery authority. |
 | Counters: root turns, tool calls, compactions | view | root `CommandAccepted`; the distinct call ids of effect `OperationAdvanced` facts and of the tool results `HistoryAppended` commits (so a call rejected before preparation counts once); each `WorkflowSettled { Compacted }` once, whatever its reason (endpoint or turn fence) | monotonic over the applied records; a successor starts from its source's values at the `Branched` record; after a `BehindRetention` rebuild they restart from zero |
 | Child-wake suppression | intent-backed view | `wake_suppression` intents the host writes on an idle interrupt and on a failed or discarded wake; the cancel of a running `HostWake` turn (`CommandAccepted` of a cancel naming it), a context-capacity `TurnTerminal` of a `HostWake` root, and a `QuotaExceeded` failed `TurnTerminal` of any root turn | suppressed from the newest such intent or fact until a later `CommandAccepted` of a `UserPrompt` root or of the exact new-turn command in a recorded root `handoff`/`owner_lost` continuation decision, provided no suppression intent between the decision and acceptance vetoes it; intent order is `(anchor, ordinal)` |
 | Agent attention acknowledgements | intent | `(tree, agent, attempt, attention)` | operator-authored presentation bookkeeping |

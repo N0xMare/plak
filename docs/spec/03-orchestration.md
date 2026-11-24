@@ -3596,7 +3596,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 
 ## 14. Persistence, reopen, and recovery
 
-Product state lives in `product.sqlite3` at generation **39**, revision **40**: intents and
+Product state lives in `product.sqlite3` at generation **39**, revision **41**: intents and
 feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds, a rebind request's optional filled choices, and the `last_root_turn` view a continue reads (chapter 02 §4.4.1). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at generation **11**,

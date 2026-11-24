@@ -114,6 +114,10 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     let staged = check_legacy_and_stage(&command, scratch.path(), &service);
     let stores = scratch.path().join("stores");
     assert_pending_read_refusal(&mut command());
+    assert!(has_index(
+        &stores.join("product.sqlite3"),
+        "transcript_rows_preview"
+    ));
     for (file, fixture_index) in [
         ("product.sqlite3", "product_revision_fixture"),
         ("subagents.sqlite3", "subagents_revision_fixture"),
@@ -152,7 +156,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(
         paths
             .state_dir()
-            .join("product.pre-revision-40.sqlite3")
+            .join("product.pre-revision-41.sqlite3")
             .exists()
     );
     assert!(

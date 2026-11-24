@@ -36,6 +36,7 @@ use plakous_offline_crash_harness::{
     scripted_runtime_binding_with_extensions, scripted_runtime_binding_with_telemetry,
     scripted_topology_runtime_binding,
 };
+use plakous_recursive_subagents_store::admission::{Revision, Schema};
 
 use crate::store::sessions as product_sessions;
 use crate::{product_agent, product_config, product_host, product_paths};
@@ -91,27 +92,25 @@ pub(crate) fn upgrade_state_key() -> Option<String> {
 }
 
 static STORE_REVISION_FIXTURE: AtomicBool = AtomicBool::new(false);
-const STORE_REVISION_DDL: &str =
-    "CREATE INDEX product_revision_fixture ON product_schema(fingerprint)";
+const FIXTURE_INDEX: &str = "CREATE INDEX product_revision_fixture ON product_schema(fingerprint)";
 
-pub(crate) fn product_store_schema(
-    base: plakous_recursive_subagents_store::admission::Schema,
-) -> plakous_recursive_subagents_store::admission::Schema {
-    if STORE_REVISION_FIXTURE.load(Ordering::Relaxed) {
-        plakous_recursive_subagents_store::admission::Schema {
-            revisions: &[
-                crate::store::schema::NATIVE_ULTRAFAST_REVISION,
-                plakous_recursive_subagents_store::admission::Revision {
-                    sql: STORE_REVISION_DDL,
-                    objects: &[("product_revision_fixture", STORE_REVISION_DDL)],
-                    fingerprint: "e156d5b66aaaffa97fe8c1aa8fa0e31c9c32d48a561d6a48dfc569d0ced0c1e5",
-                },
-            ],
-            ..base
-        }
-    } else {
-        base
+pub(crate) fn product_store_schema(base: Schema) -> Schema {
+    static REVISIONS: std::sync::OnceLock<Box<[Revision]>> = std::sync::OnceLock::new();
+    if !STORE_REVISION_FIXTURE.load(Ordering::Relaxed) {
+        return base;
     }
+    let revisions = REVISIONS.get_or_init(|| {
+        base.revisions
+            .iter()
+            .map(|revision| Revision { ..*revision })
+            .chain(std::iter::once(Revision {
+                sql: FIXTURE_INDEX,
+                objects: &[("product_revision_fixture", FIXTURE_INDEX)],
+                fingerprint: "2a438e8ec4944f49600aabe542fafbe7b6e6cda8afa6d5c0eb6cd981e3c41dcd",
+            }))
+            .collect()
+    });
+    Schema { revisions, ..base }
 }
 
 pub(crate) fn upgrade_reexec_probe_omitted() -> bool {
