@@ -1,6 +1,7 @@
 //! Subscription usage reads.
 
 use super::vertical::NativeFuture;
+use plakous_auth::custody::AccountFacts;
 
 mod cache;
 
@@ -50,28 +51,11 @@ impl NativeSubscriptions {
             .require_provider(provider)
             .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
         if let Some(gateway) = &self.gateway {
-            let facts = match self.gateway_facts(gateway, provider).await {
-                Ok(facts) => facts,
-                Err(NativeSubscriptionError::Transport(cause)) => {
-                    return Err(SubscriptionUsageUnavailable::Transport(cause));
-                }
-                Err(_) => return Err(SubscriptionUsageUnavailable::LocalState),
-            };
-            let encoded = serde_json::to_vec(&(
-                facts
-                    .profile
-                    .map(|profile| (profile.id, profile.contract_revision)),
-                facts
-                    .generation
-                    .map(plakous_auth::CredentialGeneration::get),
-                facts.account_binding.map(|binding| *binding.as_bytes()),
-                facts.selection_epoch_digest.map(|epoch| *epoch.as_bytes()),
-            ))
-            .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
-            return Ok(Some(plakous_model::sha256_bytes(&[
-                b"plak.console-observation.gateway.v1",
-                &encoded,
-            ])));
+            let facts = self
+                .gateway_facts(gateway, provider)
+                .await
+                .map_err(|error| gateway_usage_refusal(&error))?;
+            return gateway_revision(&facts).map(Some);
         }
         let state = self.state.clone();
         if !run_blocking(move || state.layout_exists())
@@ -95,11 +79,11 @@ impl NativeSubscriptions {
             &encoded,
         ])))
     }
-    /// Reads allowance once without login, token refresh or a refresh retry.
-    /// Console reads coalesce and may consume a fresh exact-fenced observation
-    /// produced by a legacy read. Legacy reads never consume this cache.
-    /// `before_get` is awaited only for a real GET; its output is retained as
-    /// the caller's concurrency permit until that read finishes.
+    /// Reads allowance without login, token refresh or a refresh retry.
+    /// Console reads coalesce under the exact account's current fence, and
+    /// under local custody can also reuse an observation from a legacy read.
+    /// Legacy reads never consume this cache. `before_get` is awaited only
+    /// on a miss and its output retained as the caller's concurrency permit.
     pub async fn subscription_usage_read_only<Permit>(
         &self,
         provider: NativeProvider,
@@ -116,8 +100,7 @@ impl NativeSubscriptions {
             return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
         }
         if let Some(gateway) = &self.gateway {
-            let _permit = before_get.await;
-            return Box::pin(self.gateway_usage(gateway, provider, false)).await;
+            return Box::pin(self.gateway_usage_read_only(gateway, provider, before_get)).await;
         }
         let state = self.state.clone();
         match run_blocking(move || state.layout_exists()).await {
@@ -157,7 +140,8 @@ impl NativeSubscriptions {
                 Ok(revision) if lock.verify().is_ok() => revision,
                 _ => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
             };
-            if let Some(observation) = entry.cached(&revision) {
+            if let Some(observation) = entry.cached(&cache::Revision::Local(revision.0, revision.1))
+            {
                 return observation;
             }
             if !cache::can_fetch() {
@@ -201,7 +185,7 @@ impl NativeSubscriptions {
             return self.usage_unavailable(SubscriptionUsageUnavailable::NotConnected);
         }
         if let Some(gateway) = &self.gateway {
-            return Box::pin(self.gateway_usage(gateway, provider, true)).await;
+            return Box::pin(self.gateway_usage(gateway, provider)).await;
         }
         let observation = Box::pin(self.read_usage_once(provider, false)).await;
         if matches!(
@@ -268,39 +252,84 @@ impl NativeSubscriptions {
         Box::pin(self.observe_usage_unlocked(provider, lock, reader)).await
     }
 
-    /// One allowance read under gateway custody: the gateway's facts admit
-    /// it and the read relays through the gateway. After an `Unauthorized`
-    /// reply `refresh` asks the gateway's single writer to refresh the
-    /// rejected generation and reads once more.
+    async fn ready_gateway_usage_facts(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        provider: NativeProvider,
+    ) -> Result<AccountFacts, SubscriptionUsageUnavailable> {
+        let facts = self
+            .gateway_facts(gateway, provider)
+            .await
+            .map_err(|error| gateway_usage_refusal(&error))?;
+        let status = Self::gateway_status_of(provider, &facts)
+            .map_err(|error| gateway_usage_refusal(&error))?;
+        if status.compatibility() != super::CompatibilityStatus::Current {
+            return Err(SubscriptionUsageUnavailable::Unqualified);
+        }
+        if status.credential() != NativeAuthStatus::Ready {
+            return Err(credential_reason(Some(status.credential())));
+        }
+        Ok(facts)
+    }
+
+    async fn read_gateway_usage_once(&self, provider: NativeProvider) -> SubscriptionUsageRead {
+        match self.usage_reader(provider).await {
+            Ok(reader) => reader.await,
+            Err(NativeSubscriptionError::Transport(cause)) => {
+                self.usage_unavailable(SubscriptionUsageUnavailable::Transport(cause))
+            }
+            Err(error) => self.usage_unavailable(reader_refusal(&error)),
+        }
+    }
+
+    async fn gateway_usage_read_only<Permit>(
+        &self,
+        gateway: &super::custody::SubscriptionGateway,
+        provider: NativeProvider,
+        before_get: impl Future<Output = Permit>,
+    ) -> SubscriptionUsageRead {
+        let Some(entry) =
+            cache::gateway_entry(self.state.observation_paths(), provider, &gateway.custodian)
+        else {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::Busy);
+        };
+        let _console = entry.console.lock().await;
+        let revision = async || {
+            let facts = self.ready_gateway_usage_facts(gateway, provider).await?;
+            if facts.expected_fence().is_none() {
+                return Err(SubscriptionUsageUnavailable::LocalState);
+            }
+            gateway_revision(&facts).map(cache::Revision::Gateway)
+        };
+        let before = match revision().await {
+            Ok(revision) => revision,
+            Err(reason) => return self.usage_unavailable(reason),
+        };
+        if let Some(observation) = entry.cached(&before) {
+            return observation;
+        }
+        let permit = before_get.await;
+        let observation = self.read_gateway_usage_once(provider).await;
+        drop(permit);
+        if !matches!(revision().await, Ok(after) if before == after) {
+            return self.usage_unavailable(SubscriptionUsageUnavailable::AccountChanged);
+        }
+        entry.publish(before, &observation);
+        observation
+    }
+
+    /// Legacy reads stay fresh and may ask the gateway's single writer to
+    /// refresh a rejected generation before trying again.
     async fn gateway_usage(
         &self,
         gateway: &super::custody::SubscriptionGateway,
         provider: NativeProvider,
-        refresh: bool,
     ) -> SubscriptionUsageRead {
-        let facts = match self.gateway_facts(gateway, provider).await {
+        let facts = match self.ready_gateway_usage_facts(gateway, provider).await {
             Ok(facts) => facts,
-            Err(NativeSubscriptionError::Transport(cause)) => {
-                return self.usage_unavailable(SubscriptionUsageUnavailable::Transport(cause));
-            }
-            Err(_) => return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState),
+            Err(reason) => return self.usage_unavailable(reason),
         };
-        let Ok(status) = Self::gateway_status_of(provider, &facts) else {
-            return self.usage_unavailable(SubscriptionUsageUnavailable::LocalState);
-        };
-        if status.compatibility() != super::CompatibilityStatus::Current {
-            return self.usage_unavailable(SubscriptionUsageUnavailable::Unqualified);
-        }
-        if status.credential() != NativeAuthStatus::Ready {
-            return self.usage_unavailable(credential_reason(Some(status.credential())));
-        }
-        let observation = match self.usage_reader(provider).await {
-            Ok(reader) => reader.await,
-            Err(NativeSubscriptionError::Transport(cause)) => {
-                return self.usage_unavailable(SubscriptionUsageUnavailable::Transport(cause));
-            }
-            Err(error) => return self.usage_unavailable(reader_refusal(&error)),
-        };
+        let observation = self.read_gateway_usage_once(provider).await;
         let rejected = matches!(
             observation,
             SubscriptionUsageRead::Unavailable {
@@ -308,8 +337,7 @@ impl NativeSubscriptions {
                 ..
             }
         );
-        let (true, true, Some(fence), Ok(slot)) = (
-            refresh,
+        let (true, Some(fence), Ok(slot)) = (
             rejected,
             facts.expected_fence(),
             self.custody_slot(provider),
@@ -391,6 +419,38 @@ impl NativeSubscriptions {
                 .ok()
                 .map(NativeSubscriptionStatus::credential),
         )
+    }
+}
+
+fn gateway_revision(facts: &AccountFacts) -> Result<[u8; 32], SubscriptionUsageUnavailable> {
+    let encoded = serde_json::to_vec(&(
+        facts.profile.as_ref().map(|profile| {
+            (
+                &profile.id,
+                &profile.contract_revision,
+                profile.consent == plakous_auth::custody::Consent::Current,
+            )
+        }),
+        facts
+            .generation
+            .map(plakous_auth::CredentialGeneration::get),
+        facts.account_binding.map(|binding| *binding.as_bytes()),
+        facts.selection_epoch_digest.map(|epoch| *epoch.as_bytes()),
+        facts.status == plakous_auth::custody::CustodyStatus::Ready,
+    ))
+    .map_err(|_| SubscriptionUsageUnavailable::LocalState)?;
+    Ok(plakous_model::sha256_bytes(&[
+        b"plak.console-observation.gateway.v1",
+        &encoded,
+    ]))
+}
+
+fn gateway_usage_refusal(error: &NativeSubscriptionError) -> SubscriptionUsageUnavailable {
+    match error {
+        NativeSubscriptionError::Transport(cause) => {
+            SubscriptionUsageUnavailable::Transport(*cause)
+        }
+        _ => SubscriptionUsageUnavailable::LocalState,
     }
 }
 

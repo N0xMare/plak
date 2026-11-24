@@ -5,8 +5,8 @@ use crate::account_choice::readiness;
 use crate::home::paths::PlakPaths;
 use plakd_wire_types::console::{
     AccountCustody, AccountStatus, Compatibility, Credential, Diagnostic, KeySource, KeyStatus,
-    NativeStatus, ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope, UnavailableCode,
-    ValidationCode, Vertical,
+    NativeIdentity, NativeStatus, ProfileNotice, ReadAction, ReadRefusal, ReadRemedy, ReadScope,
+    UnavailableCode, ValidationCode, Vertical,
 };
 use plakous::subscriptions::{NativeSubscriptions, SubscriptionPaths};
 use plakous_hosted::account::{AccountRef, Vertical as AccountVertical};
@@ -272,9 +272,9 @@ fn refresh_observation(
     })
 }
 
-pub(super) async fn status_rows(
+async fn status_rows(
+    console: &super::Console,
     application: &Reader,
-    paths: &PlakPaths,
     accounts: Vec<AccountRef>,
     as_of: &str,
     deadline: Instant,
@@ -284,7 +284,19 @@ pub(super) async fn status_rows(
     let mut fingerprints = Vec::new();
     for account in accounts {
         check(deadline, cancelled)?;
-        rows.push(status(application, paths, &account, as_of).await);
+        let mut row = status(application, &console.paths, &account, as_of).await;
+        if let Some(native) = &mut row.native
+            && native.credential == Credential::Ready
+            && native.compatibility == Compatibility::Current
+            && let Some(view) = console.allowance(&account, deadline).await.view
+            && (view.account_email.is_some() || view.plan_label.is_some())
+        {
+            native.identity = Some(NativeIdentity {
+                email: view.account_email,
+                plan: view.plan_label,
+            });
+        }
+        rows.push(row);
         if let Some(provider) = account.vertical().capability().native_provider()
             && let Ok(subscriptions) = application.subscriptions_for(&account)
             && let Ok(Some(fingerprint)) =
@@ -410,15 +422,7 @@ impl super::Console {
             return Err(validation("account_id", ValidationCode::UnknownAccount));
         }
         let roster = roster(&reader, &self.paths, selected.as_deref()).await?;
-        let rows = status_rows(
-            &reader,
-            &self.paths,
-            roster.accounts,
-            &at,
-            deadline,
-            cancelled,
-        )
-        .await?;
+        let rows = status_rows(self, &reader, roster.accounts, &at, deadline, cancelled).await?;
         Ok(plakd_wire_types::console::HostResponse::AccountsStatus {
             as_of: at,
             rows,

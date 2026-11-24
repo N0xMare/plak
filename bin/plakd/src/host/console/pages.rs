@@ -277,6 +277,12 @@ pub(super) async fn source_revision(
                     _ => hash.update(b"unavailable"),
                 }
             }
+        } else if custody.gateway().is_some() {
+            if let Ok(Some(key)) = custody.gateway_key_facts(account.as_str()).await
+                && let Some(fingerprint) = key.fingerprint
+            {
+                hash.update(fingerprint.as_bytes());
+            }
         } else if let Ok(Some(generation)) =
             crate::home::secrets::observation::revision(paths, account.as_str())
         {

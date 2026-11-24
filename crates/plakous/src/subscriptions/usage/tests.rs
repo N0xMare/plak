@@ -38,11 +38,12 @@ async fn console_joins_a_legacy_read_and_reuses_only_its_exact_fenced_observatio
     let mut changed = entry
         .pending()
         .ok_or("legacy GET registered before unlocking")?;
-    assert!(entry.cached(&(None, None)).is_none());
+    let revision = cache::Revision::Local(None, None);
+    assert!(entry.cached(&revision).is_none());
     finish.send(()).map_err(|()| "legacy stopped early")?;
     changed.changed().await?;
     let observation = legacy.await??;
-    assert_eq!(entry.cached(&(None, None)), Some(observation.clone()));
+    assert_eq!(entry.cached(&revision), Some(observation.clone()));
     assert_eq!(
         gets.load(Ordering::SeqCst),
         1,
@@ -50,14 +51,17 @@ async fn console_joins_a_legacy_read_and_reuses_only_its_exact_fenced_observatio
     );
     assert!(
         entry
-            .cached(&(Some("another-consent".into()), None))
+            .cached(&cache::Revision::Local(
+                Some("another-consent".into()),
+                None
+            ))
             .is_none()
     );
     let named = paths.for_named_account(provider, "other")?;
     assert!(
         cache::entry(&named, provider)
             .ok_or("named scope")?
-            .cached(&(None, None))
+            .cached(&revision)
             .is_none()
     );
     // Legacy never consults the populated console cache: its next read still

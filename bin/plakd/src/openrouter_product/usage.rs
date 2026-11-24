@@ -19,6 +19,25 @@ pub(crate) fn legacy(
     ))
 }
 
+pub(crate) async fn read_only(
+    paths: &PlakPaths,
+    custody: &crate::gateway::HostCustody,
+    account: &AccountRef,
+) -> VerticalObservation {
+    use plakous::gateway::custody::KeySource;
+    match custody.gateway_key_facts(account.as_str()).await {
+        Ok(Some(key)) if key.source == KeySource::Missing => {
+            return VerticalObservation::NotConnected;
+        }
+        Ok(_) => {}
+        Err(error) => {
+            return VerticalObservation::Unavailable(error.to_string());
+        }
+    }
+    let credentials = super::ProductOpenRouterCredentials::new(paths.clone(), custody.clone());
+    project(openrouter::read_openrouter_key_usage(&credentials, account).await)
+}
+
 fn project(probe: OpenRouterKeyUsageProbe) -> VerticalObservation {
     match probe {
         OpenRouterKeyUsageProbe::NotConfigured => VerticalObservation::NotConnected,

@@ -18,6 +18,8 @@ use super::{
 #[cfg(test)]
 use super::{Origin, parse_claude_oauth_token_grant};
 
+const CUSTODIED_PROFILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// App-owned manager for one explicit Claude selected-account slot.
 #[derive(Clone)]
 pub struct ClaudeNativeAuthManager {
@@ -384,9 +386,7 @@ impl ClaudeNativeAuthManager {
         }
     }
 
-    /// The usage read of a custodied login: the usage GET alone, its
-    /// `authorization` the custodian's field, relayed through the route's
-    /// client. Profile hydration is never relayed, so no e-mail is attached.
+    /// The pinned usage and optional profile GETs use the same custodied field.
     async fn custodied_usage(&self, login: &ClaudeCustodiedLogin) -> SubscriptionUsageRead {
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {
             observed_at: Timestamp::new(system_unix_seconds().unwrap_or(0), 0)
@@ -426,11 +426,23 @@ impl ClaudeNativeAuthManager {
         };
         let Ok(usage_request) = self
             .core
-            .oauth_control_get(CLAUDE_SUBSCRIPTION_USAGE_PATH, headers)
+            .oauth_control_get(CLAUDE_SUBSCRIPTION_USAGE_PATH, headers.clone())
         else {
             return unavailable(SubscriptionUsageUnavailable::LocalState);
         };
-        let (status, is_json, body) = match self.core.execute_usage(usage_request).await {
+        let profile_request = self
+            .core
+            .oauth_control_get(CLAUDE_SUBSCRIPTION_PROFILE_PATH, headers)
+            .ok();
+        let (usage_reply, profile_reply) =
+            tokio::join!(self.core.execute_usage(usage_request), async {
+                let request = profile_request?;
+                tokio::time::timeout(CUSTODIED_PROFILE_TIMEOUT, self.core.execute_usage(request))
+                    .await
+                    .ok()?
+                    .ok()
+            });
+        let (status, is_json, body) = match usage_reply {
             Ok(reply) => reply,
             Err(AuthBodyError::TooLarge) => {
                 return unavailable(SubscriptionUsageUnavailable::InvalidResponse);
@@ -463,7 +475,10 @@ impl ClaudeNativeAuthManager {
                     reason: SubscriptionUsageUnavailable::Stale,
                 }
             }
-            Ok(snapshot) => SubscriptionUsageRead::Snapshot(snapshot),
+            Ok(snapshot) => SubscriptionUsageRead::Snapshot(attach_claude_profile(
+                snapshot,
+                profile_reply.as_ref(),
+            )),
             Err(_) => SubscriptionUsageRead::Unavailable {
                 observed_at,
                 reason: SubscriptionUsageUnavailable::InvalidResponse,

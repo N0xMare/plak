@@ -776,13 +776,13 @@ fn paste(value: String) -> SecretText {
     SecretText::new(zeroize::Zeroizing::new(value)).unwrap()
 }
 
-fn loopback_listener() -> TcpListener {
+pub(super) fn loopback_listener() -> TcpListener {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
     listener
 }
 
-fn oauth_request(listener: &TcpListener, path: &str) -> TcpStream {
+pub(super) fn oauth_request(listener: &TcpListener, path: &str) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut peer = loop {
         match listener.accept() {
@@ -821,7 +821,7 @@ fn oauth_request(listener: &TcpListener, path: &str) -> TcpStream {
     peer
 }
 
-fn oauth_reply(mut peer: TcpStream, status: &str, body: &str) {
+pub(super) fn oauth_reply(mut peer: TcpStream, status: &str, body: &str) {
     write!(peer, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
 }
 

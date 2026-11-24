@@ -9,6 +9,9 @@ use plakous::model::{SubscriptionUsageRead, SubscriptionUsageUnavailable, Timest
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
+#[cfg(feature = "web")]
+mod gateway;
+
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn fixture() -> Result<(tempfile::TempDir, GatewayFixture, Arc<Console>), Box<dyn std::error::Error>>

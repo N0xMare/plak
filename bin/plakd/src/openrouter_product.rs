@@ -19,6 +19,7 @@ use plakous_hosted::{CliFailure, CliResult};
 
 pub(crate) mod usage;
 pub(crate) use usage::legacy as legacy_key_usage;
+pub(crate) use usage::read_only as read_key_usage;
 
 /// Plak's credentials: the product secret store under one product home.
 pub struct ProductOpenRouterCredentials {

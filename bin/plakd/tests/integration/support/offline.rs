@@ -291,20 +291,7 @@ impl Fixture {
     /// A `plakd` command bound to this fixture's home, workspace and script.
     pub(super) fn command(&self) -> Command {
         let command = self.base_command();
-        self.gateway.get_or_init(|| {
-            let socket = self.gateway_socket();
-            write_private(
-                &self.home().join("gateway.toml"),
-                &format!("socket = {:?}\n", socket.to_str().unwrap()),
-            );
-            let mut gateway = self.base_command();
-            gateway.env("PLAK_TEST_FAULTS", "fault=connect");
-            super::gateway_process::GatewayProcess::start(
-                &mut gateway,
-                &socket,
-                &self.root.join("gateway.log"),
-            )
-        });
+        self.start_gateway_with(&[]);
         let config = self.home().join("config.toml");
         if let Ok(mut text) = std::fs::read_to_string(&config)
             && let Ok(doc) = text.parse::<toml_edit::DocumentMut>()
@@ -320,6 +307,24 @@ impl Fixture {
             write_private(&config, &text);
         }
         command
+    }
+
+    pub(super) fn start_gateway_with(&self, environment: &[(&str, &str)]) {
+        self.gateway.get_or_init(|| {
+            let socket = self.gateway_socket();
+            write_private(
+                &self.home().join("gateway.toml"),
+                &format!("socket = {:?}\n", socket.to_str().unwrap()),
+            );
+            let mut gateway = self.base_command();
+            gateway.env("PLAK_TEST_FAULTS", "fault=connect");
+            gateway.envs(environment.iter().copied());
+            super::gateway_process::GatewayProcess::start(
+                &mut gateway,
+                &socket,
+                &self.root.join("gateway.log"),
+            )
+        });
     }
 
     pub(super) fn gateway_socket(&self) -> PathBuf {

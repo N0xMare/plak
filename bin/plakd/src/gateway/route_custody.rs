@@ -202,6 +202,19 @@ impl HostCustody {
         }
     }
 
+    pub(crate) async fn gateway_key_facts(
+        &self,
+        account: &str,
+    ) -> Result<Option<plakous::gateway::custody::KeyFacts>, plakous::gateway::custody::CustodyError>
+    {
+        use plakous::gateway::custody::{CredentialCustodian as _, CustodySlot};
+        let Some(gateway) = self.gateway() else {
+            return Ok(None);
+        };
+        let slot = CustodySlot::new(account)?;
+        Ok(gateway.custodian().facts(&slot).await?.key)
+    }
+
     /// Diagnose a missing key before provider construction. The route still
     /// checks the account and generation at each dispatch.
     pub(crate) async fn require_api_key(&self, account: &str) -> crate::CliResult<()> {

@@ -30,8 +30,8 @@ pub const ANTHROPIC_API_UPSTREAM_PINS: &[UpstreamPin] = &[
     },
 ];
 
-/// Claude subscription rows: OAuth Messages (`?beta=true`) and the usage
-/// read. The token endpoint and profile hydration are never relayed.
+/// Claude subscription rows: OAuth Messages (`?beta=true`), usage and
+/// account profile reads. The token endpoint is never relayed.
 pub const CLAUDE_UPSTREAM_PINS: &[UpstreamPin] = &[
     UpstreamPin {
         origin: CLAUDE_OAUTH_MESSAGES_ORIGIN,
@@ -45,6 +45,14 @@ pub const CLAUDE_UPSTREAM_PINS: &[UpstreamPin] = &[
         origin: CLAUDE_OAUTH_MESSAGES_ORIGIN,
         method: "GET",
         path: PinPath::Exact(crate::subscription_usage::CLAUDE_SUBSCRIPTION_USAGE_PATH),
+        query: PinQuery::None,
+        credential_headers: CLAUDE_CREDENTIAL_HEADERS,
+        pool_inference: false,
+    },
+    UpstreamPin {
+        origin: CLAUDE_OAUTH_MESSAGES_ORIGIN,
+        method: "GET",
+        path: PinPath::Exact(crate::subscription_usage::CLAUDE_SUBSCRIPTION_PROFILE_PATH),
         query: PinQuery::None,
         credential_headers: CLAUDE_CREDENTIAL_HEADERS,
         pool_inference: false,
@@ -116,17 +124,33 @@ mod tests {
             )
             .is_some()
         );
-        // Profile hydration and the token endpoint are never relayable.
-        for path in ["/api/oauth/profile", "/v1/oauth/token"] {
-            assert!(pinned(CLAUDE_UPSTREAM_PINS, "GET", origin, path).is_none());
+        let profile = "/api/oauth/profile";
+        assert!(pinned(CLAUDE_UPSTREAM_PINS, "GET", origin, profile).is_some());
+        for (pins, method, origin, path) in [
+            (CLAUDE_UPSTREAM_PINS, "POST", origin, profile),
+            (
+                CLAUDE_UPSTREAM_PINS,
+                "GET",
+                origin,
+                "/api/oauth/profile?x=1",
+            ),
+            (
+                CLAUDE_UPSTREAM_PINS,
+                "GET",
+                "https://platform.claude.com",
+                profile,
+            ),
+            (ANTHROPIC_API_UPSTREAM_PINS, "GET", origin, profile),
+            (
+                CLAUDE_UPSTREAM_PINS,
+                "POST",
+                "https://platform.claude.com",
+                "/v1/oauth/token",
+            ),
+        ] {
             assert!(
-                pinned(
-                    CLAUDE_UPSTREAM_PINS,
-                    "POST",
-                    "https://platform.claude.com",
-                    path
-                )
-                .is_none()
+                pinned(pins, method, origin, path).is_none(),
+                "{method} {origin}{path}"
             );
         }
     }

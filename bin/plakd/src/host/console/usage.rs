@@ -4,7 +4,7 @@ use plakd_wire_types::console::{
     ReadRemedy, ReadScope, UnavailableCode, UsageWindow,
 };
 use plakous_host_protocol::views::presentation::SessionLedgerView;
-use plakous_hosted::account::AccountRef;
+use plakous_hosted::account::{AccountRef, Vertical};
 use plakous_hosted::subscription_usage::{self, VerticalObservation};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -100,7 +100,7 @@ impl Console {
         })
     }
 
-    async fn allowance(&self, account: &AccountRef, deadline: Instant) -> Allowance {
+    pub(super) async fn allowance(&self, account: &AccountRef, deadline: Instant) -> Allowance {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let Some(budget) = remaining
             .checked_sub(super::limits::PROVIDER_RESERVE)
@@ -113,17 +113,32 @@ impl Console {
             );
         };
         let timeout = budget.min(super::limits::PROVIDER_DEADLINE);
-        if account.vertical() == plakous_hosted::account::Vertical::OpenRouter {
-            // The gateway holds the key; this host never reads it.
+        let Ok(observation) = tokio::time::timeout(timeout, self.observe_allowance(account)).await
+        else {
             return missing(
                 account,
-                "gateway",
-                "the gateway holds this key; run plakd usage for its allowance",
+                "deadline",
+                "provider allowance read took too long; retry",
+            );
+        };
+        observation.into_allowance(account)
+    }
+
+    async fn observe_allowance(&self, account: &AccountRef) -> AllowanceObservation {
+        if account.vertical() == Vertical::OpenRouter {
+            let Ok(_permit) = self.provider.acquire().await else {
+                return AllowanceObservation::Missing(
+                    "local_state",
+                    "allowance state could not be read",
+                );
+            };
+            return AllowanceObservation::Observed(
+                crate::openrouter_product::read_key_usage(&self.paths, &self.custody, account)
+                    .await,
             );
         }
         let Some(provider) = account.vertical().capability().native_provider() else {
-            return missing(
-                account,
+            return AllowanceObservation::Missing(
                 "not_supported",
                 "this API account has no provider allowance endpoint",
             );
@@ -131,7 +146,10 @@ impl Console {
         let subscriptions = accounts::reader_at(&self.state, &self.custody)
             .and_then(|reader| reader.subscriptions_for(account));
         let Ok(subscriptions) = subscriptions else {
-            return missing(account, "local_state", "allowance state could not be read");
+            return AllowanceObservation::Missing(
+                "local_state",
+                "allowance state could not be read",
+            );
         };
         #[cfg(test)]
         let subscriptions = self
@@ -140,20 +158,24 @@ impl Console {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .unwrap_or(subscriptions);
-        let Ok(observation) = tokio::time::timeout(
-            timeout,
-            subscriptions
-                .subscription_usage_read_only(provider, self.provider.clone().acquire_owned()),
-        )
-        .await
-        else {
-            return missing(
-                account,
-                "deadline",
-                "provider allowance read took too long; retry",
-            );
-        };
-        project(account, VerticalObservation::Native(observation))
+        let observation = subscriptions
+            .subscription_usage_read_only(provider, self.provider.acquire())
+            .await;
+        AllowanceObservation::Observed(VerticalObservation::Native(observation))
+    }
+}
+
+enum AllowanceObservation {
+    Observed(VerticalObservation),
+    Missing(&'static str, &'static str),
+}
+
+impl AllowanceObservation {
+    fn into_allowance(self, account: &AccountRef) -> Allowance {
+        match self {
+            Self::Observed(observation) => project(account, observation),
+            Self::Missing(code, detail) => missing(account, code, detail),
+        }
     }
 }
 
@@ -211,7 +233,7 @@ fn remedies(account: &AccountRef, observation: &VerticalObservation) -> Vec<Read
             ..
         }) => ReadAction::Login,
         VerticalObservation::RejectedKey { .. } | VerticalObservation::NotConnected
-            if account.vertical() == plakous_hosted::account::Vertical::OpenRouter =>
+            if account.vertical() == Vertical::OpenRouter =>
         {
             ReadAction::SetKey
         }

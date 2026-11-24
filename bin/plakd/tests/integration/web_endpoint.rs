@@ -29,6 +29,7 @@ use tungstenite::protocol::{Role, WebSocketConfig};
 use tungstenite::{Message, WebSocket};
 
 use super::offline_support::*;
+mod accounts;
 mod latency;
 mod lifecycle;
 mod root_stream;
@@ -41,6 +42,7 @@ const ANSWER: &str = "the web answer";
 /// address, never assigned).
 const DEVICE: &str = "192.0.2.10";
 pub(super) const CSP: &str = "default-src 'self'; frame-ancestors 'none'";
+const CONSOLE_CSP: &str = "default-src 'self'; script-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'";
 
 /// A running `plakd host --web`.
 struct Web {
@@ -461,7 +463,7 @@ fn a_tailnet_client_attaches_prompts_and_reads_the_answer() {
 }
 
 #[test]
-fn accounts_usage_keeps_recorded_totals_without_reading_the_gateways_key() {
+fn accounts_usage_keeps_recorded_totals_without_a_gateway_key() {
     let fixture = Fixture::new(&json!({
         "version": 1, "steps": [{"output": {"text": ANSWER}}]
     }));
@@ -515,7 +517,7 @@ fn accounts_usage_keeps_recorded_totals_without_reading_the_gateways_key() {
         &socket_dir(&fixture).join("plak.sock"),
         &[],
         &[],
-        "default-src 'self'; script-src 'self'; connect-src 'self'; require-trusted-types-for 'script'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+        CONSOLE_CSP,
     );
     assert!(ready, "{:?}", web.lines.try_iter().collect::<Vec<_>>());
     let mut socket = upgrade(&web, &cookie(&web));
@@ -546,7 +548,7 @@ fn accounts_usage_keeps_recorded_totals_without_reading_the_gateways_key() {
     let row = &usage["rows"][0];
     assert_eq!(row["account_id"], "openrouter", "{answer}");
     assert_eq!(
-        row["allowance"]["unavailable"]["code"], "gateway",
+        row["allowance"]["view"]["state"], "not_connected",
         "{answer}"
     );
     assert_eq!(row["recorded"]["calls"], "2", "{answer}");

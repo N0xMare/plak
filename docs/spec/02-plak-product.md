@@ -4661,8 +4661,8 @@ attachment or session admission. Exact canonical full account ids are required;
 no whitespace repair, aliases, sibling or default fallback is allowed. The
 roster includes all seven defaults, bounded named-account inventory and, for
 usage, retained historical account groups. Raw invalid directory entries count
-toward the 512-entry scan budget. Each provider GET is observational, one at a
-time per host with a timeout of at most 5 s, clipped to the remaining request
+toward the 512-entry scan budget. Provider allowance observations are read-only,
+one at a time per host with a timeout of at most 5 s, clipped to the remaining request
 budget minus a 1 s reserve for the after-check and paging. Cache hits do not
 acquire the provider permit; misses wait for it within that timeout. Once the
 allowance budget is exhausted, remaining accounts carry `deadline` allowance
@@ -4678,11 +4678,16 @@ per response, with explicit truncated-page or typed refusal rather than a
 fabricated complete list. No SQLite transaction is held between page requests.
 
 Allowance sharing is asymmetric. Console reads coalesce among themselves and
-may reuse an exact-account, consent-generation and credential-generation
-fenced observation from a legacy refresh for 30 s, or join its in-flight GET.
-Legacy reads never consume the console cache: they retain fresh provider reads,
-their existing per-session 60 s aging and their unchanged freshness law.
-A console read never refreshes a token or retries a rejected token with a grant.
+may reuse a native allowance observation for 30 s while the exact account,
+consent and credential fences still match. Under local custody they may also
+reuse an observation from a legacy refresh or join its in-flight read.
+Native account status takes email and plan from that same read; it leaves
+identity absent if neither field is available. Legacy reads never consume the
+console cache: they retain fresh provider reads, their existing per-session 60 s
+aging and their unchanged freshness law. A console read never refreshes a token
+or retries a rejected token with a grant. OpenRouter allowance reads only the
+exact key's `GET /api/v1/key` (relayed through the gateway under gateway custody),
+never the account Credits endpoint.
 
 Wire v2 is the framed host protocol. The closed JSONL projection in section
 4.3 remains a separate surface. Neutral frames, intent/observation types and

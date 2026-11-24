@@ -1937,9 +1937,10 @@ its provider's exact pin rows, compared on the logical URL's origin, method,
 path and query rule, with the custodied header names equal to the row's;
 an off-table origin, path, method or query, a reserved or hop-by-hop header,
 a plain entry reusing a custodied name and a malformed header are refused
-before any upstream byte. Token, device, JWKS, userinfo, discovery and
-profile endpoints are never relayable. The caller opens a fresh HTTP/1.1
-connection for each gateway request; a lost reply after possible admission
+before any upstream byte. Token, device, JWKS, userinfo and OAuth discovery
+endpoints are never relayable. The only profile pin is the Claude
+subscription allowance's read-only account profile. The caller opens a fresh
+HTTP/1.1 connection for each gateway request; a lost reply after possible admission
 is not proof of an unsent request and does not authorize a relay-client
 resend. The gateway follows no redirect (a 3xx is relayed unchanged) and
 never retries an upstream request. An idle upstream socket may be reused

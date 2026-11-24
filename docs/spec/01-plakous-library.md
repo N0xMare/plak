@@ -6258,11 +6258,13 @@ tables, including OpenRouter's per-model endpoint list and the SuperGrok
 credits read). A templated path segment admits only the slug the send sites
 emit (ASCII letters, digits, `-`, `_`, `.` and the `%3A` escape), never `.`
 or `..` and no other escape, so no segment decodes to a separator or a dot
-segment; token, device, JWKS, userinfo, discovery and profile
-endpoints are never rows. `InProcessGateway` serves local custody to the
-process's own host (and a same-user Unix socket peer) over an in-memory
-duplex. A repository-only dial override (`plakous-http/fault-injection`,
-absent from product builds) maps a pinned origin to a loopback fixture
+segment. Token, device, JWKS, userinfo and OAuth discovery endpoints are
+never rows; the only profile row is the Claude subscription's
+`GET https://api.anthropic.com/api/oauth/profile` with no query.
+`InProcessGateway` serves local custody to the process's own host
+(and a same-user Unix socket peer) over an in-memory duplex. A repository-only
+dial override (`plakous-http/fault-injection`, absent from product builds) maps
+a pinned origin to a loopback fixture
 while every check still runs on the logical URL; the gateway's upstream
 client keeps its own transport fault plan, so upstream faults apply to the
 in-process gateway's upstream hop, and the relaying client applies only its
@@ -6380,9 +6382,11 @@ provider 401 asks `AfterRejection`
 for the rejected generation and selection, the operator's forced refresh is
 `Operator`, and nothing is resent by the gateway; whether the route
 re-dispatches stays the route's existing rule. The usage read relays the
-pinned usage GET (Claude's profile read is never relayed, so a custodied
-Claude allowance carries no e-mail) and, after an `Unauthorized` reply,
-asks `AfterRejection` once and reads again. Store operations (login,
+pinned usage GET. Claude's optional account-profile GET relays concurrently
+with the same credential fence and a shorter timeout. Its reply can enrich a
+successful usage observation, but a failed or slow profile read does not erase
+the meters. The legacy read, after an `Unauthorized` usage
+reply, asks `AfterRejection` once and reads again. Store operations (login,
 logout, revoke, consent, named-account listing and removal, and the upstream
 account fingerprint) refuse `NativeSubscriptionError::GatewayCustody`;
 they belong to the gateway. A caller with an explicit host-owned catalog cache
