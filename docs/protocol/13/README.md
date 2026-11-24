@@ -79,3 +79,11 @@ staging build will serve 13 only. Use that exact build's normal schema
 output and pair it with matching client artifacts before connecting. There
 is no negotiation or fallback. See the [host plan](host-plan.md) for the
 activation gate.
+
+The draft directory uses the latest retained assistant prose, or the latest
+retained user prompt if there is no assistant prose. The host redacts the
+preview, folds it to one plain-text line, and cuts at a UTF-8 boundary.
+Costs are measured USD micro-units: a root with unproven coverage is unknown,
+and an incomplete tree may report the known subtotal. Coverage depends on
+matching terminal records, attribution and retained evidence, not just the
+presence of a reported price.

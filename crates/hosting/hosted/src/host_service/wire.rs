@@ -1510,9 +1510,9 @@ mod session;
 mod slot;
 
 pub use host::{
-    AdmissionPause, Created, Creation, HostConnection, HostPrincipal, HostReadLimits, HostReadTask,
-    HostRequestContext, HostSessions, HostStepDrain, PickerProgress, SessionHost, StepDrainMonitor,
-    StoredSessionView,
+    AdmissionPause, Created, Creation, DirectorySlot, HostConnection, HostPrincipal,
+    HostReadLimits, HostReadTask, HostRequestContext, HostSessions, HostStepDrain, PickerProgress,
+    SessionHost, StepDrainMonitor, StoredSessionView,
 };
 pub use lines::{Line, LineSender, Lines, lines};
 pub use session::WireSession;

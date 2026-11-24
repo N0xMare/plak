@@ -864,7 +864,10 @@ fn commit_views(
             )
             .map_err(|error| super::write_error(error, "could not write a transcript row".to_owned()))?;
     }
-    Ok(Some(state_changed != 0 || next != expected))
+    let transcript_changed = !writes.upserts.is_empty() || !writes.deletes.is_empty();
+    Ok(Some(
+        state_changed != 0 || next != expected || transcript_changed,
+    ))
 }
 
 fn write_keyed<K: rusqlite::ToSql, V: serde::Serialize>(

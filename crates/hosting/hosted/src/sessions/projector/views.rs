@@ -243,6 +243,9 @@ pub struct SessionViewState {
     /// The newest fact-derived pause transition; `None` inside means a
     /// user prompt resumed the queue.
     pub pause: Option<Anchored<Option<PauseCause>>>,
+    /// Optional directory timestamps; old view images have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_attention: Option<Box<DirectoryAttention>>,
     /// The newest fact-derived child-wake transition: `true` suppresses.
     pub wake: Option<Anchored<bool>>,
     /// The counters.
@@ -279,7 +282,21 @@ pub struct SessionViewState {
     pub history_through: Option<u64>,
 }
 
+/// Durable observations used by the host directory, not pause authority.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryAttention {
+    /// Host commit time of a context-capacity or recovery pause and its anchor.
+    pub pause_at_ms: Option<Anchored<u64>>,
+    /// Branch and host commit time of an active quota refusal.
+    pub quota_at_ms: Option<(plakous::model::BranchId, u64)>,
+}
+
 impl SessionViewState {
+    pub(super) fn directory_attention_mut(&mut self) -> &mut DirectoryAttention {
+        self.directory_attention.get_or_insert_with(Box::default)
+    }
+
     /// Distinguishes a deliberately empty imported window from actual later pruning.
     pub fn observe_retained_from(&mut self, retained_from: u64) {
         if self

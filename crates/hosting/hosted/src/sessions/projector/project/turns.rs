@@ -92,6 +92,10 @@ impl Applier<'_> {
                     anchor,
                     value: Some(PauseCause::RecoveryRequired { turn_id: turn }),
                 });
+                self.views.state.directory_attention_mut().pause_at_ms = Some(Anchored {
+                    anchor,
+                    value: self.committed_at(),
+                });
             }
             _ => {}
         }
@@ -157,6 +161,10 @@ impl Applier<'_> {
                     turn_id: turn_id.to_string(),
                 }),
             });
+            self.views.state.directory_attention_mut().pause_at_ms = Some(Anchored {
+                anchor,
+                value: self.committed_at(),
+            });
         }
         // Spec 03 §8: a root whose route reported its quota exhausted would
         // only fail again, so mail does not wake it, whatever started the
@@ -168,6 +176,10 @@ impl Applier<'_> {
                 anchor,
                 value: true,
             });
+        }
+        if model_kind == Some(plakous::model::ModelErrorKind::QuotaExceeded) {
+            self.views.state.directory_attention_mut().quota_at_ms =
+                Some((self.record.header().branch_id, self.committed_at()));
         }
         Ok(())
     }

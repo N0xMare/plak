@@ -15,6 +15,9 @@ use super::views::{
 };
 use super::{ProductStore, decode_node, from_i64};
 
+#[cfg(feature = "web")]
+pub(crate) mod cost;
+
 type Stamp = (
     i64,
     i64,
@@ -134,7 +137,43 @@ pub(crate) struct DirectoryMetadata {
     pub(crate) effort: Option<String>,
     pub(crate) service_tier: Option<String>,
 }
+
+pub(crate) struct DirectoryActivity {
+    pub(crate) standing: plakous_hosted::runtime::RootStanding,
+    pub(crate) root: Option<AttentionReason>,
+    pub(crate) wakes: u32,
+    pub(crate) root_turns: u64,
+    pub(crate) retention_gap: bool,
+    pub(crate) pause_since: Option<u64>,
+    pub(crate) quota_since: Option<u64>,
+}
+
+const PREVIEW_TEXT: &str = "SELECT json_extract(row,'$.text') FROM transcript_rows
+    WHERE session_id=?1 AND json_extract(row,'$.kind')=?2
+      AND json_extract(row,'$.kind') IN ('assistant','user') AND json_extract(row,'$.text') <> ''
+    ORDER BY anchor DESC,ordinal DESC LIMIT 1";
+
 impl ProductStore {
+    /// Two bounded index seeks, in one snapshot. Do not join the operator
+    /// notice lane, which may contain arbitrary prose but is not a prompt.
+    pub(crate) fn directory_preview(&self, id: &str) -> Result<Option<String>, String> {
+        let tx = self
+            .connection
+            .unchecked_transaction()
+            .map_err(unavailable)?;
+        let mut query = tx.prepare(PREVIEW_TEXT).map_err(unavailable)?;
+        for kind in ["assistant", "user"] {
+            if let Some(text) = query
+                .query_row([id, kind], |row| row.get(0))
+                .optional()
+                .map_err(unavailable)?
+            {
+                return Ok(Some(text));
+            }
+        }
+        Ok(None)
+    }
+
     pub(crate) fn directory_metadata(&self, id: &str) -> Result<Option<DirectoryMetadata>, String> {
         self.connection
             .prepare(&format!(
@@ -187,14 +226,7 @@ impl ProductStore {
         &mut self,
         id: &str,
         policy: ResumeAfterLoss,
-    ) -> Result<
-        (
-            plakous_hosted::runtime::RootStanding,
-            Option<AttentionReason>,
-            u32,
-        ),
-        String,
-    > {
+    ) -> Result<DirectoryActivity, String> {
         let tx = self
             .connection
             .unchecked_transaction()
@@ -229,11 +261,36 @@ impl ProductStore {
         }
         let standing = plakous_hosted::runtime::root_standing_from_intents(&intents, &views);
         let reason = root_reason(&views, &intents, policy);
-        let mut wakes = 0_u32;
+        let mut activity = DirectoryActivity {
+            standing,
+            root: reason,
+            wakes: 0,
+            root_turns: views.state.counters.root_turns,
+            retention_gap: views.state.retained_from.is_some()
+                || views.state.imported_through.is_some(),
+            pause_since: views
+                .state
+                .directory_attention
+                .as_ref()
+                .and_then(|attention| attention.pause_at_ms.as_ref())
+                .filter(|at| {
+                    views.state.pause.as_ref().is_some_and(|pause| {
+                        pause.anchor == at.anchor && pause.value == views.pause_cause(&intents)
+                    })
+                })
+                .map(|at| at.value / 1000),
+            quota_since: views
+                .state
+                .directory_attention
+                .as_ref()
+                .and_then(|attention| attention.quota_at_ms)
+                .filter(|at| views.state.head.is_some_and(|head| head.branch_id == at.0))
+                .map(|at| at.1 / 1000),
+        };
         if reason.is_some() {
             let items = super::load_queue(&tx, id)?;
             if items.is_empty() {
-                return Ok((standing, reason, 0));
+                return Ok(activity);
             }
             if !loss {
                 intents = read_intents(&tx, &mut self.verified_submissions, id, false)?;
@@ -245,12 +302,32 @@ impl ProductStore {
                     submission.kind == plakous_hosted::sessions::projector::SubmissionKind::HostWake
                         && !plakous_hosted::runtime::is_root_loss_command(&submission.command_id)
                 }) {
-                    wakes = wakes.saturating_add(1);
+                    activity.wakes = activity.wakes.saturating_add(1);
                 }
             }
         }
-        Ok((standing, reason, wakes))
+        Ok(activity)
     }
+}
+
+#[cfg(test)]
+#[test]
+#[allow(clippy::unwrap_used, reason = "isolated store fixture")]
+fn preview_seeks_the_speaker_index_without_sorting_the_transcript() {
+    let (_home, paths) = crate::home::paths::PlakPaths::isolated_test_home();
+    let store = ProductStore::open(&paths).unwrap();
+    let plan: String = store
+        .connection
+        .query_row(
+            &format!("EXPLAIN QUERY PLAN {PREVIEW_TEXT}"),
+            ["example", "assistant"],
+            |row| row.get(3),
+        )
+        .unwrap();
+    assert!(
+        plan.contains("SEARCH") && plan.contains("transcript_rows_preview"),
+        "{plan}"
+    );
 }
 
 #[cfg(test)]

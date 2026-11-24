@@ -832,6 +832,7 @@ fn prompt_history_append_and_front_prune_touch_constant_rows() {
 #[test]
 fn product_admission_refusals_and_fingerprint_are_exact() {
     let base = SCHEMA.base_fingerprint;
+    let current = SCHEMA.fingerprint();
     assert_eq!(
         base,
         digest_parts(
@@ -872,7 +873,7 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
         (
             ProductStoreOpenErrorKind::Unavailable,
             format!(
-                "product store schema shape does not match its exact revision (expected fingerprint {base}); current-schema product state is not authoritative"
+                "product store schema shape does not match its exact revision (expected fingerprint {current}); current-schema product state is not authoritative"
             )
         )
     );
@@ -881,7 +882,7 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
         (
             ProductStoreOpenErrorKind::Unavailable,
             format!(
-                "product store schema fingerprint does not match its exact revision (expected fingerprint {base}); current-schema product state is not authoritative"
+                "product store schema fingerprint does not match its exact revision (expected fingerprint {current}); current-schema product state is not authoritative"
             )
         )
     );
@@ -890,7 +891,7 @@ fn product_admission_refusals_and_fingerprint_are_exact() {
         (
             ProductStoreOpenErrorKind::Unavailable,
             format!(
-                "product store schema fingerprint is missing (expected fingerprint {base}); current-schema product state is not authoritative"
+                "product store schema fingerprint is missing (expected fingerprint {current}); current-schema product state is not authoritative"
             )
         )
     );
@@ -976,7 +977,6 @@ fn ultrafast_target_requires_the_new_product_revision() {
 fn current_schema_rejects_previous_product_store_without_modification() {
     // A product schema change moves the state directory; a store at
     // another version in this directory is refused with its rows intact.
-    assert_eq!(SCHEMA_VERSION, 40);
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     paths.ensure_layout().unwrap();
@@ -995,7 +995,9 @@ fn current_schema_rejects_previous_product_store_without_modification() {
         ProductStoreOpenErrorKind::UnsupportedPersistence
     );
     assert!(
-        error.to_string().contains("product schema 37, expected 40"),
+        error
+            .to_string()
+            .contains(&format!("product schema 37, expected {SCHEMA_VERSION}")),
         "{error}"
     );
     assert!(

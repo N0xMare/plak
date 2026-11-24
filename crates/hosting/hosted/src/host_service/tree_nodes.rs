@@ -11,10 +11,6 @@ pub(super) struct ChildCounts {
     pub(super) held: usize,
 }
 
-pub(super) fn try_child_counts(tree_id: &str) -> Option<(usize, usize)> {
-    try_child_work_counts(tree_id).map(|counts| (counts.work, counts.held))
-}
-
 pub(super) fn try_child_work_counts(tree_id: &str) -> Option<ChildCounts> {
     crate::topology_runtime::lookup(tree_id).map_or(Some(ChildCounts::default()), |runtime| {
         runtime.try_read(|tree| count_children(tree, runtime.continues_after_loss()))

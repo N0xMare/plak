@@ -53,6 +53,9 @@ impl Applier<'_> {
             .insert(command_id.to_owned(), Delivery::Accepted);
         match kind {
             FeedCommandKind::Root { origin } => {
+                if let Some(attention) = &mut self.views.state.directory_attention {
+                    attention.quota_at_ms = None;
+                }
                 let host_wake = origin == plakous::model::TurnOrigin::HostWake;
                 self.views.state.counters.root_turns += 1;
                 if let Some(turn_id) = turn_id {
@@ -122,6 +125,7 @@ impl Applier<'_> {
                         })
                 });
                 if !host_wake || resumes_fence {
+                    self.views.state.directory_attention = None;
                     let anchor = self.seq();
                     self.views.state.pause = Some(Anchored {
                         anchor,

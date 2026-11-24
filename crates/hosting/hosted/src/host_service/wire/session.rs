@@ -50,6 +50,9 @@ fn directory_event<P: ProtocolExtension>(event: &SessionObservation<P>) -> bool 
             | SessionObservation::ApprovalRequired { .. }
             | SessionObservation::ApprovalResolved { .. }
             | SessionObservation::CredentialWait { .. }
+            | SessionObservation::TurnLifecycle(_)
+            | SessionObservation::SessionOpening
+            | SessionObservation::SessionOpened { .. }
             | SessionObservation::TopologyNavigatorSnapshot(_)
     )
 }
@@ -258,6 +261,23 @@ impl<P: ProtocolExtension> WireSession<P> {
     #[must_use]
     pub fn kept_activity(&self) -> super::super::KeptActivity {
         served::lock(&self.served).service().kept_activity()
+    }
+
+    pub(super) fn directory_resident(
+        &self,
+    ) -> (
+        String,
+        (
+            super::super::KeptActivity,
+            super::super::KeptDirectoryAttention,
+        ),
+    ) {
+        let guard = served::lock(&self.served);
+        let service = guard.service();
+        (
+            guard.session().to_owned(),
+            (service.kept_activity(), service.kept_directory_attention()),
+        )
     }
 
     pub(super) fn lifecycle_busy(&self) -> plakous_host_protocol::wire::LifecycleReason {

@@ -71,6 +71,12 @@ pub(crate) mod local {
     use plakous_recursive_subagents::tree::ProductAgentTree;
 
     use super::{Change, PathBuf, PlakPaths, TreeChange};
+    use crate::store::directory_projection::cost::Member;
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct ChildAttention {
+        pub(crate) since: Option<u64>,
+    }
 
     #[derive(PartialEq, Eq)]
     pub(crate) struct TreeFacts {
@@ -78,20 +84,110 @@ pub(crate) mod local {
         pub(crate) roster: OrchestrationSnapshot,
         pub(crate) hold: PendingTreeWork,
         pub(crate) resume: PendingTreeWork,
+        pub(crate) children: Vec<Member>,
+        pub(crate) child_recovery: Option<ChildAttention>,
+        held_child: bool,
+        held_even_on_continue: bool,
+        pub(crate) child_limits: BTreeMap<String, u64>,
     }
 
     impl TreeFacts {
         pub(crate) fn of(tree: &ProductAgentTree) -> Self {
+            use plakous_host_protocol::topology::{AttemptStatus, NodeStatus};
+            use plakous_recursive_subagents::tree::{ContinuationCause, LossContinuationState};
+
+            let mut costs = BTreeMap::<&str, (u64, u64)>::new();
+            for attempt in tree.attempts().values() {
+                let member = costs
+                    .entry(&attempt.agent_id)
+                    .or_insert((attempt.started_at, 0));
+                member.0 = member.0.min(attempt.started_at);
+                member.1 = member.1.saturating_add(u64::from(attempt.usage.turns));
+            }
+            let mut children = Vec::new();
+            let mut child_recovery = None::<ChildAttention>;
+            let mut held_child = false;
+            let mut held_even_on_continue = false;
+            let mut child_limits = BTreeMap::<String, u64>::new();
+            for (id, node) in tree.nodes() {
+                if id == &tree.root_agent_id {
+                    continue;
+                }
+                let (started_ms, turns) = costs.get(id.as_str()).copied().unwrap_or((0, 0));
+                children.push(Member {
+                    locator: node
+                        .session_locator
+                        .as_ref()
+                        .and_then(|loc| loc.parse().ok()),
+                    started_ms,
+                    turns,
+                    remote: !node.placement.is_local(),
+                });
+                let attempt = node
+                    .attempt_id
+                    .as_ref()
+                    .and_then(|id| tree.attempts().get(id));
+                if node.status == NodeStatus::RecoveryRequired {
+                    let at = attempt
+                        .and_then(|attempt| attempt.ended_at)
+                        .map(|at| at / 1000);
+                    let previous = child_recovery.and_then(|attention| attention.since);
+                    child_recovery = Some(ChildAttention {
+                        since: previous.into_iter().chain(at).min(),
+                    });
+                } else if let Some(loss) = tree.loss_continuation(id).filter(|loss| {
+                    loss.cause == ContinuationCause::OwnerLost
+                        && loss.state == LossContinuationState::Held
+                }) {
+                    held_child = true;
+                    held_even_on_continue |= loss.interrupted_continuation;
+                }
+                if let Some(attempt) =
+                    attempt.filter(|attempt| attempt.status == AttemptStatus::Blocked)
+                    && let Some(limit) = &attempt.blocked
+                    && let Some(at) = attempt.ended_at
+                    && let Some(account) =
+                        crate::telemetry_store::recorded_usage::exact_account(&limit.account)
+                {
+                    let at = at / 1000;
+                    child_limits
+                        .entry(account.as_str().to_owned())
+                        .and_modify(|since| *since = (*since).min(at))
+                        .or_insert(at);
+                }
+            }
             Self {
                 revision: tree.revision,
                 roster: tree.current_epoch().clone(),
                 hold: PendingTreeWork::read(tree, ResumeAfterLoss::Hold),
                 resume: PendingTreeWork::read(tree, ResumeAfterLoss::Continue),
+                children,
+                child_recovery,
+                held_child,
+                held_even_on_continue,
+                child_limits,
             }
         }
 
         pub(crate) fn same_projection(&self, other: &Self) -> bool {
             self.roster == other.roster && self.hold == other.hold && self.resume == other.resume
+        }
+
+        pub(crate) fn same_draft_projection(&self, other: &Self) -> bool {
+            self.children == other.children
+                && self.child_recovery == other.child_recovery
+                && self.held_child == other.held_child
+                && self.held_even_on_continue == other.held_even_on_continue
+                && self.child_limits == other.child_limits
+        }
+
+        pub(crate) fn child_attention(&self, policy: ResumeAfterLoss) -> Option<ChildAttention> {
+            let held = match policy {
+                ResumeAfterLoss::Hold => self.held_child,
+                ResumeAfterLoss::Continue => self.held_even_on_continue,
+            };
+            self.child_recovery
+                .or(held.then_some(ChildAttention { since: None }))
         }
     }
 

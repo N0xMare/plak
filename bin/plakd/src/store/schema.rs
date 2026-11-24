@@ -113,6 +113,14 @@ pub(crate) const NATIVE_ULTRAFAST_REVISION: Revision = Revision {
     fingerprint: BASE_FINGERPRINT,
 };
 
+const PREVIEW_INDEX: &str = "CREATE INDEX transcript_rows_preview ON transcript_rows(session_id,json_extract(row,'$.kind'),anchor,ordinal) WHERE json_extract(row,'$.kind') IN ('assistant','user') AND json_extract(row,'$.text') <> ''";
+
+const DIRECTORY_PREVIEW: Revision = Revision {
+    sql: PREVIEW_INDEX,
+    objects: &[("transcript_rows_preview", PREVIEW_INDEX)],
+    fingerprint: "b59a938e5cda4be7e625516b35ea24836a552240ae58ec648a472f7c197badfd",
+};
+
 /// The product file's admission descriptors.
 pub(super) const SCHEMA: Schema = Schema {
     noun: "product",
@@ -121,7 +129,7 @@ pub(super) const SCHEMA: Schema = Schema {
     generation: GENERATION,
     objects: SCHEMA_OBJECTS,
     base_fingerprint: BASE_FINGERPRINT,
-    revisions: &[NATIVE_ULTRAFAST_REVISION],
+    revisions: &[NATIVE_ULTRAFAST_REVISION, DIRECTORY_PREVIEW],
 };
 
 pub(super) fn schema() -> Schema {

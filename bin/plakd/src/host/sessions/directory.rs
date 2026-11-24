@@ -22,6 +22,7 @@ use crate::store::directory_projection::{DirectoryMetadata, ProductDirectoryProb
 
 use super::{Holder, activity_of, environment_of, runner_views};
 
+mod draft;
 mod files;
 
 const REVALIDATE: Duration = Duration::from_secs(15);
@@ -29,11 +30,12 @@ const PROBE_HOLDERS: Duration = Duration::from_millis(250);
 
 type Rows = BTreeMap<String, Summary>;
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct Summary {
     row: SessionRow,
     identity: String,
     degraded: bool,
+    draft: Option<draft::Facts>,
 }
 
 pub(super) struct Directory {
@@ -41,12 +43,21 @@ pub(super) struct Directory {
     rows: Arc<RwLock<Rows>>,
     changes: watch::Sender<u64>,
     external: Option<External>,
+    draft_attention: draft::Stamps,
     #[cfg(test)]
     pub(super) runtime_inspections: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Directory {
     pub(super) fn start(paths: &PlakPaths, tree: Arc<SqliteTreeStore>) -> CliResult<Self> {
+        Self::start_with_draft(paths, tree, false)
+    }
+
+    fn start_with_draft(
+        paths: &PlakPaths,
+        tree: Arc<SqliteTreeStore>,
+        draft: bool,
+    ) -> CliResult<Self> {
         let (inbox, events) = Inbox::register(paths);
         let (changes, _) = watch::channel(0_u64);
         let mut source = Source {
@@ -65,6 +76,7 @@ impl Directory {
             omitted: BTreeSet::new(),
             retry_rows: BTreeSet::new(),
             holders: BTreeMap::new(),
+            draft: draft.then(|| draft::Source::new(paths)),
             #[cfg(test)]
             runtime_inspections: Arc::default(),
         };
@@ -84,6 +96,7 @@ impl Directory {
             rows,
             changes,
             external: None,
+            draft_attention: draft::Stamps::default(),
             #[cfg(test)]
             runtime_inspections,
         })
@@ -159,6 +172,22 @@ impl Directory {
         include_archived: bool,
         runners: &[runner_views::RunnerRow],
     ) -> Vec<SessionRow> {
+        self.select(workspace, runner, include_archived, |summary| {
+            let mut row = summary.row.clone();
+            let runner = &row.runner.runner_id;
+            row.runner_status = runner_status(summary, runners);
+            row.runner = runner_views::label(runner, runners);
+            Some(row)
+        })
+    }
+
+    fn select<T>(
+        &self,
+        workspace: Option<&str>,
+        runner: Option<&str>,
+        include_archived: bool,
+        project: impl FnMut(&Summary) -> Option<T>,
+    ) -> Vec<T> {
         let by_remote_path = runner.is_some_and(|runner| runner != "local");
         let local_identity = workspace
             .filter(|_| !by_remote_path)
@@ -189,17 +218,7 @@ impl Directory {
         selected
             .into_iter()
             .take(MAX_DIRECTORY_ROWS as usize)
-            .map(|summary| {
-                let mut row = summary.row.clone();
-                let runner = &row.runner.runner_id;
-                row.runner_status = if summary.degraded {
-                    RunnerStatus::Unknown
-                } else {
-                    runner_views::status(runner, runners).unwrap_or(RunnerStatus::Unknown)
-                };
-                row.runner = runner_views::label(runner, runners);
-                row
-            })
+            .filter_map(project)
             .collect()
     }
 
@@ -218,6 +237,15 @@ impl Directory {
     pub(super) fn tick(&self) {
         self.inbox.send(Notice::Revalidate);
         self.settle();
+    }
+}
+
+fn runner_status(summary: &Summary, runners: &[runner_views::RunnerRow]) -> RunnerStatus {
+    if summary.degraded {
+        RunnerStatus::Unknown
+    } else {
+        runner_views::status(&summary.row.runner.runner_id, runners)
+            .unwrap_or(RunnerStatus::Unknown)
     }
 }
 
@@ -298,6 +326,7 @@ struct Source {
     omitted: BTreeSet<String>,
     retry_rows: BTreeSet<String>,
     holders: BTreeMap<String, Holder>,
+    draft: Option<draft::Source>,
     #[cfg(test)]
     runtime_inspections: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -342,7 +371,15 @@ impl Source {
             }
             // Live child state is overlaid separately.
             let tree_changed = !batch.trees.is_empty() || !batch.custody.is_empty();
-            let updates = self.apply(&mut batch);
+            let costs_changed = tick
+                && self
+                    .draft
+                    .as_mut()
+                    .is_some_and(|draft| draft.costs.poll(&self.paths));
+            let mut updates = self.apply(&mut batch);
+            if costs_changed {
+                self.refresh_draft_costs(shared, &mut updates);
+            }
             if publish(shared, updates) || tree_changed {
                 bump(notify);
             }
@@ -354,6 +391,14 @@ impl Source {
     }
 
     fn revalidate(&mut self, batch: &mut Batch) {
+        if let Some(draft) = &self.draft {
+            batch.records.extend(
+                self.metadata
+                    .keys()
+                    .filter(|id| !draft.previews.contains_key(*id))
+                    .cloned(),
+            );
+        }
         if let Ok(records) = self.product_probe.changes() {
             batch.records.extend(records);
         }
@@ -390,6 +435,37 @@ impl Source {
         });
     }
 
+    fn refresh_draft_costs(
+        &mut self,
+        shared: &RwLock<Rows>,
+        updates: &mut Vec<(String, Option<Summary>)>,
+    ) {
+        let Some(draft) = &mut self.draft else { return };
+        let affected = updates
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<BTreeSet<_>>();
+        let rows = shared.read().unwrap_or_else(PoisonError::into_inner);
+        let measured = rows
+            .iter()
+            .filter_map(|(id, summary)| {
+                if affected.contains(id.as_str()) {
+                    return None;
+                }
+                let tree = self
+                    .trees
+                    .get(&summary.row.node.tree_id)
+                    .and_then(|facts| facts.as_ref().ok())
+                    .and_then(|facts| facts.as_deref());
+                let facts = summary.draft.as_ref()?.measure(&mut draft.costs, tree)?;
+                let mut summary = summary.clone();
+                summary.draft = Some(facts);
+                Some((id.clone(), Some(summary)))
+            })
+            .collect::<Vec<_>>();
+        updates.extend(measured);
+    }
+
     fn apply(&mut self, batch: &mut Batch) -> Vec<(String, Option<Summary>)> {
         let mut affected = std::mem::take(&mut batch.custody);
         if batch.configuration {
@@ -412,6 +488,9 @@ impl Source {
         self.profiles.clear();
         self.holders.clear();
         self.retry_rows.clear();
+        if let Some(draft) = &mut self.draft {
+            draft.previews.clear();
+        }
         Ok(self
             .update(ids, BTreeMap::new(), BTreeSet::new())
             .into_iter()
@@ -454,6 +533,7 @@ impl Source {
             if !matches!(
                 (self.trees.get(&id), &facts),
                 (Some(Ok(Some(previous))), Ok(Some(current))) if previous.same_projection(current)
+                    && (self.draft.is_none() || previous.same_draft_projection(current))
             ) {
                 affected.insert(id.clone());
             }
@@ -466,11 +546,21 @@ impl Source {
             self.revisions.remove(&id);
             self.retry_rows.remove(&id);
             self.retry_revisions.remove(&id);
+            if let Some(draft) = &mut self.draft {
+                draft.previews.remove(&id);
+            }
             if let Some(previous) = self.metadata.remove(&id) {
                 affected.insert(previous.node.tree_id);
             }
             match self.store.directory_metadata(&id) {
                 Ok(Some(metadata)) => {
+                    if let Some(draft) = &mut self.draft
+                        && let Ok(text) = self.store.directory_preview(&id)
+                    {
+                        draft
+                            .previews
+                            .insert(id.clone(), text.and_then(draft::preview));
+                    }
                     self.product_probe.note(&id, Some(&metadata));
                     affected.insert(metadata.node.tree_id.clone());
                     if let Some(locator) = metadata.locator {
@@ -555,6 +645,7 @@ impl Source {
                     degraded_tree: tree.is_err(),
                     profiles: profiles.as_ref(),
                     revision,
+                    draft: self.draft.as_mut(),
                 },
             );
             self.holders.remove(id);
@@ -638,6 +729,7 @@ struct Projection<'a> {
     degraded_tree: bool,
     profiles: Option<&'a Profiles>,
     revision: u64,
+    draft: Option<&'a mut draft::Source>,
 }
 
 fn summarize(
@@ -652,7 +744,7 @@ fn summarize(
     let policy = profiles.map_or(ResumeAfterLoss::Hold, |profiles| {
         crate::session_attention::policy(&profiles.config)
     });
-    let (activity, root, wakes) = store
+    let activity = store
         .directory_activity(id, policy)
         .map_err(|_| "activity")?;
     let holder =
@@ -666,12 +758,31 @@ fn summarize(
     let needs_operator = projection.head
         && !meta.archived
         && profiles.is_some()
-        && work.attention(root, 0, wakes).is_some();
+        && work.attention(activity.root, 0, activity.wakes).is_some();
+    let draft = projection.draft.map(|draft| {
+        let remote = hosted_elsewhere.is_some()
+            || meta
+                .runner
+                .as_ref()
+                .is_some_and(|runner| runner.runner_id != "local");
+        draft.project(
+            id,
+            meta,
+            &activity,
+            draft::Context {
+                tree,
+                head: projection.head,
+                remote,
+                policy,
+            },
+        )
+    });
     let (profile, differences) = profile(id, meta, profiles.zip(tree));
     Ok((
         Summary {
             identity: meta.identity.clone(),
             degraded: profiles.is_none() || projection.degraded_tree,
+            draft,
             row: SessionRow {
                 runner: runner_views::label(
                     meta.runner
@@ -696,7 +807,7 @@ fn summarize(
                 created_at: meta.created_at,
                 updated_at: meta.updated_at,
                 residency: SessionResidency::Dormant,
-                activity: activity_of(activity),
+                activity: activity_of(activity.standing),
                 live_work: LiveWork::default(),
                 session: id.to_owned(),
             },

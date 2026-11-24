@@ -103,7 +103,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use attachment::{attachment_of, kept_for_attach, origin};
-pub use attention::KeptActivity;
+pub use attention::{KeptActivity, KeptDirectoryAttention};
 pub use child::{ChildNodes, ControlDone, NodeState};
 pub use face::{FacePublisher, FaceReceiver, FaceSender, face};
 use queue::Queue;
@@ -273,9 +273,10 @@ struct State<P: ProtocolExtension> {
     attachments: BTreeMap<AttachmentId, Attachment<P>>,
     next_attachment: AttachmentId,
     snapshot: Snapshot<P>,
+    directory_attention: attention::LiveAttention,
     root_revision: Option<u64>,
     resync_wait: BTreeMap<TranscriptScope, std::time::Instant>,
-    directory_children: Option<(String, (usize, usize))>,
+    directory_children: Option<(String, tree_nodes::ChildCounts)>,
     /// The attachment whose intent the session is answering.
     requester: Option<AttachmentId>,
     /// How many attachments hold each agent transcript: the session serves
@@ -651,6 +652,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 root_revision: None,
                 resync_wait: BTreeMap::new(),
                 directory_children: None,
+                directory_attention: attention::LiveAttention::default(),
                 requester: None,
                 agent_holders: BTreeMap::new(),
                 holding: false,

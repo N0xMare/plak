@@ -108,6 +108,10 @@ impl<P: ProtocolExtension> HostService<P> {
             // A face's service takes no later attachment to keep anything for.
             if self.actions.is_some() && child_answer.is_none() {
                 state.snapshot.remember(&observation, class, size);
+                if let Payload::Other(event) = &observation {
+                    let state = &mut *state;
+                    state.directory_attention.observe(&state.snapshot, event);
+                }
             }
             for id in targets {
                 if let Some(held) = state.attachments.get_mut(&id) {

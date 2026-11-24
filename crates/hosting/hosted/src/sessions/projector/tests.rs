@@ -2254,6 +2254,16 @@ fn a_quota_terminal_suppresses_wakes_until_the_next_prompt() {
             "host_wake={host_wake}"
         );
         assert!(views.pause_cause(&feed.intents).is_none());
+        let terminal = feed.records.last().unwrap().header();
+        assert_eq!(
+            views
+                .state
+                .directory_attention
+                .as_ref()
+                .unwrap()
+                .quota_at_ms,
+            Some((terminal.branch_id, terminal.committed_at_ms))
+        );
         let errors: Vec<_> = rows(&views)
             .into_iter()
             .filter(|row| row.is_error())
@@ -2263,7 +2273,9 @@ fn a_quota_terminal_suppresses_wakes_until_the_next_prompt() {
         apply_step(&mut feed, &turn(true, End::Completed));
         assert!(project_all(&feed).views.wake_suppressed(&feed.intents));
         apply_step(&mut feed, &turn(false, End::Completed));
-        assert!(!project_all(&feed).views.wake_suppressed(&feed.intents));
+        let next = project_all(&feed).views;
+        assert!(!next.wake_suppressed(&feed.intents));
+        assert!(next.state.directory_attention.is_none());
     }
     let feed = feed_of(&[turn(false, End::Failed)]);
     assert!(!project_all(&feed).views.wake_suppressed(&feed.intents));

@@ -163,6 +163,66 @@ fn directory_attention_tracks_pending_decisions_even_while_busy() {
     }
 }
 
+#[test]
+fn typed_directory_attention_keeps_concurrent_live_causes_until_each_clears() {
+    use plakous_host_protocol::observation::{TurnLifecycle, TurnPhase, UsageLimitNotice};
+
+    let (service, _intents) = service(32);
+    service.observe(approval("a1"));
+    let approval_since = service.kept_directory_attention().approval;
+    assert!(approval_since.is_some());
+    service.observe(approval("a2"));
+    service.observe(Observation::CredentialWait {
+        account: Some("openai/work".into()),
+    });
+    service.observe(Observation::TurnLifecycle(TurnLifecycle {
+        turn_id: "turn".into(),
+        phase: TurnPhase::Refused,
+        model_error_kind: None,
+        http_status: None,
+        usage_limit: Some(UsageLimitNotice {
+            kind: "openai".into(),
+            account: "openai/work".into(),
+            resets_at: Some(9),
+            alternatives: vec!["openai/other".into()],
+        }),
+    }));
+    service.observe(Observation::ApprovalResolved {
+        approval_id: "a1".into(),
+        resolution: "denied".into(),
+    });
+    let pending = service.kept_directory_attention();
+    assert_eq!(pending.approval, approval_since);
+    assert!(pending.credential.is_some());
+    assert_eq!(
+        pending
+            .usage_limit
+            .as_ref()
+            .map(|(account, _)| account.as_str()),
+        Some("openai/work")
+    );
+    service.observe(Observation::ApprovalResolved {
+        approval_id: "a2".into(),
+        resolution: "denied".into(),
+    });
+    assert!(service.kept_directory_attention().approval.is_none());
+    service.observe(Observation::TurnLifecycle(TurnLifecycle {
+        turn_id: "next".into(),
+        phase: TurnPhase::Admitted,
+        model_error_kind: None,
+        http_status: None,
+        usage_limit: None,
+    }));
+    let after = service.kept_directory_attention();
+    assert!(after.usage_limit.is_none());
+    assert_eq!(after.credential, pending.credential);
+    service.observe(Observation::CredentialWait { account: None });
+    assert_eq!(
+        service.kept_directory_attention(),
+        super::KeptDirectoryAttention::default()
+    );
+}
+
 fn root_patch(from: u64) -> Observation {
     Observation::TranscriptPatch(TranscriptPatch {
         scope: TranscriptScope::Root,
