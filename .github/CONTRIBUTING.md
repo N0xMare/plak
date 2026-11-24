@@ -34,8 +34,7 @@ are [spec 06 §8](../docs/spec/06-build-and-support-surface.md).
 ## Pull requests
 
 - Keep each pull request small and focused on one change.
-- Leave `CHANGELOG.md` to the cut integrator; explain user-visible changes in
-  your commits.
+- Explain user-visible changes in your commits.
 - Test externally meaningful behavior and failure modes deterministically.
   Live provider tests are opt-in and paid; do not add them to any gate.
 - No credentials, auth headers, private session data or unsanitized provider

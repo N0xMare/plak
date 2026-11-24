@@ -31,10 +31,9 @@ just --list                # other recipes
 Production install requires exact-tree batch and install evidence and
 [qualifying strict sweep evidence](docs/spec/06-build-and-support-surface.md#8-repository-settings).
 
-Workers leave `CHANGELOG.md` and debt ceilings alone. The integrator tightens
-the upper bounds with `just tighten-ceilings` before gating every landing and
-cut, and commits any changes. At a cut, the integrator writes Unreleased entries
-from landed commits.
+`CHANGELOG.md` is written only at the cut, from landed commits.
+Workers leave debt ceilings alone. The integrator tightens them with
+`just tighten-ceilings` before gating every landing and cut, and commits any changes.
 
 For a conflict in a [derived pin or fixture](docs/spec/05-testing-and-evidence.md#derived-pins-and-fixtures),
 take either side of the generated file or block, keep both sides' source

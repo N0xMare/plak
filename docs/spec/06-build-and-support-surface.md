@@ -2275,9 +2275,9 @@ candidate and before publication; a production install builds from the source
 tree and does not require it. Only a matching cohort verification receipt
 (§6.5) may avoid repeating archive verification.
 
-Commits inside a branch are not gated individually. Ordinary branches do not
-edit `CHANGELOG.md`. At a cut, the integrator writes its Unreleased entries
-from the landed commits and tightens ceilings (§4). The cut deploys the
+Commits inside a branch are not gated individually.
+`CHANGELOG.md` is written only at the cut, from landed commits.
+At a cut the integrator tightens ceilings (§4). The cut deploys the
 resulting main tip, not a separately integrated branch. Main can carry an
 install-profile failure that the install tier catches before production.
 A production install requires the batch gate **and** the install tier on the
