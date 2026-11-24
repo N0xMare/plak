@@ -230,37 +230,45 @@ fn install(
     authority.bundle = bundle;
 }
 
-#[tokio::test]
-async fn warm_owner_reconstructs_reclaimed_addresses_even_after_lost_prune_ack() -> TestResult {
+fn prepared_owner(
+    store: Arc<dyn SessionStore>,
+    expires_at: u64,
+    lease_seconds: u64,
+) -> TestResult<PreparedCheckpoint> {
     let first = checkpoint(1, 1_000)?;
     let bundle = RuntimeCheckpointCodec::bundle(&first, None)?;
-    let store = Arc::new(SweepStore::default());
-    store.accept(&bundle)?;
     let topology = first.manifest().topology();
     let session = SessionRef::new(topology.session_id, topology.branch_id);
     let head = BranchHead::from_store(
         session,
-        BranchRevision::from_store(1),
+        BranchRevision::from_store(topology.branch_revision),
         CheckpointObjectRef::from_store(topology.checkpoint_id, bundle.root(), first.integrity()),
     );
     let lease = BranchLease::from_store(
         session,
         RunId::try_from(uuid::Uuid::from_u128(99))?,
         NonZeroU64::new(1).ok_or("nonzero fence")?,
-        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 1_000, 0)?,
-        NonZeroU64::new(1_000).ok_or("nonzero interval")?,
+        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), expires_at, 0)?,
+        NonZeroU64::new(lease_seconds).ok_or("nonzero interval")?,
     );
-    let mut owner = PreparedCheckpoint::new(
+    Ok(PreparedCheckpoint::new(
         first,
         bundle,
         Some(DurableBranchFacts::new(
-            store.clone(),
+            store,
             head,
             lease,
             StoreTimeouts::default(),
         )),
-    )
-    .start();
+    ))
+}
+
+#[tokio::test]
+async fn warm_owner_reconstructs_reclaimed_addresses_even_after_lost_prune_ack() -> TestResult {
+    let store = Arc::new(SweepStore::default());
+    let prepared = prepared_owner(store.clone(), 1_000, 1_000)?;
+    store.accept(&prepared.state.bundle)?;
+    let mut owner = prepared.start();
     *lock_mutex(&store.authority) = Arc::downgrade(&owner.state);
     for cycle in 0..4_u128 {
         let tail = if cycle % 2 == 0 { 2_000 } else { 1_000 };
@@ -426,33 +434,7 @@ impl SessionStore for FlakyRenewStore {
 /// Starts an owner holding a 3 s lease (renewed every second) that
 /// expires at store second 100.
 fn flaky_owner(store: Arc<FlakyRenewStore>) -> TestResult<CheckpointOwner> {
-    let first = checkpoint(1, 1_000)?;
-    let bundle = RuntimeCheckpointCodec::bundle(&first, None)?;
-    let topology = first.manifest().topology();
-    let session = SessionRef::new(topology.session_id, topology.branch_id);
-    let head = BranchHead::from_store(
-        session,
-        BranchRevision::from_store(1),
-        CheckpointObjectRef::from_store(topology.checkpoint_id, bundle.root(), first.integrity()),
-    );
-    let lease = BranchLease::from_store(
-        session,
-        RunId::try_from(uuid::Uuid::from_u128(99))?,
-        NonZeroU64::new(1).ok_or("nonzero fence")?,
-        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 100, 0)?,
-        NonZeroU64::new(3).ok_or("nonzero interval")?,
-    );
-    Ok(PreparedCheckpoint::new(
-        first,
-        bundle,
-        Some(DurableBranchFacts::new(
-            store,
-            head,
-            lease,
-            StoreTimeouts::default(),
-        )),
-    )
-    .start())
+    Ok(prepared_owner(store, 100, 3)?.start())
 }
 
 #[tokio::test(start_paused = true)]
@@ -673,33 +655,7 @@ impl SessionStore for SupersededStore {
 }
 
 fn superseded_owner(store: Arc<SupersededStore>) -> TestResult<CheckpointOwner> {
-    let first = checkpoint(1, 1_000)?;
-    let bundle = RuntimeCheckpointCodec::bundle(&first, None)?;
-    let topology = first.manifest().topology();
-    let session = SessionRef::new(topology.session_id, topology.branch_id);
-    let head = BranchHead::from_store(
-        session,
-        BranchRevision::from_store(topology.branch_revision),
-        CheckpointObjectRef::from_store(topology.checkpoint_id, bundle.root(), first.integrity()),
-    );
-    let lease = BranchLease::from_store(
-        session,
-        RunId::try_from(uuid::Uuid::from_u128(99))?,
-        NonZeroU64::new(1).ok_or("nonzero fence")?,
-        LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 1_000, 0)?,
-        NonZeroU64::new(1_000).ok_or("nonzero interval")?,
-    );
-    Ok(PreparedCheckpoint::new(
-        first,
-        bundle,
-        Some(DurableBranchFacts::new(
-            store,
-            head,
-            lease,
-            StoreTimeouts::default(),
-        )),
-    )
-    .start())
+    Ok(prepared_owner(store, 1_000, 1_000)?.start())
 }
 
 /// A commit the head fence refuses fences the owner itself: nothing it
