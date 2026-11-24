@@ -94,11 +94,21 @@ fn third_build_stops_the_job_on_its_original_daemon() {
     profiles::wait_idle(&mut client, &session);
     settled_script(&fixture);
     for image in [&first, &second] {
+        let bridges: Vec<i32> = std::fs::read_to_string(fixture.root.join("ssh-bridges"))
+            .unwrap()
+            .lines()
+            .map(|pid| pid.parse().unwrap())
+            .filter(|&pid| runner::alive(pid))
+            .collect();
+        assert!(!bridges.is_empty(), "no active source bridge");
         paired.advance(image);
         let result = candidate_upgrade(&fixture, image, &environment)
             .output()
             .unwrap();
         assert!(result.status.success(), "{result:?}");
+        for pid in bridges {
+            assert!(!runner::alive(pid), "source bridge {pid} survived exec");
+        }
         drop(client);
         client = Client::connect(&host);
         runner::remote_ready(&mut client, &paired.id);

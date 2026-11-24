@@ -38,7 +38,7 @@ use plakous::tools::{
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::home::paths::{PlakPaths, SecretShelf};
-use dial::ssh_command;
+use dial::ssh_status;
 pub(crate) use dial::{STRICT_SSH_OPTIONS, version};
 use home::{LocalRunnerHome, RunnerHome};
 
@@ -642,12 +642,11 @@ async fn pair(paths: &PlakPaths, name: &str, stdout: &mut dyn std::io::Write) ->
     }
     let configured = configured(paths, name)?;
     let host_id = host_id(paths)?;
-    let status = ssh_command(
+    let status = ssh_status(
         &configured.ssh,
         &[&configured.command, "runner", "allow", &host_id],
+        false,
     )
-    .stdin(std::process::Stdio::null())
-    .status()
     .await
     .map_err(|error| CliFailure::new(format!("ssh could not be started: {error}")))?;
     if !status.success() {

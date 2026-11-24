@@ -277,18 +277,10 @@ impl Pass {
             let pass = pass.clone();
             Box::pin(async move {
                 let rebind = pass.prepare(&services);
-                let dialed = super::super::super::dial::Dialed {
-                    client: pass.client.clone(),
-                    hello: pass.hello.clone(),
-                    _ssh: tokio::process::Command::new("sleep")
-                        .arg("60")
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .kill_on_drop(true)
-                        .spawn()
-                        .unwrap(),
-                };
+                let dialed = super::super::super::dial::Dialed::in_process(
+                    pass.client.clone(),
+                    pass.hello.clone(),
+                );
                 REBIND_AFTER_CLEANUP
                     .scope(
                         RefCell::new(rebind),

@@ -571,6 +571,10 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[
     ("plakd", "src/commands/runner/local/start.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
     ],
+    # The runner transport registers its strict SSH children for explicit reaping.
+    ("plakd", "src/commands/runner/dial.rs"): [
+        ("Command", (("string", "ssh"),)),
+    ],
     # Doctor's one cleared-env, five-second, own-group local version probe.
     ("plakd", "src/product_doctor/jj_cli.rs"): [
         ("Command", (("identifier", "executable"),)),
@@ -655,7 +659,13 @@ EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
     ("plakd", "src/host/reexec.rs"): {"Command", "Stdio"},
     ("plakd", "src/host/starter.rs"): {"Command", "Stdio"},
     # The host's ssh dial to a runner pipes its link through stdin/stdout.
-    ("plakd", "src/commands/runner/dial.rs"): {"Stdio"},
+    ("plakd", "src/commands/runner/dial.rs"): {"Command", "ExitStatus", "Stdio"},
+    ("plakd", "src/commands/runner/dial/children.rs"): {
+        "Command",
+        "ExitStatus",
+        "Stdio",
+        "self",
+    },
     ("plakd", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
     ("plakd", "src/product_doctor/runner_ssh.rs"): {"Command", "Stdio"},
     ("plakd", "src/main.rs"): {"ExitCode"},
@@ -684,6 +694,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakd", "src/cli.rs"): {"value_parser"},
     ("plakous-hosted", "src/agent/roots.rs"): {"warn"},
     ("plakd", "src/commands/runner/local.rs"): {"warn"},
+    ("plakd", "src/commands/runner/dial/children.rs"): {"warn"},
     ("plakd", "src/host.rs"): {"select"},
     ("plakd", "src/host/send.rs"): {"pin", "select"},
     ("plakd", "src/host/upgrade/startup.rs"): {"select"},

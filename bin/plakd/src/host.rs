@@ -448,7 +448,7 @@ impl RunningHost {
             "plakd host: stopped in {} ms",
             stopping.elapsed().as_millis()
         );
-        runtime.shutdown_timeout(Duration::from_secs(1));
+        shutdown_runtime(runtime);
         scan_result?;
         if paired {
             let ready = ready.ok_or_else(|| CliFailure::new("missing paired host upgrade"))?;
@@ -680,6 +680,11 @@ fn announce_host(
         identity.instance,
         environment.describe(),
     );
+}
+
+fn shutdown_runtime(runtime: tokio::runtime::Runtime) {
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    crate::commands::runner::dial::children::shutdown::close();
 }
 
 fn stop_listeners(

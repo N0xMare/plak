@@ -626,14 +626,9 @@ async fn check_ssh(destination: &str) -> Result<(), plakous::runner::PlacementFa
         timed_out,
     };
     // The remote login shell resolves `true`; `/bin/true` is absent on macOS.
-    let mut transport = crate::commands::runner::dial::ssh_command(destination, &["true"]);
     let transport = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        transport
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status(),
+        super::dial::ssh_status(destination, &["true"], true),
     )
     .await
     .map_err(|_| unavailable(true))?

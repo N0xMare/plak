@@ -142,6 +142,11 @@ fn cut_final_probes(
         },
     );
     assert_eq!(providers(fixture), 2, "no later round during outage");
+    until_within(
+        "dead SSH child is reaped before the held redial",
+        std::time::Duration::from_secs(8),
+        || !alive(pid),
+    );
     (bridge, refusals.into_inner().unwrap())
 }
 

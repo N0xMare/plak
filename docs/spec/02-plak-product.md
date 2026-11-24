@@ -5818,6 +5818,13 @@ and the existing durable handoff decision and continuation command ids are reuse
 This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
+On every host stop, including inherited and legacy same-key handoff,
+cross-key replacement and plain shutdown, the host stops opening paired-runner
+SSH transports and tries to stop and reap the SSH children it owns within a
+bound. It logs failed or incomplete cleanup and continues shutdown or
+replacement. A successor opens fresh transports; runner daemons and their
+jobs do not stop with the source transports.
+
 A same-key upgrade uses planned handoff of the same sessions, not export/import.
 It re-execs the source PID. When the destination advertises support for
 the source's private descriptor-handoff marker during qualification, the

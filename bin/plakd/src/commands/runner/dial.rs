@@ -2,7 +2,9 @@
 //! over ssh with fixed strict options and runs `plakd runner connect --stdio`
 //! there. It never listens: there is no dial-in.
 
-use std::process::Stdio;
+pub(crate) mod children;
+
+use std::process::{Command, ExitStatus};
 
 use plakous::runner::protocol::{Hello, VersionTriple};
 use plakous::runner::{CallJournal, FileCallJournal, RunnerClient};
@@ -70,15 +72,28 @@ pub(crate) fn version() -> VersionTriple {
 }
 
 /// The ssh invocation that runs `remote` on `destination`.
-pub(crate) fn ssh_command(destination: &str, remote: &[&str]) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new("ssh");
+fn ssh_command(destination: &str, remote: &[&str]) -> Command {
+    let mut command = Command::new("ssh");
     command
         .args(STRICT_SSH_OPTIONS)
         .arg("--")
         .arg(destination)
-        .args(remote)
-        .kill_on_drop(true);
+        .args(remote);
     command
+}
+
+pub(super) async fn ssh_status(
+    destination: &str,
+    remote: &[&str],
+    quiet: bool,
+) -> std::io::Result<ExitStatus> {
+    use std::process::Stdio;
+    let mut command = ssh_command(destination, remote);
+    command.stdin(Stdio::null());
+    if quiet {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+    children::status(&mut command).await
 }
 
 /// A dialed runner: the client, what the runner said in its hello, and the
@@ -86,7 +101,18 @@ pub(crate) fn ssh_command(destination: &str, remote: &[&str]) -> tokio::process:
 pub(crate) struct Dialed {
     pub(crate) client: RunnerClient,
     pub(crate) hello: Hello,
-    pub(crate) _ssh: tokio::process::Child,
+    _ssh: Option<children::SshChild>,
+}
+
+#[cfg(test)]
+impl Dialed {
+    pub(super) fn in_process(client: RunnerClient, hello: Hello) -> Self {
+        Self {
+            client,
+            hello,
+            _ssh: None,
+        }
+    }
 }
 
 /// Dials `destination` over ssh and binds as this host, or, with `inspect`,
@@ -144,11 +170,9 @@ pub(crate) async fn dial_placed(
     Ok(Dialed {
         client,
         hello,
-        _ssh: child,
+        _ssh: Some(child),
     })
 }
-
-type SshStream = tokio::io::Join<tokio::process::ChildStdout, tokio::process::ChildStdin>;
 
 /// A paired, exact-triple read-only connection; never binds an owner instance.
 pub(crate) async fn qualify(
@@ -167,29 +191,23 @@ pub(crate) async fn qualify(
     Ok(Dialed {
         client,
         hello,
-        _ssh: child,
+        _ssh: Some(child),
     })
 }
 
 fn ssh_stream(
     destination: &str,
     command: &str,
-) -> Result<(tokio::process::Child, SshStream), plakous::runner::PlacementFailure> {
+) -> Result<(children::SshChild, children::SshStream), plakous::runner::PlacementFailure> {
     let unavailable = || plakous::runner::PlacementFailure::RunnerUnreachable {
         phase: plakous::runner::ProbePhase::Ssh,
         timed_out: false,
     };
-    let mut ssh = ssh_command(destination, &[command, "runner", "connect", "--stdio"]);
-    let mut child = ssh
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|_| unavailable())?;
-    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return Err(unavailable());
-    };
-    Ok((child, tokio::io::join(stdout, stdin)))
+    children::bridge(&mut ssh_command(
+        destination,
+        &[command, "runner", "connect", "--stdio"],
+    ))
+    .map_err(|_| unavailable())
 }
 
 pub(crate) async fn reconnect_placed(
@@ -216,6 +234,6 @@ pub(crate) async fn reconnect_placed(
     Ok(Dialed {
         client: client.clone(),
         hello,
-        _ssh: child,
+        _ssh: Some(child),
     })
 }
