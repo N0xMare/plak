@@ -46,3 +46,7 @@ pub use subscription_usage::*;
 /// Provider-neutral classified request accounting.
 #[doc(hidden)]
 pub mod subscription_limit;
+
+/// Poll-local authority acquisition for a turn's undispatched model round.
+#[doc(hidden)]
+pub mod authority_acquisition;

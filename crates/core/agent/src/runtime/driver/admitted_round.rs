@@ -72,12 +72,11 @@ impl Driver {
         &mut self,
         descriptor: &ResolvedModelDescriptor,
         round: &AdmittedRound,
-    ) -> bool {
+    ) -> Result<bool, AgentError> {
         let now = self.clock.now();
-        let Ok((authority, now)) = self.request_authority(Arc::clone(&self.model), now).await
-        else {
-            return false;
-        };
+        let (authority, now) = self
+            .round_request_authority(Arc::clone(&self.model), now)
+            .await?;
         if validate_configuration_runtime_authority(
             &self.provider_configuration,
             descriptor,
@@ -86,15 +85,15 @@ impl Driver {
         )
         .is_err()
         {
-            return false;
+            return Ok(false);
         }
         let prepared = round
             .prepared
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let record = prepared.record();
-        record
+        Ok(record
             .revalidate_first_dispatch(descriptor, &round.plan, &authority, now)
-            .is_ok()
+            .is_ok())
     }
 }

@@ -448,6 +448,12 @@ pub enum RuntimeModelAuthorityError {
     /// The adapter has no honest authority producer for this route.
     #[error("fresh model/account authority is unavailable")]
     Unavailable,
+    /// The bounded wait for the selected credential authority expired before dispatch.
+    #[error("timed out waiting for fresh model/account authority")]
+    AcquisitionTimedOut,
+    /// The selected credential authority denied this request.
+    #[error("selected credential authority refused model preparation")]
+    CredentialRefused,
     /// The adapter returned malformed or contradictory authority facts.
     #[error("fresh model/account authority is invalid")]
     Invalid,

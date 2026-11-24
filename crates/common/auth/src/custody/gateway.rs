@@ -8,10 +8,13 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use plakous_gateway_protocol as protocol;
 use plakous_gateway_protocol::refusal::GatewayRefusal;
 use plakous_http::relay::{RelayCallError, RelayClient};
+use plakous_model::{RuntimeModelAuthorityError, authority_acquisition};
+use tokio::time::{Instant, timeout_at};
 
 use super::{
     AccountFacts, Consent, CredentialCustodian, CredentialField, CredentialFields, CustodyError,
@@ -19,6 +22,9 @@ use super::{
     ProfileFacts, RefreshRequest,
 };
 use crate::CredentialGeneration;
+
+#[cfg(test)]
+mod tests;
 
 impl CredentialField {
     /// The custodied placeholder for `slot` at `expected`: a credential the
@@ -82,20 +88,101 @@ impl GatewayCustodian {
         endpoint: protocol::Endpoint,
         request: &impl serde::Serialize,
     ) -> Result<T, CustodyError> {
+        let body = protocol::call::encode(request).map_err(|_| CustodyError::Internal)?;
+        let mut result = self.call_once(slot, endpoint, body.clone()).await;
+        if result
+            .as_ref()
+            .is_err_and(|error| waitable(endpoint, error))
+            && let Some(deadline) = authority_acquisition::wait_deadline(Instant::now().into_std())
+        {
+            let Some(reply) = self
+                .wait_for_call(slot, endpoint, &body, Instant::from_std(deadline))
+                .await
+            else {
+                authority_acquisition::refuse(RuntimeModelAuthorityError::AcquisitionTimedOut)
+                    .await;
+                return Err(CustodyError::Unavailable);
+            };
+            result = reply;
+        }
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(error) => {
+                let error = call_error(&error, slot);
+                if matches!(
+                    error,
+                    CustodyError::ScopeDenied
+                        | CustodyError::Disabled
+                        | CustodyError::UnknownAccount
+                        | CustodyError::UpstreamNotPinned
+                        | CustodyError::ReservedHeader
+                        | CustodyError::CustodiedHeadersMismatch
+                ) {
+                    authority_acquisition::refuse(RuntimeModelAuthorityError::CredentialRefused)
+                        .await;
+                }
+                return Err(error);
+            }
+        };
+        protocol::call::decode(&reply).map_err(|_| CustodyError::Internal)
+    }
+
+    async fn call_once(
+        &self,
+        slot: &CustodySlot,
+        endpoint: protocol::Endpoint,
+        body: Vec<u8>,
+    ) -> Result<Vec<u8>, RelayCallError> {
         let control = RelayClient::call_control();
         if self.current_authority_kinds.contains(&slot.kind()) {
             self.relay
                 .require_version(protocol::PROTOCOL_VERSION, &control)
-                .await
-                .map_err(|error| call_error(&error, slot))?;
+                .await?;
         }
-        let body = protocol::call::encode(request).map_err(|_| CustodyError::Internal)?;
-        let reply = self
-            .relay
-            .call(endpoint, body, &control)
-            .await
-            .map_err(|error| call_error(&error, slot))?;
-        protocol::call::decode(&reply).map_err(|_| CustodyError::Internal)
+        self.relay.call(endpoint, body, &control).await
+    }
+
+    async fn wait_for_call(
+        &self,
+        slot: &CustodySlot,
+        endpoint: protocol::Endpoint,
+        body: &[u8],
+        deadline: Instant,
+    ) -> Option<Result<Vec<u8>, RelayCallError>> {
+        timeout_at(deadline, async {
+            let mut delay = Duration::from_millis(250);
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                authority_acquisition::backoff(delay.min(remaining), remaining).await;
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                let result = self.call_once(slot, endpoint, body.to_vec()).await;
+                if !result
+                    .as_ref()
+                    .is_err_and(|error| waitable(endpoint, error))
+                {
+                    return Some(result);
+                }
+                delay = (delay * 2).min(Duration::from_secs(2));
+            }
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+}
+
+fn waitable(endpoint: protocol::Endpoint, error: &RelayCallError) -> bool {
+    use protocol::Endpoint::{Facts, Refresh};
+    match error {
+        // The deployed gateway returns Busy both while draining and at
+        // capacity. Facts (and version discovery) cannot exchange upstream.
+        RelayCallError::Refused(GatewayRefusal::Busy { .. }) => endpoint == Facts,
+        RelayCallError::Transport(failure) if matches!(endpoint, Facts | Refresh) => {
+            failure.gateway_unreachable_before_send()
+        }
+        _ => false,
     }
 }
 

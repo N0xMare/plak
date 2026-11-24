@@ -235,6 +235,7 @@ pub struct Failure {
     idle_age: Option<std::time::Duration>,
     connect_attempts: Option<ConnectAttempts>,
     request_body_bytes_written: Option<u64>,
+    gateway_unreachable: bool,
 }
 
 /// Only the closed facts read from an I/O error, not the error itself.
@@ -298,6 +299,7 @@ impl Failure {
             idle_age: None,
             connect_attempts: None,
             request_body_bytes_written: None,
+            gateway_unreachable: false,
         }
     }
 
@@ -349,7 +351,27 @@ impl Failure {
 
     /// Records the I/O kind, OS error number and any Rustls error behind `io`.
     pub(crate) fn with_io_cause(self, io: &std::io::Error) -> Self {
+        self.with_io_cause_and_dial_proof(io, false)
+    }
+
+    /// Records diagnostics and separately carries the gateway dial's proof
+    /// of unavailability before send, if the dial established it.
+    pub(crate) fn with_io_cause_and_dial_proof(
+        mut self,
+        io: &std::io::Error,
+        gateway_unreachable: bool,
+    ) -> Self {
+        self.gateway_unreachable = gateway_unreachable;
         self.with_io_detail(&IoDetail::from_error(io))
+    }
+
+    /// The credential gateway's listener refused the dial or was absent,
+    /// before any request bytes could be written. Not derived from diagnostics.
+    #[must_use]
+    pub const fn gateway_unreachable_before_send(self) -> bool {
+        self.gateway_unreachable
+            && matches!(self.phase, Phase::Connect)
+            && matches!(self.transmission, TransmissionFact::NotStarted)
     }
 
     const fn with_io_detail(mut self, io: &IoDetail) -> Self {
@@ -609,6 +631,8 @@ fn hyper_cause(error: &hyper::Error) -> &'static str {
 
 fn io_cause(kind: std::io::ErrorKind) -> &'static str {
     match kind {
+        std::io::ErrorKind::ConnectionRefused => "connection_refused",
+        std::io::ErrorKind::NotFound => "not_found",
         std::io::ErrorKind::ConnectionReset => "connection_reset",
         std::io::ErrorKind::ConnectionAborted => "connection_aborted",
         std::io::ErrorKind::BrokenPipe => "broken_pipe",

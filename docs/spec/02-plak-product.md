@@ -7057,8 +7057,9 @@ query strings, keys, tokens or pastes. A failed upstream transport adds an
 optional `upstream_failure` object: connection use (fresh, reused or stale
 replacement), pool idle age at checkout in milliseconds, HTTP version,
 request body bytes written, an `error_class` from the closed
-`Failure::transport_error_class()` vocabulary (chapter 01 §13.1), and any
-numeric TLS alert or HTTP/2 reason. Unknown facts are null. The byte count
+`Failure::transport_error_class()` vocabulary (chapter 01 §13.1), including
+`not_found` for an absent socket and `connection_refused` for a refused dial,
+and any numeric TLS alert or HTTP/2 reason. Unknown facts are null. The byte count
 excludes the HTTP head and counts HTTP/1.1 body plaintext confirmed accepted
 by the stream; it is not delivery evidence and may omit partial progress
 during an errored write. An unsent request records zero; HTTP/2 upload
@@ -7144,6 +7145,10 @@ credential store and account authority. Existing installations with an old
 host unit and a gateway unit pinned to a snapshot migrate the gateway while the
 old host keeps serving, then carry the host and replace its unit; see the user
 guide for the exact order and drop-in removal.
+
+An already-serving host's ordinary turn can wait out the listener gap while
+acquiring authority before dispatch, up to the caller-side bound in chapter
+01 §7.5. The wait does not restart a relayed request that went upstream.
 
 The host reads its own `config.toml` once at startup; project overlays cannot
 select the gateway. Every route, subscription, console operation, carry probe

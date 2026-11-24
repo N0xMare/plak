@@ -426,7 +426,7 @@ async fn upstream_failure_audit_appends_only_closed_transport_fields() {
             "idle_age_ms": null,
             "http_version": null,
             "request_body_bytes_written": 0,
-            "error_class": "io_other",
+            "error_class": "not_found",
             "tls_alert": null,
             "http2_reason": null,
         })

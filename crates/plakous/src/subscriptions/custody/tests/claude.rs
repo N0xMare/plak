@@ -28,6 +28,8 @@ const TOKEN: &str = "https://platform.claude.com";
 const MODEL: &str = "claude-sonnet-5";
 const PROVIDER: NativeProvider = NativeProvider::Claude;
 
+mod swap_wait;
+
 /// A client dialing the Claude Messages and token origins at `upstream`.
 fn dialing(upstream: &Upstream) -> TestResult<Client> {
     let token = Client::new_http1(Limits::default())?.with_test_dial_override(
@@ -59,6 +61,17 @@ fn gateway_custody(
     paths: &SubscriptionPaths,
     upstream: &Upstream,
 ) -> TestResult<crate::custody::Custody> {
+    let server = gateway_server(paths, upstream)?;
+    let gateway = GatewayCustody::connect(InProcessGateway::endpoint_for(&server), None, |kind| {
+        (kind == "claude").then_some(CLAUDE_CREDENTIAL_HEADERS)
+    })?;
+    Ok(gateway.custody())
+}
+
+fn gateway_server(
+    paths: &SubscriptionPaths,
+    upstream: &Upstream,
+) -> TestResult<crate::gateway::server::RelayServer<InProcessGateway>> {
     let mut local = at_review(paths, PROVIDER)?;
     local.claude_test_transport = Some(dialing(upstream)?);
     let custody = LocalCustody::new(new_instance().ok_or("gateway instance")?).with_kind(
@@ -66,12 +79,8 @@ fn gateway_custody(
         Arc::new(SubscriptionCustodian::new(local, PROVIDER)),
         CLAUDE_UPSTREAM_PINS,
     );
-    let server = InProcessGateway::server(custody, upstream.client.clone())
-        .with_dial_override(MESSAGES, upstream.origin.clone());
-    let gateway = GatewayCustody::connect(InProcessGateway::endpoint_for(&server), None, |kind| {
-        (kind == "claude").then_some(CLAUDE_CREDENTIAL_HEADERS)
-    })?;
-    Ok(gateway.custody())
+    Ok(InProcessGateway::server(custody, upstream.client.clone())
+        .with_dial_override(MESSAGES, upstream.origin.clone()))
 }
 
 fn lowercase(request: &[u8]) -> String {

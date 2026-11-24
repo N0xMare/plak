@@ -5,6 +5,7 @@ use super::{
     ModelPreparationErrorKind, ModelRetryability, NonZeroU32, PreparedCallError,
     RedactedModelErrorSource, SafeDiagnostic, Serialize, Serializer, ValidationError, Visitor, fmt,
 };
+use crate::RuntimeModelAuthorityError;
 
 /// A provider-neutral typed model error with a redaction-safe message.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -677,6 +678,12 @@ impl From<ModelPreparationError> for ModelError {
                 | ValidationError::Serialization { .. }
                 | ValidationError::Digest(_) => ModelErrorKind::InvalidRequest,
             },
+            ModelPreparationError::RuntimeAuthority(
+                RuntimeModelAuthorityError::AcquisitionTimedOut,
+            ) => ModelErrorKind::Unavailable,
+            ModelPreparationError::RuntimeAuthority(
+                RuntimeModelAuthorityError::CredentialRefused,
+            ) => ModelErrorKind::Authorization,
             ModelPreparationError::RuntimeAuthority(_) => ModelErrorKind::InvalidConfiguration,
             ModelPreparationError::PreparedCall(
                 PreparedCallError::RecordTooLarge | PreparedCallError::WireTooLarge { .. },

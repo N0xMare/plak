@@ -320,16 +320,49 @@ pub(in crate::subscriptions) fn claude_generation(paths: &SubscriptionPaths) -> 
 pub(in crate::subscriptions) fn claude_stored(
     paths: &SubscriptionPaths,
 ) -> TestResult<(u64, plakous_auth::CredentialStatus)> {
+    let fence = claude_store(paths)?.load()?.ok_or("no Claude record")?;
+    Ok((fence.generation().get(), fence.status()))
+}
+
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn claude_store(
+    paths: &SubscriptionPaths,
+) -> TestResult<plakous_auth::PrivateCredentialStore> {
     let provider = NativeProvider::Claude;
-    let store = plakous_auth::PrivateCredentialStore::open_slot(
+    Ok(plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(provider),
         plakous_auth::SubscriptionIntegrationProfileId::new(
             NativeSubscriptions::notice(provider).unwrap().profile_id(),
         )?,
         slot_of(paths)?,
+    )?)
+}
+
+/// Publishes the replacement fixture payload and its recovery marker. The
+/// caller holds the compatibility lock, just as for the initial seed.
+#[cfg(feature = "claude")]
+pub(in crate::subscriptions) fn restore_claude_fixture(
+    paths: &SubscriptionPaths,
+    revoked: &plakous_auth::CredentialFence,
+    payload: plakous_auth::SecretBytes,
+) -> TestResult {
+    let provider = NativeProvider::Claude;
+    let notice = NativeSubscriptions::notice(provider)?;
+    let consent = load_acceptance_exact(paths, notice, notice.reviewed_at() + 60)?;
+    let generation = revoked.generation().next()?;
+    let operation = arm_login_recovery(paths, provider, &consent.generation)?;
+    claude_store(paths)?.replace_selected_login(
+        revoked,
+        plakous_auth::CredentialRecord::new(
+            revoked.profile_id().clone(),
+            revoked.account_binding().clone(),
+            generation,
+            plakous_auth::CredentialStatus::Ready,
+            payload,
+        )?,
     )?;
-    let fence = store.load()?.ok_or("no Claude record")?;
-    Ok((fence.generation().get(), fence.status()))
+    clear_login_recovery(paths, provider, &operation, generation.get())?;
+    Ok(())
 }
 
 /// A tool-free Claude selection of `model`, with the product's Claude

@@ -6,10 +6,92 @@
 use super::*;
 use crate::RuntimeCheckpointKind;
 use plakous_model::RuntimeModelAuthorityError;
+use plakous_model::authority_acquisition;
 
 struct WaitingModel {
     inner: Arc<ArtifactModel>,
     prepared: Mutex<Option<(ValidatedRequestPlan, PreparedCallRecord)>>,
+}
+
+struct FinalAuthorityBackoff {
+    inner: Arc<ArtifactModel>,
+    prepared: AtomicBool,
+    backing_off: Notify,
+}
+
+impl LanguageModel for FinalAuthorityBackoff {
+    fn revalidate_runtime_authority(
+        self: Arc<Self>,
+        checked_at: Timestamp,
+    ) -> RuntimeModelAuthorityOperation {
+        Box::pin(async move {
+            if self.prepared.load(Ordering::Acquire)
+                && authority_acquisition::wait_deadline(tokio::time::Instant::now().into_std())
+                    .is_some()
+            {
+                self.backing_off.notify_one();
+                authority_acquisition::backoff(Duration::from_secs(30), Duration::from_secs(60))
+                    .await;
+            }
+            Arc::clone(&self.inner)
+                .revalidate_runtime_authority(checked_at)
+                .await
+        })
+    }
+
+    fn prepare_call(
+        self: Arc<Self>,
+        plan: ValidatedRequestPlan,
+        context: ModelPreparationContext,
+    ) -> Result<PreparedModelCall, ModelPreparationError> {
+        let call = Arc::clone(&self.inner).prepare_call(plan, context)?;
+        self.prepared.store(true, Ordering::Release);
+        Ok(call)
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lease_loss_interrupts_final_authority_backoff_without_dispatch() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(3).ok_or("lease")?,
+    )?;
+    let inner = artifact_test_model(0, 91_000)?;
+    let model = Arc::new(FinalAuthorityBackoff {
+        inner: Arc::clone(&inner),
+        prepared: AtomicBool::new(false),
+        backing_off: Notify::new(),
+    });
+    let slots = crate::RequestSlots::new("fixture", std::num::NonZeroUsize::MIN);
+    let mut builder =
+        durable_artifact_test_builder(workspace, Arc::clone(&inner)).request_slots(slots.clone());
+    builder.model = model.clone();
+    let agent = sessions.create("create:authority-backoff", builder).await?;
+    let turn = agent.prompt("fixture prompt").await?;
+    tokio::time::timeout(Duration::from_secs(5), model.backing_off.notified()).await?;
+    let gate = tokio::time::timeout(
+        Duration::from_secs(1),
+        agent.inner.provider_dispatch_gate.lock(),
+    )
+    .await?;
+    assert_eq!(slots.in_flight(), 0);
+    assert_eq!(inner.calls.load(Ordering::Acquire), 0);
+    drop(gate);
+
+    store.reject_renewal.store(true, Ordering::Release);
+    let outcome = tokio::time::timeout(Duration::from_secs(5), turn.result()).await?;
+    assert!(agent.inner.authority.lease_lost_for_test());
+    let error = match outcome {
+        Ok(turn) => turn.error().cloned().ok_or("unexpected completion")?,
+        Err(error) => error,
+    };
+    assert_ne!(error.kind(), AgentErrorKind::Model);
+    assert_eq!(inner.calls.load(Ordering::Acquire), 0);
+    Ok(())
 }
 
 impl LanguageModel for WaitingModel {

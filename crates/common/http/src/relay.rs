@@ -98,8 +98,12 @@ impl crate::transport::hooks::Dialer for Dial {
         let endpoint = self.0.clone();
         Box::pin(async move {
             let failed = |error: std::io::Error| {
+                let unreachable = matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                );
                 Failure::new(Phase::Connect, TransmissionFact::NotStarted, ErrorKind::Io)
-                    .with_io_cause(&error)
+                    .with_io_cause_and_dial_proof(&error, unreachable)
             };
             Ok(match endpoint {
                 GatewayEndpoint::Unix(path) => Box::new(
@@ -112,7 +116,10 @@ impl crate::transport::hooks::Dialer for Dial {
                     let stream = tokio::net::TcpStream::connect(address)
                         .await
                         .map_err(failed)?;
-                    stream.set_nodelay(true).map_err(failed)?;
+                    stream.set_nodelay(true).map_err(|error| {
+                        Failure::new(Phase::Connect, TransmissionFact::NotStarted, ErrorKind::Io)
+                            .with_io_cause(&error)
+                    })?;
                     Box::new(stream)
                 }
                 GatewayEndpoint::InMemory(gateway) => Box::new(gateway.open()),
@@ -377,7 +384,7 @@ impl RelayClient {
     /// A control for one call with the default call timeout.
     #[must_use]
     pub fn call_control() -> ExchangeControl {
-        ExchangeControl::new(Instant::now() + CALL_TIMEOUT)
+        ExchangeControl::new((tokio::time::Instant::now() + CALL_TIMEOUT).into_std())
     }
 
     async fn send(

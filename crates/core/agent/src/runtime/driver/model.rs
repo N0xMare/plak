@@ -405,7 +405,9 @@ impl Driver {
                 Box::pin(self.prepare_round(command, attempt_id, &descriptor, *request)).await?
             }
             RoundRequest::Admitted(admitted)
-                if !self.admitted_round_authorized(&descriptor, &admitted).await =>
+                if !self
+                    .admitted_round_authorized(&descriptor, &admitted)
+                    .await? =>
             {
                 // The runtime authority changed since the admission (a
                 // refreshed credential, another account or an expired
@@ -576,7 +578,7 @@ impl Driver {
                 return Err(self.model_timeout_error());
             }
             let provider_dispatch_gate = Arc::clone(&self.provider_dispatch_gate);
-            let dispatch_guard = provider_dispatch_gate.lock().await;
+            let mut dispatch_guard = Some(provider_dispatch_gate.lock_owned().await);
             if self.placement_unavailable() {
                 // Held while this round queued: park again without the gate.
                 drop(dispatch_guard);
@@ -589,9 +591,13 @@ impl Driver {
                 return Err(self.model_timeout_error());
             }
             let dispatch_checked_at = self.clock.now();
-            let dispatch_authority = match Arc::clone(&self.model)
-                .revalidate_runtime_authority(dispatch_checked_at)
-                .await
+            let (dispatch_authority, dispatch_checked_at) = match self
+                .check_round_authority(
+                    Arc::clone(&self.model),
+                    dispatch_checked_at,
+                    &mut dispatch_guard,
+                )
+                .await?
             {
                 Ok(authority) => authority,
                 Err(plakous_model::RuntimeModelAuthorityError::AwaitingCredential) => {
@@ -602,6 +608,12 @@ impl Driver {
                 }
                 Err(error) => return Err(self.authority_error(error)),
             };
+            if self.placement_unavailable() {
+                continue;
+            }
+            if crate::executor::now() >= operation_deadline {
+                return Err(self.model_timeout_error());
+            }
             validate_configuration_runtime_authority(
                 &self.provider_configuration,
                 &descriptor,
@@ -974,7 +986,7 @@ impl Driver {
         cache_affinity: ModelCacheAffinity,
     ) -> Result<(PreparedModelCall, Timestamp), AgentError> {
         let (authority, prepared_at) = self
-            .request_authority(Arc::clone(&self.model), prepared_at)
+            .round_request_authority(Arc::clone(&self.model), prepared_at)
             .await?;
         validate_configuration_runtime_authority(
             &self.provider_configuration,

@@ -6205,6 +6205,27 @@ reaches a provider; a relayed request without one is refused unsent as well.
 (the operator refresh through the admin `Refresh`), fetched fresh on every
 call, and hands out placeholders for the kind's credential headers.
 
+For an ordinary turn's request preparation and final pre-dispatch authority
+check, the caller can wait on the same gateway and account within a bounded
+window, with exponential backoff. It retries a
+facts or refresh call on a typed dial failure proving the connection was
+refused or the socket was absent before sending any bytes. It also backs off
+on a typed `busy` reply to a read-only facts call (including version
+discovery), which covers both drain and capacity. A failed write, missing
+response or other ambiguous outcome does not authorize retry. Authorization
+and policy refusals stop preparation immediately; a missing or logged-out
+native credential still parks as described in §5.4.
+
+Between attempts the caller releases any shared request slot and per-session
+dispatch gate it holds. It must reacquire them before resuming the same
+acquisition. Cancellation, shutdown and loss of the runtime lease interrupt
+the wait; exhausting the window reports model `Unavailable` at `Preparation`
+without dispatch. The caller does not rerun the whole authority check, change
+route or relax exact-URL authorization. It does not wait on inference relays,
+after dispatch of the request, or for paid compaction. The gateway still makes
+exactly one upstream exchange per relay and never retries it: the caller is
+waiting to obtain authority, not replaying an upstream exchange.
+
 A `fence_moved` refusal names the credential's current facts. When the
 account binding is unchanged and the generation grew, the relay prepares the
 same request again inside the same logical attempt with the moved fence, at
@@ -13170,7 +13191,8 @@ Physical HTTP protocol failures retain an optional closed transport-library
 cause category, numeric HTTP/2 reason and numeric operating-system error in
 observation metadata. Categories
 distinguish parsing, incomplete messages, connection reset/abort/EOF, and local
-versus remote HTTP/2 reset/GOAWAY when the dependency retains that fact. An I/O
+versus remote HTTP/2 reset/GOAWAY when the dependency retains that fact.
+Closed I/O labels include `connection_refused` and `not_found`. An I/O
 cause that Rustls raised (`invalid_data`), on a request or in the TLS handshake,
 also keeps a closed `TlsCause`: a received alert with its numeric alert
 description, a decrypt failure, an invalid or inappropriate message, peer
