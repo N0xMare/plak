@@ -586,6 +586,15 @@ pub(crate) fn recover_actual_host_fixture(
     .join()
     .map_err(|_| "actual host recovery thread panicked")??;
     let mut report = probe_product_fixture(home, state_path)?;
+    if state.workflow == ProductWorkflow::AccountContinue && !next_prompt {
+        assert!(
+            !observations.iter().any(|event| {
+                matches!(event, crate::surface_protocol::HostEvent::TurnLifecycle(turn)
+                    if turn.phase == plakous_host_protocol::TurnPhase::Admitted)
+            }),
+            "a plain account-continue reopen admitted a turn"
+        );
+    }
     report.account_continue_warnings = observations
         .into_iter()
         .filter_map(|event| {

@@ -1497,7 +1497,7 @@ assertions do not measure elapsed time and need no budget lane.
 | Process observation and job-await budgets | `process_await_wait_does_not_reserve_a_blocking_worker`, `terminal_hint_drains_more_than_one_record_batch_without_waiting`, `contended_observation_does_not_block_the_async_worker` |
 | Process capacity probes | `running_children_still_count_against_the_session_limit`, `sixty_fifth_running_start_is_refused_before_spawn`, `host_capacity_refuses_the_129th_start_across_services_before_spawn`, `a_refusal_raised_before_any_spawn_reaches_the_model_as_a_tool_failure` |
 | Product CAS startup/reopen | `isolated_jsonl_startups_and_reopens_preserve_product_revision`, `isolated_idle_jsonl_quits_and_reopens_preserve_product_revision` |
-| Crash-sweep view rebuild | `full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape` — runs every registered sweep shape's lifecycle in sequence in one test (38 to 58 seconds alone); under parallel gate load it outran the parallel lane's 120-second allowance |
+| Crash-sweep view rebuild | `sweep_shapes_without_core_view_pilots_obey_both_sqlite_laws` runs the nine lifecycles that do not reuse a core twin-pilot fixture. The other eight view-law shapes reuse fixtures in the core parallel lane (§2.6). |
 | Auth lock/callback and HTTP closure deadlines | `expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded`, `busy_execution_lock_fails_without_waiting_or_accepting`, `an_early_response_to_an_unfinished_upload_is_not_kept`, `a_post_acceptance_deadline_is_definite_on_both_wires` |
 | Detached writer cleanup | `host_future_drop_is_bounded_with_a_detached_continuous_writer` |
 | Auth deadlines | `cancelling_claimed_refresh_after_request_observation_restores_ready`, `local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store` |
@@ -1648,7 +1648,7 @@ macOS; ignored full-tier retirement soaks in both profiles still run alone.
 | Kind | Predicates |
 | --- | --- |
 | Real SIGKILL relaunch | `actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers` |
-| Continue on another account | `account_continue_sigkill_cuts_reopen_without_resubmitting` — a real SQLite home, the root's first turn failed on its usage limit, then `ChooseAccount` with `continue_failed`; SIGKILL after the rebind's `ProductPublished`, the root-start's `Prepared` and its `RuntimeReturned`, then two relaunches on the root line's head: one rebind, no physical dispatch and no submission by either reopen, a published-but-unqueued continue has no submission and one warning per open with the derived command id, a prepared root-start stays queued with its one written submission, and a returned one has exactly one accepted submission and no queued copy (chapter 02 §4.4.1). `account_continue_crash_cuts::` cuts the same boundaries in process |
+| Continue on another account | `account_continue_sigkill_cuts_reopen_without_resubmitting` — a real SQLite home, the root's first turn failed on its usage limit, then `ChooseAccount` with `continue_failed`; SIGKILL after the rebind's `ProductPublished`, the root-start's `Prepared` and its `RuntimeReturned`, then two relaunches on the root line's head. Neither reopen admits, dispatches or submits a turn. There is one rebind with the derived operation id; a published-but-unqueued continue has no submission and one warning per open with the derived command id, a prepared root-start keeps its matching queue item and one written submission, and a returned one has exactly one accepted submission and no queued copy (chapter 02 §4.4.1). `account_continue_crash_cuts::` covers the rebind's `Prepared` cut in process (withdraw the unpublished request) and the explicit retry branches (refuse an already-queued continue; submit a published-but-unqueued continue once without a second rebind). |
 | Spawn on a chosen account | `spawn_account_receipt_replays_after_relaunch` — cut the caller after the SQLite tree publishes the receipt and before child binding, reopen the persisted tree after a choice change, then replay the exact receipt: no new node, and the bound runtime account equals the node's original frozen reference (chapter 03 §2.1) |
 | Real JSONL face SIGKILL | `jsonl_face_cut_before_the_turn_reopens_exactly`, `jsonl_face_cut_inside_the_model_request_is_abandoned_with_the_billing_note`, `jsonl_face_cut_inside_a_running_tool_is_abandoned_with_the_workspace_note`, `jsonl_face_cut_after_the_answer_reopens_exactly`; `jsonl_face_cut_inside_an_approval_is_asked_again_on_reopen` is explicitly ignored under `JSONL-APPROVAL-RESUME` |
 | GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
@@ -2093,13 +2093,23 @@ checks use full binary-relative paths, not bare module names or suffixes.
 [--strict]` builds the shared workspace fixtures and runs the ignored full
 sweep. The install subset cuts `final_only`, `direct_tool_then_final`,
 `promoted_background_job` and `sealed_family_artifacts` with up to sixteen
-workers. Other registered shapes run twin pilots in install. Separate bounded
+workers. Other registered shapes run twin pilots in install and must publish
+at least one runtime commit. Separate bounded
 retirement campaigns cover closed cells, interrupted batches, a live child
 and process, and a yielded cell with delivered children below the retirement
 boundary. Representative cuts include the first commit of each store; the
 live-child/process and yielded-cell campaigns require a first product cut
 and reserve the entire pool as specified in §2.3. Their ignored exhaustive
 counterparts run in full/soak.
+
+The core SQL view laws cover seventeen shapes: compare the complete
+incrementally maintained and clear-and-replayed views, then plain-open
+byte-identical twins with and without their views. Busy quit and uncertain
+MCP first recover once before cloning, so both arms have the same canonical
+facts. Eight shapes reuse the first converged fixture from their core parallel
+twin pilots after both traces have been compared. The remaining nine run
+their lifecycles in serial. The install and strict campaigns do not run
+these view checks on their indexed fixtures.
 
 Test-support `PLAK_TEST_LEDGER_RETIREMENT_HIGH_WATER` (8–2048, default 2048)
 and `PLAK_TEST_LEDGER_HEADROOM_LIMIT` (default 3584) reach retirement/refusal

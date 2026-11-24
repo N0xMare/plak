@@ -690,11 +690,8 @@ fn an_unsent_continue_is_reported_on_reopen_and_never_resubmitted() {
     assert!(unsent_continue_notice(&session, &views).is_none());
 }
 
-/// Crash cuts of a continue (spec 02 §4.4.1): the host stops at the rebind's
-/// written request, its publication, the root-start's written submission and
-/// its admitted turn; a host then reopens the line head from the same stores.
-/// Each shows one rebind, at most one resubmitted prompt, and no resubmission
-/// by the reopen itself.
+/// Continue cuts not covered by the plain-open SIGKILL matrix (spec 02
+/// §4.4.1): the rebind's written request and both explicit retry branches.
 mod account_continue_crash_cuts {
     use super::*;
     use crate::runtime::test_support::{use_short_crash_lease, wait_out_crashed_lease};
@@ -702,34 +699,28 @@ mod account_continue_crash_cuts {
 
     struct Cut {
         store: Arc<dyn SessionRecordStore>,
-        tree: String,
+        head: SessionRecord,
         source: String,
-        failed_turn: String,
-        reopened: Vec<HostEvent>,
+        ids: ContinueIds,
         repeated: Option<AccountChoiceOutcome>,
-        repeat_events: Vec<HostEvent>,
+        repeat_admissions: usize,
     }
 
-    /// What the reopened host does once it settled: nothing, or the same
-    /// continue again, which is refused or runs.
-    #[derive(Clone, Copy, Eq, PartialEq)]
-    enum Repeat {
-        No,
-        Refused,
-        Runs,
+    #[derive(Clone, Copy)]
+    enum Case {
+        Unpublished,
+        QueuedRetry,
+        PublishedRetry,
     }
 
-    fn cut_at(workflow: HostWorkflow, boundary: HostBoundary, nth: usize) -> Cut {
-        cut_then(workflow, boundary, nth, Repeat::No)
-    }
-
-    fn cut_then(workflow: HostWorkflow, boundary: HostBoundary, nth: usize, repeat: Repeat) -> Cut {
+    fn reopen(case: Case) -> Cut {
+        let cut = match case {
+            Case::Unpublished => (HostWorkflow::Rebind, HostBoundary::Prepared, 1),
+            Case::QueuedRetry => (HostWorkflow::RootDelivery, HostBoundary::Prepared, 2),
+            Case::PublishedRetry => (HostWorkflow::Rebind, HostBoundary::ProductPublished, 1),
+        };
         let root = tempfile::tempdir().unwrap();
-        let (config, surface) = continue_host(
-            root.path(),
-            Some((workflow, boundary, nth)),
-            b"offline-loopback-account",
-        );
+        let (config, surface) = continue_host(root.path(), Some(cut), b"offline-loopback-account");
         use_short_crash_lease(&config.state_roots);
         let store = Arc::clone(&config.store);
         let state_roots = config.state_roots.clone();
@@ -740,8 +731,12 @@ mod account_continue_crash_cuts {
         wait_for(&events, &mut seen, 0, |events| {
             idle_after(events, TurnPhase::Failed)
         });
-        let failed_turn = lifecycle(&seen, TurnPhase::Failed)[0].turn_id.clone();
         let source = line_head(store.as_ref(), &tree).id;
+        let ids = ContinueIds::of(
+            &source,
+            &lifecycle(&seen, TurnPhase::Failed)[0].turn_id,
+            "codex/b",
+        );
         *surface.next.lock().unwrap() = Some(SurfaceAccountChoice::Root {
             account: "codex/b".into(),
             continue_failed: true,
@@ -751,6 +746,7 @@ mod account_continue_crash_cuts {
         drop((actions, events));
 
         let head = line_head(store.as_ref(), &tree);
+        let before_retry = head.id.clone();
         let account: &'static [u8] = if head.id == source {
             b"offline-loopback-account"
         } else {
@@ -765,6 +761,45 @@ mod account_continue_crash_cuts {
         config.session = head;
         let (actions, events, worker) = spawn_host_worker(config)
             .unwrap_or_else(|failure| panic!("the line head reopens: {}", failure.message()));
+        let notice = matches!(case, Case::PublishedRetry).then(|| ids.command_id());
+        observe_idle_reopen(&events, notice.as_deref());
+        let mut repeat_events = Vec::new();
+        let repeated = match case {
+            Case::Unpublished => None,
+            Case::QueuedRetry => Some(refused_continue(&surface, &actions)),
+            Case::PublishedRetry => {
+                continue_on_b(&surface, &actions, &events, &mut repeat_events);
+                surface.outcomes.lock().unwrap().last().cloned()
+            }
+        };
+        send_attached_action(&actions, UserAction::Quit);
+        worker.join().unwrap().unwrap();
+        let head = line_head(store.as_ref(), &tree);
+        assert_eq!(head.id, before_retry, "reopen and retry never rebind again");
+        if head.id != source {
+            assert_eq!(
+                head.source_product_session_id.as_deref(),
+                Some(source.as_str())
+            );
+            assert_eq!(
+                head.source_workflow_operation_id.as_deref(),
+                Some(ids.operation_id.as_str())
+            );
+        }
+        Cut {
+            store,
+            head,
+            source,
+            ids,
+            repeated,
+            repeat_admissions: lifecycle(&repeat_events, TurnPhase::Admitted).len(),
+        }
+    }
+
+    fn observe_idle_reopen(
+        events: &crate::surface_protocol::HostEventReceiver<TestExtension>,
+        notice: Option<&str>,
+    ) {
         let mut reopened = Vec::new();
         let settle = Instant::now() + Duration::from_secs(3);
         while Instant::now() < settle {
@@ -772,81 +807,29 @@ mod account_continue_crash_cuts {
                 reopened.push(event);
             }
         }
-        let mut repeat_events = Vec::new();
-        let repeated = match repeat {
-            Repeat::No => None,
-            Repeat::Refused => Some(refused_continue(&surface, &actions)),
-            Repeat::Runs => {
-                continue_on_b(&surface, &actions, &events, &mut repeat_events);
-                surface.outcomes.lock().unwrap().last().cloned()
-            }
-        };
-        send_attached_action(&actions, UserAction::Quit);
-        worker.join().unwrap().unwrap();
-        Cut {
-            store,
-            tree,
-            source,
-            failed_turn,
-            reopened,
-            repeated,
-            repeat_events,
-        }
-    }
-
-    impl Cut {
-        fn head(&self) -> SessionRecord {
-            line_head(self.store.as_ref(), &self.tree)
-        }
-
-        fn ids(&self) -> ContinueIds {
-            ContinueIds::of(&self.source, &self.failed_turn, "codex/b")
-        }
-
-        /// One rebind at most: the head is the source or its one successor.
-        fn assert_one_rebind(&self) {
-            let head = self.head();
-            if head.id != self.source {
-                assert_eq!(
-                    head.source_product_session_id.as_deref(),
-                    Some(self.source.as_str())
-                );
-                assert_eq!(
-                    head.source_workflow_operation_id.as_deref(),
-                    Some(self.ids().operation_id.as_str())
-                );
-            }
-        }
-
-        fn reopen_admitted_nothing(&self) {
+        assert!(
+            lifecycle(&reopened, TurnPhase::Admitted).is_empty(),
+            "reopen never submits the continue: {reopened:?}"
+        );
+        if let Some(command) = notice {
             assert!(
-                lifecycle(&self.reopened, TurnPhase::Admitted).is_empty(),
-                "reopen never submits the continue: {:?}",
-                self.reopened
-            );
-        }
-
-        fn continue_notice(&self) -> bool {
-            self.reopened.iter().any(|event| {
-                matches!(
-                    event,
-                    HostEvent::Row(TranscriptRow::Notice(notice)) if matches!(
+                reopened.iter().any(|event| {
+                    matches!(event, HostEvent::Row(TranscriptRow::Notice(notice)) if matches!(
                         &notice.remedy,
                         Some(plakous_host_protocol::notice_remedy::NoticeRemedy::ContinueOnAccount {
                             continuation
-                        }) if continuation.command_id == self.ids().command_id()
-                    )
-                )
-            })
+                        }) if continuation.command_id == command
+                    ))
+                }),
+                "the unsent continue must be reported: {reopened:?}"
+            );
         }
     }
 
     #[test]
     fn a_cut_after_the_rebind_request_is_written_withdraws_it_and_sends_nothing() {
-        let cut = cut_at(HostWorkflow::Rebind, HostBoundary::Prepared, 1);
-        cut.assert_one_rebind();
-        cut.reopen_admitted_nothing();
-        let head = cut.head();
+        let cut = reopen(Case::Unpublished);
+        let head = cut.head;
         assert_eq!(
             head.id, cut.source,
             "an unpublished rebind has no successor"
@@ -855,7 +838,7 @@ mod account_continue_crash_cuts {
             cut.store
                 .load_intents(&head.id)
                 .unwrap()
-                .workflow_request(&cut.ids().operation_id)
+                .workflow_request(&cut.ids.operation_id)
                 .is_none(),
             "the unpublished request is withdrawn"
         );
@@ -863,99 +846,22 @@ mod account_continue_crash_cuts {
         assert_eq!(user_rows(cut.store.as_ref(), &head.id), ["do the thing"]);
     }
 
-    #[test]
-    fn a_cut_after_the_rebind_publishes_reports_the_unsent_continue_once_opened() {
-        let cut = cut_at(HostWorkflow::Rebind, HostBoundary::ProductPublished, 1);
-        cut.assert_one_rebind();
-        cut.reopen_admitted_nothing();
-        let head = cut.head();
-        assert_ne!(head.id, cut.source, "the rebind published");
-        assert_eq!(head.account.as_deref(), Some("codex/b"));
-        assert_eq!(head.pending_queue.len(), 0);
-        assert!(cut.continue_notice(), "{:?}", cut.reopened);
-    }
-
-    #[test]
-    fn a_cut_after_the_root_start_is_written_keeps_it_queued_and_paused() {
-        let cut = cut_at(HostWorkflow::RootDelivery, HostBoundary::Prepared, 2);
-        cut.assert_one_rebind();
-        cut.reopen_admitted_nothing();
-        let head = cut.head();
-        assert!(
-            head.pending_queue
-                .iter()
-                .any(|item| item.id == cut.ids().item_id),
-            "the written root-start waits for the operator"
-        );
-        assert!(
-            !cut.continue_notice(),
-            "a queued continue is not reported as unsent"
-        );
-    }
-
-    #[test]
-    fn a_cut_after_the_root_turn_is_admitted_runs_it_once() {
-        let cut = cut_at(HostWorkflow::RootDelivery, HostBoundary::RuntimeReturned, 2);
-        cut.assert_one_rebind();
-        cut.reopen_admitted_nothing();
-        let head = cut.head();
-        let views = cut.store.load_views(&head.id).unwrap().unwrap();
-        assert!(views.state.deliveries.contains_key(&cut.ids().command_id()));
-        assert!(!cut.continue_notice());
-        let root_starts = cut
-            .store
-            .load_intents(&head.id)
-            .unwrap()
-            .submissions
-            .iter()
-            .map(|submission| submission.command_id.clone())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            root_starts,
-            [cut.ids().command_id()],
-            "exactly one resubmission, the continue's"
-        );
-        let prompts = user_rows(cut.store.as_ref(), &head.id);
-        assert!(
-            prompts
-                .iter()
-                .filter(|text| *text == "do the thing")
-                .count()
-                <= 2,
-            "at most the prompt and its one resubmission: {prompts:?}"
-        );
-        assert!(
-            !head
-                .pending_queue
-                .iter()
-                .any(|item| item.id == cut.ids().item_id),
-            "an admitted continue leaves no queued copy"
-        );
-    }
-
     /// A repeat of a continue whose root-start is queued is refused
     /// `already_continued` and queues nothing more.
     #[test]
     fn a_repeat_of_a_queued_continue_is_refused_already_continued() {
-        let cut = cut_then(
-            HostWorkflow::RootDelivery,
-            HostBoundary::Prepared,
-            2,
-            Repeat::Refused,
-        );
-        cut.assert_one_rebind();
-        cut.reopen_admitted_nothing();
+        let cut = reopen(Case::QueuedRetry);
         assert_eq!(
             cut.repeated,
             Some(AccountChoiceOutcome::Refused(
                 AccountChoiceRefusal::AlreadyContinued
             ))
         );
-        let head = cut.head();
         assert_eq!(
-            head.pending_queue
+            cut.head
+                .pending_queue
                 .iter()
-                .filter(|item| item.id == cut.ids().item_id)
+                .filter(|item| item.id == cut.ids.item_id)
                 .count(),
             1,
             "the queued continue stays the only one"
@@ -967,24 +873,16 @@ mod account_continue_crash_cuts {
     /// on the continue's successor under the continue's own ids.
     #[test]
     fn a_repeat_of_a_published_continue_resubmits_once_without_a_second_rebind() {
-        let cut = cut_then(
-            HostWorkflow::Rebind,
-            HostBoundary::ProductPublished,
-            1,
-            Repeat::Runs,
-        );
-        cut.reopen_admitted_nothing();
-        assert!(cut.continue_notice(), "{:?}", cut.reopened);
-        let head = cut.head();
+        let cut = reopen(Case::PublishedRetry);
+        let head = cut.head;
         assert_ne!(head.id, cut.source, "the first attempt's rebind published");
-        cut.assert_one_rebind();
-        assert_eq!(lifecycle(&cut.repeat_events, TurnPhase::Admitted).len(), 1);
+        assert_eq!(cut.repeat_admissions, 1);
         assert!(matches!(
             &cut.repeated,
             Some(AccountChoiceOutcome::Chosen { root: Some(root), .. }) if root == "codex/b"
         ));
         let views = cut.store.load_views(&head.id).unwrap().unwrap();
-        assert!(views.state.deliveries.contains_key(&cut.ids().command_id()));
+        assert!(views.state.deliveries.contains_key(&cut.ids.command_id()));
         assert_eq!(
             user_rows(cut.store.as_ref(), &head.id),
             ["do the thing", "do the thing"],

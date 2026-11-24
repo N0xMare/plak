@@ -307,6 +307,26 @@ fn alternate_lifecycle(
 }
 
 pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Commit> {
+    pilot_then(seed, session, shape, |_| {})
+}
+
+pub(super) fn check_pilot_views(shape: &str) {
+    let (seed, session) = setup(shape);
+    pilot_with_view_laws(&seed, &session, shape);
+}
+
+fn pilot_with_view_laws(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Commit> {
+    pilot_then(seed, session, shape, |fixture| {
+        view_rebuild_laws::assert_rebuild_and_plain_open(fixture, session, shape);
+    })
+}
+
+fn pilot_then(
+    seed: &Fixture,
+    session: &str,
+    shape: &str,
+    check: impl FnOnce(&Fixture),
+) -> Vec<trace::Commit> {
     let mut pilots = Vec::new();
     let mut fixtures = Vec::new();
     let mut retirement_twins = Vec::new();
@@ -396,6 +416,8 @@ pub(super) fn pilot(seed: &Fixture, session: &str, shape: &str) -> Vec<trace::Co
     }
     let mut pilot = pilots.remove(0);
     pilot.sort_by_key(|commit| (commit.store.clone(), commit.store_ordinal));
+    // Reuse the first converged twin only after both traces have been compared.
+    check(&fixtures[0].0);
     pilot
 }
 
@@ -432,7 +454,7 @@ fn capacity_denial_and_unsent_fold_cuts_share_one_pilot() {
     let shape = "capacity_overflow";
     let (seed, session) = setup(shape);
     let baseline = summary::read_converged(&seed);
-    let pilot = pilot(&seed, &session, shape);
+    let pilot = pilot_with_view_laws(&seed, &session, shape);
     for store in ["product", "runtime"] {
         let target = find_capacity_denial_cut(&pilot, store, &baseline, |commit| {
             let (fixture, _) = kill_fixture(&seed, &session, shape, &pilot, commit);
@@ -1135,7 +1157,7 @@ fn reopened_summary_rejects_a_cursor_behind_the_runtime_tail() {
 fn summary_queue_joins_consumed_submissions_without_changing_the_cut_trace() {
     let shape = "final_only";
     let (seed, session) = setup(shape);
-    let pilot = pilot(&seed, &session, shape);
+    let pilot = pilot_with_view_laws(&seed, &session, shape);
     let accepted = pilot
         .iter()
         .find(|commit| commit.store == "runtime" && commit.label == "commit")

@@ -620,6 +620,27 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
         let after = evidence(&fixture)?;
         assert_eq!(after, before, "{cut:?}: the reopen dispatched nothing");
         let reopened = head(&paths)?;
+        let mut store = crate::store::ProductStore::open(&paths)?;
+        let failed = store
+            .load_views(&source.id)?
+            .ok_or("missing source views")?
+            .state
+            .last_root_turn
+            .ok_or("missing source turn")?;
+        let digest = plakous_hosted::sessions::digest_parts(&[
+            "plak:account-continue",
+            &source.id,
+            &failed.turn_id,
+            "codex/b",
+        ]);
+        let mut bytes = [0_u8; 16];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16)?;
+        }
+        let item = uuid::Builder::from_random_bytes(bytes)
+            .into_uuid()
+            .to_string();
+        let command_id = format!("plak.queue.{item}.1");
         assert_ne!(reopened.id, source.id, "{cut:?}: the rebind published");
         assert_eq!(reopened.account.as_deref(), Some("codex/b"));
         assert_eq!(
@@ -627,21 +648,20 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
             Some(source.id.as_str()),
             "{cut:?}: one rebind"
         );
-        assert!(
-            reopened
-                .source_workflow_operation_id
-                .as_deref()
-                .is_some_and(|operation| operation.starts_with("plak:rebind:account:")),
+        assert_eq!(
+            reopened.source_workflow_operation_id,
+            Some(format!("plak:rebind:account:{digest}")),
             "{cut:?}: the continue's rebind"
         );
-        let intents = crate::store::ProductStore::open(&paths)?.load_intents(&reopened.id)?;
+        let intents = store.load_intents(&reopened.id)?;
         let root_starts = intents
             .submissions
             .iter()
             .filter(|submission| {
                 submission.kind == plakous_hosted::sessions::projector::SubmissionKind::RootStart
             })
-            .count();
+            .map(|submission| submission.command_id.as_str())
+            .collect::<Vec<_>>();
         let prompts = reopened
             .transcript
             .iter()
@@ -652,30 +672,29 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
         match cut {
             ProductCrashBoundary::ProductPublished => {
                 assert_eq!(reopened.pending_queue.len(), 0, "nothing was queued");
-                assert_eq!(root_starts, 0, "the continue was never submitted");
+                assert!(root_starts.is_empty(), "the continue was never submitted");
                 assert_eq!(prompts, 1, "nothing was resent");
             }
             ProductCrashBoundary::Prepared => {
-                assert_eq!(
-                    reopened.pending_queue.len(),
-                    1,
+                assert!(
+                    matches!(reopened.pending_queue.as_slice(), [queued] if queued.id == item),
                     "the written root-start waits for the operator"
                 );
-                assert_eq!(root_starts, 1, "the written root-start is recorded once");
+                assert_eq!(root_starts, [command_id.as_str()], "one written root-start");
                 assert_eq!(prompts, 1, "the queued continue is not resent");
             }
             ProductCrashBoundary::RuntimeReturned => {
                 assert_eq!(reopened.pending_queue.len(), 0, "no queued copy");
-                assert_eq!(root_starts, 1, "exactly one resubmission");
-                let command = &intents.submissions[0].command_id;
+                assert_eq!(intents.submissions.len(), 1, "exactly one resubmission");
+                assert_eq!(root_starts, [command_id.as_str()]);
                 assert!(
                     matches!(
-                        crate::store::ProductStore::open(&paths)?
+                        store
                             .load_views(&reopened.id)?
                             .ok_or("missing projected session")?
                             .state
                             .deliveries
-                            .get(command),
+                            .get(&command_id),
                         Some(crate::store::sessions::projector::Delivery::Accepted)
                     ),
                     "the runtime admitted the resubmission once"
@@ -689,27 +708,9 @@ fn account_continue_sigkill_cuts_reopen_without_resubmitting() -> TestResult {
         let (second_report, repeated) = relaunch_report(&fixture.recover(false), &fixture.probe())?;
         assert_eq!(repeated, None);
         let expected = if cut == ProductCrashBoundary::ProductPublished {
-            let mut store = crate::store::ProductStore::open(&paths)?;
-            let failed = store
-                .load_views(&source.id)?
-                .ok_or("missing source views")?
-                .state
-                .last_root_turn
-                .ok_or("missing source turn")?;
-            let digest = plakous_hosted::sessions::digest_parts(&[
-                "plak:account-continue",
-                &source.id,
-                &failed.turn_id,
-                "codex/b",
-            ]);
-            let mut bytes = [0_u8; 16];
-            for (index, byte) in bytes.iter_mut().enumerate() {
-                *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16)?;
-            }
-            let item = uuid::Builder::from_random_bytes(bytes).into_uuid();
             vec![plakous_host_protocol::notice_remedy::AccountContinuation {
                 account: "codex/b".into(),
-                command_id: format!("plak.queue.{item}.1"),
+                command_id,
             }]
         } else {
             Vec::new()

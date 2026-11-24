@@ -19,9 +19,7 @@ mod sw3a;
 
 #[test]
 fn uncertain_mcp_tool_pilot_proves_live_shape() {
-    let shape = "uncertain_mcp_tool";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
+    super::driver::check_pilot_views("uncertain_mcp_tool");
 }
 
 #[test]
@@ -54,37 +52,17 @@ fn owner_lost_child_continue_pilot_quits_without_a_handoff() {
 
 #[test]
 fn hosted_tool_call_final_pilot_proves_live_shape() {
-    let shape = "hosted_tool_call_final";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
-}
-
-#[test]
-fn capacity_overflow_pilot_proves_live_shape() {
-    let shape = "capacity_overflow";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
+    super::driver::check_pilot_views("hosted_tool_call_final");
 }
 
 #[test]
 fn native_mid_turn_pilot_proves_native_strategy_and_protected_tail() {
-    let shape = "scheduled_native_compaction_in_turn";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
-}
-
-#[test]
-fn final_only_pilot_waits_for_face_idle() {
-    let shape = "final_only";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
+    super::driver::check_pilot_views("scheduled_native_compaction_in_turn");
 }
 
 #[test]
 fn busy_quit_escalates_pilot_proves_deaf_stall_and_identical_twins() {
-    let shape = "busy_quit_escalates";
-    let (seed, session) = super::driver::setup(shape);
-    super::driver::pilot(&seed, &session, shape);
+    super::driver::check_pilot_views("busy_quit_escalates");
 }
 
 #[test]
@@ -1799,27 +1777,6 @@ fn followup_preserves_descriptor_and_script_dials() {
     original.as_object_mut().unwrap().remove("steps");
     followup.as_object_mut().unwrap().remove("steps");
     assert_eq!(original, followup);
-}
-
-#[test]
-#[ignore = "opt-in live-fact pilots; requires the JavaScript sidecar"]
-fn live_fact_pilots() {
-    for name in [
-        "non_stop_finish_length",
-        "empty_length_retry",
-        "non_stop_finish_refusal",
-        "steer_accepted_mid_turn",
-        "scheduled_compaction_in_turn",
-        "scheduled_compaction_workflow",
-        "code_mode_cell_nested_then_final",
-        "code_mode_cell_final",
-    ] {
-        eprintln!("live-fact pilot: {name}");
-        assert!(!get(name).subset, "live-fact shapes must remain opt-in");
-        let (seed, session) = super::driver::setup(name);
-        let pilot = super::driver::pilot(&seed, &session, name);
-        assert!(pilot.iter().any(|commit| commit.store == "runtime"));
-    }
 }
 
 fn uncertain_mcp_script() -> Value {

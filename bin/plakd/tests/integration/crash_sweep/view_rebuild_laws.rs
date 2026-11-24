@@ -1,65 +1,48 @@
 use super::*;
 
-const SHAPES: &[&str] = &[
-    "uncertain_mcp_tool",
-    "busy_quit_escalates",
-    "hosted_tool_call_final",
-    "capacity_overflow",
-    "final_only",
-    "direct_tool_then_final",
-    "promoted_background_job",
-    "sealed_family_artifacts",
-    "non_stop_finish_length",
-    "empty_length_retry",
-    "non_stop_finish_refusal",
-    "steer_accepted_mid_turn",
-    "scheduled_compaction_in_turn",
-    "scheduled_native_compaction_in_turn",
-    "scheduled_compaction_workflow",
-    "code_mode_cell_nested_then_final",
-    "code_mode_cell_final",
-];
-
 #[test]
-fn full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_shape() {
-    for shape in SHAPES {
+fn sweep_shapes_without_core_view_pilots_obey_both_sqlite_laws() {
+    for shape in [
+        "direct_tool_then_final",
+        "non_stop_finish_length",
+        "empty_length_retry",
+        "non_stop_finish_refusal",
+        "steer_accepted_mid_turn",
+        "scheduled_compaction_in_turn",
+        "scheduled_compaction_workflow",
+        "code_mode_cell_nested_then_final",
+        "code_mode_cell_final",
+    ] {
         let (seed, session) = setup(shape);
         let fixture = seed.fork(&shapes::script(shape));
         let outcome = lifecycle(&fixture, &session, shape, None, None);
-        // A deaf busy quit deliberately abandons by lease only, reporting 130.
-        let expected_exit = if *shape == "busy_quit_escalates" {
-            130
-        } else {
-            0
-        };
-        assert_eq!(
-            outcome.status.code(),
-            Some(expected_exit),
-            "{shape}: {}",
-            outcome.stderr
-        );
+        assert!(outcome.status.success(), "{shape}: {}", outcome.stderr);
         summary::read_converged(&fixture);
-        let paths = summary::paths(&fixture);
-        let incremental = view_snapshot::snapshot(&paths);
-        let mut store = plakd::store::ProductStore::open(&paths).unwrap();
-        store.delete_views(&session).unwrap();
-        drop(store);
-        summary::read_converged(&fixture);
-        assert_eq!(
-            view_snapshot::snapshot(&paths),
-            incremental,
-            "{shape}: complete SQL views differ"
-        );
-        if matches!(*shape, "busy_quit_escalates" | "uncertain_mcp_tool") {
-            // Compare identical canonical facts, not two independently minted recovery heads.
-            let mut opened = reopen_result(&fixture, &session)
-                .unwrap_or_else(|outcome| panic!("busy quit recovery refused: {}", outcome.stderr));
-            summary::read_reopened(&fixture);
-            opened.send(&quit_frame());
-            assert!(opened.finish().status.success());
-        }
-        assert_plain_open_twin(&fixture, &session, shape, &shapes::script(shape));
+        assert_rebuild_and_plain_open(&fixture, &session, shape);
     }
+}
+
+pub(super) fn assert_rebuild_and_plain_open(fixture: &Fixture, session: &str, shape: &str) {
+    let paths = summary::paths(fixture);
+    let incremental = view_snapshot::snapshot(&paths);
+    let mut store = plakd::store::ProductStore::open(&paths).unwrap();
+    store.delete_views(session).unwrap();
+    drop(store);
+    summary::read_converged(fixture);
+    assert_eq!(
+        view_snapshot::snapshot(&paths),
+        incremental,
+        "{shape}: complete SQL views differ"
+    );
+    if matches!(shape, "busy_quit_escalates" | "uncertain_mcp_tool") {
+        // Compare identical canonical facts, not two independently minted recovery heads.
+        let mut opened = reopen_result(fixture, session)
+            .unwrap_or_else(|outcome| panic!("{shape}: recovery refused: {}", outcome.stderr));
+        summary::read_reopened(fixture);
+        opened.send(&quit_frame());
+        assert!(opened.finish().status.success());
+    }
+    assert_plain_open_twin(fixture, session, shape, &shapes::script(shape));
 }
 
 pub(super) fn assert_plain_open_twin(

@@ -126,7 +126,11 @@ fn durability_twin_pilots() {
                 while let Some(shape) = names.get(next.fetch_add(1, Ordering::Relaxed)) {
                     let piloted = std::panic::catch_unwind(|| {
                         let (seed, session) = driver::setup(shape);
-                        driver::pilot(&seed, &session, shape)
+                        let pilot = driver::pilot(&seed, &session, shape);
+                        assert!(
+                            pilot.iter().any(|commit| commit.store == "runtime"),
+                            "{shape}: pilot published no runtime commit"
+                        );
                     });
                     if let Err(error) = piloted {
                         divergent

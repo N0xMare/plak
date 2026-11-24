@@ -126,12 +126,10 @@ fn leftover_job_pilot_pins_group_promotion_and_settlement() {
 
 #[test]
 fn promoted_job_pilot_pins_real_process_promotion_and_settlement() {
-    let (fixture, session) = super::super::driver::setup("promoted_background_job");
-    super::super::driver::pilot(&fixture, &session, "promoted_background_job");
+    super::super::driver::check_pilot_views("promoted_background_job");
 }
 
 #[test]
 fn sealed_artifact_pilot_pins_real_native_promotion() {
-    let (fixture, session) = super::super::driver::setup("sealed_family_artifacts");
-    super::super::driver::pilot(&fixture, &session, "sealed_family_artifacts");
+    super::super::driver::check_pilot_views("sealed_family_artifacts");
 }
