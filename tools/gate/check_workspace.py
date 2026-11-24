@@ -2904,21 +2904,6 @@ def _identifier_values(tokens: list[RustToken]) -> list[str]:
     return [token.value for token in tokens if token.kind == "identifier"]
 
 
-def _contains_identifier_pair(tokens: list[RustToken], first: str, second: str) -> bool:
-    identifiers = _identifier_values(tokens)
-    return any(
-        identifiers[index : index + 2] == [first, second] for index in range(len(identifiers) - 1)
-    )
-
-
-def _call_names(tokens: list[RustToken]) -> list[str]:
-    return [
-        token.value
-        for index, token in enumerate(tokens[:-1])
-        if token.kind == "identifier" and tokens[index + 1].value == "("
-    ]
-
-
 def _foreign_function_names(tokens: list[RustToken]) -> set[str]:
     """Return function and link names declared by explicit foreign blocks."""
     names: set[str] = set()

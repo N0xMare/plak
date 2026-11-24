@@ -1,5 +1,8 @@
-//! Runner protocol, version 8: what a Plakous host and a runner say to each
-//! other over one byte stream (spec 01 §8.4).
+//! Native runner protocol (spec 01 §8.4). Pairing matches the exact
+//! [`VersionTriple`]; home-local binds match the protocol version regardless
+//! of revision or flavor. Older protocols get only minimal read-only `Lines`
+//! inspection, not pairing. Job retention uses a separate versioned endpoint
+//! ([`retention`]).
 //!
 //! A connection carries length-prefixed JSON frames ([`frame`]). The runner
 //! speaks first with its [`Hello`]; the host answers with its [`Bind`], and
@@ -26,10 +29,7 @@ pub use message::{
 };
 pub use owner::LineOwner;
 
-/// The protocol version this crate speaks. Both ends must match it exactly.
-/// A home-local runner binds any build of it, so every change to the
-/// runner's semantics bumps it (spec 01 §8.4); the frames of each version
-/// are pinned by a test.
+/// The exact protocol version for native binds (spec 01 §8.4).
 pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Stable stopped-foreground receipt identity, independent of the connection
