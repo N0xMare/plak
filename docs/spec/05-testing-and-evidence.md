@@ -45,6 +45,14 @@ parses or a route that renders is not a support or correctness promise.
   using the successor's ID. The state-key override exercises both keys without
   bypassing custody checks. Use literal producer and destination builds at
   format cuts; a test-only key override is not cross-revision evidence.
+- **Production predecessor.** Install gates on both supported platforms must
+  run the production upgrade command against separately built images of the
+  deployed revision and the candidate, with real daemons, isolated homes and
+  offline dependencies. Same-key qualification must exercise work already
+  admitted by the old host; a changed key must refuse before drain. The
+  exception surfaces (chapter 00) must see data and requests from their actual
+  producer and consumer builds. This bounded fixture does not replace staging
+  evidence under production-shaped load (chapter 02 §4.6).
 - **Hosted ports.** A scripted `RuntimeFactory` uses the same construction
   port as production. Admission-scoped observers do not retain the prompt;
   immutable registration is construction-root-local. Switchable test overrides
@@ -1592,6 +1600,8 @@ busy-root absence test reserve `ceil(N/4)` slots at priority 90.
 
 `.config/nextest-install.toml` owns family membership. Every gate run of the
 install profile selects all families; path changes do not select a subset.
+The predecessor images are required build inputs, not an optional test
+selector. Missing images fail install qualification.
 
 Fixed absence/liveness observation windows retain their lengths under this
 layout. `a_busy_roots_child_job_survives_attach_after_host_loss` observes a

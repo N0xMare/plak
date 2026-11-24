@@ -20,6 +20,12 @@ class MuslCheckTests(unittest.TestCase):
         (self.root / 'tools/musl').mkdir(parents=True)
         script = ROOT / 'tools/musl/musl-check.sh'
         shutil.copyfile(script, self.root / 'tools/musl/musl-check.sh')
+        (self.root / 'tools/gate').mkdir()
+        (self.root / 'tools/gate/build_predecessor.py').write_text(
+            "import sys\nfrom pathlib import Path\n"
+            "assert sys.argv[1] == '--write-archive'\n"
+            "Path(sys.argv[2]).write_text('archived predecessor')\n"
+        )
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.tools = self.root / 'musl tools'
@@ -50,9 +56,12 @@ from pathlib import Path
 args = sys.argv[1:]
 source = next(arg[:-len(':/qual/src')] for arg in args if arg.endswith(':/qual/src'))
 root = Path(source)
+suffix = ':/qual/predecessor.tar:ro'
+archives = [Path(arg[:-len(suffix)]) for arg in args if arg.endswith(suffix)]
 Path(os.environ['MUSL_CALLS']).write_text(json.dumps(dict(
     args=args, files=sorted(str(path.relative_to(root)) for path in root.rglob('*')
-                           if path.is_file()), payload=(root / 'payload').read_text())))
+                           if path.is_file()), payload=(root / 'payload').read_text(),
+    predecessor=[path.read_text() for path in archives])))
 raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
 ''',
         )
@@ -129,6 +138,29 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         result, call = self.run_gate('--fast', 'plakd')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(call['args'][-3:], ['sh', '--fast', 'plakd'])
+
+    def test_pinned_archive_is_mounted_read_only_only_for_install_families(self):
+        for tier, install in (
+            ((), True),
+            (('--full',), True),
+            (('--install',), True),
+            (('--install-checks',), True),
+            (('--steps', 'static,tests-install,tooling'), True),
+            (('--steps', 'tests-parallel'), False),
+            (('--batch',), False),
+            (('--fast', 'plakd'), False),
+        ):
+            with self.subTest(tier=tier):
+                result, call = self.run_gate(*tier)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                mounts = [arg for arg in call['args'] if ':/qual/predecessor.tar' in arg]
+                env = 'PLAK_PREDECESSOR_SOURCE_ARCHIVE=/qual/predecessor.tar'
+                self.assertEqual(env in call['args'], install)
+                self.assertEqual(call['predecessor'], ['archived predecessor'] if install else [])
+                self.assertEqual(len(mounts), int(install))
+                for mount in mounts:
+                    self.assertTrue(mount.endswith(':/qual/predecessor.tar:ro'))
+                    self.assertFalse(Path(mount.split(':/qual/', 1)[0]).exists())
 
     def test_container_uses_host_identity_and_writable_offline_home(self):
         result, call = self.run_gate()

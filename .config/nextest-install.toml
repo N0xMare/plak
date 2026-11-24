@@ -4,6 +4,9 @@
 [upgrade]
 filter = "test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::)"
 
+[predecessor]
+filter = "test(host_skeleton::predecessor::)"
+
 [ledger-retirement]
 filter = '''
 test(crash_sweep::durability_ledger_retirement_closed_cells)

@@ -33,14 +33,14 @@ mod latency;
 mod lifecycle;
 mod root_stream;
 
-const LOGIN: &str = "a@example.com";
+pub(super) const LOGIN: &str = "a@example.com";
 const HOST: &str = "plak.example.ts.net";
-const ORIGIN: &str = "https://plak.example.ts.net";
+pub(super) const ORIGIN: &str = "https://plak.example.ts.net";
 const ANSWER: &str = "the web answer";
 /// A device of the tailnet that is not this machine (a documentation
 /// address, never assigned).
 const DEVICE: &str = "192.0.2.10";
-const CSP: &str = "default-src 'self'; frame-ancestors 'none'";
+pub(super) const CSP: &str = "default-src 'self'; frame-ancestors 'none'";
 
 /// A running `plakd host --web`.
 struct Web {
@@ -190,7 +190,11 @@ fn exchange(stream: &mut UnixStream, method: &str, path: &str, headers: &[(&str,
 }
 
 fn connect(web: &Web) -> UnixStream {
-    let stream = UnixStream::connect(&web.socket).unwrap();
+    connect_at(&web.socket)
+}
+
+fn connect_at(path: &std::path::Path) -> UnixStream {
+    let stream = UnixStream::connect(path).unwrap();
     // A read the endpoint never answers fails the test rather than hang it.
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(20)))
@@ -252,7 +256,11 @@ fn upgrade_headers(origin: Option<&str>, cookie: Option<&str>) -> Vec<(&'static 
 }
 
 fn upgrade(web: &Web, cookie: &str) -> WebSocket<UnixStream> {
-    let mut stream = connect(web);
+    upgrade_at(&web.socket, cookie)
+}
+
+pub(super) fn upgrade_at(path: &std::path::Path, cookie: &str) -> WebSocket<UnixStream> {
+    let mut stream = connect_at(path);
     let head = exchange(
         &mut stream,
         "GET",
@@ -266,6 +274,22 @@ fn upgrade(web: &Web, cookie: &str) -> WebSocket<UnixStream> {
     );
     let config = WebSocketConfig::default().max_message_size(Some(64 << 20));
     WebSocket::from_raw_socket(stream, Role::Client, Some(config))
+}
+
+pub(super) fn handoff_cookie(path: &std::path::Path) -> String {
+    let mut headers = serve_headers(HOST, DEVICE);
+    headers.extend([
+        ("Connection", "close".to_owned()),
+        ("Tailscale-User-Login", LOGIN.to_owned()),
+    ]);
+    let head = exchange(&mut connect_at(path), "GET", "/", &headers);
+    assert_eq!(head.status, 200);
+    head.header("set-cookie")
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
 }
 
 fn send(socket: &mut WebSocket<UnixStream>, frame: &ClientFrame<Core>) {

@@ -83,10 +83,13 @@ class DevCheckWorkerTests(unittest.TestCase):
                         line.split()[2]
                         for line in result.stdout.splitlines()
                         if line.startswith('== group:')
-                        and line.split()[2] not in ('test-build', 'package-lite')
+                        and line.split()[2]
+                        not in ('test-build', 'package-lite', 'predecessor-build')
                     ],
                     list(groups),
                 )
+                calls = [s for s in scripts if s[0].endswith('build_predecessor.py')]
+                self.assertEqual(len(calls), 2 if 'tests-install' in groups else 0)
                 for checker in (
                     'check_workspace.py',
                     'check_features.py',
@@ -129,6 +132,8 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
         self.worker = self.root / "custom target" / "host-triple" / "debug" / "plakous-py-host"
+        self.predecessor = self.root / 'predecessor images'
+        self.predecessor.mkdir()
         # The gate probes the wasm target in the sysroot; other rustc calls are real.
         self.sysroot = self.root / 'sysroot'
         (self.sysroot / 'lib/rustlib/wasm32-unknown-unknown/lib').mkdir(parents=True)
@@ -138,6 +143,7 @@ class DevCheckWorkerTests(unittest.TestCase):
             PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
             GATE_CALLS=str(self.log),
             GATE_WORKER=str(self.worker),
+            GATE_PREDECESSOR=str(self.predecessor),
             CARGO_TARGET_DIR=str(self.root / 'custom target'),
             CARGO_BUILD_TARGET='host-triple',
             GATE_SYSROOT=str(self.sysroot),
@@ -147,6 +153,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_JS_HOST', None)
         self.env.pop('PLAK_MCP_SERVER', None)
         self.env.pop('PLAK_TEST_BINARY', None)
+        self.env.pop('PLAK_INSTALL_PREDECESSOR', None)
         self.env.pop('PLAK_NEXTEST_PARTITION', None)
         self.env.pop('PLAK_BATCH_BASE', None)
         self.env.pop('GATE_REAL_PROCESS_GUARD', None)
@@ -176,6 +183,8 @@ if args == ['nextest', '--version']:
     print('cargo-nextest 0.9.100')
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(args=args, worker=os.environ.get('PLAK_PY_HOST'),
+                             jobs=os.environ.get('CARGO_BUILD_JOBS'),
+                             predecessor=os.environ.get('PLAK_INSTALL_PREDECESSOR'),
                              js_worker=os.environ.get('PLAK_JS_HOST'),
                              mcp_server=os.environ.get('PLAK_MCP_SERVER'),
                              test_binary=os.environ.get('PLAK_TEST_BINARY'),
@@ -201,6 +210,12 @@ if args[0] == 'test' and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
         if time.monotonic() > deadline:
             raise SystemExit('test build ran alone')
         time.sleep(0.02)
+if phases := os.environ.get('GATE_PREDECESSOR_PHASES'):
+    phases = Path(phases)
+    if args[0] == 'test':
+        (phases / 'test-build-started').touch()
+    if args[:2] == ['nextest', 'run'] and not (phases / 'predecessor-finished').exists():
+        raise SystemExit('test lane started before the predecessor build finished')
 if phases := os.environ.get('GATE_OVERLAP_PHASES'):
     phases = Path(phases)
     if args[0] == 'test':
@@ -266,6 +281,7 @@ if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
+                              jobs=os.environ.get('CARGO_BUILD_JOBS'),
                               worker=os.environ.get('PLAK_PY_HOST'),
                               js_worker=os.environ.get('PLAK_JS_HOST'),
                               mcp_server=os.environ.get('PLAK_MCP_SERVER'),
@@ -277,6 +293,22 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                               rustc_wrapper=os.environ.get('RUSTC_WRAPPER'),
                               target_rustflags=os.environ.get('CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'),
                               git_nosystem=os.environ.get('GIT_CONFIG_NOSYSTEM'))) + '\n')
+if sys.argv[1].endswith('build_predecessor.py'):
+    mode = os.environ.get('GATE_PREDECESSOR_MODE', 'miss')
+    if '--check' in sys.argv and mode != 'hit':
+        raise SystemExit(1)
+    if phases := os.environ.get('GATE_PREDECESSOR_PHASES'):
+        phases = Path(phases)
+        (phases / 'predecessor-started').touch()
+        deadline = time.monotonic() + 5
+        while not (phases / 'test-build-started').exists():
+            if time.monotonic() > deadline:
+                raise SystemExit('predecessor build did not overlap test-build')
+            time.sleep(0.02)
+        (phases / 'predecessor-finished').touch()
+    if mode != 'empty':
+        print(os.environ['GATE_PREDECESSOR'])
+    raise SystemExit(23 if mode == 'fail' else 0)
 if sys.argv[1].endswith('check_public_compile.py') and os.environ.get('GATE_TEST_BUILD_WAITS_FOR'):
     open(os.environ['GATE_TEST_BUILD_WAITS_FOR'], 'w').close()
 if phases := os.environ.get('GATE_OVERLAP_PHASES'):
@@ -723,6 +755,49 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertLess(contracts, lane)
         self.assertGreater(publish, lane)
 
+    def test_predecessor_miss_builds_once_with_candidate_then_joins_before_all_lanes(self):
+        self.env['GATE_PREDECESSOR_PHASES'] = str(self.root)
+        self.env['GATE_TEST_BUILD_WAITS_FOR'] = str(self.root / 'predecessor-started')
+        result, calls, _ = self.run_gate('--steps', 'tests-parallel,tests-durability,tests-install')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.profiles(calls), ['offline', 'durability', 'install'])
+        checks, builds = self.predecessor_calls()
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(len(builds), 1)
+        self.assertEqual(builds[0]['jobs'], '4')
+        self.assertEqual(next(c['jobs'] for c in calls if c['args'][0] == 'test'), '4')
+        self.assertEqual(
+            [c['predecessor'] for c in self.lanes(calls)], [None, None, str(self.predecessor)]
+        )
+
+    def test_predecessor_hit_needs_no_build_or_candidate_jobs(self):
+        self.env['GATE_PREDECESSOR_MODE'] = 'hit'
+        result, calls, _ = self.run_gate('--steps', 'tests-install')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        checks, builds = self.predecessor_calls()
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(builds, [])
+        self.assertNotIn('== group: predecessor-build ==', result.stdout)
+        self.assertEqual(next(c['jobs'] for c in calls if c['args'][0] == 'test'), '8')
+        self.assertEqual([c['predecessor'] for c in self.lanes(calls)], [str(self.predecessor)])
+
+    def test_missing_predecessor_result_fails_install_without_running_it(self):
+        for mode, status in (('fail', 23), ('empty', 1)):
+            with self.subTest(mode=mode):
+                self.log.unlink(missing_ok=True)
+                self.env['GATE_PREDECESSOR_MODE'] = mode
+                result, calls, _ = self.run_gate('--steps', 'tests-serial,tests-install')
+                self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                self.assertIn('tests-install requires the pinned predecessor build', result.stderr)
+                self.assertEqual(self.profiles(calls), ['serial'])
+
+    def predecessor_calls(self):
+        calls = [c for c in self.python_calls if c['python'][0].endswith('build_predecessor.py')]
+        return (
+            [c for c in calls if '--check' in c['python']],
+            [c for c in calls if '--check' not in c['python']],
+        )
+
     def test_failed_test_lanes_do_not_skip_contracts_or_tooling(self):
         self.env['GATE_CARGO_FAILURES'] = json.dumps({'nextest': 8})
         result, calls, scripts = self.run_gate()
@@ -793,6 +868,10 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(self.profiles(calls), profiles)
                 self.assertEqual(self.filtersets(calls), [None] * len(profiles))
+                checks, builds = self.predecessor_calls()
+                self.assertEqual(
+                    (len(checks), len(builds)), (1, 1) if 'install' in profiles else (0, 0)
+                )
 
     def test_feature_builds_deny_warnings_on_the_flags_cargo_will_use(self):
         self.env['RUSTFLAGS'] = '-C link-arg=-fuse-ld=mold'

@@ -362,6 +362,7 @@ not (
   | test(subscriptions::custody::tests::durability::)
   | test(host_skeleton::upgrade::retained_jobs::changed::durability::))
 | ((test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::))
+| (test(host_skeleton::predecessor::))
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)
@@ -699,6 +700,7 @@ slow-timeout = { period = "240s", terminate-after = 2 }
 # BEGIN generated install (tools/gate/nextest_layout.py)
 default-filter = '''
 (test(host_skeleton::upgrade::) - test(host_skeleton::upgrade::retained_jobs::changed::durability::))
+| (test(host_skeleton::predecessor::))
 | (test(crash_sweep::durability_ledger_retirement_closed_cells)
 | test(crash_sweep::durability_ledger_retirement_live_child_process)
 | test(crash_sweep::durability_ledger_retirement_yielded_cell)

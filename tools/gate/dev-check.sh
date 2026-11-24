@@ -731,7 +731,21 @@ run_group() {
       fi
       return "$durability_status" ;;
     tests-install)
-      run_weighted_lane install ;;
+      local predecessor
+      if [[ ! -s "$group_spool/predecessor.path" ]] \
+        || ! read -r predecessor <"$group_spool/predecessor.path" || [[ ! -d "$predecessor" ]]; then
+        echo 'tests-install requires the pinned predecessor build' >&2
+        return 1
+      fi
+      PLAK_INSTALL_PREDECESSOR="$predecessor" run_weighted_lane install ;;
+    predecessor-build)
+      local source=()
+      if [[ -n "${PLAK_PREDECESSOR_SOURCE_ARCHIVE:-}" ]]; then
+        source=(--source-archive "$PLAK_PREDECESSOR_SOURCE_ARCHIVE")
+      fi
+      nice -n 5 python3 tools/gate/build_predecessor.py --target-dir "$target_dir" ${source[@]+"${source[@]}"} \
+        >"$group_spool/predecessor.build"
+      mv "$group_spool/predecessor.build" "$group_spool/predecessor.path" ;;
     contracts)
       echo "== positive/negative public compile contracts =="
       nice -n 5 python3 tools/gate/check_public_compile.py ;;
@@ -869,6 +883,13 @@ if selected standalone; then
   fi
 fi
 if selected contracts; then compile_only+=(contracts); fi
+if selected tests-install; then
+  if ! python3 tools/gate/build_predecessor.py --target-dir "$target_dir" --check \
+    >"$group_spool/predecessor.path" || [[ ! -s "$group_spool/predecessor.path" ]]; then
+    rm -f "$group_spool/predecessor.path"
+    compile_only+=(predecessor-build)
+  fi
+fi
 
 # Install/RC link and doc commands use the main target before test preparation.
 # In particular a later build must not overwrite the selected host binary.
@@ -897,8 +918,14 @@ if [[ "$compile_count" -gt 0 && "$test_jobs" -gt "$compile_count" ]]; then
   if [[ "$compile_jobs" -lt 1 ]]; then compile_jobs=1; fi
   for group in ${compile_only[@]+"${compile_only[@]}"}; do
     if [[ "$group" == package-lite ]]; then background+=(""); continue; fi
-    test_jobs=$((test_jobs - compile_jobs))
-    start_group "$group" "$compile_jobs"
+    group_jobs=$compile_jobs
+    if [[ "$group" == predecessor-build ]]; then
+      # The historical graph is a full build, not a small compile contract.
+      group_jobs=$((test_jobs / 2))
+      if [[ "$group_jobs" -lt 1 ]]; then group_jobs=1; fi
+    fi
+    test_jobs=$((test_jobs - group_jobs))
+    start_group "$group" "$group_jobs"
     background+=("$group_pid")
   done
 fi

@@ -29,12 +29,22 @@ git ls-files --cached --others --exclude-standard --deduplicate -z |
   done | tar --null -T - -cf - | tar -C "$source" -xf -
 echo "musl source export: $source (retained)"
 [[ $# -gt 0 ]] || set -- --full
+predecessor_mount=()
+case "${1:-}:${2:-}" in
+  --full:*|--install:*|--install-checks:*|--steps:*tests-install*)
+    predecessor_archive="$(mktemp "$target/predecessor.XXXXXX.tar")"
+    trap 'rm -f -- "$predecessor_archive"' EXIT
+    python3 tools/gate/build_predecessor.py --write-archive "$predecessor_archive"
+    predecessor_mount=(-v "$predecessor_archive:/qual/predecessor.tar:ro"
+      -e PLAK_PREDECESSOR_SOURCE_ARCHIVE=/qual/predecessor.tar) ;;
+esac
 status=0
 docker run --rm --platform linux/amd64 --pull never --network none \
   --user "$(id -u):$(id -g)" \
   --tmpfs /dev/shm:rw,exec,size=16g \
   -v "$source:/qual/src" -v "$target:/qual/target" -v "$tools:/qual/tools:ro" \
   -v "$cargo_home:/qual/cargo-home" \
+  ${predecessor_mount[@]+"${predecessor_mount[@]}"} \
   -e "PLAK_PUBLIC_CONTRACTS_DIR=/qual/target/public-contracts-${image##*:}" \
   -e "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" \
   --entrypoint /bin/sh "$image" -c '

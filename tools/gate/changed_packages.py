@@ -54,6 +54,7 @@ SHARED_TEST_PREFIX = "tests/fixtures/"
 # Files and directories outside every package that the named package's tests
 # read: plakd compares its config key table and reference config with these.
 PACKAGE_INPUTS = {
+    ".config/install-predecessor": "plakd",
     "docs/spec/07-config-reference.md": "plakd",
     "docs/reference-config": "plakd",
 }

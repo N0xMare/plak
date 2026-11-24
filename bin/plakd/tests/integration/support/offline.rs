@@ -327,7 +327,11 @@ impl Fixture {
     }
 
     pub(super) fn base_command(&self) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_plakd"));
+        self.base_command_from(Path::new(env!("CARGO_BIN_EXE_plakd")))
+    }
+
+    pub(super) fn base_command_from(&self, image: &Path) -> Command {
+        let mut command = Command::new(image);
         command
             .current_dir(self.workspace())
             .env_clear()
@@ -1206,13 +1210,22 @@ impl ChildRunner {
     /// Starts the daemon, in its own process group as `connect` would, and
     /// waits until it listens.
     pub(super) fn start(&self) -> i32 {
+        let child = self.start_daemon_from(Path::new(env!("CARGO_BIN_EXE_plakd")));
+        let pid = i32::try_from(child.id()).unwrap();
+        // From here the harness only signals the daemon and reaps it once.
+        std::mem::forget(child);
+        pid
+    }
+
+    pub(super) fn start_daemon_from(&self, image: &Path) -> Child {
         let log = std::fs::File::create(self.home.join("serve-harness.log")).unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_plakd"));
+        let mut command = Command::new(image);
         command
             .args(["runner", "serve"])
             .env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &self.home)
+            .env("XDG_STATE_HOME", self.home.join("os-state"))
             .env("PLAK_HOME", &self.home)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -1247,9 +1260,7 @@ impl ChildRunner {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        // From here the harness only signals the daemon and reaps it once.
-        std::mem::forget(child);
-        pid
+        child
     }
 
     /// The daemon this harness started last, while it lives. It is this

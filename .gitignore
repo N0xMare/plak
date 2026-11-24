@@ -1,4 +1,5 @@
 target/
+/target-predecessor/
 .public-contracts/
 /.dev-tools/
 tests/fixtures/authority-negative/target/

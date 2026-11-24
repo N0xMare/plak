@@ -193,6 +193,8 @@ fn a_live_host_serves_gateway_status_after_drain_and_crash_restarts() {
 }
 
 mod gateway_upstream;
+#[cfg(feature = "web")]
+mod predecessor;
 
 fn serving_host(process: (Child, mpsc::Receiver<String>)) -> Option<Host> {
     await_serving_host(process).ok()
