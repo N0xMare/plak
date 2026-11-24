@@ -5857,6 +5857,9 @@ a private scratch directory and applies the registered steps there. It enables
 WAL on each copy before any binding or exact-reopen probe can open it.
 The probes open product and tree databases only for inspection and cannot
 open rehearsal copies for writing. They never upgrade the live stores.
+An exact-reopen probe against a live store does not rehearse a pending
+revision. A standalone precheck must use the prepared copies when the
+destination requires a revision, or leave qualification to the coordinator.
 Equal revisions retain the ordinary probe. The destination applies the
 live steps only after source drain and release and before announcing
 readiness; a failure after either commit is fixed forward under

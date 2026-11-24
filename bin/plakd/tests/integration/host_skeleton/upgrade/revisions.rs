@@ -27,6 +27,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
         command.env("PLAK_TEST_STORE_REVISION_IMAGE", &image);
         command
     };
+    assert_live_prechecks(&fixture, &command, &paths, &sessions);
     let staged = check_legacy_and_stage(&command, scratch.path(), &service);
     let stores = scratch.path().join("stores");
     assert_pending_read_refusal(&mut command());
@@ -80,6 +81,42 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(!fixture.home().join("host/upgrades").exists());
     stop(&mut source);
     assert_fresh_fingerprints(&paths);
+}
+
+fn assert_live_prechecks(
+    fixture: &Fixture,
+    destination: &impl Fn() -> std::process::Command,
+    paths: &plakd::home::paths::PlakPaths,
+    sessions: &[String; 2],
+) {
+    let live = rusqlite::Connection::open(paths.product_database()).unwrap();
+    live.execute_batch("BEGIN; SELECT name FROM sqlite_schema;")
+        .unwrap();
+    let probe = |mut command: std::process::Command, session: &str, host_upgrade| {
+        command.arg("version");
+        if host_upgrade {
+            command.arg("--host-upgrade-reopen");
+        }
+        let output = command.args(["--reopen-probe", session]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    assert_eq!(
+        probe(fixture.command(), &sessions[0], false),
+        json!({"verdict":"opens"})
+    );
+    assert_eq!(
+        probe(fixture.command(), &sessions[1], true),
+        json!({"verdict":"opens"})
+    );
+    let refused = probe(destination(), &sessions[0], true);
+    assert_eq!(refused["verdict"], "refused");
+    assert!(
+        refused["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("product store upgrade pending")),
+        "{refused}"
+    );
 }
 
 fn assert_parallel_inspection(
