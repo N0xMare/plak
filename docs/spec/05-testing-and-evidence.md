@@ -1614,6 +1614,11 @@ paused daemon's live job after 1.1 seconds.
 `a_transient_daemon_failure_keeps_the_redial_bound` requires the host to stay
 alive and report a blocked runner after a two-second redial window in each
 daemon mode, shortened from the ten-second production window by a test hook.
+The fixture owns the initial daemon so no delayed startup can replace the
+silent listener. It atomically swaps in that listener before stopping the
+initial daemon, observes the host-initiated redial, and withholds Hello until
+the host closes the connection. The picker reads the blocked verdict and
+the test checks the matching timeout diagnostic once.
 The start-scan and busy-release `host_crash_cuts_` matrices
 also check no new continuation/dispatch after 300 ms per indexed cut.
 The Python and JavaScript `cell_worker_delivery_crash_cuts_preserve_only_proven_acceptance`

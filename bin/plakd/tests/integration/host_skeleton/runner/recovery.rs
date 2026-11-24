@@ -46,26 +46,88 @@ fn a_broken_daemon_blocks_local_placement_without_terminating_the_host() {
     }
 }
 
-#[test]
-fn a_transient_daemon_failure_keeps_the_redial_bound() {
+#[tokio::test]
+async fn a_transient_daemon_failure_keeps_the_redial_bound() {
+    use plakous_host_protocol::wire::{PlacementReason, RunnerStatus};
+    use tokio::io::AsyncReadExt as _;
+
     for detached in ["0", "1"] {
         let Some(fixture) = fixture() else { return };
+        let socket = local_runner_root(&fixture.home()).join("run/r.sock");
+        let mut daemon = Child::spawn(
+            fixture
+                .base_command()
+                .args(["runner", "serve", "--local"])
+                .env("TOKIO_WORKER_THREADS", "2")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null()),
+        );
+        // The daemon holds its startup lock before binding the socket.
+        // Starting the host after that point rules out delayed launchers
+        // from the initial dial replacing the silent listener later.
+        let ready_deadline = tokio::time::Instant::now() + WAIT;
+        while !socket.exists() {
+            assert!(
+                daemon.try_wait().unwrap().is_none()
+                    && tokio::time::Instant::now() < ready_deadline,
+                "fixture daemon did not bind"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         let mut host = start_env(
             &fixture,
             &[],
             &[
                 ("PLAK_TEST_RUNNER_DETACHED", detached.into()),
                 ("PLAK_TEST_RUNNER_RECONNECT_SECONDS", "2".into()),
+                ("PLAK_LOG", "plak.runner=warn".into()),
             ],
         );
         wait_local_runner_ready(&host);
-        let socket = local_runner_root(&fixture.home()).join("run/r.sock");
-        std::fs::remove_file(&socket).unwrap();
-        // A listener that never sends Hello is transient, not a start refusal.
-        let _listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
-        kill_local_daemon_only(&fixture.home());
-        wait_for_recovery_failure(&fixture, &mut host, "did not reconnect within 2 s");
-        assert_eq!(Client::connect(&host).rows(1), []);
+        let replacement = socket.with_file_name("s.sock");
+        let listener = tokio::net::UnixListener::bind(&replacement).unwrap();
+        let mut client = Client::connect(&host);
+        // Publish the silent endpoint before dropping the old link, with no
+        // gap in which the redial could launch at a missing socket.
+        std::fs::rename(replacement, socket).unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(25);
+        daemon.kill().unwrap();
+        daemon.wait().unwrap();
+        // Observe the host's own redial before the picker can drive one.
+        let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
+            .await
+            .expect("host did not redial the replacement socket")
+            .unwrap();
+        // Keep Hello withheld while the picker waits for the probe verdict.
+        client.read_deadline = Some(deadline.into_std());
+        let status = local_runner_status(&mut client);
+        client.read_deadline = None;
+        let mut byte = [0];
+        assert_eq!(
+            tokio::time::timeout_at(deadline, stream.read(&mut byte))
+                .await
+                .expect("host did not close the silent redial")
+                .unwrap(),
+            0
+        );
+        assert!(
+            matches!(
+                status,
+                RunnerStatus::Blocked {
+                    reason: PlacementReason::RunnerUnreachable { .. }
+                }
+            ),
+            "the failed redial must block placement: {status:?}"
+        );
+        let log = std::fs::read_to_string(fixture.home().join("logs/plak.log")).unwrap();
+        assert!(
+            log.lines()
+                .any(|line| line.contains("runner_recovery_failed")
+                    && line.contains("phase=\"daemon\"")
+                    && line.contains("did not reconnect within 2 s")),
+            "{log}"
+        );
+        assert_eq!(client.rows(1), []);
         stop(&mut host);
     }
 }
