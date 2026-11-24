@@ -2368,9 +2368,9 @@ dependencies = [
 
 [[package]]
 name = "micro-monty"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0adb86c69249c87d800135aa40d64a55982b2280fdc1aa8caf17396803c569d"
+checksum = "e64e40ccfeb75872dc48e20cb02a9708cda49fe2e233dbe2898024522b90c757"
 dependencies = [
  "mm-compile",
  "mm-core",
@@ -2418,21 +2418,21 @@ dependencies = [
 
 [[package]]
 name = "mm-compile"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10df73169a56cb8ed8ba53d0b990f7657a76c6bcfaa6be153d9d3ad8e7bad1aa"
+checksum = "e693a20aa0f9230cb3c63fe98856443016bb83a21ba59c64ebc34e7caf29e4f2"
 
 [[package]]
 name = "mm-core"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aec5335121bb382b3c5fb0e5e717c3c0b509e601d6fb6988719a44cfe48cd786"
+checksum = "dcf5dff0e3e2959f6dc1a842d459eb57919a2be5e429a3ace98e78c3097690d8"
 
 [[package]]
 name = "mm-engine"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4067863652d5f619efe76bb03d906d3a7fccfc3b54a59ba08183b81ddb8b3d7b"
+checksum = "4a248fc77a6c02f713e85ff62bc116fa31ae388dd7b1435b8aac97a63c32a65e"
 dependencies = [
  "mm-compile",
  "mm-core",
@@ -2441,18 +2441,18 @@ dependencies = [
 
 [[package]]
 name = "mm-parse"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "807bd094e89174b43b7f0e8c7e272938fc8cb5bbcf01d9ccc2eae532e8f2d750"
+checksum = "14c397da6448dfa3af69b98c9407690539196fab011d7c88b0379ca69317b230"
 dependencies = [
  "mm-compile",
 ]
 
 [[package]]
 name = "mm-stdlib"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c6e1ced58b11377ce1746cd4af6954593f5b0f3293015956f2cd38c58e20e30"
+checksum = "4ea374ef8ff6eacb8190660b16ebcea02f63191f9481fce045fe9ae2711f1471"
 dependencies = [
  "mm-compile",
  "mm-engine",

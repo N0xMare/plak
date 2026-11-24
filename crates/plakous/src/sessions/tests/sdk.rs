@@ -13,11 +13,44 @@ struct SdkModel {
 }
 const CELLS: &[(&str, &str)] = &[
     (
-        "try:\n    await ctx.read(typo='seed')\nexcept TypeError as error:\n    assert 'read' in str(error) and 'typo' in str(error) and '_sdk_' not in str(error), str(error)\nelse:\n    raise AssertionError('unexpected keyword was accepted')\nfiles = await asyncio.gather(ctx.read(target='ref_seed'), ctx.read({'target': 'seed'}), ctx.read(target='seed'), ctx.read(target='seed'))\nawait fs.apply([fs.Write('result', files[0].text, expect='absent')])\nawait state.put('answer', {'n': 42})\nprint('saved', len(files))",
+        r"try:
+    await ctx.read(typo='seed')
+except TypeError as error:
+    assert 'read' in str(error) and 'typo' in str(error) and '_sdk_' not in str(error), str(error)
+else:
+    raise AssertionError('unexpected keyword was accepted')
+files = await asyncio.gather(ctx.read(target='ref_seed'), ctx.read({'target': 'seed'}), ctx.read(target='seed'), ctx.read(target='seed'))
+await fs.apply([fs.Write('result', files[0].text, expect='absent')])
+await state.put('answer', {'n': 42})
+import sys
+sys.setrecursionlimit(200)
+assert sys.getrecursionlimit() == 200
+print('saved', len(files))",
         "saved 4",
     ),
     (
-        "assert 'files' not in globals()\nprint((await state.get('answer'))['n'])\ntry:\n    await state.put('large', [None] * 100000)\nexcept OverflowError:\n    print('quota refused')\nprint(await state.get('large', 'not stored'))\ntry:\n    await state.put('float_large', [1e16] * 35000)\nexcept ValueError:\n    print('inexact float refused')\nprint(await state.get('float_large', 'float not stored'))\nawait state.put('float_near', [1e15] * 26000)\nassert len(await state.get('float_near')) == 26000\nawait state.drop('float_near')\nprint('canonical round trip')\ntry:\n    await state.put('bad key', 1)\nexcept ValueError:\n    print('invalid key')",
+        r"assert 'files' not in globals()
+import sys
+assert sys.getrecursionlimit() == 1000
+print((await state.get('answer'))['n'])
+try:
+    await state.put('large', [None] * 100000)
+except OverflowError:
+    print('quota refused')
+print(await state.get('large', 'not stored'))
+try:
+    await state.put('float_large', [1e16] * 35000)
+except ValueError:
+    print('inexact float refused')
+print(await state.get('float_large', 'float not stored'))
+await state.put('float_near', [1e15] * 26000)
+assert len(await state.get('float_near')) == 26000
+await state.drop('float_near')
+print('canonical round trip')
+try:
+    await state.put('bad key', 1)
+except ValueError:
+    print('invalid key')",
         "quota refused",
     ),
     (

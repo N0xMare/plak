@@ -10084,7 +10084,7 @@ The SDK is an explicit embedding presentation and the root-only `py-sdk` product
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the cell client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
-| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | micro-monty exactly `0.0.2` in `plakous-py-host`, one worker per agent incarnation |
+| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | micro-monty exactly `0.0.3` in `plakous-py-host`, one worker per agent incarnation |
 | `py-sdk` / embedding SDK | Product / consumer | `run_py`, JSON field `code`; no wait tool | Same micro-monty worker; fresh globals per cell, named session state |
 | `direct` | — | none | — |
 
@@ -10325,9 +10325,13 @@ that abandons held results emits `Delivery{NotObserved}` before `CellDone`
 for every result never handed to the interpreter. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
 replay. The engine contract is the cell recipe over `micro-monty`,
-`0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d`
+`0.0.3+744d12b78e3af171ec94f1b6d70d45f8d9f168d2820a378a70a1db5977ebd69a`
 (the release and build id), `plakous-cell-protocol.v2`, and
-`plakous.micro-monty-python-adapter.v1`. Exact reopen requires the current engine,
+`plakous.micro-monty-python-adapter.v2`. The adapter identity also
+distinguishes releases at startup, since the worker's `Hello` does not carry
+the engine build id. A suspended cell resumes in the same worker; Plak does
+not store or export interpreter snapshots. SDK named state
+uses the host-owned encoding (§9.8). Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
 uses export/carry; there is no migration. The library's incompatible evaluator
 refusal is `IncompatibleSession`: “recorded evaluator path, bytes or contract
@@ -10385,6 +10389,8 @@ failure points to the cell's await line. Until the engine provides lazy
 async host functions, the worker removes only the frame blocks for its
 generated `plak-python-prelude.py`; the rest of the engine report and its
 suggestions are unchanged.
+Using a coroutine or host future where a value is expected may add a missing
+`await` hint to the report without changing the exception's `str()` or `args`.
 An engine panic is a worker loss. A lost generation is
 stopped, joined and reset under its typed reset reason before the next cell,
 which starts a fresh generation and never re-evaluates source. Every other

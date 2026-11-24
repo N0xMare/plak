@@ -473,16 +473,16 @@ mod monty_upgrade_tests {
     use super::*;
 
     /// The engine contract recorded by the previous Python worker.
-    fn previous_monty_contract() -> Result<Digest, AgentError> {
+    fn previous_python_contract() -> Result<Digest, AgentError> {
         Digest::sha256(
             DigestDomain::ExecutionEnvironment,
             1,
             &[
                 b"plakous.cell-engine-contract.v1",
-                b"monty",
-                b"1.2.0",
+                b"micro-monty",
+                b"0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d",
                 b"plakous-cell-protocol.v2",
-                b"plakous.monty-python-adapter.v9",
+                b"plakous.micro-monty-python-adapter.v1",
             ],
         )
         .map_err(identity_error)
@@ -497,9 +497,9 @@ mod monty_upgrade_tests {
             &[
                 b"plakous.cell-engine-contract.v1",
                 b"micro-monty",
-                b"0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d",
+                b"0.0.3+744d12b78e3af171ec94f1b6d70d45f8d9f168d2820a378a70a1db5977ebd69a",
                 b"plakous-cell-protocol.v2",
-                b"plakous.micro-monty-python-adapter.v1",
+                b"plakous.micro-monty-python-adapter.v2",
             ],
         )
         .map_err(identity_error)?;
@@ -518,7 +518,7 @@ mod monty_upgrade_tests {
         std::fs::write(&path, b"offline worker")?;
         let artifact = LocalCompositionEngineArtifact::monty_worker_v1(path.canonicalize()?)?;
         let environment_identity = artifact.worker.environment_identity();
-        let previous = previous_monty_contract()?;
+        let previous = previous_python_contract()?;
         assert_ne!(previous, artifact.engine_contract_identity());
         // A self-consistent record of the same worker bytes, bound under the
         // previous contract: only the contract disagrees with this build.

@@ -199,14 +199,13 @@ pinned `ExecStart` (on macOS, the executable in `ProgramArguments`) at the
 destination. If the old binary refuses after an interrupted upgrade, start
 the destination; it finishes any remaining steps.
 
-If the source build used Monty for Python cells, check Python-bound sessions
-before handoff, even if you skipped the release that changed the worker.
-The micro-monty worker cannot exactly
-reopen a Monty binding, even on a same-key upgrade. Settle live Python roots
-and children on the writing build. To keep working on an incompatible
-session, export it with that build and use an import format the destination
-accepts. An archived head remains available for inspection, but archiving
-does not make it reopenable.
+If the source build used Monty or an earlier micro-monty release for Python
+cells, check Python-bound sessions before handoff. The micro-monty 0.0.3
+worker cannot exactly reopen such a binding, even on a same-key upgrade.
+Settle live Python roots and children on the writing build. To keep working on
+an incompatible session, export it with that build and use an import format the
+destination accepts. An archived head remains available for inspection, but
+archiving does not make it reopenable.
 
 The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
 named `product.pre-revision-<source>.sqlite3` and

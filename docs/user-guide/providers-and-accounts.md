@@ -340,9 +340,9 @@ Call tools using schema-named keywords or a dictionary. `asyncio` is
 pre-imported, `help(tool)` prints its typed signature, and tool failures raise
 `ToolError`. Structured results do not need `json.loads`; text stays text.
 
-This build runs micro-monty in `plakous-py-host`. An exact reopen of a
-Monty-recorded py-ptc or py-sdk session refuses before inference with
-“recorded evaluator path, bytes or contract is unavailable or inconsistent;
+This build runs micro-monty 0.0.3 in `plakous-py-host`. Exact reopen of a py-ptc
+or py-sdk session bound to Monty or micro-monty 0.0.2 refuses before inference
+with “recorded evaluator path, bytes or contract is unavailable or inconsistent;
 no inference was dispatched”. Use the writing build's `plakd session export
 <id>`, then this build's `plakd session import <file>` (importable versions
 are 13 and 12). The carry does not restore the former Python globals.

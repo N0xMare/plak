@@ -42,8 +42,9 @@ pub const MONTY_WORKER: WorkerIdentity = WorkerIdentity {
     binary: "plakous-py-host",
     engine: "micro-monty",
     // The worker verifies this version and build ID against the linked engine.
-    version: "0.0.2+06717fdeb70bb48b5e5461b21b1816428052fc4f71846c8b79cefbb14713231d",
-    adapter: "plakous.micro-monty-python-adapter.v1",
+    version: "0.0.3+744d12b78e3af171ec94f1b6d70d45f8d9f168d2820a378a70a1db5977ebd69a",
+    // Hello does not carry the build ID, so this changes with the engine pin.
+    adapter: "plakous.micro-monty-python-adapter.v2",
 };
 
 /// Parent to worker.

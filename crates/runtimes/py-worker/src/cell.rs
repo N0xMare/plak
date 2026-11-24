@@ -355,6 +355,7 @@ impl Worker {
             .map_err(|error| format!("Python tool bootstrap failed: {error}"))?;
         match self.session.start(&code) {
             Progress::Complete(_) => {
+                self.session.setup_done();
                 self.bindings = Some(
                     functions
                         .iter()

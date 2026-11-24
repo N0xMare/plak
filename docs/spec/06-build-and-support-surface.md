@@ -2105,7 +2105,7 @@ client or official native host binary is part of this execution path.
 Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
 `serde_json_canonicalizer`, `tracing`, `vt100`, and
-micro-monty at `=0.0.2`.
+micro-monty at `=0.0.3`.
 
 ### 7.5 Portable crates
 

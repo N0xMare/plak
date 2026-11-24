@@ -280,7 +280,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakd": "8d03c04a83cd942b85fbb0ca5293979597049a7311adeaa39819862de7a466d4",
     "plakous-hosted": "bb952cc674b62474288a95219cd5f795322fe161a62420f2c5e08ddd752f55c9",
     "plakous-image": "9e6162576ed3060fc3b358b2a80c4a9a70637fc66eed4dba218df54b7552adf0",
-    "plakous-py-worker": "69292766720fd343d9c1ce2701cee97bf9c89fccfd5b74618ebae180ba970e63",
+    "plakous-py-worker": "84bd4ce125ecf0a4ca54d5ace2197f39c96cdde39ee124a8dc1d324522426712",
     "plakous-js-runtime": "64d3c544cedd4ed2c06c3211b8aef336cd27377f2a070efb7cc6330b00ec60ba",
     "plakous": "96bf15a73ea7b3d151783e9d560e5e4ddb4c01925b2a013a898682bf4bf9a131",
     "plakous-agent": "12970a9102d2f4c3c8ddb521bde4f620ed572e74ac5e3eb2c51008ffe16c9bdb",

@@ -1,5 +1,5 @@
 use super::*;
-use crate::protocol::QUICKJS_WORKER;
+use crate::protocol::{MONTY_WORKER, QUICKJS_WORKER};
 use std::os::unix::fs::PermissionsExt as _;
 
 #[test]
@@ -84,6 +84,17 @@ async fn a_worker_naming_another_revision_engine_or_adapter_is_refused() {
         let error = refusal(&opening, Duration::from_secs(10)).await;
         assert!(error.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn the_previous_python_worker_hello_is_refused() {
+    let previous = WorkerFrame::Hello {
+        revision: CELL_PROTOCOL_REVISION.into(),
+        engine: "micro-monty".into(),
+        adapter: "plakous.micro-monty-python-adapter.v1".into(),
+    };
+    let error = check_hello(&previous, MONTY_WORKER).expect_err("incompatible Python worker");
+    assert!(error.contains("python-adapter.v1, not"), "{error}");
 }
 
 #[test]
