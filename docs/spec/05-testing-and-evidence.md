@@ -39,19 +39,12 @@ parses or a route that renders is not a support or correctness promise.
   Client delivery at the verdict barrier is an attempted write, not receipt.
   Deadline tests belong to the owner of each clock: L0 holds, provider watchdogs
   and process executors are separate evidence.
-- **Settled carry.** Install fixtures exercise real host and runner processes,
-  named state, paused queues, source refusal or precommit rollback,
-  destination-only continuation after surrender, and exact imported successor
-  readiness. Remote placement must not consult a same-spelled host checkout.
-  Partial, unavailable and abandoned successors stay withheld until their
-  own proof; an already-Ready successor keeps its foreground work. The
-  runner qualification interface is read-only with a closed allowlist.
-  Test-only overrides (`PLAK_TEST_BINDING_CUT_IMAGE`,
-  `PLAK_TEST_FORCE_HOST_UPGRADE`, `PLAK_TEST_STATE_KEY`,
-  `PLAK_TEST_HOST_UPGRADE_RUNNER_REVISION`) control these cases without bypassing
-  custody checks or changing production reads. No fixture proves a live-tree/job
-  migration or cross-revision binary pair. Use literal producer/destination
-  builds and staging receipts for cross-revision evidence (chapter 02 §4.6).
+- **Offline migration.** Install fixtures prove pre-drain refusal on a changed
+  key and stopped-host export/import into a fresh successor. The fixture
+  preserves portable history, named state and paused queue text, and reconnects
+  using the successor's ID. The state-key override exercises both keys without
+  bypassing custody checks. Use literal producer and destination builds at
+  format cuts; a test-only key override is not cross-revision evidence.
 - **Hosted ports.** A scripted `RuntimeFactory` uses the same construction
   port as production. Admission-scoped observers do not retain the prompt;
   immutable registration is construction-root-local. Switchable test overrides

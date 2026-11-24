@@ -65,12 +65,16 @@ are not prerequisites or authority for current behavior.
 
 ## Working agreements
 
-- Remove obsolete paths rather than preserve backward compatibility. The
-  [four exceptions](docs/spec/00-overview.md#persisted-versions) are session
-  export, runner job retention, the credential gateway protocol and additive
-  in-place store revisions. For each of the first three, support the build's
-  own and immediately previous version; keep the previous importer or speaker
-  for one bump only.
+- Remove obsolete paths rather than preserve backward compatibility outside
+  [the persisted-version rules](docs/spec/00-overview.md#persisted-versions).
+  Bump the runtime epoch only when persisted runtime encoding changes.
+  Until a previous-epoch reader ships, every epoch bump is a declared
+  format cut. With that reader, read the current and previous epoch in
+  place and keep the state key unchanged on non-cut bumps. Session export,
+  runner job retention and the credential gateway support the current and
+  previous version of their own
+  formats; additive in-place store revisions remain supported. Running host
+  upgrades are same-key; migrate across keys offline at declared format cuts.
 - Settled invariants: a single-owner driver with one terminal result per
   admitted root turn, single-agent L0, exact-URL auth without fallback across
   routes, and single-dispatch paid compaction. Amend the owning rule if it

@@ -874,10 +874,8 @@ tool fails when it resumes, not partway through a tier.
 ### 6.1 Cargo-native product build
 
 Kept installed snapshots record `state-key` and `export-version` next to the
-binary, obtained from its hidden version answers. Foreign resume uses the
-export-version manifest to refuse incompatible carry without running export.
-Absent, empty or unparseable export-version manifests leave the version
-unknown and retain the export-then-refuse fallback.
+binary, obtained from its hidden version answers. These are build facts for
+deployment and installed-build probes, not session reopen authority.
 
 The installed stable `$HOME/.local/bin/plakd` link is also what
 `plakd host install` records in an explicit per-user service file: a systemd user
@@ -1460,37 +1458,30 @@ Installation removes an obsolete `monty` launch symlink only when it points
 into the plakd sidecar or snapshot roots; independent files and links remain.
 
 Host upgrade uses the invoked destination image's binary identity, not the
-workspace revision or a stable link's name. Its private
-`version --host-upgrade-probe` reports host availability, state key, export
-import versions, ownership-receipt version, local-runner protocol and
-configuration verdict. `version --host-upgrade-capacity <export>` enforces
-strict preflight. The private coordinator/capability protocol starts at **1**;
-the ownership-receipt format is **1**, independently checked before drain.
-The coordinator adds `--host-upgrade-service <file>` to validate resolved
-service arguments, web assets and required paired placements without binding
-the service or adopting lines. Its `--host-upgrade-reopen --reopen-probe <id>`
-uses remote qualification only for host upgrade; ordinary `--reopen-probe`
-inspection does not acquire this runner dependency.
+workspace revision or a stable link's name. Running host upgrade and deploy
+are same-key and refuse a changed key before any drain as
+`host_upgrade_offline_migration_required`. Declare format cuts for incompatible
+changes to stored formats, not for routine releases. At the cut, settle work
+and stop the source, export with the retained source image, import with the
+destination, and then start it (chapter 02 §2.5.1). Keep both immutable
+snapshots and their matching sidecars through verification. Installation
+alone does not migrate or remove old snapshots or state.
 
-Required placements use authenticated read-only exact-triple qualification,
-including the configuration/window builder's runner workspace and skill reads.
-These probes dispatch no turn and do not open a foreign state key as session
-authority. The source hashes the destination and retains its own executable
-path in the ownership receipt; startup/retry verifies the selected image again.
-Use a tested maintainer snapshot for product host changes; keep the paired
-host and runner on the same source revision. Settle work before a coordinated
-upgrade and report both binary IDs. Keep both immutable snapshots with
-matching sidecars through acknowledgement.
-Installation alone does not execute an upgrade, and old snapshots/state are not
-automatically removed. For a remote placement, advance its dedicated command
-link to the matching immutable snapshot before invoking host upgrade; normal
-maintainer installation must not move that link. A mismatch refuses before
-drain. Keep the old executable and workers for inspection/drain until every
-successor is acknowledged. After surrender, destination host custody owns
-host-owned import through registry connections and fresh per-placement Ready
-reconciliation. Retries never create a second serving-instance bind. Runner outages
-withhold only affected successors while ready roots serve; recovery uses that
-snapshot's receipts, never an old-key fallback.
+The private `version --host-upgrade-probe` reports host availability, state
+key, local-runner capabilities and configuration. The coordinator adds
+`--host-upgrade-service <file>` to validate resolved service arguments, web
+assets and required paired placements without binding the service or adopting
+lines. Its `--host-upgrade-reopen --reopen-probe <id>` uses remote
+qualification only for host upgrade; ordinary `--reopen-probe` inspection
+does not acquire this runner dependency. Required placements use authenticated
+read-only exact-triple qualification, including configuration reads. These
+probes dispatch no turn and do not open a foreign state key as session authority.
+
+Use a tested maintainer snapshot for product host changes; report both binary
+IDs. For a remote placement, advance its dedicated command link to the
+matching immutable snapshot before invoking same-key host upgrade. Normal
+maintainer installation does not move that link; a mismatch refuses before
+drain.
 
 ### 6.4 Linkers
 

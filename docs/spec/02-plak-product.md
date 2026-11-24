@@ -1096,10 +1096,14 @@ matching build and all three files as a set, without their old WAL/SHM files.
 
 Each build keeps its state in `~/.plak/state/<key>/`, where the key is
 `r<runtime schema>.e<runtime format epoch>.p<product generation>.t<tree
-generation>`, for example `r28.e39.p39.t11`. The key is derived from those
-four constants, never hand-bumped. The runtime schema and format epoch are
-exact and do not support in-place changes. Runtime epoch 39 removes the
-credential-store path from the Codex and
+generation>`, for example `r28.e39.p39.t11`. This build derives the key from
+the four format constants and reads only runtime schema 28 and epoch 39.
+Epoch 39 is a declared format cut, not an in-place transition from epoch
+38. Until a previous-epoch reader ships, each epoch bump is a declared
+format cut. With that reader, the key's epoch component remains at the
+last declared cut on non-cut bumps, and the current and immediately
+previous record epochs are read within the key (chapter 00).
+Runtime epoch 39 removes the credential-store path from the Codex and
 SuperGrok credential-authority digests. Product schema 39 stores
 `sessions.account_choices`, a JSON object mapping non-root provider kinds to full
 account references. The root kind's account is the root line head and is not a
@@ -1116,8 +1120,9 @@ default means exactly the old behavior. It uses only SQL and deterministic
 backfill from that store's own rows. It must stay correct while the previous
 revision's code keeps writing: a new table must not be an app-maintained mirror
 of an existing table. A change to authority, lineage, history encoding or
-binding digests instead bumps the generation and uses a cross-key settled
-carry. Steps accumulate within a generation and are deleted at its next
+binding digests instead bumps the generation and requires offline
+migration at a declared format cut (§2.5.1). Steps accumulate within a
+generation and are deleted at its next
 generation bump. A fresh store creates the frozen generation base and runs
 the same steps in order. Each step starts at the pinned source fingerprint and
 validates the exact destination shape and fingerprint. Local finished-child
@@ -1168,8 +1173,8 @@ read-only binding inspections concurrently (§4.5). Neither inspection borrows
 the other build's verdict or substitutes for the destination's exact-reopen
 checks (§4.6).
 
-Commands that cannot carry a foreign session automatically, including
-`run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely
+Session commands, including `run --session`, recovery, inspection and
+export, use the same incompatible-build refusal for an id (or uniquely
 matching prefix) recorded only under another state key. It does not present
 that session as missing or open its foreign store as current authority.
 Current-store ambiguity, integrity and storage failures are never replaced by
@@ -1379,7 +1384,7 @@ under another build's directory, is refused with the one incompatible-session
 message instead of "not found":
 
 ```text
-session <id> was created by an incompatible plakd build (state <key>); carry it forward with that build's `plakd session export <id>` and then `plakd session import <file>`, or start a new session
+session <id> was created by an incompatible plakd build (state <key>); for offline migration stop the host, use that build's `plakd session export <id>`, then use this build's `plakd session import <file>`, or start a new session
 ```
 
 Startup may refuse for projection debt only when the recorded head is stale
@@ -1409,21 +1414,15 @@ Installed-build inspection remains a host product service. The reload probe
 reports the destination state key, accepted export versions and configuration
 verdict for the session workspace. Exact-reopen and carry-capacity probes
 perform bounded inspection without creating a session or dispatching inference.
-A timed-out probe does not trigger another probe. Host upgrade authority,
-preflight and receipts are specified in section 4.6, not delegated to a client.
+A timed-out probe does not trigger another probe. Host upgrade authority
+and preflight are specified in section 4.6, not delegated to a client.
 
 Import discovers the nearest project root from the document's workspace and
 validates its effective configuration before creating any successor; the
 workspace directory itself is not necessarily a project root, and the product
 home is never an overlay. A failure after commit names the successor:
 `session <new> was carried forward from <old>; fix the error and run: plakd run --session <new>`.
-Foreign resume validates effective configuration before running snapshot
-export. A config refusal says to fix the config and retry the same command;
-only version or unimportable-document refusals recommend this workspace's
-newest carried session from `plakd session list`. Foreign resume skips export
-when a snapshot manifest advertises an unsupported export version; absent,
-empty or unparseable manifests retain export-then-refuse. Its regenerable
-carry file is removed on every failure. Export publication is atomic and
+Export publication is atomic and
 refuses an existing destination. A directory sync failure after publication
 is a warning, not an export refusal.
 
@@ -1667,77 +1666,45 @@ Inspection writes no session, tree or credential state and never renews a
 credential. It is evidence for the host's upgrade decision, not permission for
 a client to execute a new runtime or replay an effect.
 
-`plakd run --session <id>` carries only when the id can name nothing in this build:
-at least the shortest accepted prefix, and no local session in this workspace
-matching it (a full id this store lacks, or a prefix matching none). An
-ambiguous or too-short id is this build's own refusal. The id must then match
-exactly one session across the other builds' logs. If that session was already
-carried forward into this workspace, the carried session is resumed with a
-note instead. Otherwise the newest kept installed snapshot (chapter 06 §6.1), searched
-across both the maintainer and the `just install release` snapshot roots,
-whose `state-key` manifest names that key exports it, within 120 seconds, and
-this build imports it, deletes the carry file and opens the new session with
-the note. Only installed snapshot directories (64 hex digits) owned by this
-user whose directory and `plakd` are not group- or world-writable are used.
-Without such a snapshot the incompatible-session refusal above stands. When no
-snapshot exists, a paid compaction fallback is not offered.
+**Offline migration at a declared format cut.** Settle the selected roots,
+including their submitted work, children and jobs, then stop the source host
+and standalone writers. Use the retained source executable and sidecars.
+Run `plakd session list` from each local session workspace to identify
+roots. Add `--include-archived` to see archived roots, which stay behind
+with unselected trees under the original key. Export each selected local
+root from its workspace with `plakd session export`.
+For a paired root, record the full session ID from the source host's
+directory before stopping it. Export by that full ID on the source host
+machine; this build uses the recorded runner workspace without requiring a
+matching local directory or contacting the runner. Prefix lookup remains
+scoped to the calling workspace.
 
-**Host-owned settled carry.** `plakd host upgrade --expect-binary <id>` uses
-this same portable-session producer and importer, not a database copy or live-tree export
-(§4.6). Settled carry takes the newest unarchived record of
-each tree, across the whole home rather than the directory's row limit.
-Archived roots remain in their original key. A root with no canonical runtime,
-an unsettled submission/workflow, a running or held turn, a live/sealing child,
-a held child continuation, an in-flight workspace operation, or nonterminal
-daemon jobs blocks cross-key carry. Local and paired remote placements are
-supported; live trees and job registries are not. A remote placement must pass
-the destination's paired, exact-triple read-only qualification before drain.
-Advance its dedicated executable link to the matching snapshot first; retain
-the old build to inspect and drain any incompatible old workers.
+Prepare the destination configuration and paired runner links. With both
+hosts stopped, use the destination executable to import each document
+with `plakd session import`. Start the destination host, verify the new
+session IDs and reconnect to them. Keep the original state and exports
+until the destination is verified.
 
-Carried roots start new agent lines and retain committed named state, portable
-conversation, bounded transcript, generated title and paused queued text under
-the ordinary carry law. Finished children and unresolved source facts remain
-inert references; their tree, candidates, job registry, leases and continuation
-authority are not imported or revived. Their inert facts remain in the retained
-portable source documents, not executable topology in the successor. Queued images
-and provider replay are not transported, and historical prompts/tools are never
-re-executed.
+Imports start independent sessions on fresh lines. Live jobs and job
+registries, live or held children, tree topology, candidates and seal
+outcomes, effect and call journals, workspace-operation authority, explicit
+title overrides, queued images and provider replay do not transfer. Any
+source facts included for reference authorize no work.
 
-Version-1 private ownership receipts under `host/upgrades/<operation>/` name
-source instance/key/binary/executable, destination identity, monotonically
-ordered operation sequence, original host argv, export digests and reserved
-successor IDs and runner identities, source archival intent and each successor's
-Ready or explicitly abandoned disposition.
-They carry no session encodings. Imports use the reserved product
-ID and create operation, with a write-ahead target record: retry finishes that
-same seed. A target cannot open or appear as an ordinary directory entry before
-its own durable Ready acknowledgement. Before source surrender the source
-remains authoritative. Preparation errors withdraw the receipt while source
-leases are still held; plain host startup also withdraws a Prepared receipt.
-Aborted receipts neither redirect later starts nor authorize target seeds.
-If the retained source image is unavailable, startup marks preparation Aborted
-and continues under its own key, never treating preparation as surrender.
+Export may catch up the source projection but never changes source
+authority. Import never writes to the source key. There is no host-owned
+cross-key import, source archival or redirect. Each import commits
+independently; after interruption, check the destination inventory and
+resume with the remaining files. Duplicate import names the existing
+successor. To abort the cut while both hosts are stopped, restart the
+source with its own build and matching runner links. The imported copies
+do not merge back into that source.
 
-A committed receipt fences the source tree's records against reopen and
-authorizes only destination startup import, not client execution. The source
-exits and releases its shared home custody before that import. The destination
-claims its own host custody and imports reserved successors from receipts.
-Local seeds are prepared before normal runner startup; a host-owned retry worker
-finishes pending imports, followed by a fresh ordinary Ready sweep for each
-placement before publishing that successor's Ready receipt. It does not
-use standalone exclusive import or transfer old agent-line custody. After this
-boundary there is no fallback to the old owner: startup and retry follow the
-recorded destination, including partial import and failure before Ready. The
-destination acknowledges the complete operation only after every successor is
-Ready or explicitly abandoned; a runner outage leaves only its successors
-withheld and retried while ready roots can serve. Already-imported successors skip import/configuration
-probes. Post-surrender capacity checking is advisory, not another strict
-admission barrier: preflight already enforced it. A lost
-acknowledgement never creates another successor or replays input; the same
-upgrade invocation reports the existing mappings. Source stores,
-exports and executable remain available for reference, not automatic deletion.
-Keep both installed snapshots and their sidecars through acknowledged success.
+Host startup and destination service preflight refuse with
+`host_upgrade_legacy_receipt_pending` if a legacy ownership receipt is
+prepared or committed, or is acknowledged with an abandoned mapping. The
+check reads only the phase and abandonment flags; it does not act on
+receipt authority. Inspect the operation with its original builds.
 
 ##### Settled child traces
 
@@ -2930,7 +2897,7 @@ version. There is no top-level prompt positional or terminal resume command.
 | `host [--web <unix:path\|127.0.0.1:port>] [--ui <dir>]` | Serve the home's session directory; section 4.6 owns host and web options. |
 | `host connect --stdio [--auto-start]` | Discover the host and relay client wire frames; only explicit local `--auto-start` permits startup. |
 | `host install --web unix:<absolute socket> --ui <absolute dir> [--dry-run]` | Install a Linux user unit or macOS LaunchAgent without starting it. |
-| `host upgrade --expect-binary <id> [--wait <seconds> \| --drain <duration\|idle>]`, `host upgrade --abandon <successor-uuid-or-runner-id>` | Explicit host upgrade and receipt recovery (section 4.6). |
+| `host upgrade --expect-binary <id> [--drain <duration\|idle>]` | Explicit same-key host upgrade (section 4.6). |
 | `wire schema` | Print the exact build's wire JSON Schema without opening a session. |
 | `accounts list`, `accounts rm <vertical>/<name> [--yes]` | Inspect or remove local named account selections without implicit remote logout. |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
@@ -4318,15 +4285,17 @@ Compare generations for inequality only; numeric ordering confers no authority. 
 ephemeral extension-free session host uses an empty key. Protocol 11 adds the
 product advisory frame `host_lifecycle {host_generation, phase, reason,
 target?, retry_after_ms?}`. `phase` is `draining`, `restarting`, `stopping` or
-`running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`. A target has exactly `binary_id` and `state_key`. An optional
+`running`; `reason` is `paired_upgrade`, `cross_key_upgrade` or `shutdown`.
+`cross_key_upgrade` remains a wire variant but this build never emits it.
+A target has exactly `binary_id` and `state_key`. An optional
 retry hint is a u32 bounded to 30000 ms. These DTOs belong to `plakd-wire-types`;
 the neutral envelope carries the product's lifecycle extension.
 
 A source announces `draining` only after admission of a planned upgrade and
 its admission pause, `restarting` after preparation commits, and `running`
 when reversible preparation aborts and source admission reopens. That `running`
-notice omits both target and retry hint. A same-key upgrade uses
-`paired_upgrade`, and a changed key uses `cross_key_upgrade`. A planned stop
+notice omits both target and retry hint. A running host upgrade uses
+`paired_upgrade`. A planned stop
 (including SIGTERM handoff) announces `stopping` / `shutdown`. Socket and web
 writers make a bounded final send attempt before closing. Connection joins and
 advisory delivery spend the same host-wide stop budget: handoff receives only
@@ -5903,20 +5872,16 @@ are closed or retired. These trees use existing store records, so an older
 build would not be rejected by store admission and could route a child to
 its root's runner instead of the child's saved placement.
 
-`plakd host upgrade --expect-binary <id> [--wait <seconds> | --drain <duration|idle>]` is an explicit
-same-user operator action, invoked using the destination executable and its own
-binary ID. It discovers exactly one live source host across keys, then echoes
-that host's key and instance on its private upgrade control socket. Missing or
-older unsupported coordinators refuse without signalling or stopping anything.
-The private coordinator protocol is 3: it includes bounded categorical progress
-replies as well as the drain budget; older coordinator identities refuse before
-any drain, without a compatibility reader. Operational
-receipt version 1 and export document version 13 are unchanged.
-The source independently hashes the destination image and probes its host
-capability, key, import versions and configuration. Cross-key capacity and
-credential probes must give a usable known input window; an insufficient or
-unknown window refuses rather than warning and surrendering. No credential
-renewal or paid request is used to obtain a native-login verdict.
+`plakd host upgrade --expect-binary <id> [--drain <duration|idle>]` is an
+explicit same-user operation, invoked using the destination executable and
+its binary ID. It discovers exactly one live source host across keys and
+echoes that host's key and instance on its private upgrade control socket.
+A changed key refuses as `host_upgrade_offline_migration_required` before
+admissions pause or sessions drain, naming the offline procedure (§2.5.1).
+Deploy returns the same refusal before drain. Private coordinator protocol 3
+is exact-version; older coordinators refuse without signalling or stopping
+anything. The source independently hashes the destination image and probes
+its key, host and runner capabilities, and configuration.
 The source retains resolved service arguments, not a working-directory-relative
 invocation. Destination service preflight parses those arguments and validates
 the home configuration and user templates that startup requires. For a web
@@ -5942,8 +5907,8 @@ and the existing durable handoff decision and continuation command ids are reuse
 This is the admission-verdict barrier seam; the step-drain coordinator owns
 when to call it, after closing ingress and before freezing runtime steps.
 
-On every host stop, including same-key handoff,
-cross-key replacement and plain shutdown, the host closes its MCP pool and
+On every host stop, including same-key handoff and plain shutdown, the host
+closes its MCP pool and
 stops spawning source-owned SSH transports, runner launcher helpers, evaluator
 sidecars and Changes helpers. It tries to stop and reap the children it owns,
 including idle local stdio MCP servers, within one shared cleanup bound.
@@ -5962,7 +5927,7 @@ must answer the source's v4 capability probe. A same-key destination that does
 not answer it with support is refused as `missing_descriptor_handoff` before
 admissions pause or sessions drain. Use a supported intermediate that can
 hand off to the destination, or stop the source and cold-start the destination.
-This capability is not required for cold start or cross-key replacement.
+This capability is not required for cold start.
 
 The upgrade re-execs the source PID and retains the control and web listeners
 and the home-wide and per-key locks. The exec temporarily carries the control
@@ -6030,8 +5995,8 @@ promoted jobs do not block exact reopen. The source separately qualifies
 process custody as described below.
 The source closes ingress and resolves earlier draft verdicts before requesting
 runtime holds. `--drain` defaults to 60 seconds; integer `ms`, `s`, `m`, `h`
-suffixes and bare seconds accept 0 through one hour. It is exclusive with
-`--wait` and `--abandon`. Finite modes share one absolute host-wide natural-drain
+suffixes and bare seconds accept 0 through one hour. Finite modes share one
+absolute host-wide natural-drain
 deadline across every agent. The earlier verdict barrier uses the later of that
 deadline and ten seconds after preparation began, including for `--drain 0`;
 that floor does not extend natural draining. `idle` uses a bounded 60-second
@@ -6080,8 +6045,7 @@ receipt is added. Upgrade yields use Notice, not Background: Background remains 
 process-only control and must not mask observation waits. No in-flight effect
 journal crosses surrender. A root or child stop/interrupt acts normally during
 reversible same-key preparation; it does not cancel the upgrade, and stopped
-work is not continued. For cross-key carry it still wins over preparation and
-reopens the source gates. The source seals control admission and joins
+work is not continued. The source seals control admission and joins
 already-admitted Stop receipts before Ready; a Stop that has not settled
 within that join bound prevents surrender.
 The held phase seals admission, joins Stop, rechecks held roots, inspects
@@ -6119,7 +6083,7 @@ or resend a process start or an ambiguous write. Confirmed original-daemon
 loss yields typed `outcome_unknown` for allocations without exact terminal
 evidence; a transient link failure does not assert that an original exited.
 The old daemon exits on its own when its retention obligations and idle grace
-end. No job authority is added to the host upgrade receipt or state key.
+end. No job authority is added to the host handoff or state key.
 Live job carry requires a retention speaker for the original daemon's
 version. Skip-upgrades beyond the destination's current and immediately
 previous retention versions are not supported with live jobs: settle them
@@ -6156,115 +6120,21 @@ Missing local inspection instead names the source local connection, while a
 timed-out inspection directs the operator to reachability/load and retry.
 Concurrent resident release retries definite busy lease releases and durability
 flushes under their original cleanup bounds; unresolved release still aborts
-before surrender. Cross-key live trees and jobs remain outside settled carry.
+before surrender.
 
-Cross-key upgrade is the **settled-root** operation of §2.5.1. Without
-`--wait`, blockers are returned before stopping admissions, as a list with
-session ID, closed kind and detail. The optional wait is bounded to 3600 seconds
-and closes new client and standalone-writer admissions while work settles;
-timeout restores them without surrender. Capacity is verified before draining.
-The paused host joins resident planned handoffs to persist already accepted
-mailboxes, then rechecks settlement and holds source branch leases while the
-old producer exports. This second check catches input accepted just before
-the pause. A failed preparation restores the old directory's admissions;
-released old sessions can be attached again under normal handoff recovery.
-No shell stop-then-import sequence or client-owned runtime performs this work.
+Before pausing, the destination qualifies required paired runners using
+their installed command, exact revision/flavor/protocol and pinned identity
+and roots. This authenticated, binding-free connection permits only
+configuration build reads (chapter 01 §8.4); it cannot register an owner,
+lease or line, sweep, or dispatch work. It checks configuration using that
+placement, not a same-spelled host checkout. Advance the runner's dedicated
+link to the matching immutable snapshot first. A mismatch refuses before
+drain; installation does not advance the link.
 
-Root selection uses the directory's `head_of_tree` relation, not last-updated
-retired rows. Only unarchived, eligible heads are carried, checked for settlement
-and counted against the 4096-root cap. Archived heads remain under the source
-key, outside this operation; their settlement or worker state is not inspected
-or promised to transfer.
-
-Immediately before surrender, the source marks the selected records archived
-through the existing product store, under their held leases. A durable archival
-intent lets plain startup or error rollback undo those flags before marking an
-attempt Aborted; if the source image is missing, the own-key source start later
-finishes that cleanup without redirecting another key. A missing source record
-is already restored for rollback purposes. After commit the flags
-remain, so older builds that do not read upgrade receipts still refuse ordinary
-reopen. This is not an immutable fence against an older build or operator
-explicitly unarchiving or editing source state: do not do that after surrender.
-
-`plakd status`, `plakd doctor`, and remote runner reconciliation no longer read
-upgrade receipts. Host start, session open, and session metadata mutation still
-check the applicable receipt and return a typed refusal when it withholds
-authority. A durable session open no longer performs a separate
-lease-revalidating write; recovery writes and later commits remain lease-fenced
-(chapter 01 §5.5).
-
-Before pausing, the destination qualifies every required paired runner using
-its installed command, exact revision/flavor/protocol and pinned identity and
-roots. This authenticated, binding-free connection permits only configuration
-build reads (chapter 01 §8.4); it cannot register an owner, lease or line, sweep,
-or dispatch work. Configuration, credentials and strict capacity are checked
-using that placement, not a same-spelled host checkout. A mismatch refuses
-before drain with the paired-upgrade remedy: advance the runner's dedicated
-link to the matching immutable snapshot first, retaining the old build to
-inspect and drain old workers. Installation does not advance that link.
-
-After durable source surrender and source exit, the destination imports dormant
-seeds under its own host custody and before each successor becomes Ready.
-Remote seeds use only the registry's already Ready bound client and services;
-an importer never creates another bind under the serving process instance.
-The fresh successor's job read uses that same connection, without loading an
-old call journal or adopting an old line.
-The normal runner Ready sweep follows import and precedes that successor's
-acknowledgement.
-A successor's Ready mapping and acknowledgement do not imply its directory row is published; a watch publishes it.
-A post-surrender runner outage or credential/configuration
-refusal keeps the affected successors withheld; a host-owned worker retries
-without preventing ready roots from serving. Retries wake on registry status
-changes and otherwise back off exponentially from five seconds to three minutes;
-they do not run a separate SSH dial loop. Completed imports are not
-re-probed or re-created. The command can report an unknown outcome while such
-work is pending; repair the destination/runner and retry the same command.
-For a permanently lost placement, `plakd host upgrade --abandon <successor-or-runner>`
-is an explicit same-user action on the serving destination. An exact reserved
-successor UUID selects one pending remote mapping; a pinned runner ID selects
-its pending mappings. Ready and local successors cannot be abandoned. The
-durable abandoned disposition is irreversible, keeps that reserved successor
-withheld forever even after operation acknowledgement, and never releases the
-source fence. Repeating the action is idempotent. Receipt publication is
-serialized with retry import/readiness so a lost acknowledgement or racing
-retry cannot resurrect the reservation. Once every mapping is Ready or
-abandoned, the operation acknowledges and no longer blocks later upgrades or
-ordinary standalone session commands.
-
-The action prints each retained source export path. To recover elsewhere, copy
-that v13 document, set its placement fields (`runner` and `workspace_root`) to
-the intended admitted placement, and use ordinary `plakd session import` on the
-copy. For local recovery use `runner: {"name":"local","runner_id":"local"}`
-and an absolute local workspace.
-Leave the retained original unchanged; the import creates another fresh line,
-not the abandoned reservation. Ordinary import custody rules still apply (stop
-the destination host before a standalone remote import), and normal pairing,
-configuration and credential admission still apply. Remove obsolete runner
-configuration when the placement is permanently retired.
-
-An interruption after surrender, partway through import or before Ready resumes
-the same reserved successors. A commit or acknowledgement lost to process
-failure is resolved from receipts before serving either side. Restarting with
-the destination executable after a precommit crash withdraws preparation and
-restores the retained source when available; a missing source image instead
-marks the attempt Aborted without forcing that key. After commit startup can
-only select the destination. An executable/configuration failure after commit
-requires repairing and retrying that destination, not reopening the source.
-`host connect --stdio` follows recorded successor keys, and attaching a carried
-root (or its full former session UUID) receives the existing `moved` refusal
-with its current root address. Children receive no revival alias.
-
-After acknowledgement, a receipt-aware old-key `plakd host` start follows the
-recorded destination, and old source session addresses redirect to their
-recorded successors. Source records stay archived and fenced; old-key execution
-does not resume them. An Aborted attempt, by contrast, never redirects a later
-destination-key start. Embedded/headless paths retain their existing custody
-and daemon-process restrictions rather than becoming upgrade owners.
-
-Reloading an integrator's client does not run this command,
-read ownership receipts, acquire custody or resend an ambiguously accepted
-submission. The upgrade command reports success only after destination
-acknowledgement; a timeout names an unknown outcome and the retry remedy.
+Reloading a client does not run this command, acquire custody or resend an
+ambiguously accepted submission. Upgrade reports success after the same-key
+destination acknowledges readiness. A timeout names an unknown outcome and
+directs the operator to start the destination if the host stopped.
 
 Native login, introduced in protocol 7 (current client protocol 12), runs in
 a dedicated account-service worker, never the
@@ -6867,8 +6737,9 @@ version, which a serving host may already have cached. Plan proves the loaded ga
 the dedicated `~/.local/bin/plakd-gateway` link to an owned immutable image,
 that its target matches the process executable, and that the enrolled Unix
 socket answers for the credential-store holder. Unknown images, service
-drift and custody changes refuse. A state-key change requires the manual
-settled upgrade runbook. Paired runner IDs, literal `login@host`
+drift and custody changes refuse. A state-key change returns
+`host_upgrade_offline_migration_required` before draining the source and
+names the offline migration procedure (§2.5.1). Paired runner IDs, literal `login@host`
 destinations and dedicated command paths must match the serving host's
 configured placements. Legacy versions use
 the existing host upgrade, state-key, export-version and wire-schema probes;
@@ -7034,13 +6905,11 @@ credential store and leases. V1 serves the former path-based Codex and
 SuperGrok binding and selection facts; v2 serves location-independent
 authority (chapter 01 §7.5). The host negotiates the highest common version,
 and Codex and SuperGrok cannot use a v1-only gateway for new-build admission
-or revalidation. Upgrade the gateway before carrying the host across state
-keys: the existing host keeps its v1 authority and the successor binds with v2.
-A cross-key preflight that needs either subscription refuses before surrender
-when the destination sees only v1. The host keeps its custody and negotiated
-version for its lifetime. If the host was carried first, upgrade the gateway,
-then restart the host so it negotiates v2. The refusal is `gateway protocol too
-old; upgrade the gateway`.
+or revalidation. Upgrade the gateway before offline migration so the source
+can still speak v1 and the destination can bind with v2. A serving host
+keeps its custody and negotiated version for its lifetime. If the destination
+is already serving, restart it after the gateway upgrade so it negotiates v2.
+The refusal is `gateway protocol too old; upgrade the gateway`.
 
 `<home>/gateway.toml` keys (absent file: every default):
 
@@ -7237,8 +7106,8 @@ read. So do unchanged configuration inputs between full reloads, which run at
 least every three minutes; I/O failures are not cached. This authority does not
 depend on an attached application client.
 Build identity/reopen/carry probes remain product services; client reload is
-not host upgrade. The host upgrade coordinator and its receipts remain §4.6's
-authority. A session export remains the only cross-build history carrier.
+not host upgrade. The host upgrade coordinator is §4.6's authority.
+A session export remains the only cross-build history carrier.
 
 Images remain admitted through explicit CLI files or wire inputs under the
 existing image count/byte/type/model limits. The server has no clipboard or

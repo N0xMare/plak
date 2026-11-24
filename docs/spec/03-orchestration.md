@@ -3816,7 +3816,8 @@ released record; another process's attach is refused with the typed
 custody take's `recover_node` runs apply unchanged (§14.1).
 
 **Tree store admission.** A generation change moves the product's state
-directory and uses settled carry. Only the stopped-store owner may apply an
+directory and requires offline migration at a declared format cut
+(chapter 02 §2.5.1). Only the stopped-store owner may apply an
 additive in-place revision within the current generation (chapter 02 §2.5).
 The store fails closed on a **DDL fingerprint**, not the revision integer
 alone. At the current revision, a
@@ -4417,32 +4418,11 @@ reorder already accepted queue facts. Restart cuts around the existing decision,
 admission and terminal publications retain those identities; a lost admitted
 turn remains governed by the ordinary loss law, not automatic draft replay.
 
-The host's settled cross-key upgrade (chapter 02 §4.6) first pauses client
-admissions and joins these releases, including already accepted mailboxes,
-then rechecks quiescence before exporting under source branch leases. It may
-reopen the old directory after a failed preparation. This operation carries
-settled roots as new lines, not live tree custody: old children remain inert
-references and cannot be resumed in the successor. Same-key upgrade remains
-the planned handoff above, with its existing once-only continuation law.
-Paired remote roots use binding-free destination qualification before drain.
-After durable surrender, source exit releases shared home custody; destination
-startup takes its own host custody and imports the reserved fresh lines before
-their fresh Ready reconciliation and per-successor acknowledgement. A host-owned
-worker retries pending imports/reconciliation without holding ready local roots
-behind an unavailable remote placement. Remote creation uses the registry's
-existing Ready client and services, never a second bind under that process
-instance; a new bind would cancel the serving connection and its live services.
-Retries wake on registry status changes and otherwise use capped exponential
-backoff. An explicit operator abandonment permanently withholds the reserved
-remote successor and counts as a terminal receipt disposition, not source
-revival or transfer. It does not transfer or
-adopt source lines, copy job registries, or load an old call journal. Interrupted
-creation retries its reserved operation and successor, including a canonical
-create committed before the product locator was saved. Each target cannot
-execute until its own Ready receipt; surrendered source
-records never reopen. Source archival is durable before surrender, and the
-Prepared receipt owns its rollback if startup or preparation fails.
-Runner transfer rules and the embedded daemon-process refusal are unchanged.
+At a state-key cut, migrate settled roots offline (chapter 02 §2.5.1).
+Imports start fresh lines. Old children are inert references, not resumable
+topology, and no job registry, old call journal or workspace-operation
+authority moves. Same-key handoff retains the once-only continuation law
+above.
 
 **Stops.** Every interrupt intent records its cause: a parent's
 `interrupt_agent` records `parent`, the operator's interrupt of a node

@@ -189,17 +189,16 @@ neither `plakous-auth` nor `plakous-http` nor an interpreter. No facade or worke
 
 ## Persisted versions
 
-Backward compatibility is not preserved outside the four exceptions below.
+Backward compatibility is not preserved outside the rules below.
 Remove obsolete paths rather than add compatibility layers, fallbacks or
 migrations. Unshipped APIs and databases have no compatibility claim.
 
 The latest workspace release is **0.0.4**. This build opens only its current
 state key, `r28.e39.p39.t11`, as native authority (chapter 02 §2.5).
-Other keys are left untouched; explicit legacy pruning may take schema-blind
-SQLite and holder locks to prove a directory is unused. Use settled export
-and import across keys, not a native reopen.
-The 0.0.4 release uses `r28.e38.p38.t11`; carrying its epoch-38 sessions into
-this build requires export and import.
+Explicit legacy pruning may take schema-blind SQLite and holder locks
+to prove another state directory is unused.
+The 0.0.4 release uses `r28.e38.p38.t11`; migrate its settled sessions
+offline using export and import (chapter 02 §2.5.1).
 
 | Store | Owner | Current version |
 | --- | --- | --- |
@@ -209,15 +208,18 @@ this build requires export and import.
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), plakd (location) | generation **11**, revision **13** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | plakd | schema **22**, disposable, never recovery authority |
 | Session export document | plakd | writes **13**, imports **13** and **12**, refuses **11** and older |
-| Host-upgrade ownership receipt | plakd | version **1**, outside state keys; surrender/reconnect authority only |
 
-The runtime schema and epoch are never migrated; checkpoint component
-revisions are frozen. A runtime format change or breaking product/tree store
-change requires a new key and settled carry. Empty move tables are reserved;
-non-empty move tables and group-bearing upgrade receipts are unsupported
-test-only state. Upgrade receipts coordinate exports and carry no histories,
-bindings, topology or job registries. No destination opens the source
-databases (chapter 02 §4.6).
+Bump the runtime format epoch only when persisted runtime encoding changes,
+not on a release or protocol cadence. Checkpoint component revisions are
+frozen. Epoch 39 is a declared format cut: this build reads only epoch 39,
+and every epoch bump remains a declared cut until an immediate
+previous-epoch reader ships. Once that reader ships, read the current and
+immediately previous record epochs in place. Non-cut bumps leave the key's
+epoch component at the last declared cut, separate from the writer epoch
+(chapter 02 §2.5). Batch incompatible stored-format changes into declared
+cuts. Running host upgrades stay within their current key. Migrate across
+keys offline with settled export and import, never by opening a foreign key
+as native session authority.
 
 The first exception is the session export document. A build MUST import
 export documents of its own version and of the immediately previous version;
@@ -261,7 +263,7 @@ Neither store reads the other; each moves in a single transaction, and older bui
 newer revisions without writing. The first real revision can ship only when
 no build that predates revision admission can run against that key; those
 builds may write before their version checks. Generation changes discard the
-revision steps and continue to use settled carry (chapter 02 §2.5).
+revision steps and require offline migration (chapter 02 §2.5.1).
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

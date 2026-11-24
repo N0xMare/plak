@@ -2235,14 +2235,6 @@ authorize runtime mutation except through typed facade calls. Resume
 reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
-The reserved move tables confer no runtime or host authority (chapter 00).
-Committed/Acknowledged outgoing receipts exclude surrendered copies from
-cross-key resume/foreign-session discovery. Prepared and Aborted sources are
-not excluded; Aborted receipts impose no target gate. Pending and abandoned
-destination reservations refuse execution and metadata mutation (including
-archive/delete), so an ordinary lifecycle command cannot invalidate publication
-or turn an abandoned reservation into authority.
-
 An explicit cross-build conversation import is construction, not recovery
 repair (chapter 02 §2.5.1). Ordinary import refuses the closed `host_upgrade` document kind before any state
 is admitted. Export v13 carries full canonical content and
@@ -2382,10 +2374,10 @@ permission: Claude Code front matter such as `allowed-tools` is ignored.
 
 ### 4.5 Installed-build inspection and private carry files
 
-Build inspection, carry exports and host-upgrade receipts remain product-owned.
+Build inspection and portable exports remain product-owned.
 A client MUST NOT treat a probe verdict or a local executable path as session,
 credential or effect authority. Export files contain private conversation data;
-host-upgrade receipts coordinate custody but carry no session encoding. The
+they carry no live custody. The
 export and upgrade rules are chapter 02 sections 2.5.1 and 4.6.
 
 ### 4.6 Reload requests are a same-user local channel
@@ -2428,7 +2420,7 @@ acceptance, replay permission, custody or admission authority. Bridge discovery
 refusals are closed product DTOs on stdout, not parser guidance from stderr.
 Absence and auto-start still require the existing verified sockets and
 kernel-held private locks; a stopping diagnostic is meaningful only while its
-verified lock is held. Unverifiable ownership, permissions, receipts or socket
+verified lock is held. Unverifiable ownership, permissions or socket
 identity returns `verification_failed`, never absence or permission to start.
 
 The directory's separate same-user notice datagram socket is
@@ -2446,7 +2438,8 @@ socket is `host/upgrade.sock`, mode 0600 under the owned private host directory;
 the serving process holds the home guard and rejects other-user peers before
 reading a bounded control frame. Requests echo the source instance and key.
 The source hashes the absolute destination executable independently, and the
-destination's probes and importer must agree on its exact binary and key.
+destination's probes must agree on its exact binary and key. A changed key
+refuses before the admission pause.
 Nothing is selected through a client role, relative executable, shell string
 or arbitrary source-store path.
 
@@ -2460,9 +2453,9 @@ barrier, while source authority is still held; after Ready it cannot revoke a
 transfer. Tree pauses defer host wakes/recovery without refusing effects already
 dispatched under that authority. Rollback reopens trees before driver gates.
 During reversible preparation, the admission gate admits only an existing-session
-StopSession or an interrupt on this connection's exact live attachment. It first
-sets the coordinator's cancellation flag, then follows the ordinary control path;
-it never reopens ingress or admits a prompt. Surrender serializes with that gate:
+StopSession or an interrupt on this connection's exact live attachment. Both
+follow the ordinary control path without withdrawing the upgrade. Neither
+reopens ingress or admits a prompt. Surrender serializes with that gate:
 once committed, a source control is refused and must reconnect to the destination.
 Private coordinator protocol 3 progress reports are bounded observations, never
 custody, admission or effect authority. Upgrade Notice can yield observation waits
@@ -2477,48 +2470,13 @@ cancelled by the upgrade hold. Neither the draft registry nor step-control
 memory is a cross-build carrier. The existing home guard, exact native runner
 triple and normal handoff remain the execution authorities.
 
-Ownership receipts are private bounded regular files opened without following
-links, atomically published and synced. Their directories and operation IDs
-are validated; corrupt or ambiguous receipts never grant execution authority.
-They contain identities and export digests, not another session carrier.
-Targets cannot execute before their individual Ready acknowledgement; source records are fenced by a
-committed surrender. The host pause and an exclusive home admission guard
-exclude new client and embedded/headless writes during preparation; ordinary
-standalone writers hold that guard shared before construction. The joined
-handoff drains accepted mailboxes before the final quiescence check. A crash
-before commit leaves source authority intact; after commit recovery follows
-the destination receipt and never falls back to source execution. Same-user
-control files are not a boundary against the home owner's deliberate edits.
-Source records are also archived under held leases before surrender, so older
-builds without receipt readers honour the existing ordinary-reopen refusal.
-Explicit unarchive or direct source-store edits by an older build/operator are
-a residual authority escape: never use them to resume surrendered work.
-Preparation withdrawal restores its archival intent; an unavailable source image
-cannot turn Prepared into Committed or make Aborted redirect future starts.
-Paired remote placements are qualified before drain using the binding-free,
-exact-triple mode of §2.9. It admits configuration reads under existing runner
-root consent, not custody, owner registration, adoption or effects. The operator
-must advance the runner's dedicated link to the matching snapshot first.
-After surrender the source exits and releases shared custody. Only the
-destination serving host, holding its own home custody, may import the reserved
-new lines. A remote importer uses only the host registry's Ready bound client
-and services, never another bind under the same serving instance. It loads no
-old call journal; the fresh successor's job read is ordinary new-line authority, not a
-transfer of the source line. Fresh normal Ready reconciliation follows each
-import before its mapping's durable readiness bit is published. A missing
-runner withholds only its own successors; retries retain host custody and do
-not re-create or re-probe already imported roots. Preflight is strict, while a
-changed capacity after surrender produces the ordinary import warning.
-Neither a standalone importer alongside a host nor fallback to surrendered
-source roots is authorized, including after a destination startup failure.
-The same-user `host upgrade --abandon` action is bound to the serving destination
-identity. Only pending remote mappings may become permanently abandoned; Ready
-and local mappings refuse. The abandoned reservation stays withheld after
-operation acknowledgement, and source fencing is unchanged. The action grants
-no new placement: a copied retained export goes through ordinary import
-admission. Retry and disposition serialize receipt publication under a private
-owned kernel-held file lock so neither can overwrite the other's terminal state.
-Embedded daemon-held-process refusals remain in force.
+The host pause and an exclusive home admission guard exclude new client
+and embedded/headless writes during preparation; standalone writers hold
+that guard shared before construction. Runner qualification uses the
+binding-free exact-triple mode of §2.9, which admits configuration reads,
+not custody or effects. There is no cross-key custody transfer. At a
+declared format cut, settle and stop the source and use the portable
+export/import procedure in chapter 02 §2.5.1.
 
 Protocol-7 console writes trust transport-verified same-user socket peers by
 default, independently of `web.*`; they still enforce consent, exact targets,
