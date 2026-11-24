@@ -15,10 +15,11 @@ pub(super) fn scan() -> Result<Vec<Identity>, ()> {
 type Snapshot = Option<(Instant, Arc<Vec<Identity>>)>;
 const MAX_TRACKED_PROCESSES: usize = 4096;
 const STARTUP_SCAN_ATTEMPTS: usize = 3;
-// Bounds one Linux whole-table pass. A stat read of another busy process can
-// stall, so a loaded host can spend most of a second on one complete pass.
-// Each cleanup phase is allotted this bound for every complete pass it needs,
-// plus its fixed spacing.
+// Linux rejects a whole-table pass that ends after this bound; a stalled stat
+// read is not interrupted. A stat read of another busy process can stall, so a
+// loaded host can spend more than a second on one complete pass. Each cleanup
+// phase is allotted this bound for every complete pass it needs, plus its
+// fixed spacing.
 const SCAN_WATCHDOG: Duration = Duration::from_secs(2);
 const STAGE_SPACING: Duration = Duration::from_millis(150);
 const SCAN_SPACING: Duration = Duration::from_millis(20);
@@ -438,7 +439,7 @@ impl SessionCleanup {
     }
 
     pub(super) fn reprove(&mut self) -> bool {
-        self.prove_absence_until(Instant::now() + Duration::from_secs(1))
+        self.prove_absence_until(Instant::now() + ABSENCE_PROOF_BUDGET)
     }
 
     pub(super) fn survivors(&self) -> Vec<super::super::TerminalProcessIdentity> {

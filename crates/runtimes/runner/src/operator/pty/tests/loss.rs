@@ -140,7 +140,7 @@ fn operator_pty_unknown_close_reproves_or_acknowledges_surviving_escape_without_
         });
         // Close only after the worker has recorded the escape while its parent is still live.
         receipt
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(30))
             .unwrap_or_else(|error| panic!("worker did not record the PTY escape: {error}"));
         closing.store(true, Ordering::Release);
         let deadline = Instant::now() + Duration::from_secs(30);

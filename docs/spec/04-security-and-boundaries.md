@@ -920,19 +920,21 @@ confirming the anchored leader and stopping groups cannot consume the proof's
 window. Incomplete cleanup scans retry within their phase's window, then
 retain unknown. An observed escape or an unconfirmed group signal retains
 unknown after reaping without spending the proof window. Linux bounds each
-whole-table pass by record size, entry count and elapsed time; a stat read of
-another busy process can stall, so a loaded host can spend most of a second on
-one pass. Linux scans assume visibility of the runner user's processes:
-hidepid and privilege-changing descendants can restrict evidence, not
-establish containment or grant kill authority over invisible processes.
+whole-table pass by record size and entry count, and rejects a pass that ends
+after its elapsed-time bound; it does not interrupt a stalled stat read. A stat
+read of another busy process can stall, so a loaded host can spend more than a
+second on one pass. Linux scans assume visibility of the runner user's
+processes: hidepid and privilege-changing descendants can restrict evidence,
+not establish containment or grant kill authority over invisible processes.
 
 Unknown cleanup is not an unrecoverable pin: close requests a fresh two-scan
 absence proof of the old session and tracked escaped `(pid,start)` identities,
-without signaling a remembered pid after reaping; a low-frequency worker also
-re-proves it. An escaped zombie is terminated, not a live survivor. Only proven
-absence becomes `exited`. A close with explicit `acknowledge_loss` may instead
-become `lost`, releasing pins, quota and idle-exit accounting while reporting
-last-observed surviving escaped identities. It does not kill those escapees
+within the same proof window as cleanup and without signaling a remembered pid
+after reaping; a low-frequency worker also re-proves it. An escaped zombie is
+terminated, not a live survivor. Only proven absence becomes `exited`. A close
+with explicit `acknowledge_loss` may instead become `lost`, releasing pins,
+quota and idle-exit accounting while reporting last-observed surviving escaped
+identities. It does not kill those escapees
 or claim they died. Closed/expired namespaces still allow list and close for
 this resolution. Fast double-fork escapes reparented before observation remain
 an explicit unsandboxed-shell residual, even when the original SID is absent.

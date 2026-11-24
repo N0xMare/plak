@@ -556,6 +556,7 @@ fn operator_runner_loss_sigkill_does_not_recover_or_recreate_shell() {
     // The new runner has no process authority from a former instance's bare PID.
     // A normal-HUP deterministic child should die when the killed runner loses
     // its master; this observation is test teardown, not recovery authority.
+    let deadline = Instant::now() + Duration::from_secs(30);
     while complete_scan_for_test()
         .iter()
         .any(|row| row.pid == pid && !row.zombie)
