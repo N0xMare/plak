@@ -1558,8 +1558,7 @@ pub(crate) mod suite {
     /// goldens: nothing is read from disk, and a prompt change must be
     /// re-pinned here deliberately.
     ///
-    /// Re-pin with:
-    /// `PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_ -- --nocapture`
+    /// Re-pin with `just regenerate prompts`.
     // Claude pins include explicit account/device/session fixture identities and
     // body attestation, alongside instruction text and complete tool payloads.
     const PROMPT_RENDER_PINS: &[(&str, &str)] = &[
@@ -2446,7 +2445,7 @@ pub(crate) mod suite {
         }
         assert!(
             failures.is_empty(),
-            "rendered prompt drift (inspect with `just prompts diff`; re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_):\n\n{}",
+            "rendered prompt drift (inspect with `just prompts diff`; re-pin with `just regenerate prompts`):\n\n{}",
             failures.join("\n\n")
         );
     }

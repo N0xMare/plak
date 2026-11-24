@@ -23,7 +23,7 @@ just batch                 # Linux integration gate; set PLAK_BATCH_BASE to the 
 just batch-mac             # macOS integration gate
 just nextest ARGS          # manual tests in the isolated test environment
 just steps GROUPS          # named groups; tests-install for install-family changes
-just regenerate PART      # rebuild the affected derived pins or fixtures
+just regenerate PART       # rebuild the affected derived pins or fixtures
 just tighten-ceilings      # integrator: lower debt ceilings to actual counts
 just --list                # other recipes
 ```

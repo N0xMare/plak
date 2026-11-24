@@ -982,8 +982,7 @@ pub(crate) mod suite {
     /// sha256 of each route's compact summary-request body. An instruction,
     /// prefix or lowering change shows up here as a pin diff.
     ///
-    /// Re-pin with:
-    /// `PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_compaction_wire -- --nocapture`
+    /// Re-pin with `just regenerate prompts`.
     const COMPACTION_WIRE_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root",
@@ -1377,7 +1376,7 @@ pub(crate) mod suite {
         }
         assert!(
             failures.is_empty(),
-            "summary request drift (re-pin with PLAK_PRINT_PROMPT_PINS=1 cargo test -p plakous-hosted --lib rendered_compaction_wire -- --nocapture):\n\n{}",
+            "summary request drift (re-pin with `just regenerate prompts`):\n\n{}",
             failures.join("\n\n")
         );
     }
