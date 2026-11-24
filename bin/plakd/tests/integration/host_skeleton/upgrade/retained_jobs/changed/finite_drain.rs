@@ -269,9 +269,9 @@ fn finish_child(sut: &FiniteDrain, host: &mut Host, child: &PendingChild) {
     let store = SqliteTreeStore::open(&paths.subagents_database()).unwrap();
     let before = child_locator(&store, child);
     sut.finish_job(child.original);
-    // Wait can return immediately if a process notice already consumed the
-    // terminal. Use the retained terminal, not a transient dispatch state.
-    wait_retained_terminal(&paths.runtime_database(), before);
+    // Either Wait or the process notice can deliver the exit. The original
+    // shell had to survive until the fixture released it, not until Wait
+    // happened to be visible in the ledger.
     release_continuation(&sut.fixture);
     root_wake::submitted_result(&sut.fixture, &child.parent);
     root_wake::idle_stays(&sut.fixture, &child.session, child.root_turns);
