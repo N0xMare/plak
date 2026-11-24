@@ -94,6 +94,12 @@ impl StartupFailure {
 pub(super) fn classify_connection(
     c: &Connection,
 ) -> Result<SqlitePersistenceShape, SessionStoreError> {
+    classify_bootstrap_connection(c).map(|(shape, _)| shape)
+}
+
+pub(super) fn classify_bootstrap_connection(
+    c: &Connection,
+) -> Result<(SqlitePersistenceShape, bool), SessionStoreError> {
     let app: i64 = c
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(map_sqlite)?;
@@ -108,7 +114,7 @@ pub(super) fn classify_connection(
         )
         .map_err(map_sqlite)?;
     if app == 0 && version == 0 && objects == 0 {
-        return Ok(SqlitePersistenceShape::MissingOrFresh);
+        return Ok((SqlitePersistenceShape::MissingOrFresh, false));
     }
     if app != APPLICATION_ID {
         return Err(SessionStoreError::corrupt());
@@ -117,8 +123,10 @@ pub(super) fn classify_connection(
         return Err(SessionStoreError::UnsupportedSchema);
     }
     verify_shape_pragmas(c)?;
-    verify_exact_schema(c)?;
-    Ok(SqlitePersistenceShape::Current)
+    Ok((
+        SqlitePersistenceShape::Current,
+        bootstrap_epoch(c)?.is_some(),
+    ))
 }
 
 /// Admits one inspection snapshot: a current shape and a bound clock domain.
@@ -197,10 +205,10 @@ pub(super) fn admit_header_file(path: &Path) -> Result<bool, SessionStoreError> 
 /// The authoritative transaction repeats the domain check after this preflight.
 pub(super) fn admit_existing_header(
     path: &Path,
-    domain: Option<LeaseDomain>,
-) -> Result<(), SessionStoreError> {
+    domain: LeaseDomain,
+) -> Result<bool, SessionStoreError> {
     if !admit_header_file(path)? {
-        return Ok(());
+        return Ok(false);
     }
     // A WAL can carry a newer header than the main file. Read its committed
     // identity without opening a writer or checkpointing it into the main file.
@@ -209,43 +217,18 @@ pub(super) fn admit_existing_header(
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(map_sqlite)?;
-    let application: i64 = connection
-        .pragma_query_value(None, "application_id", |row| row.get(0))
+    connection
+        .execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
         .map_err(map_sqlite)?;
-    let version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(map_sqlite)?;
-    if application == 0 && version == 0 {
-        let objects: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(map_sqlite)?;
-        return if objects == 0 {
-            Ok(())
-        } else {
-            Err(SessionStoreError::corrupt())
-        };
-    }
-    if application != APPLICATION_ID {
-        return Err(SessionStoreError::corrupt());
-    }
-    if version != SCHEMA_VERSION {
-        return Err(SessionStoreError::UnsupportedSchema);
-    }
-    if let Some(domain) = domain {
-        connection
-            .execute_batch("PRAGMA trusted_schema=OFF;")
-            .map_err(map_sqlite)?;
-        verify_exact_schema(&connection)?;
-        let bound = bound_domain(&connection)?;
+    let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+    let (shape, legacy) = classify_bootstrap_connection(&snapshot)?;
+    if shape == SqlitePersistenceShape::Current {
+        let bound = bound_domain(&snapshot)?;
         if bound.epoch() == domain.epoch() && bound != domain {
             return Err(SessionStoreError::LeaseDomainMismatch);
         }
     }
-    Ok(())
+    Ok(legacy)
 }
 
 pub(super) fn wait_for_actor(

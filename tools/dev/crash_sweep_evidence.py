@@ -107,18 +107,24 @@ def formats(root, commit):
         r'(?s)const SCHEMA: &str = r"(.*?)\n";',
         "runtime schema",
     )
-    state_key = one(
+    state_format = one(
         source("bin/plakd/src/home/state.rs"),
         r'(?m)^        "([^"\n]+)",\n'
         r"        plakous::sessions::RUNTIME_STORE_SCHEMA_VERSION,\n"
-        r"        plakous::sessions::RUNTIME_FORMAT_EPOCH,\n"
+        r"        plakous::sessions::RUNTIME_FORMAT_(?:CUT|EPOCH),\n"
         r"        crate::store::GENERATION,\n"
         r"        plakous_recursive_subagents_store::GENERATION,",
         "state key format",
-    ).format(runtime, epoch, product, tree)
+    )
+    cut = (
+        constant("crates/plakous/src/sessions.rs", "RUNTIME_FORMAT_CUT")
+        if "plakous::sessions::RUNTIME_FORMAT_CUT," in source("bin/plakd/src/home/state.rs")
+        else epoch
+    )
     return {
-        "state_key": state_key,
+        "state_key": state_format.format(runtime, cut, product, tree),
         "runtime_revision": runtime,
+        "runtime_encoding_epoch": epoch,
         "product_revision": product_revision,
         "tree_revision": tree_revision,
         "runtime_schema_sha256": hashlib.sha256(runtime_ddl.encode()).hexdigest(),

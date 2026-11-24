@@ -272,7 +272,9 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         SessionStoreError::NotLineHead => SessionStoreOrigin::NotLineHead,
         SessionStoreError::Capacity(capacity) => SessionStoreOrigin::Capacity(capacity),
         SessionStoreError::StorageFull => SessionStoreOrigin::StorageFull,
-        SessionStoreError::BackendBusy => SessionStoreOrigin::Busy,
+        SessionStoreError::BackendBusy | SessionStoreError::BootstrapBusy => {
+            SessionStoreOrigin::Busy
+        }
         SessionStoreError::BackendUnavailable | SessionStoreError::Shutdown => {
             SessionStoreOrigin::Unavailable
         }

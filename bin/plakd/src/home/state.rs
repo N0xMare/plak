@@ -2,7 +2,7 @@
 //!
 //! Every database and session log this build writes lives under
 //! `state/<key>/`, where the key names the runtime schema, the runtime format
-//! epoch, the product generation and the agent-tree generation. A build that reads a
+//! cut, the product generation and the agent-tree generation. A build that reads a
 //! different format never opens another build's files as session authority:
 //! it starts fresh in its own directory and names the others once. Explicit
 //! legacy pruning uses schema-blind lock probes; no other generation is migrated, moved
@@ -33,7 +33,7 @@ pub fn state_key() -> String {
     format!(
         "r{}.e{}.p{}.t{}",
         plakous::sessions::RUNTIME_STORE_SCHEMA_VERSION,
-        plakous::sessions::RUNTIME_FORMAT_EPOCH,
+        plakous::sessions::RUNTIME_FORMAT_CUT,
         crate::store::GENERATION,
         plakous_recursive_subagents_store::GENERATION,
     )

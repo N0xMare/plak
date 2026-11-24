@@ -351,7 +351,7 @@ fn seed_binding_heads(fixture: &Fixture) {
     );
     assert_eq!(
         manifest["runtime_epoch"],
-        plakous::sessions::RUNTIME_FORMAT_EPOCH
+        plakous::sessions::RUNTIME_FORMAT_CUT
     );
     assert_eq!(manifest["cases"].as_array().unwrap().len(), 17);
     let bytes = std::fs::read(source.join("runtime.sqlite3")).unwrap();

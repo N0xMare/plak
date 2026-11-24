@@ -455,6 +455,11 @@ pub enum SessionStoreError {
     /// A bounded backend queue or lock wait is exhausted.
     #[error("session store backend is busy")]
     BackendBusy,
+    /// The one-time SQLite shape bootstrap requires all older handles to close.
+    #[error(
+        "runtime store bootstrap requires exclusive ownership; close other store handles and retry"
+    )]
+    BootstrapBusy,
     /// Physical storage is exhausted, independently of logical retention limits.
     #[error("session store disk is full")]
     StorageFull,

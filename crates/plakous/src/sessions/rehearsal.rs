@@ -7,6 +7,33 @@ use super::{
 use plakous_agent::internal::CheckpointRecoveryVerdict;
 use {plakous_store::SqliteSessionStore, std::path::Path};
 
+/// Read-only preflight for the stopped-store runtime bootstrap.
+///
+/// # Errors
+/// Returns typed shape and storage refusals.
+pub fn runtime_bootstrap_pending(database: &Path) -> Result<bool, AgentSessionsError> {
+    SqliteSessionStore::bootstrap_pending(database).map_err(store_error)
+}
+
+/// Exercise the actual runtime bootstrap on a detached copy.
+///
+/// # Errors
+/// Returns typed shape, integrity and storage refusals.
+pub fn rehearse_runtime_bootstrap(source: &Path, scratch: &Path) -> Result<(), AgentSessionsError> {
+    SqliteSessionStore::rehearse_bootstrap(source, scratch).map_err(store_error)
+}
+
+/// Commit the pending bootstrap under exclusive SQLite locking.
+///
+/// # Errors
+/// Returns typed shape, integrity and storage refusals.
+pub fn bootstrap_stopped_runtime(
+    database: &Path,
+    cut: impl Fn(&str),
+) -> Result<(), AgentSessionsError> {
+    SqliteSessionStore::bootstrap_stopped(database, cut).map_err(store_error)
+}
+
 /// Reads every retained branch's frozen binding data, including children.
 /// No actor, ownership, runtime, credential or runner is opened. Each graph is
 /// decoded from immutable checkpoint objects through read-only SQLite.

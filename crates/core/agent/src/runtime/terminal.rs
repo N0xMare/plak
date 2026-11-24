@@ -758,7 +758,7 @@ impl DurableSessionStoreError {
                     .map(|class| DurableCapacityAdmission::new(class, capacity.limit)),
             },
             SessionStoreError::BackendUnavailable => Self::BackendUnavailable,
-            SessionStoreError::BackendBusy => Self::BackendBusy,
+            SessionStoreError::BackendBusy | SessionStoreError::BootstrapBusy => Self::BackendBusy,
             SessionStoreError::Corrupt(reason) => Self::Corrupt(reason),
             SessionStoreError::StorageFull => Self::StorageFull,
             SessionStoreError::UnsupportedSchema => Self::UnsupportedSchema,

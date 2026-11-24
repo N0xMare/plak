@@ -2223,19 +2223,19 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **28** and the checkpoint format epoch is **38**; the
-feed record encoding (§5.11) is part of that epoch, which it shares with the
-decision-fact encodings of the same release. Only
-the current exact schema and format epoch are supported. Every other runtime
-schema version is refused as `UnsupportedSchema`, and an object of another
-epoch as `UnsupportedCodec`; both surface as an incompatible build (§5.4). A
-database of the current schema version whose object table admits another epoch
-is likewise `UnsupportedCodec`: the version and epoch are classified before the
-exact-schema comparison, so a previous build's store never reads as corrupt. No
-migration or semantic archive decoder is retained. A pre-release change to any
-persisted runtime encoding bumps the format epoch (or the schema); the
-per-component revision constants inside the graph are frozen and never bumped
-on their own. `ReplayOmissionV1` uses provenance tag 4 and offline placeholder
+The runtime schema is exact and does not encode the checkpoint writer epoch
+in its DDL. A read-only preflight recognizes the exact supported legacy
+DDL before opening a writer. The one-time bootstrap takes exclusive SQLite
+ownership, syncs a pre-change backup, and rebuilds and verifies the schema in
+one transaction without changing retained addresses, rows, or receipt seals.
+The prior shape remains authoritative until commit; after commit older builds
+refuse the new shape. A library embedder MUST close its store before a build
+with the new shape opens it. If another handle holds the database, bootstrap
+returns a typed busy refusal. The paired product upgrade rehearses the same
+transition on a detached copy before draining the live owner (chapter 06 §6.3).
+Unknown schema versions are `UnsupportedSchema`; unsupported codecs are
+`UnsupportedCodec`. A change to persisted runtime encoding bumps its epoch,
+not the state key. `ReplayOmissionV1` uses provenance tag 4 and offline placeholder
 record version 2.
 Offline placeholder and replay-omission passes preserve cache affinity and
 its epoch.

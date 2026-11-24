@@ -858,7 +858,7 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
             "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(1,7,zeroblob(32),1)",
             [],
         )
-        .expect_err("predecessor object codec must violate the current schema constraint");
+        .expect("codec admission is independent of the object-table constraint");
     connection
         .execute(
             "INSERT INTO runtime_objects(kind,codec,digest,byte_len) VALUES(19,39,zeroblob(32),1)",
@@ -878,10 +878,7 @@ async fn fresh_schema_has_required_integrity_pragmas_and_reopens() {
         )
         .expect_err("unknown object kind must violate the current schema constraint");
     connection
-        .execute(
-            "DELETE FROM runtime_objects WHERE kind IN(19,20) AND codec=39 AND digest=zeroblob(32)",
-            [],
-        )
+        .execute("DELETE FROM runtime_objects WHERE digest=zeroblob(32)", [])
         .expect("remove schema probe");
     drop(connection);
     SqliteSessionStore::open(&db.path).expect("reopen");

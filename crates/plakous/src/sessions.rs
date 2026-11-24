@@ -80,10 +80,11 @@ use plakous_model::{
 use plakous_tools::{ToolExecutorId, ToolOutcome};
 
 /// Schema version of the SQLite runtime store this build reads and writes.
-/// A product keys its state directory by it and by [`RUNTIME_FORMAT_EPOCH`],
-/// so a build never opens a store another format wrote.
+/// A product keys its state directory by it and by [`RUNTIME_FORMAT_CUT`].
 #[cfg(feature = "sessions-sqlite")]
 pub const RUNTIME_STORE_SCHEMA_VERSION: i64 = plakous_store::SQLITE_SCHEMA_VERSION;
+/// Last declared runtime format cut; encoding-epoch bumps do not move it.
+pub const RUNTIME_FORMAT_CUT: u32 = 39;
 /// Format epoch of the persisted runtime checkpoint graph. Any change to a
 /// persisted runtime encoding bumps it; nothing older decodes.
 pub const RUNTIME_FORMAT_EPOCH: u32 = plakous_agent::internal::RUNTIME_FORMAT_EPOCH;

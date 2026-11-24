@@ -1326,7 +1326,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "FeedTurnOutcome",
         "FeedWorkflowKind",
         "FeedWorkflowOutcome",
-        "RUNTIME_FORMAT_EPOCH",
+        "RUNTIME_FORMAT_CUT",
         "RUNTIME_STORE_SCHEMA_VERSION",
         "CreateSessionOutcome",
         "CreateSessionRequest",
@@ -1720,6 +1720,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    ("plakd", "src/host/store_revisions.rs"): {
+        "sessions": {
+            "bootstrap_stopped_runtime",
+            "rehearsal",
+            "rehearse_runtime_bootstrap",
+            "runtime_bootstrap_pending",
+        },
+    },
     # Child traces share the transcript redactor without inheriting preview bounds.
     ("plakd", "src/carry/history/trace_redaction.rs"): {"tools": {"preview_redaction"}},
     # Deploy distinguishes API refusals without exposing provider bodies,

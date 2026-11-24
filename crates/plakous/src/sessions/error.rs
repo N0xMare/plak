@@ -319,6 +319,9 @@ fn runtime_error_kind(error: &AgentError) -> AgentSessionsError {
 }
 
 pub(super) fn store_error(error: SessionStoreError) -> AgentSessionsError {
+    if error == SessionStoreError::BootstrapBusy {
+        return AgentSessionsError::new(AgentSessionsErrorKind::StorageBusy, error.to_string());
+    }
     store_origin_error(session_store_origin(error))
 }
 

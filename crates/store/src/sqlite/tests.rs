@@ -84,16 +84,44 @@ fn an_object_from_another_format_epoch_is_an_unsupported_codec() {
     }
 }
 
-/// The object table admits exactly the current format epoch. The DDL
-/// spells the epoch as a literal, so a bump that forgets it makes every
-/// fresh store refuse its first object as "storage unavailable".
 #[test]
-fn the_object_table_admits_the_current_format_epoch() {
-    let epoch = plakous_agent::internal::RUNTIME_FORMAT_EPOCH;
-    assert!(
-        super::SCHEMA.contains(&format!("CHECK(codec={epoch})")),
-        "runtime_objects.codec CHECK disagrees with RUNTIME_FORMAT_EPOCH {epoch}"
+fn legacy_bootstrap_refuses_an_idle_writer_then_rebuilds_after_it_closes() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("runtime.sqlite3");
+    drop(SqliteSessionStore::open(&path)?);
+    let incumbent = Connection::open(&path)?;
+    incumbent.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         DROP TABLE runtime_writer;
+         DROP TABLE runtime_objects;",
+    )?;
+    let ddl = super::SCHEMA
+        .split(";\n")
+        .find(|sql| {
+            sql.trim_start()
+                .starts_with("CREATE TABLE runtime_objects (")
+        })
+        .ok_or("object table")?
+        .replace(
+            "codec INTEGER NOT NULL, digest",
+            "codec INTEGER NOT NULL CHECK(codec=39), digest",
+        );
+    incumbent.execute_batch(&ddl)?;
+    assert!(SqliteSessionStore::bootstrap_pending(&path)?);
+    assert_eq!(
+        SqliteSessionStore::open(&path).err(),
+        Some(SessionStoreError::BootstrapBusy)
     );
+    assert!(!path.with_extension("pre-codec-bootstrap.sqlite3").exists());
+    let scratch = dir.path().join("copy.sqlite3");
+    SqliteSessionStore::rehearse_bootstrap(&path, &scratch)?;
+    assert!(!SqliteSessionStore::bootstrap_pending(&scratch)?);
+    assert!(SqliteSessionStore::bootstrap_pending(&path)?);
+    drop(incumbent);
+    drop(SqliteSessionStore::open_verified(&path)?);
+    assert!(!SqliteSessionStore::bootstrap_pending(&path)?);
+    assert!(path.with_extension("pre-codec-bootstrap.sqlite3").is_file());
+    Ok(())
 }
 
 /// Release cost is bounded by construction, not by tuning: the lease

@@ -6,14 +6,22 @@ mod cleanup;
 use std::fs::File;
 use std::path::Path;
 
+use plakous::sessions::rehearsal::{
+    bootstrap_stopped_runtime, rehearse_runtime_bootstrap, runtime_bootstrap_pending,
+};
 use plakous_recursive_subagents_store::admission::LockedUpgrade;
 
 use crate::home::paths::PlakPaths;
 use crate::store::revisions::{
     databases,
-    host::{failure, pending},
+    host::{failure, pending as revisions_pending},
 };
 use crate::{CliFailure, CliResult};
+
+pub(super) fn pending(paths: &PlakPaths) -> CliResult<bool> {
+    let runtime = runtime_bootstrap_pending(&paths.runtime_database())?;
+    Ok(revisions_pending(paths)? || runtime)
+}
 
 pub(super) fn upgrade_stopped(
     paths: &PlakPaths,
@@ -38,6 +46,9 @@ pub(super) fn upgrade_stopped(
         .map(LockedUpgrade::backup)
         .collect::<Result<Vec<_>, _>>()
         .map_err(failure)?;
+    bootstrap_stopped_runtime(&paths.runtime_database(), |point| {
+        crate::test_hooks::upgrade_crash_cut(&format!("runtime:{point}"));
+    })?;
     for upgrade in backups {
         upgrade
             .commit(|stem, point| crate::test_hooks::upgrade_crash_cut(&format!("{stem}:{point}")))
@@ -66,9 +77,11 @@ pub(super) fn rehearse_for_service(paths: &PlakPaths, service: &Path) -> CliResu
     }
     // Older coordinators can't route their later probes to the copies.
     // Equal-revision cutovers stay compatible in either direction.
-    if databases(paths)
-        .iter()
-        .any(|(schema, _)| schema.version() > schema.generation)
+    let runtime = runtime_bootstrap_pending(&paths.runtime_database())?;
+    if (runtime
+        || databases(paths)
+            .iter()
+            .any(|(schema, _)| schema.version() > schema.generation))
         && crate::wire_transport::hosts::live(paths)?
             .iter()
             .any(|host| host.key == crate::home::state::state_key())
@@ -86,6 +99,10 @@ fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {
         return Ok(());
     }
     crate::commands::runner::private_directory(scratch)?;
+    let runtime = paths.runtime_database();
+    if runtime_bootstrap_pending(&runtime)? {
+        rehearse_runtime_bootstrap(&runtime, &scratch.join("runtime.sqlite3"))?;
+    }
     let copies = paths.clone().with_probe_stores(scratch.to_path_buf());
     for ((schema, source), (_, destination)) in databases(paths).into_iter().zip(databases(&copies))
     {

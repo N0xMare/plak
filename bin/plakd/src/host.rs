@@ -197,7 +197,7 @@ fn serve_host(
     let (ownership, inherited) = HostOwnership::take(paths, &binary, inherited)?;
     legacy_upgrade::refuse_unresolved(paths)?;
     let paired_start = inherited.is_some();
-    let stores_pending = crate::store::revisions::host::pending(paths)?;
+    let stores_pending = store_revisions::pending(paths)?;
     let web_policy = command
         .web
         .as_ref()

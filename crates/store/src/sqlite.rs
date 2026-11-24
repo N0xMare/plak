@@ -47,6 +47,7 @@ mod actor_tests;
 mod admission_budget_tests;
 mod authority;
 mod binding_inspection;
+mod bootstrap;
 mod checkpoint_cache;
 mod codec;
 mod error;
@@ -691,7 +692,7 @@ impl SqliteSessionStore {
         let domain = clock.now()?.domain();
         let path = path.as_ref().to_path_buf();
         let progress = Arc::new(StartupProgress(Mutex::new(StartupStage::Header)));
-        admit_existing_header(&path, Some(domain))
+        let legacy = admit_existing_header(&path, domain)
             .map_err(|error| progress.failure("preparation", error).report())?;
         progress.set(StartupStage::PrivateFile);
         prepare_private_file(&path)
@@ -705,8 +706,15 @@ impl SqliteSessionStore {
         let worker_progress = Arc::clone(&progress);
         let join = thread::Builder::new()
             .name("plakous-sqlite-store".into())
-            .spawn(
-                move || match Backend::open(&path, clock, domain, options, &worker_progress) {
+            .spawn(move || {
+                match Backend::open_after_bootstrap(
+                    &path,
+                    clock,
+                    domain,
+                    options,
+                    legacy,
+                    &worker_progress,
+                ) {
                     Ok(mut backend) => {
                         backend.usage_snapshot = Some(Arc::clone(&worker_usage));
                         *worker_usage
@@ -726,8 +734,8 @@ impl SqliteSessionStore {
                     Err(error) => {
                         let _ = ready_tx.send(Err(error));
                     }
-                },
-            )
+                }
+            })
             .map_err(|_| {
                 progress
                     .failure("spawn", SessionStoreError::BackendUnavailable)
@@ -895,6 +903,20 @@ impl fmt::Debug for SqliteSessionStore {
 }
 
 impl Backend {
+    fn open_after_bootstrap(
+        path: &Path,
+        clock: Arc<dyn LeaseClock>,
+        domain: LeaseDomain,
+        options: SqliteStoreOptions,
+        legacy: bool,
+        progress: &StartupProgress,
+    ) -> Result<Self, SessionStoreError> {
+        if legacy {
+            bootstrap::run(path, |_| {})?;
+        }
+        Self::open(path, clock, domain, options, progress)
+    }
+
     fn open(
         path: &Path,
         clock: Arc<dyn LeaseClock>,

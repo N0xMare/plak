@@ -1095,16 +1095,14 @@ the state key, file sizes and SHA-256 checksums. Restore only offline using a
 matching build and all three files as a set, without their old WAL/SHM files.
 
 Each build keeps its state in `~/.plak/state/<key>/`, where the key is
-`r<runtime schema>.e<runtime format epoch>.p<product generation>.t<tree
-generation>`, for example `r28.e39.p39.t11`. This build derives the key from
-the four format constants and reads only runtime schema 28 and epoch 39.
-Epoch 39 is a declared format cut, not an in-place transition from epoch
-38. Until a previous-epoch reader ships, each epoch bump is a declared
-format cut. With that reader, the key's epoch component remains at the
-last declared cut on non-cut bumps, and the current and immediately
-previous record epochs are read within the key (chapter 00).
-Runtime epoch 39 removes the credential-store path from the Codex and
-SuperGrok credential-authority digests. Product schema 39 stores
+\`r<runtime schema>.e<runtime format cut>.p<product generation>.t<tree
+generation>\`, for example \`r28.e39.p39.t11\`. The key is derived from those
+four constants, never hand-bumped. The runtime schema is exact. The \`e\`
+component records the last declared runtime format cut, not the writer's
+encoding epoch. Runtime epoch 39 is the last declared cut and removes the
+credential-store path from the Codex and SuperGrok credential-authority
+digests. Stores under the epoch-38 key require offline migration; the
+epoch-39 key has no epoch-38 records. Product schema 39 stores
 `sessions.account_choices`, a JSON object mapping non-root provider kinds to full
 account references. The root kind's account is the root line head and is not a
 map entry. State-directory

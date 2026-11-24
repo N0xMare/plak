@@ -339,9 +339,10 @@ async fn sqlite_feed_rows_are_deleted_with_their_session() -> TestResult {
 fn rewrite_as_build(db: &Database, version: i64, epoch: u32) -> TestResult {
     let connection = Connection::open(&db.path)?;
     connection.execute_batch(&format!(
-        "PRAGMA writable_schema=ON;
+        "DROP TABLE runtime_writer;
+         PRAGMA writable_schema=ON;
          UPDATE sqlite_schema
-         SET sql=replace(sql,'CHECK(codec={RUNTIME_FORMAT_EPOCH})','CHECK(codec={epoch})')
+         SET sql=replace(sql,'codec INTEGER NOT NULL,','codec INTEGER NOT NULL CHECK(codec={epoch}),')
          WHERE type='table' AND name='runtime_objects';
          PRAGMA writable_schema=OFF;"
     ))?;

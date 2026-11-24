@@ -93,6 +93,7 @@ pub(super) fn initialize_schema(
         .map_err(map_sqlite)?;
     if app == 0 && version == 0 && tables == 0 {
         c.execute_batch(SCHEMA).map_err(map_sqlite)?;
+        initialize_writer_epoch(c)?;
         c.execute(
             "UPDATE store_meta SET lease_domain=?1 WHERE id=1",
             [domain_bytes(domain)],
@@ -127,7 +128,7 @@ INSERT INTO store_meta VALUES(1,0,0,0,0,0,0,0,0,0,zeroblob(48));
 CREATE TABLE runtime_objects (
  id INTEGER PRIMARY KEY,
  kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 20),
- codec INTEGER NOT NULL CHECK(codec=39), digest BLOB NOT NULL CHECK(length(digest)=32),
+ codec INTEGER NOT NULL, digest BLOB NOT NULL CHECK(length(digest)=32),
  byte_len INTEGER NOT NULL CHECK(byte_len>=0), UNIQUE(kind,codec,digest));
 CREATE TABLE runtime_object_bytes (
  id INTEGER PRIMARY KEY REFERENCES runtime_objects(id), bytes BLOB NOT NULL);
@@ -304,7 +305,17 @@ CREATE TABLE imported_branches (
  FOREIGN KEY(session_id,branch_id) REFERENCES branches(session_id,branch_id) ON DELETE CASCADE) WITHOUT ROWID;
 CREATE INDEX runtime_move_lines_operation ON runtime_move_lines(operation);
 CREATE INDEX imported_sessions_operation ON imported_sessions(operation);
+CREATE TABLE runtime_writer (
+ id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL);
 ";
+
+pub(super) const WRITER_EPOCH: u32 = plakous_agent::internal::RUNTIME_FORMAT_EPOCH;
+
+pub(super) fn initialize_writer_epoch(c: &Connection) -> Result<(), SessionStoreError> {
+    c.execute("INSERT INTO runtime_writer VALUES(1,?1)", [WRITER_EPOCH])
+        .map_err(map_sqlite)?;
+    Ok(())
+}
 
 /// Admits shape, schema, domain and counter integrity. Retained state over
 /// the configured bounds is not a refusal: an over-limit store still opens so
@@ -319,6 +330,10 @@ pub(super) fn admit_open(c: &Connection) -> Result<(), SessionStoreError> {
 
 pub(super) fn verify_database(c: &Connection) -> Result<(), SessionStoreError> {
     admit_open(c)?;
+    verify_contents(c)
+}
+
+pub(super) fn verify_contents(c: &Connection) -> Result<(), SessionStoreError> {
     let integrity: String = c
         .query_row("PRAGMA integrity_check(1)", [], |r| r.get(0))
         .map_err(map_sqlite)?;
@@ -406,36 +421,49 @@ pub(super) fn verify_shape_pragmas(c: &Connection) -> Result<(), SessionStoreErr
 }
 
 pub(super) fn verify_exact_schema(c: &Connection) -> Result<(), SessionStoreError> {
-    let reference = Connection::open_in_memory().map_err(map_sqlite)?;
-    reference.execute_batch(SCHEMA).map_err(map_sqlite)?;
-    if schema_objects(c)? == schema_objects(&reference)? {
-        return Ok(());
+    if bootstrap_epoch(c)?.is_some() {
+        Err(SessionStoreError::UnsupportedSchema)
+    } else {
+        Ok(())
     }
-    // The object table's DDL spells the format epoch, so a store another
-    // epoch's build wrote at this schema version differs here first: that is
-    // an incompatible build, not damage.
-    let epoch = i64::from(plakous_agent::internal::RUNTIME_FORMAT_EPOCH);
-    if object_table_epoch(c)?.is_some_and(|written| written != epoch) {
-        return Err(SessionStoreError::UnsupportedCodec);
-    }
-    Err(SessionStoreError::corrupt())
 }
 
-/// The format epoch the `runtime_objects` codec CHECK admits, when the table
-/// exists and spells one.
-fn object_table_epoch(c: &Connection) -> Result<Option<i64>, SessionStoreError> {
-    let sql: Option<String> = c
-        .query_row(
-            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='runtime_objects'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(map_sqlite)?;
-    Ok(sql.and_then(|sql| {
-        let (_, rest) = sql.split_once("CHECK(codec=")?;
-        rest.split_once(')')?.0.parse().ok()
-    }))
+const OBJECT_CODEC_DDL: &str = "codec INTEGER NOT NULL, digest";
+
+/// Legacy admission differs by exactly two objects: the writer marker is
+/// absent and the object table constrains its codec column to one epoch.
+pub(super) fn bootstrap_epoch(c: &Connection) -> Result<Option<u32>, SessionStoreError> {
+    let reference = Connection::open_in_memory().map_err(map_sqlite)?;
+    reference.execute_batch(SCHEMA).map_err(map_sqlite)?;
+    let mut expected = schema_objects(&reference)?;
+    let actual = schema_objects(c)?;
+    if actual == expected {
+        return Ok(None);
+    }
+    expected.retain(|(_, name, _, _)| name != "runtime_writer");
+    let object_sql = &mut expected
+        .iter_mut()
+        .find(|(_, name, _, _)| name == "runtime_objects")
+        .ok_or_else(SessionStoreError::corrupt)?
+        .3;
+    let epoch = actual
+        .iter()
+        .find(|(_, name, _, _)| name == "runtime_objects")
+        .and_then(|(_, _, _, sql)| sql.split_once("CHECK(codec="))
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .and_then(|(tag, _)| tag.parse::<u32>().ok())
+        .ok_or_else(SessionStoreError::corrupt)?;
+    *object_sql = object_sql.replace(
+        OBJECT_CODEC_DDL,
+        &format!("codec INTEGER NOT NULL CHECK(codec={epoch}), digest"),
+    );
+    if actual != expected {
+        return Err(SessionStoreError::corrupt());
+    }
+    if epoch != 39 {
+        return Err(SessionStoreError::UnsupportedCodec);
+    }
+    Ok(Some(epoch))
 }
 
 fn schema_objects(
