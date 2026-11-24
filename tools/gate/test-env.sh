@@ -17,12 +17,13 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 source "$here/dev-tools-prefix.sh"
-# A leaked override would shorten every test, and a provider key the operator
-# exported would make tests see credentials. The shell snippet unsets them in
+# Leaked overrides can change test behavior or rewrite fixtures. Exported
+# provider keys would expose credentials to tests. The snippet unsets them in
 # the caller; `-- command` unsets them before the command. --json keeps them:
 # the live drivers need real keys, and the offline Python drivers that take
 # --json drop the names --unset-names prints.
 leaked=(PLAK_TEST_SESSION_LEASE_SECONDS PLAK_TEST_CELL_HELLO_MS PLAK_TEST_HOST_IDLE_EXIT_SECONDS
+  PLAK_PRINT_PROMPT_PINS PLAK_UPDATE_GOLDENS PLAK_UPDATE_BINDING_CONTRACTS
   OPENAI_API_KEY XAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY)
 fresh=()
 mode=shell

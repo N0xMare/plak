@@ -6043,6 +6043,8 @@ def tighten_ceilings(workspace: Workspace) -> int:
         placement: dict[str, int] = {}
         errors.extend(validate_configuration_rules(name, sources, cfg.get(name, {}), placement))
         root_edits["workspace", "metadata", "plakous", "cfg", name] = placement
+        if package.layer not in ABOVE_FACADE_LAYERS:
+            continue
         module_counts: dict[str, int] = {}
         errors.extend(
             validate_module_rules(package, sources, policy.modules.get(name, {}), module_counts)

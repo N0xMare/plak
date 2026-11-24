@@ -420,7 +420,7 @@ debug = "full"
 strip = "none"
 lto = false
 
-# Placement debt is capped here; tighten ceilings at each cut.
+# Placement debt is capped here; tighten ceilings at each landing and cut.
 
 [workspace.metadata.plakous.cfg.plakd]
 feature-sites = ["src/lib.rs"]

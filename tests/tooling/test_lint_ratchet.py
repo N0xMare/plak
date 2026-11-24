@@ -371,7 +371,7 @@ class TightenCeilingsTests(unittest.TestCase):
                 'feature-sites = []\nfeature-ceiling = 3\ntest-seam-ceiling = 3\nenv-ceiling = 3\n'
                 'reason = "Existing debt"\n'
                 '[workspace.metadata.plakous.modules.pkg.a]\n'
-                'may-use = ["crate::a"]\nmay-use-ceiling = 3\nreason = "Existing debt"\n'
+                'may-use = ["crate::a"]\nmay-use-ceiling = 3\n'
             )
             graph = {
                 "workspace_members": ["pkg"],

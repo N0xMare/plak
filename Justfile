@@ -33,12 +33,12 @@ install-checks:
 steps GROUPS:
     tools/gate/dev-check.sh --steps {{quote(GROUPS)}}
 
-[doc("lower debt ceilings to their measured counts for a cut")]
+[doc("lower debt ceilings to their measured counts before gating")]
 tighten-ceilings:
     python3 tools/gate/check_workspace.py --tighten-ceilings
 
 [positional-arguments]
-[doc("regenerate derived pins and fixtures (omit parts to regenerate all on Linux)")]
+[doc("regenerate derived pins and fixtures (omit parts to regenerate all)")]
 regenerate *PARTS:
     python3 tools/gate/regenerate.py "$@"
 

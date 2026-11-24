@@ -1717,6 +1717,27 @@ or containment descriptor is normalized.
 | Rendered route, lifecycle and wire pins | `crates/hosting/hosted/tests/common/{rendered_prompts,rendered_lifecycle,rendered_wire}.rs` | `just regenerate prompts` (§2.5) |
 | Observation parity goldens (the host loop and the JSONL projection emit the same sequence) | `bin/plakd/tests/parity/*.jsonl` | `PLAK_UPDATE_GOLDENS=1 cargo test -p plakd --lib observation_parity` |
 
+#### Derived pins and fixtures
+
+On conflict, take either side of the generated file or block and run
+`just regenerate <part>` on the merged inputs. Review and commit the result
+instead of hand-merging digests. With no part named, `just regenerate` runs
+all listed generators.
+
+| Part | Output |
+| --- | --- |
+| `manifests` | `EXPECTED_SECURITY_SURFACE_DIGESTS` in `tools/gate/check_features.py` |
+| `bindings` | `crates/hosting/hosted/tests/fixtures/binding-contracts.json` |
+| `nextest` | Generated offline and install blocks in `.config/nextest.toml` |
+| `prompts` | Rendered route, lifecycle and compaction-wire digest tables in `crates/hosting/hosted/tests/common/rendered_{prompts,lifecycle,wire}.rs` |
+
+Regeneration does not approve security-surface changes, binding changes
+(which still require exact predecessor reopen evidence), or prompt changes.
+Do not regenerate the current SQLite binding seed to resolve a merge
+conflict; follow its [fixture instructions](../../crates/hosting/hosted/tests/fixtures/current-bindings/README.md)
+when the runtime format or presentation changes. Historical binding baselines
+are evidence, not projections of the current tree.
+
 ### 2.5 Prompt renders are pinned in code, not in files
 
 What a model sees on each product route — harness costume, identity, enrolled
@@ -1774,9 +1795,11 @@ not, so the cost of a wording change is read rather than re-derived.
 A prompt change is meant to fail the test with the list of routes whose digest
 moved. Review the model-visible changes with `just prompts diff`, run
 `just regenerate prompts`, and re-run the test in its normal pin-checking
-mode. `just prompts pins` prints the rows without updating the tables. Neither
-command skips the structural checks. A rendered artifact is never edited —
-`just prompts render` overwrites it from Rust.
+mode. `just prompts pins` prints the rows without updating the tables. Both
+commands use print mode, which skips comparing the old pins and checking the
+old route pin table's size. Gates unset the print and update overrides before
+running the tests. A rendered artifact is never edited — `just prompts render`
+overwrites it from Rust.
 
 Vendor CLI captures under a gitignored local capture directory come from
 `just prompts native-compare`. Installed binaries run with isolated configuration

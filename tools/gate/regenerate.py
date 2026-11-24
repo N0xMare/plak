@@ -6,7 +6,6 @@ import argparse
 import os
 import re
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -88,10 +87,6 @@ def bindings() -> None:
     )
 
 
-def current_bindings() -> None:
-    subprocess.run([sys.executable, "tools/dev/fixtures/current_bindings.py"], cwd=ROOT, check=True)
-
-
 def nextest() -> None:
     config = nextest_layout.CONFIG
     write_if_changed(
@@ -135,7 +130,6 @@ def main() -> None:
     generators = {
         "manifests": manifests,
         "bindings": bindings,
-        "current-bindings": current_bindings,
         "nextest": nextest,
         "prompts": prompts,
     }
@@ -145,12 +139,13 @@ def main() -> None:
     unknown = set(parts) - generators.keys()
     if unknown:
         parser.error(f"unknown parts: {', '.join(sorted(unknown))}")
-    if (not parts or "current-bindings" in parts) and sys.platform != "linux":
-        parser.error("current-bindings requires Linux; select other parts explicitly")
     for name, generate in generators.items():
         if not parts or name in parts:
             print(f"regenerating {name}", flush=True)
-            generate()
+            try:
+                generate()
+            except subprocess.CalledProcessError as error:
+                raise SystemExit(f"regenerating {name} failed: {error}") from None
 
 
 if __name__ == "__main__":

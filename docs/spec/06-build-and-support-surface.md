@@ -436,9 +436,10 @@ only in enrolled packages. A module rule can cap its `may-use` list with
 `may-use-ceiling`; omitting that key leaves the list uncapped by this ratchet.
 
 Every enrolled ceiling is an upper bound: a count above it fails, and a
-reduction passes without a manifest edit. Nonzero ceilings require a reviewed
-reason and are not raised without review. At each cut, the integrator runs
-`just tighten-ceilings` to lower every enrolled ceiling to its actual count.
+reduction passes without a manifest edit. Nonzero configuration, lint and
+size ceilings require a reviewed reason. Raising any ceiling requires review.
+Workers leave ceilings unchanged. At each landing and each cut, the integrator
+runs `just tighten-ceilings` on the tip and commits any changes before the gate.
 The command uses the static checker's inventories and never raises a ceiling.
 
 `plakous-hosted::capabilities` owns the complete current route metadata in
@@ -729,25 +730,7 @@ provider-owned protocol names, enrolled in the same inventory.
 The external facade consumer pins all four `JobStatus` variants (`Running`,
 `Exited`, `Stopped`, `OutcomeUnknown`) and all five `JobStopReason` variants.
 
-### Derived pins and fixtures
-
-Run `just regenerate` on Linux with no concurrent build in the checkout.
-Pass one or more part names to update only those outputs:
-
-| Part | Output |
-| --- | --- |
-| `manifests` | `EXPECTED_SECURITY_SURFACE_DIGESTS` in `tools/gate/check_features.py` |
-| `bindings` | `crates/hosting/hosted/tests/fixtures/binding-contracts.json` |
-| `current-bindings` | `manifest.json` and `runtime.sqlite3` under `crates/hosting/hosted/tests/fixtures/current-bindings/` (Linux only; records the source revision) |
-| `nextest` | Generated offline and install blocks in `.config/nextest.toml` |
-| `prompts` | Rendered route, lifecycle and compaction-wire digest tables in `crates/hosting/hosted/tests/common/rendered_{prompts,lifecycle,wire}.rs` |
-
-Resolve conflicts only in the generated files or blocks by taking either
-side and regenerating from the merged inputs. Do not hand-merge digests.
-Regeneration does not approve security-surface changes, binding changes
-(which still require exact predecessor reopen evidence), or prompt changes.
-Historical fixtures, including the predecessor and default-account binding
-baselines, are evidence, not projections of the current tree.
+See [chapter 05 §2.4](05-testing-and-evidence.md#derived-pins-and-fixtures) for regeneration of derived pins and fixtures.
 
 ### 4.1 The `maintainer` feature
 
@@ -1624,13 +1607,13 @@ no diff configuration can narrow) touches nothing but:
   `gate-evidence/package` also names HEAD's tree (rerun `just steps package`
   on HEAD).
 
+Tightened ceilings change manifests and require fresh evidence; tighten before gating.
+
 The root agent-instruction file is guidance for repository agents, not a build,
 test or packaged-crate input. Instruction-discovery tests use in-memory or
 temporary workspaces; prompt-render tests enroll their own fixture instructions,
 not the checkout's instructions. Its content-only changes need no new full or
 package evidence.
-Cut-time changelog edits are inert under this rule; ceiling changes to
-manifests are not.
 
 The changed instructions and documentation must still pass the tracked-file
 hygiene scan of the workspace checker, which `verify` reruns on the delta. Any
@@ -2287,8 +2270,10 @@ is the pre-tag dry run and releases nothing. The workflow checks nothing else.
 Worker branches use `just fast <packages>` plus the groups their change needs.
 A change to an install-family test or code it exercises, including crash-sweep
 shapes, requires `just steps tests-install` before handoff.
-Each reviewed branch lands on main after its candidate tree passes the
-fan-out integration batch gate, with the Linux and Mac runs concurrent:
+The integrator merges each reviewed branch with current main and tightens
+ceilings (§4) before the integration batch gate. Push exactly the tree that
+passed that gate as main's new tip. If main moves first, re-merge, tighten
+again and re-gate. The Linux and Mac runs are concurrent:
 
 - Linux x86_64 musl runs workspace and standalone lint, the test build, and
   the rdeps-scoped parallel, core serial and core durability lanes
