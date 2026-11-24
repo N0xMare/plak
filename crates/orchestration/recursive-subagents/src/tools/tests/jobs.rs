@@ -81,9 +81,8 @@ async fn an_await_naming_an_own_process_returns_its_row_when_it_ends() {
 
 #[test]
 fn an_own_job_no_longer_listed_is_already_reported_not_a_refusal() {
-    let ended = vec!["p2".to_owned()];
-    assert!(unlisted_job_admitted("p2", &ended).is_ok());
-    let refused = unlisted_job_admitted("p9", &ended).unwrap_err();
+    assert!(unlisted_job_admitted("p2", true).is_ok());
+    let refused = unlisted_job_admitted("p9", false).unwrap_err();
     assert_eq!(refused.code, TopologyErrorCode::GrantDenied);
     assert_eq!(refused.message, "process p9 is not in this session");
     let rows = await_job_rows(None, &["p2".to_owned()]);

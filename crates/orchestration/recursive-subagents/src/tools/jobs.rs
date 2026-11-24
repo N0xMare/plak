@@ -93,17 +93,22 @@ pub(super) fn admit_awaited_jobs(
     // at every admission would move the wait's terminal generation. An id
     // in that history was this session's job and has since been reaped or
     // consumed; the call still returns, with an `already_reported` row.
-    let ended = jobs.map_or_else(Vec::new, |service| service.terminal_jobs_since(0));
     for id in missing {
-        unlisted_job_admitted(id, &ended)?;
+        let number = task_process_number(id)
+            .and_then(|number| u32::try_from(number).ok())
+            .filter(|number| format!("p{number}") == *id);
+        let ended = number.is_some_and(|number| {
+            jobs.is_some_and(|service| service.has_seen_job_terminal(number))
+        });
+        unlisted_job_admitted(id, ended)?;
     }
     Ok(())
 }
 
-/// An id in `ended` was this session's job and has been reaped or consumed;
-/// the await reports it. Anything else was never issued here.
-pub(super) fn unlisted_job_admitted(id: &str, ended: &[String]) -> Result<(), TopologyError> {
-    if ended.iter().any(|ended| ended == id) {
+/// An ended id was this session's job and has been reaped or consumed; the
+/// await reports it. Anything else was never issued here.
+pub(super) fn unlisted_job_admitted(id: &str, ended: bool) -> Result<(), TopologyError> {
+    if ended {
         Ok(())
     } else {
         Err(TopologyError::new(
@@ -145,7 +150,10 @@ pub(super) fn await_job_rows(
     named
         .iter()
         .map(|id| {
-            let Some(job) = views.iter().find(|job| job_id(job) == *id) else {
+            let Some(job) = views.iter().find(|job| {
+                job_id(job) == *id
+                    && jobs.is_some_and(|service| !service.job_was_reported(job.number))
+            }) else {
                 return AwaitJobRow {
                     id: id.clone(),
                     status: "already_reported",

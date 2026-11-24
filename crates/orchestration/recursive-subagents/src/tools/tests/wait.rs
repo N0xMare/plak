@@ -784,6 +784,53 @@ async fn owned_process_wakes_only_waits_admitted_before_its_terminal_transition(
 }
 
 #[tokio::test]
+async fn late_job_attachment_does_not_wake_a_tree_wait_with_a_consumed_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let mut tree = bootstrap_tree("consumed-job-attachment", root.path());
+    tree.spawn_agent("root", &spawn_request(), None).unwrap();
+    let driver = driver_on(tree, Arc::new(FailingStore));
+    let waiter = wait_tool(driver.clone());
+    let arguments = json!({"timeout_ms": 300_000});
+    let (preempt, flag) = tokio::sync::watch::channel(plakous::tools::ToolPreempt::None);
+    let mut wait = Box::pin(waiter.wait_operation_preempt("tree-await", &arguments, Some(flag)));
+    assert!(futures_util::poll!(wait.as_mut()).is_pending());
+
+    let (jobs, _opened) = install_running_job(&driver, "root", root.path()).await;
+    jobs.stop_jobs(
+        plakous::tools::JobStopReason::User,
+        std::time::Duration::from_millis(250),
+    )
+    .unwrap();
+    jobs.consume_jobs(&[1]);
+    driver.read(|tree| tree.waiters().notify_waiters()).unwrap();
+    assert!(
+        futures_util::poll!(wait.as_mut()).is_pending(),
+        "the consumed terminal woke the tree await"
+    );
+    preempt.send_replace(plakous::tools::ToolPreempt::Steer);
+    let outcome = outcome_json(&wait.await.unwrap());
+    assert_eq!(outcome["woke_by"], "steer");
+    assert!(
+        !outcome["processes"]
+            .as_array()
+            .is_some_and(|jobs| !jobs.is_empty())
+    );
+    let named = AwaitRequest {
+        agents: AwaitAgents::Unwatched,
+        processes: vec!["p1".to_owned()],
+        timeout_ms: 0,
+    };
+    let result = outcome_json(
+        &waiter
+            .await_operation("named-consumed-job", &named, &json!({}), None)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(result["jobs"][0]["status"], "already_reported");
+    assert!(result["jobs"][0].get("output").is_none());
+}
+
+#[tokio::test]
 async fn wait_resolves_jobs_that_attach_after_admission() {
     let root = tempfile::tempdir().unwrap();
     let mut tree = bootstrap_tree("late-job-service", root.path());

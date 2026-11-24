@@ -178,10 +178,11 @@ impl JoinedProcessSessions {
     /// The runner did not answer: a restore against what it does not know
     /// would report its jobs twice or not at all.
     pub(crate) fn refresh_runner_jobs(&self) -> Result<(), ExecutionBackendError> {
-        match self.runner_arm() {
-            Some(arm) => arm.refresh(),
-            None => Ok(()),
+        if let Some(arm) = self.runner_arm() {
+            arm.refresh()?;
+            arm.on_jobs(self, &arm.sessions.cached_jobs());
         }
+        Ok(())
     }
 
     /// Lets the line's job events report once the restore is done. Nothing
@@ -414,6 +415,10 @@ impl RunnerArm {
             .copied()
     }
 
+    pub(super) fn is_consumed(&self, number: u32) -> bool {
+        lock(&self.state).consumed.contains(&number)
+    }
+
     pub(super) fn seed_job_numbers(&self, next: u32) {
         self.sessions.seed_job_numbers(next);
     }
@@ -541,7 +546,14 @@ impl RunnerArm {
         &self,
         id: JoinedProcessSessionId,
     ) -> Option<JoinedProcessStatus> {
-        self.status(id).filter(|status| status.is_terminal())
+        self.status(id)
+            .filter(|status| status.is_terminal())
+            .or_else(|| {
+                self.sessions
+                    .cached_job_status(id)
+                    .map(process_status)
+                    .filter(|status| status.is_terminal())
+            })
     }
 
     pub(super) fn active_session_ids(&self) -> Vec<JoinedProcessSessionId> {
@@ -554,10 +566,13 @@ impl RunnerArm {
     }
 
     pub(super) fn is_promoted(&self, id: JoinedProcessSessionId) -> bool {
-        lock(&self.state)
+        let projected = lock(&self.state)
             .sessions
             .get(&id)
-            .is_some_and(|session| session.promoted)
+            .is_some_and(|session| session.promoted);
+        // A re-adopted job can be known only to the mirror, before the new
+        // owner creates its first projection state for the job.
+        projected || self.sessions.cached_job_status(id).is_some()
     }
 
     pub(super) fn knows(&self, id: JoinedProcessSessionId) -> bool {

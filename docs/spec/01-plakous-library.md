@@ -8296,7 +8296,10 @@ of a job the runner still lists is that live job, never a second snapshot of
 it; a row of a job the runner no longer lists, such as one a restarted runner
 lost, is restored as a terminal snapshot under the runner's session identity
 (a running row as of unknown outcome), and that session's reads stay on the
-host. A promotion through the runner arm reports the jobs from its synchronous
+host. An exact job in the runner mirror is promoted even before a new owner
+has opened any tool observation of it. Refreshing the mirror after attachment
+publishes terminal transitions through the same path as the watch.
+A promotion through the runner arm reports the jobs from its synchronous
 read to the host observer before returning, without waiting for `jobs.watch`.
 The stream and the synchronous report share transition deduplication, so an
 immediate answer and release cannot lose or duplicate promotion observations.
@@ -8983,6 +8986,10 @@ appends queued prompts. Children have boundary and admission delivery only.
 Notice delivery and top-level terminal results use one consumption rule in
 the checkpoint publisher: remove durable rows atomically with canonical
 evidence, then retire registry snapshots only after publication succeeds.
+This also applies to the first Wait after reopening: a folded line terminal
+or a newly refreshed terminal is pending, not reported, until either path's
+canonical commit. Consumed jobs never wake an await as a fresh terminal;
+keeping their ownership evidence does not move the terminal generation back.
 
 All publication paths preserve `jobs`: normal/terminal/history commits,
 compaction and re-fold, abandonment/recovery and branch seeding. A

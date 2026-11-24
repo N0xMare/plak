@@ -30,6 +30,7 @@ pub(super) struct TestCreateStore {
     pub(super) state: Mutex<CreateStoreState>,
     pub(super) branch_after_acquire: Mutex<Option<crate::LoadedBranch>>,
     pub(super) genesis: Mutex<Option<StoredCheckpoint>>,
+    pub(super) line_terminals: Mutex<Vec<crate::manifest::LineJobTerminal>>,
     pub(super) feed_records: Mutex<Vec<crate::feed::FeedRecord>>,
     pub(super) feed_retained_from: AtomicU64,
     pub(super) feed_read_budgets: Mutex<Vec<usize>>,
@@ -1157,6 +1158,9 @@ impl SessionStore for TestCreateStore {
                         .stored_commits
                         .insert(reference.checkpoint_id(), stored);
                     state.commits.insert(reference.checkpoint_id(), committed);
+                    lock_mutex(&self.line_terminals).retain(|terminal| {
+                        !request.consumed_line_terminals().contains(&terminal.number)
+                    });
                     lock_mutex(&self.feed_records).push(crate::feed::FeedRecord::from_store(
                         crate::feed::FeedHeader {
                             session_id: head.session().session_id(),
@@ -1547,7 +1551,7 @@ impl SessionStore for TestCreateStore {
         &self,
         _line: plakous_model::LineId,
     ) -> crate::StoreFuture<'_, Vec<crate::manifest::LineJobTerminal>> {
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(lock_mutex(&self.line_terminals).clone()) })
     }
 
     fn record_line_job_terminals(

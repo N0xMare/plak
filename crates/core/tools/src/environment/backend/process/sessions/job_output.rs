@@ -46,7 +46,7 @@ impl JoinedProcessSessions {
         if let Some(arm) = self.runner_arm() {
             arm.consume(numbers, self.inner.active_limit);
         }
-        let _ = self.terminal_jobs_since(0);
+        let _ = self.job_terminal_generation();
         {
             let mut released = Vec::new();
             let mut state = lock(&self.inner.state);

@@ -84,8 +84,9 @@ impl JoinedProcessSessions {
     /// Captures terminal transitions already observed for this service's jobs.
     #[must_use]
     pub fn job_terminal_generation(&self) -> u64 {
-        let _ = self.terminal_jobs_since(0);
-        u64::try_from(lock(&self.inner.state).terminal_jobs.len()).unwrap_or(u64::MAX)
+        let mut state = lock(&self.inner.state);
+        self.record_local_job_terminals(&mut state);
+        u64::try_from(state.terminal_jobs.len()).unwrap_or(u64::MAX)
     }
 
     /// Subscribes before polling to wake promptly on process terminal changes.
@@ -104,38 +105,70 @@ impl JoinedProcessSessions {
         Ok(lock(&self.session(id)?.shared).changes.subscribe())
     }
 
-    /// Names promoted jobs that became terminal after an admission generation.
+    /// Names unconsumed promoted jobs that became terminal after an admission
+    /// generation. Consumption does not move the generation backwards.
     #[must_use]
     pub fn terminal_jobs_since(&self, generation: u64) -> Vec<String> {
-        let mut state = lock(&self.inner.state);
-        {
-            let newly_terminal: Vec<_> = state
-                .active
-                .iter()
-                .chain(&state.finished)
-                .filter(|(id, session)| {
-                    session.promoted.load(Ordering::Acquire) == PROMOTED
-                        && lock(&session.shared).status.is_terminal()
-                        && !state.terminal_membership.contains(id)
-                })
-                .map(|(id, _)| *id)
-                .collect();
-            for id in &newly_terminal {
-                if let Some(session) = state.active.get(id).or_else(|| state.finished.get(id)) {
-                    let _ = self.observe_job(*id, session, false);
-                }
-            }
+        let arm = self.runner_arm();
+        let numbers = {
+            let mut state = lock(&self.inner.state);
+            self.record_local_job_terminals(&mut state);
             state
-                .terminal_membership
-                .extend(newly_terminal.iter().copied());
-            state.terminal_jobs.extend(newly_terminal);
+                .terminal_jobs
+                .iter()
+                .skip(usize::try_from(generation).unwrap_or(usize::MAX))
+                .filter(|id| {
+                    state
+                        .active
+                        .get(id)
+                        .or_else(|| state.finished.get(id))
+                        .map_or(arm.is_some(), |session| {
+                            !session.consumed.load(Ordering::Acquire)
+                        })
+                })
+                .map(|id| Self::job_number(*id))
+                .collect::<Vec<_>>()
+        };
+        numbers
+            .into_iter()
+            .filter(|number| arm.is_none_or(|arm| !arm.is_consumed(*number)))
+            .map(|number| format!("p{number}"))
+            .collect()
+    }
+
+    pub(crate) fn has_seen_job_terminal(&self, number: u32) -> bool {
+        if self.reported_session_for_number(number).is_some() {
+            return true;
+        }
+        let mut state = lock(&self.inner.state);
+        self.record_local_job_terminals(&mut state);
+        state
+            .terminal_membership
+            .iter()
+            .any(|id| Self::job_number(*id) == number)
+    }
+
+    fn record_local_job_terminals(&self, state: &mut JoinedProcessServiceState) {
+        let newly_terminal: Vec<_> = state
+            .active
+            .iter()
+            .chain(&state.finished)
+            .filter(|(id, session)| {
+                session.promoted.load(Ordering::Acquire) == PROMOTED
+                    && lock(&session.shared).status.is_terminal()
+                    && !state.terminal_membership.contains(id)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &newly_terminal {
+            if let Some(session) = state.active.get(id).or_else(|| state.finished.get(id)) {
+                let _ = self.observe_job(*id, session, false);
+            }
         }
         state
-            .terminal_jobs
-            .iter()
-            .skip(usize::try_from(generation).unwrap_or(usize::MAX))
-            .map(|id| format!("p{}", Self::job_number(*id)))
-            .collect()
+            .terminal_membership
+            .extend(newly_terminal.iter().copied());
+        state.terminal_jobs.extend(newly_terminal);
     }
 
     /// Seeds the durable per-session number counter without ever moving it back.

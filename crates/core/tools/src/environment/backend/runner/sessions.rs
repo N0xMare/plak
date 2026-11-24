@@ -447,6 +447,18 @@ impl RunnerSessions {
         lock(&self.mirror).jobs()
     }
 
+    pub(crate) fn cached_job_status(&self, id: JoinedProcessSessionId) -> Option<JobStatus> {
+        let number = JoinedProcessSessions::job_number(id);
+        lock(&self.mirror)
+            .instances
+            .iter()
+            .rev()
+            .find_map(|(_, jobs)| {
+                let job = jobs.get(&number)?;
+                (job.session_id == id.runtime_bytes()).then_some(job.status)
+            })
+    }
+
     /// The revision [`Self::jobs`] bumps when it finds a job newly ended.
     #[must_use]
     pub fn terminal_changes(&self) -> tokio::sync::watch::Receiver<u64> {

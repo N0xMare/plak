@@ -984,15 +984,16 @@ reads it from the result observation, not from the 2 KiB preview. A human or unw
 steer returns no steer text. `ToolPreempt::Notice` likewise returns early with
 `woke_by=notice`, the current agent/job rows and no notice text; host information
 keeps its existing consumer. Like a steer-only wake, a notice-only wake saves
-no durable receipt. Newly terminal process ids are always retained in
+no durable receipt. Newly terminal, unconsumed process ids are retained in
 `processes`; a process wake takes precedence over a simultaneous Notice
 (not over consumed mail or a steer). Watched urgent mail still returns `mail` with its
 body through the sole mail consumer. A process wake adds `processes: ["p3"]`:
 only terminal transitions of the caller's own jobs after wait admission wake it,
 using an allocation-local terminal generation. Previously terminal jobs do not
-wake a new wait. No non-mail early wake saves a durable receipt. The grant
-is unchanged: agents only, roots and hubs, never leaves; process ids are not
-wait targets. Process tools refuse ids outside the caller's live session,
+wake a new wait, and consumed transitions cannot wake one even if their
+service attaches after admission. No non-mail early wake saves a durable
+receipt. The grant is unchanged: agents only, roots and hubs, never leaves;
+process ids are not wait targets. Process tools refuse ids outside the caller's live session,
 including imported or forked history, with typed `not in this session` errors.
 `wait_agent` is one presentation of the **await**, the single pack-neutral
 capability over the caller's children, their mail and its own processes. An

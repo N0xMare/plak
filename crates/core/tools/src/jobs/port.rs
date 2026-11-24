@@ -148,6 +148,21 @@ impl JoinedSessionsPort {
         self.sessions().terminal_jobs_since(generation)
     }
 
+    /// Whether this service observed the job finish, including a job whose
+    /// result was already reported. For ownership checks, not wake decisions.
+    #[must_use]
+    pub fn has_seen_job_terminal(&self, number: u32) -> bool {
+        self.sessions().has_seen_job_terminal(number)
+    }
+
+    /// Whether a terminal has been reported even if its process has not joined.
+    #[must_use]
+    pub fn job_was_reported(&self, number: u32) -> bool {
+        self.sessions()
+            .reported_session_for_number(number)
+            .is_some()
+    }
+
     /// See [`JoinedProcessSessions::session_for_number`].
     #[must_use]
     pub fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
@@ -222,8 +237,9 @@ impl JoinedSessionsPort {
         self.sessions().consume_jobs(numbers);
     }
 
-    /// Reads a runner service's jobs from its runner before a restore
-    /// matches them against durable rows; nothing for a local service.
+    /// Reads a runner service's jobs from its runner; nothing for a local
+    /// service. Before restore it updates only the mirror; after restore
+    /// it reports job transitions like the watch.
     ///
     /// # Errors
     ///

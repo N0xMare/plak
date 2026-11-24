@@ -1,5 +1,7 @@
 use super::*;
 
+mod reopen;
+
 struct NoticeFixture {
     directory: tempfile::TempDir,
     agent: Agent,

@@ -6,7 +6,7 @@
 use super::*;
 
 #[derive(Default)]
-struct RetainedJobHost(Mutex<Option<plakous_tools::JoinedSessionsPort>>);
+pub(super) struct RetainedJobHost(Mutex<Option<plakous_tools::JoinedSessionsPort>>);
 
 impl plakous_tools::JobHost for RetainedJobHost {
     fn service(&self, _: plakous_model::LineId) -> Option<plakous_tools::JoinedSessionsPort> {

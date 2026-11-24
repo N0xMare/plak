@@ -97,6 +97,7 @@ pub(in crate::runtime::durable) enum SessionUpdateFixtureMode {
 
 pub(super) struct SessionUpdateTool {
     pub(super) await_promoted_terminal: AtomicBool,
+    pub(super) await_first_job: AtomicBool,
     pub(super) poll_reported_terminal: AtomicBool,
     /// With `await_promoted_terminal`, leaves the terminal job unjoined, so
     /// the next boundary delivers its notice.
@@ -115,6 +116,7 @@ impl SessionUpdateTool {
     pub(super) fn new(mode: SessionUpdateFixtureMode) -> Self {
         Self {
             await_promoted_terminal: AtomicBool::new(false),
+            await_first_job: AtomicBool::new(false),
             poll_reported_terminal: AtomicBool::new(false),
             leave_terminal_unjoined: AtomicBool::new(false),
             mode,
@@ -169,6 +171,9 @@ impl plakous_tools::ToolExecutor for SessionUpdateTool {
                     )
                 })?;
             if matches!(mode, SessionUpdateFixtureMode::Promoted) && dispatch > 0 {
+                if self.await_first_job.load(Ordering::Acquire) {
+                    return ProcessSessionTools::await_first_job(&context, &[], 10_000).await;
+                }
                 if self.poll_reported_terminal.load(Ordering::Acquire) {
                     let disposition = if sessions.session_for_number(1).is_some() {
                         "live"
