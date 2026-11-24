@@ -1910,6 +1910,9 @@ visible. Failure injection targets the recorded owner, not a transient probe
 or redial successor. Teardown re-lists successors in its own home.
 Signal tests wait for the fsynced provider-dispatch record, after installation
 of the signal watcher, not for an arbitrary elapsed interval.
+The tooling reference client starts the home-local runner as its own child
+before the host can detach one. It joins the host and then the runner before
+deleting the temporary home.
 
 The guarded entry points are the Rust lanes in `tools/gate/dev-check.sh`,
 `just nextest`, and `just dev crash-sweep`. `tools/dev/coverage.sh` and

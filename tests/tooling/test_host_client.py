@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 
@@ -56,7 +57,6 @@ class ReferenceClientTests(unittest.TestCase):
             "TMPDIR": str(scratch),
             "GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"],
             "GIT_CONFIG_NOSYSTEM": "1",
-            "PLAK_TEST_RUNNER_DETACHED": "1",
             "PLAK_TEST_MODEL": "offline-loopback-v1",
             "PLAK_TEST_SCRIPT": str(script),
             "PLAK_TEST_EVIDENCE": str(self.root / "evidence.jsonl"),
@@ -67,6 +67,7 @@ class ReferenceClientTests(unittest.TestCase):
         (home / "config.toml").write_text(
             '[root]\nagent="lead"\n[orchestration]\nsubagents=false\n' + gateway
         )
+        self.start_runner(home)
         self.host = subprocess.Popen(
             [self.binary, "host"],
             cwd=self.workspace,
@@ -94,14 +95,48 @@ class ReferenceClientTests(unittest.TestCase):
                 self.socket = line.removeprefix("plakd host: serving on ").split(" (host ")[0]
                 break
 
-    def stop_host(self):
-        if self.host.poll() is None:
-            self.host.terminate()
+    def start_runner(self, home):
+        # Own the runner before starting the host. The host's detached
+        # launcher can otherwise outlive even a joined host during startup.
+        log = self.enterContext(tempfile.TemporaryFile())
+        runner = subprocess.Popen(
+            [self.binary, "runner", "serve", "--local"],
+            cwd=self.workspace,
+            env=dict(self.env, TOKIO_WORKER_THREADS="2"),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=log,
+            start_new_session=True,
+        )
+        self.addCleanup(self.stop_process, runner)
+        runner_home = home / "host/runner"
+        deadline = time.monotonic() + 15
+        while (remaining := deadline - time.monotonic()) > 0:
+            # Binding this socket follows acquisition of the daemon lock,
+            # which also prevents the host from launching a second runner.
+            if any(path.is_socket() for path in runner_home.glob("*/run/r.sock")):
+                self.assertIsNone(runner.poll(), "the fixture runner exited at startup")
+                return
             try:
-                self.host.wait(timeout=15)
+                runner.wait(timeout=min(0.02, remaining))
             except subprocess.TimeoutExpired:
-                os.killpg(self.host.pid, signal.SIGKILL)
-                self.host.wait(timeout=5)
+                continue
+            break
+        log.seek(0)
+        self.fail(f"fixture runner did not bind: {log.read().decode()}")
+
+    @staticmethod
+    def stop_process(process):
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+
+    def stop_host(self):
+        self.stop_process(self.host)
         self.drain.join(timeout=5)
         self.host.stderr.close()
 
@@ -178,6 +213,10 @@ class ReferenceClientTests(unittest.TestCase):
     def test_unknown_session_fails_without_creating_one(self):
         with self.assertRaisesRegex(host_client.ProtocolError, "not in the host directory"):
             host_client.inspect_session(self.socket, str(uuid.uuid4()))
+        with host_client.Client(self.socket) as client:
+            client.hello()
+            directory = client.request(1, {"op": "list_sessions", "include_archived": False})
+            self.assertEqual(directory["rows"], [])
 
     def test_guide_transcript_matches_the_live_host(self):
         session = self.create_session()
