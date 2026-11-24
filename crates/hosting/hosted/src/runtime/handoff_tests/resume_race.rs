@@ -167,6 +167,10 @@ enum ResumeScenario {
     Retry,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one ordered handoff fixture exercises the control, overtaking, and retry schedules"
+)]
 fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
     let retry = scenario == ResumeScenario::Retry;
     let home = tempfile::tempdir().unwrap();
