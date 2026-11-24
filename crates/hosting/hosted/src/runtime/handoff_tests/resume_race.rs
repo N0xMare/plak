@@ -18,6 +18,7 @@ use plakous_offline_crash_harness::{
     BoundaryController, scripted_pi_runtime_binding_with_extensions,
 };
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const RESULT: &str = r#"{"ok":true}"#;
@@ -146,11 +147,28 @@ fn child_binding(
 #[test]
 fn operator_resume_cannot_overtake_the_handed_off_child_recovery() {
     for manual in [false, true] {
-        handoff_child_while_recovery_is_pending(manual);
+        handoff_child_while_recovery_is_pending(if manual {
+            ResumeScenario::Overtake
+        } else {
+            ResumeScenario::Automatic
+        });
     }
 }
 
-fn handoff_child_while_recovery_is_pending(manual: bool) {
+#[test]
+fn operator_resume_retries_a_deferred_continuation_with_its_original_command() {
+    handoff_child_while_recovery_is_pending(ResumeScenario::Retry);
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ResumeScenario {
+    Automatic,
+    Overtake,
+    Retry,
+}
+
+fn handoff_child_while_recovery_is_pending(scenario: ResumeScenario) {
+    let retry = scenario == ResumeScenario::Retry;
     let home = tempfile::tempdir().unwrap();
     let (config, evidence) = scripted_host_with(
         home.path(),
@@ -181,12 +199,25 @@ fn handoff_child_while_recovery_is_pending(manual: bool) {
     wait_for(&events, &mut seen, "first host idle after the turn", idle);
     let child = executor.block_on(park_child(&runtime, &lost.state_roots, &*first));
     assert!(runtime.read(|tree| tree.is_parked(&child)).unwrap());
+    if retry {
+        let child = child.clone();
+        executor
+            .block_on(runtime.mutate_then_emit(false, move |tree| {
+                tree.mark_owner_lost(&child);
+                Ok(())
+            }))
+            .unwrap();
+    }
     actions.request_handoff_and_release();
     worker.join().unwrap().unwrap();
     drop(runtime);
 
     let mut next = next_host(home.path(), &lost, &json!([]), lost.store.clone());
-    next.resume_after_loss = crate::runtime::ResumeAfterLoss::Continue;
+    next.resume_after_loss = if retry {
+        crate::runtime::ResumeAfterLoss::Hold
+    } else {
+        crate::runtime::ResumeAfterLoss::Continue
+    };
     let (entered, release) = crate::agent::resume_race_hook::install(lost.id.clone());
     let ready = release.subscribe();
     let answer_gate = home.path().join("answer-after-bind");
@@ -205,12 +236,23 @@ fn handoff_child_while_recovery_is_pending(manual: bool) {
             json!([{"fault": {"at": "in_band", "kind": "outcome_unknown"}}])
         }
     });
+    let refuse = AtomicBool::new(retry);
+    let second: Arc<crate::runtime::ScriptedChildBinding> = Arc::new(move |agent, path, roots| {
+        if refuse.swap(false, Ordering::AcqRel) {
+            return Err("injected child reopen refusal".into());
+        }
+        second(agent, path, roots)
+    });
     let runtime = executor.block_on(attach(&next, trees.clone(), second));
     assert_eq!(
         runtime
             .read(|tree| tree.loss_continuation(&child).map(|hold| hold.cause))
             .unwrap(),
-        Some(ContinuationCause::Handoff)
+        Some(if retry {
+            ContinuationCause::OwnerLost
+        } else {
+            ContinuationCause::Handoff
+        })
     );
     let (actions, events, worker) = spawn_host_worker(next).unwrap();
     executor.block_on(async {
@@ -219,19 +261,46 @@ fn handoff_child_while_recovery_is_pending(manual: bool) {
             .unwrap();
     });
     let mut seen = Vec::new();
-    if manual {
+    let resume = || {
         send_attached_action(
             &actions,
             UserAction::ResumeLossContinuation {
                 agent_id: Some(child.clone()),
             },
         );
+    };
+    if scenario == ResumeScenario::Overtake {
+        resume();
         wait_for(&events, &mut seen, "the explicit Resume answer", |event| {
             notice_tone(std::slice::from_ref(event), "already continuing").is_some()
                 || notice_tone(std::slice::from_ref(event), "resumed ").is_some()
         });
     }
     release.send(true).unwrap();
+    let deferred = if retry {
+        resume();
+        wait_for(&events, &mut seen, "deferred Resume", |event| {
+            notice_tone(std::slice::from_ref(event), "injected child reopen refusal").is_some()
+        });
+        let command = runtime
+            .read(|tree| {
+                tree.loss_continuation(&child)
+                    .filter(|loss| loss.state == crate::agent_tree::LossContinuationState::Pending)
+                    .and_then(|loss| loss.command_id)
+            })
+            .unwrap()
+            .expect("the refused reopen kept its consent");
+        resume();
+        wait_for(
+            &events,
+            &mut seen,
+            "the retry answers already continuing",
+            |event| notice_tone(std::slice::from_ref(event), "already continuing").is_some(),
+        );
+        Some(command)
+    } else {
+        None
+    };
     executor.block_on(async {
         wait_until(&runtime, &child, "continuation admission", |tree| {
             continuation_commands(tree).any(|command| command.fact == Some(CommandFact::Accepted))
@@ -247,8 +316,14 @@ fn handoff_child_while_recovery_is_pending(manual: bool) {
     send_attached_action(&actions, UserAction::Quit);
     worker.join().unwrap().unwrap();
     let stored = ProductAgentTree::reopen(trees.load(&lost.id).unwrap().unwrap());
-    assert_delivered_once(&executor, &lost, &stored, &child, &child_evidence);
-    if manual {
+    assert_delivered_once(&executor, &lost, &stored, &child, &child_evidence, retry);
+    if let Some(command) = deferred {
+        assert_eq!(
+            stored.command(&command).unwrap().fact,
+            Some(CommandFact::Accepted)
+        );
+    }
+    if scenario != ResumeScenario::Automatic {
         assert!(
             notice_tone(&seen, "already continuing").is_some(),
             "{seen:?}"
@@ -303,6 +378,7 @@ fn assert_delivered_once(
     stored: &ProductAgentTree,
     child: &str,
     evidence: &std::path::Path,
+    owner_lost: bool,
 ) {
     let attempt = stored.attempt(child).unwrap();
     assert_eq!(
@@ -323,11 +399,12 @@ fn assert_delivered_once(
     let resumptions = continuation_commands(stored).collect::<Vec<_>>();
     assert_eq!(resumptions.len(), 1);
     assert_eq!(resumptions[0].fact, Some(CommandFact::Accepted));
-    assert!(
-        resumptions[0]
-            .text
-            .contains(crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE)
-    );
+    let instruction = if owner_lost {
+        crate::child_prompts::PLAK_CHILD_LOSS_RESUME_TEMPLATE
+    } else {
+        crate::child_prompts::PLAK_CHILD_HANDOFF_RESUME_TEMPLATE
+    };
+    assert!(resumptions[0].text.contains(instruction));
     let results: Vec<_> = stored
         .messages()
         .values()

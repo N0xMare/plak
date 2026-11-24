@@ -79,7 +79,12 @@ async fn resume_after_loss(
     automatic: bool,
 ) -> LossResume {
     let Ok(claim) = crate::agent::recovery::claim_child(runtime, agent_id).await else {
-        if !automatic && already_continuing(runtime, agent_id).unwrap_or(false) {
+        if !automatic
+            && automatic_standing(runtime, agent_id)
+                .ok()
+                .flatten()
+                .is_some()
+        {
             return LossResume::AlreadyContinuing;
         }
         return LossResume::Busy;
@@ -298,14 +303,18 @@ fn due_automatically(continuation: &LossContinuation, continues: bool) -> bool {
     }
 }
 
-fn already_continuing(runtime: &ProductTopologyRuntime, agent_id: &str) -> Result<bool, String> {
+fn automatic_standing(
+    runtime: &ProductTopologyRuntime,
+    agent_id: &str,
+) -> Result<Option<LossContinuationState>, String> {
     runtime
         .read(|tree| {
             tree.loss_continuation(agent_id)
-                .is_some_and(|continuation| {
-                    due_automatically(&continuation, runtime.continues_after_loss())
+                .filter(|continuation| {
+                    due_automatically(continuation, runtime.continues_after_loss())
                         || continuation.state == LossContinuationState::Running
                 })
+                .map(|continuation| continuation.state)
         })
         .map_err(|error| error.message)
 }
@@ -377,10 +386,14 @@ pub(crate) async fn operator_resume_after_loss(
     for agent_id in targets {
         // The scan settles recovery before it takes automatic continuations.
         // Don't race it for the claim, even before it reached this child.
-        let outcome = if already_continuing(runtime, &agent_id)? {
-            LossResume::AlreadyContinuing
-        } else {
-            resume_after_loss(&parent, runtime, &agent_id, false).await
+        let outcome = match automatic_standing(runtime, &agent_id)? {
+            Some(state) => {
+                if state != LossContinuationState::Running {
+                    runtime.driver().request_retirement_recovery();
+                }
+                LossResume::AlreadyContinuing
+            }
+            None => resume_after_loss(&parent, runtime, &agent_id, false).await,
         };
         resumed.push((agent_id, outcome));
     }
