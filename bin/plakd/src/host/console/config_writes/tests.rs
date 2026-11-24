@@ -88,6 +88,48 @@ fn template(console: &Console, id: &str, changes: Vec<TemplateChange>) -> HostRe
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn protocol_twelve_fast_toggle_round_trips_without_downgrading_ultrafast() -> TestResult {
+    let (_root, console) = fixture();
+    let id = "worker";
+    let path = console.paths.user_agents_dir().join("worker.toml");
+    std::fs::create_dir_all(console.paths.user_agents_dir())?;
+    let standard = "account = \"codex\"\nmodel = \"gpt-6.2-sol\"\n";
+    for (starting, toggle, stored, extra) in [
+        (None, true, Some("fast"), Some("priority")),
+        (Some("ultrafast"), true, Some("ultrafast"), Some("priority")),
+        (Some("ultrafast"), false, None, None),
+    ] {
+        let mut text = standard.to_owned();
+        if let Some(tier) = starting {
+            text.push_str(&format!("service_tier = \"{tier}\"\n"));
+        }
+        std::fs::write(&path, text)?;
+        let request = template(
+            &console,
+            id,
+            vec![TemplateChange::FastMode { value: toggle }],
+        );
+        assert!(matches!(
+            console.request(owner(1), request).await,
+            Ok(HostResponse::Saved { .. })
+        ));
+        let file = std::fs::read_to_string(&path)?;
+        let parsed = crate::product_config::parse_template(&file, id)?;
+        assert_eq!(parsed.service_tier(), stored);
+        assert!(!file.contains("fast_mode"));
+        let response = definitions::Snapshot::read(&console.paths, &console.definition_nonce)
+            .map_err(|_| "definition snapshot")?
+            .response(&HostRequest::TemplatesGet { id: id.into() })
+            .map_err(|_| "template read")?;
+        let HostResponse::TemplatesGet { template } = response else {
+            return Err("template body".into());
+        };
+        assert_eq!(template.body.extra.as_deref(), extra);
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn settings_metadata_follows_effective_write_capability() -> TestResult {
     let (_root, console) = fixture();
     for (socket, web_write) in [(true, false), (false, false), (false, true)] {

@@ -1,7 +1,7 @@
 account = "codex"
 model = "gpt-6-luna"
 effort = "xhigh"
-fast_mode = true
+service_tier = "fast"
 composition = "plakous-default"
 description = "Research the workspace and the web; report grounded findings with their sources. Edit files only when the brief asks."
 access = "full"

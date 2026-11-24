@@ -622,20 +622,25 @@ impl SessionRecord {
                         .to_owned(),
                 );
             }
-            (ProductTargetSelection::Native | ProductTargetSelection::NativePriority, Some(_))
+            (ProductTargetSelection::Native, Some(_))
                 if selected_account.as_ref().is_some_and(|account| {
                     account.vertical() == crate::account::Vertical::OpenRouter
                 }) =>
             {
                 return Err("OpenRouter account requires an exact OpenRouter target".to_owned());
             }
-            (ProductTargetSelection::NativePriority, Some(_))
-                if selected_account.as_ref().is_some_and(|account| {
-                    account.vertical() == crate::account::Vertical::Codex
-                }) => {}
-            (ProductTargetSelection::NativePriority, _) => {
+            (
+                ProductTargetSelection::NativePriority | ProductTargetSelection::NativeUltrafast,
+                Some(_),
+            ) if selected_account
+                .as_ref()
+                .is_some_and(|account| account.vertical() == crate::account::Vertical::Codex) => {}
+            (
+                ProductTargetSelection::NativePriority | ProductTargetSelection::NativeUltrafast,
+                _,
+            ) => {
                 return Err(
-                    "priority native target requires the Codex subscription account".to_owned(),
+                    "named native service tier requires the Codex subscription account".to_owned(),
                 );
             }
             (ProductTargetSelection::Platform { provider }, _)

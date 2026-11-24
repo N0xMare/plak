@@ -152,7 +152,7 @@ fn revision_forward_qualification_uses_scratch_then_handoff_keeps_the_session() 
     assert!(
         paths
             .state_dir()
-            .join("product.pre-revision-39.sqlite3")
+            .join("product.pre-revision-40.sqlite3")
             .exists()
     );
     assert!(

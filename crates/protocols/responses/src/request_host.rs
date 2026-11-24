@@ -308,7 +308,29 @@ pub enum ResponsesReplayPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ServiceTierPolicy {
     StandardOnly,
-    ExactNamed(&'static str),
+    CodexNamed,
+    CodexPriority,
+    CodexUltrafast,
+}
+
+impl ServiceTierPolicy {
+    fn admits(self, tier: &str) -> bool {
+        match self {
+            Self::StandardOnly => false,
+            Self::CodexNamed => matches!(tier, "priority" | "ultrafast"),
+            Self::CodexPriority => tier == "priority",
+            Self::CodexUltrafast => tier == "ultrafast",
+        }
+    }
+
+    const fn identity(self) -> (&'static [u8], &'static str) {
+        match self {
+            Self::StandardOnly => (b"standard-only", ""),
+            Self::CodexNamed => (b"exact-set", "priority|ultrafast"),
+            Self::CodexPriority => (b"exact-named", "priority"),
+            Self::CodexUltrafast => (b"exact-named", "ultrafast"),
+        }
+    }
 }
 
 /// Where harness/profile instruction text is lowered on the wire.
@@ -466,7 +488,7 @@ impl ResponsesRequestPolicy {
             ResponsesReplayPolicy::Strict,
         );
         Self {
-            service_tier: ServiceTierPolicy::ExactNamed("priority"),
+            service_tier: ServiceTierPolicy::CodexNamed,
             instruction_placement: InstructionPlacementPolicy::CodexDeveloperInstructions,
             ..policy
         }
@@ -613,7 +635,7 @@ impl ResponsesRequestPolicy {
     /// Whether this route can accept native compaction input, subject to exact producing binding.
     #[must_use]
     pub fn authorizes_native_compaction_item_replay(self) -> bool {
-        matches!(self.service_tier, ServiceTierPolicy::ExactNamed("priority"))
+        matches!(self.service_tier, ServiceTierPolicy::CodexNamed)
             && matches!(self.max_output_tokens, MaxOutputTokensPolicy::Omit)
             && matches!(self.function_strict, FunctionStrictPolicy::IncludeFalse)
             && matches!(self.custom_tools, CustomToolPolicy::StringSchema)
@@ -662,10 +684,7 @@ impl ResponsesRequestPolicy {
             MaxOutputTokensPolicy::Emit => b"emit".as_slice(),
             MaxOutputTokensPolicy::Omit => b"omit".as_slice(),
         };
-        let (service_tier_kind, service_tier_name) = match self.service_tier {
-            ServiceTierPolicy::StandardOnly => (b"standard-only".as_slice(), ""),
-            ServiceTierPolicy::ExactNamed(name) => (b"exact-named".as_slice(), name),
-        };
+        let (service_tier_kind, service_tier_name) = self.service_tier.identity();
         let strict = match self.function_strict {
             FunctionStrictPolicy::IncludeTrue => b"include-true".as_slice(),
             FunctionStrictPolicy::IncludeFalse => b"include-false".as_slice(),
@@ -1228,17 +1247,11 @@ pub fn lower_responses_request(
     body.insert("model".to_owned(), json!(config.model.as_str()));
     body.insert("input".to_owned(), Value::Array(input));
     body.insert("stream".to_owned(), Value::Bool(true));
-    match (request.processing_tier(), config.policy.service_tier) {
-        (ProcessingTierDisposition::Standard, _) => {}
-        (
-            ProcessingTierDisposition::ProviderNamed(selected),
-            ServiceTierPolicy::ExactNamed(name),
-        ) if selected.as_str() == name => {
-            body.insert("service_tier".to_owned(), Value::String(name.to_owned()));
-        }
-        (ProcessingTierDisposition::ProviderNamed(_), _) => {
+    if let ProcessingTierDisposition::ProviderNamed(selected) = request.processing_tier() {
+        if !config.policy.service_tier.admits(selected.as_str()) {
             return Err(ResponsesRequestOptionError::NativeOptions.into());
         }
+        body.insert("service_tier".to_owned(), json!(selected.as_str()));
     }
     if config.policy.store_field == StoreFieldPolicy::Emit {
         body.insert(

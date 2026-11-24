@@ -6,7 +6,6 @@
 //! `ResumeSessionEntry` rows, and `note_idle_only` is the loop's own refusal
 //! vocabulary. Settings policy belongs to the product binary.
 
-use crate::binding::TargetSelection;
 use crate::sessions::SessionRecord;
 use crate::surface_protocol::ContentEvent;
 
@@ -34,8 +33,10 @@ pub(super) fn emit_resume_choices<P: plakous_host_protocol::ProtocolExtension>(
                 account: session.account,
                 model: session.model,
                 effort: session.effort,
-                extra: (session.target_selection == TargetSelection::NativePriority)
-                    .then(|| "Fast".to_owned()),
+                extra: session
+                    .target_selection
+                    .native_service_tier_label()
+                    .map(str::to_owned),
                 title: session
                     .title_override
                     .or(session.title)

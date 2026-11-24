@@ -285,6 +285,8 @@ pub enum TargetSelection {
     Native,
     /// Native Codex subscription target using the exact `priority` service tier.
     NativePriority,
+    /// Native Codex subscription target using the exact `ultrafast` service tier.
+    NativeUltrafast,
     /// Gateway target whose selected wire and policy are reconstruction facts.
     OpenRouter {
         /// Original and resolved protocol under a pinned rule revision.
@@ -300,6 +302,85 @@ pub enum TargetSelection {
 }
 
 impl TargetSelection {
+    /// Returns the native target for an exact provider tier id, or Standard
+    /// when no tier was selected.
+    #[must_use]
+    pub fn for_native_service_tier(id: Option<&str>) -> Option<Self> {
+        match id {
+            None => Some(Self::Native),
+            Some("priority") => Some(Self::NativePriority),
+            Some("ultrafast") => Some(Self::NativeUltrafast),
+            Some(_) => None,
+        }
+    }
+
+    /// The exact named provider tier id; Standard and API targets have none.
+    #[must_use]
+    pub const fn native_service_tier(&self) -> Option<&'static str> {
+        match self {
+            Self::NativePriority => Some("priority"),
+            Self::NativeUltrafast => Some("ultrafast"),
+            _ => None,
+        }
+    }
+
+    /// The human label of an explicitly selected native processing tier.
+    #[must_use]
+    pub const fn native_service_tier_label(&self) -> Option<&'static str> {
+        match self {
+            Self::NativePriority => Some("Fast"),
+            Self::NativeUltrafast => Some("Ultrafast"),
+            _ => None,
+        }
+    }
+
+    /// The processing tier carried into native provider configuration.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an API target or an invalid provider tier id.
+    pub fn native_processing_tier(
+        &self,
+    ) -> crate::CliResult<plakous::model::ProcessingTierDisposition> {
+        use plakous::model::{ProcessingTierDisposition, ProviderServiceTierId};
+        if self.is_api() {
+            return Err(crate::CliFailure::new(
+                "API target has no native subscription processing tier",
+            ));
+        }
+        self.native_service_tier()
+            .map_or(Ok(ProcessingTierDisposition::Standard), |id| {
+                ProviderServiceTierId::new(id)
+                    .map(ProcessingTierDisposition::ProviderNamed)
+                    .map_err(|_| crate::CliFailure::new("native service tier identity is invalid"))
+            })
+    }
+
+    /// Checks the selected tier against the exact account and model's catalog row.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a named tier absent from the row, without substituting a tier.
+    pub fn admit_native_service_tier<'a>(
+        &self,
+        account: &str,
+        model: &str,
+        tier_ids: impl IntoIterator<Item = &'a str>,
+    ) -> crate::CliResult<()> {
+        if let Some(id) = self.native_service_tier()
+            && !tier_ids.into_iter().any(|tier| tier == id)
+        {
+            let label = self.native_service_tier_label().unwrap_or(id);
+            return Err(crate::CliFailure::classified(
+                crate::error::CliFailureKind::Usage,
+                format!(
+                    "{label} (`{id}`) is not advertised for `{model}` on `{account}`; run `plakd models {account}` and choose an offered tier or omit service_tier for Standard"
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Whether construction uses API-key rather than subscription authority.
     #[must_use]
     pub const fn is_api(&self) -> bool {
@@ -325,12 +406,12 @@ impl TargetSelection {
                 provider: *provider,
                 account: account.clone(),
             }),
-            Self::Native | Self::NativePriority => None,
+            Self::Native | Self::NativePriority | Self::NativeUltrafast => None,
         })
     }
 
     /// Check route agreement without resolving credentials or build admission.
-    /// Priority native service is valid only for the Codex subscription route.
+    /// Named native service tiers are valid only for the Codex subscription route.
     ///
     /// # Errors
     /// Returns an account-target mismatch; no alternate account is tried.
@@ -345,7 +426,7 @@ impl TargetSelection {
             }
             Self::OpenRouter { .. } => account.vertical() == Vertical::OpenRouter,
             Self::Native => !account.vertical().is_api(),
-            Self::NativePriority => account.vertical() == Vertical::Codex,
+            Self::NativePriority | Self::NativeUltrafast => account.vertical() == Vertical::Codex,
         };
         if matches {
             Ok(())
@@ -364,7 +445,9 @@ impl TargetSelection {
     /// Refuses an unsupported or contradictory gateway wire binding.
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            Self::Native | Self::NativePriority | Self::Platform { .. } => Ok(()),
+            Self::Native | Self::NativePriority | Self::NativeUltrafast | Self::Platform { .. } => {
+                Ok(())
+            }
             Self::OpenRouter { wire, routing: _ } => {
                 wire.validate()?;
                 Ok(())
@@ -394,12 +477,10 @@ pub enum AttachRoute<'a> {
         /// Saved gateway routing policy, not a local endpoint fallback list.
         routing: &'a OpenRouterRoutingSelection,
     },
-    /// A native OAuth subscription, optionally on the priority service tier.
+    /// A native OAuth subscription.
     NativeOauth {
         /// Native subscription identity selected by the exact account.
         provider: NativeProvider,
-        /// Whether this target explicitly requests the priority service tier.
-        priority: bool,
     },
 }
 
@@ -557,15 +638,12 @@ impl TargetSelection {
             // A native target on any account without an OAuth subscription —
             // `openrouter` included — is `NotOauth`, the refusal the attach
             // paths have always reported for it.
-            Self::Native | Self::NativePriority => selected
+            Self::Native | Self::NativePriority | Self::NativeUltrafast => selected
                 .vertical()
                 .capability()
                 .native_provider()
                 .map_or(Err(RouteRefusal::NotOauth), |provider| {
-                    Ok(AttachRoute::NativeOauth {
-                        provider,
-                        priority: matches!(self, Self::NativePriority),
-                    })
+                    Ok(AttachRoute::NativeOauth { provider })
                 }),
         }
     }

@@ -915,11 +915,7 @@ impl ScriptedRuntimeFactory {
             return Ok(None);
         }
         if let Some(route) = &self.profile_route {
-            super::rebind::rebind_processing_tier(
-                selection,
-                plakous::subscriptions::NativeProvider::Codex,
-                &[],
-            )?;
+            selection.admit_native_service_tier(account, model, [])?;
             *route
                 .target_effort
                 .lock()

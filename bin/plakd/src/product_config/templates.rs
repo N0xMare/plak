@@ -70,12 +70,12 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         example: "\"medium\"",
     },
     TemplateFieldDoc {
-        key: "fast_mode",
-        value_type: "bool",
-        default: "false",
-        constraint: "true is only valid on the codex kind",
-        meaning: "Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's.",
-        example: "true",
+        key: "service_tier",
+        value_type: "enum",
+        default: "(unset)",
+        constraint: "fast|ultrafast; Codex kind only; the exact account and model must advertise the tier at bind",
+        meaning: "Request a named Codex processing tier. Omit for Standard. A child runs on its own template's tier, never its parent's.",
+        example: "\"fast\"",
     },
     TemplateFieldDoc {
         key: "composition",
@@ -231,10 +231,18 @@ pub fn render_template_annotated(name: &str, template: &AgentTemplate) -> String
     out
 }
 
-/// One template file body, canonical field order. Also the form the epoch
-/// digest covers.
+/// One template file body, in canonical field order.
 #[must_use]
 pub(crate) fn render_template(template: &AgentTemplate) -> String {
+    render_template_body(template, false)
+}
+
+/// The preimage for a frozen roster digest, not a template file.
+pub(crate) fn render_template_for_digest(template: &AgentTemplate) -> String {
+    render_template_body(template, true)
+}
+
+fn render_template_body(template: &AgentTemplate, frozen_digest: bool) -> String {
     fn text(out: &mut String, key: &str, value: &str) {
         out.push_str(&format!("{key} = {}\n", toml_text(value)));
     }
@@ -244,10 +252,12 @@ pub(crate) fn render_template(template: &AgentTemplate) -> String {
     if let Some(effort) = &template.effort {
         text(&mut out, "effort", effort);
     }
-    out.push_str(&format!(
-        "fast_mode = {}\n",
-        template.extra.as_deref() == Some("priority")
-    ));
+    match (frozen_digest, template.service_tier()) {
+        (true, None) => out.push_str("fast_mode = false\n"),
+        (true, Some("fast")) => out.push_str("fast_mode = true\n"),
+        (_, Some(tier)) => text(&mut out, "service_tier", tier),
+        (false, None) => {}
+    }
     if let Some(composition) = template.composition {
         text(&mut out, "composition", composition.as_str());
     }

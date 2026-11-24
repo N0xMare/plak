@@ -1482,8 +1482,16 @@ async fn catalog_preserves_exact_service_tiers_and_provider_defaults() -> TestRe
         "id": "priority",
         "name": "Fast",
         "description": "1.5x speed, increased usage"
+    }, {
+        "id": "ultrafast",
+        "name": "Ultrafast",
+        "description": "Further increased usage"
+    }, {
+        "id": "future-tier",
+        "name": "Future",
+        "description": "Unsupported tier"
     }]);
-    model["default_service_tier"] = serde_json::json!("priority");
+    model["default_service_tier"] = serde_json::json!("ultrafast");
     let (_directory, _resolver, catalog) =
         resolver_for_catalog_values("account-service-tiers", vec![model]).await?;
     let entry = catalog.entries().first().ok_or("catalog entry missing")?;
@@ -1491,7 +1499,15 @@ async fn catalog_preserves_exact_service_tiers_and_provider_defaults() -> TestRe
         entry.default_reasoning_effort(),
         Some(ReasoningEffort::Medium)
     );
-    assert_eq!(entry.default_service_tier(), Some("priority"));
+    assert_eq!(entry.default_service_tier(), Some("ultrafast"));
+    assert_eq!(
+        entry
+            .service_tiers()
+            .iter()
+            .map(CodexCatalogServiceTier::id)
+            .collect::<Vec<_>>(),
+        ["priority", "ultrafast"]
+    );
     let tier = entry
         .service_tiers()
         .first()
@@ -1609,7 +1625,7 @@ async fn executable_catalog_rows_fail_closed_on_invalid_service_tiers_and_defaul
     ]);
     let mut malformed = catalog_model_value("gpt-5.5");
     malformed["service_tiers"] = serde_json::json!([
-        {"id":"priority","name":"","description":"missing name"}
+        {"id":"ultrafast","name":"","description":"missing name"}
     ]);
     let mut dangling_default = catalog_model_value("gpt-5.6-sol");
     dangling_default["tool_mode"] = serde_json::json!("code_mode_only");

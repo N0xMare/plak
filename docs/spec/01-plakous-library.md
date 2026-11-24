@@ -3884,7 +3884,7 @@ Sealed Messages artifacts add a distinct `native` block variant; the HTTP reques
 serializer unwraps it into native JSON. Existing variants, artifact revisions
 and sealed digests are unchanged. An older decoder refuses that unfamiliar
 persisted tag as an invalid artifact envelope, rather than treating native cited
-text as uncited text. Exports v13 and v12 carry the opaque replay vocabulary
+text as uncited text. Exports v14 and v13 carry the opaque replay vocabulary
 (chapter 02 §2.5.1).
 
 **On this wire reasoning has exactly two forms, and text is not one of them.** A
@@ -4033,7 +4033,7 @@ model, family and dialect. The canonical replay scope and its digest include the
 full account-binding digest, including its version; an accountless envelope
 never acquires Responses replay authority. This check applies to historical
 prefixes as well as newly appended output and hosted-program lineage. Export
-v13 and v12 preserve the scope. Ordinary forks and validated imports cannot widen it.
+v14 and v13 preserve the scope. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including
@@ -4711,13 +4711,15 @@ not permit another request or retry.
 
 Processing tier is an independent identity-bearing dimension: `Standard` or one
 exact provider-named id. `Standard` never means "use a discovered provider
-default." Codex OAuth MAY explicitly admit a catalog-advertised `priority` row,
-lowered exactly as top-level Responses `service_tier: "priority"`; Standard
-omits the field. Unknown catalog tier ids are ignored without hiding the
+default." Codex OAuth admits only catalog-advertised `priority` and `ultrafast`
+as named tiers and lowers the selected id exactly as top-level Responses
+`service_tier`; Standard omits the field. A non-transient HTTP client refusal on a named tier is terminal. Credential
+renewal and the existing transient HTTP and in-band retry rules still apply,
+and no attempt substitutes a different tier. Unknown catalog tier ids are ignored without hiding the
 model or offering those tiers; an advertised unknown default becomes no
-default. Duplicate priority tiers, malformed priority metadata and defaults
-absent from the advertised tiers still reject the row. Every other policy must explicitly lower or reject a named
-tier. Codex OAuth offers `low` through `max`, intersected with each catalog row.
+default. Duplicate known tiers, malformed known-tier metadata and defaults
+absent from the advertised tiers still reject the row. Every other policy
+must explicitly lower or reject a named tier. Codex OAuth offers `low` through `max`, intersected with each catalog row.
 Ultra is withheld from offered efforts; an ultra catalog default becomes no
 default without dropping the model row. Explicit binding still refuses it. Pro
 reasoning and Ultra orchestration are not Codex OAuth effort values.
@@ -5032,7 +5034,7 @@ behind mutable precedence.
 discovery by Grok 1.0.40 (`eb1a2256660d`). `grok-4.7-build-fast` is a separate
 exact catalog id, enrolled from the Grok Build 1.0.41 model list
 (`4220f3b224a6`), where it is the default and is named Grok 4.7 Fast. It is not
-an alias of `grok-4.7` and it is not Codex `fast_mode`. It uses the same
+an alias of `grok-4.7` and it is not a Codex processing tier. It uses the same
 low/medium/high/xhigh effort table and the same foreground-terminal process
 presentation. A catalog row whose id and model disagree, and the unreviewed
 labels `grok-4.7-latest` and `grok-4.7-build`, stay refused. SuperGrok answers
@@ -8159,7 +8161,7 @@ format 5 and host backend semantic revision 15 bind them, and exact reopen rejec
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
 the ceiling boolean, including when false. The runtime format epoch isolates
 these bindings from earlier state. CarryBinding does not embed an environment
-descriptor; this build writes v13, imports v13 and v12, and refuses v11 and older.
+descriptor; this build writes v14, imports v14 and v13, and refuses v12 and older.
 Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -10676,10 +10678,10 @@ lists saved keys and their sizes, plus running promoted job numbers. Values
 themselves are not included in that note. Compaction may drop a state-only note
 because the next boundary re-emits it.
 
-The Python SDK presentation issues these state operations. Export v13 carries
+The Python SDK presentation issues these state operations. Export v14 carries
 the committed named values as JSON and validates their keys, values and quotas
 before seeding the new session's genesis atomically with its history. Export
-v12 imports preserve named values; v11 and older are refused.
+v13 imports preserve named values; v12 and older are refused.
 
 ### 9.9 Typed Python SDK cells
 
@@ -11610,8 +11612,8 @@ contain no anchor, so import is unanchored. A nonempty root genesis seed
 (never a fork, rebind or clear successor) may use the destination's unanchored
 occupancy measure, once, for its first preflight fold; this is not paid admission
 authority.
-The export document is version 13; this build imports versions 13 and 12,
-refusing v11 and older (chapter 02 §2.5.1).
+The export document is version 14; this build imports versions 14 and 13,
+refusing v12 and older (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound, or on a
 `ReferenceClientEnvelope` contract its enrolled reference envelope (§6.8,
@@ -12039,7 +12041,7 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; exports v13 and v12 carry the turn record in its independent neutral
+encoding; exports v14 and v13 carry the turn record in its independent neutral
 compaction fields, so conversation carry preserves the position (spec 02
 §2.5.1). Carrying a history to
 another binding turns a native compaction block into a plain compaction block

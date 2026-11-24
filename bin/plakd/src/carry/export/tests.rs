@@ -65,7 +65,7 @@ fn settled_export_matches_the_writable_projector_path() {
     assert!(current_projection(&paths, &record).unwrap().is_some());
     let read_only = export_session(&paths, &record).unwrap();
     // Lifecycle metadata is home-local: neither overrides nor archival may
-    // alter a v12 document, even a single serialized byte.
+    // alter a v14 document, even a single serialized byte.
     let original_bytes = serde_json::to_vec(&read_only).unwrap();
     let mut metadata = crate::store::ProductStore::open(&paths).unwrap();
     metadata
@@ -77,7 +77,7 @@ fn settled_export_matches_the_writable_projector_path() {
         serde_json::to_vec(&export_session(&paths, &renamed).unwrap()).unwrap(),
         original_bytes
     );
-    assert_eq!(VERSION, 13);
+    assert_eq!(VERSION, 14);
     let imported = export_session(&paths, &renamed)
         .unwrap()
         .into_import()

@@ -128,7 +128,8 @@ pub fn compile_provider_configuration_with_implementation_and_router_policy(
     router_policy: Option<&ResponsesRouterPolicy>,
 ) -> Result<CompiledProviderConfiguration, ResponsesProviderConfigurationError> {
     validate_selected_behavior(selected, policy)?;
-    let canonical_bytes = canonical_policy_bytes(policy, router_policy)?;
+    let canonical_bytes =
+        canonical_policy_bytes(policy, &selected.behavior().processing_tier, router_policy)?;
     let family = descriptor.model_family().cloned().ok_or(
         ResponsesProviderConfigurationError::PolicyMismatch("model_family"),
     )?;
@@ -167,15 +168,10 @@ fn validate_selected_behavior(
     policy: ResponsesRequestPolicy,
 ) -> Result<(), ResponsesProviderConfigurationError> {
     let behavior = selected.behavior();
-    match (&behavior.processing_tier, policy.service_tier) {
-        (ProcessingTierDisposition::Standard, _) => {}
-        (
-            ProcessingTierDisposition::ProviderNamed(selected),
-            ServiceTierPolicy::ExactNamed(name),
-        ) if selected.as_str() == name => {}
-        (ProcessingTierDisposition::ProviderNamed(_), _) => {
-            return Err(mismatch("processing_tier"));
-        }
+    if let ProcessingTierDisposition::ProviderNamed(id) = &behavior.processing_tier
+        && !policy.service_tier.admits(id.as_str())
+    {
+        return Err(mismatch("processing_tier"));
     }
     match behavior.reasoning_effort {
         ReasoningEffortDisposition::Disabled => {}
@@ -306,9 +302,26 @@ pub(super) fn validate_tools(
 }
 
 fn canonical_policy_bytes(
-    policy: ResponsesRequestPolicy,
+    mut policy: ResponsesRequestPolicy,
+    selected_tier: &ProcessingTierDisposition,
     router_policy: Option<&ResponsesRouterPolicy>,
 ) -> Result<Vec<u8>, ResponsesProviderConfigurationError> {
+    // Seal the individual authorization, not the route's full menu. The
+    // compiled policy payload keeps the original representation for Fast.
+    let (exact_policy, service_tier) = match policy.service_tier {
+        ServiceTierPolicy::StandardOnly => (ServiceTierPolicy::StandardOnly, "standard-only"),
+        ServiceTierPolicy::CodexNamed
+            if matches!(selected_tier, ProcessingTierDisposition::ProviderNamed(id)
+                if id.as_str() == "ultrafast") =>
+        {
+            (ServiceTierPolicy::CodexUltrafast, "ultrafast")
+        }
+        ServiceTierPolicy::CodexNamed | ServiceTierPolicy::CodexPriority => {
+            (ServiceTierPolicy::CodexPriority, "priority")
+        }
+        ServiceTierPolicy::CodexUltrafast => (ServiceTierPolicy::CodexUltrafast, "ultrafast"),
+    };
+    policy.service_tier = exact_policy;
     let execution_identity = policy
         .execution_identity()
         .map_err(|_| ResponsesProviderConfigurationError::Identity)?;
@@ -324,10 +337,7 @@ fn canonical_policy_bytes(
         artifact_schema_revision: RESPONSES_ARTIFACT_SCHEMA_REVISION,
         artifact_codec_revision: RESPONSES_ARTIFACT_CODEC_REVISION,
         execution_identity,
-        service_tier: match policy.service_tier {
-            ServiceTierPolicy::StandardOnly => "standard-only",
-            ServiceTierPolicy::ExactNamed(name) => name,
-        },
+        service_tier,
         max_output_tokens: match policy.max_output_tokens {
             MaxOutputTokensPolicy::Emit => "emit",
             MaxOutputTokensPolicy::Omit => "omit",

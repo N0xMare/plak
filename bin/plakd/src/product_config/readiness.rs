@@ -39,7 +39,9 @@ impl TemplateNotReady {
             Self::NoApiKey => "no API key",
             Self::ModelNotAdmitted => "model not admitted",
             Self::EffortNotAdmitted => "effort not admitted",
-            Self::TierNotAdvertised => "tier not advertised",
+            Self::TierNotAdvertised => {
+                "service_tier is not advertised for this account and model; run `plakd models <account>` to see offered tiers or omit service_tier for Standard"
+            }
         }
     }
 }

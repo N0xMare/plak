@@ -45,7 +45,7 @@ pub struct RosterBinding {
     /// Which provider protocol the child speaks, when the card chooses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<ProtocolSelection>,
-    /// Identity-bearing tier, derived from the template's `fast_mode`. A
+    /// Identity-bearing tier, derived from the template's `service_tier`. A
     /// child runs on this tier whatever its caller runs on.
     pub processing_tier: ProcessingTierDisposition,
     /// The user's card text; the model routes on it.

@@ -1,11 +1,11 @@
 use super::*;
 use std::fs;
 
-const V12_FIXTURE: &str = include_str!("../../../tests/fixtures/session-export-v12.json");
+const V13_FIXTURE: &str = include_str!("../../../tests/fixtures/session-export-v13.json");
 
 #[test]
-fn current_export_bytes_match_the_frozen_v13_fixture() {
-    let expected = include_str!("../../../tests/fixtures/session-export-v13-default.json");
+fn current_export_bytes_match_the_frozen_v14_fixture() {
+    let expected = include_str!("../../../tests/fixtures/session-export-v14-default.json");
     assert_eq!(
         serde_json::to_vec(&sample_document()).unwrap(),
         expected.trim_end().as_bytes()
@@ -13,30 +13,45 @@ fn current_export_bytes_match_the_frozen_v13_fixture() {
 }
 
 #[test]
-fn previous_export_keeps_the_base_writers_exact_v12_bytes_and_is_importable() {
-    let previous = include_str!("../../../tests/fixtures/session-export-v12-default.json");
+fn previous_export_keeps_the_base_writers_exact_v13_bytes_and_is_importable() {
+    let previous = include_str!("../../../tests/fixtures/session-export-v13-default.json");
     let current = serde_json::to_vec(&sample_document()).unwrap();
     let current = String::from_utf8(current).unwrap();
-    let as_previous = current.replacen(
-        "\"version\":13,\"kind\":\"portable_session\",",
-        "\"version\":12,",
-        1,
-    );
+    let as_previous = current.replacen("\"version\":14,", "\"version\":13,", 1);
     assert_eq!(as_previous.as_bytes(), previous.trim_end().as_bytes());
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("previous.json");
     fs::write(&path, previous).unwrap();
     let document = read_document(&path).unwrap();
-    assert_eq!(document.version, 12);
-    assert_eq!(document.kind, None);
+    assert_eq!(document.version, PREVIOUS_VERSION);
+    assert_eq!(document.kind, Some(DocumentKind::PortableSession));
     document.into_import().unwrap();
 }
 
 fn document_versions() -> [CarryDocument; 2] {
     [
         sample_document(),
-        serde_json::from_str(V12_FIXTURE).unwrap(),
+        serde_json::from_str(V13_FIXTURE).unwrap(),
     ]
+}
+
+#[test]
+fn ultrafast_target_round_trips_only_in_the_current_version() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("ultrafast.json");
+    let mut document = sample_document();
+    document.binding.target_selection = ProductTargetSelection::NativeUltrafast;
+    write_document(&path, &document).unwrap();
+    let imported = read_document(&path).unwrap().into_import().unwrap();
+    assert_eq!(
+        imported.record.target_selection,
+        ProductTargetSelection::NativeUltrafast
+    );
+
+    document.version = PREVIOUS_VERSION;
+    fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let error = read_document(&path).unwrap_err().to_string();
+    assert!(error.contains("$.binding.target_selection"), "{error}");
 }
 
 #[test]
@@ -200,7 +215,7 @@ fn v8_is_refused_before_import_regardless_of_named_state_or_selection() {
         assert_eq!(
             read_document(&path).unwrap_err().to_string(),
             format!(
-                "{} is a version 8 session export; this build imports versions 12 and 13",
+                "{} is a version 8 session export; this build imports versions 13 and 14",
                 path.display()
             )
         );
@@ -212,7 +227,7 @@ fn v8_is_refused_before_import_regardless_of_named_state_or_selection() {
     assert_eq!(
         read_document(&path).unwrap_err().to_string(),
         format!(
-            "{} is a version 8 session export; this build imports versions 12 and 13",
+            "{} is a version 8 session export; this build imports versions 13 and 14",
             path.display()
         )
     );
@@ -267,32 +282,35 @@ fn file_import_validates_named_state_keys_count_and_total_before_creation() {
 }
 
 #[test]
-fn v12_import_preserves_named_state_and_v11_is_refused() {
+fn v13_import_preserves_named_state_and_v12_is_refused() {
     let root = tempfile::tempdir().unwrap();
-    let mut value: serde_json::Value = serde_json::from_str(V12_FIXTURE).unwrap();
+    let mut value: serde_json::Value = serde_json::from_str(V13_FIXTURE).unwrap();
     value["named_state"] = serde_json::json!({"answer":42});
-    let path = root.path().join("v12.json");
+    let path = root.path().join("v13.json");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let imported = read_document(&path).unwrap().into_import().unwrap();
     assert_eq!(imported.history.named_state().unwrap()["answer"], 42);
-    value["version"] = serde_json::json!(11);
-    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    fs::write(
+        &path,
+        include_str!("../../../tests/fixtures/session-export-v12-default.json"),
+    )
+    .unwrap();
     let error = read_document(&path).unwrap_err().to_string();
     assert!(
-        error.contains("version 11 session export; this build imports versions 12 and 13"),
+        error.contains("version 12 session export; this build imports versions 13 and 14"),
         "{error}"
     );
 }
 
 /// Previous-version history and saved placement/profile survive the version cut.
 #[test]
-fn a_frozen_v12_document_imports_with_an_identical_canonical_history() {
+fn a_frozen_v13_document_imports_with_an_identical_canonical_history() {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v12.json");
-    fs::write(&path, V12_FIXTURE).unwrap();
+    let path = root.path().join("v13.json");
+    fs::write(&path, V13_FIXTURE).unwrap();
     let document = read_document(&path).unwrap();
     assert_eq!(document.version, PREVIOUS_VERSION);
-    assert_eq!(document.kind, None);
+    assert_eq!(document.kind, Some(DocumentKind::PortableSession));
     assert!(document.runner.is_some());
     assert!(document.profile.is_some());
     let import = document.into_import_with_replay(true).unwrap();
@@ -304,7 +322,7 @@ fn a_frozen_v12_document_imports_with_an_identical_canonical_history() {
         import.record.runner, None,
         "the local runner is the record default"
     );
-    let mut fixture: serde_json::Value = serde_json::from_str(V12_FIXTURE).unwrap();
+    let mut fixture: serde_json::Value = serde_json::from_str(V13_FIXTURE).unwrap();
     let reexport = |history| serde_json::to_value(history::History::export(history).unwrap());
     assert_eq!(reexport(&import.history).unwrap(), fixture["history"]);
     assert_eq!(import.history.segments().len(), 4);
@@ -319,13 +337,13 @@ fn a_frozen_v12_document_imports_with_an_identical_canonical_history() {
 }
 
 #[test]
-fn v13_names_its_kind_runner_and_profile_and_round_trips() {
+fn v14_names_its_kind_runner_and_profile_and_round_trips() {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v12.json");
+    let path = root.path().join("v14.json");
     let document = sample_document();
     write_document(&path, &document).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert_eq!(value["version"], 13);
+    assert_eq!(value["version"], 14);
     assert_eq!(value["kind"], "portable_session");
     assert_eq!(
         value["runner"],
@@ -351,24 +369,24 @@ type Mutation = fn(&mut serde_json::Value);
 
 /// Each refusal names the field, the version and the JSON path.
 #[test]
-fn malformed_v13_documents_are_refused() {
+fn malformed_v14_documents_are_refused() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("export.json");
     let valid = serde_json::to_value(sample_document()).unwrap();
     let mutations: [(&str, Mutation); 10] = [
-        ("version 13 requires `runner` at $.runner", |v| {
+        ("version 14 requires `runner` at $.runner", |v| {
             v.as_object_mut().unwrap().remove("runner");
         }),
-        ("version 13 requires `profile` at $.profile", |v| {
+        ("version 14 requires `profile` at $.profile", |v| {
             v.as_object_mut().unwrap().remove("profile");
         }),
-        ("version 13 requires `runner` at $.runner", |v| {
+        ("version 14 requires `runner` at $.runner", |v| {
             v["runner"] = serde_json::Value::Null;
         }),
         ("export kind does not match its version", |v| {
             v.as_object_mut().unwrap().remove("kind");
         }),
-        ("export kind does not match its version", |v| {
+        ("version 12 session export", |v| {
             v["version"] = 12.into();
         }),
         (
@@ -415,7 +433,7 @@ fn malformed_v13_documents_are_refused() {
 }
 
 #[test]
-fn v12_document_round_trips_named_state_selection_and_full_history() {
+fn v14_document_round_trips_named_state_selection_and_full_history() {
     use plakous::model::{
         Actor, ContentBlock, ConversationItem, EntryId, HistorySegment, HistorySegmentKind,
         ModelId, Provenance, TextBlock,
@@ -442,7 +460,7 @@ fn v12_document_round_trips_named_state_selection_and_full_history() {
         .insert("answer".into(), serde_json::json!({"n":42}));
     document.history = history::History::export(&original).unwrap();
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("v12.json");
+    let path = root.path().join("v14.json");
     write_document(&path, &document).unwrap();
     let bytes = fs::read(&path).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();

@@ -487,6 +487,27 @@ fn openrouter_roster_protocol_freezes_on_snapshot_digest() {
 }
 
 #[test]
+fn standard_and_fast_keep_the_frozen_template_digest() {
+    let mut config = ProductConfig::default_product();
+    for (name, tier) in [("standard", None), ("fast", Some("priority"))] {
+        let mut template = template("codex", "gpt-5.6-luna");
+        template.extra = tier.map(str::to_owned);
+        config.templates.insert(name.to_owned(), template);
+    }
+    // The prior writer hashed these same two templates with fast_mode
+    // booleans, in sorted order.
+    assert_eq!(
+        templates_digest(
+            &config,
+            ["standard", "fast"].into_iter(),
+            None,
+            &BTreeMap::new()
+        ),
+        "b934b62d9123f28553c6998c4bae9375c65b799dd794e6ed690bfa68e6c9513c"
+    );
+}
+
+#[test]
 fn template_authority_and_tier_are_inside_the_digest() {
     let mut config = ProductConfig::default_product();
     config.templates.insert("fast".to_owned(), {
@@ -505,6 +526,23 @@ fn template_authority_and_tier_are_inside_the_digest() {
             plakous::model::ProviderServiceTierId::new("priority").unwrap()
         )
     );
+
+    config.templates.get_mut("fast").unwrap().extra = Some("ultrafast".into());
+    let ultrafast = snapshot_from_config(&config, "codex", "gpt-5.6-luna", None);
+    let named = |id| {
+        ProcessingTierDisposition::ProviderNamed(
+            plakous::model::ProviderServiceTierId::new(id).unwrap(),
+        )
+    };
+    assert_eq!(
+        ultrafast.binding(&name("fast")).unwrap().processing_tier,
+        named("ultrafast")
+    );
+    assert_eq!(
+        fast.binding(&name("fast")).unwrap().processing_tier,
+        named("priority")
+    );
+    assert_ne!(ultrafast.digest, fast.digest);
 
     config.working_set = WorkingSet::parse(["standard"]).unwrap();
     let standard = snapshot_from_config(&config, "codex", "gpt-5.6-luna", None);

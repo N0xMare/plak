@@ -1,6 +1,6 @@
 //! The product file's exact schema objects and admission descriptors.
 
-use plakous_recursive_subagents_store::admission::Schema;
+use plakous_recursive_subagents_store::admission::{Revision, Schema};
 
 use super::GENERATION;
 
@@ -103,6 +103,16 @@ pub(super) const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
 ];
 
+const BASE_FINGERPRINT: &str = "9c64f5a3da9370dfab12e9acd4cd6568bbf2ac4814e165141ef1dc930173fe50";
+
+/// Revision 40 admits the Ultrafast target in the existing JSON column.
+/// No existing row or SQL object changes.
+pub(crate) const NATIVE_ULTRAFAST_REVISION: Revision = Revision {
+    sql: "",
+    objects: &[],
+    fingerprint: BASE_FINGERPRINT,
+};
+
 /// The product file's admission descriptors.
 pub(super) const SCHEMA: Schema = Schema {
     noun: "product",
@@ -110,8 +120,8 @@ pub(super) const SCHEMA: Schema = Schema {
     archive: "product.sqlite3 and runtime.sqlite3 together",
     generation: GENERATION,
     objects: SCHEMA_OBJECTS,
-    base_fingerprint: "9c64f5a3da9370dfab12e9acd4cd6568bbf2ac4814e165141ef1dc930173fe50",
-    revisions: &[],
+    base_fingerprint: BASE_FINGERPRINT,
+    revisions: &[NATIVE_ULTRAFAST_REVISION],
 };
 
 pub(super) fn schema() -> Schema {

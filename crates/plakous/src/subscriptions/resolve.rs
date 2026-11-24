@@ -51,7 +51,7 @@ fn configure_gated_provider(
     {
         return Err(NativeModelResolutionError::after_selection(
             requested_model,
-            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier"),
+            NativeSubscriptionError::ProcessingTierNotAdvertised(tier.clone()),
         ));
     }
     let vertical = super::vertical::require_vertical(provider)
@@ -383,19 +383,21 @@ mod tests {
     fn a_named_tier_requires_the_exact_fresh_catalog_row() -> TestResult {
         let (selected, resolved, authority) = inputs()?;
         let mut behavior = selected.behavior().clone();
-        behavior.processing_tier = plakous_model::ProcessingTierDisposition::ProviderNamed(
-            plakous_model::ProviderServiceTierId::new("priority")?,
-        );
+        let ultrafast = plakous_model::ProviderServiceTierId::new("ultrafast")?;
+        behavior.processing_tier =
+            plakous_model::ProcessingTierDisposition::ProviderNamed(ultrafast.clone());
         let selected = SelectedProviderConfiguration::new(selected.route().clone(), behavior)?;
+        let mut resolved = resolved;
+        resolved.service_tiers.push("priority".into());
         let error = configure_gated_provider(&selected, NativeProvider::Codex, resolved, authority)
             .err()
             .ok_or("unadvertised tier was admitted")?;
         assert_eq!(
             error.kind(),
-            NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier")
+            NativeSubscriptionError::ProcessingTierNotAdvertised(ultrafast)
         );
         let (_, mut resolved, authority) = inputs()?;
-        resolved.service_tiers.push("priority".into());
+        resolved.service_tiers.push("ultrafast".into());
         let error = configure_gated_provider(&selected, NativeProvider::Codex, resolved, authority)
             .err()
             .ok_or("fixture without authenticated evidence was admitted")?;

@@ -910,11 +910,12 @@ A smaller destination route schedules compaction at the first prompt when
 needed; if its protected history or summary input still cannot fit, it returns
 the normal context-limit refusal rather than silently truncating conversation.
 An unknown destination window is reported but does not block carry.
-This build writes version 13 and imports versions 13 and 12. Both versions preserve
+This build writes version 14 and imports versions 14 and 13. Version 14
+also preserves the Codex Ultrafast selection. Both versions preserve
 the composition selection, including `py-sdk`, and session-owned named state.
 Both versions name the runner the session ran on and its profile (root
-template and working set); the imported session keeps that profile. Versions 11 and older are refused with `this build imports versions 12 and 13`.
-Version 13 tags portable sessions explicitly; ordinary import refuses the reserved
+template and working set); the imported session keeps that profile. Versions 12 and older are refused with `this build imports versions 13 and 14`.
+Both versions tag portable sessions explicitly; ordinary import refuses the reserved
 `host_upgrade` kind.
 New exports have no separate archive.
 Keep exports private: they contain full conversation/tool contents and named

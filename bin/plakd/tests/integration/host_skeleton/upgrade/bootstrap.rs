@@ -1,4 +1,4 @@
-//! Actual predecessor exports enter the ordinary product importer, not native reopen.
+//! The predecessor's neutral payloads exercise portable import, not native reopen.
 
 use super::*;
 
@@ -14,6 +14,9 @@ fn host_upgrade_bootstrap_imports_all_seventeen_frozen_predecessor_presentations
         let mut document = exported["document"].clone();
         assert_eq!(document["version"], 12);
         assert_eq!(document["source"]["state_key"], "r27.e37.p37.t10");
+        document["version"] = 13.into();
+        document["kind"] = "portable_session".into();
+        document["source"]["producer"] = json!({"status":"unavailable"});
         // The old binding fixture's inert `/` cannot be an executable product
         // workspace. Relocate only that portable placement into this scratch
         // workspace; no predecessor checkpoint or binding is rewritten.

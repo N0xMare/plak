@@ -1,7 +1,7 @@
 use std::{error::Error, fmt};
 
 use super::NativeProvider;
-use plakous_model::ProviderConfigurationError;
+use plakous_model::{ProviderConfigurationError, ProviderServiceTierId};
 
 /// Redaction-safe failure from the curated subscription facade.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +80,8 @@ pub enum NativeSubscriptionError {
     DeviceCodeExpired,
     /// The exact requested model was not admitted by fresh account-scoped evidence.
     ModelUnavailable,
+    /// The fresh row for this account and model did not advertise the exact tier.
+    ProcessingTierNotAdvertised(ProviderServiceTierId),
     /// The explicit provider configuration was not admitted by exact resolved facts.
     ProviderConfigurationRejected,
     /// One explicit behavior dimension did not match the selected provider policy.
@@ -166,6 +168,13 @@ impl fmt::Display for NativeSubscriptionError {
         if let Self::Transport(Some(cause)) = self {
             return write!(formatter, "native subscription transport failed: {cause}");
         }
+        if let Self::ProcessingTierNotAdvertised(id) = self {
+            return write!(
+                formatter,
+                "processing tier `{}` is not advertised by the exact authenticated model row; choose an offered tier or omit service_tier for Standard",
+                id.as_str()
+            );
+        }
         formatter.write_str(self.label())
     }
 }
@@ -219,6 +228,7 @@ impl NativeSubscriptionError {
             }
             Self::DeviceCodeExpired => "device code expired before it was approved",
             Self::ModelUnavailable => "requested native subscription model is unavailable",
+            Self::ProcessingTierNotAdvertised(_) => "native processing tier is not advertised",
             Self::ProviderConfigurationRejected => {
                 "explicit native provider configuration was rejected"
             }

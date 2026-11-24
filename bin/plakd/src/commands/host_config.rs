@@ -7,7 +7,7 @@ use std::sync::Arc;
 use plakous::agent::ReasoningEffort;
 
 use super::support::{
-    application_execution_failure, native_processing_tier, persist_miss_native_tool_mode,
+    application_execution_failure, persist_miss_native_tool_mode,
     product_subscription_request_limits,
 };
 use crate::home::paths as product_paths;
@@ -268,11 +268,8 @@ pub(crate) fn build_host_config(
     let selected_fact = native_models
         .iter()
         .find(|fact| fact.account == account && fact.exact_id == model_id);
-    let (native_tool_mode, priority_admitted) = if let Some(fact) = selected_fact {
-        (
-            fact.native_tool_mode,
-            fact.service_tiers.iter().any(|tier| tier.0 == "priority"),
-        )
+    let native_tool_mode = if let Some(fact) = selected_fact {
+        fact.native_tool_mode
     } else {
         match executor.block_on(subscriptions.model_catalog_persisted(provider)) {
             Ok(Ok(snapshot)) => {
@@ -285,13 +282,7 @@ pub(crate) fn build_host_config(
                             "model `{model_id}` is not in the `{account}` catalog; run `plakd models {account}` to list the models it offers"
                         )
                     })?;
-                (
-                    entry.native_tool_mode(),
-                    entry
-                        .service_tiers()
-                        .iter()
-                        .any(|tier| tier.id() == "priority"),
-                )
+                entry.native_tool_mode()
             }
             Ok(Err(plakous::subscriptions::NativeSubscriptionError::ModelUnavailable))
                 if custody.gateway().is_some()
@@ -312,21 +303,13 @@ pub(crate) fn build_host_config(
             _ => persist_miss_native_tool_mode(account)?,
         }
     };
-    if session.target_selection == product_config::ProductTargetSelection::NativePriority
-        && !priority_admitted
-    {
-        return Err(
-            format!("Fast is absent from the authenticated `{model_id}` catalog row").into(),
-        );
-    }
     let selected = product_agent::selected_coding_provider_configuration_with_processing_tier(
         provider,
         model,
         effort_explicit.then_some(effort),
         native_tool_mode,
         session.composition,
-        native_processing_tier(&session.target_selection)
-            .map_err(|error| error.message().to_owned())?,
+        session.target_selection.native_processing_tier()?,
     )
     .map_err(|e| format!("provider configuration `{model_id}`: {}", e.message()))?;
     let limits = product_subscription_request_limits()
@@ -337,8 +320,14 @@ pub(crate) fn build_host_config(
                 .resolve_turn_scoped_provider_for_attach(selected, limits),
         )
         .map_err(|e| format!("resolve {account}/{model_id}: {e:?}"))?
-        .map_err(|e| {
-            format!("resolve {account}/{model_id}: {e} — check `plakd login {account}` and `plakd models {account}`")
+        .map_err(|error| match error.kind() {
+            tier @ plakous::subscriptions::NativeSubscriptionError::ProcessingTierNotAdvertised(_) => {
+                crate::CliFailure::classified(crate::CliFailureKind::Usage,
+                    format!("resolve {account}/{model_id}: {tier}; run `plakd models {account}` to see offered tiers"))
+            }
+            _ => crate::CliFailure::new(
+                format!("resolve {account}/{model_id}: {error} — check `plakd login {account}` and `plakd models {account}`"),
+            ),
         })?;
 
     let resolved = Arc::new(resolved);

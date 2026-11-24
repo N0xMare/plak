@@ -718,18 +718,17 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     )
 }
 
-/// Fork now from a Fast (`NativePriority`) root onto a non-fast profile lands
-/// `Native`, and the reverse onto a `fast_mode = true` root lands
-/// `NativePriority`.
+/// The source keeps Fast, the first fork is Standard, and the reverse fork
+/// uses the target profile's Ultrafast selection.
 #[test]
-fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Send + Sync>> {
+fn profile_fork_persists_the_target_service_tier() -> Result<(), Box<dyn Error + Send + Sync>> {
     const A: &[u8] = b"fast-source-account";
     const B: &[u8] = b"standard-target-account";
-    const FAST: &[u8] = b"fast-return-account";
+    const ULTRAFAST: &[u8] = b"ultrafast-return-account";
     let (root, paths, workspace, gateway) = profile_home("low")?;
     std::fs::write(
         paths.home().join("agents/pa-root.toml"),
-        "account = \"codex\"\nmodel = \"offline-loopback-v1\"\neffort = \"medium\"\nfast_mode = true\ndescription = \"fast root\"\n",
+        "account = \"codex\"\nmodel = \"offline-loopback-v1\"\neffort = \"medium\"\nservice_tier = \"ultrafast\"\ndescription = \"ultrafast root\"\n",
     )?;
     std::fs::write(
         paths.home().join("profiles/pa.toml"),
@@ -776,12 +775,12 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
         .map_err(|_| "fast-lane host panicked")?
         .map_err(|error| error.message().to_owned())?;
 
-    verify_fast_return(
+    verify_ultrafast_return(
         &paths,
         &workspace,
         &gateway,
         &source_id,
-        account_injection(&workspace, &controller, B, FAST)?,
+        account_injection(&workspace, &controller, B, ULTRAFAST)?,
     )
 }
 
@@ -1446,7 +1445,7 @@ fn verify_reverse_binding(
     Ok(())
 }
 
-fn verify_fast_return(
+fn verify_ultrafast_return(
     paths: &PlakPaths,
     workspace: &Path,
     gateway: &GatewayFixture,
@@ -1500,21 +1499,21 @@ fn verify_fast_return(
     send_action(&actions, crate::surface_protocol::UserAction::Quit)?;
     worker
         .join()
-        .map_err(|_| "fast return host panicked")?
+        .map_err(|_| "ultrafast return host panicked")?
         .map_err(|error| error.message().to_owned())?;
 
-    let fast = product_sessions::list_sessions_for_cwd(paths, workspace)?
+    let ultrafast = product_sessions::list_sessions_for_cwd(paths, workspace)?
         .into_iter()
         .map(|row| product_sessions::load_session(paths, &row.id))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .find(|row| row.id != source_id && row.id != standard_id)
-        .ok_or("fast branch missing")?;
+        .ok_or("ultrafast branch missing")?;
     assert_eq!(
-        fast.target_selection,
-        plakous_hosted::binding::TargetSelection::NativePriority
+        ultrafast.target_selection,
+        plakous_hosted::binding::TargetSelection::NativeUltrafast
     );
-    assert_eq!(fast.model.as_deref(), Some("offline-loopback-v1"));
+    assert_eq!(ultrafast.model.as_deref(), Some("offline-loopback-v1"));
     Ok(())
 }
 

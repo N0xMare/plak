@@ -132,7 +132,7 @@ pub(crate) struct DirectoryMetadata {
     pub(crate) account: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<String>,
-    pub(crate) fast: bool,
+    pub(crate) service_tier: Option<String>,
 }
 impl ProductStore {
     pub(crate) fn directory_metadata(&self, id: &str) -> Result<Option<DirectoryMetadata>, String> {
@@ -166,7 +166,7 @@ impl ProductStore {
                     account: row.get(10)?,
                     model: row.get(11)?,
                     effort: row.get(12)?,
-                    fast: selection == crate::product_config::ProductTargetSelection::NativePriority,
+                    service_tier: selection.native_service_tier().map(str::to_owned),
                 })
             }))
             .optional()

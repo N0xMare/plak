@@ -305,7 +305,7 @@ fn templates_digest<'a>(
         if let Some(template) = config.templates.get(name) {
             body.push_str(name);
             body.push('\n');
-            body.push_str(&crate::product_config::render_template(template));
+            body.push_str(&crate::product_config::render_template_for_digest(template));
             body.push('\n');
         }
     }

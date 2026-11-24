@@ -4,8 +4,8 @@
 //! thing that crosses is a portable session reference: `plakd session export` writes it
 //! from this build's state, `plakd session import` creates a new linked session
 //! from the full neutral conversation and named state. This build imports
-//! versions 13 and 12, preserves their saved runner/profile, and refuses version
-//! 11 and older. The writer emits version 13.
+//! versions 14 and 13, preserves their saved runner/profile, and refuses version
+//! 12 and older. The writer emits version 14.
 
 mod document;
 mod export;

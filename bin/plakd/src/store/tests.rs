@@ -937,10 +937,46 @@ fn unknown_schema_is_refused() {
 }
 
 #[test]
+fn ultrafast_target_requires_the_new_product_revision() {
+    let root = tempdir().unwrap();
+    let paths = PlakPaths::explicit(root.path().join("p"));
+    paths.ensure_layout().unwrap();
+    let path = paths.product_database();
+    let old = plakous_recursive_subagents_store::admission::Schema {
+        revisions: &[],
+        ..SCHEMA
+    };
+    drop(old.open_writer(&path, |_| Ok(())).unwrap());
+    assert!(matches!(
+        SCHEMA.inspect(&path).unwrap(),
+        plakous_recursive_subagents_store::admission::Status::Pending(39)
+    ));
+    SCHEMA
+        .lock_upgrade(&path)
+        .unwrap()
+        .unwrap()
+        .backup()
+        .unwrap()
+        .commit(|_, _| {})
+        .unwrap();
+    let mut store = ProductStore::open(&paths).unwrap();
+    let mut session = SessionRecord::new(root.path().join("workspace"));
+    session.account = Some("codex".into());
+    session.model = Some("offline-loopback-v1".into());
+    session.target_selection = ProductTargetSelection::NativeUltrafast;
+    store.commit(&mut session).unwrap();
+    assert_eq!(
+        store.load(&session.id).unwrap().target_selection,
+        session.target_selection
+    );
+    assert!(old.check_revision(&path).is_err());
+}
+
+#[test]
 fn current_schema_rejects_previous_product_store_without_modification() {
     // A product schema change moves the state directory; a store at
     // another version in this directory is refused with its rows intact.
-    assert_eq!(SCHEMA_VERSION, 39);
+    assert_eq!(SCHEMA_VERSION, 40);
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     paths.ensure_layout().unwrap();
@@ -959,7 +995,7 @@ fn current_schema_rejects_previous_product_store_without_modification() {
         ProductStoreOpenErrorKind::UnsupportedPersistence
     );
     assert!(
-        error.to_string().contains("product schema 37, expected 39"),
+        error.to_string().contains("product schema 37, expected 40"),
         "{error}"
     );
     assert!(

@@ -247,8 +247,9 @@ class EvidenceTests(GitFixture):
         path = self.root / "bin/plakd/src/store/schema.rs"
         path.write_text(
             path.read_text().replace(
-                "revisions: &[],",
-                'revisions: &[\n        Revision {\n            sql: "CREATE INDEX ...",\n        },\n    ],',
+                "    revisions: &[",
+                '    revisions: &[\n        Revision {\n            sql: "CREATE INDEX ...",\n        },\n        ',
+                1,
             )
         )
         self.candidate = self.commit()
@@ -266,7 +267,7 @@ class EvidenceTests(GitFixture):
             "const ADD_INDEX: Revision = Revision {\n"
             "    sql: ADDED_INDEX,\n"
             '    objects: &[("added", ADDED_INDEX)],\n'
-            "};\n" + source.replace("revisions: &[],", "revisions: &[ADD_INDEX],")
+            "};\n" + source.replace("    revisions: &[", "    revisions: &[ADD_INDEX, ", 1)
         )
         revision = self.commit()
         before = EVIDENCE.formats(self.root, self.base)

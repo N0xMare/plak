@@ -3,11 +3,11 @@ use std::os::unix::fs::PermissionsExt as _;
 
 fn seed_paired(fixture: &Fixture, path: &str, id: &str) -> String {
     let mut document: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../fixtures/session-export-v12-default.json"
+        "../../../fixtures/session-export-v13-default.json"
     ))
     .unwrap();
     let previous: serde_json::Value =
-        serde_json::from_str(include_str!("../../../fixtures/session-export-v12.json")).unwrap();
+        serde_json::from_str(include_str!("../../../fixtures/session-export-v13.json")).unwrap();
     document["history"] = previous["history"].clone();
     document["source"]["session_id"] = json!(uuid::Uuid::new_v4().to_string());
     document["workspace_root"] = json!(fixture.workspace().canonicalize().unwrap());

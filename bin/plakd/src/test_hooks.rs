@@ -99,11 +99,14 @@ pub(crate) fn product_store_schema(
 ) -> plakous_recursive_subagents_store::admission::Schema {
     if STORE_REVISION_FIXTURE.load(Ordering::Relaxed) {
         plakous_recursive_subagents_store::admission::Schema {
-            revisions: &[plakous_recursive_subagents_store::admission::Revision {
-                sql: STORE_REVISION_DDL,
-                objects: &[("product_revision_fixture", STORE_REVISION_DDL)],
-                fingerprint: "e156d5b66aaaffa97fe8c1aa8fa0e31c9c32d48a561d6a48dfc569d0ced0c1e5",
-            }],
+            revisions: &[
+                crate::store::schema::NATIVE_ULTRAFAST_REVISION,
+                plakous_recursive_subagents_store::admission::Revision {
+                    sql: STORE_REVISION_DDL,
+                    objects: &[("product_revision_fixture", STORE_REVISION_DDL)],
+                    fingerprint: "e156d5b66aaaffa97fe8c1aa8fa0e31c9c32d48a561d6a48dfc569d0ced0c1e5",
+                },
+            ],
             ..base
         }
     } else {

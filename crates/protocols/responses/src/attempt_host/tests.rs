@@ -944,6 +944,14 @@ fn exact_request_authority_with_metadata(
     include_tools: bool,
     metadata: RequestMetadata,
 ) -> Result<(ModelRequest, ResponsesRequestAuthority), TestError> {
+    exact_request_authority_with_tier(include_tools, metadata, ProcessingTierDisposition::Standard)
+}
+
+fn exact_request_authority_with_tier(
+    include_tools: bool,
+    metadata: RequestMetadata,
+    tier: ProcessingTierDisposition,
+) -> Result<(ModelRequest, ResponsesRequestAuthority), TestError> {
     let descriptor = test_descriptor()?;
     let item = ConversationItem::new(
         typed_id::<EntryId>(13)?,
@@ -960,7 +968,8 @@ fn exact_request_authority_with_metadata(
         ConversationView::from_items(vec![item])?,
         metadata,
     )
-    .resolved_harness_plan_identity(harness_plan);
+    .resolved_harness_plan_identity(harness_plan)
+    .processing_tier(tier);
     if include_tools {
         builder = builder.tools(vec![plakous_model::ConfiguredTool::new(ToolDefinition::new(
             ToolName::new("lookup")?,
@@ -1726,6 +1735,138 @@ async fn statuses_are_returned_once_without_fallback_or_retry() -> Result<(), Te
         } if provider.class() == ResponsesProviderErrorClass::Unknown
     ));
     assert_eq!(peer.await??.1, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn named_codex_tier_refusals_keep_the_backend_error_without_replay() -> TestResult {
+    for (tier, status, kind) in [
+        (
+            Some("priority"),
+            "403 Forbidden",
+            ModelErrorKind::Authorization,
+        ),
+        (
+            Some("ultrafast"),
+            "403 Forbidden",
+            ModelErrorKind::Authorization,
+        ),
+        (None, "402 Payment Required", ModelErrorKind::QuotaExceeded),
+    ] {
+        let response = http_response_with(
+            status,
+            Some("application/json"),
+            "Retry-After: 0\r\n",
+            br#"{"error":{"message":"request refused"}}"#,
+        );
+        let (tls, identity, origin, peer) = responding_wire_peer_sequence(vec![response]).await?;
+        let client = Client::with_tls_config_and_identity(Limits::default(), tls, identity)?;
+        let dialect = wire_dialect(origin, openai_generation_fingerprint(b"named-tier-refusal"));
+        let authorization =
+            ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?
+                .with_credential_rejected(wire_credential_rejected);
+        let data = attempt_data(&client, &authorization)?.with_wrapped_overload();
+        let attempt = match tier {
+            Some(tier) => named_tier_attempt(&data, tier)?,
+            None => executable_attempt(&data, CancellationToken::new())?,
+        };
+        let service =
+            ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
+        let Err(error) = service.execute(attempt).await else {
+            panic!("expected typed HTTP refusal");
+        };
+        assert_eq!(error.retry_class(), RetryClass::Never);
+        assert_eq!(error.facts().physical_attempts(), 1);
+        assert_eq!(
+            error
+                .contextual_http_error(&test_descriptor()?)
+                .as_ref()
+                .map(ModelError::kind),
+            Some(kind)
+        );
+        assert_eq!(dialect.credential_rejections.load(Ordering::SeqCst), 0);
+        let requests = peer.await??;
+        assert_eq!(requests.len(), 1);
+        let (_, body) = std::str::from_utf8(&requests[0])?
+            .split_once("\r\n\r\n")
+            .ok_or("request framing")?;
+        let body: serde_json::Value = serde_json::from_str(body)?;
+        assert_eq!(body["service_tier"].as_str(), tier);
+    }
+    Ok(())
+}
+
+fn named_tier_attempt(
+    data: &ResponsesAttemptDialectData,
+    id: &str,
+) -> TestResult<ResponsesAttempt> {
+    let metadata = RequestMetadata::for_turn(
+        typed_id::<RunId>(10)?,
+        typed_id::<TurnId>(11)?,
+        typed_id::<AttemptId>(12)?,
+        Timestamp::new(1_700_000_000, 0)?,
+    );
+    let tier =
+        ProcessingTierDisposition::ProviderNamed(plakous_model::ProviderServiceTierId::new(id)?);
+    let (request, authority) = exact_request_authority_with_tier(false, metadata, tier)?;
+    let prepared = prepare_responses_attempt(authority, &request, None, data)?;
+    Ok(ResponsesAttempt::from_prepared(
+        prepared,
+        typed_id::<AttemptId>(14)?,
+        CancellationToken::new(),
+        Instant::now() + Duration::from_secs(10),
+    ))
+}
+
+#[tokio::test]
+async fn named_codex_tiers_keep_auth_renewal_and_transient_retries() -> TestResult {
+    for tier in ["priority", "ultrafast"] {
+        for (first, renewals) in [
+            (refusal("401 Unauthorized", "0"), 1),
+            (refusal("429 Too Many Requests", "0"), 0),
+            (refusal("503 Service Unavailable", "0"), 0),
+            (wrapped_overload("0"), 0),
+            (
+                http_response(
+                    "200 OK",
+                    Some("text/event-stream"),
+                    &rate_limited_stream_refusal(),
+                ),
+                0,
+            ),
+        ] {
+            let accepted = http_response("200 OK", Some("text/event-stream"), &complete_sse_body());
+            let (tls, identity, origin, peer) =
+                responding_wire_peer_sequence(vec![first, accepted]).await?;
+            let client = Client::with_tls_config_and_identity(Limits::default(), tls, identity)?;
+            let dialect = wire_dialect(origin, openai_generation_fingerprint(b"named-tier-retry"));
+            let authorization =
+                ResponsesAuthorizationAdapter::new(1, 1, wire_preflight, wire_revalidate)?
+                    .with_credential_rejected(wire_credential_rejected);
+            let data = attempt_data(&client, &authorization)?.with_wrapped_overload();
+            let attempt = named_tier_attempt(&data, tier)?;
+            let service =
+                ResponsesAttemptService::new(client, Arc::clone(&dialect), data, authorization)?;
+            let response = service.execute(attempt).await?;
+            assert!(response.facts().provider_accepted());
+            assert_eq!(response.facts().physical_attempts(), 2);
+            assert_eq!(
+                dialect.credential_rejections.load(Ordering::SeqCst),
+                renewals
+            );
+            let requests = peer.await??;
+            assert_eq!(requests.len(), 2);
+            for request in requests {
+                let (_, body) = std::str::from_utf8(&request)?
+                    .split_once("\r\n\r\n")
+                    .ok_or("request framing")?;
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(body)?["service_tier"],
+                    tier
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -5214,13 +5355,17 @@ fn rate_limited_failure(sequence: u64) -> serde_json::Value {
             "error":{"code":"rate_limit_exceeded","message":"slow down"}}})
 }
 
+fn rate_limited_stream_refusal() -> Vec<u8> {
+    let created = serde_json::json!({"type":"response.created","sequence_number":0,
+        "response":{"id":"resp_refused","object":"response","status":"in_progress","model":"gpt-test"}});
+    sse(&[created, rate_limited_failure(1)])
+}
+
 /// Four in-band refusals spend the whole physical budget: the attempt ends in
 /// one failed terminal after four requests, never a fifth.
 #[tokio::test]
 async fn in_band_refusals_that_exhaust_the_budget_end_in_one_failed_terminal() -> TestResult {
-    let created = serde_json::json!({"type":"response.created","sequence_number":0,
-        "response":{"id":"resp_refused","object":"response","status":"in_progress","model":"gpt-test"}});
-    let refused = sse(&[created, rate_limited_failure(1)]);
+    let refused = rate_limited_stream_refusal();
     let (response, seen, terminal, sends) =
         serve_in_band_refusals(vec![refused; 4], b"in-band-exhausted").await?;
     assert!(!response.terminal().is_completed());

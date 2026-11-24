@@ -3,15 +3,15 @@
 use super::application::{PlakousApplication, catalog_summaries};
 use super::session::load_admitted_product_session;
 use super::support::{
-    application_execution_failure, native_processing_tier, product_subscription_request_limits,
-    require_ready, run_composition, warn_catalog_snapshot,
+    application_execution_failure, product_subscription_request_limits, require_ready,
+    run_composition, warn_catalog_snapshot,
 };
 use crate::cli_output::{TerminalMode, safe_terminal_block};
 use crate::product_config;
 use crate::store::sessions as product_sessions;
 use plakous::agent::ReasoningEffort;
 use plakous::application::ApplicationExecutor;
-use plakous::subscriptions::{NativeProvider, NativeSubscriptionError};
+use plakous::subscriptions::NativeSubscriptionError;
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 use plakous_hosted::runtime as product_host;
@@ -103,6 +103,13 @@ impl PlakousApplication {
             Some(account),
             accounts,
         )?;
+        let target_selection = product_config::ProductTargetSelection::for_native_service_tier(
+            configured.extra_for_tuple(account, model),
+        )
+        .ok_or_else(|| {
+            CliFailure::classified(CliFailureKind::Usage, "invalid native service tier")
+        })?;
+        target_selection.validate_account(selection)?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // scripted lifecycle binds the requested tuple without a credential
         // refresh or a catalog row, because there is no provider to admit.
@@ -114,7 +121,7 @@ impl PlakousApplication {
             session.model = Some(model.to_owned());
             session.effort = effort.map(product_host::effort_label);
             session.composition = composition;
-            session.target_selection = product_config::ProductTargetSelection::Native;
+            session.target_selection = target_selection;
             session.account_choices.clone_from(&choices);
             return self.run_hosted(
                 config,
@@ -127,8 +134,6 @@ impl PlakousApplication {
                 limits,
             );
         }
-        let priority_requested =
-            provider == NativeProvider::Codex && configured.prefers_priority(account, model);
         // Product path: refresh, then fail-closed catalog revalidation.
         // Catalog discovery uses a 0-AuthRefresh gate, so an expired access
         // token with durable Ready status must be rotated here first.
@@ -165,30 +170,22 @@ impl PlakousApplication {
                 )
             })?;
         let selected_effort = run_effort(catalog_entry, effort)?;
-        if priority_requested
-            && !catalog_entry
+        target_selection.admit_native_service_tier(
+            account,
+            model.as_str(),
+            catalog_entry
                 .service_tiers
                 .iter()
-                .any(|(id, _, _)| id == "priority")
-        {
-            return Err(CliFailure::classified(
-                CliFailureKind::Usage,
-                "Fast is absent from the authenticated run model row",
-            ));
-        }
+                .map(|(id, _, _)| id.as_str()),
+        )?;
         let native_tool_mode = catalog_entry.native_tool_mode;
-        let target_selection = if priority_requested {
-            product_config::ProductTargetSelection::NativePriority
-        } else {
-            product_config::ProductTargetSelection::Native
-        };
         let selected = product_agent::selected_coding_provider_configuration_with_processing_tier(
             provider,
             model,
             selected_effort,
             native_tool_mode,
             composition,
-            native_processing_tier(&target_selection)?,
+            target_selection.native_processing_tier()?,
         )
         .map_err(|failure| failure.or_kind(CliFailureKind::Usage))?;
         // Product coding turns need real inference allowance; catalog-only gates may use zero.
@@ -352,7 +349,9 @@ impl PlakousApplication {
             return self.run_hosted(
                 config,
                 session,
-                plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
+                plakous_hosted::runtime::test_kit::registered_authority(
+                    plakous::subscriptions::NativeProvider::Codex,
+                ),
                 prompt,
                 print_session_id,
                 stdout,
@@ -453,16 +452,14 @@ impl PlakousApplication {
                 "session has no exact admitted effort binding",
             ));
         }
-        if session.target_selection == product_config::ProductTargetSelection::NativePriority
-            && !catalog_entry
+        session.target_selection.admit_native_service_tier(
+            &account,
+            model.as_str(),
+            catalog_entry
                 .service_tiers
                 .iter()
-                .any(|(id, _, _)| id == "priority")
-        {
-            return Err(CliFailure::new(
-                "Fast is absent from the authenticated session model row",
-            ));
-        }
+                .map(|(id, _, _)| id.as_str()),
+        )?;
         let native_tool_mode = catalog_entry.native_tool_mode;
         let selected = product_agent::selected_coding_provider_configuration_with_processing_tier(
             provider,
@@ -470,7 +467,7 @@ impl PlakousApplication {
             effort_explicit.then_some(effort),
             native_tool_mode,
             session.composition,
-            native_processing_tier(&session.target_selection)?,
+            session.target_selection.native_processing_tier()?,
         )
         .map_err(|failure| failure.or_kind(CliFailureKind::Usage))?;
         let request_limits = product_subscription_request_limits()

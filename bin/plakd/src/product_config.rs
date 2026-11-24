@@ -67,7 +67,9 @@ pub use templates::{
     TEMPLATE_FIELD_DOCS, TemplateFieldDoc, init_if_missing, render_template_annotated,
 };
 
-pub(crate) use templates::{parse_template, render_template};
+#[cfg(test)]
+pub(crate) use templates::render_template;
+pub(crate) use templates::{parse_template, render_template_for_digest};
 
 pub(crate) fn install_gateway_address(
     paths: &crate::home::paths::PlakPaths,

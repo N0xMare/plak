@@ -285,7 +285,7 @@ fn a_profile_root_names_its_api_or_openrouter_target_exactly() {
 }
 
 #[test]
-fn native_model_transition_selects_the_codex_fast_lane_only() {
+fn native_model_transition_selects_named_tiers_only_for_codex() {
     assert_eq!(
         profile_target_selection("codex", None, None).unwrap(),
         TargetSelection::Native
@@ -295,6 +295,10 @@ fn native_model_transition_selects_the_codex_fast_lane_only() {
         TargetSelection::NativePriority
     );
     assert_eq!(
+        profile_target_selection("codex/work", Some("ultrafast"), None).unwrap(),
+        TargetSelection::NativeUltrafast
+    );
+    assert_eq!(
         profile_target_selection("grok", Some("priority"), None).unwrap_err(),
         "model: provider-specific option is not admitted for this target"
     );
@@ -302,6 +306,8 @@ fn native_model_transition_selects_the_codex_fast_lane_only() {
         profile_target_selection("openai", Some("priority"), None).unwrap_err(),
         "model: provider-specific option is not admitted for this API target"
     );
+    assert!(profile_target_selection("claude", Some("ultrafast"), None).is_err());
+    assert!(profile_target_selection("codex", Some("future-tier"), None).is_err());
 }
 
 #[test]

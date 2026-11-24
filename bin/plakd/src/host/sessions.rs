@@ -1241,8 +1241,10 @@ mod tests {
                 account: record.account.clone(),
                 model: record.model.clone(),
                 effort: record.effort.clone(),
-                fast: record.target_selection
-                    == crate::product_config::ProductTargetSelection::NativePriority,
+                service_tier: record
+                    .target_selection
+                    .native_service_tier()
+                    .map(str::to_owned),
                 workspace,
                 roster: Some(tree.current_epoch().clone()),
                 live_children: false,

@@ -37,7 +37,7 @@ Templates MUST NOT be authored through `plakd config set`, which refuses
 | Field | Meaning |
 | --- | --- |
 | `account`, `model`, `effort` | the bind tuple; never shown on the card unless `show_model`. `account` is a provider kind (`codex`, `claude`, `grok`, `anthropic`, `openai`, `xai-api`, `openrouter`) or an accepted alias, never a named account: a named reference such as `codex/work` is a named load error. The session holds the named account per kind (§2.1, chapter 02 §4.4.1) |
-| `fast_mode` | Codex-only fast lane (provider-native `priority` processing tier) |
+| `service_tier` | Codex-only processing tier: `fast` (`priority`) or `ultrafast`; omitted is Standard |
 | `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`) |
 | `protocol` | OpenRouter-only wire selection |
 | `description` | **required** for a template named in the working set or in any `spawns` list: the card text the spawner routes on |
@@ -423,16 +423,18 @@ when its template sets `may_adopt`.
 
 ### 2.1 Bind
 
-A child's account, model, effort, processing tier (`fast_mode`),
+A child's account, model, effort, processing tier (`service_tier`),
 composition, and protocol come **only** from its own template, resolved against
 the frozen snapshot. Nothing is taken from the parent: a template that names the
 parent's account and model still binds its own effort (an omitted effort means
-the model's catalog default) and its own tier, and a Standard parent may spawn a
-Fast child or the reverse. A card that names no account or no model is refused
+the model's catalog default) and its own tier. The epoch freezes the exact
+provider tier id; editing a template does not change a running epoch.
+A card that names no account or no model is refused
 `schema_mismatch` before any node is spent. Not-Ready, a tuple absent from the
 authenticated catalog, a tier the exact catalog row does not advertise, or a
 resolve failure is fail-closed (`model_not_admitted` or binder recovery),
-never a fallback to the caller. A non-empty `spawns` decides only whether a
+never a fallback to the caller or another tier. A rebind must revalidate the
+requested tier against the current row. A non-empty `spawns` decides only whether a
 node may be a parent; it is independent of the node's tier.
 
 The card's account is a kind. At spawn, before product admission, the tree
@@ -3556,7 +3558,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 
 ## 14. Persistence, reopen, and recovery
 
-Product state lives in `product.sqlite3` at **schema 39**: intents and
+Product state lives in `product.sqlite3` at generation **39**, revision **40**: intents and
 feed-derived views (chapter 02 §2.6), including `sessions.account_choices` for non-root kinds, a rebind request's optional filled choices, and the `last_root_turn` view a continue reads (chapter 02 §4.4.1). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at generation **11**,

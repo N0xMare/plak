@@ -503,7 +503,7 @@ fn role(label: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {
             .effort
             .clone()
             .unwrap_or_else(|| "default".to_owned()),
-        fast: template.is_fast(),
+        fast: template.service_tier().is_some(),
         depth,
     }
 }

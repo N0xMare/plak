@@ -242,10 +242,7 @@ fn template_summary(
         model: template.model.clone(),
         effort: template.effort.clone(),
         composition: template.composition_or_default().as_str().into(),
-        tier: match template.processing_tier() {
-            plakous::model::ProcessingTierDisposition::Standard => "standard".into(),
-            plakous::model::ProcessingTierDisposition::ProviderNamed(tier) => tier.as_str().into(),
-        },
+        tier: template.legacy_fast_extra().unwrap_or("standard").into(),
         unready_reason: Some("readiness is not evaluated by this definition read".into()),
     }
 }
@@ -258,7 +255,7 @@ fn template_body(template: &AgentTemplate) -> TemplateBody {
             .map_or_else(|_| template.account.clone(), |account| account.to_string()),
         model: template.model.clone(),
         effort: template.effort.clone(),
-        extra: template.extra.clone(),
+        extra: template.legacy_fast_extra().map(str::to_owned),
         composition: template.composition.map(Into::into),
         protocol: template.protocol.map(Into::into),
         description: template.description.clone(),

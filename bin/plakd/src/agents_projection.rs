@@ -7,7 +7,6 @@
 //! projection the product still renders — each template with the readiness
 //! the host computed for it.
 
-use plakous::model::ProcessingTierDisposition;
 use plakous_host_protocol::views::TemplateRow;
 
 use crate::home::paths::PlakPaths;
@@ -38,10 +37,11 @@ fn template_rows_of(
             model: row.template.model.clone(),
             effort: row.template.effort.clone(),
             composition: row.template.composition_or_default().as_str().to_owned(),
-            tier: match row.template.processing_tier() {
-                ProcessingTierDisposition::Standard => "standard".to_owned(),
-                ProcessingTierDisposition::ProviderNamed(tier) => tier.as_str().to_owned(),
-            },
+            tier: row
+                .template
+                .legacy_fast_extra()
+                .unwrap_or("standard")
+                .into(),
             unready_reason: row.readiness.reason().map(str::to_owned),
         })
         .collect()

@@ -67,7 +67,7 @@ fn named_templates_canonicalize_aliases_and_keep_vertical_protocol_rules() {
         assert!(error.contains("not a named account"), "{named}: {error}");
     }
     let fast = parse_template(
-        "account = \"codex\"\nmodel = \"m\"\nfast_mode = true\n",
+        "account = \"codex\"\nmodel = \"m\"\nservice_tier = \"fast\"\n",
         "fixture",
     )
     .unwrap();
@@ -656,7 +656,7 @@ fn full_schema_round_trips_through_files() {
             &template_body(
                 "codex",
                 "gpt-5.6-luna",
-                "effort = \"low\"\nfast_mode = true\ncomposition = \"native-ptc\"\naccess = \"full\"\ncost_tier = 3\n[env]\nCARGO_TARGET_DIR = \"/tmp/t\"\n",
+                "effort = \"low\"\nservice_tier = \"fast\"\ncomposition = \"native-ptc\"\naccess = \"full\"\ncost_tier = 3\n[env]\nCARGO_TARGET_DIR = \"/tmp/t\"\n",
             ),
         ),
         (
@@ -862,48 +862,50 @@ fn roster_key_other_than_working_set_is_a_named_error() {
     assert!(ProductConfig::parse("[roster]\nworking_set = []\n").is_ok());
 }
 
-/// `fast_mode` is the only spelling of the Codex fast lane: a bool that
-/// maps to the provider-native `priority` option internally.
 #[test]
-fn fast_mode_is_a_codex_only_bool() {
-    let fast = parse_template(
-        "account = \"codex\"\nmodel = \"m\"\nfast_mode = true\n",
-        "t",
-    )
-    .unwrap();
-    assert_eq!(fast.extra.as_deref(), Some("priority"));
-    assert!(fast.is_fast());
-    let rendered = render_template(&fast);
-    assert!(rendered.contains("fast_mode = true\n"), "{rendered}");
-    assert_eq!(parse_template(&rendered, "t").unwrap(), fast);
-
-    // false is explicit everywhere, including a non-Codex account.
-    for account in ["codex", "grok"] {
-        let standard = parse_template(
-            &format!("account = \"{account}\"\nmodel = \"m\"\nfast_mode = false\n"),
+fn service_tier_is_a_closed_codex_only_template_option() {
+    for (name, id) in [("fast", "priority"), ("ultrafast", "ultrafast")] {
+        let tier_line = format!("service_tier = \"{name}\"\n");
+        let template = parse_template(
+            &format!("account = \"codex\"\nmodel = \"m\"\n{tier_line}"),
             "t",
         )
         .unwrap();
+        assert_eq!(template.extra.as_deref(), Some(id));
+        let rendered = render_template(&template);
+        assert!(rendered.contains(&tier_line), "{rendered}");
+        assert_eq!(parse_template(&rendered, "t").unwrap(), template);
+        let error = parse_template(
+            &format!("account = \"grok\"\nmodel = \"m\"\n{tier_line}"),
+            "t",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("service_tier requires the Codex subscription kind"),
+            "{error}"
+        );
+    }
+    for account in ["codex", "grok"] {
+        let standard =
+            parse_template(&format!("account = \"{account}\"\nmodel = \"m\"\n"), "t").unwrap();
         assert_eq!(standard.extra, None);
-        assert!(!standard.is_fast());
         let rendered = render_template(&standard);
-        assert!(rendered.contains("fast_mode = false\n"), "{rendered}");
+        assert!(!rendered.contains("service_tier"), "{rendered}");
         assert_eq!(parse_template(&rendered, "t").unwrap(), standard);
     }
 
-    // true is refused on any other account.
-    let error =
-        parse_template("account = \"grok\"\nmodel = \"m\"\nfast_mode = true\n", "t").unwrap_err();
-    assert!(
-        error.contains("Fast mode requires the Codex subscription account"),
-        "{error}"
-    );
-    let error = parse_template(
-        "account = \"codex\"\nmodel = \"m\"\nfast_mode = \"true\"\n",
-        "t",
-    )
-    .unwrap_err();
-    assert!(error.contains("fast_mode must be a boolean"), "{error}");
+    for (value, expected) in [
+        ("true", "service_tier must be a string"),
+        ("\"priority\"", "service_tier must be fast|ultrafast"),
+        ("\"standard\"", "service_tier must be fast|ultrafast"),
+    ] {
+        let error = parse_template(
+            &format!("account = \"codex\"\nmodel = \"m\"\nservice_tier = {value}\n"),
+            "t",
+        )
+        .unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
 
     let error = parse_template(
         "account = \"codex\"\nmodel = \"m\"\ncomposition = \"follow-catalog\"\n",
@@ -979,7 +981,7 @@ fn every_template_validation_rule_has_a_positive_and_a_negative_case() {
             .contains("template t: OpenRouter has no native programmatic tool calling")
     );
 
-    // Rule 5: fast_mode maps to `priority`, and only on codex.
+    // Rule 5: only Codex admits named tiers.
     let mut fast = template("codex", "gpt");
     fast.extra = Some("priority".into());
     fast.validate("t").unwrap();
@@ -995,7 +997,7 @@ fn every_template_validation_rule_has_a_positive_and_a_negative_case() {
         grok_fast
             .validate("t")
             .unwrap_err()
-            .contains("Fast mode requires the Codex subscription account")
+            .contains("service_tier requires the Codex subscription kind")
     );
 
     // Rule 6: any composition is admitted because the tuple is structural.
@@ -1464,7 +1466,11 @@ fn the_shipped_presets_load_as_a_home() {
                 Some(*effort),
                 "{preset}/{role} effort"
             );
-            assert_eq!(template.is_fast(), *fast, "{preset}/{role} fast_mode");
+            assert_eq!(
+                template.service_tier(),
+                fast.then_some("fast"),
+                "{preset}/{role} service_tier"
+            );
             assert_eq!(template.max_tier, access, "{preset}/{role} access");
             assert_eq!(
                 template
@@ -2078,6 +2084,37 @@ fn readiness_requires_credential_ready_and_catalog_admission() {
         template_readiness(&record, CredentialReadiness::Ready, &sections),
         template_readiness(&record, CredentialReadiness::Ready, &sections)
     );
+}
+
+#[test]
+fn ultrafast_readiness_does_not_borrow_another_account_or_models_tier() {
+    let mut sections = catalog(
+        "codex",
+        true,
+        vec![
+            catalog_entry("gpt-6.2-sol", &["low"], &["priority", "ultrafast"]),
+            catalog_entry("gpt-6.2-astra", &["low"], &["priority"]),
+        ],
+    );
+    sections.extend(catalog(
+        "codex/work",
+        true,
+        vec![catalog_entry("gpt-6.2-sol", &["low"], &["priority"])],
+    ));
+    let mut record = template("codex", "gpt-6.2-sol");
+    record.extra = Some("ultrafast".into());
+    assert_eq!(
+        template_readiness(&record, CredentialReadiness::Ready, &sections),
+        TemplateReadiness::Ready
+    );
+    for (account, model) in [("codex", "gpt-6.2-astra"), ("codex/work", "gpt-6.2-sol")] {
+        record.account = account.into();
+        record.model = model.into();
+        assert_eq!(
+            template_readiness(&record, CredentialReadiness::Ready, &sections),
+            TemplateReadiness::NotReady(TemplateNotReady::TierNotAdvertised)
+        );
+    }
 }
 
 #[test]
@@ -2704,5 +2741,13 @@ fn removed_keys_are_plain_unknown_keys() {
             format!("template t: unknown key {key}"),
             "{line}"
         );
+    }
+    for value in [true, false] {
+        let error = toml_file::parse_template(
+            &format!("account = \"codex\"\nmodel = \"m\"\nfast_mode = {value}\n"),
+            "t",
+        )
+        .unwrap_err();
+        assert!(error.contains("service_tier = \"fast\""), "{error}");
     }
 }

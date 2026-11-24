@@ -1195,7 +1195,17 @@ pub async fn spawned_child_spec(
                 ),
             )
             .await
-            .map_err(|error| child_provider_failure(error.kind(), &selection))?,
+            .map_err(|error| match error.kind() {
+                kind @ NativeSubscriptionError::ProcessingTierNotAdvertised(_) => {
+                    crate::CliFailure::classified(
+                        crate::error::CliFailureKind::Usage,
+                        format!(
+                            "cannot bind child model `{target_model}` on `{selection}`: {kind}; run `plakd models {selection}` to see offered tiers"
+                        ),
+                    )
+                }
+                kind => crate::CliFailure::new(child_provider_failure(kind, &selection)),
+            })?,
     );
     if resolved.native_tool_mode() != native_tool_mode {
         let row_mode = child_tool_mode_label(resolved.native_tool_mode());

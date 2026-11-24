@@ -31,7 +31,7 @@ reach for first:
 | Field | Meaning |
 | --- | --- |
 | `account`, `model` | The binding. Required. |
-| `effort`, `composition`, `protocol`, `fast_mode` | Model options and tool composition. `composition = "native-ptc"` is the vertical's own programmatic tool calling, enrolled today only for Codex Code Mode; a card on another vertical is refused, so use `js-ptc` or `py-ptc` there (see [Providers and accounts](providers-and-accounts.md)). `fast_mode` is a template setting; its provider-native processing tier is resolved at bind. |
+| `effort`, `composition`, `protocol`, `service_tier` | Model options and tool composition. `composition = "native-ptc"` is the vertical's own programmatic tool calling, enrolled today only for Codex Code Mode; a card on another vertical is refused, so use `js-ptc` or `py-ptc` there (see [Providers and accounts](providers-and-accounts.md)). |
 | `description` | The card the spawning model reads. Required for anything in the working set or in a `spawns` list. |
 | `access` | `full` or `read-execute`. Default `full`. `read-execute` omits dedicated file-edit tools but still permits shell commands. |
 | `tools` | Optional tools by name (`web_search`, `fetch_url`, `mcp:github`, ...). Default `[]`. A child gets exactly its own template's list, whatever its parent has; see [Configuration](configuration.md#optional-tools-and-mcp-servers). |
@@ -39,6 +39,16 @@ reach for first:
 | `may_adopt` | May it adopt a child's work? Default `false`, and requires `spawns` naming another template. |
 | `delegation` | `explicit` (default) or `proactive`. |
 | `show_model`, `cost_tier`, `max_turns`, `on_mint`, `[env]` | Optional extras. |
+
+For a Codex subscription template, set `service_tier = "fast"` or
+`service_tier = "ultrafast"`, or omit it for Standard. Run
+`plakd models <account>` to check the tiers offered for the exact model and
+account. An unavailable tier is refused, not replaced with a different one.
+Select Ultrafast in the template file and select that template with
+`root.agent` or a profile; the protocol-12 console's template Fast toggle
+cannot select Ultrafast. The protocol's generic session model picker and
+settings can still select Ultrafast where the catalog offers it, and can show
+it on the active session binding.
 
 `config.toml` holds no templates: an `[agent.<name>]` block there is refused at
 load with a message to move it into `agents/`.
@@ -210,7 +220,7 @@ pins belong to retained records, independently of the checkout's lifetime.
 
 - The task text and output schema its parent passed to `spawn_agent`.
 - Its **own** template's binding. A child does not inherit its parent's account,
-  model, effort or Fast mode — it gets what its template says, even when the
+  model, effort or service tier — it gets what its template says, even when the
   template names the same account and model as the parent. A Fast parent may
   spawn Standard children and the reverse.
 - Its **own** template's authority. A fresh child's spawn menu is its own

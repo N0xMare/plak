@@ -208,7 +208,9 @@ async fn authentication_policy_and_model_absence_do_not_retry() {
     for kind in [
         NativeSubscriptionError::ModelUnavailable,
         NativeSubscriptionError::CatalogDocumentRejected,
-        NativeSubscriptionError::ProviderConfigurationPolicyMismatch("processing_tier"),
+        NativeSubscriptionError::ProcessingTierNotAdvertised(
+            plakous_model::ProviderServiceTierId::new("ultrafast").unwrap(),
+        ),
     ] {
         let attempts = AtomicUsize::new(0);
         let _ = resolve(

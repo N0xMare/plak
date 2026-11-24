@@ -734,8 +734,11 @@ pub(super) fn send_shell_binding<P: plakous_host_protocol::ProtocolExtension>(
         account: config.session.account.clone(),
         model: config.session.model.clone(),
         effort: config.session.effort.clone(),
-        extra: (config.session.target_selection == TargetSelection::NativePriority)
-            .then(|| "priority".to_owned()),
+        extra: config
+            .session
+            .target_selection
+            .native_service_tier()
+            .map(str::to_owned),
         composition: config.session.composition.into(),
         protocol: match &config.session.target_selection {
             TargetSelection::OpenRouter { wire, .. } => match wire.selection {
@@ -755,9 +758,9 @@ pub(super) fn send_shell_binding<P: plakous_host_protocol::ProtocolExtension>(
                     plakous_host_protocol::ProtocolSelection::Chat
                 }
             },
-            TargetSelection::Native | TargetSelection::NativePriority => {
-                plakous_host_protocol::ProtocolSelection::Auto
-            }
+            TargetSelection::Native
+            | TargetSelection::NativePriority
+            | TargetSelection::NativeUltrafast => plakous_host_protocol::ProtocolSelection::Auto,
         },
         effective_presentation: crate::agent::effective_presentation_label(
             config.session.composition,
@@ -949,11 +952,9 @@ impl ReadinessRefresh {
     }
 }
 
-/// The target selection for a profile root: Platform for an API account,
-/// the priority lane only for a Codex root on the fast lane, Native otherwise.
 /// The target a profile's root names: its account's direct API route, the
 /// `OpenRouter` gateway on the root's wire, or a native subscription (Codex
-/// alone takes the priority lane).
+/// alone takes named processing tiers).
 pub(super) fn profile_target_selection(
     account: &str,
     requested_tier: Option<&str>,
@@ -982,14 +983,14 @@ pub(super) fn profile_target_selection(
     }
     match requested_tier {
         None | Some("standard") => Ok(TargetSelection::Native),
-        Some("priority")
-            if account
-                .parse::<crate::account::AccountRef>()
-                .is_ok_and(|account| account.vertical() == crate::account::Vertical::Codex) =>
-        {
-            Ok(TargetSelection::NativePriority)
+        Some(id) => {
+            let target = TargetSelection::for_native_service_tier(Some(id)).filter(|_| {
+                account
+                    .parse::<crate::account::AccountRef>()
+                    .is_ok_and(|account| account.vertical() == crate::account::Vertical::Codex)
+            });
+            target.ok_or("model: provider-specific option is not admitted for this target")
         }
-        Some(_) => Err("model: provider-specific option is not admitted for this target"),
     }
 }
 
@@ -1015,7 +1016,9 @@ pub(super) fn api_root_binding(
                 _ => return Err("an API root takes an effort its model publishes"),
             }
         }
-        TargetSelection::Native | TargetSelection::NativePriority => {
+        TargetSelection::Native
+        | TargetSelection::NativePriority
+        | TargetSelection::NativeUltrafast => {
             return Err("a native target is not an API root");
         }
     };
@@ -1139,8 +1142,10 @@ pub(super) fn handle_shell_set_model<P: plakous_host_protocol::ProtocolExtension
     root.account = account;
     root.model.clone_from(&model);
     root.effort.clone_from(&effort);
-    root.extra = (candidate.target_selection == TargetSelection::NativePriority)
-        .then(|| "priority".to_owned());
+    root.extra = candidate
+        .target_selection
+        .native_service_tier()
+        .map(str::to_owned);
     root.composition = Some(candidate.composition);
     root.protocol = match &candidate.target_selection {
         TargetSelection::OpenRouter { wire, .. } => Some(wire.selection),

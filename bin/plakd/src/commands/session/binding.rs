@@ -60,15 +60,17 @@ pub(crate) fn seed_new_session_binding_on(
     {
         record.target_selection = product_config::ProductTargetSelection::Platform { provider };
         resolve_api_composition(record, provider)?;
-    } else if record.account.as_deref() == Some("codex")
-        && config.default_extra() == Some("priority")
-    {
-        record.target_selection = product_config::ProductTargetSelection::NativePriority;
     } else if record.account.as_deref() == Some("openrouter") {
         record.target_selection = product_config::ProductTargetSelection::OpenRouter {
             wire: product_config::ProductWireBinding::resolve(config.default_protocol()),
             routing: product_config::ProductOpenRouterRoutingSelection::GatewayManaged,
         };
+    } else {
+        record.target_selection =
+            product_config::ProductTargetSelection::for_native_service_tier(config.default_extra())
+                .ok_or_else(|| {
+                    CliFailure::classified(CliFailureKind::Usage, "invalid native service tier")
+                })?;
     }
     Ok(())
 }

@@ -49,7 +49,7 @@ fn profile_fixture() -> Option<Fixture> {
     let low = std::fs::read_to_string(fixture.home().join("agents/offline-low.toml")).unwrap();
     write_private(
         &fixture.home().join("agents/offline-fast.toml"),
-        &format!("{low}fast_mode = true\n"),
+        &format!("{low}service_tier = \"fast\"\n"),
     );
     write_private(
         &profiles.join("offline-fast.toml"),
@@ -332,7 +332,11 @@ fn offline_profile_readiness_does_not_admit_other_routes_or_efforts() {
         ProfileApply::Switch,
     )
     .unwrap_err();
-    assert!(reason.contains("Fast is absent"), "{reason}");
+    assert!(
+        reason.contains("Fast (`priority`) is not advertised")
+            && reason.contains("plakd models codex"),
+        "{reason}"
+    );
     let reason = apply(
         &mut client,
         attachment,

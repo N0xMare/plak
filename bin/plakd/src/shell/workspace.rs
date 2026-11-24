@@ -70,7 +70,7 @@ mod tests {
             account: None,
             model: None,
             effort: None,
-            fast: false,
+            service_tier: None,
             workspace: root.path().to_owned(),
             roster: None,
             live_children: false,

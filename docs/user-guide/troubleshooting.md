@@ -474,7 +474,8 @@ Use the new session ID printed by import. A duplicate import names its
 existing successor. Fix any configuration refusal and retry the import
 with the existing file.
 
-This build imports export versions 12 and 13. Release 0.0.2 wrote version
+This build imports export versions 13 and 14. To migrate a version 12 export, import it
+with a build that accepts v12 and writes v13, then export it again. Release 0.0.2 wrote version
 8; finish those sessions on 0.0.2 or start new ones. The old state remains
 untouched.
 

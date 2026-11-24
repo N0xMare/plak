@@ -20,8 +20,8 @@ pub(super) const FORMAT: &str = "plak-session-export";
 /// and of the immediately previous one. Any change to the document, including
 /// the embedded canonical-history and binding encodings, bumps this; the
 /// previous version's importer is kept for one bump only.
-pub(crate) const VERSION: u32 = 13;
-const PREVIOUS_VERSION: u32 = 12;
+pub(crate) const VERSION: u32 = 14;
+const PREVIOUS_VERSION: u32 = 13;
 pub(crate) const IMPORTABLE_VERSIONS: [u32; 2] = [PREVIOUS_VERSION, VERSION];
 const MAX_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
@@ -244,12 +244,19 @@ impl CarryDocument {
 
     pub(super) fn validate(&self) -> Result<(), ImportError> {
         match (self.version, self.kind) {
-            (VERSION, Some(DocumentKind::PortableSession)) | (PREVIOUS_VERSION, None) => {}
+            (VERSION | PREVIOUS_VERSION, Some(DocumentKind::PortableSession)) => {}
             _ => {
                 return Err(ImportError::Invalid(
                     "export kind does not match its version or import operation".to_owned(),
                 ));
             }
+        }
+        if self.version == PREVIOUS_VERSION
+            && self.binding.target_selection == ProductTargetSelection::NativeUltrafast
+        {
+            return Err(ImportError::Invalid(format!(
+                "version {PREVIOUS_VERSION} does not admit Ultrafast at $.binding.target_selection"
+            )));
         }
         if self
             .pending_work

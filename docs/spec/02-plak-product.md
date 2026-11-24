@@ -68,9 +68,7 @@ before credential-source construction. This applies to run/agent selection,
 resume, and imported documents. An account disagreeing with the recorded target
 returns typed `AccountTargetMismatch` (`account_target_mismatch`) before credentials.
 An unbound empty shell remains valid. An unknown account never
-inherits the target provider's default credentials. Export stays v13 with its
-v12 importer; these account-admission rules do not change binding inputs or
-the document encodings.
+inherits the target provider's default credentials. The account-admission rules apply to both supported export versions (§2.5.1).
 Read-only session labels retain unknown account metadata. Displaying it admits
 no work.
 
@@ -321,7 +319,7 @@ another session's jobs.
     r28.e39.p39.t11/            this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 28, epoch 39
-      product.sqlite3             plakd intents and feed-derived views, schema 39
+      product.sqlite3             plakd intents and feed-derived views, generation 39, revision 40
       subagents.sqlite3           the agent tree, schema 11
       custody-hosts/<instance>.lock  each live host process's custody liveness lock (chapter 03 §14)
       host.lock                   held by this build's `plakd host` for its life, naming its pid and binary (section 4.6); not state
@@ -612,7 +610,7 @@ Each pass snapshots same-runtime ancestry once with a narrow metadata read and
 loads only ancestor submissions. It never hydrates ancestor records, transcripts
 or unrelated intents. Own intents are read after each feed page.
 
-Product schema 39 holds the intents of §2.6 in `submissions` (keyed by command id),
+The product store holds the intents of §2.6 in `submissions` (keyed by command id),
 `workflow_requests` (keyed by operation id), `operator_notices` (keyed by notice
 id, unique per `(anchor, ordinal)`; an imported transcript is written there once
 at anchor 0 in document order) and `host_intents` (the `wake_suppression`,
@@ -633,7 +631,7 @@ them for a session is the rebuild. All keyed views cascade with the session.
 
 Workflow requests and feed-derived workflow completions are the only workflow
 model. Session records carry no workflow journal or two-phase workflow states,
-and product schema 39 has no legacy `workflows` table. Recovery
+and the product store has no legacy `workflows` table. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
 **Operator-terminal pins.** The private host registry owns terminals separately
@@ -1103,7 +1101,7 @@ encoding epoch. The runtime reads the current and preceding epoch in place.
 Runtime epoch 39 is the last declared cut and removes the
 credential-store path from the Codex and SuperGrok credential-authority
 digests. Stores under the epoch-38 key require offline migration; the
-epoch-39 key has no epoch-38 records. Product schema 39 stores
+epoch-39 key has no epoch-38 records. The product store records
 `sessions.account_choices`, a JSON object mapping non-root provider kinds to full
 account references. The root kind's account is the root line head and is not a
 map entry. State-directory
@@ -1412,7 +1410,6 @@ credential-source construction or successor publication. It never inherits
 the target provider's default key. A named API account binds only its own shelf
 key or refuses; its target must agree with its vertical on both import and resume.
 Valid unbound empty shells remain valid.
-Export uses v13, importing v13 and v12; this refusal changes no encoding.
 
 Installed-build inspection remains a host product service. The reload probe
 reports the destination state key, accepted export versions and configuration
@@ -1435,8 +1432,8 @@ is a warning, not an export refusal.
 The export document is the sole cross-build carrier. A build imports its own
 version and the immediately previous version; any document change bumps the
 version, and the previous reader survives for exactly one bump. This build
-writes **version 13** and imports **13 and 12**, never older documents.
-Version 13 requires a closed `kind`: `portable_session` or reserved
+writes **version 14** and imports **14 and 13**, never older documents.
+Both versions require a closed `kind`: `portable_session` or reserved
 `host_upgrade`. Import accepts only `portable_session` before creating any
 state. Version 12 has no kind.
 Canonical format epochs are not export versions: the carrier uses a neutral
@@ -1458,9 +1455,9 @@ epoch when the tree has rows, otherwise the virtual-tree root profile its
 record keeps. Export never reads the live configuration; a session without tree
 rows whose record names no root profile is refused as an integrity error, since
 this build writes one with every such record. Both fields are required in
-versions 12 and 13. A document with the wrong version's shape
+versions 13 and 14. A document with the wrong version's shape
 refuses before import, naming the field, the version and its JSON path
-(``version 13 requires `runner` at $.runner``), as does a runner name or identity
+(``version 14 requires `runner` at $.runner``), as does a runner name or identity
 that is empty, too long or contains whitespace (`$.runner`), and a profile
 naming an invalid template or listing one twice (`$.profile`). A nonlocal
 placement imports only when its saved runner id is configured,
@@ -1473,17 +1470,17 @@ exclusive home runner custody and retains its executor through the CLI face's
 lifetime. A running host refuses it before any bind with
 `import_through_running_host` (exit 2): stop the host, or import through an
 attached client. Local import remains direct and starts no daemon.
-The embedded history and
-binding encodings are shared by admitted versions v13 and v12: portable
-history carries no backend descriptor or job owner, and ordinary file carry
-never restores jobs. Frozen tool selections are not exported (below), so the
+Portable history uses the same neutral encoding in both admitted versions. It
+carries no backend descriptor or job owner, and ordinary file carry never
+restores jobs. Version 14 admits the exact Codex Ultrafast binding target;
+version 13 does not. Frozen tool selections are not exported (below), so the
 successor freezes the destination's tools and MCP placement. Both admitted
-versions name their saved runner and profile; there is no v11 fallback reader.
-This build writes v13, imports v13 and v12, and refuses v11 and older. The
-export version does not migrate native databases; the current product schema is 39.
+versions name their saved runner and profile. The export version does not
+migrate native databases. Product-store generation 39 revision 40 admits
+the exact Ultrafast target without changing any existing rows or SQL objects.
 
 `plakd session export <id> [--out <path>]` writes one JSON document with
-`"format": "plak-session-export", "version": 13` and prints its path. The
+`"format": "plak-session-export", "version": 14` and prints its path. The
 exclusive 0600 file never overwrites an existing path. Without `--out`, it is
 `~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
 state key and producer build provenance (verified binary id, or explicitly
@@ -1496,9 +1493,9 @@ Otherwise the common lease-free projector first catches the views up to the
 feed tail; any required writes remain derived product-view writes, not attach.
 The binding carries `py-sdk` like every other explicit selection. `named_state`
 is a key-ordered JSON map of committed session-owned values (01 §9.8); import
-validates it and seeds it atomically with history. The v12 importer uses the
-same history decoder and preserves named state. Version 11 and older are refused
-with `this build imports versions 12 and 13`; older state is left untouched.
+validates it and seeds it atomically with history. The v13 importer uses the
+same history decoder and preserves named state. Version 12 and older are refused
+with `this build imports versions 13 and 14`; older state is left untouched.
 
 `history` contains `replay_account` (source account reference), `replay_model`
 (model identifier string), and ordered `groups`. Each group contains its
@@ -1654,7 +1651,7 @@ same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
 on republication, and permanent removal when the anchor is no longer provable.
 The export file remains in place for ordinary import.
 
-Versions 13 and 12 carry full conversation rather than a separate archive;
+Versions 14 and 13 carry full conversation rather than a separate archive;
 neither has a restart checkpoint or archive import arm. There is no
 `session reference` command or search/tail archive reader. Old retained
 reference files are never read or used as import authority;
@@ -2102,7 +2099,7 @@ view, and nothing is both.
 | `title_override`, `archived` | intent | product-session id | home-local presentation/admission metadata; fresh successors and imports start with None/false; never exported. Separate revision-fenced, serialized writes preserve runtime projections; runtime saves never overwrite these columns |
 | `first_prompt` | not stored | — | a read projection of the first user row of the transcript view, for pickers and lists |
 | Selection: account, model, effort, composition, target selection | intent | the create request, then each rebind request | the effective selection is a view: the selection of the request whose `WorkflowSettled { Published }` the successor was created from, else the creation selection |
-| Account choices of the non-root kinds (`sessions.account_choices`, product schema 39) | intent | the create fill, `ChooseAccount`, or the rebind request that carries them | written with the record by creation, import and carry, and by the attached host loop for a non-root `ChooseAccount` (§4.4.1); a fork or rebind successor copies its source's, or takes the profile fill's that its rebind or switch selection carries (`account_choices`, omitted when absent); a root that changes kind keeps its previous account for cards of that kind. Never the root kind: that is the line head's account |
+| Account choices of the non-root kinds (`sessions.account_choices`, product generation 39) | intent | the create fill, `ChooseAccount`, or the rebind request that carries them | written with the record by creation, import and carry, and by the attached host loop for a non-root `ChooseAccount` (§4.4.1); a fork or rebind successor copies its source's, or takes the profile fill's that its rebind or switch selection carries (`account_choices`, omitted when absent); a root that changes kind keeps its previous account for cards of that kind. Never the root kind: that is the line head's account |
 | Last root turn (`last_root_turn`: turn id, command id, outcome, the exact prompt text when its segment was operator text alone, and whether history was committed after it) | view | `CommandAccepted`, `HistoryAppended`, `TurnTerminal` on the followed lineage | what a continue on another account reads (§4.4.1); a successor's seeded views inherit it |
 | Head locator | view | `Created`, `Advanced`, `Branched` on the session's branch | the checkpoint of the newest applied record on that branch |
 | Applied cursor | view | — | (runtime session id, sequence), stored in every projector transaction |
@@ -2186,7 +2183,7 @@ opening note `session <id> was carried forward as <successor>; resuming it`,
 instead of a read-only refusal; the headless faces print it on stderr.
 
 Carries keep their own write-ahead marker rather than a `workflow_requests`
-row. Product schema 39 retains the node, virtual root profile, runner display
+row. The product store retains the node, virtual root profile, runner display
 copy, frozen MCP placement, `switch` workflow kind, root interrupt cause and
 continuation decision intents. It also owns terminal workspace pins (§2.2);
 none of those pins turns a carry into a terminal or an agent job.
@@ -3099,7 +3096,7 @@ marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
 `plakd version --carry-probe <file>` is a hidden machine form: it validates a
-v13/v12 export and reports the destination route, optional total/admitted input
+v14/v13 export and reports the destination route, optional total/admitted input
 windows, estimated history tokens and message count. It performs no inference
 or session creation and emits no startup event.
 
@@ -4514,6 +4511,18 @@ Publication replies distinguish Saved from published/durability-uncertain
 (section 07 §§1, 3, 5). No persisted version, export encoding, binding input
 or runner protocol changes are introduced by these console operations.
 
+Protocol 12 projects both Fast and Ultrafast as Fast in template and profile
+reads: the template read's `extra` is `priority` and the profile role's `fast`
+is true; Standard reads as unset/false. In `template_put`, `fast_mode: true`
+preserves an already-authored Ultrafast tier and otherwise sets Fast.
+`fast_mode: false` removes `service_tier` for Standard. Choose Ultrafast in an
+agent template file and select that template through `root.agent` or a
+profile to configure its default. The separate session model picker and
+settings use the existing generic extras fields: they advertise and accept
+`ultrafast` only for a Codex account and model offering it. Session
+binding, shell and resume views can show that extra or its label; no named
+tier field is added to the protocol.
+
 Remote `SaveSettings`, `ApplyProfile {apply:default}` and the legacy
 `RefreshUsageCredential` are local-face-only: refusal is
 `refused_for_role {row:local_face}` before dispatch, with no config/credential
@@ -5596,7 +5605,7 @@ Protocol 12 adds the session's account choice. A template names a provider
 kind (chapter 03 §1); the session holds the full account reference it uses for
 each kind. The root kind's account is the root line head's bound account and
 is never stored separately; every other kind the session's profile uses is an
-entry of `sessions.account_choices` (product schema 39, §2.6). The tree records
+entry of `sessions.account_choices` (product generation 39, §2.6). The tree records
 no session-level choice; a spawned node freezes the full account its card's
 kind resolved to (chapter 03 §2.1).
 
@@ -8754,7 +8763,7 @@ separate work.
 
 Named slots scope source authority, not provider model/profile behavior. Default
 account binding/configuration identities and prompt renders are unchanged.
-The writer uses v13, the readers admit v13 and v12, and v11 and older refuse. Account/target disagreement refuses
+Account/target disagreement refuses
 import and resume before credentials. A missing named slot never selects the
 default or a sibling. Each usage row belongs to one full reference; selecting a
 named account reads only that account. Provider-reported email remains a detail

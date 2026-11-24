@@ -213,6 +213,10 @@ fn target_selection_persists_its_exact_serde_shape() {
         serde_json::to_string(&TargetSelection::NativePriority).unwrap(),
         "\"native_priority\""
     );
+    assert_eq!(
+        serde_json::from_str::<TargetSelection>("\"native_ultrafast\"").unwrap(),
+        TargetSelection::NativeUltrafast
+    );
     let openrouter = TargetSelection::OpenRouter {
         wire: WireBinding::resolve(ProtocolSelection::Messages),
         routing: OpenRouterRoutingSelection::GatewayManaged,
@@ -226,4 +230,20 @@ fn target_selection_persists_its_exact_serde_shape() {
     assert_eq!(decoded, openrouter);
     assert!(decoded.validate().is_ok());
     assert!(serde_json::from_str::<TargetSelection>(r#"{"open_router":{"wire":{"selection":"auto","resolved":"chat","resolution_revision":"plak-openrouter-wire-resolution-v1"},"routing":"gateway_managed","extra":1}}"#).is_err());
+}
+
+#[test]
+fn native_ultrafast_refuses_the_current_catalog_when_only_fast_is_offered() {
+    let target = TargetSelection::NativeUltrafast;
+    let failure = target
+        .admit_native_service_tier("codex/work", "gpt-6.2-astra", ["priority"])
+        .unwrap_err();
+    assert_eq!(failure.exit_code(), 2);
+    assert!(failure.message().contains("Ultrafast"));
+    assert!(failure.message().contains("gpt-6.2-astra"));
+    assert!(failure.message().contains("plakd models codex/work"));
+    target
+        .admit_native_service_tier("codex/work", "gpt-6.2-sol", ["priority", "ultrafast"])
+        .unwrap();
+    assert_eq!(target.native_service_tier(), Some("ultrafast"));
 }

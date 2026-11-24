@@ -156,8 +156,11 @@ pub(super) fn send_binding<P: plakous_host_protocol::ProtocolExtension>(
         account: config.session.account.clone(),
         model: Some(config.model_id.clone()),
         effort: config.session.effort.clone(),
-        extra: (config.session.target_selection == TargetSelection::NativePriority)
-            .then(|| "priority".to_owned()),
+        extra: config
+            .session
+            .target_selection
+            .native_service_tier()
+            .map(str::to_owned),
         composition: config.session.composition.into(),
         protocol: match &config.session.target_selection {
             TargetSelection::OpenRouter { wire, .. } => match wire.selection {
@@ -177,9 +180,9 @@ pub(super) fn send_binding<P: plakous_host_protocol::ProtocolExtension>(
                     plakous_host_protocol::ProtocolSelection::Chat
                 }
             },
-            TargetSelection::Native | TargetSelection::NativePriority => {
-                plakous_host_protocol::ProtocolSelection::Auto
-            }
+            TargetSelection::Native
+            | TargetSelection::NativePriority
+            | TargetSelection::NativeUltrafast => plakous_host_protocol::ProtocolSelection::Auto,
         },
         effective_presentation: crate::agent::effective_presentation_label(
             config.session.composition,
@@ -329,14 +332,17 @@ pub(super) fn session_info_facts(
     if let Some(effort) = effort.filter(|value| !value.is_empty()) {
         admitted_options.push(format!("effort = {effort}"));
     }
-    if *target_selection == TargetSelection::NativePriority {
-        admitted_options.push("Fast (extra = priority)".to_owned());
+    if let Some(id) = target_selection.native_service_tier() {
+        let label = target_selection.native_service_tier_label().unwrap_or(id);
+        admitted_options.push(format!("{label} (extra = {id})"));
     }
     // Auth selects one exact URL/API profile, so the kernel is a property of
     // the resolved route, never a guess about the model. Plak resolves an
     // OpenRouter `auto` once, to Chat, before calling Plakous.
     let api_kernel = match target_selection {
-        TargetSelection::Native | TargetSelection::NativePriority => {
+        TargetSelection::Native
+        | TargetSelection::NativePriority
+        | TargetSelection::NativeUltrafast => {
             native_provider.and_then(|provider| match provider {
                 NativeProvider::Codex | NativeProvider::Xai => Some("Responses"),
                 NativeProvider::Claude => Some("Messages"),
@@ -405,7 +411,9 @@ pub(super) fn thinking_request_statement(
         );
     };
     match target_selection {
-        TargetSelection::Native | TargetSelection::NativePriority => {
+        TargetSelection::Native
+        | TargetSelection::NativePriority
+        | TargetSelection::NativeUltrafast => {
             match native_provider {
                 Some(NativeProvider::Codex) => {
                     format!("reasoning summaries (auto) requested at {effort}")

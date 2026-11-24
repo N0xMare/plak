@@ -345,7 +345,7 @@ or py-sdk session bound to Monty or micro-monty 0.0.2 refuses before inference
 with “recorded evaluator path, bytes or contract is unavailable or inconsistent;
 no inference was dispatched”. Use the writing build's `plakd session export
 <id>`, then this build's `plakd session import <file>` (importable versions
-are 13 and 12). The carry does not restore the former Python globals.
+are 14 and 13). The carry does not restore the former Python globals.
 
 `js-ptc` and `py-ptc` are one plakd-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit

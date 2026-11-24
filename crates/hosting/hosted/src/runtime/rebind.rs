@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use plakous::model::{ModelId, ProcessingTierDisposition, ProviderServiceTierId};
+use plakous::model::ModelId;
 use plakous::sessions::{
     AgentSessionsErrorKind, RebindSessionOutcome, SessionOperationId, SessionRuntimeBinding,
 };
@@ -203,44 +203,40 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
     }
     let model_id = ModelId::new(model.to_owned())
         .map_err(|_| CliFailure::new("rebind target model identity is invalid"))?;
-    let subscriptions = config
-        .state_roots
-        .native_subscriptions_for(&account.parse()?)?;
-    let (reasoning_efforts, service_tiers, native_tool_mode) =
-        rebind_model_capabilities(watch, config, &subscriptions, provider, account, model).await?;
+    let account_ref = account.parse()?;
+    target_selection.validate_account(&account_ref)?;
+    let subscriptions = config.state_roots.native_subscriptions_for(&account_ref)?;
+    let (reasoning_efforts, service_tiers, native_tool_mode) = rebind_model_capabilities(
+        watch,
+        config,
+        &subscriptions,
+        provider,
+        account,
+        model,
+        target_selection.native_service_tier().is_some(),
+    )
+    .await?;
     admit_rebind_effort(&reasoning_efforts, explicit, parsed_effort)?;
     let target_effort = explicit.then_some(parsed_effort);
-    let processing_tier = rebind_processing_tier(target_selection, provider, &service_tiers)?;
+    target_selection.admit_native_service_tier(
+        account,
+        model,
+        service_tiers.iter().map(String::as_str),
+    )?;
     let selected = selected_coding_provider_configuration_with_processing_tier(
         provider,
         model_id,
         target_effort,
         native_tool_mode,
         composition,
-        processing_tier,
+        target_selection.native_processing_tier()?,
     )?;
-    let limits = crate::agent::product_subscription_request_limits()
-        .map_err(|_| CliFailure::new("rebind subscription gate is invalid"))?;
-    let resolved = watched(
-        watch,
-        Box::pin(bounded_rebind_lookup(
-            subscriptions.resolve_turn_scoped_provider(
-                selected,
-                limits,
-                plakous::model::SessionLineage::Root,
-            ),
-        )),
-    )
-    .await
-    .map_err(|()| CliFailure::new("rebind target resolution timed out; source unchanged"))?
-    .map_err(|error| {
-        CliFailure::new(format!("rebind target resolution failed: {}", error.kind()))
-    })?;
+    let resolved = resolve_rebind_provider(watch, &subscriptions, selected, account, model).await?;
     let resolved = std::sync::Arc::new(resolved);
     let binding = coding_session_target_binding(resolved.as_ref());
     let spec = ProductAgentSpec {
         root_profile: config.session.root_profile.clone(),
-        account: account.parse()?,
+        account: account_ref,
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
         tool_selection: super::startup::root_tool_selection(&config.session),
@@ -269,6 +265,38 @@ pub(super) async fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExte
         effort: target_effort,
         effort_explicit: explicit,
         binding,
+    })
+}
+
+async fn resolve_rebind_provider<P: plakous_host_protocol::ProtocolExtension>(
+    watch: InterruptWatch<'_, P>,
+    subscriptions: &plakous::subscriptions::NativeSubscriptions,
+    selected: plakous::model::SelectedProviderConfiguration,
+    account: &str,
+    model: &str,
+) -> CliResult<plakous::subscriptions::ResolvedProvider> {
+    let limits = crate::agent::product_subscription_request_limits()
+        .map_err(|_| CliFailure::new("rebind subscription gate is invalid"))?;
+    watched(
+        watch,
+        Box::pin(bounded_rebind_lookup(
+            subscriptions.resolve_turn_scoped_provider(
+                selected,
+                limits,
+                plakous::model::SessionLineage::Root,
+            ),
+        )),
+    )
+    .await
+    .map_err(|()| CliFailure::new("rebind target resolution timed out; source unchanged"))?
+    .map_err(|error| match error.kind() {
+        tier @ plakous::subscriptions::NativeSubscriptionError::ProcessingTierNotAdvertised(_) => {
+            CliFailure::classified(
+                crate::error::CliFailureKind::Usage,
+                format!("cannot rebind model `{model}` on `{account}`: {tier}; run `plakd models {account}` to see offered tiers"),
+            )
+        }
+        kind => CliFailure::new(format!("rebind target resolution failed: {kind}")),
     })
 }
 
@@ -803,6 +831,7 @@ async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
     provider: NativeProvider,
     account: &str,
     model: &str,
+    require_fresh: bool,
 ) -> CliResult<(
     Vec<plakous::model::ReasoningEffort>,
     Vec<String>,
@@ -811,10 +840,11 @@ async fn rebind_model_capabilities<P: plakous_host_protocol::ProtocolExtension>(
     let candidate = match &config.target {
         HostTargetAuthority::Native {
             catalog_candidates, ..
-        } => catalog_candidates
+        } if !require_fresh => catalog_candidates
             .iter()
             .find(|candidate| candidate.account == account && candidate.exact_id == model),
-        HostTargetAuthority::OpenRouter { .. }
+        HostTargetAuthority::Native { .. }
+        | HostTargetAuthority::OpenRouter { .. }
         | HostTargetAuthority::Platform { .. }
         | HostTargetAuthority::Registered { .. } => None,
     };
@@ -877,36 +907,6 @@ fn admit_rebind_effort(
         ));
     }
     Ok(())
-}
-
-pub(super) fn rebind_processing_tier(
-    target_selection: &TargetSelection,
-    provider: NativeProvider,
-    service_tiers: &[String],
-) -> CliResult<ProcessingTierDisposition> {
-    let processing_tier = match target_selection {
-        TargetSelection::Native => ProcessingTierDisposition::Standard,
-        TargetSelection::NativePriority
-            if provider == NativeProvider::Codex
-                && service_tiers.iter().any(|tier| tier == "priority") =>
-        {
-            ProcessingTierDisposition::ProviderNamed(
-                ProviderServiceTierId::new("priority")
-                    .map_err(|_| CliFailure::new("Codex priority tier identity is invalid"))?,
-            )
-        }
-        TargetSelection::NativePriority => {
-            return Err(CliFailure::new(
-                "Fast is absent from this exact authenticated Codex model row",
-            ));
-        }
-        TargetSelection::OpenRouter { .. } | TargetSelection::Platform { .. } => {
-            return Err(CliFailure::new(
-                "OpenRouter target selection cannot be used for a native OAuth rebind",
-            ));
-        }
-    };
-    Ok(processing_tier)
 }
 
 struct ProfileRuntimeInput<'a> {

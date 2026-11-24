@@ -4944,7 +4944,7 @@ fn v8_exports_refuse_file_import_without_creating_sessions() {
         assert!(
             result
                 .stderr
-                .contains("version 8 session export; this build imports versions 12 and 13"),
+                .contains("version 8 session export; this build imports versions 13 and 14"),
             "{}",
             result.stderr
         );
@@ -5715,7 +5715,7 @@ fn export_session(fixture: &Fixture, session: &str, name: &str) -> (String, Valu
     let document: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("export document")).expect("json");
     assert_eq!(document["format"], "plak-session-export");
-    assert_eq!(document["version"], 13);
+    assert_eq!(document["version"], 14);
     assert!(document["source_resolved_count"].is_u64());
     assert!(
         document["pending_work"]
@@ -6656,7 +6656,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     let nested = fixture.workspace().join("nested");
     std::fs::create_dir_all(&nested).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v12.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v13.json")).unwrap();
     document["workspace_root"] = json!(nested);
     let path = fixture.root.join("nested-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -6702,7 +6702,7 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     let home = fixture.root.join(".plak");
     std::fs::rename(fixture.home(), &home).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v12.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v13.json")).unwrap();
     document["workspace_root"] = json!(fixture.root);
     let path = fixture.root.join("home-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -6730,12 +6730,12 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let version = run_cli(&fixture, &["version", "--export-version"]);
     assert!(version.status.success(), "{}", version.stderr);
-    assert_eq!(version.stdout.trim(), "13");
+    assert_eq!(version.stdout.trim(), "14");
     let valid = run_cli(&fixture, &["version", "--reload-probe"]);
     assert!(valid.status.success(), "{}", valid.stderr);
     let verdict: Value = serde_json::from_str(&valid.stdout).unwrap();
     assert_eq!(verdict["config_error"], Value::Null);
-    assert_eq!(verdict["export_versions"], json!([12, 13]));
+    assert_eq!(verdict["export_versions"], json!([13, 14]));
 
     let project = fixture.workspace().join(".plak");
     std::fs::create_dir_all(&project).unwrap();
@@ -6793,15 +6793,15 @@ fn doctor_checks_trusted_project_config_and_template_files() {
 
 /// A previous-version document retains its saved placement/profile and history.
 #[test]
-fn a_v12_session_imports_and_exports_as_v13_with_an_identical_history() {
+fn a_v13_session_imports_and_exports_as_v14_with_an_identical_history() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     write_loopback_template(&fixture, "review");
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v12.json"))
+        serde_json::from_str(include_str!("../fixtures/session-export-v13.json"))
             .expect("sanitized previous export");
     document["workspace_root"] = json!(fixture.workspace());
     document["named_state"] = json!({"fixture_answer":42});
-    let path = fixture.root.join("v12-session.json");
+    let path = fixture.root.join("v13-session.json");
     write_private(&path, &serde_json::to_string(&document).expect("document"));
     let imported = run_cli(
         &fixture,
@@ -6821,8 +6821,8 @@ fn a_v12_session_imports_and_exports_as_v13_with_an_identical_history() {
         .lines()
         .find_map(|line| line.strip_prefix("resume with: plakd run --session "))
         .expect("imported session id");
-    let (_, exported) = export_session(&fixture, new, "v13-session.json");
-    assert_eq!(exported["version"], 13);
+    let (_, exported) = export_session(&fixture, new, "v14-session.json");
+    assert_eq!(exported["version"], 14);
     assert_eq!(exported["kind"], "portable_session");
     assert_eq!(exported["history"], document["history"]);
     assert_eq!(
@@ -6857,21 +6857,20 @@ fn set_home_default(fixture: &Fixture, root: &str) {
     );
 }
 
-/// A v12 import binds the document's profile and its record keeps it, so a
+/// A v13 import binds the document's profile and its record keeps it, so a
 /// later change of the home default does not reach the next export.
 #[test]
-fn a_v12_import_keeps_its_profile_after_the_home_default_changes() {
+fn a_v13_import_keeps_its_profile_after_the_home_default_changes() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     write_loopback_template(&fixture, "carried");
     write_loopback_template(&fixture, "later");
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v12.json"))
+        serde_json::from_str(include_str!("../fixtures/session-export-v13.json"))
             .expect("sanitized previous export");
-    document["version"] = json!(12);
     document["workspace_root"] = json!(fixture.workspace());
     document["runner"] = json!({"name":"local","runner_id":"local"});
     document["profile"] = json!({"root_template":"carried","working_set":[]});
-    let path = fixture.root.join("v12-session.json");
+    let path = fixture.root.join("v13-session.json");
     write_private(&path, &serde_json::to_string(&document).expect("document"));
     let imported = run_cli(
         &fixture,

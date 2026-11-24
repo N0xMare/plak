@@ -157,13 +157,19 @@ impl DefaultBinding {
         }
     }
 
-    /// Whether this binding asks for the priority processing tier on the exact
-    /// `account`/`model` tuple.
+    /// The configured processing tier when the account kind and model match.
     #[must_use]
-    pub fn prefers_priority(&self, account: &str, model: &str) -> bool {
-        self.account.as_deref() == Some(account)
+    pub fn extra_for_tuple(&self, account: &str, model: &str) -> Option<&str> {
+        if self
+            .account
+            .as_deref()
+            .is_some_and(|kind| plakous_hosted::binding::account_runs_template(kind, account))
             && self.model.as_deref() == Some(model)
-            && self.extra.as_deref() == Some("priority")
+        {
+            self.extra.as_deref()
+        } else {
+            None
+        }
     }
 }
 
@@ -200,7 +206,7 @@ pub struct AgentTemplate {
     pub account: String,
     pub model: String,
     pub effort: Option<String>,
-    /// Closed to `priority` on `codex`.
+    /// Exact Codex provider tier id: `priority` or `ultrafast`.
     pub extra: Option<String>,
     pub composition: Option<ProductCompositionSelection>,
     pub protocol: Option<ProductProtocolSelection>,
@@ -320,10 +326,11 @@ impl AgentTemplate {
         }
         match self.extra.as_deref() {
             None => {}
-            Some("priority") if account.vertical() == plakous_hosted::account::Vertical::Codex => {}
-            Some("priority") => {
+            Some("priority" | "ultrafast")
+                if account.vertical() == plakous_hosted::account::Vertical::Codex => {}
+            Some("priority" | "ultrafast") => {
                 return Err(format!(
-                    "template {name} Fast mode requires the Codex subscription account"
+                    "template {name}: service_tier requires the Codex subscription kind"
                 ));
             }
             Some(_) => {
@@ -396,11 +403,11 @@ impl AgentTemplate {
         Ok(())
     }
 
-    /// Reasoning tier, derived from `extra` and never from a catalog default.
+    /// Processing tier, derived from `extra` and never from a catalog default.
     #[must_use]
     pub fn processing_tier(&self) -> ProcessingTierDisposition {
         match self.extra.as_deref() {
-            Some("priority") => plakous::model::ProviderServiceTierId::new("priority")
+            Some(id @ ("priority" | "ultrafast")) => plakous::model::ProviderServiceTierId::new(id)
                 .map_or(ProcessingTierDisposition::Standard, |tier| {
                     ProcessingTierDisposition::ProviderNamed(tier)
                 }),
@@ -409,8 +416,18 @@ impl AgentTemplate {
     }
 
     #[must_use]
-    pub fn is_fast(&self) -> bool {
-        self.extra.as_deref() == Some("priority")
+    pub fn service_tier(&self) -> Option<&'static str> {
+        match self.extra.as_deref() {
+            Some("priority") => Some("fast"),
+            Some("ultrafast") => Some("ultrafast"),
+            _ => None,
+        }
+    }
+
+    /// The protocol-12 template read value that backs its Fast toggle.
+    #[must_use]
+    pub(crate) fn legacy_fast_extra(&self) -> Option<&'static str> {
+        self.service_tier().map(|_| "priority")
     }
 
     #[must_use]

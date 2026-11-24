@@ -85,6 +85,7 @@ mod tests {
                 provider: Some(provider.clone()),
                 retry_after: None,
                 retry_disabled: true,
+                tier_refused: false,
                 facts,
             };
             let mapped = model_error(&error, &descriptor).ok_or("Codex mapping")?;

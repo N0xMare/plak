@@ -485,7 +485,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> RebindTransition<'_, '_, P> {
                         subscriptions,
                         evidence: None,
                     },
-                    TargetSelection::Native | TargetSelection::NativePriority => {
+                    TargetSelection::Native
+                    | TargetSelection::NativePriority
+                    | TargetSelection::NativeUltrafast => {
                         return Err(CliFailure::new("API rebind published a non-API target"));
                     }
                 }

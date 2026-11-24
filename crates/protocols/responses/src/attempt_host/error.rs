@@ -162,8 +162,10 @@ pub enum ResponsesAttemptError {
         provider: Option<ResponsesProviderError>,
         /// Provider `Retry-After` advice in whole seconds, when present.
         retry_after: Option<Duration>,
-        /// Provider advice or a body-classified entitlement failure forbids replay.
+        /// Provider advice or a terminal refusal forbids physical replay.
         retry_disabled: bool,
+        /// A named tier received a non-transient HTTP client refusal.
+        tier_refused: bool,
         /// Conservative physical-attempt facts.
         facts: TerminalFacts,
     },
@@ -298,6 +300,9 @@ impl ResponsesAttemptError {
             | Self::HttpStatus {
                 class: ResponsesHttpStatusClass::Quota,
                 ..
+            }
+            | Self::HttpStatus {
+                tier_refused: true, ..
             } => RetryClass::Never,
             Self::Transport { source, facts, .. }
                 if matches!(

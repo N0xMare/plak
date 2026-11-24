@@ -191,7 +191,7 @@ struct TemplateFile {
     account: Entry,
     model: Entry,
     effort: Entry,
-    fast_mode: Entry,
+    service_tier: Entry,
     composition: Entry,
     protocol: Entry,
     description: Entry,
@@ -415,9 +415,19 @@ pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, St
         template.model = model;
     }
     template.effort = string("effort", &file.effort)?;
-    template.extra = boolean("fast_mode", &file.fast_mode)?
-        .unwrap_or(false)
-        .then(|| "priority".to_owned());
+    template.extra = match string("service_tier", &file.service_tier)?.as_deref() {
+        None => None,
+        Some("fast") => Some("priority".to_owned()),
+        Some("ultrafast") => Some("ultrafast".to_owned()),
+        Some(_) => {
+            let span = file.service_tier.as_ref().map_or(0..0, Spanned::span);
+            return Err(located(
+                text,
+                span,
+                &format!("template {name}: service_tier must be fast|ultrafast"),
+            ));
+        }
+    };
     if let Some(composition) = string("composition", &file.composition)? {
         template.composition = Some(ProductCompositionSelection::parse_config(&composition)?);
     }
@@ -748,6 +758,9 @@ fn template_translate(text: &str, name: &str, error: &toml::de::Error) -> String
         Some(field) => match site(text, error.span()) {
             Site::Section(section) => format!(
                 "template {name}: unknown section [{section}]; a template is one flat object plus an optional [env] table"
+            ),
+            Site::Key(section) if section.is_empty() && field == "fast_mode" => format!(
+                "template {name}: fast_mode was removed; replace fast_mode = true with service_tier = \"fast\", or remove fast_mode = false for Standard"
             ),
             Site::Key(_) => format!("template {name}: unknown key {field}"),
         },

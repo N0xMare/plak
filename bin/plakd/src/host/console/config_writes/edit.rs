@@ -47,7 +47,7 @@ pub(super) fn template(
             );
             continue;
         }
-        let (key, value) = field(change)?;
+        let (key, value) = field(change, &document)?;
         if !seen.insert(key.into()) {
             return Err(invalid("changes"));
         }
@@ -56,7 +56,10 @@ pub(super) fn template(
     Ok(document.to_string())
 }
 
-fn field(change: &TemplateChange) -> Result<(&'static str, Option<Value>), ReadRefusal> {
+fn field(
+    change: &TemplateChange,
+    document: &DocumentMut,
+) -> Result<(&'static str, Option<Value>), ReadRefusal> {
     use TemplateChange as C;
     let value = match change {
         C::Account { value } => {
@@ -65,7 +68,17 @@ fn field(change: &TemplateChange) -> Result<(&'static str, Option<Value>), ReadR
         }
         C::Model { value } => ("model", Some(Value::from(value.as_str()))),
         C::Effort { value } => ("effort", value.as_deref().map(Value::from)),
-        C::FastMode { value } => ("fast_mode", Some(Value::from(*value))),
+        C::FastMode { value } => (
+            "service_tier",
+            value.then(|| {
+                let enabled = document.get("service_tier").and_then(Item::as_str);
+                Value::from(if enabled == Some("ultrafast") {
+                    "ultrafast"
+                } else {
+                    "fast"
+                })
+            }),
+        ),
         C::Composition { value } => (
             "composition",
             value.map(|value| Value::from(value.as_str())),

@@ -1,13 +1,12 @@
-# Previous-version session export
+# Portable session export fixtures
 
-`session-export-v12.json` pins the version-12 neutral history vocabulary,
-including named state, runner placement and a saved root profile. It is a
-synthetic, sanitized fixture, not private session data. The corresponding
-version-13 writer fixture adds the closed `portable_session` document kind.
+`session-export-v13.json` is a synthetic full-history fixture, adapted
+from `session-export-v12.json` with the `portable_session` document kind.
+It covers neutral history, runner placement and a saved root profile.
 
-`session-export-v12-default.json` separately retains the base build's byte-exact
-writer output, unchanged. Tests pin those bytes and import it as the previous
-version; it is not replaced by the synthetic full-history fixture above.
+`session-export-v14-default.json` pins the current writer output;
+`session-export-v13-default.json` pins the importable predecessor.
+The retired `session-export-v12-default.json` fixture is refusal evidence.
 
 The previous-version reader must preserve the history exactly; ordinary file
 import still creates new identities and strips provider replay.

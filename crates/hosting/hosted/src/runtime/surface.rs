@@ -171,8 +171,8 @@ pub struct SurfaceSession {
     pub model: Option<String>,
     /// Root effort; absence means default effort.
     pub effort: Option<String>,
-    /// Root fast-lane selection.
-    pub fast: bool,
+    /// Exact named root processing tier; none for Standard.
+    pub service_tier: Option<String>,
     /// Launch workspace, not the process's mutable working directory.
     pub workspace: std::path::PathBuf,
     /// This session's frozen tree epoch, when it has one.
@@ -286,7 +286,10 @@ pub(super) fn session_facts(
         account: session.account.clone(),
         model: session.model.clone(),
         effort: session.effort.clone(),
-        fast: session.target_selection == crate::binding::TargetSelection::NativePriority,
+        service_tier: session
+            .target_selection
+            .native_service_tier()
+            .map(str::to_owned),
         workspace: session.workspace_root.clone(),
         roster,
         live_children,
@@ -333,7 +336,7 @@ pub struct SurfaceProfileFork {
     pub model: String,
     /// Effort, when the profile names one.
     pub effort: Option<String>,
-    /// Processing extra, when the profile's root is on the fast lane.
+    /// Exact named provider tier, if the profile's root selects one.
     pub extra: Option<String>,
     /// The root template's composition, when it names one.
     pub composition: Option<crate::binding::CompositionSelection>,

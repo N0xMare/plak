@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use super::*;
 
-const BASE: [i64; 2] = [39, 13];
-const CURRENT: [i64; 2] = [40, 14];
+const BASE: [i64; 2] = [40, 13];
+const CURRENT: [i64; 2] = [41, 14];
 
 #[test]
 fn product_revision_crash_before_commit_leaves_both_stores_openable_by_the_source() {
@@ -13,12 +13,12 @@ fn product_revision_crash_before_commit_leaves_both_stores_openable_by_the_sourc
 
 #[test]
 fn product_revision_crash_after_commit_restarts_a_mixed_revision_home() {
-    crash("product:after-commit", [40, 13]);
+    crash("product:after-commit", [41, 13]);
 }
 
 #[test]
 fn tree_revision_crash_before_commit_restarts_a_mixed_revision_home() {
-    crash("subagents:before-commit", [40, 13]);
+    crash("subagents:before-commit", [41, 13]);
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
     let (code, stderr) = exit(child, &lines);
     assert_eq!(code, Some(86), "{cut}: {stderr}");
     assert_eq!(versions(&paths), expected);
-    let product_backup = paths.state_dir().join("product.pre-revision-39.sqlite3");
+    let product_backup = paths.state_dir().join("product.pre-revision-40.sqlite3");
     let tree_backup = paths.state_dir().join("subagents.pre-revision-13.sqlite3");
     for (backup, revision) in [(&product_backup, BASE[0]), (&tree_backup, BASE[1])] {
         assert_eq!(version(backup), revision);
@@ -58,7 +58,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
     if expected == BASE {
         stop(&mut start(&fixture));
     } else {
-        older_refuses_unchanged(&fixture, &paths, "product schema 40");
+        older_refuses_unchanged(&fixture, &paths, "product schema 41");
     }
     let product_copy_time = product_backup.metadata().unwrap().modified().unwrap();
     let tree_copy_time = tree_backup.metadata().unwrap().modified().unwrap();
@@ -91,7 +91,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
             tree_copy_time
         );
         std::fs::copy(product_backup, paths.product_database()).unwrap();
-        assert_eq!(versions(&paths), [39, 14]);
+        assert_eq!(versions(&paths), [40, 14]);
         older_refuses_unchanged(&fixture, &paths, "subagents schema 14");
         embedded_commands_refuse_unchanged(&fixture, &paths, &session);
     }

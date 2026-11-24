@@ -69,18 +69,9 @@ fn persist_miss_fail_closes_codex_and_leaves_grok_claude_unset() {
         persist_miss_native_tool_mode("codex").unwrap_err(),
         CODEX_CATALOG_SNAPSHOT_MISSING
     );
-    assert_eq!(
-        persist_miss_native_tool_mode("grok").unwrap(),
-        (None, false)
-    );
-    assert_eq!(
-        persist_miss_native_tool_mode("claude").unwrap(),
-        (None, false)
-    );
-    assert_eq!(
-        persist_miss_native_tool_mode("openrouter").unwrap(),
-        (None, false)
-    );
+    assert_eq!(persist_miss_native_tool_mode("grok").unwrap(), None);
+    assert_eq!(persist_miss_native_tool_mode("claude").unwrap(), None);
+    assert_eq!(persist_miss_native_tool_mode("openrouter").unwrap(), None);
 }
 
 #[test]

@@ -177,26 +177,6 @@ pub const fn native_tool_mode_label(mode: NativeToolMode) -> &'static str {
     }
 }
 
-pub fn native_processing_tier(
-    selection: &product_config::ProductTargetSelection,
-) -> CliResult<plakous::model::ProcessingTierDisposition> {
-    match selection {
-        product_config::ProductTargetSelection::Native => {
-            Ok(plakous::model::ProcessingTierDisposition::Standard)
-        }
-        product_config::ProductTargetSelection::NativePriority => {
-            Ok(plakous::model::ProcessingTierDisposition::ProviderNamed(
-                plakous::model::ProviderServiceTierId::new("priority")
-                    .map_err(|_| CliFailure::new("priority tier identity is invalid"))?,
-            ))
-        }
-        product_config::ProductTargetSelection::OpenRouter { .. }
-        | product_config::ProductTargetSelection::Platform { .. } => Err(CliFailure::new(
-            "API target has no native subscription processing tier",
-        )),
-    }
-}
-
 pub const CODEX_CATALOG_SNAPSHOT_MISSING: &str =
     "Codex catalog snapshot is missing; run `plakd models codex`";
 
@@ -206,16 +186,14 @@ pub(crate) fn gateway_catalog_remedy(account: &str) -> String {
     )
 }
 
-pub fn persist_miss_native_tool_mode(
-    account: &str,
-) -> Result<(Option<NativeToolMode>, bool), String> {
+pub fn persist_miss_native_tool_mode(account: &str) -> Result<Option<NativeToolMode>, String> {
     if account
         .parse::<plakous_hosted::account::AccountRef>()
         .is_ok_and(|account| account.vertical() == plakous_hosted::account::Vertical::Codex)
     {
         Err(CODEX_CATALOG_SNAPSHOT_MISSING.to_owned())
     } else {
-        Ok((None, false))
+        Ok(None)
     }
 }
 
@@ -593,6 +571,10 @@ pub fn native_subscription_failure(
             "the {name} login is held by the credential gateway; login, logout, consent and account changes go through its admin verbs"
         )),
         E::GatewayUnavailable => crate::gateway::GatewayUnavailable::CustodyCall.failure(),
+        E::ProcessingTierNotAdvertised(_) => CliFailure::classified(
+            CliFailureKind::Usage,
+            format!("{error}; run `plakd models {name}` to see the available tiers"),
+        ),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)

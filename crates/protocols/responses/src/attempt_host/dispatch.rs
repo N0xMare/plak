@@ -306,7 +306,16 @@ async fn classify_error_response(
     {
         class = ResponsesHttpStatusClass::WrappedOverload;
     }
+    // A named tier's entitlement refusal has no documented error shape.
+    // Surface the status as received instead of probing it with another turn.
+    let tier_refused = attempt.named_service_tier
+        && status.is_client_error()
+        && !matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::TOO_MANY_REQUESTS | StatusCode::REQUEST_TIMEOUT
+        );
     let retry_disabled = retry_disabled
+        || tier_refused
         || provider
             .as_ref()
             .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota);
@@ -337,6 +346,7 @@ async fn classify_error_response(
         provider,
         retry_after,
         retry_disabled,
+        tier_refused,
         facts: attempt.facts(),
     })
 }

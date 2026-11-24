@@ -1598,7 +1598,7 @@ pub(crate) mod directory_projection;
 pub mod holders;
 mod lifecycle;
 pub(crate) mod revisions;
-mod schema;
+pub(crate) mod schema;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;
 mod attention;

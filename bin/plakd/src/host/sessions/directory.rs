@@ -724,7 +724,7 @@ fn profile(
             account: meta.account.clone(),
             model: meta.model.clone(),
             effort: meta.effort.clone(),
-            fast: meta.fast,
+            service_tier: meta.service_tier.clone(),
             workspace: meta.workspace.clone(),
             roster: Some(tree.roster.clone()),
             live_children: false,

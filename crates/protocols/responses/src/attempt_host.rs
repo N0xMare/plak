@@ -45,7 +45,8 @@ use plakous_http::{
 };
 use plakous_model::{
     AttemptId, CancellationToken, Digest, DigestDomain, ModelOperationRoot, ModelProviderRequestId,
-    ModelRequest, ModelRetry, ModelTransportFault, ResolvedModelDescriptor,
+    ModelRequest, ModelRetry, ModelTransportFault, ProcessingTierDisposition,
+    ResolvedModelDescriptor,
 };
 #[cfg(test)]
 use plakous_model::{ModelRetryCause, ModelRetryDeclineReason as Decline};
@@ -276,6 +277,7 @@ pub struct PreparedResponsesAttempt {
     wire_occurrence_counts: Option<ResponsesWireOccurrenceCounts>,
     operation: ResponsesOperationBinding,
     retry_permitted: bool,
+    named_service_tier: bool,
 }
 
 impl PreparedResponsesAttempt {
@@ -337,6 +339,7 @@ impl fmt::Debug for PreparedResponsesAttempt {
             .field("wire_occurrence_counts", &self.wire_occurrence_counts)
             .field("operation", &self.operation)
             .field("retry_permitted", &self.retry_permitted)
+            .field("named_service_tier", &self.named_service_tier)
             .finish()
     }
 }
@@ -446,6 +449,10 @@ where
         wire_occurrence_counts: inspection.wire_occurrence_counts,
         operation,
         retry_permitted,
+        named_service_tier: matches!(
+            request.processing_tier(),
+            ProcessingTierDisposition::ProviderNamed(_)
+        ),
     })
 }
 
@@ -583,6 +590,7 @@ pub struct ResponsesAttempt {
     stream: StreamProgress,
     core: FamilyAttemptCore,
     retry_permitted: bool,
+    named_service_tier: bool,
 }
 
 impl ResponsesAttempt {
@@ -610,6 +618,7 @@ impl ResponsesAttempt {
             wire_occurrence_counts: _,
             operation,
             retry_permitted,
+            named_service_tier,
         } = prepared;
         let ledger_policy = operation.ledger_policy();
         Self {
@@ -625,6 +634,7 @@ impl ResponsesAttempt {
             stream: StreamProgress::default(),
             core: FamilyAttemptCore::new_with_policy(ledger_policy),
             retry_permitted,
+            named_service_tier,
         }
     }
 

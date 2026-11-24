@@ -185,7 +185,19 @@ pub(crate) fn new_agent_record(
             record.composition = product_config::ProductCompositionSelection::Direct;
         }
     } else {
-        if provider.is_some() {
+        if (!record.target_selection.is_api() || provider.is_some())
+            && let (Some(account), Some(model)) =
+                (record.account.as_deref(), record.model.as_deref())
+        {
+            let binding = cfg.default_binding();
+            record.target_selection =
+                product_config::ProductTargetSelection::for_native_service_tier(
+                    binding.extra_for_tuple(account, model),
+                )
+                .ok_or_else(|| {
+                    CliFailure::classified(CliFailureKind::Usage, "invalid native service tier")
+                })?;
+        } else if provider.is_some() {
             record.target_selection = product_config::ProductTargetSelection::Native;
         }
         if let Some(composition) = composition {

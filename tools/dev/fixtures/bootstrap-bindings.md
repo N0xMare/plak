@@ -18,8 +18,9 @@ python3 tools/dev/fixtures/bootstrap_bindings.py \
 
 Review the result, then replace the checked-in JSON. The template is injected
 only into the pinned source's test module; it is not linked into the candidate.
-The candidate's unit test imports the documents and commits fresh native heads;
-the product integration imports and re-exports every document through the CLI.
+The tests put the unchanged neutral payloads in a supported v13 envelope
+without claiming a v13 writer. The unit test commits fresh native heads;
+the product integration imports and re-exports each payload through the CLI.
 The integration relocates the fixture's inert `/` placement into its scratch
 workspace, and uses the existing offline model selector. All other carried
 binding fields are checked unchanged. This proves the settled carrier boundary,

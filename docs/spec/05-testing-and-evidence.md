@@ -856,9 +856,9 @@ Native freshness tests retain the recorded slot, refuse vertical disagreement,
 and keep full-reference human detail without expanding structured remedy values.
 Named Busy/429 tests discard previous quotas, plans and email, while default
 last-Ready retention keeps its existing regressions.
-Default API binding/configuration and the retained byte-exact v12 writer fixture
-are pinned to pre-account evidence. The current writer uses v13; tests admit v13
-and v12 and refuse v11 and older; seven-vertical tests pair default and named profile/prompt behavior
+Default API binding/configuration is pinned to pre-account evidence. The
+current writer uses v14; tests pin the prior v13 writer bytes and refuse v12
+and older. Seven-vertical tests pair default and named profile/prompt behavior
 and capability decisions. Usage tests preserve provider email detail without
 copying its reading to a sibling or default row.
 
@@ -3135,11 +3135,11 @@ with unchanged provider-dispatch evidence.
 
 | Selection and carry contract | Offline evidence |
 | --- | --- |
-| v12 selection and committed named-state carry | `v12_document_round_trips_named_state_selection_and_full_history`; the real SDK driver exports committed values; `oversized_named_state_is_refused_before_import` |
-| v12 imports with named state; v11 refused | `v12_import_preserves_named_state_and_v11_is_refused`; `v8_is_refused_before_import_regardless_of_named_state_or_selection` |
-| v13 kind, runner and profile; malformed v13 refused | `v13_names_its_kind_runner_and_profile_and_round_trips`, `malformed_v13_documents_are_refused` |
-| A frozen v12 document imports with its saved runner and profile with an identical history | `a_frozen_v12_document_imports_with_an_identical_canonical_history`, `a_v12_session_imports_and_exports_as_v13_with_an_identical_history` |
-| Typed rows, send times and process commands for v13 and v12 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
+| v14 selection and committed named-state carry | `v14_document_round_trips_named_state_selection_and_full_history`; the real SDK driver exports committed values; `oversized_named_state_is_refused_before_import` |
+| v13 imports with named state; v12 refused | `v13_import_preserves_named_state_and_v12_is_refused`; `v8_is_refused_before_import_regardless_of_named_state_or_selection` |
+| v14 kind, runner and profile; malformed v14 refused | `v14_names_its_kind_runner_and_profile_and_round_trips`, `malformed_v14_documents_are_refused` |
+| A frozen v13 document imports with its saved runner and profile with an identical history | `a_frozen_v13_document_imports_with_an_identical_canonical_history`, `a_v13_session_imports_and_exports_as_v14_with_an_identical_history` |
+| Typed rows, send times and process commands for v14 and v13 | `current_and_previous_documents_preserve_every_transcript_row_type`, `current_and_previous_documents_carry_send_times_and_process_commands` |
 | Import rejects pseudo-work and rebuilds durable intents | `current_and_previous_documents_reject_resolved_count_pseudo_work`, `import_intents_survive_reopen_and_rebuild` |
 | Root-only selection and cross-field refusal | `sdk_is_a_root_override_not_a_child_template_capability`, `root_composition_cross_field_rules_apply_on_load_and_save`, `applying_claude_profile_discards_saved_sdk_selection`, `sdk_child_selection_refusals_are_exact_and_create_nothing`, `sdk_spawned_api_binding_refuses_before_discovery_or_creation` |
 | Optional tool/MCP and v8 version refusal before creation or dispatch | `sdk_optional_tools_and_fence_refuse_before_surface_compilation`, `agent_sdk_hello_and_configured_mcp_refusal_are_offline`, `v8_exports_refuse_file_import_without_creating_sessions` |

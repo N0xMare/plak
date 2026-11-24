@@ -54,7 +54,7 @@ pub(super) fn seed(fixture: &Fixture, ordinal: usize) -> String {
 
 fn seed_in(fixture: &Fixture, ordinal: usize, workspace: &std::path::Path) -> String {
     let mut document: serde_json::Value =
-        serde_json::from_str(include_str!("../../fixtures/session-export-v12.json")).unwrap();
+        serde_json::from_str(include_str!("../../fixtures/session-export-v13.json")).unwrap();
     document["source"]["session_id"] = json!(uuid::Uuid::new_v4().to_string());
     document["workspace_root"] = json!(workspace);
     document["named_state"] = json!({"answer": ordinal});

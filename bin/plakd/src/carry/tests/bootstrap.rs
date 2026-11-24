@@ -6,7 +6,7 @@ use plakous::sessions::{
 };
 
 #[tokio::test]
-async fn bootstrap_frozen_r27_presentations_import_v12_into_fresh_r28_heads()
+async fn bootstrap_frozen_r27_presentations_import_through_v13_into_fresh_r28_heads()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bootstrap-v12.json");
@@ -33,7 +33,13 @@ async fn bootstrap_frozen_r27_presentations_import_v12_into_fresh_r28_heads()
         assert_eq!(value["version"], 12);
         assert_eq!(value["source"]["state_key"], "r27.e37.p37.t10");
         let path = root.path().join("source.json");
-        fs::write(&path, serde_json::to_vec(value)?)?;
+        // V12 is no longer an input format. Re-envelope its unchanged neutral
+        // payload as v13 for this fixture, without attributing it to a writer.
+        let mut portable = value.clone();
+        portable["version"] = 13.into();
+        portable["kind"] = "portable_session".into();
+        portable["source"]["producer"] = serde_json::json!({"status":"unavailable"});
+        fs::write(&path, serde_json::to_vec(&portable)?)?;
         let document = read_document(&path)?;
         let old_id = value["source"]["session_id"].as_str().ok_or("source id")?;
         let source: plakous::sessions::SessionLocator = exported["case"]["locator"]

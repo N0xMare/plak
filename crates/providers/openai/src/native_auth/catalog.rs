@@ -817,7 +817,7 @@ pub(super) fn catalog_service_tiers(
     let mut ids = BTreeSet::new();
     let mut tiers = Vec::with_capacity(model.service_tiers.len());
     for tier in &model.service_tiers {
-        if tier.id != "priority" {
+        if !matches!(tier.id.as_str(), "priority" | "ultrafast") {
             continue;
         }
         validate_identifier(&tier.id, MAX_SERVICE_TIER_ID_BYTES)

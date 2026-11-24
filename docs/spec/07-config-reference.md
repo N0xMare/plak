@@ -49,14 +49,14 @@ release retained capacity without positive original-instance/process-loss proof.
 
 The current state directory is `state/r28.e39.p39.t11/`: runtime SQLite
 schema 28, runtime format epoch 39, product generation 39, and tree generation 11
-(current tree store revision 13).
+(current product store revision 40 and tree store revision 13).
 These are format identities, not configuration keys. Client wire protocol 12
 and runner protocol 9 require separate exact matches, with no negotiation.
-Product schema 39 adds `sessions.account_choices`. Runtime
+The product store records `sessions.account_choices`. Runtime
 epoch 39 removes the credential-store path from Codex and SuperGrok
 credential-authority digests and retains context codec 4, with imported
-compaction strategy/count facts and no stale execution grants. Session export stays
-version 13; imports admit versions 13 and 12 and refuse version 11 and older.
+compaction strategy/count facts and no stale execution grants. Session export uses
+version 14; imports admit versions 14 and 13 and refuse version 12 and older.
 The host's private terminal registry renews namespaces every thirty seconds and
 joins shutdown for up to four seconds. Live and retained unknown/lost-instance
 pins prevent idle exit while host memory survives. Unresolved shutdown leaves
@@ -845,7 +845,7 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 | `account` | string | `(required)` | a provider kind: codex\|chatgpt\|grok\|supergrok\|xai-oauth\|claude\|openrouter\|openai\|anthropic\|xai-api; a named account (codex/work) is a load error naming the template | Provider kind the copy runs on. The session holds the named account per kind (chapter 02 §4.4.1); a spawn binds the session's account for this kind. |
 | `model` | string | `(required)` | non-empty; a direct API account must name an enrolled model, checked at load; every other account is checked at bind | Exact model id. |
 | `effort` | string | `(unset)` | none\|low\|medium\|high\|xhigh\|max\|ultra; Codex offers low through max (never ultra); none is an explicit API effort, not an omitted one; a direct API account requires a level on the model's published ladder, checked at load; every other account is checked at bind | Reasoning effort; on a subscription account a typo surfaces as a bind failure, not a load error. |
-| `fast_mode` | bool | `false` | true is only valid on the codex kind | Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's. |
+| `service_tier` | enum | (unset) | fast\|ultrafast; Codex kind only; the exact account and model must advertise the tier at bind | Request a named Codex processing tier. Omit for Standard. A child runs on its own template's tier, never its parent's. |
 | `composition` | enum | `"plakous-default"` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc; native-ptc is refused for openrouter, anthropic and xai-api, and on openai is valid only for a model enrolled as CodeModeOnly | How the model composes the product tools: direct calls one at a time, or a programmatic tool calling (PTC) cell. native-ptc is the provider's own PTC system (today only Codex Code Mode is enrolled); js-ptc and py-ptc are harness PTC on every account. plakous-default uses the versioned Plakous-recommended tool presentation for this provider/model; the resolved presentation is pinned for the session and does not select or substitute a model. |
 | `protocol` | enum | `"auto"` | auto\|chat\|responses\|messages; anything but auto is OpenRouter-only | Wire protocol pin for an OpenRouter model whose family the gateway reports wrongly. |
 | `description` | string | `""` | required and non-blank for a template named in [roster] working_set or in a spawns list | The spawn card a parent routes on: what this agent is for, in the parent's words. |
@@ -889,10 +889,11 @@ Cross-field rules, all checked at load and again before any save:
   `description`, whether or not the working set reaches it. A list may name the
   template itself or close a cycle; a node's menu never carries its own
   template, and the depth bounds end a cycle.
-- `fast_mode = true` requires the Codex vertical, bare or named. A template that sets it is a
-  **Fast** template. Fast and a non-empty `spawns` are legal together anywhere,
-  including the root and the working set: `spawns` decides only whether a node
-  may be a parent, and every child runs on its own template's tier.
+- `service_tier = "fast"` requests the Codex subscription's `priority` tier;
+  `service_tier = "ultrafast"` requests `ultrafast`. Omission is Standard.
+  At bind the exact authenticated account and model must advertise the chosen tier;
+  no tier is substituted. Either named tier is legal with a non-empty `spawns`
+  list: that list controls delegation, not processing tier.
 - `protocol` other than `auto` requires the OpenRouter vertical, bare or named.
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
 - `composition = "py-sdk"` in any agent template is a load error: `py-sdk is root-only and has no child result channel`. Select it with `[root] composition = "py-sdk"`, the root settings picker or `--composition py-sdk`. It requires the core single-agent surface and a Direct-capable route; the root opens no topology, and optional tools are refused before inference. `plakous-default` never chooses it.
@@ -1052,8 +1053,9 @@ resolved config is frozen into an `OrchestrationSnapshot`: the root bind, the
 writer mode, the four clamped tree bounds, the epoch rules, the roster (one
 `RosterBinding` per closure template: the working set plus every template
 reachable from it through `spawns`), and a `templates_digest` over the
-canonical rendering of every closure template plus the root template's body,
-in name order. The root template has a card only when the closure reaches it.
+canonical rendering of every resolved closure template plus the root
+template's body, in name order. A change of file spelling without a change of
+resolved tier does not change the digest. The root template has a card only when the closure reaches it.
 Each card carries its template's `tools` list. The snapshot also freezes
 `tool_sections`: the canonical rendering of every `[tools.<name>]` and
 `[mcp_servers.<id>]` table a closure template's list, or the bound root
@@ -1160,9 +1162,9 @@ Two keys take a value spelling the file grammar cannot:
 Every built-in profile has the same four roles:
 
 The Codex profile uses `gpt-6.2-astra` at `medium` for root and reviewer,
-`gpt-6.2-sol` at `medium` for worker, and `gpt-6-luna` at `xhigh` with fast
-mode for researcher (there is no enrolled 6.2 Luna successor). The mixed
-profile's Codex worker uses `gpt-6.2-sol` at `medium` with fast mode. Other
+`gpt-6.2-sol` at `medium` for worker, and `gpt-6-luna` at `xhigh` with
+`service_tier = "fast"` for researcher (there is no enrolled 6.2 Luna successor).
+The mixed profile's Codex worker uses `gpt-6.2-sol` at `medium` with the same tier. Other
 providers' defaults are unchanged. The annotated reference home uses the
 same Codex assignments.
 

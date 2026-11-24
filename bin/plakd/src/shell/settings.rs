@@ -61,11 +61,20 @@ fn profile_differences(
             profile: row.root.effort.clone(),
         });
     }
-    if session.fast != row.root.fast {
+    let session_fast = session.service_tier.is_some();
+    if session_fast != row.root.fast {
         differences.push(Difference::RootFast {
-            session: session.fast,
+            session: session_fast,
         });
     }
+    // Protocol 12 cannot describe a Fast/Ultrafast distinction. Keep the
+    // comparison exact without inventing a different Fast toggle.
+    let named_tier_differs = session_fast
+        && row.root.fast
+        && session.service_tier.as_deref()
+            != config
+                .root_template()
+                .and_then(|root| root.extra.as_deref());
     let roster = crate::roster_input::roster_input_from_config(
         config,
         row.root.account.clone(),
@@ -86,7 +95,9 @@ fn profile_differences(
                 differences.push(Difference::Card(name.to_string()));
             }
         }
-        if differences.is_empty() && frozen.templates_digest != roster.templates_digest {
+        if named_tier_differs
+            || (differences.is_empty() && frozen.templates_digest != roster.templates_digest)
+        {
             differences.push(Difference::Roster);
         }
     } else {
@@ -188,12 +199,10 @@ fn session_profile_row(
         .into_iter()
         .filter_map(|(depth, name)| snapshot.binding(&name).map(|card| (depth, card)))
         .map(|(depth, card)| {
-            let fast = match &card.processing_tier {
-                plakous::model::ProcessingTierDisposition::ProviderNamed(tier) => {
-                    tier.as_str() == "priority"
-                }
-                plakous::model::ProcessingTierDisposition::Standard => false,
-            };
+            let fast = matches!(
+                &card.processing_tier,
+                plakous::model::ProcessingTierDisposition::ProviderNamed(_)
+            );
             ProfileRole {
                 label: card
                     .template
@@ -225,7 +234,7 @@ fn session_profile_row(
                 .clone()
                 .unwrap_or_else(|| "not attached".to_owned()),
             effort: effort.to_owned(),
-            fast: session.fast,
+            fast: session.service_tier.is_some(),
             depth: 0,
         },
         cards,
@@ -427,7 +436,7 @@ fn apply_profile(
         account: root_account,
         model: root.model.clone(),
         effort: root.effort.clone(),
-        extra: root.is_fast().then(|| "priority".to_owned()),
+        extra: root.extra.clone(),
         composition: root.composition.map(|composition| {
             plakous_host_protocol::CompositionSelection::from(composition).into()
         }),

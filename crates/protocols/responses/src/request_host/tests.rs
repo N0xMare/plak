@@ -229,71 +229,82 @@ fn openai_codex_unknown_native_options_are_rejected() -> TestResult {
 #[test]
 fn codex_service_tier_is_exact_and_orthogonal_to_reasoning() -> TestResult {
     let (protocol, family, model) = target_values()?;
-    let policy = ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content");
-    let standard = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(31, "standard")?])?,
-        metadata()?,
-    )
-    .reasoning(ReasoningPolicy::Enabled {
-        effort: Some(ReasoningEffort::High),
-        requirement: CapabilityRequirement::Required,
-    })
-    .build()?;
-    let priority = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(32, "priority")?])?,
-        metadata()?,
-    )
-    .processing_tier(ProcessingTierDisposition::ProviderNamed(
-        ProviderServiceTierId::new("priority")?,
-    ))
-    .reasoning(ReasoningPolicy::Enabled {
-        effort: Some(ReasoningEffort::Low),
-        requirement: CapabilityRequirement::Required,
-    })
-    .build()?;
-    let standard = lower_responses_request(
-        &standard,
-        ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
-    )?;
-    let priority = lower_responses_request(
-        &priority,
-        ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
-    )?;
-    assert_eq!(standard.body().get("service_tier"), None);
-    assert_eq!(standard.body()["reasoning"]["effort"], "high");
-    assert_eq!(priority.body()["service_tier"], "priority");
-    assert_eq!(priority.body()["reasoning"]["effort"], "low");
+    let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"codex-service-tier"])?;
+    let request = |tier| -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        Ok(crate::test_support::model_request_builder(
+            ConversationView::from_items(vec![user(31, "hello")?])?,
+            metadata()?,
+        )
+        .processing_tier(tier)
+        .reasoning(ReasoningPolicy::Enabled {
+            effort: Some(ReasoningEffort::Low),
+            requirement: CapabilityRequirement::Required,
+        })
+        .build()?)
+    };
+    for policy in [
+        ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
+        ResponsesRequestPolicy::openai_codex_lite("reasoning.encrypted_content"),
+    ] {
+        let config = || {
+            ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None)
+                .with_cache_affinity(Some(&affinity))
+        };
+        let standard =
+            lower_responses_request(&request(ProcessingTierDisposition::Standard)?, config())?;
+        assert_eq!(standard.body().get("service_tier"), None);
+        assert_eq!(standard.body()["reasoning"]["effort"], "low");
+        for id in ["priority", "ultrafast"] {
+            let lowered = lower_responses_request(
+                &request(ProcessingTierDisposition::ProviderNamed(
+                    ProviderServiceTierId::new(id)?,
+                ))?,
+                config(),
+            )?;
+            let mut expected = standard.body().clone();
+            expected["service_tier"] = json!(id);
+            assert_eq!(lowered.body(), &expected);
+        }
+        assert!(
+            lower_responses_request(
+                &request(ProcessingTierDisposition::ProviderNamed(
+                    ProviderServiceTierId::new("future-tier")?
+                ))?,
+                config(),
+            )
+            .is_err()
+        );
+    }
     Ok(())
 }
 
 #[test]
 fn non_codex_responses_policy_rejects_named_service_tier() -> TestResult {
     let (protocol, family, model) = target_values()?;
-    let request = crate::test_support::model_request_builder(
-        ConversationView::from_items(vec![user(33, "unsupported")?])?,
-        metadata()?,
-    )
-    .processing_tier(ProcessingTierDisposition::ProviderNamed(
-        ProviderServiceTierId::new("priority")?,
-    ))
-    .build()?;
-    assert!(
-        lower_responses_request(
-            &request,
-            ResponsesRequestConfig::new(
-                &protocol,
-                Some(&family),
-                &model,
-                ResponsesRequestPolicy::openai_platform(
-                    ResponsesStoragePolicy::Stateless,
-                    false,
-                    false,
-                ),
-                None,
-            ),
+    for id in ["priority", "ultrafast"] {
+        let request = crate::test_support::model_request_builder(
+            ConversationView::from_items(vec![user(33, "unsupported")?])?,
+            metadata()?,
         )
-        .is_err()
-    );
+        .processing_tier(ProcessingTierDisposition::ProviderNamed(
+            ProviderServiceTierId::new(id)?,
+        ))
+        .build()?;
+        for policy in [
+            ResponsesRequestPolicy::openai_platform_stateless(),
+            ResponsesRequestPolicy::supergrok_stateless(),
+        ] {
+            assert!(matches!(
+                lower_responses_request(
+                    &request,
+                    ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None,)
+                ),
+                Err(ResponsesRequestError::Option(
+                    ResponsesRequestOptionError::NativeOptions
+                ))
+            ));
+        }
+    }
     Ok(())
 }
 

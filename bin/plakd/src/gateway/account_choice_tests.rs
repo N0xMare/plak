@@ -48,7 +48,7 @@ fn choose_openai(
             account: Some("openai".into()),
             model: None,
             effort: None,
-            fast: false,
+            service_tier: None,
             workspace: workspace.to_path_buf(),
             roster: None,
             live_children: false,

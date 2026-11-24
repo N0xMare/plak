@@ -1,7 +1,6 @@
 account = "claude"
 model = "claude-opus-5-5"
 effort = "medium"
-fast_mode = false
 composition = "plakous-default"
 description = "Implement a bounded change and run its relevant checks; report changes, evidence, and unresolved issues."
 access = "full"

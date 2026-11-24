@@ -29,6 +29,7 @@ fn grok_exact_426_version_gate_is_permanent_configuration_drift_without_adopting
                 ResponsesAttemptError::HttpStatus {
                     retry_after: None,
                     retry_disabled: false,
+                    tier_refused: false,
                     physical: None,
                     status: StatusCode::from_u16(status)?,
                     class: ResponsesHttpStatusClass::Rejected,
@@ -117,6 +118,7 @@ fn codex_usage_limit_is_terminal_and_carries_reset_without_provider_prose()
                 provider: Some(provider),
                 retry_after: Some(Duration::ZERO),
                 retry_disabled: true,
+                tier_refused: false,
                 facts,
             },
             &descriptor()?,
@@ -196,6 +198,7 @@ fn the_responses_row_of_the_provider_failure_matrix_is_definite()
     let status = |code: u16, class, facts| ResponsesAttemptError::HttpStatus {
         retry_after: None,
         retry_disabled: false,
+        tier_refused: false,
         physical: None,
         status: StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_GATEWAY),
         class,
@@ -365,6 +368,7 @@ fn xai_pre_generation_refusal_is_policy_not_authorization() -> Result<(), Box<dy
                 ResponsesAttemptError::HttpStatus {
                     retry_after: None,
                     retry_disabled: false,
+                    tier_refused: false,
                     physical: None,
                     status: StatusCode::FORBIDDEN,
                     class: ResponsesHttpStatusClass::Authorization,
