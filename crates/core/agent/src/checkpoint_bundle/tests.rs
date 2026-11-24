@@ -6,6 +6,14 @@
 use super::object::object_address;
 use super::*;
 
+pub(crate) fn previous_epoch_round_trip(
+    checkpoint: &RuntimeCheckpoint,
+) -> Result<RuntimeCheckpoint, CheckpointBundleError> {
+    let previous =
+        RuntimeCheckpoint::new_at(checkpoint.manifest().clone(), PREVIOUS_RUNTIME_FORMAT_EPOCH)?;
+    RuntimeCheckpointCodec::materialize(&RuntimeCheckpointCodec::bundle_full(&previous)?)
+}
+
 mod epoch_pins;
 use crate::RuntimeComponentKind;
 use crate::SessionWorkflowId;

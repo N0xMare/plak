@@ -320,7 +320,19 @@ fn runtime_error_kind(error: &AgentError) -> AgentSessionsError {
 
 pub(super) fn store_error(error: SessionStoreError) -> AgentSessionsError {
     if error == SessionStoreError::BootstrapBusy {
-        return AgentSessionsError::new(AgentSessionsErrorKind::StorageBusy, error.to_string());
+        return AgentSessionsError::new(AgentSessionsErrorKind::BootstrapBusy, error.to_string());
+    }
+    if error == SessionStoreError::BootstrapRequired {
+        return AgentSessionsError::new(
+            AgentSessionsErrorKind::BootstrapRequired,
+            error.to_string(),
+        );
+    }
+    if error == SessionStoreError::BootstrapRehearsalTooLarge {
+        return AgentSessionsError::new(
+            AgentSessionsErrorKind::StorageUnavailable,
+            error.to_string(),
+        );
     }
     if matches!(
         error,

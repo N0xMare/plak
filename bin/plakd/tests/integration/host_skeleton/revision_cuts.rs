@@ -97,7 +97,7 @@ fn crash(cut: &str, expected: [i64; 2]) {
     }
 }
 
-fn exit(mut child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, String) {
+pub(super) fn exit(mut child: Child, lines: &mpsc::Receiver<String>) -> (Option<i32>, String) {
     let deadline = Instant::now() + WAIT;
     loop {
         if let Some(status) = child.try_wait().unwrap() {

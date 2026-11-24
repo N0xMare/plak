@@ -416,12 +416,6 @@ impl PlakPaths {
 
     #[must_use]
     pub fn runtime_database(&self) -> PathBuf {
-        if let Some(directory) = &self.probe_stores {
-            let copy = directory.join("runtime.sqlite3");
-            if copy.is_file() {
-                return copy;
-            }
-        }
         self.state_dir().join("runtime.sqlite3")
     }
 

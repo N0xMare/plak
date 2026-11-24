@@ -208,14 +208,17 @@ destination accepts. An archived head remains available for inspection, but
 archiving does not make it reopenable.
 
 The pre-upgrade copies sit beside the databases in `~/.plak/state/<key>/`,
-named `product.pre-revision-<source>.sqlite3` and
-`subagents.pre-revision-<source>.sqlite3`. They are for manual disaster
+named `product.pre-revision-<source>.sqlite3`,
+`subagents.pre-revision-<source>.sqlite3`, and, for the one-time runtime
+table change, `runtime.pre-codec-bootstrap.sqlite3`. They are for manual disaster
 recovery, not automatic rollback. `plakd doctor` reports how many are retained
 in the current state directory. To go back, stop the host and other store
 users, move each revised database and its SQLite WAL/SHM files aside, restore
 its pre-upgrade copy under the original name, and run the older build. This
 loses writes made since the copies; it does not undo writes to other stores.
 Use a coordinated backup if later work changed more than the restored stores.
+Remove these copies only after verifying the new host and deciding not to
+restore the earlier state.
 
 A build supporting only tree revision 12 refuses revision 13. Do not start
 it against an empty replacement tree: restore the matching pre-revision

@@ -1917,6 +1917,59 @@ async fn durable_reopen_rejects_malformed_admission_evidence() -> TestResult {
 }
 
 #[tokio::test]
+async fn decoded_previous_epoch_does_not_relax_credential_authority() -> TestResult {
+    use crate::runtime::admission::refreshed_reopen_admission;
+
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let original = artifact_test_model(0, 30_000)?;
+    let agent = sessions
+        .create(
+            "create:old-epoch-authority",
+            durable_artifact_test_builder(Arc::clone(&workspace), Arc::clone(&original)),
+        )
+        .await?;
+    let old = crate::checkpoint_bundle::tests::previous_epoch_round_trip(&agent.checkpoint())?;
+    agent.shutdown().await?;
+
+    let matching = durable_artifact_test_builder(Arc::clone(&workspace), original);
+    let fresh = sealed_runtime_admission(&matching).await?.fact;
+    refreshed_reopen_admission(old.manifest(), &matching.provider_configuration, &fresh)?;
+
+    let descriptor = durable_test_descriptor("test.route")?;
+    let authority = artifact_authority(&descriptor, 2)?;
+    let changed = RuntimeModelAuthority::new(
+        &descriptor,
+        authority.account_binding(),
+        Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[b"changed credential authority"],
+        )?,
+        2,
+        Timestamp::new(9, 0)?,
+        Some(Timestamp::new(20, 0)?),
+    )?;
+    let model = Arc::new(ArtifactModel::new(descriptor, changed, 0, 40_000, false));
+    let candidate = durable_artifact_test_builder(workspace, Arc::clone(&model));
+    let fresh = sealed_runtime_admission(&candidate).await?.fact;
+    let refusal =
+        refreshed_reopen_admission(old.manifest(), &candidate.provider_configuration, &fresh)
+            .expect_err(
+                "a readable legacy checkpoint must still refuse changed credential authority",
+            );
+    assert!(refusal.binding_mismatch());
+    assert_eq!(model.prepares.load(Ordering::Acquire), 0);
+    assert_eq!(model.calls.load(Ordering::Acquire), 0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_duplicate_reopens_exact_historical_terminal_without_redispatch() -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);

@@ -397,15 +397,7 @@ pub(super) fn verify_contents(c: &Connection) -> Result<(), SessionStoreError> {
     if integrity != "ok" {
         return Err(SessionStoreError::corrupt());
     }
-    if c.query_row("SELECT 1 FROM pragma_foreign_key_check LIMIT 1", [], |_| {
-        Ok(())
-    })
-    .optional()
-    .map_err(map_sqlite)?
-    .is_some()
-    {
-        return Err(SessionStoreError::corrupt());
-    }
+    verify_foreign_keys(c)?;
     load_verified_objects(c)?;
     let orphan: bool = c.query_row("WITH RECURSIVE owned(kind,codec,digest) AS (
         SELECT root_kind,root_codec,root_digest FROM checkpoints
@@ -418,6 +410,19 @@ pub(super) fn verify_contents(c: &Connection) -> Result<(), SessionStoreError> {
         return Err(SessionStoreError::corrupt());
     }
     verify_authority(c)
+}
+
+pub(super) fn verify_foreign_keys(c: &Connection) -> Result<(), SessionStoreError> {
+    if c.query_row("SELECT 1 FROM pragma_foreign_key_check LIMIT 1", [], |_| {
+        Ok(())
+    })
+    .optional()
+    .map_err(map_sqlite)?
+    .is_some()
+    {
+        return Err(SessionStoreError::corrupt());
+    }
+    Ok(())
 }
 
 fn load_verified_objects(c: &Connection) -> Result<(), SessionStoreError> {

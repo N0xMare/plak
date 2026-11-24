@@ -211,10 +211,10 @@ offline using export and import (chapter 02 §2.5.1).
 
 Bump the runtime format epoch only when persisted runtime encoding changes,
 not on a release or protocol cadence. Checkpoint component revisions are
-frozen. Epoch 39 is a declared format cut: this build reads only epoch 39,
-and every epoch bump remains a declared cut until an immediate
-previous-epoch reader ships. Once that reader ships, read the current and
-immediately previous record epochs in place. Non-cut bumps leave the key's
+frozen. Epoch 39 is the last declared format cut. The runtime reads the
+current and immediately previous record epochs in place. No store under
+the epoch-39 key was written with epoch-38 records; stores under the
+epoch-38 key still require offline migration. Non-cut bumps leave the key's
 epoch component at the last declared cut, separate from the writer epoch
 (chapter 02 §2.5). Batch incompatible stored-format changes into declared
 cuts. Running host upgrades stay within their current key. Migrate across
@@ -264,6 +264,12 @@ newer revisions without writing. The first real revision can ship only when
 no build that predates revision admission can run against that key; those
 builds may write before their version checks. Generation changes discard the
 revision steps and require offline migration (chapter 02 §2.5.1).
+
+The runtime has a one-time, same-key exception to rebuild the object table
+into epoch-neutral exact DDL. This is not an additive product or tree revision.
+It requires a stopped store, exclusive SQLite ownership and a synced backup;
+one transaction changes the shape without rewriting encoded payloads or
+retained authority (chapter 01 §5.2).
 
 Retention-only authority is irreversible for a host/line during that worker's
 lifetime. Downgrading or reinstalling the drainer's own build triple does not

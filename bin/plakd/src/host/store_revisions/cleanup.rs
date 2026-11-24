@@ -34,7 +34,10 @@ pub(super) fn lock_marker(path: &Path, exclusive: bool) -> Option<File> {
 pub(super) fn stale_copies(paths: &PlakPaths) {
     for entry in directories(&paths.state_dir()) {
         let name = entry.file_name();
-        if name.to_str().is_some_and(staging_name) {
+        if name
+            .to_str()
+            .is_some_and(|name| staging_name(name) || abandoned_runtime_staging(name))
+        {
             discard_sqlite(&entry.path(), "copy.sqlite3");
             let _ = fs::remove_dir(entry.path());
         }
@@ -62,6 +65,25 @@ fn staging_name(name: &str) -> bool {
     })
 }
 
+fn abandoned_runtime_staging(name: &str) -> bool {
+    let Some((pid, nonce)) = name
+        .strip_prefix(".runtime-bootstrap-")
+        .and_then(|name| name.split_once('-'))
+    else {
+        return false;
+    };
+    let Some(pid) = pid
+        .parse::<i32>()
+        .ok()
+        .filter(|n| *n > 0 && n.to_string() == pid)
+        .and_then(rustix::process::Pid::from_raw)
+    else {
+        return false;
+    };
+    nonce.parse::<u64>().is_ok_and(|n| n.to_string() == nonce)
+        && rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH)
+}
+
 fn probe_name(name: &str) -> bool {
     name.strip_prefix(".tmp").is_some_and(|suffix| {
         suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
@@ -83,6 +105,8 @@ fn discard_probe(directory: &Path) {
     for stem in STORE_STEMS {
         discard_sqlite(&stores, &format!("{stem}.sqlite3"));
     }
+    discard_sqlite(&stores, "runtime.sqlite3");
+    discard_sqlite(&stores, "runtime.pre-codec-bootstrap.sqlite3");
     if fs::remove_dir(&stores).is_ok() {
         let _ = fs::remove_file(directory.join("service.json"));
         let _ = fs::remove_file(marker);

@@ -1075,6 +1075,12 @@ impl ProductStateRoots {
         Ok(sessions)
     }
 
+    pub(crate) fn verification_sessions(&self) -> CliResult<Arc<AgentSessions>> {
+        plakous::sessions::rehearsal::sqlite_reopen_inspection(&self.runtime_database)
+            .map(Arc::new)
+            .map_err(|error| CliFailure::new(error.to_string()))
+    }
+
     /// The process's one [`TreeStore`] over the product home, opened on the
     /// first call and shared by every root attach after it.
     pub(crate) fn tree_store(&self) -> CliResult<Arc<dyn TreeStore>> {

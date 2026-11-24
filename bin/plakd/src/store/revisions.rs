@@ -20,15 +20,16 @@ pub(crate) fn backup_count(paths: &PlakPaths) -> usize {
         .filter(|entry| {
             entry.file_type().is_ok_and(|kind| kind.is_file())
                 && entry.file_name().to_str().is_some_and(|name| {
-                    STORE_STEMS.into_iter().any(|stem| {
-                        name.strip_prefix(&format!("{stem}.pre-revision-"))
-                            .and_then(|name| name.strip_suffix(".sqlite3"))
-                            .is_some_and(|revision| {
-                                revision
-                                    .parse::<i64>()
-                                    .is_ok_and(|value| value > 0 && value.to_string() == revision)
-                            })
-                    })
+                    name == "runtime.pre-codec-bootstrap.sqlite3"
+                        || STORE_STEMS.into_iter().any(|stem| {
+                            name.strip_prefix(&format!("{stem}.pre-revision-"))
+                                .and_then(|name| name.strip_suffix(".sqlite3"))
+                                .is_some_and(|revision| {
+                                    revision.parse::<i64>().is_ok_and(|value| {
+                                        value > 0 && value.to_string() == revision
+                                    })
+                                })
+                        })
                 })
         })
         .count()

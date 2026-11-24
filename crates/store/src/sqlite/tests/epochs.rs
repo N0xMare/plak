@@ -109,6 +109,7 @@ async fn preceding_epoch_fork_has_a_current_closure_and_unchanged_source_receipt
     let dir = tempfile::tempdir()?;
     let path = legacy(dir.path())?;
     let original_seal = old_receipt(&path)?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
     let store = SqliteSessionStore::open(&path)?;
     let lease = lease(&store).await?;
     let old = store.load_branch(selector()?, "reopen").await?;
@@ -204,6 +205,7 @@ async fn epoch_crash_worker() -> TestResult {
             }
         })?;
     } else {
+        SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
         let store = SqliteSessionStore::open(&path)?;
         let lease = lease(&store).await?;
         let prior = store.load_branch(selector()?, "reopen").await?;
@@ -249,7 +251,9 @@ async fn sigkill_bootstrap_and_first_epoch_publication_keep_exact_authority() ->
                 SqliteSessionStore::bootstrap_pending(&path)?,
                 bootstrap_cut == "before-commit"
             );
-            assert!(path.with_extension("pre-codec-bootstrap.sqlite3").is_file());
+            let backup = path.with_extension("pre-codec-bootstrap.sqlite3");
+            assert!(SqliteSessionStore::bootstrap_pending(&backup)?);
+            assert_eq!(feed(&backup)?, before);
             assert_eq!(feed(&path)?, before);
             kill_at(&path, "publication", commit_cut.name())?;
             let store = SqliteSessionStore::open_verified(&path)?;
@@ -310,6 +314,7 @@ async fn sigkill_bootstrap_and_first_epoch_publication_keep_exact_authority() ->
 fn unsupported_retained_payload_refuses_from_a_read_only_wal_snapshot() -> TestResult {
     let directory = tempfile::tempdir()?;
     let path = legacy(directory.path())?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
     drop(SqliteSessionStore::open(&path)?);
     let incumbent = Connection::open(&path)?;
     incumbent.execute_batch("PRAGMA wal_autocheckpoint=0; PRAGMA foreign_keys=ON")?;
@@ -361,6 +366,7 @@ fn unsupported_retained_payload_refuses_from_a_read_only_wal_snapshot() -> TestR
 async fn a_stale_writer_cannot_mutate_after_epoch_activation() -> TestResult {
     let directory = tempfile::tempdir()?;
     let path = legacy(directory.path())?;
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
     let store = SqliteSessionStore::open(&path)?;
     let retained = store.load_branch(selector()?, "reopen").await?;
     let next = RUNTIME_FORMAT_EPOCH + 1;

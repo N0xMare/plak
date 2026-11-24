@@ -11,6 +11,8 @@ pub(super) const fn startup_error_category(error: SessionStoreError) -> &'static
     match error {
         SessionStoreError::BackendBusy => "backend_busy",
         SessionStoreError::BootstrapBusy => "bootstrap_busy",
+        SessionStoreError::BootstrapRequired => "bootstrap_required",
+        SessionStoreError::BootstrapRehearsalTooLarge => "bootstrap_rehearsal_too_large",
         SessionStoreError::BackendUnavailable => "backend_unavailable",
         SessionStoreError::UnsupportedSchema => "unsupported_schema",
         SessionStoreError::UnsupportedCodec => "unsupported_codec",

@@ -112,17 +112,28 @@ fn legacy_bootstrap_refuses_an_idle_writer_then_rebuilds_after_it_closes() -> Te
     assert!(SqliteSessionStore::bootstrap_pending(&path)?);
     assert_eq!(
         SqliteSessionStore::open(&path).err(),
+        Some(SessionStoreError::BootstrapRequired)
+    );
+    assert_eq!(
+        SqliteSessionStore::bootstrap_stopped(&path, |_| {}).err(),
         Some(SessionStoreError::BootstrapBusy)
     );
     assert!(!path.with_extension("pre-codec-bootstrap.sqlite3").exists());
     let scratch = dir.path().join("copy.sqlite3");
     SqliteSessionStore::rehearse_bootstrap(&path, &scratch)?;
     assert!(!SqliteSessionStore::bootstrap_pending(&scratch)?);
+    assert!(
+        !scratch
+            .with_extension("pre-codec-bootstrap.sqlite3")
+            .exists()
+    );
     assert!(SqliteSessionStore::bootstrap_pending(&path)?);
     drop(incumbent);
+    SqliteSessionStore::bootstrap_stopped(&path, |_| {})?;
     drop(SqliteSessionStore::open_verified(&path)?);
     assert!(!SqliteSessionStore::bootstrap_pending(&path)?);
-    assert!(path.with_extension("pre-codec-bootstrap.sqlite3").is_file());
+    let backup = path.with_extension("pre-codec-bootstrap.sqlite3");
+    assert!(SqliteSessionStore::bootstrap_pending(&backup)?);
     Ok(())
 }
 

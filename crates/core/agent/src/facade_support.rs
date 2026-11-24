@@ -275,9 +275,10 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         SessionStoreError::BackendBusy | SessionStoreError::BootstrapBusy => {
             SessionStoreOrigin::Busy
         }
-        SessionStoreError::BackendUnavailable | SessionStoreError::Shutdown => {
-            SessionStoreOrigin::Unavailable
-        }
+        SessionStoreError::BackendUnavailable
+        | SessionStoreError::Shutdown
+        | SessionStoreError::BootstrapRequired
+        | SessionStoreError::BootstrapRehearsalTooLarge => SessionStoreOrigin::Unavailable,
         SessionStoreError::Invalid(reason) => SessionStoreOrigin::InvalidInput(reason),
         SessionStoreError::UnsupportedSchema
         | SessionStoreError::UnsupportedCodec

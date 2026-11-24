@@ -300,6 +300,7 @@ pub(super) fn request(
     if let Some(inspection) = &inspection {
         requester::prove_deploy_source(paths, inspection)?;
     }
+    super::store_revisions::rehearse_runtime(paths)?;
     let mut stream = crate::wire_transport::hosts::socket_until(&socket(paths), Instant::now() + PROBE_BOUND)
         .map_err(|_| CliFailure::new("host_upgrade_unsupported_source: source has no supported upgrade coordinator; retain its executable and settle it using its own lifecycle"))?;
     stream

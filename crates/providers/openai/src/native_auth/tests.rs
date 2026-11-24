@@ -2693,6 +2693,30 @@ async fn resolution_evidence_follows_slot_not_store_path() -> TestResult {
     let (_, first) = first_resolver.resolve_with_evidence(model_id)?;
     let (_, second) = second_resolver.resolve_with_evidence(model_id)?;
     let (_, third) = third_resolver.resolve_with_evidence(model_id)?;
+    let epoch_38 = Digest::sha256(
+        DigestDomain::ModelBinding,
+        1,
+        &[
+            b"plak-native-codex-authority",
+            OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
+            first_slot.as_os_str().as_encoded_bytes(),
+        ],
+    )?;
+    let epoch_39 = Digest::sha256(
+        DigestDomain::ModelBinding,
+        1,
+        &[
+            b"plak-native-codex-authority-v2",
+            OPENAI_CODEX_COMPATIBILITY_PROFILE_ID.as_bytes(),
+            b"primary",
+        ],
+    )?;
+    assert_eq!(first.credential_authority_binding(), epoch_39);
+    // Compare the persisted authority input without changing digest framing.
+    assert_ne!(
+        serde_json::to_vec(&epoch_38)?,
+        serde_json::to_vec(&first.credential_authority_binding())?
+    );
     assert_eq!(first.account_fingerprint(), second.account_fingerprint());
     assert_eq!(first.account_fingerprint(), third.account_fingerprint());
     assert_eq!(

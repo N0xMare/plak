@@ -34,6 +34,7 @@ FORMAT_FILES = (
     "crates/core/model/src/history.rs",
     "crates/core/tools/src/policy.rs",
     "crates/orchestration/recursive-subagents-store/src/database.rs",
+    "crates/plakous/src/sessions.rs",
     "crates/store/src/sqlite.rs",
     "crates/store/src/sqlite/schema.rs",
 )
@@ -222,6 +223,23 @@ class EvidenceTests(GitFixture):
             )
         )
         self.candidate = self.commit()
+        self.assert_refused()
+
+    def test_runtime_writer_epoch_changes_evidence_without_moving_state_key(self):
+        self.write()
+        path = self.root / "crates/core/agent/src/checkpoint_bundle.rs"
+        before = EVIDENCE.formats(self.root, self.base)
+        epoch = before["runtime_encoding_epoch"]
+        path.write_text(
+            path.read_text().replace(
+                f"const RUNTIME_FORMAT_EPOCH: u32 = {epoch};",
+                f"const RUNTIME_FORMAT_EPOCH: u32 = {epoch + 1};",
+            )
+        )
+        self.candidate = self.commit()
+        after = EVIDENCE.formats(self.root, self.candidate)
+        self.assertEqual(after["state_key"], before["state_key"])
+        self.assertEqual(after["runtime_encoding_epoch"], epoch + 1)
         self.assert_refused()
 
     def test_additive_product_revision_is_detected_with_the_same_state_key(self):

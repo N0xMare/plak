@@ -2226,13 +2226,18 @@ branch acquisition are separate transactions.
 The runtime schema is exact and does not encode the checkpoint writer epoch
 in its DDL. A read-only preflight recognizes the exact supported legacy
 DDL before opening a writer. The one-time bootstrap takes exclusive SQLite
-ownership, syncs a pre-change backup, and rebuilds and verifies the schema in
-one transaction without changing retained addresses, rows, or receipt seals.
+ownership after a short bounded lock retry, syncs a pre-change backup, and
+rebuilds the object table in a single transaction. It verifies the exact
+schema, retained object headers and counts, and foreign keys without changing
+retained addresses, payloads, or receipt seals.
 The prior shape remains authoritative until commit; after commit older builds
-refuse the new shape. A library embedder MUST close its store before a build
-with the new shape opens it. If another handle holds the database, bootstrap
-returns a typed busy refusal. The paired product upgrade rehearses the same
-transition on a detached copy before draining the live owner (chapter 06 §6.3).
+refuse the new shape. Ordinary library open refuses legacy DDL with
+`BootstrapRequired`. A library embedder MUST close all handles to the store,
+then call `SessionBackend::bootstrap_sqlite` explicitly before opening it
+with the new build. If another handle prevents exclusive ownership, bootstrap
+returns `BootstrapBusy`. The paired product upgrade rehearses the same
+transition and verifies all retained content on a detached copy before
+draining the live owner (chapter 06 §6.3).
 Unknown schema versions are `UnsupportedSchema`. A runtime store reads the
 current and immediately preceding checkpoint encodings, and writes only the
 current encoding. Read-only admission refuses retained payloads outside that

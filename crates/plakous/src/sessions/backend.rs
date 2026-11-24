@@ -81,7 +81,8 @@ impl SessionBackend {
     /// Opens or creates one required-durability SQLite backend.
     ///
     /// Attach admits bounded shape, exact schema, and counters. It does not
-    /// reconstruct every retained object.
+    /// reconstruct every retained object. A legacy shape requires an explicit
+    /// [`Self::bootstrap_sqlite`] before opening a writer.
     ///
     /// The database path and backend remain private implementation inputs;
     /// callers receive only the semantic workflow handle.
@@ -92,10 +93,24 @@ impl SessionBackend {
     ///
     /// # Errors
     ///
-    /// Returns a redaction-safe storage or integrity failure when the database
+    /// Returns `BootstrapRequired` for the supported pre-bootstrap schema,
+    /// or a redaction-safe storage or integrity failure when the database
     /// cannot be opened exactly.
     pub fn sqlite(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
         Self::sqlite_with_storage_probe(path, Arc::new(|_| false))
+    }
+
+    /// Upgrades the exact pre-bootstrap shape of a stopped SQLite store.
+    /// Close all store handles first. An already-current or absent store is
+    /// left alone. The verified transaction keeps a synced pre-change backup.
+    ///
+    /// # Errors
+    /// Returns `BootstrapBusy` if another handle prevents exclusive ownership,
+    /// or a storage or integrity failure without activating a partial shape.
+    pub fn bootstrap_sqlite(path: impl AsRef<Path>) -> Result<(), AgentSessionsError> {
+        let path = path.as_ref();
+        SqliteSessionStore::bootstrap_stopped(path, |_| {})
+            .map_err(|error| store_path_error(path, error))
     }
 
     /// Opens SQLite with a process-local pause probe for colocated

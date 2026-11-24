@@ -1095,11 +1095,12 @@ the state key, file sizes and SHA-256 checksums. Restore only offline using a
 matching build and all three files as a set, without their old WAL/SHM files.
 
 Each build keeps its state in `~/.plak/state/<key>/`, where the key is
-\`r<runtime schema>.e<runtime format cut>.p<product generation>.t<tree
-generation>\`, for example \`r28.e39.p39.t11\`. The key is derived from those
-four constants, never hand-bumped. The runtime schema is exact. The \`e\`
+`r<runtime schema>.e<runtime format cut>.p<product generation>.t<tree
+generation>`, for example `r28.e39.p39.t11`. The key is derived from those
+four constants, never hand-bumped. The runtime schema is exact. The `e`
 component records the last declared runtime format cut, not the writer's
-encoding epoch. Runtime epoch 39 is the last declared cut and removes the
+encoding epoch. The runtime reads the current and preceding epoch in place.
+Runtime epoch 39 is the last declared cut and removes the
 credential-store path from the Codex and SuperGrok credential-authority
 digests. Stores under the epoch-38 key require offline migration; the
 epoch-39 key has no epoch-38 records. Product schema 39 stores
@@ -1155,6 +1156,9 @@ revision; a crash after commit does not rerun its steps. The stores commit
 independently: after an interruption between commits, the destination build
 completes the remaining revision on startup.
 
+The one-time runtime object table bootstrap (chapter 01 §5.2) likewise
+keeps a synced `runtime.pre-codec-bootstrap.sqlite3` beside the live store.
+
 After the first revision commit, same-key recovery is fix-forward: start the
 destination or another build supporting the committed revision. Before any
 restart, point the host service's stable executable link or pinned executable
@@ -1165,6 +1169,8 @@ in the other stores. No host restores a copy automatically. On startup the
 host removes abandoned copy staging and abandoned qualification copies; it
 skips scratch still held by a probe and never removes published copies.
 `plakd doctor` reports retained copies in the current state directory.
+An operator may remove them after verifying the new host and deciding not
+to restore the earlier state.
 
 Before surrender in a same-key upgrade, source and destination run independent
 read-only binding inspections concurrently (§4.5). Neither inspection borrows

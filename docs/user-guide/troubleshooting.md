@@ -741,6 +741,15 @@ not read. That only happens to a damaged or hand-placed file. Move the named
 file (and its `-wal` and `-shm` companions) out of the directory and run plakd
 again; it creates a fresh store.
 
+## Store integrity refusal after a same-key runtime bootstrap
+
+An older build treats the new runtime table shape as an integrity error.
+Keep the existing state and start the newer build that supports it. If you
+must restore the previous shape, first stop the host and all other store
+users. Move the runtime database and its SQLite sidecars aside, then restore
+`runtime.pre-codec-bootstrap.sqlite3` as `runtime.sqlite3`. This loses
+subsequent runtime writes and does not roll back the product or tree stores.
+
 ## A reasoning model needs `--effort`
 
 There is no default effort; the catalog row decides. A reasoning model requires

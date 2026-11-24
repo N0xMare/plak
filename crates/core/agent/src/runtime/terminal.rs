@@ -757,7 +757,9 @@ impl DurableSessionStoreError {
                     .admission
                     .map(|class| DurableCapacityAdmission::new(class, capacity.limit)),
             },
-            SessionStoreError::BackendUnavailable => Self::BackendUnavailable,
+            SessionStoreError::BackendUnavailable
+            | SessionStoreError::BootstrapRequired
+            | SessionStoreError::BootstrapRehearsalTooLarge => Self::BackendUnavailable,
             SessionStoreError::BackendBusy | SessionStoreError::BootstrapBusy => Self::BackendBusy,
             SessionStoreError::Corrupt(reason) => Self::Corrupt(reason),
             SessionStoreError::StorageFull => Self::StorageFull,

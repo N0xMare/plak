@@ -984,10 +984,12 @@ async fn attach_native_source(
     operation_id: SessionOperationId,
     stderr: &mut (dyn Write + Send),
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
-    let sessions = spec
-        .state_roots
-        .runtime_sessions()
-        .map_err(CodingSessionOpenFailure::from)?;
+    let sessions = if target.verifies() {
+        spec.state_roots.verification_sessions()
+    } else {
+        spec.state_roots.runtime_sessions()
+    }
+    .map_err(CodingSessionOpenFailure::from)?;
     // Attachment catalogs are identity-bearing, so restore bounds before compilation.
     if let Some(locator) = target.locator() {
         spec.state_roots = spec
@@ -1217,10 +1219,12 @@ async fn attach_api_source(
     if parent.product_home.is_none() {
         return Err(CliFailure::new("plak product home is unavailable").into());
     }
-    let sessions = parent
-        .state_roots
-        .runtime_sessions()
-        .map_err(CodingSessionOpenFailure::from)?;
+    let sessions = if target.verifies() {
+        parent.state_roots.verification_sessions()
+    } else {
+        parent.state_roots.runtime_sessions()
+    }
+    .map_err(CodingSessionOpenFailure::from)?;
     // Read before anything is compiled: the configuration a reopen builds has
     // to carry the process budgets and output bound the session was created
     // under, not today's product policy or route attestation.

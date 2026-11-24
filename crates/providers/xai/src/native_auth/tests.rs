@@ -84,6 +84,18 @@ fn grok_authority_ignores_store_path_and_differs_by_slot_and_account_scope() -> 
     }
     assert!(!expected.contains(first.path().to_string_lossy().as_ref()));
     assert_eq!(authority(&first, None), expected);
+    let mut previous = Sha256::new();
+    previous.update(first.path().as_os_str().as_encoded_bytes());
+    previous.update(b"\0xai-route-credential-authority-v2\0");
+    previous.update(first.slot_id().as_str().as_bytes());
+    let mut epoch_38 = String::from("plak-native-xai-route:");
+    for byte in previous.finalize() {
+        write!(&mut epoch_38, "{byte:02x}")?;
+    }
+    assert_ne!(
+        serde_json::to_vec(&authority(&first, None))?,
+        serde_json::to_vec(&epoch_38)?
+    );
     assert_eq!(authority(&first, None), authority(&moved, None));
     assert_ne!(authority(&first, None), authority(&other_slot, None));
     let work = authority(&moved, Some("grok/work"));

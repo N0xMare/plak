@@ -68,9 +68,10 @@ are not prerequisites or authority for current behavior.
 - Remove obsolete paths rather than preserve backward compatibility outside
   [the persisted-version rules](docs/spec/00-overview.md#persisted-versions).
   Bump the runtime epoch only when persisted runtime encoding changes.
-  Until a previous-epoch reader ships, every epoch bump is a declared
-  format cut. With that reader, read the current and previous epoch in
-  place and keep the state key unchanged on non-cut bumps. Session export,
+  Read the current and previous epoch in place and keep the state key
+  unchanged on non-cut bumps. Epoch 39 is the last declared cut; epoch-38
+  state keys still need offline migration. The one-time runtime DDL bootstrap
+  requires a stopped store, a synced backup and an atomic shape change. Session export,
   runner job retention and the credential gateway support the current and
   previous version of their own
   formats; additive in-place store revisions remain supported. Running host

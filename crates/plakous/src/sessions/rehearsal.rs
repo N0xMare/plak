@@ -7,6 +7,19 @@ use super::{
 use plakous_agent::internal::CheckpointRecoveryVerdict;
 use {plakous_store::SqliteSessionStore, std::path::Path};
 
+/// Construct a verification-only facade over exact SQLite reads, without
+/// opening its writer or bootstrapping supported legacy DDL.
+///
+/// # Errors
+/// Returns a runtime construction failure. Exact DB checks occur on read.
+#[doc(hidden)]
+pub fn sqlite_reopen_inspection(path: &Path) -> Result<super::AgentSessions, AgentSessionsError> {
+    super::AgentSessions::new(super::SessionBackend::from_store(
+        std::sync::Arc::new(SqliteSessionStore::reopen_inspection(path.to_path_buf())),
+        plakous_agent::internal::RuntimeDurability::Required,
+    ))
+}
+
 /// Read-only preflight for the stopped-store runtime bootstrap.
 ///
 /// # Errors

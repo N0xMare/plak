@@ -58,6 +58,7 @@ mod gc_tests;
 #[cfg(test)]
 mod index_tests;
 mod inspection;
+mod inspection_backend;
 #[cfg(test)]
 mod lease_sync_tests;
 mod lines;
@@ -131,6 +132,9 @@ pub struct BindingCheckpointInspection {
 }
 
 /// Bounded `SQLite` actor and retained-state options.
+///
+/// Admission scans retained object metadata and feed headers to check codec
+/// support and accounting. It does not reconstruct every object payload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SqliteStoreOptions {
     limits: MemoryStoreLimits,
@@ -483,6 +487,13 @@ impl SqliteSessionStore {
     /// `None` for a missing file. Callers admit its shape once, on the snapshot
     /// they read, with [`admit_inspection_snapshot`] or [`classify_connection`].
     fn open_inspection(path: &Path) -> Result<Option<Connection>, SessionStoreError> {
+        Self::open_inspection_with_timeout(path, BUSY_TIMEOUT)
+    }
+
+    fn open_inspection_with_timeout(
+        path: &Path,
+        timeout: Duration,
+    ) -> Result<Option<Connection>, SessionStoreError> {
         admit_header_file(path)?;
         let metadata = match path.symlink_metadata() {
             Ok(metadata) => metadata,
@@ -496,7 +507,7 @@ impl SqliteSessionStore {
         )
         .map_err(map_sqlite)?;
         verify_sqlite_runtime(&connection)?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(map_sqlite)?;
+        connection.busy_timeout(timeout).map_err(map_sqlite)?;
         connection
             .execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
             .map_err(map_sqlite)?;
@@ -692,8 +703,10 @@ impl SqliteSessionStore {
         let domain = clock.now()?.domain();
         let path = path.as_ref().to_path_buf();
         let progress = Arc::new(StartupProgress(Mutex::new(StartupStage::Header)));
-        let legacy = admit_existing_header(&path, domain)
-            .map_err(|error| progress.failure("preparation", error).report())?;
+        let refuse = |error| progress.failure("preparation", error).report();
+        if admit_existing_header(&path, domain).map_err(refuse)? {
+            return Err(refuse(SessionStoreError::BootstrapRequired));
+        }
         progress.set(StartupStage::PrivateFile);
         prepare_private_file(&path)
             .map_err(|error| progress.failure("preparation", error).report())?;
@@ -706,15 +719,8 @@ impl SqliteSessionStore {
         let worker_progress = Arc::clone(&progress);
         let join = thread::Builder::new()
             .name("plakous-sqlite-store".into())
-            .spawn(move || {
-                match Backend::open_after_bootstrap(
-                    &path,
-                    clock,
-                    domain,
-                    options,
-                    legacy,
-                    &worker_progress,
-                ) {
+            .spawn(
+                move || match Backend::open(&path, clock, domain, options, &worker_progress) {
                     Ok(mut backend) => {
                         backend.usage_snapshot = Some(Arc::clone(&worker_usage));
                         *worker_usage
@@ -734,8 +740,8 @@ impl SqliteSessionStore {
                     Err(error) => {
                         let _ = ready_tx.send(Err(error));
                     }
-                }
-            })
+                },
+            )
             .map_err(|_| {
                 progress
                     .failure("spawn", SessionStoreError::BackendUnavailable)
@@ -903,20 +909,6 @@ impl fmt::Debug for SqliteSessionStore {
 }
 
 impl Backend {
-    fn open_after_bootstrap(
-        path: &Path,
-        clock: Arc<dyn LeaseClock>,
-        domain: LeaseDomain,
-        options: SqliteStoreOptions,
-        legacy: bool,
-        progress: &StartupProgress,
-    ) -> Result<Self, SessionStoreError> {
-        if legacy {
-            bootstrap::run(path, |_| {})?;
-        }
-        Self::open(path, clock, domain, options, progress)
-    }
-
     fn open(
         path: &Path,
         clock: Arc<dyn LeaseClock>,

@@ -303,7 +303,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-openrouter": "ae2cbd7d0d210efcd4b4534fd5f841f3a28d801ff0c892a1317bf452f41a5340",
     "plakous-responses": "1af24d35407bb8c920bd1241de5694e20e0ec4d7e2189f698bf6633d79ab2cfc",
     # SQLite's captured terminal envelope uses the existing JSON dependency.
-    "plakous-store": "7e9c37178c2bc5a89ec6bfcb9e0b03451cafb1e9ba5effb562898aaff5f03e6d",
+    "plakous-store": "2c3a1f7c9e4b81a5b25ee3c830084328c4c103edb2e3595925b8ab18f6afe651",
     # Runner waits use the existing Tokio select macro on all targets.
     # Linux group scans use the existing Nix wrapper to handle kernel PGID zero.
     # The unjoined process fixture is available only to test builds.

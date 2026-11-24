@@ -1,6 +1,74 @@
 //! A predecessor-native store is refused byte-for-byte after a state-key cut.
 use plakous::sessions::SessionBackend;
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn previous_epoch_api_checkpoint_reopens_exactly() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::agent_tree_protocol::WriterMode;
+    use plakous::sessions::{
+        AgentSessions, AgentSessionsErrorKind, OpenSessionOutcome, OpenSessionRequest,
+        SessionLocator, SessionOperationId,
+    };
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("runtime.sqlite3");
+    std::fs::write(
+        &database,
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/runtime-epoch-38/runtime.sqlite3"
+        )),
+    )?;
+    std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o600))?;
+    let error = SessionBackend::sqlite(&database).expect_err("legacy open must not bootstrap");
+    assert_eq!(error.kind(), AgentSessionsErrorKind::BootstrapRequired);
+    SessionBackend::bootstrap_sqlite(&database)?;
+    let sessions = AgentSessions::new(SessionBackend::sqlite(&database)?)?;
+    let locator: SessionLocator = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/runtime-epoch-38/locator.txt"
+    ))
+    .trim()
+    .parse()?;
+    let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+        "current-api",
+        "root",
+        "owner",
+        "/".into(),
+        "selected-tuple",
+        WriterMode::SingleLease,
+    )
+    .map_err(|error| error.message)?;
+    let frozen = Arc::new(sessions.created_tool_presentation(locator).await?);
+    let extensions =
+        crate::topology_extensions::topology_tool_extensions(Arc::new(Mutex::new(tree)), "root")?
+            .with_frozen_presentation(Some(frozen));
+    let runtime = crate::platform::tests::previous_fixture_runtime(
+        &extensions,
+        Path::new("/"),
+        "current-api",
+        true,
+        false,
+        super::CompositionSelection::Direct,
+    )
+    .await?;
+    let opened = sessions
+        .open(OpenSessionRequest::new(
+            SessionOperationId::new("previous-epoch:exact-open")?,
+            locator,
+            runtime,
+        ))
+        .await?;
+    let OpenSessionOutcome::Opened { session, .. } = opened else {
+        panic!("previous encoding must reopen under the exact binding");
+    };
+    assert_eq!(session.release().await?, locator);
+    Ok(())
+}
+
 #[tokio::test]
 async fn current_build_api_presentation_reopens_without_dispatch()
 -> Result<(), Box<dyn std::error::Error>> {

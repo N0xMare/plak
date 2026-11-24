@@ -1467,6 +1467,16 @@ destination, and then start it (chapter 02 §2.5.1). Keep both immutable
 snapshots and their matching sidecars through verification. Installation
 alone does not migrate or remove old snapshots or state.
 
+Before requesting a same-key drain for a runtime store with legacy DDL,
+the destination requester reports progress and rehearses the one-time
+bootstrap on a size-bounded, detached snapshot. It runs the same structural
+transition and verifies all retained content without making a second backup
+of scratch. Failure leaves the source serving. Rehearsal runs separately
+from the timed capability probe; the initial and held probes inspect the
+live runtime read-only and do not repeat the rehearsal. At startup after
+drain, the destination takes exclusive SQLite ownership, syncs a pre-change
+backup, and performs the verified structural transaction (chapter 01 §5.2).
+
 The private `version --host-upgrade-probe` reports host availability, state
 key, local-runner capabilities and configuration. The coordinator adds
 `--host-upgrade-service <file>` to validate resolved service arguments, web

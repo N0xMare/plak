@@ -2000,7 +2000,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         'tools': {'runner', 'runner::LocalDaemonBackend'},
     },
     ("plakous-hosted", "src/agent/roots.rs"): {
-        "sessions": {"LeaseOnlyHead", "FrozenSessionPresentation"},
+        "sessions": {
+            "LeaseOnlyHead",
+            "FrozenSessionPresentation",
+            "rehearsal",
+            "sqlite_reopen_inspection",
+        },
         'runner': {'RunnerClient', 'RunnerRegistry', 'RunnerServices', 'RunnerStatus'},
         'tools': {'runner::LocalDaemonBackend'},
     },

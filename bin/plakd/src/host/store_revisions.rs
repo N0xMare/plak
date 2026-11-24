@@ -34,7 +34,6 @@ pub(super) fn upgrade_stopped(
     }
     // Exclude pre-existing embedded writers before taking either SQLite lock.
     let _admission = crate::carry::upgrade::admission(paths, true)?;
-    pending(paths)?;
     let databases = databases(paths);
     let locks = databases
         .iter()
@@ -94,15 +93,33 @@ pub(super) fn rehearse_for_service(paths: &PlakPaths, service: &Path) -> CliResu
     Ok(())
 }
 
+/// The destination requester runs this before sending a request, even when
+/// the live coordinator predates the runtime shape change.
+pub(super) fn rehearse_runtime(paths: &PlakPaths) -> CliResult<()> {
+    let runtime = paths.runtime_database();
+    if !runtime_bootstrap_pending(&runtime)? {
+        return Ok(());
+    }
+    eprintln!("host upgrade: qualifying runtime store bootstrap on a detached copy");
+    let directory =
+        tempfile::tempdir_in(paths.home()).map_err(|error| CliFailure::new(error.to_string()))?;
+    let _marker = request_rehearsal(directory.path())?;
+    let stores = directory.path().join("stores");
+    crate::commands::runner::private_directory(&stores)?;
+    let start = std::time::Instant::now();
+    rehearse_runtime_bootstrap(&runtime, &stores.join("runtime.sqlite3"))?;
+    eprintln!(
+        "host upgrade: runtime store bootstrap qualification completed in {} ms",
+        start.elapsed().as_millis()
+    );
+    Ok(())
+}
+
 fn rehearse(paths: &PlakPaths, scratch: &Path) -> CliResult<()> {
-    if !pending(paths)? {
+    if !revisions_pending(paths)? {
         return Ok(());
     }
     crate::commands::runner::private_directory(scratch)?;
-    let runtime = paths.runtime_database();
-    if runtime_bootstrap_pending(&runtime)? {
-        rehearse_runtime_bootstrap(&runtime, &scratch.join("runtime.sqlite3"))?;
-    }
     let copies = paths.clone().with_probe_stores(scratch.to_path_buf());
     for ((schema, source), (_, destination)) in databases(paths).into_iter().zip(databases(&copies))
     {

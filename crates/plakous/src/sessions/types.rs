@@ -1105,6 +1105,10 @@ pub enum AgentSessionsErrorKind {
     /// request queue was full. Nothing was written; the same request may
     /// succeed when retried.
     StorageBusy,
+    /// Close all handles and explicitly bootstrap the stopped SQLite store.
+    BootstrapRequired,
+    /// Another handle prevented exclusive SQLite ownership during bootstrap.
+    BootstrapBusy,
     /// The store is unavailable or shutting down, or the runtime refused the
     /// request under backpressure.
     StorageUnavailable,

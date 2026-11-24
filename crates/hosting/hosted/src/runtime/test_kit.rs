@@ -1094,7 +1094,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     ) -> RuntimeFuture<'a, Result<(), CodingSessionOpenFailure>> {
         Box::pin(async move {
             crate::agent::verify_bound_session(
-                config.state_roots.runtime_sessions()?,
+                config.state_roots.verification_sessions()?,
                 head,
                 self.binding(config, Self::role(config))?,
             )
