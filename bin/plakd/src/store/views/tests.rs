@@ -1798,6 +1798,8 @@ fn stored_rows(paths: &PlakPaths) -> Vec<(i64, String)> {
 /// inspection alike; the stored rows are not written.
 #[test]
 fn rows_an_older_bound_stored_are_redacted_on_read() {
+    use super::super::transcript_history::{body_mut, read};
+
     let root = tempdir().unwrap();
     let paths = PlakPaths::explicit(root.path().join("p"));
     let (mut store, session) = store_with_session(root.path());
@@ -1815,6 +1817,24 @@ fn rows_an_older_bound_stored_are_redacted_on_read() {
     let loaded = store.load(&session).unwrap();
     assert!(!format!("{:?}", loaded.transcript).contains("ghp_"));
     drop(store);
+    let rendered = loaded.transcript.items();
+    let mut expected = rendered[0].row.clone();
+    read(&paths, &session, |history| {
+        assert!(
+            history.items(0, None)? == rendered,
+            "history must use restore-time redaction"
+        );
+        assert!(
+            history.row(rendered[0].key)? == expected,
+            "row reads must use restore-time redaction"
+        );
+        assert_eq!(
+            history.totals(0, None)?.bytes,
+            body_mut(&mut expected).unwrap().len() as u64
+        );
+        Ok(())
+    })
+    .unwrap();
     let inspected = ProductStore::inspect_session_read_only(&paths, &session).unwrap();
     assert!(!format!("{:?}", inspected.transcript).contains("ghp_"));
     assert_eq!(stored_rows(&paths), stored);

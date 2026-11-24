@@ -20,7 +20,11 @@ next older cursor are the same on every part; the cursor is present exactly
 when `has_older` is true. The older-history cursor is opaque; repeat the
 last completed page's cursor after a transport
 loss only on the same reopened scope. On `cursor_expired`, reattach for a
-new first page. Read an individual truncated row or repair its stream by
+new first page. A page cuts between turns, including host-woken turns that
+have no visible user prompt. If retention or import leaves older rows without
+their turn facts, that prefix pages as one unit. A single row that cannot fit
+a frame keeps a UTF-8 prefix and reports the omitted byte count. Read an
+individual truncated row or repair its stream by
 key and UTF-8 byte offset. For replay use the exact retained token, host
 generation and revision; discard a stale replay, or replace the viewport on
 `first_page`. Keep retained revisions and transcript content in memory only.

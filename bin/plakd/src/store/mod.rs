@@ -1601,6 +1601,9 @@ pub mod holders;
 mod lifecycle;
 pub(crate) mod revisions;
 pub(crate) mod schema;
+// The draft host assembles v13 frames here before the coordinated switch.
+#[allow(dead_code, reason = "protocol 13 is not served yet")]
+pub(crate) mod transcript_history;
 #[cfg(test)]
 pub(crate) use lifecycle::crash_cut as lifecycle_crash_cut;
 mod attention;
