@@ -155,7 +155,7 @@ fn assert_terminal_once(
             }),
             _ => None,
         })
-        .next_back()
+        .last()
         .ok_or("missing Wait result")?;
     assert_eq!(
         notice_count(agent) + usize::from(wait["tasks"][0]["status"] == "exited"),
