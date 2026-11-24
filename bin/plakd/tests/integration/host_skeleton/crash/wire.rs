@@ -5,6 +5,7 @@ use std::io;
 
 use serde_json::Value;
 
+use super::super::runner::wait_local_runner_ready;
 use super::client_control::*;
 use super::*;
 
@@ -99,6 +100,28 @@ impl Bindings {
 
     fn compare(&mut self, expected: &Value, actual: &Value) {
         self.compare_at(expected, actual, "");
+    }
+
+    fn compare_after_reconcile(&mut self, expected: &Value, actual: &Value) {
+        let answer = &expected["outcome"]["ok"];
+        if answer["answer"] != "sessions" {
+            self.compare(expected, actual);
+            return;
+        }
+        // The capture listed while the restarted host was still reconciling.
+        // Replay waits for Ready, so only that transient status is replaced;
+        // every other captured field is compared unchanged.
+        let reconciling = json!({
+            "status": "blocked",
+            "reason": {"reason": "runner_unreachable", "phase": "reconcile", "timed_out": false},
+        });
+        let mut expected = expected.clone();
+        for row in expected["outcome"]["ok"]["rows"].as_array_mut().unwrap() {
+            assert_eq!(row["runner"]["runner_id"], "local");
+            assert_eq!(row["runner_status"], reconciling, "captured status");
+            row["runner_status"] = json!({"status": "ready"});
+        }
+        self.compare(&expected, actual);
     }
 
     fn compare_directory_rows(&mut self, expected: &[Value], actual: &[Value]) {
@@ -337,6 +360,7 @@ fn replay(
                 host.child.as_mut().unwrap().kill().unwrap();
                 host.child.take().unwrap().wait().unwrap();
                 *host = start(fixture);
+                wait_local_runner_ready(host);
             } else if barrier == "new-session-time-boundary" {
                 separate_session_timestamp(fixture, session);
             } else if barrier == "stop-time-boundary" {
@@ -398,7 +422,11 @@ fn replay(
                 .send(&serde_json::to_value(frame)?)?;
         } else if entry["direction"] == "host" {
             let actual = connections.get_mut(&id).unwrap().control()?;
-            bindings.compare(&entry["frame"], &actual);
+            if before.is_some() {
+                bindings.compare_after_reconcile(&entry["frame"], &actual);
+            } else {
+                bindings.compare(&entry["frame"], &actual);
+            }
         } else if entry["eof"] == "client" {
             drop(connections.get_mut(&id).unwrap().writer.take());
         } else if entry["eof"] == "host" {

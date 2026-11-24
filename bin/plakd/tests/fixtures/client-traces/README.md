@@ -78,6 +78,12 @@ replaying input, checks no handoff/continuation or extra dispatch, and uses the
 recorded stop operation to settle work durably. The real-terminal crash
 matrices remain separate evidence.
 
+In the full journeys, replay waits for the restarted local runner to publish
+readiness after reconciling durable work. Reconnect directory replies must
+therefore report exactly `ready` where the capture recorded the transient
+reconcile-phase `blocked` status; any other captured status fails. All other
+captured fields are compared unchanged.
+
 The face-transcript assertion compares complete typed row content, order and
 multiplicity on both connections against the durable view. A live provisional
 row key may become a committed anchor; that does not permit missing, duplicate
