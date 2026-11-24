@@ -57,6 +57,15 @@ impl<P: ProtocolExtension> Payload<P> {
         }
     }
 
+    pub(super) const fn is_root_preview(&self) -> bool {
+        matches!(
+            self,
+            Self::Other(
+                SessionObservation::AssistantDelta(_) | SessionObservation::ReasoningDelta { .. }
+            )
+        )
+    }
+
     pub(super) fn received_by(&self, face: Face) -> bool {
         match self {
             Self::Snapshot(_) | Self::Patch(_) => true,
@@ -144,9 +153,11 @@ impl Write for Budget {
 
 impl<P: ProtocolExtension> Snapshot<P> {
     pub(super) fn remember(&mut self, payload: &Payload<P>, class: ObservationClass, size: usize) {
+        self.root_preview_pending |= payload.is_root_preview();
         let observation = match payload {
             Payload::Snapshot(baseline) => {
                 if baseline.scope == TranscriptScope::Root {
+                    self.root_preview_pending = false;
                     self.baseline = Some(RetainedBaseline {
                         snapshot: (Arc::clone(baseline), size),
                         patches: Vec::new(),
@@ -156,11 +167,13 @@ impl<P: ProtocolExtension> Snapshot<P> {
                 return;
             }
             Payload::Patch(patch) => {
-                if patch.scope == TranscriptScope::Root
-                    && let Some(baseline) = &mut self.baseline
-                    && !baseline.keep_patch(patch, size)
-                {
-                    self.baseline = None;
+                if patch.scope == TranscriptScope::Root {
+                    self.root_preview_pending = false;
+                    if let Some(baseline) = &mut self.baseline
+                        && !baseline.keep_patch(patch, size)
+                    {
+                        self.baseline = None;
+                    }
                 }
                 return;
             }
@@ -172,6 +185,7 @@ impl<P: ProtocolExtension> Snapshot<P> {
         ) {
             self.states.clear();
             self.baseline = None;
+            self.root_preview_pending = false;
             self.approvals.clear();
             self.credential_wait = None;
         }
@@ -187,7 +201,10 @@ impl<P: ProtocolExtension> Snapshot<P> {
             SessionObservation::CredentialWait { account } => {
                 self.credential_wait = account.is_some().then(|| (observation.clone(), size));
             }
-            SessionObservation::ClearView => self.baseline = None,
+            SessionObservation::ClearView => {
+                self.baseline = None;
+                self.root_preview_pending = false;
+            }
             _ if class == ObservationClass::State => {
                 match self
                     .states

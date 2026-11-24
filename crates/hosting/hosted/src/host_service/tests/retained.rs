@@ -2,6 +2,48 @@ use super::*;
 use plakous_host_protocol::views::transcript::{Lane, RowKey, TranscriptItem, TranscriptRow};
 
 #[test]
+fn a_late_root_attach_gets_a_live_baseline_before_its_first_preview() {
+    let (service, intents) = service(16);
+    service.observe(Observation::PresentationSnapshot(
+        PresentationSnapshot::empty(1),
+    ));
+    let early = service.attach(&root(), Face::Remote).unwrap();
+    service.take(early);
+    let delta = |text: &str| Observation::AssistantDelta(text.into());
+    service.observe(delta("first "));
+
+    let late = service.attach(&root(), Face::Remote).unwrap();
+    assert!(intents.try_recv().unwrap().is_root_attachment_repair());
+    service.observe(delta("second "));
+    assert_eq!(service.take(late), [] as [Outbound<Core>; 0]);
+
+    let prefix = TranscriptItem {
+        key: RowKey::new(1, Lane::Runtime, 0),
+        row: TranscriptRow::assistant("first second "),
+    };
+    let patch = Observation::TranscriptPatch(TranscriptPatch {
+        scope: TranscriptScope::Root,
+        from_revision: 1,
+        to_revision: 2,
+        upserts: vec![prefix.clone()],
+        deletes: Vec::new(),
+    });
+    let baseline = Observation::PresentationSnapshot(PresentationSnapshot {
+        items: vec![prefix],
+        ..PresentationSnapshot::empty(2)
+    });
+    service.observe(patch.clone());
+    service.observe(baseline.clone());
+    service.observe(delta("third"));
+    assert_eq!(
+        observations(service.take(early)),
+        [delta("first "), delta("second "), patch, delta("third")]
+    );
+    assert_eq!(observations(service.take(late)), [baseline, delta("third")]);
+    assert!(intents.try_recv().is_err());
+}
+
+#[test]
 fn attachments_share_cached_snapshot_and_patch_payloads() {
     let (service, intents) = service(16);
     service.observe(Observation::PresentationSnapshot(

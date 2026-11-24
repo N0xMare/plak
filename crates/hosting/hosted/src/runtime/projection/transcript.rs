@@ -75,11 +75,32 @@ impl Presentations {
         sink: &HostEventSender<P>,
     ) {
         let root = TranscriptScope::Root;
-        // A real producer gap needs the normal advancing publication, with
-        // pending live rows. Otherwise keep the current revision and live rows.
-        if !sink.transcript_resnapshot_required_for(&root)
-            && let Some(state) = self.states.get(&root).filter(|state| state.revision() != 0)
+        if sink.transcript_resnapshot_required_for(&root)
+            || self
+                .states
+                .get(&root)
+                .is_none_or(|state| state.revision() == 0)
         {
+            self.resync(&root, sink);
+            return;
+        }
+        let upserts = self
+            .live
+            .get_mut(&root)
+            .map_or_else(Vec::new, live::LiveRows::drain_pending);
+        if !upserts.is_empty() {
+            // A repair replaces the preview on its recipient. Publish staged
+            // rows first, without ending their streams or giving healthy holders
+            // a full snapshot. The repairing holder gets the resulting revision.
+            let change = live::LiveChange {
+                upserts,
+                deletes: Vec::new(),
+            };
+            if !self.apply_live_change(root.clone(), change, sink) {
+                return;
+            }
+        }
+        if let Some(state) = self.states.get(&root) {
             let _ = sink.replay_root_snapshot(PresentationSnapshot {
                 revision: state.revision(),
                 items: state
@@ -92,8 +113,6 @@ impl Presentations {
                     .collect(),
                 ..PresentationSnapshot::default()
             });
-        } else {
-            self.resync(&root, sink);
         }
     }
 
@@ -402,6 +421,18 @@ impl Presentations {
             }
             return true;
         };
+        self.apply_live_change(scope, changes, sink)
+    }
+
+    fn apply_live_change<P: ProtocolExtension>(
+        &mut self,
+        scope: TranscriptScope,
+        changes: live::LiveChange,
+        sink: &HostEventSender<P>,
+    ) -> bool {
+        let Some(state) = self.states.get_mut(&scope) else {
+            return false;
+        };
         if changes.deletes.is_empty()
             && changes
                 .upserts
@@ -410,6 +441,7 @@ impl Presentations {
         {
             return true;
         }
+        let attached = state.revision() != 0;
         let revision = if attached {
             let Some(revision) = sink.next_presentation_revision() else {
                 return false;

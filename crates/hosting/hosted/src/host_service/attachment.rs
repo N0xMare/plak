@@ -126,6 +126,11 @@ impl<P: ProtocolExtension> Attachment<P> {
         if self.dropped || self.waiting || !observation.received_by(self.face) {
             return;
         }
+        if self.fence_root_preview && observation.is_root_preview() {
+            // An attaching viewer cannot use a suffix before the first baseline
+            // that will cover it. Do not number observations it was never owed.
+            return;
+        }
         let scope = payload_scope(&observation);
         if matches!(&observation, Payload::Patch(patch) if self.fresh.contains(&patch.scope)) {
             self.seq += 1;
@@ -174,6 +179,9 @@ impl<P: ProtocolExtension> Attachment<P> {
             self.fresh.remove(&snapshot.scope);
             self.repairing.remove(&snapshot.scope);
             self.keyed.insert(snapshot.scope.clone());
+            if snapshot.scope == TranscriptScope::Root {
+                self.fence_root_preview = false;
+            }
         }
         if matches!(
             observation,

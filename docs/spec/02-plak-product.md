@@ -2729,7 +2729,8 @@ text or publish keyed patches. Root raw observations and scoped
 `TranscriptStream` appends for an agent expose the same scoped live state between
 boundaries. These scoped appends are in-process only, not JSONL v1 events.
 Keyed live publication occurs at assistant completion, a new user/tool row,
-sealed reasoning, retry discard, status or idle boundaries. Consecutive queued
+sealed reasoning, retry discard, status or idle boundaries, or when root
+attachment repair needs to include pending live rows. Consecutive queued
 same-scope patches compose into one patch; prose and reasoning appends coalesce
 without crossing a boundary or a different scope/location.
 Patch composition never moves a boundary past intervening same-scope live
@@ -5309,9 +5310,11 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   stream) goes, whatever its class, to the attachments holding its scope: the root's to
   all, an agent's to those that opened it. A root snapshot produced for
   attachment repair at the already published revision goes only to
-  attachments waiting for a baseline. It does not retire pending stream
-  rows or change the revision of the next patch; an advancing snapshot goes
-  to all holders. The session serves one agent
+  attachments waiting for a baseline. To include pending live rows, the
+  publisher first advances the revision with an ordinary patch without ending
+  the streams, then replays that revision to the waiting attachments. Healthy
+  holders get the patch, not the snapshot. An advancing snapshot goes to all
+  holders. The session serves one agent
   transcript: its first holder's open reaches the session, a later holder's
   open asks for a fresh snapshot of it instead, and only its last holder's
   close reaches the session; a scope change takes effect only once the
@@ -5325,12 +5328,22 @@ settings, usage, profiles, MCP and verdict views remain host-owned metadata.
   with sequence numbers and delivery state kept per attachment. A clear or
   either replay limit drops the kept baseline as a whole. Without a kept
   baseline a new attachment asks for a fresh one (the attach fails if it
-  cannot ask), and it receives no root patches until a snapshot arrives.
+  cannot ask), and it receives no root patches until a snapshot arrives. A
+  root attach whose kept baseline and patch chain precede live previews also
+  asks for a fresh baseline instead of replaying the older view. It takes no
+  root prose or reasoning previews until that baseline is queued, so the new
+  viewer sees the prefix before the subsequent deltas.
+  Applying a root patch or a complete root baseline with its retained patch
+  chain accounts for all assistant and reasoning text previously sent to the
+  attachment within the bounded keyed view, except text discarded on retry or
+  refusal or retired by clear or session switch, so the client may drop its
+  raw preview at that boundary.
   The service keeps one outstanding automatic repair request per scope,
   and attached root resync requests share it;
   unanswered requests are eligible for retry after five seconds. A repair
-  from retained data is not queued behind another baseline of the same
-  scope and is limited to one replay per attachment per five seconds.
+  from retained data requires a current keyed view, is not queued behind
+  another baseline of the same scope, and is limited to one replay per
+  attachment per five seconds.
   An attachment's queue starts with the kept observations. A wire attachment
   charges all queued observations, including those retained at attach,
   against 64 MiB of sized JSON and queue-entry overhead. The kept observations

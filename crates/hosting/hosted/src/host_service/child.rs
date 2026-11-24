@@ -270,6 +270,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 repairing: BTreeMap::new(),
                 retained_after: None,
                 keyed: BTreeSet::new(),
+                fence_root_preview: false,
                 dropped: false,
                 // As a root attachment made before an unresolved
                 // opening's binding, it takes nothing until that binding.

@@ -132,6 +132,33 @@ fn a_slow_keyed_view_survives_byte_pressure_and_reaches_the_published_revision()
 }
 
 #[test]
+fn retained_repair_asks_for_a_live_baseline_when_root_text_is_pending() {
+    let (service, intents) = service(8);
+    let baseline = snapshot(1, 16, 'a');
+    service.observe(baseline.clone());
+    let id = service.attach(&root(), Face::Remote).unwrap();
+    assert_eq!(observations(service.take(id)), [baseline]);
+
+    let preview = Observation::AssistantDelta("streaming".into());
+    service.observe(preview.clone());
+    assert_eq!(observations(service.take(id)), [preview]);
+    service
+        .lock()
+        .attachments
+        .get_mut(&id)
+        .unwrap()
+        .gapped
+        .insert(TranscriptScope::Root);
+
+    assert_eq!(service.take(id), [] as [Outbound<Core>; 0]);
+    assert!(intents.try_recv().unwrap().is_root_attachment_repair());
+    service.observe(patch(1, 32, 'b'));
+    let live = snapshot(2, 32, 'b');
+    service.observe(live.clone());
+    assert_eq!(observations(service.take(id)), [live]);
+}
+
+#[test]
 fn retained_repairs_wait_for_the_previous_baseline_and_the_cooldown() {
     let (service, intents) = service(8);
     let scope = TranscriptScope::Root;

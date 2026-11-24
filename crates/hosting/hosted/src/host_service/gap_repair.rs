@@ -128,6 +128,7 @@ impl<P: ProtocolExtension> HostService<P> {
                     }
                     if scope == TranscriptScope::Root
                         && !held.fresh.contains(&scope)
+                        && !snapshot.root_preview_pending
                         && let Some(baseline) = &snapshot.baseline
                     {
                         if held.retained_after.is_some_and(|until| now < until) {

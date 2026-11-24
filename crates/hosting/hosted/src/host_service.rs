@@ -205,6 +205,7 @@ struct Attachment<P: ProtocolExtension> {
     repairing: BTreeMap<TranscriptScope, std::time::Instant>,
     retained_after: Option<std::time::Instant>,
     keyed: BTreeSet<TranscriptScope>,
+    fence_root_preview: bool,
     dropped: bool,
     /// Admitted while the service held what follows a session opening it
     /// could not resolve: it takes nothing until the opening's binding ends
@@ -251,6 +252,8 @@ struct Snapshot<P: ProtocolExtension> {
     /// The latest root snapshot and the root patches after it, or `None`
     /// when a new attachment must ask for a fresh one.
     baseline: Option<RetainedBaseline>,
+    // A raw preview has arrived since the last keyed root publication.
+    root_preview_pending: bool,
     /// Approvals asked and not yet resolved, in the order asked.
     approvals: Vec<(String, SessionObservation<P>, usize)>,
     /// The credential wait that holds, if any.
@@ -641,6 +644,7 @@ impl<P: ProtocolExtension> HostService<P> {
                 snapshot: Snapshot {
                     states: Vec::new(),
                     baseline: None,
+                    root_preview_pending: false,
                     approvals: Vec::new(),
                     credential_wait: None,
                 },
@@ -973,8 +977,9 @@ impl<P: ProtocolExtension> HostService<P> {
             .cloned()
             .map(|(event, size)| (Payload::Other(event), size))
             .collect();
-        let needs_baseline = snapshot.baseline.is_none() && !waiting;
-        if let Some(baseline) = &snapshot.baseline {
+        let fence_root_preview = mailbox.is_some() && !waiting && snapshot.root_preview_pending;
+        let needs_baseline = !waiting && (snapshot.baseline.is_none() || fence_root_preview);
+        if !needs_baseline && let Some(baseline) = &snapshot.baseline {
             items.extend(baseline.observations());
         }
         items.extend(
@@ -1013,6 +1018,7 @@ impl<P: ProtocolExtension> HostService<P> {
             repairing: BTreeMap::new(),
             retained_after: None,
             keyed: BTreeSet::new(),
+            fence_root_preview,
             dropped: false,
             waiting,
         };

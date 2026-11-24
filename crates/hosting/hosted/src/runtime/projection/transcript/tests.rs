@@ -1230,3 +1230,43 @@ fn root_attachment_replay_preserves_the_published_patch_chain() {
     };
     assert_eq!(after.from_revision, replayed.revision);
 }
+
+#[test]
+fn root_attachment_replay_promotes_pending_text_without_ending_the_live_row() {
+    let (sink, receiver) = observation_channel::<Core>();
+    let mut publisher = Presentations::default();
+    let root = TranscriptScope::Root;
+    assert!(publisher.snapshot(PresentationSnapshot::default(), &sink));
+    let HostEvent::PresentationSnapshot(initial) = receiver.try_recv().unwrap() else {
+        panic!("initial baseline");
+    };
+    let prefix = HostEvent::<Core>::AssistantDelta("first ".into());
+    assert!(publisher.observe(root.clone(), &prefix, &sink));
+    assert!(receiver.try_recv().is_err());
+
+    publisher.replay_root(&sink);
+    let HostEvent::TranscriptPatch(patch) = receiver.try_recv().unwrap() else {
+        panic!("the live prefix must reach healthy holders as a patch");
+    };
+    let HostEvent::PresentationSnapshot(replayed) = receiver.try_recv().unwrap() else {
+        panic!("attachment repair baseline");
+    };
+    assert_eq!(patch.from_revision, initial.revision);
+    assert_eq!(replayed.revision, patch.to_revision);
+    assert_eq!(replayed.items, patch.upserts);
+    assert_eq!(replayed.items[0].row, TranscriptRow::assistant("first "));
+
+    let tail = HostEvent::<Core>::AssistantDelta("second".into());
+    assert!(publisher.observe(root.clone(), &tail, &sink));
+    assert!(publisher.observe(root, &HostEvent::<Core>::AssistantDone, &sink));
+    let HostEvent::TranscriptPatch(next) = receiver.try_recv().unwrap() else {
+        panic!("stream settlement patch");
+    };
+    assert_eq!(next.from_revision, replayed.revision);
+    assert_eq!(next.upserts.len(), 1);
+    assert_eq!(next.upserts[0].key, replayed.items[0].key);
+    assert_eq!(
+        next.upserts[0].row,
+        TranscriptRow::assistant("first second")
+    );
+}

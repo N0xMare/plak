@@ -31,6 +31,7 @@ use tungstenite::{Message, WebSocket};
 use super::offline_support::*;
 mod latency;
 mod lifecycle;
+mod root_stream;
 
 const LOGIN: &str = "a@example.com";
 const HOST: &str = "plak.example.ts.net";
