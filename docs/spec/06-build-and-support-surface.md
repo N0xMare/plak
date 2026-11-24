@@ -1185,9 +1185,15 @@ link is replaced only when it already resolves under the maintainer or release
 snapshot root, the shared sidecar cache, or the Cargo target directory; any
 other file or link is refused. A rebuild never
 rewrites a file a running session executes. Host upgrade remains an explicit
-operator workflow (chapter 02 section 4.6). A running `plakd` finds its sidecars beside the
-snapshot file it executes, not beside the `PATH` symlink. Each snapshot also
-holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
+operator workflow (chapter 02 section 4.6). For a new evaluator binding,
+`plakd` uses an explicit worker override or finds the worker beside the
+snapshot file it executes, not beside the `PATH` symlink. An exact reopen
+uses the recorded worker, including after a same-key upgrade (chapter 01
+§9.4). Installation and state pruning do not remove cached workers. Full
+uninstall removes the cache (§6.6), so retain each recorded worker at its
+canonical path as long as its sessions must reopen.
+
+Each snapshot holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
 executable's final chmod and before renaming the staging directory, the
 native snapshot installer hashes and stats the same open staged executable.
 Directory rename preserves those identity
