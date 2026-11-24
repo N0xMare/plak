@@ -210,3 +210,46 @@ fn revision_lock_retries_a_transient_wal_reader() {
     release.join().unwrap();
     locked.backup().unwrap().commit(|_, _| {}).unwrap();
 }
+
+#[test]
+fn rehearsal_prepares_wal_before_concurrent_probes() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("source.sqlite3");
+    seed(&source_path);
+    let pin_read = |path: &Path| {
+        let reader = BASE.open_reader(path).unwrap().unwrap();
+        reader.execute_batch("BEGIN; SELECT * FROM notes;").unwrap();
+        reader
+    };
+
+    let control = directory.path().join("unprepared.sqlite3");
+    let source = BASE.open_reader(&source_path).unwrap().unwrap();
+    source
+        .execute("VACUUM INTO ?1", [control.to_str().unwrap()])
+        .unwrap();
+    let reader = pin_read(&control);
+    let writer = BASE.writer(&control, false).unwrap();
+    writer.busy_timeout(std::time::Duration::ZERO).unwrap();
+    assert!(matches!(
+        BASE.configure_writer(&writer),
+        Err(AdmissionError::Busy(message)) if message == "sample store is busy: could not enable WAL"
+    ));
+    drop((reader, writer));
+
+    // A rehearsal copies every store when any needs revision. Both the
+    // unchanged product-shaped copy and the revised copy must be ready.
+    for (schema, name) in [(&BASE, "unchanged"), (&CURRENT, "revised")] {
+        let copy = directory.path().join(name);
+        schema.rehearse(&source_path, &copy).unwrap();
+        let reader = pin_read(&copy);
+        let writer = schema.open_writer(&copy, |_| Ok(())).unwrap();
+        assert_eq!(
+            writer
+                .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "wal"
+        );
+        schema.require_current(&reader).unwrap();
+    }
+    assert_eq!(BASE.inspect(&source_path).unwrap(), Status::Current);
+}

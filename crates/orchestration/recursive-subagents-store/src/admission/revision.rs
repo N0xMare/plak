@@ -13,13 +13,16 @@ impl Schema {
     }
 
     /// Copy a live source using a read-only SQLite connection, then exercise
-    /// upgrades on the scratch file only. Absent stores stay absent.
+    /// upgrades and prepare WAL on the scratch file only. Absent stores stay absent.
     pub fn rehearse(&self, source: &Path, scratch: &Path) -> Result<(), AdmissionError> {
         if let Some(connection) = self.open_reader(source)? {
             self.copy(&connection, scratch)?;
             if let Some(upgrade) = self.lock_upgrade(scratch)? {
                 upgrade.commit_with(|_, _| {})?;
             }
+            // VACUUM INTO leaves the copy in rollback-journal mode. Once
+            // probes share it, even a read snapshot can block WAL promotion.
+            self.configure_writer(&self.writer(scratch, false)?)?;
         }
         Ok(())
     }

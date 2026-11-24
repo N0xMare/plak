@@ -5853,10 +5853,11 @@ it finds and loads owed sessions; startup admission remains paused until the
 continuation inventory is captured.
 When its destination needs a higher store revision, pre-drain qualification
 takes consistent read-only copies of the existing product and tree stores in
-a private scratch directory, applies the registered steps there, and probes
-binding and exact reopen against the copies. The live stores are not upgraded
-by the probes. Equal revisions retain the ordinary probe. The destination
-applies the live steps only after source drain and release and before
+a private scratch directory and applies the registered steps there. It enables
+WAL on each copy before any binding or exact-reopen probe can open it, so
+concurrent probes do not contend to change journal mode. The probes never
+upgrade the live stores. Equal revisions retain the ordinary probe. The
+destination applies the live steps only after source drain and release and before
 announcing readiness; a failure after either commit is fixed forward under
 §2.5, not by restarting the source.
 The destination verifies exact reopen for each eligible root before admissions
