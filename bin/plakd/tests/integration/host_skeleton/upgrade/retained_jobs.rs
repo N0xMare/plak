@@ -161,18 +161,36 @@ fn settled_script(fixture: &Fixture) {
 }
 
 fn stop_job(client: &mut Client, session: String, pid: i32) {
+    use plakous_host_protocol::SessionObservation;
+
+    client.retain_observations();
+    client.read_deadline = Some(Instant::now() + WAIT);
     assert_eq!(
         client.request(21, Op::StopSession { session }),
         Outcome::Ok(Answer::Stopped {
             runner_pending: false
         })
     );
-    let deadline = Instant::now() + WAIT;
-    while runner::alive(pid) {
-        assert!(
-            Instant::now() < deadline,
-            "explicit stop left the job running"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+    // StopSession acknowledges cancellation. Even after the PID exits, the
+    // retained link can still be delivering the joined result. Keep the host
+    // open until it observes that result so shutdown can commit it.
+    loop {
+        if let HostFrame::Event {
+            observation:
+                SessionObservation::JobTerminal {
+                    job_id,
+                    status,
+                    stop_reason,
+                    ..
+                },
+            ..
+        } = client.next()
+            && job_id == "p1"
+        {
+            assert_eq!(status, "stopped");
+            assert_eq!(stop_reason.as_deref(), Some("user"));
+            break;
+        }
     }
+    assert!(!runner::alive(pid), "explicit stop left the job running");
 }

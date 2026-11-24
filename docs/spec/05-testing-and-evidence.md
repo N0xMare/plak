@@ -1671,6 +1671,10 @@ macOS; ignored full-tier retirement soaks in both profiles still run alone.
 The paired terminal-history upgrade probes wait until the source checkpoint
 records both the terminal job state and the completed tool result; disappearance
 of the process alone does not imply durable publication.
+The retained-job stop probes observe the runner's joined user-stop result
+before asking the host to shut down. They then join the host and check the
+durable terminal in the checkpoint rather than treating the wire event as
+proof of a commit.
 
 In the runner link host-kill cases, the effect itself marks that it has
 started on the runner and waits for release after the host is reaped. A
