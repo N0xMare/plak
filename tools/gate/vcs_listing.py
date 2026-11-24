@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 from pathlib import Path
 import shutil
@@ -123,26 +122,3 @@ def changed_paths(
             if 'proptest-regressions' in Path(current).relative_to(root).parts:
                 paths.update((Path(current) / name).relative_to(root).as_posix() for name in names)
     return sorted(paths - {''})
-
-
-def evidence_tree(root: Path) -> str:
-    if not (root / '.git').exists():
-        return ''
-    if (root / '.jj').is_dir() and not (root / '.git').is_dir():
-        return ''
-    if kind(root) == 'jj':
-        if jj(root, 'log', '-r', '@', '--no-graph', '-T', 'conflict').strip() != 'false':
-            raise RuntimeError('refusing gate evidence for conflicted @')
-        commit = jj(root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id').strip()
-        return run(root, 'git', 'rev-parse', f'{commit}^{{tree}}').strip()
-    if run(root, 'git', 'status', '--porcelain', '--untracked-files=normal').strip():
-        return ''
-    return run(root, 'git', 'rev-parse', 'HEAD^{tree}').strip()
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['kind', 'evidence-tree'])
-    parser.add_argument('root', nargs='?', type=Path, default=Path.cwd())
-    args = parser.parse_args()
-    print(kind(args.root) if args.command == 'kind' else evidence_tree(args.root))

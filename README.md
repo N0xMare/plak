@@ -68,8 +68,7 @@ that subscription route until a newer build renews the review; see
 compiled into this build is inactive"). The documented API routes (OpenAI Platform,
 Anthropic API, xAI Platform and OpenRouter Chat) are due for review 90 days after theirs
 (2027-02-13 for every route in this build) but never refuse on the calendar. `plakd
-doctor` and `plakd status` warn within 14 days of either date; publication dry runs and
-uploads require more than a third of every review window remaining. A re-review that
+doctor` and `plakd status` warn within 14 days of either date. A re-review that
 changes no pinned contract does not ask you to accept the notice again.
 
 ## Build your own client

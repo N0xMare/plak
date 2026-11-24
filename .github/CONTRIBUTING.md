@@ -28,7 +28,7 @@ A pushed release tag builds, attests and publishes the release. A manual run
 is the pre-tag dry run: the same build, packaging and attestation, with no
 release. Worker branches iterate and finish with `just fast <packages>`
 plus the groups their change needs; say in the pull request which gates passed
-and on which platform. The integration batch, install and publication gates
+and on which platform. The integration batch, install and release candidate gates
 are [spec 06 §8](../docs/spec/06-build-and-support-surface.md).
 
 ## Pull requests

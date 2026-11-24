@@ -20,13 +20,11 @@ A package's class decides publication (§3): supported and published-internal
 packages, the vendored Code Mode protocol snapshot among them, are publishable
 to crates.io; repository-only packages, the compile fixtures under
 `tests/fixtures/`, and the `crates/core/model/fuzz` crate set `publish = false`.
-`tools/gate/check_workspace.py` enforces both directions and the registry
-metadata of §3.3. Uploading the cohort is a maintainer act outside the gate; a
-source checkout remains a complete build. The `0.0.x` cohort carries no API,
-wire, or persisted-format compatibility obligation across versions beyond the
-export-document rule of chapter 02 §2.5.1.
+Registry publication is deferred (§6.5); a source checkout is a complete build.
+The `0.0.x` cohort carries no API, wire, or persisted-format compatibility
+obligation across versions beyond the export-document rule of chapter 02 §2.5.1.
 
-Each `v<version>` tag also has a GitHub Release carrying one tarball per
+Each `v<version>` tag has a GitHub Release carrying one tarball per
 supported target and `SHA256SUMS`, installed by the repository's `install.sh`
 (section 6.6). There is no `plakd update` verb and no self-update path. Updating means
 rerunning the installer or pulling the source and rebuilding (§6.3).
@@ -68,8 +66,8 @@ Two targets are supported, and one near neighbour is explicitly not:
 | `x86_64-apple-darwin` | Not supported. Process tools and Code Mode fail closed |
 
 Anything else is unsupported: it may compile, and compiling is not support.
-`wasm32-unknown-unknown` is not a supported product target. The `builds` group
-checks it only for the portable crate set (section 7.5).
+`wasm32-unknown-unknown` is not a supported product target. The `standalone` group
+checks it for the portable crates.
 
 The ordinary release commands use the selected Cargo target (the host target
 by default); a Linux build without `--target` produces GNU/Linux binaries, and
@@ -178,8 +176,7 @@ facade. The
 `vendor` layer holds `plakous-codex-code-mode-protocol` alone; it depends on
 no workspace package. The `engine` layer may depend on it; the composition
 compiler's explicit `plakous-compose` exception is the only harness edge.
-It is a member so the
-cohort packages together (§6.5), and it keeps its upstream edition,
+It is a member of the cohort and keeps its upstream edition,
 rust-version, Apache-2.0 license and `unsafe_code = "forbid"` lint table rather
 than the workspace's.
 
@@ -277,49 +274,10 @@ text access for all four provider aliases.
 
 ### 3.3 Package contents
 
-Every non-repository-only package builds from its own packaged files, so
-publication needs no file outside the package root:
-
-- Every `include_str!`/`include_bytes!` in a package's tracked Rust files,
-  tests included, resolves inside that package. Embedded assets live in the
-  package that embeds them: the built-in profile homes in `bin/plakd/presets/`,
-  the vendored Codex instruction text in
-  `crates/harness/prompts/vendor/codex-prompt/`, and test fixtures beside the
-  tests that read them (a fixture two packages read is copied into each).
-- No packaged manifest names a repository-only package outside
-  dev-dependencies, and a dev-dependency on one is path-only, so `cargo
-  package` strips it.
-- `plakd/test-support` is repository-only. Cargo packages no regular dependency
-  that is not on the registry, optional or not, so the repository manifest
-  keeps the feature with its optional `plakous-offline-crash-harness` edge and
-  the published manifest is that manifest with both removed
-  (`tools/release/publish_shape.py`; `stage DEST` copies the tree with that
-  manifest for `cargo package`). Every `cfg(feature = "test-support")` site
-  compiles out of the published crate, and the workspace lints declare the
-  feature name to `check-cfg`, so it builds without an unexpected-cfg warning.
-  Repository builds, the gate, and the live drivers keep
-  `--features plakd/test-support`.
-- The Code Mode grammar snapshot under `vendor/codex-code-mode-protocol` is the
-  package `plakous-codex-code-mode-protocol`: upstream `codex-code-mode-protocol`
-  renamed, keeping the upstream version, `LICENSE`, `NOTICE` and
-  `PROVENANCE.md`.
-
-- A published package carries the registry metadata: its description,
-  `license`, `repository` (the repository URL; no redundant `homepage`),
-  `documentation` (`https://docs.rs/<name>` for a library; `plakd` and the
-  binary-only `plakous-py-worker` point into the repository), a `readme`, one
-  to five crates.io keywords and categories, and a `LICENSE` file in the
-  package root. Members other than the vendor snapshot are MIT, and each
-  `LICENSE` is a link to the root `LICENSE`, which Cargo packages as a regular
-  file; the vendor snapshot keeps its Apache-2.0 `LICENSE` and `NOTICE`. `plakd` and `plakous` use the root
-  `README.md`; every other package has its own short `README.md`.
-- Members other than the vendor snapshot inherit `[workspace.package].exclude`: `/tests/`, `/benches/` and
-  `/fixtures/` stay in the repository. A packaged crate builds its library and
-  binaries; its integration tests, benches and test data, and the unit tests
-  that read that data, run only from the repository.
-
-`tools/gate/check_workspace.py` enforces these rules and judges `plakd` by its
-published shape.
+Embedded assets live in the package that embeds them. The workspace checker
+keeps `include_str!` and `include_bytes!` inside the package root, including
+in tests. The vendored Code Mode grammar retains its upstream license,
+notice and provenance.
 
 ## 4. Product features
 
@@ -931,8 +889,8 @@ Apple Silicon batch evidence is `just batch-mac`; a production install adds
 `just install-checks` on that exact tree (§8). The shared checks run once per
 integration batch, and `just full` retains every group (chapter 05 §1).
 
-Before publication, run the full offline musl
-qualification on a Linux x86_64 Docker host:
+For release candidates, run the full offline musl qualification on a Linux
+x86_64 Docker host:
 
 ```sh
 just musl container          # full tier, including default/maintainer checks
@@ -956,7 +914,7 @@ The pinned image includes the `wasm32-unknown-unknown` rustc target, so the
 `standalone` group's wasm check runs there. `musl-check.sh` passes
 `--qual-container` to the gate, under which an image without the target skips
 that check instead of failing the tier; such a run names the skip in its final
-summary and records no gate evidence (section 7.5).
+summary.
 `tools/musl/image.Dockerfile` is the recipe: built from a `git archive` of a
 commit, its default target is the image, tagged `plak-qual-base:` plus the first
 eight hex digits of its image ID, and its `nextest` target exports the musl
@@ -1227,8 +1185,8 @@ directory and strips those copies. Release installs and `--artifacts` use
 only these staged copies; the original Cargo outputs remain inspectable.
 The gate's `builds` group reuses its default worker builds and isolated
 maintainer parent build to require the same check on both supported platforms;
-it runs in `check`, `platform` and publication `full`, without another release
-build. Workspace all-features test binaries are not shipped artifact evidence.
+the install and full tiers include it without another release build.
+Workspace all-features test binaries are not shipped artifact evidence.
 
 ### Embeddable library build
 
@@ -1467,164 +1425,7 @@ replacing them, so the linker stays on every group that denies warnings
 
 ### 6.5 Publishing the cohort
 
-`tools/release/publish.sh` (`just publish`) is the only publication path. It stages
-the tracked tree with the published `plakd` manifest (section 3.3), derives the order
-from `cargo metadata` there (`tools/release/publish_plan.py`: every member
-whose `publish` is not `false`, dependencies first, where normal, build and
-versioned dev-dependencies order the cohort because crates.io resolves each at
-upload; a cycle is an error). The cohort has 36 members. The script runs one
-`cargo package --locked` over that selection. Cargo packages the members against a local overlay of the archives
-it has just written, so unpublished siblings resolve, and verifies each by
-building it from its archive, with `CARGO_TARGET_DIR` at
-`<target>/package`. The vendor snapshot is a workspace member (§3) precisely so
-the overlay includes it. Cargo unpacks overlay archives into the Cargo home
-under their name and version and reuses an existing unpacked copy, and it
-treats a registry package's build in the verification target as fresh by
-package identity alone, so before packaging the script removes every unpacked
-`<name>-<version>` of the cohort and the cohort's verification fingerprints;
-otherwise sources or artifacts left by an earlier run of the same version
-would be verified in place of the tree being packaged. Invalidation removes
-cohort-owned `build/<name>` directories (including Rust 1.100's nested
-fingerprints) and legacy `.fingerprint/<name>-*` directories throughout the
-verification artifacts, preserving third-party dependency builds. A remaining
-fingerprint path or marker naming a cohort crate in an unrecognized layout
-refuses verification with a diagnostic rather than reusing stale artifacts.
-
-The `package` group prepares the archives with
-`cargo package --locked --no-verify`, offline first and online only if cache
-inputs are missing. It extracts precisely those archives into disposable
-scratch directories and fetches each archive's dependency graph with the same
-offline-first policy. A cached sparse-index entry can be stale rather than
-missing: when an offline step fails because no cached version matches a
-requirement (Cargo's "failed to select a version for"), the named crates' index
-entries are refreshed online with `cargo info`, run in an empty directory
-outside every Cargo workspace so a workspace patch cannot answer from a local
-path, on the caller's pinned toolchain (an explicit `RUSTUP_TOOLCHAIN` is kept),
-and the offline step is retried once. That avoids an online run of the
-whole step for a stale entry; any other failure, or a retry that still fails,
-runs that step online (`tools/release/offline_first.py`). Only the cohort siblings are substituted with their
-extracted archives during fetch, so unpublished siblings resolve without
-restoring third-party patch tables. Fetch may update the disposable
-locks for those local substitutions; verification uses the original archives
-and their locks. The final `cargo package --locked` builds and verifies strictly
-offline. An explicit `CARGO_NET_OFFLINE=true` remains authoritative during
-prefetch as well. No separate warm-up is needed. The verification target directory holds
-a debug build per crate selection and is roughly 20 GB.
-
-A dry run and `--gate` skip that packaging and verification when
-`<target>/gate-evidence/package-verification` matches the body captured before
-packaging. Every body field is a SHA-256: of the staged tree (each entry in path
-order with its kind: a regular file's bytes and executable bit, a symlink's
-`readlink` text, a directory); of `Cargo.lock` (absence is its own value); of
-the toolchain (`cargo --version` and `rustc -vV`); of the cohort name/version
-list; of the canonical JSON of the same Cargo environment as the
-workspace-check cache (every `CARGO_*` variable except the four terminal
-decoration variables and the credential variables, plus `RUSTC`, `RUSTFLAGS`
-and `RUSTUP_TOOLCHAIN`); and of the lstat identities of `$CARGO_HOME/config.toml`,
-`$CARGO_HOME/config` and every ancestor `.cargo/config.toml` and `.cargo/config`
-of the stage through `/`. Neither the body nor the receipt holds an environment
-value, so a registry token never reaches either. The receipt stores that body
-plus a SHA-256 of its canonical JSON. It is written only after offline
-verification succeeds, from the body captured before packaging, beside the gate
-target rather than inside the verification directory the script clears. A
-missing, unreadable, non-object or checksum-mismatched receipt verifies fresh,
-including a valid JSON object whose field changed without its checksum. A
-failed verification writes no receipt. `--execute` ignores the receipt and
-always verifies fresh; a successful verification still refreshes the receipt.
-
-| Invocation | Preconditions | Effect |
-| --- | --- | --- |
-| `tools/release/publish.sh` | More than a third of the window remaining on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` or a tree that differs from it only in documentation (below) | Package and verify, or reuse a matching verification receipt (above); nothing uploaded |
-| `tools/release/publish.sh --gate` | None (review time is informational) | Run by `just full`; the integration batch runs the standalone step instead. Offline-first verification-input prefetch, then strictly offline packaging and verification, unless the verification receipt matches |
-| `tools/release/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | Always verifies fresh, ignoring the receipt. Then `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
-
-Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
-read the review date and deadline of all seven compiled surfaces (the three
-subscription expiries and the four API review-due dates) and refuse any whose
-remaining time is a third of its window or less: more than 30 days of a 90-day
-window must remain, so a release publishes within 60 days of its review. The
-floor applies to API review-due dates too, keeping one review cadence, though
-those dates never refuse a route. It resolves constants from each surface's
-source and the shared window constants in `plakous-auth`, failing closed on
-unreadable source. The `--gate` package group
-prints remaining days as a non-failing informational note instead. Neither
-`just batch` nor `just full` has a time-dependent review-window precondition.
-The hidden `test-clock` feature is excluded from supported feature closures
-and inventory, and checked absent from default, maintainer and release builds;
-only dev-dependencies or repository test builds enable it. The facade
-`test-support` and cell/agent `test-hooks` features are excluded in the same way.
-
-On a colocated JJ root, `just full` records the Git tree of snapshotted `@`
-at start and end, refuses conflicted `@`, and requires equal trees. `@` need
-not be empty. Clean Git primary checkouts and linked worktrees with a gitdir
-file are eligible for evidence after validating the repository root against
-Git's `--show-toplevel`. JJ evidence still requires a colocated root with a
-`.git` directory, never a secondary JJ workspace; its package dry run still
-uses the shared VCS listing. Copies reuse the launch's `.dev-tools` when they
-have none of their own. Install/relink builds still require a `.git` directory.
-The evidence file is written only by a passing `just full` that began and
-ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1)
-and skipped no check; a run that skipped one (section 7.5) writes neither
-evidence file.
-`tools/release/gate_evidence.py verify` accepts that evidence for tree T at
-HEAD when T is HEAD's tree, or when the plumbing delta
-(`git diff-tree -r --no-renames --ignore-submodules=none T HEAD^{tree}`, which
-no diff configuration can narrow) touches nothing but:
-
-- agent instructions and documentation no gate reads: `AGENTS.md`,
-  `tests/live/STATUS.md`, `CHANGELOG.md`,
-  `docs/spec/**` and `docs/user-guide/**`, except
-  `docs/spec/07-config-reference.md`, which `plakd` configuration tests read,
-  and `docs/user-guide/integrating.md`, whose transcript the tooling client
-  contract executes against a real host;
-  and
-- `README.md`, which `readme.workspace` packages and no test reads, when
-  `gate-evidence/package` also names HEAD's tree (rerun `just steps package`
-  on HEAD).
-
-Tightened ceilings change manifests and require fresh evidence; tighten before gating.
-
-The root agent-instruction file is guidance for repository agents, not a build,
-test or packaged-crate input. Instruction-discovery tests use in-memory or
-temporary workspaces; prompt-render tests enroll their own fixture instructions,
-not the checkout's instructions. Its content-only changes need no new full or
-package evidence.
-
-The changed instructions and documentation must still pass the tracked-file
-hygiene scan of the workspace checker, which `verify` reruns on the delta. Any
-other path, a symlink or submodule entry on either side, evidence that is not a 40- or
-64-hex tree id git knows, differing trees with no readable delta, or an
-unreadable state refuses. `verify` prints T, HEAD's tree and every changed
-path with its class, so the decision is auditable. On the `README.md` path the
-publish run's own packaging still packages and verifies the whole cohort at
-HEAD.
-
-The full tier's `structure: evidence allowlist` step (`gate_evidence.py
-audit`) keeps the allowlist honest as a best-effort lint. It flags, in every
-tracked Rust, Python, shell, manifest, recipe or workflow file outside a
-comment or URL: an allowlisted path, a bare path-component literal (`"docs"`,
-`"spec"`, `"user-guide"`, `"STATUS"`, including `"../../docs"`), `CHANGELOG`,
-`README`, and Markdown globs (`*.md`). `AGENTS.md` is exempt from token review
-because it is the product's instruction-file basename, not necessarily a
-reference to the repository file. Each other hit must be listed by its exact
-text for its file with a reason, or be the exact excluded path its reviewed
-reader reads; a listed text that no longer occurs fails as stale. It also
-fails on a root README or agent-instruction read through `include_str!`
-(multi-line forms included), a `CARGO_MANIFEST_DIR` join or the repository root.
-A path built in a way the lint cannot see is still covered by the rule itself: only the listed
-documentation is inert, and every other delta invalidates the evidence. So an
-upload always follows a full gate on bytes that differ from the packaged ones
-at most in inert documentation. Publishing is a maintainer act;
-no gate or workflow uploads. The maintainer runs `just full` and then
-`just publish --execute` on a gated host, from the tagged tree whose release
-tarballs §6.6 builds.
-
-For colocated JJ: test `@` with `just full`, then `jj commit` or `jj new` so
-`@` is empty before `just publish` (which still checks clean Git status and
-`HEAD^{tree}`). Tag `@-` with `jj tag set vX.Y.Z -r @-` or Git, set the main
-bookmark to `@-`, push it with JJ and push tags with Git. Never push
-`refs/plak/*` (in particular, never `git push --mirror`). Release automation
-continues to clone plain Git.
+Crates.io publication is deferred until a registry release is planned.
 
 ### 6.6 Release artifacts and the installer
 
@@ -1700,8 +1501,7 @@ not a gate or a guarantee across toolchains or SDKs.
 When preparing the next stable release, run
 `python3 tools/release/pin_installer.py <version>` on the release candidate
 tree before its final checks. This updates the tagged installer URL and
-matching `PLAK_VERSION` in the README and getting-started guide. Include the
-README change in that tree's `just steps package` evidence (§6.5); a
+matching `PLAK_VERSION` in the README and getting-started guide. A
 prerelease does not point users at a different installer tag.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
@@ -1713,9 +1513,8 @@ tarballs, their target-specific JSON Schemas and combined `SHA256SUMS`, marked a
 of the workflow on a branch (`gh workflow run release.yml --ref main`) is the
 pre-tag dry run: the same two builds, `package-release.sh --untagged` and the
 attestations, with the tarballs and schemas kept as workflow artifacts and no release
-created, so a release is cut by tagging a commit whose dry run passed. It never publishes crates: a runner
-has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
-commit SHA.
+created. Cut a release by tagging a commit whose dry run passed. Every action
+is pinned to a full commit SHA.
 
 `install.sh` at the repository root is a POSIX `sh` installer that never
 needs elevated privileges. `sh install.sh uninstall [--dry-run]` removes plakd-owned
@@ -1851,15 +1650,6 @@ re-upgrade on the same intact home with the matching runner links. This
 does not discard committed state; do not restore older runner files to
 make the reverse appear to work.
 
-Publication retries only Cargo HTTP 429 failures: at most five attempts per
-crate, honoring a numeric or HTTP-date Retry-After, or Cargo's crates.io body
-deadline (`Please try again after <HTTP-date>`), when reported. Honored delays
-have a 900-second maximum: a longer delay stops with a clear refusal to wait,
-never an early retry. Without a usable hint it waits 5, 10, 20, then 30 seconds.
-Only an HTTP status of 429 admits retries, not mentions of 429 in another
-status's body. Other failures stop immediately;
-dependents are never published before their prerequisites appear in the index.
-
 ## 7. Dependency and supply-chain policy
 
 JWT identity verification uses `jsonwebtoken =11.1.0` without either built-in
@@ -1977,8 +1767,7 @@ about 160 wire types.
 - crates.io is the only allowed registry; unknown registries and unknown Git
   sources are denied;
 - wildcard dependency requirements are denied, except a versionless path
-  dependency on a repository-only package, which never reaches a published
-  manifest;
+  dependency on a repository-only package;
 - a Git dependency requires an immutable revision, a provenance entry, and an
   entry in §7.3;
 - yanked and known-vulnerable dependencies fail the supply-chain gate;
@@ -2101,20 +1890,13 @@ again and re-gate. The Linux and Mac runs are concurrent:
 - Apple Silicon macOS runs `just batch-mac`: workspace all-features clippy,
   the workspace test build, and three platform-sensitive passes, each
   intersected with the change scope (chapter 05 §1). It does not repeat the
-  shared checks or build install and archive artifacts.
+  shared checks or build install artifacts.
 
-Every integration batch runs the `standalone` step: each publishable crate is
-linted alone in its own default resolution
+Every integration batch runs the `standalone` step: each non-repository-only
+crate is linted alone in its default resolution
 (`cargo clippy --locked -p <crate> --lib --bins`, all targets for supported
-packages, warnings denied, in a dedicated target directory), the portable
-crates are checked for `wasm32-unknown-unknown`, and the cohort is packaged
-without verification (`cargo package --locked --no-verify`). That is the
-per-batch standalone compilation witness for published-internal crates; no
-path-based trigger skips it. Archive verification (`package`) builds every
-crate from its archive and runs in `just full` on both platforms, at release
-candidate and before publication; a production install builds from the source
-tree and does not require it. Only a matching cohort verification receipt
-(§6.5) may avoid repeating archive verification.
+packages, warnings denied), and the portable crates are checked for
+`wasm32-unknown-unknown`. No path-based trigger skips standalone.
 
 Commits inside a branch are not gated individually.
 `CHANGELOG.md` is written only at the cut, from landed commits.
@@ -2171,10 +1953,10 @@ do require recompilation and
 currently exceed the warm target (about ten minutes on one Linux host with
 populated caches). Install and release evidence are timed separately.
 
-A release candidate or publication runs `just full` on both supported
-platforms, `just musl native` and `just musl container`, the full strict crash
-sweep, the dependency audit and the publish dry run. Full adds per-package
-standalone rustdoc and archive verification, and runs the ignored 5,000-call
+A release candidate runs `just full` on both supported platforms,
+`just musl native` and `just musl container`, the full strict crash sweep
+and the dependency audit. Full adds per-package standalone rustdoc and runs
+the ignored 5,000-call
 and full indexed retirement soaks. `just soak` selects only that long test
 evidence (chapter 05 §2.3).
 
@@ -2212,11 +1994,8 @@ settings have been changed.
 Dependency updates are manual: a maintainer raises a version and the change is
 verified by `just full` and `cargo deny` before it lands. There is no
 automated update service. Routine checks are deterministic and offline except
-for advisory acquisition, which refreshes advisory data, the static group's
-locked dependency fetch before the structure checkers, and the package group's
-archive verification-input prefetch (§6.5). Both dependency preparation paths
-try offline first and go online only for missing cache inputs; the package
-group also refreshes stale index entries a version requirement names (§6.5).
+for advisory acquisition and the static group's locked dependency fetch,
+which goes online only for missing cache inputs.
 
 ## 9. Change requirements
 
@@ -2237,7 +2016,7 @@ hidden launch/re-exec flags are removed, and explicit run/agent/wire session
 resume remains supported. The runnable Python example is test-only support.
 
 The product has no terminal/clipboard features. The 2n+3 witnesses, standalone checks,
-portable builds and contracts run per batch; package verification runs at RC.
+portable builds and contracts run per batch.
 Public host tests do not build or require any external client repository.
 The product's outbox tests cover ordered snapshot jobs, one page exposed
 at a time, and output for a retired agent view queued before its successor

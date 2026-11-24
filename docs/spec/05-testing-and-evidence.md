@@ -155,38 +155,29 @@ tools/gate/dev-check.sh --steps GROUP,... # just steps GROUP,...
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate target directory. Full also audits the publication evidence allowlist (chapter 06 §6.5) |
+| `static` | Workspace all-features, all-targets clippy with warnings denied. Except in Mac batch, also Rust formatting, `ruff check` and `ruff format --check` over `tools/`, `tests/tooling`, `tests/live` and `eval/`, locked dependency fetch (offline first), and `check_workspace.py` and `check_features.py`. The feature checker's library builds use a separate target directory. |
 | `builds` | Link plakd in its release resolution and with maintainer features, build the two sidecars, and verify their linkage against the maintainer binary; rustc warnings denied |
 | `rustdoc` | Workspace all-features documentation with warnings denied |
 | `rustdoc-alone` | Documentation of each supported package alone in its default resolution, warnings denied, in a dedicated target directory |
-| `standalone` | Clippy each of the publish-plan crates alone in its default resolution (`--lib --bins`, `--bins` for the binary-only Python worker, or `--all-targets` for supported packages), warnings denied, in a dedicated target directory. Check portable wasm32 libraries there (chapter 06 §7.5), and package the staged publication cohort with `cargo package --locked --offline --no-verify` in a separate `package-lite` target. When archive verification is selected on a repository tree it already supplies the packaging witness, so no separate package-lite run is needed |
+| `standalone` | Clippy each non-repository-only crate in its own default resolution (`--lib --bins`, `--bins` for the binary-only Python worker, or `--all-targets` for supported packages), with warnings denied. Check portable wasm32 libraries in the same group |
 | `contracts` | Positive and negative public compile contracts |
 | `tooling` | Python tooling self-tests, including a test-only socket driver and the user-guide hello/directory/attach transcript against an isolated real host, requiring exact wire-version refusal. Batch always runs the tree readers and selects the rest by changed path |
 | `tests-parallel` | Nextest `offline` profile |
 | `tests-durability` | Nextest `durability` profile: core crash-law rows and the SQLite SIGKILL campaign in a host-scaled weighted pool |
 | `tests-serial` | Nextest `serial` profile: wall-clock budgets, four threads on Linux and one on macOS |
 | `tests-install` | Complete install profile in a host-scaled weighted pool, including two exclusive indexed crash-sweep campaigns |
-| `package` | `tools/release/publish.sh --gate`: prefetch archive verification inputs offline first, then package and verify the staged cohort strictly offline (chapter 06 §6.5); requires a repository tree |
 
 | Tier | Groups |
 | --- | --- |
 | fast | `static`, scoped `tests-parallel` if any package is touched |
 | batch | `static`, `standalone`, `contracts`, path-scoped `tooling`, scoped `tests-parallel`, core `tests-durability` and `tests-serial` |
 | batch-mac | Workspace clippy, a shared test build and three platform-sensitive passes: parallel, durability, serial |
-| install | `builds`, `rustdoc`, full `tooling`, full `tests-parallel`, `tests-install`. The named `just install-checks` supplement runs all four Mac test lanes, without packaging or batch scoping |
+| install | `builds`, `rustdoc`, full `tooling`, full `tests-parallel`, `tests-install`. The named `just install-checks` supplement runs all four Mac test lanes, without batch scoping |
 | full | Every group and both ignored retirement soaks |
 
 The tiers are not nested. Integration, exact-tree installation and release
-requirements are in chapter 06 §8. A passing full run that starts and ends
-on the same clean tree records that tree id in
-`$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`). Clean Git roots
-include primary checkouts and linked worktrees whose `.git` is a gitdir
-file; both must match Git's reported repository root. An unconflicted
-colocated JJ root is also eligible, but a secondary JJ workspace is not.
-A passing run that includes archive verification on an eligible tree
-(full, or `--steps package`) also writes `gate-evidence/package`. A run that
-skips a check names the skip in its final summary and writes neither file.
-Chapter 06 §6.5 specifies when evidence covers later trees.
+requirements are in chapter 06 §8. A run that skips a check names the skip
+in its final summary.
 
 `--steps` runs its named groups and rejects unknown or empty groups. When
 given a batch base it shares the parallel and tooling batch scoping policy.
@@ -195,10 +186,9 @@ always runs the full profile. Test lanes and tooling still prepare the shared
 test artifacts. Independent runners use separate checkout, target and scratch
 roots. Each group prints a `== group: <name> ==` banner and a
 `== time: <name> <seconds> s ==` line. Separate time lines identify test
-preparation and package-lite. Standalone and public compile contracts run
+preparation. Standalone and public compile contracts run
 under nice in targets separate from workspace test preparation, subject to
-the Cargo jobs budget. Package-lite uses a separate target and finishes
-before the test build, so it does not reserve a compile slot during it.
+the Cargo jobs budget.
 In a combined Linux batch
 with sufficient build slots, the feature checker and standalone lint run
 in sequence in the standalone target, reusing matching Cargo artifacts
@@ -260,7 +250,7 @@ install-profile failure that the install tier catches before production.
 Batch tooling always runs `test_host_client`, `test_nextest_lanes`,
 `test_pinned_callback_ports`, `test_configuration_placement`,
 `test_uuid_features`, `test_policy_validators`,
-`test_agent_kind_docs`, `test_artifact_linkage`, `test_review_expiry`,
+`test_agent_kind_docs`, `test_artifact_linkage`,
 `test_live_jobs` and `test_check_prod_loc`.
 Changing anything below `tools/`, `tests/tooling/`, `tests/live/`, `eval/`,
 `.config/`, or `tests/fixtures/`, or changing `Justfile`, selects the entire
@@ -381,14 +371,14 @@ exports all four for the test process.
 | --- | --- | --- |
 | Formatting | `cargo fmt --all --check` | The tree is byte-identical to `rustfmt` output under the pinned toolchain |
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. Warnings are errors; documentation lint scope and workspace exceptions are in chapter 06 §5 |
-| Standalone compilation and archives | `just steps standalone` | The publishable crates lint in their own default resolution, portable libraries compile for wasm, and the staged tree can form the cohort archives |
+| Standalone compilation | `just steps standalone` | Non-repository-only crates lint in their own default resolution, and portable libraries compile for wasm |
 | Install builds | `just steps builds` | The release and maintainer resolutions of plakd and their sidecars link with the expected native-library split; warnings in these builds are errors |
-| Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown`. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip and the run records no gate evidence |
+| Portable wasm libraries | `cargo check --locked -p <crate> --lib --target wasm32-unknown-unknown` for each name from `check_workspace.py --wasm-libraries`, with `-D warnings` | The portable set compiles as a library for `wasm32-unknown-unknown`. This is not a supported product target, and the check proves compilation, not run-time behavior. The musl qualification container skips the check while its preloaded image lacks the rustc target; the summary names the skip |
 | Docs | `just steps rustdoc` at install; `just steps rustdoc,rustdoc-alone` at RC | Broken and private intra-doc links are errors in the externally consumed libraries (chapter 06 §5); bare URLs are errors throughout. Standalone docs build each supported package in its own default resolution |
 | Offline tests | `just steps tests-parallel,tests-durability,tests-serial,tests-install` (the gate supplies the host-scaled durability configuration) | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/gate/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/gate/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plakd`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions. |
-| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of thirteen standalone library profiles (eleven facade profiles, including API-only and standalone provider and tool profiles; hosted without optional features and with all features), warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
+| Feature closures | `python3 tools/gate/check_features.py` | Per-package feature closures (2n+3 witnesses: none, each singleton, full minus each feature, default and full; never a cross-product), statically, then `cargo check --lib` of thirteen standalone library profiles (eleven facade profiles, including API-only and standalone provider and tool profiles; hosted without optional features and with all features), warnings denied (spec 06), plus locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plakd` and present under `test-support` |
 | Tooling tests | `python3 tools/gate/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers. Up to four `python3 -m unittest` processes run at once; the mock gate-driver module is divided by test case, and other selected modules run whole |
 
 Nested-failure regressions cover exact successful string delivery, caught and
@@ -3731,7 +3721,7 @@ install. It has three parts, all bound to the same source revision:
 
 1. `just full` on both supported platforms, `just musl native` and
    `just musl container`, the full strict crash-point sweep (§2.3) with every
-   REFUSED signature reviewed against its allowlist, and the publish dry run;
+   REFUSED signature reviewed against its allowlist, and the dependency audit;
 2. the live matrix below;
 3. maintainer review of the candidate host through an independently maintained
    client, separate from public automated gate prerequisites.
@@ -4354,7 +4344,4 @@ redaction self-tests run in the tooling group; no gate starts Docker, a
 browser, or these authorization servers. Linux runs use a native Docker host;
 macOS requires Docker Desktop host networking for the loopback URL identities.
 
-Compiled-review time is never a qualification precondition: `just full`'s
-package group reports remaining days without failing. Publication dry runs
-and uploads separately require more than a third of each compiled review
-window remaining (chapter 06).
+Compiled review dates do not impose a separate gate precondition.

@@ -10,7 +10,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$root"
 
 # Canonical group order, including replay of overlapped groups.
-all_groups=(static builds rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install package)
+all_groups=(static builds rustdoc rustdoc-alone standalone contracts tooling tests-parallel tests-durability tests-serial tests-install)
 batch_groups=static,standalone,contracts,tooling,tests-parallel,tests-durability,tests-serial
 
 tier=batch
@@ -18,7 +18,7 @@ selection=$batch_groups
 packages=()
 fast_test_match=package
 # The musl qualification image lacks the wasm target; only that container may
-# skip the wasm check, and a run that skips records no evidence.
+# skip the wasm check.
 qual_container=false
 if [[ "${1:-}" == --qual-container ]]; then qual_container=true; shift; fi
 case "${1:-}" in
@@ -575,10 +575,6 @@ run_static_tree_checks() {
   echo "== structure: features (static) =="
   CARGO_TARGET_DIR="$feature_target" python3 tools/gate/check_features.py ${worker_features[@]+"${worker_features[@]}"} \
     || failed="${failed:+$failed }features"
-  if [[ "$tier" == full ]]; then
-    echo "== structure: evidence allowlist =="
-    python3 tools/release/gate_evidence.py audit || failed="${failed:+$failed }evidence"
-  fi
   printf '%s %s\n' "$SECONDS" "$failed" >"$group_spool/static-tree.state"
 }
 
@@ -649,10 +645,10 @@ run_group() {
   case "$1" in
     standalone)
       export CARGO_TARGET_DIR="$target_dir/standalone"
-      local order package targets standalone_failed=0
-      order="$(python3 tools/release/publish_plan.py order)"
-      [[ -n "$order" ]] || { echo 'standalone: empty publication plan' >&2; return 1; }
-      while read -r package _; do
+      local packages package targets standalone_failed=0
+      packages="$(python3 tools/gate/check_workspace.py --standalone-packages)"
+      [[ -n "$packages" ]] || { echo 'standalone: empty package list' >&2; return 1; }
+      while IFS= read -r package; do
         echo "== clippy: $package alone =="
         targets=(--lib --bins)
         case " ${supported_packages[*]} " in
@@ -661,22 +657,9 @@ run_group() {
         esac
         nice -n 5 cargo clippy --locked -p "$package" "${targets[@]}" ${target_args[@]+"${target_args[@]}"} -- -D warnings \
           || standalone_failed=1
-      done <<<"$order"
+      done <<<"$packages"
       run_wasm_portability_checks
       return "$standalone_failed" ;;
-    package-lite) (
-      local scratch order package selection_args=()
-      scratch="$(mktemp -d "$TMPDIR/plakd-package-lite.XXXXXX")"
-      trap 'rm -rf "$scratch"' EXIT
-      python3 tools/release/publish_shape.py stage "$scratch/stage"
-      cd "$scratch/stage"
-      export CARGO_TARGET_DIR="$target_dir/package-lite"
-      order="$(python3 "$root/tools/release/publish_plan.py" order)"
-      [[ -n "$order" ]] || { echo 'package-lite: empty publication plan' >&2; return 1; }
-      while read -r package _; do selection_args+=(-p "$package"); done <<<"$order"
-      echo "== package the publishable cohort without verification =="
-      nice -n 5 cargo package --locked --no-verify --offline "${selection_args[@]}"
-    ) ;;
     builds)
       echo "== release resolution (default plakd features) =="
       run_build_denying_warnings cargo build --locked -p plakd --bins ${target_args[@]+"${target_args[@]}"}
@@ -754,34 +737,16 @@ run_group() {
       PLAK_TOOLING_BINARY="$plak_host" PLAK_PY_HOST="$py_host" PLAK_JS_HOST="$js_host" \
         PLAK_MCP_SERVER="$mcp_server" PLAK_TEST_BINARY="$plak_host" \
         python3 tools/gate/run_tooling_tests.py "${tooling_args[@]}" ;;
-    package)
-      # Publication packages a git tree; the musl container mounts an export.
-      if [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
-        echo "skip package: not a git work tree (the dry run stages tracked files)"
-        return 0
-      fi
-      echo "== publish dry run: prefetch inputs, then verify the cohort offline =="
-      tools/release/publish.sh --gate ;;
     test-build)
       prepare_tests "$test_build_mode" ;;
     *) echo "unimplemented step group: $1" >&2; exit 2 ;;
   esac
 }
 
-# A passing full tier on a clean tree records that tree as publication
-# evidence, and a passing package group (full, or `--steps` naming it) records
-# package evidence. tools/release/publish.sh refuses a tree neither covers
-# (tools/release/gate_evidence.py: documentation-only deltas keep the full
-# evidence; a packaged-file delta also needs package evidence for HEAD).
-evidence_tree=''
-if [[ "$tier" == full || ",$selection," == *",package,"* ]]; then
-  evidence_tree="$(python3 tools/gate/vcs_listing.py evidence-tree)"
-fi
-
 failed_groups=""
 gate_status=0
 # A group appends one line per skipped check to skip_record; the run keeps
-# them in skipped_checks for the summary and the evidence decision.
+# them in skipped_checks for the summary.
 skip_record=''
 skipped_checks=''
 group_spool="$(mktemp -d "$TMPDIR/plakd-groups.XXXXXX")"
@@ -875,12 +840,8 @@ fi
 # a test lane or tooling. Even under an explicit Cargo jobs cap the children
 # collectively get no more slots than that cap.
 compile_only=()
-if selected standalone; then
-  if [[ "$standalone_started" != true ]]; then compile_only+=(standalone); fi
-  # Full packaging already exercises no-verify on the same cohort.
-  if ! selected package || [[ "$(python3 tools/gate/vcs_listing.py kind)" == export ]]; then
-    compile_only+=(package-lite)
-  fi
+if selected standalone && [[ "$standalone_started" != true ]]; then
+  compile_only+=(standalone)
 fi
 if selected contracts; then compile_only+=(contracts); fi
 if selected tests-install; then
@@ -899,12 +860,6 @@ done
 
 background=()
 compile_count=${#compile_only[@]}
-if [[ " ${compile_only[*]:-} " == *" package-lite "* ]]; then
-  # Packaging without verification is brief and does not compile. Do not
-  # reserve one of the build slots for it throughout test preparation.
-  CARGO_BUILD_JOBS=1 buffer_group package-lite
-  compile_count=$((compile_count - 1))
-fi
 if [[ "$compile_count" -gt 0 && "$test_jobs" -gt "$compile_count" ]]; then
   compile_jobs=$((test_jobs / 8))
   if [[ "$test_build_needed" == false ]]; then
@@ -917,7 +872,6 @@ if [[ "$compile_count" -gt 0 && "$test_jobs" -gt "$compile_count" ]]; then
   fi
   if [[ "$compile_jobs" -lt 1 ]]; then compile_jobs=1; fi
   for group in ${compile_only[@]+"${compile_only[@]}"}; do
-    if [[ "$group" == package-lite ]]; then background+=(""); continue; fi
     group_jobs=$compile_jobs
     if [[ "$group" == predecessor-build ]]; then
       # The historical graph is a full build, not a small compile contract.
@@ -949,7 +903,7 @@ if [[ ${#background[@]} -gt 0 ]]; then
   done
 else
   for group in ${compile_only[@]+"${compile_only[@]}"}; do
-    if [[ "$group" == package-lite ]]; then replay_group package-lite; else run_timed "$group"; fi
+    run_timed "$group"
   done
 fi
 
@@ -976,7 +930,6 @@ for group in "${all_groups[@]}"; do
       else
         echo "== not run: $group (test build failed) =="
       fi ;;
-    package) run_timed "$group" ;;
   esac
 done
 while IFS= read -r skipped; do
@@ -985,22 +938,5 @@ done <<<"$skipped_checks"
 if [[ "$gate_status" -ne 0 ]]; then
   echo "== failed groups: $failed_groups =="
   exit "$gate_status"
-fi
-if [[ -n "$evidence_tree" && -n "$skipped_checks" ]]; then
-  echo "== no evidence: a check was skipped ==" >&2
-elif [[ -n "$evidence_tree" ]]; then
-  if [[ "$(python3 tools/gate/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
-    mkdir -p "$target_dir/gate-evidence"
-    printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/package"
-    echo "== evidence: package group passed on tree $evidence_tree =="
-    if [[ "$tier" == full ]]; then
-      printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/full"
-      echo "== evidence: full gate passed on tree $evidence_tree =="
-    fi
-  else
-    echo "== no evidence: the tree changed during the run ==" >&2
-  fi
-elif [[ "$tier" == full || ",$selection," == *",package,"* ]]; then
-  echo "== no evidence: evidence requires a clean git tree or unconflicted colocated jj root with a .git directory =="
 fi
 echo "== ok: $tier gate passed =="

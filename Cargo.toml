@@ -341,9 +341,6 @@ rust_2018_idioms = { level = "deny", priority = -1 }
 unsafe_code = "forbid"
 unused_lifetimes = "deny"
 unused_qualifications = "warn"
-# `plakd/test-support` is repository-only: the published `plakd` manifest drops the
-# feature (tools/release/publish_shape.py), and its cfg sites still name it.
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("test-support"))'] }
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "allow"

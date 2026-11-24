@@ -23,7 +23,6 @@ GROUPS = (
     'tests-durability',
     'tests-serial',
     'tests-install',
-    'package',
 )
 BATCH_GROUPS = (
     'static',
@@ -83,8 +82,7 @@ class DevCheckWorkerTests(unittest.TestCase):
                         line.split()[2]
                         for line in result.stdout.splitlines()
                         if line.startswith('== group:')
-                        and line.split()[2]
-                        not in ('test-build', 'package-lite', 'predecessor-build')
+                        and line.split()[2] not in ('test-build', 'predecessor-build')
                     ],
                     list(groups),
                 )
@@ -97,7 +95,10 @@ class DevCheckWorkerTests(unittest.TestCase):
                 ):
                     self.assertEqual(
                         any(
-                            s[0].endswith(checker) and '--wasm-libraries' not in s for s in scripts
+                            s[0].endswith(checker)
+                            and '--wasm-libraries' not in s
+                            and '--standalone-packages' not in s
+                            for s in scripts
                         ),
                         tier != ('--install',),
                     )
@@ -107,7 +108,6 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / "tools/gate").mkdir(parents=True)
-        (self.root / "tools/release").mkdir(parents=True)
         for name in (
             "dev-check.sh",
             "dev-tools.sh",
@@ -121,7 +121,6 @@ class DevCheckWorkerTests(unittest.TestCase):
             destination = self.root / "tools/gate" / name
             shutil.copyfile(ROOT / "tools/gate" / name, destination)
             destination.chmod(0o755)
-        shutil.copyfile(ROOT / "tools/gate/vcs_listing.py", self.root / "tools/gate/vcs_listing.py")
         shutil.copyfile(
             ROOT / "tools/gate/test-processes.py", self.root / "tools/gate/test-processes.py"
         )
@@ -155,7 +154,6 @@ class DevCheckWorkerTests(unittest.TestCase):
         self.env.pop('PLAK_BATCH_BASE', None)
         self.env.pop('GATE_REAL_PROCESS_GUARD', None)
         self.env['CARGO_BUILD_JOBS'] = '8'
-        # The offline musl container exports this; the package group must decide it itself.
         self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
         self.env['PLAK_TEST_TMPDIR'] = str(self.root / 'test-tmp')
@@ -274,7 +272,7 @@ if sys.argv[1].endswith('test-processes.py'):
     if sys.argv[2:5] == ['--', 'cargo', 'nextest']:
         os.execvp('cargo', sys.argv[3:])
     raise SystemExit('unexpected process-guard invocation')
-if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
+if sys.argv[1] == '-':
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:], git_global=os.environ.get('GIT_CONFIG_GLOBAL'),
@@ -336,10 +334,8 @@ if sys.argv[1].endswith('check_workspace.py') and '--wasm-libraries' in sys.argv
     print('plakous-model')
 if sys.argv[1].endswith('nextest_layout.py'):
     print(max(1, min(16, int(os.environ.get('GATE_AVAILABLE_PARALLELISM', '16')))))
-if sys.argv[1].endswith('publish_plan.py'):
-    print('plakous-model 0.0.4\nplakous-hosted 0.0.4')
-if sys.argv[1].endswith('publish_shape.py'):
-    os.mkdir(sys.argv[-1])
+if sys.argv[1].endswith('check_workspace.py') and '--standalone-packages' in sys.argv:
+    print('plakous-model\nplakous-hosted')
 ''',
         )
         self.executable(
@@ -354,19 +350,6 @@ if not real:
 os.execv(real, [real, *sys.argv[1:]])
 ''',
         )
-
-        publish = self.root / 'tools/release/publish.sh'
-        publish.write_text(
-            '#!'
-            + sys.executable
-            + r'''
-import json, os, sys
-with open(os.environ['GATE_CALLS'], 'a') as log:
-    log.write(json.dumps(dict(publish=sys.argv[1:], offline=os.environ.get('CARGO_NET_OFFLINE'))) + '\n')
-raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
-'''
-        )
-        publish.chmod(0o700)
 
     def executable(self, name, source):
         path = self.bin / name
@@ -397,21 +380,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             [c['python'] for c in calls if 'python' in c],
         )
 
-    def commit_fixture(self):
-        """Make the fixture a clean git tree; gate scratch and logs are ignored."""
-        (self.root / '.gitignore').write_text('calls.jsonl\n/test-tmp/\n/custom target/\n')
-        git = ['git', '-C', str(self.root), '-c', 'user.name=t', '-c', 'user.email=t@t']
-        subprocess.run([*git, 'init', '-q'], check=True)
-        subprocess.run([*git, 'add', '-A'], check=True)
-        subprocess.run([*git, 'commit', '-q', '-m', 'fixture'], check=True)
-        return subprocess.run(
-            [*git, 'rev-parse', 'HEAD^{tree}'], check=True, text=True, capture_output=True
-        ).stdout.strip()
-
-    def publish_calls(self):
-        lines = self.log.read_text().splitlines() if self.log.exists() else []
-        return [call for call in map(json.loads, lines) if 'publish' in call]
-
     def test_builds_and_rustdoc_keep_the_compiler_wrapper(self):
         self.env['RUSTC_WRAPPER'] = 'sccache'
         result, calls, _ = self.run_gate('--steps', 'builds,rustdoc')
@@ -421,14 +389,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertTrue(all(call['rustc_wrapper'] == 'sccache' for call in builds))
         rustdoc = next(call for call in calls if call['args'][0] == 'doc')
         self.assertEqual(rustdoc['rustc_wrapper'], 'sccache')
-
-    @property
-    def evidence(self):
-        return self.root / 'custom target' / 'gate-evidence' / 'full'
-
-    @property
-    def package_evidence(self):
-        return self.root / 'custom target' / 'gate-evidence' / 'package'
 
     def assert_nextest_home_is_isolated(self, calls):
         lanes = [c for c in calls if c['args'][:2] in (['nextest', 'run'], ['nextest', 'list'])]
@@ -713,11 +673,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
 
     def test_contracts_overlap_the_test_build_and_finish_before_tooling(self):
         # The fake test build waits for contracts, proving the overlap.
-        self.commit_fixture()
         self.env['GATE_TEST_BUILD_WAITS_FOR'] = str(self.root / 'contracts-started')
-        result, calls, scripts = self.run_gate(
-            '--steps', 'static,rustdoc,contracts,tooling,package'
-        )
+        result, calls, scripts = self.run_gate('--steps', 'static,rustdoc,contracts,tooling')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(
             [
@@ -725,9 +682,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 for line in result.stdout.splitlines()
                 if line.startswith('== time: ')
             ],
-            ['static', 'rustdoc', 'test-build', 'contracts', 'tooling', 'package'],
+            ['static', 'rustdoc', 'test-build', 'contracts', 'tooling'],
         )
-        self.assertEqual(len(self.publish_calls()), 1)
         self.assertEqual(scripts.count(['tools/gate/check_public_compile.py']), 1)
         # Tooling waits for the overlapping groups to end.
         self.assertLess(
@@ -737,9 +693,8 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             ),
         )
 
-    def test_test_lanes_do_not_share_the_host_with_contracts_or_package(self):
-        self.commit_fixture()
-        result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts,package')
+    def test_contracts_finish_before_the_test_lanes(self):
+        result, calls, scripts = self.run_gate('--steps', 'tests-serial,contracts')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         lane = max(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'nextest')
@@ -748,9 +703,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
             for i, row in enumerate(records)
             if row.get('python') == ['tools/gate/check_public_compile.py']
         )
-        publish = next(i for i, row in enumerate(records) if 'publish' in row)
         self.assertLess(contracts, lane)
-        self.assertGreater(publish, lane)
 
     def test_predecessor_miss_builds_once_with_candidate_then_joins_before_all_lanes(self):
         self.env['GATE_PREDECESSOR_PHASES'] = str(self.root)
@@ -806,16 +759,15 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertIn('failed groups: tests-parallel tests-durability tests-serial', result.stdout)
         self.assertNotIn('gate passed', result.stdout)
 
-    def test_batch_uses_scope_and_keeps_builds_and_verification_out(self):
+    def test_batch_uses_scope_without_install_builds(self):
         self.env['PLAK_BATCH_BASE'] = 'test-base'
         self.env['GATE_BATCH_FILTER'] = 'rdeps(=plakd) | package(=plakous-offline-crash-harness)'
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
             [c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-            ['fmt', 'fetch', *CLIPPIES, 'clippy', 'clippy', 'check', 'test', 'package'],
+            ['fmt', 'fetch', *CLIPPIES, 'clippy', 'clippy', 'check', 'test'],
         )
-        self.assertEqual(self.publish_calls(), [])
         self.assertEqual(
             [c['args'][0:8] for c in calls if c['args'][0] == 'clippy' and '-p' in c['args']],
             [
@@ -841,9 +793,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 ],
             ],
         )
-        lite = next(c for c in calls if c['args'][0] == 'package')
-        self.assertIn('--no-verify', lite['args'])
-        self.assertTrue(lite['target_dir'].endswith('/package-lite'))
         self.assertTrue(
             all('-D warnings' in c['rustflags'] for c in calls if self.is_wasm_check(c))
         )
@@ -1038,7 +987,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertEqual(self.filtersets(calls), [None, None])
         self.assertEqual([call['args'] for call in calls if call['args'][0] == 'build'], BUILDS)
         self.assertNotIn('clippy', [call['args'][0] for call in calls])
-        self.assertEqual(self.publish_calls(), [])
         self.assertIn(['tools/gate/run_tooling_tests.py', '-v'], scripts)
 
     def test_install_checks_runs_all_four_lanes_without_batch_scoping(self):
@@ -1171,18 +1119,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         summary = result.stdout.splitlines()[-2:]
         self.assertEqual(summary, [self.WASM_SKIP, '== ok: steps gate passed =='])
 
-    def test_a_skipped_full_run_on_a_clean_tree_records_no_evidence(self):
-        shutil.rmtree(self.sysroot / 'lib/rustlib/wasm32-unknown-unknown')
-        self.commit_fixture()
-        result, _, _ = self.run_gate('--qual-container', '--full')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(self.WASM_SKIP, result.stdout.splitlines())
-        self.assertIn('no evidence: a check was skipped', result.stderr)
-        self.assertNotIn('evidence: full gate passed', result.stdout)
-        self.assertNotIn('evidence: package group passed', result.stdout)
-        self.assertFalse(self.evidence.exists())
-        self.assertFalse(self.package_evidence.exists())
-
     def test_fast_tier_defaults_to_touched_package_tests(self):
         self.env['GATE_CHANGED'] = 'plakous-model\nplakd\n'
         result, calls, scripts = self.run_gate('--fast')
@@ -1295,8 +1231,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertNotIn('clippy:packages', result.stdout)
         self.assertFalse(any(call['args'][0] == 'clippy' for call in calls))
 
-    def test_full_runs_two_ignored_soaks_and_archive_verification(self):
-        self.commit_fixture()
+    def test_full_runs_two_ignored_soaks(self):
         full, calls, _ = self.run_gate('--full')
         self.assertEqual(full.returncode, 0, full.stderr)
         self.assertEqual(
@@ -1311,8 +1246,6 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                 ['--run-ignored', 'only', '-E', 'test(ledger_retirement_5000_)'],
             ],
         )
-        self.assertEqual(len(self.publish_calls()), 1)
-        self.assertFalse(any(call['args'][0] == 'package' for call in calls))
 
     def test_explicit_rustdoc_selects_only_the_named_resolution(self):
         result, calls, _ = self.run_gate('--steps', 'rustdoc')
@@ -1442,7 +1375,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         )
 
     def test_bad_step_groups_fail_before_builds(self):
-        for groups in ('', 'static,typo', ',static', 'static,'):
+        for groups in ('', 'static,typo', ',static', 'static,', 'package'):
             with self.subTest(groups=groups):
                 self.log.unlink(missing_ok=True)
                 result, calls, _ = self.run_gate('--steps', groups)
@@ -1459,52 +1392,3 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertIn(f'--test-threads={width}', self.lanes(calls)[1]['args'])
         self.assertIn('--test-threads=10', self.lanes(calls)[0]['args'])
         self.assertIn('--config-file', self.lanes(calls)[0]['args'])
-
-    def test_package_group_delegates_prefetch_and_offline_verification_in_a_git_tree(self):
-        self.commit_fixture()
-        result, calls, _ = self.run_gate('--steps', 'package')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.publish_calls(), [dict(publish=['--gate'], offline=None)])
-        self.assertEqual([c['args'] for c in calls], [['nextest', '--version']])
-
-    def test_package_group_is_skipped_outside_a_git_work_tree(self):
-        result, _, _ = self.run_gate('--steps', 'package')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('skip package: not a git work tree', result.stdout)
-        self.assertEqual(self.publish_calls(), [])
-
-    def test_failed_package_dry_run_fails_the_gate(self):
-        self.commit_fixture()
-        self.env['GATE_PUBLISH_FAILURE'] = '3'
-        result, _, _ = self.run_gate('--steps', 'package')
-        self.assertEqual(result.returncode, 3)
-        self.assertIn('failed groups: package', result.stdout)
-
-    def test_only_a_passing_full_run_on_a_clean_tree_records_evidence(self):
-        tree = self.commit_fixture()
-        result, _, _ = self.run_gate()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.evidence.exists())
-        self.assertFalse(self.package_evidence.exists())
-        # A passing package group alone records package evidence, never full.
-        result, _, _ = self.run_gate('--steps', 'package')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.evidence.exists())
-        self.assertEqual(self.package_evidence.read_text(), tree + '\n')
-        self.assertIn(f'evidence: package group passed on tree {tree}', result.stdout)
-        self.package_evidence.unlink()
-        self.env['GATE_PUBLISH_FAILURE'] = '1'
-        result, _, _ = self.run_gate('--full')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(self.evidence.exists())
-        del self.env['GATE_PUBLISH_FAILURE']
-        (self.root / 'untracked').write_text('x')
-        result, _, _ = self.run_gate('--full')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('no evidence: evidence requires a clean git tree', result.stdout)
-        self.assertFalse(self.evidence.exists())
-        (self.root / 'untracked').unlink()
-        result, _, _ = self.run_gate('--full')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.evidence.read_text(), tree + '\n')
-        self.assertEqual(self.package_evidence.read_text(), tree + '\n')

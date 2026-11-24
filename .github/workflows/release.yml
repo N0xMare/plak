@@ -2,8 +2,7 @@
 # tarballs and wire schemas, attests them and creates the GitHub Release. A manual run on a
 # branch is the pre-tag dry run: the same build, packaging and attestation,
 # with the tarballs kept as workflow artifacts and no release. Nothing else
-# runs here: the gates are local, and publishing the crate cohort is a
-# maintainer act (docs/spec/06-build-and-support-surface.md).
+# runs here: the gates are local (docs/spec/06-build-and-support-surface.md).
 name: release
 
 on:

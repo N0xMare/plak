@@ -661,10 +661,7 @@ each compiled deadline and after it, naming the surface and UTC date, including
 accounts you have not configured: a `Warning:` that the build will refuse or
 refuses a subscription route, or a `Note:` that API facts are or were due for
 review. Install a newly reviewed build; neither a warning nor a new login
-extends a subscription profile. Publication dry runs and uploads refuse a build
-with a third of any review window or less remaining (30 days of 90); this
-check is not part of the development qualification gates; their package step
-only reports remaining days.
+extends a subscription profile.
 
 ## `native subscription storage is unsafe: <path> …`
 

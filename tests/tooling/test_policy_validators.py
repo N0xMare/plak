@@ -131,47 +131,6 @@ class PackageRustFilesTests(unittest.TestCase):
         self.assertEqual(tracked, self.EXPECTED)
 
 
-class PackagedDependencyTests(unittest.TestCase):
-    CLASSES = {'plakd': 'supported', 'lib': 'published-internal', 'harness': 'repository-only'}
-
-    def test_dev_only_path_edges_and_the_published_plak_shape_pass(self):
-        manifests = {
-            'plakd': {
-                'dependencies': {'harness': {'path': 'h', 'version': '0.1.0', 'optional': True}}
-            },
-            'lib': {'dev-dependencies': {'harness': {'path': 'h'}}},
-            'harness': {'dependencies': {'lib': {'path': 'l', 'version': '0.1.0'}}},
-        }
-        self.assertEqual(
-            workspace_policy.validate_packaged_dependencies(
-                manifests, self.CLASSES, {'dependencies': {}}
-            ),
-            [],
-        )
-
-    def test_regular_and_versioned_dev_edges_are_reported(self):
-        manifests = {
-            'plakd': {},
-            'lib': {
-                'target': {
-                    'cfg(unix)': {'dependencies': {'h2': {'package': 'harness', 'path': 'h'}}}
-                },
-                'dev-dependencies': {'harness': {'path': 'h', 'version': '0.1.0'}},
-            },
-        }
-        findings = workspace_policy.validate_packaged_dependencies(
-            manifests, self.CLASSES, {'dependencies': {'harness': {'path': 'h'}}}
-        )
-        self.assertEqual(
-            findings,
-            [
-                'lib: packaged manifest depends on repository-only harness',
-                'lib: dev-dependency on repository-only harness must be path-only',
-                'plakd: packaged manifest depends on repository-only harness',
-            ],
-        )
-
-
 class WorkspaceInheritanceTests(unittest.TestCase):
     def test_inherited_edges_resolve_as_cargo_does(self):
         shared = {
@@ -225,90 +184,6 @@ class WorkspaceInheritanceTests(unittest.TestCase):
             policy_module.inherit_workspace_dependencies(
                 {'dependencies': {'missing': {'workspace': True}}}, {}
             )
-
-
-class PublicationTests(unittest.TestCase):
-    LICENSE = 'MIT License\n'
-
-    def published(self, directory: Path, **overrides):  # type: ignore[no-untyped-def]
-        (directory / 'README.md').write_text('# demo\n')
-        (directory / 'LICENSE').write_text(self.LICENSE)
-        metadata = {
-            'publish': None,
-            'description': 'A demo package',
-            'license': 'MIT',
-            'repository': workspace_policy.WORKSPACE_REPOSITORY,
-            'documentation': 'https://docs.rs/plakous-demo',
-            'readme': 'README.md',
-            'keywords': ['llm', 'agent'],
-            'categories': ['development-tools'],
-            'targets': [{'kind': ['lib']}],
-        }
-        metadata.update(overrides)
-        return metadata
-
-    def validate(self, directory: Path, metadata, manifest=None, license_text=LICENSE):  # type: ignore[no-untyped-def]
-        manifest = {'package': {'exclude': {'workspace': True}}} if manifest is None else manifest
-        return workspace_policy.validate_publication(
-            'plakous-demo', 'published-internal', metadata, manifest, directory, 'MIT', license_text
-        )
-
-    def test_a_complete_published_package_passes(self):
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            self.assertEqual(self.validate(directory, self.published(directory)), [])
-
-    def test_missing_and_malformed_metadata_is_reported(self):
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            metadata = self.published(
-                directory,
-                description='',
-                repository=None,
-                documentation='https://example.com',
-                keywords=['LLM', 'a', 'b', 'c', 'd', 'e'],
-                categories=['ai'],
-                readme=None,
-            )
-            (directory / 'LICENSE').write_text('Apache\n')
-            findings = self.validate(directory, metadata, {'package': {}})
-        self.assertEqual(
-            findings,
-            [
-                'plakous-demo: published packages need a description',
-                f'plakous-demo: repository must be {workspace_policy.WORKSPACE_REPOSITORY}',
-                'plakous-demo: a library\'s documentation is https://docs.rs/plakous-demo',
-                'plakous-demo: published packages need a readme file',
-                'plakous-demo: keywords must list 1 to 5 entries',
-                "plakous-demo: keyword 'LLM' is not a crates.io keyword",
-                "plakous-demo: category 'ai' is not a reviewed crates.io slug",
-                'plakous-demo: LICENSE differs from the repository LICENSE',
-                'plakous-demo: published members inherit the workspace exclude list',
-            ],
-        )
-
-    def test_a_published_class_with_publish_false_is_reported(self):
-        with tempfile.TemporaryDirectory() as raw:
-            directory = Path(raw)
-            findings = self.validate(directory, self.published(directory, publish=[]))
-        self.assertEqual(
-            findings, ['plakous-demo: published-internal packages are published (no publish key)']
-        )
-
-    def test_repository_only_packages_stay_unpublished(self):
-        with tempfile.TemporaryDirectory() as raw:
-            findings = workspace_policy.validate_publication(
-                'plakous-test-support',
-                'repository-only',
-                {'publish': None},
-                {},
-                Path(raw),
-                'MIT',
-                self.LICENSE,
-            )
-        self.assertEqual(
-            findings, ['plakous-test-support: repository-only packages must have publish = false']
-        )
 
 
 class TrackedHygieneTests(unittest.TestCase):
@@ -2960,6 +2835,27 @@ class FeaturePolicyTests(unittest.TestCase):
 
     def test_repository_feature_contracts_are_exact(self) -> None:
         self.assertEqual(self.contracts(self.manifests), [])
+
+    def test_product_closures_reject_a_nonoptional_offline_harness(self) -> None:
+        harness = "plakous-offline-crash-harness"
+        manifests = copy.deepcopy(self.manifests)
+
+        def resolved(package: str, profile: tuple[str, ...]) -> set[str]:
+            if package != "plakd":
+                return set()
+            return feature_policy.expected_closure(package, profile, False, manifests)
+
+        with patch.object(feature_policy, "full_closure", side_effect=resolved):
+            self.assertEqual(feature_policy.validate_excluded_closures(), [])
+            product = manifests["plakd"]
+            product["dependencies"][harness].pop("optional")
+            product["features"]["test-support"].remove(f"dep:{harness}")
+            findings = feature_policy.validate_excluded_closures()
+        for profile in ("default", "maintainer"):
+            self.assertTrue(
+                any(f"plakd [{profile}]: closure reaches" in e and harness in e for e in findings),
+                findings,
+            )
 
     def test_dependency_graph_is_derived_from_the_manifests(self) -> None:
         edges = feature_policy.direct_workspace_edges(self.manifests)

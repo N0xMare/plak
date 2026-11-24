@@ -1,4 +1,4 @@
-"""Cargo inputs shared by the workspace-check and package-verification receipts.
+"""Cargo inputs for the workspace-check cache.
 
 A path is identified by lstat, not by following it: type, size, mtime, and, for
 a symlink, its readlink plus the identity of what it points to, link by link.

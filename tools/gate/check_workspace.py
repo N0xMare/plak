@@ -67,27 +67,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # for a member and spelled out for a standalone fixture workspace.
 WORKSPACE_LICENSE = "MIT"
 WORKSPACE_REPOSITORY = "https://github.com/N0xMare/plak"
-# The reviewed vendor snapshot, the one `vendor` layer member: published with
-# the cohort under its upstream license, edition, rust-version and lints.
+# The reviewed vendor snapshot keeps its upstream edition, MSRV and lints.
 VENDOR_PACKAGE = "plakous-codex-code-mode-protocol"
-VENDOR_LICENSE = "Apache-2.0"
-# The crates.io category slugs this workspace uses (a reviewed subset of the
-# registry's list; an unknown slug is rejected at upload).
-CRATES_IO_CATEGORIES = frozenset(
-    {
-        "api-bindings",
-        "asynchronous",
-        "authentication",
-        "command-line-utilities",
-        "database",
-        "development-tools",
-        "filesystem",
-        "network-programming",
-        "text-processing",
-        "web-programming::http-client",
-    }
-)
-CRATES_IO_KEYWORD = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 
 # The supported library packages' external compile-positive fixtures. The
 # dependency paths are derived from the workspace at load time; only the
@@ -4896,53 +4877,6 @@ def workspace_manifest_tables(workspace: Workspace) -> dict[str, dict[str, Any]]
     return {name: package.manifest for name, package in workspace.packages.items()}
 
 
-def packaged_dependency_names(manifest: dict[str, Any]) -> set[str]:
-    """Regular and build dependencies, including target-specific tables.
-
-    Dev-dependencies are excluded: Cargo strips a version-less one when
-    packaging, and one with a version must resolve from the registry.
-    """
-    names: set[str] = set()
-    tables = [manifest] + list(manifest.get("target", {}).values())
-    for table in tables:
-        for section in ("dependencies", "build-dependencies"):
-            for key, spec in table.get(section, {}).items():
-                names.add(spec.get("package", key) if isinstance(spec, dict) else key)
-    return names
-
-
-def validate_packaged_dependencies(
-    manifests: dict[str, dict[str, Any]],
-    classes: dict[str, str],
-    published_plak: dict[str, Any],
-) -> list[str]:
-    """No packaged manifest names a repository-only package outside dev-dependencies.
-
-    `plakd` is judged by its published shape, which drops `test-support` and the
-    offline harness edge; dev-dependencies on repository-only packages must be
-    version-less so packaging strips them.
-    """
-    repository_only = {name for name, kind in classes.items() if kind == "repository-only"}
-    errors: list[str] = []
-    for name, manifest in sorted(manifests.items()):
-        if name in repository_only:
-            continue
-        shape = published_plak if name == "plakd" else manifest
-        for dependency in sorted(packaged_dependency_names(shape) & repository_only):
-            errors.append(f"{name}: packaged manifest depends on repository-only {dependency}")
-        tables = [manifest] + list(manifest.get("target", {}).values())
-        for table in tables:
-            for key, spec in table.get("dev-dependencies", {}).items():
-                dependency = spec.get("package", key) if isinstance(spec, dict) else key
-                if dependency in repository_only and (
-                    not isinstance(spec, dict) or "version" in spec
-                ):
-                    errors.append(
-                        f"{name}: dev-dependency on repository-only {dependency} must be path-only"
-                    )
-    return errors
-
-
 def validate_commit_trace_edge(manifests: dict[str, dict[str, Any]]) -> list[str]:
     """The host -> store exception exists only for the repository crash tracer."""
     tree = manifests.get("plakous-recursive-subagents-store", {})
@@ -5275,9 +5209,7 @@ def validate_package_local_includes(
 ) -> list[str]:
     """Every `include_str!`/`include_bytes!` stays inside its own package.
 
-    `sources` maps package-relative Rust paths to their text. A path that
-    climbs out of the package root builds in the repository but not from the
-    packaged crate, which holds only files under its own root.
+    `sources` maps package-relative Rust paths to their text.
     """
     errors: list[str] = []
     for relative, text in sorted(sources.items()):
@@ -5302,66 +5234,6 @@ def validate_rust_file_policies(package: str, sources: dict[str, str]) -> list[s
         *each_source(validate_package_local_includes, package, ordered),
         *each_source(validate_fixture_loops, package, ordered),
     ]
-
-
-def validate_publication(
-    name: str,
-    package_class: str,
-    metadata: dict[str, Any],
-    manifest: dict[str, Any],
-    package_dir: Path,
-    license_expression: str,
-    license_text: str | None,
-) -> list[str]:
-    """A package's class decides publication; a published package carries full metadata.
-
-    `metadata` is the package's `cargo metadata` entry and `manifest` its own
-    manifest. `license_text`, when given, is what the packaged `LICENSE` must
-    say; the vendor snapshot keeps its upstream license file instead.
-    """
-    if package_class == "repository-only":
-        if metadata.get("publish") != []:
-            return [f"{name}: repository-only packages must have publish = false"]
-        return []
-    errors: list[str] = []
-    if metadata.get("publish") is not None:
-        errors.append(f"{name}: {package_class} packages are published (no publish key)")
-    if not metadata.get("description"):
-        errors.append(f"{name}: published packages need a description")
-    if metadata.get("license") != license_expression:
-        errors.append(f"{name}: license must be {license_expression}")
-    if metadata.get("repository") != WORKSPACE_REPOSITORY:
-        errors.append(f"{name}: repository must be {WORKSPACE_REPOSITORY}")
-    libraries = [target for target in metadata.get("targets", []) if "lib" in target["kind"]]
-    documentation = metadata.get("documentation") or ""
-    if libraries and name != "plakd":
-        if documentation != f"https://docs.rs/{name}":
-            errors.append(f"{name}: a library's documentation is https://docs.rs/{name}")
-    elif not documentation.startswith(f"{WORKSPACE_REPOSITORY}/"):
-        errors.append(f"{name}: documentation must point into {WORKSPACE_REPOSITORY}")
-    readme = metadata.get("readme")
-    if not readme or not (package_dir / readme).is_file():
-        errors.append(f"{name}: published packages need a readme file")
-    for key, limit in (("keywords", 5), ("categories", 5)):
-        values = metadata.get(key) or []
-        if not 1 <= len(values) <= limit:
-            errors.append(f"{name}: {key} must list 1 to {limit} entries")
-    for keyword in metadata.get("keywords") or []:
-        if not CRATES_IO_KEYWORD.fullmatch(keyword):
-            errors.append(f"{name}: keyword {keyword!r} is not a crates.io keyword")
-    for category in metadata.get("categories") or []:
-        if category not in CRATES_IO_CATEGORIES:
-            errors.append(f"{name}: category {category!r} is not a reviewed crates.io slug")
-    packaged_license = package_dir / "LICENSE"
-    if not packaged_license.is_file():
-        errors.append(f"{name}: published packages carry a LICENSE file")
-    elif license_text is not None and packaged_license.read_text(encoding="utf-8") != license_text:
-        errors.append(f"{name}: LICENSE differs from the repository LICENSE")
-    if license_text is not None and manifest.get("package", {}).get("exclude") != {
-        "workspace": True
-    }:
-        errors.append(f"{name}: published members inherit the workspace exclude list")
-    return errors
 
 
 def package_rust_files(
@@ -5467,20 +5339,6 @@ def tighten_ceilings(workspace: Workspace) -> int:
     return 0
 
 
-def load_publish_shape() -> Any:
-    """Import tools/release/publish_shape.py, the published plakd manifest shape."""
-    import importlib.util
-
-    path = ROOT / "tools/release/publish_shape.py"
-    _note_file(path)
-    spec = importlib.util.spec_from_file_location("publish_shape", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def validate_workspace_excludes(
     root_workspace: dict[str, Any],
     supported_fixture_paths: set[str],
@@ -5516,18 +5374,6 @@ def _check_workspace() -> int:
     errors.extend(validate_tracked_hygiene(ROOT, listed=listed))
     errors.extend(validate_local_production_lints(workspace_manifest_tables(workspace)))
     errors.extend(validate_commit_trace_edge(workspace_manifest_tables(workspace)))
-    publish_shape = load_publish_shape()
-    errors.extend(
-        validate_packaged_dependencies(
-            workspace_manifest_tables(workspace),
-            {name: package.package_class for name, package in packages.items()},
-            tomllib.loads(
-                publish_shape.published_plak_manifest(
-                    (ROOT / publish_shape.PLAK_MANIFEST).read_text(encoding="utf-8")
-                )
-            ),
-        )
-    )
     for name in COMMIT_TRACE_SOURCE_PREFIXES:
         sources, discovery_errors = package_sources(packages[name], ROOT)
         errors.extend(discovery_errors)
@@ -5557,21 +5403,11 @@ def _check_workspace() -> int:
     errors.extend(validate_neutral_dependencies(workspace))
     errors.extend(validate_image_leaf(workspace))
 
-    root_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     for name, package in sorted(packages.items()):
         metadata = package.metadata
+        if package.package_class == "repository-only" and metadata.get("publish") != []:
+            errors.append(f"{name}: repository-only packages must have publish = false")
         if name == VENDOR_PACKAGE:
-            errors.extend(
-                validate_publication(
-                    name,
-                    package.package_class,
-                    metadata,
-                    package.manifest,
-                    package.manifest_path.parent,
-                    VENDOR_LICENSE,
-                    None,
-                )
-            )
             continue
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
@@ -5579,18 +5415,6 @@ def _check_workspace() -> int:
             errors.append(f"{name}: rust-version must be 1.100.0")
         if metadata.get("license") != WORKSPACE_LICENSE:
             errors.append(f"{name}: license expression is inconsistent")
-        errors.extend(
-            validate_publication(
-                name,
-                package.package_class,
-                metadata,
-                package.manifest,
-                package.manifest_path.parent,
-                WORKSPACE_LICENSE,
-                root_license,
-            )
-        )
-
     # Every supported library package has exactly one external consumer fixture;
     # `plakd` is pinned by cli_contract.rs instead.
     for package in sorted(packages.values(), key=lambda item: item.name):
@@ -6162,6 +5986,11 @@ def check_root(root: Path, *, full: bool = False) -> int:
 
 def main() -> int:
     """Run the workspace checks, skipping them when the recorded reads are unchanged."""
+    if sys.argv[1:] == ["--standalone-packages"]:
+        for name, package in sorted(load_workspace(ROOT).packages.items()):
+            if package.package_class != "repository-only":
+                print(name)
+        return 0
     if sys.argv[1:] == ["--wasm-libraries"]:
         for name in (*PORTABLE_CRATES, *PORTABLE_DEFAULT_LIBRARIES):
             print(name)
@@ -6173,7 +6002,7 @@ def main() -> int:
         return check_root(ROOT, full=True)
     if sys.argv[1:]:
         print(
-            "usage: check_workspace.py [--wasm-libraries | --tighten-ceilings | --full-scan]",
+            "usage: check_workspace.py [--standalone-packages | --wasm-libraries | --tighten-ceilings | --full-scan]",
             file=sys.stderr,
         )
         return 2

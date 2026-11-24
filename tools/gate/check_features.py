@@ -273,6 +273,11 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 # Named feature profiles and the packages their complete closure must exclude.
 # `composition` is the cell client on its own: no credential, HTTP,
 # subscription or interpreter machinery for either source language.
+REPOSITORY_ONLY_PACKAGES = (
+    "plakous-offline-crash-harness",
+    "plakous-test-support",
+    "plakous-mcp-fake-server",
+)
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plakd", ("default",)): (
         "micro-monty",
@@ -289,7 +294,9 @@ EXCLUDED_CLOSURE_PACKAGES = {
         "syntect",
         "arboard",
         "pulldown-cmark",
+        *REPOSITORY_ONLY_PACKAGES,
     ),
+    ("plakd", ("maintainer",)): REPOSITORY_ONLY_PACKAGES,
     ("plakous", ("full",)): ("aws-lc-rs", "aws-lc-sys", "micro-monty", "rsa"),
     ("plakous", ("codex",)): (
         "aws-lc-rs",

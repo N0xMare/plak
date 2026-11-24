@@ -30,7 +30,6 @@ EARLY_MODULES = (
     "test_shipping_artifacts",
     "test_check_prod_loc",
     "test_nextest_lanes",
-    "test_publish",
 )
 TREE_READERS = {
     "test_agent_kind_docs",
@@ -42,7 +41,6 @@ TREE_READERS = {
     "test_nextest_lanes",
     "test_pinned_callback_ports",
     "test_policy_validators",
-    "test_review_expiry",
     "test_uuid_features",
 }
 FULL_TOOLING_PREFIXES = (
