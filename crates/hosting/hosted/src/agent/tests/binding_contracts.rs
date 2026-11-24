@@ -13,6 +13,8 @@ use std::path::Path;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+const INTERNED_FIELDS: [&str; 2] = ["configuration", "registry"];
+
 fn normalize_strings(value: &mut Value, workspace: &Path) {
     match value {
         Value::String(text) => {
@@ -119,13 +121,51 @@ fn compact_fixture(mut matrix: Value) -> TestResult<Value> {
         }
     }
     map_canonical_bytes(&mut matrix, compact_canonical_bytes)?;
-    Ok(matrix)
+    let mut fixture = json!({});
+    for field in INTERNED_FIELDS {
+        let mut table = serde_json::Map::new();
+        for row in matrix.as_object_mut().unwrap().values_mut() {
+            let block = row[field].take();
+            let key = plakous::model::sha256_hex(&[&serde_json::to_vec(&block)?]);
+            let interned = table.entry(key.clone()).or_insert_with(|| block.clone());
+            if *interned != block {
+                return Err(format!("ambiguous {field} fixture key {key}").into());
+            }
+            row[field] = Value::String(key);
+        }
+        fixture[field] = Value::Object(table);
+    }
+    fixture["rows"] = matrix;
+    Ok(fixture)
 }
 
-fn expand_fixture(mut matrix: Value) -> TestResult<Value> {
+fn expand_fixture(mut fixture: Value) -> TestResult<Value> {
+    let mut matrix = fixture["rows"].take();
+    let rows = matrix
+        .as_object_mut()
+        .ok_or("missing binding fixture rows")?;
+    for field in INTERNED_FIELDS {
+        let table = fixture[field]
+            .as_object()
+            .ok_or_else(|| format!("missing binding fixture {field} table"))?;
+        let mut unused: BTreeSet<_> = table.keys().map(String::as_str).collect();
+        for (name, row) in &mut *rows {
+            let key = row[field]
+                .as_str()
+                .ok_or_else(|| format!("{name}: missing or invalid {field} fixture reference"))?;
+            let block = table
+                .get(key)
+                .ok_or_else(|| format!("{name}: unknown {field} fixture key {key}"))?;
+            unused.remove(key);
+            row[field] = block.clone();
+        }
+        if !unused.is_empty() {
+            return Err(format!("unused {field} fixture keys: {unused:?}").into());
+        }
+    }
     // Compare the full facts, including selected behavior for every row. An
     // omitted value pins equality to the fixture's effective behavior.
-    for row in matrix.as_object_mut().unwrap().values_mut() {
+    for row in rows.values_mut() {
         let config = &mut row["configuration"];
         if config["selected"].get("behavior").is_none() {
             config["selected"]["behavior"] = config["effective"]["behavior"].clone();
@@ -389,11 +429,12 @@ async fn canonical_route_bindings_and_plans_match_the_reviewed_matrix() -> TestR
         let fixture = compact_fixture(actual.clone())?;
         std::fs::write(&path, serde_json::to_vec_pretty(&fixture)?)?;
     }
-    let raw: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-    let mut expected = expand_fixture(raw.clone())?;
+    let raw = std::fs::read(&path)?;
+    let mut expected = expand_fixture(serde_json::from_slice(&raw)?)?;
+    // Value parsing can discard duplicate keys, so check the original bytes.
     assert!(
-        compact_fixture(expected.clone())? == raw,
-        "binding fixture {} is not in the canonical shape emitted by its writer; \
+        serde_json::to_vec_pretty(&compact_fixture(expected.clone())?)? == raw,
+        "binding fixture {} is not canonical (duplicate or noncanonical keys or formatting); \
          regenerate with PLAK_UPDATE_BINDING_CONTRACTS=1",
         path.display()
     );
